@@ -27,6 +27,12 @@ backend/data
 *.sqlite-shm
 *.sqlite-wal
 
+# --- Android app build artifacts ---
+# (also in apps/android/.gitignore, but Prettier only reads this root file)
+apps/android/android/
+apps/android/.gradle-home/
+apps/android/.expo/
+
 # --- Logs / misc ---
 *.log
 npm-debug.log*

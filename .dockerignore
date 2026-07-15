@@ -3,6 +3,9 @@
 **/build
 .git
 .env
+# React Native app is not part of the server image; the workspaces glob
+# (apps/*) simply doesn't match it inside the build context.
+apps/android
 .env.*
 !.env.example
 CLAUDE.md

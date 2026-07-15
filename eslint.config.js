@@ -1,5 +1,6 @@
 // Flat ESLint config (ESLint 9) with typescript-eslint.
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -14,8 +15,16 @@ export default tseslint.config(
       sourceType: 'module',
     },
     rules: {
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/consistent-type-imports': 'error',
     },
+  },
+  {
+    // Plain-node infrastructure scripts (e.g. infrastructure/packs/*.mjs).
+    files: ['infrastructure/**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
 );

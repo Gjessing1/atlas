@@ -137,3 +137,57 @@ export function bboxContains(bbox: BBox, point: LatLng): boolean {
     point.lng <= bbox.ne.lng
   );
 }
+
+/**
+ * Offline region packs (Phase 6): pre-built per-region bundles the Android app
+ * downloads for offline use. Built out-of-band by infrastructure/packs/
+ * build-pack.sh into `<dataDir>/packs/<id>/` next to a `pack.json` manifest;
+ * the backend lists manifests at /api/regions and serves the files under
+ * /packs/<id>/<file> (range requests supported).
+ */
+
+/** One downloadable file inside a region pack; `path` is relative to the pack dir. */
+export interface RegionPackFile {
+  path: string;
+  bytes: number;
+}
+
+export interface RegionPackManifest {
+  id: string;
+  /** Human-readable region name, e.g. "Oslo". */
+  name: string;
+  bbox: BBox;
+  /** Monotonic content version — bump on rebuild so clients see updates. */
+  version: number;
+  /** Unix ms timestamp of the pack build. */
+  builtAt: number;
+  files: {
+    /** Vector basemap, a .pmtiles archive (MapLibre Native reads it via pmtiles://file://…). */
+    basemap?: RegionPackFile;
+    /** Offline search database: SQLite with an FTS5 `places` index. */
+    search?: RegionPackFile;
+    /** Offline routing graph: zipped GraphHopper graph-cache directory. */
+    graph?: RegionPackFile;
+    /** Map assets (glyphs + sprites) as a zip, for offline label/icon rendering. */
+    assets?: RegionPackFile;
+  };
+}
+
+/** GET /api/regions */
+export interface RegionsResponse {
+  regions: RegionPackManifest[];
+}
+
+/**
+ * GET /api/app/version — newest Android APK available for self-update.
+ * Backed by `<dataDir>/app/version.json` + the .apk it names.
+ */
+export interface AppVersionResponse {
+  /** Android versionCode — monotonic integer clients compare against their own. */
+  versionCode: number;
+  /** Human-readable version, e.g. "0.2.0". */
+  versionName: string;
+  /** Server-relative URL of the APK, e.g. "/app/atlas-0.2.0.apk". */
+  apkUrl: string;
+  bytes: number;
+}
