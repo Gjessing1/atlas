@@ -129,3 +129,344 @@ body {
   font-size: 12px;
   color: #666;
 }
+
+/* ---- sidebar (saved places & tracks) ---- */
+
+.sidebar-toggle {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  bottom: 12px;
+  width: min(340px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e1e0d9;
+}
+
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-actions button:not(.icon-button) {
+  padding: 4px 9px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f7f7f7;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-actions button:not(.icon-button):hover:enabled {
+  background: #ececec;
+}
+
+.sidebar-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.sidebar-empty {
+  padding: 12px 4px;
+  font-size: 13px;
+  color: #666;
+}
+
+.sidebar-errors {
+  padding: 8px 12px;
+  background: #fdecea;
+  color: #a4262c;
+  font-size: 12px;
+}
+
+.item-list {
+  list-style: none;
+}
+
+.item-row,
+.folder-row {
+  padding: 2px 0;
+}
+
+.item-row.selected > .item-line {
+  background: #eef3fb;
+  border-radius: 6px;
+}
+
+.item-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 1px 4px;
+}
+
+.item-icon {
+  font-size: 13px;
+}
+
+.item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.item-name:hover {
+  text-decoration: underline;
+}
+
+.folder-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #52514e;
+}
+
+.item-tags {
+  padding-left: 26px;
+  font-size: 11px;
+  color: #898781;
+}
+
+.icon-button {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: #898781;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+.icon-button:hover {
+  background: #f0efec;
+  color: #0b0b0b;
+}
+
+.item-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px 26px;
+  padding: 8px;
+  background: #f9f9f7;
+  border-radius: 8px;
+}
+
+.item-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #52514e;
+}
+
+.item-editor input,
+.item-editor select,
+.item-editor textarea {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.item-editor textarea {
+  resize: vertical;
+}
+
+.item-editor button.danger {
+  align-self: flex-start;
+  padding: 4px 9px;
+  border: 1px solid #e0b4b4;
+  border-radius: 6px;
+  background: #fdf3f3;
+  color: #a4262c;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.item-editor button.danger:hover {
+  background: #fbe4e4;
+}
+
+/* ---- elevation profile panel ---- */
+
+.elevation-panel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  width: min(720px, calc(100vw - 24px));
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  padding: 8px 12px 4px;
+}
+
+.elevation-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.elevation-header strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elevation-stats {
+  flex: 1;
+  font-size: 12px;
+  color: #52514e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.elevation-chart {
+  position: relative;
+}
+
+.elevation-chart svg {
+  display: block;
+  outline: none;
+}
+
+.elevation-empty {
+  padding: 10px 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.grid-line {
+  stroke: #e1e0d9;
+  stroke-width: 1;
+}
+
+.axis-label {
+  fill: #898781;
+  font-size: 10px;
+}
+
+.profile-area {
+  fill: #2a78d6;
+  fill-opacity: 0.1;
+}
+
+.profile-line {
+  fill: none;
+  stroke: #2a78d6;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.crosshair {
+  stroke: #c3c2b7;
+  stroke-width: 1;
+}
+
+.profile-dot {
+  fill: #2a78d6;
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.elevation-tooltip {
+  position: absolute;
+  top: 6px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #e1e0d9;
+  border-radius: 6px;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.elevation-tooltip strong {
+  font-size: 13px;
+}
+
+.elevation-tooltip span {
+  font-size: 11px;
+  color: #52514e;
+}
+
+/* Dot shown on the track while hovering the elevation profile. */
+.track-hover-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #2a78d6;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.editor-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-actions button:not(.danger) {
+  padding: 4px 9px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f7f7f7;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-actions button:not(.danger):hover {
+  background: #ececec;
+}

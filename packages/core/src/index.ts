@@ -116,6 +116,18 @@ export function resolveStyleTemplate(template: string, origin: string): string {
   return template.replaceAll('{origin}', origin);
 }
 
+/** Great-circle distance between two points in meters (haversine, WGS84 mean radius). */
+export function haversineM(a: LatLng, b: LatLng): number {
+  const R = 6371008.8;
+  const toRad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * toRad;
+  const dLng = (b.lng - a.lng) * toRad;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * sinLng * sinLng;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 /** Whether a point lies inside a bounding box (inclusive). Does not handle antimeridian-crossing boxes. */
 export function bboxContains(bbox: BBox, point: LatLng): boolean {
   return (

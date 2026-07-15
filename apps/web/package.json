@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@atlas/core": "*",
+    "@atlas/gpx": "*",
+    "@atlas/storage": "*",
+    "fflate": "^0.8.2",
     "maplibre-gl": "^5.0.0",
     "pmtiles": "^4.4.1",
     "react": "^19.0.0",

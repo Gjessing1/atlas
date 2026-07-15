@@ -1,0 +1,25 @@
+{
+  "name": "@atlas/gpx",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas track file handling — GPX/KML/KMZ parsing, GPX export, track statistics.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*",
+    "fast-xml-parser": "^5.2.0",
+    "fflate": "^0.8.2"
+  }
+}

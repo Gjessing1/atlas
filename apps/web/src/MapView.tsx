@@ -30,7 +30,7 @@ async function loadStyle(): Promise<string | StyleSpecification> {
   }
 }
 
-function pinPopupContent(pin: LatLng, onRemove: () => void): HTMLElement {
+function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void): HTMLElement {
   const el = document.createElement('div');
   el.className = 'pin-popup';
   const coords = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
@@ -47,6 +47,7 @@ function pinPopupContent(pin: LatLng, onRemove: () => void): HTMLElement {
     b.addEventListener('click', action);
     buttons.appendChild(b);
   };
+  mkButton('Save', onSave);
   mkButton('Copy coords', () => void navigator.clipboard.writeText(coords));
   // The URL hash always reflects camera + pin, so the current URL is the share link.
   mkButton('Copy link', () => void navigator.clipboard.writeText(window.location.href));
@@ -60,10 +61,12 @@ interface MapViewProps {
   initialView: MapViewState;
   pin: LatLng | null;
   onPinChange: (pin: LatLng | null) => void;
+  /** Save the dropped pin as a place (favorites). */
+  onSavePin: (pin: LatLng) => void;
   onMapReady: (map: maplibregl.Map) => void;
 }
 
-export function MapView({ initialView, pin, onPinChange, onMapReady }: MapViewProps) {
+export function MapView({ initialView, pin, onPinChange, onSavePin, onMapReady }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const pinRef = useRef(pin);
@@ -157,7 +160,11 @@ export function MapView({ initialView, pin, onPinChange, onMapReady }: MapViewPr
     markerRef.current = null;
     if (pin) {
       const popup = new maplibregl.Popup({ closeButton: false, offset: 32 }).setDOMContent(
-        pinPopupContent(pin, () => onPinChange(null)),
+        pinPopupContent(
+          pin,
+          () => onPinChange(null),
+          () => onSavePin(pin),
+        ),
       );
       const marker = new maplibregl.Marker({ draggable: true, color: '#d33' })
         .setLngLat(pin)
@@ -180,7 +187,7 @@ export function MapView({ initialView, pin, onPinChange, onMapReady }: MapViewPr
         pin: pin ?? undefined,
       }),
     );
-  }, [map, pin, onPinChange]);
+  }, [map, pin, onPinChange, onSavePin]);
 
   return <div ref={containerRef} style={{ height: '100%' }} />;
 }

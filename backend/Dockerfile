@@ -4,6 +4,8 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
+COPY packages/gpx/package.json ./packages/gpx/
+COPY packages/storage/package.json ./packages/storage/
 COPY apps/web/package.json ./apps/web/
 COPY backend/package.json ./backend/
 # Single deterministic install for every workspace. The npm download cache persists

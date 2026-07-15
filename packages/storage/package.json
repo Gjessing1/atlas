@@ -1,0 +1,28 @@
+{
+  "name": "@atlas/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas user-data storage layer — async repository API over SQLite (WASM+OPFS on web).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*",
+    "@sqlite.org/sqlite-wasm": "3.53.0-build1"
+  }
+}

@@ -10,11 +10,12 @@
     "backend"
   ],
   "scripts": {
-    "build": "npm run build -w @atlas/core && npm run build -w @atlas/backend && npm run build -w @atlas/web",
-    "dev": "npm run build -w @atlas/core && concurrently -k -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
+    "build:packages": "npm run build -w @atlas/core && npm run build -w @atlas/gpx -w @atlas/storage",
+    "build": "npm run build:packages && npm run build -w @atlas/backend && npm run build -w @atlas/web",
+    "dev": "npm run build:packages && concurrently -k -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
     "dev:backend": "npm run dev -w @atlas/backend",
     "dev:web": "npm run dev -w @atlas/web",
-    "typecheck": "npm run build -w @atlas/core && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
