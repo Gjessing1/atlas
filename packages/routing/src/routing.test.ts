@@ -4,6 +4,7 @@ import { buildRouteRequest, parseRouteResponse } from './graphhopper.js';
 import { viaInsertIndex } from './insert.js';
 import { routePathToTrackData } from './model.js';
 import { optimizeWaypointOrder } from './optimize.js';
+import { httpRouteProvider } from './provider.js';
 
 const oslo = { lat: 59.9139, lng: 10.7522 };
 const sognsvann = { lat: 59.9706, lng: 10.7305 };
@@ -56,6 +57,13 @@ describe('buildRouteRequest', () => {
       instructions: false,
     });
     expect(body['algorithm']).toBeUndefined();
+  });
+
+  it('requests instructions only when asked', () => {
+    const off = buildRouteRequest({ profile: 'car', points: [oslo, sognsvann] });
+    expect(off['instructions']).toBe(false);
+    const on = buildRouteRequest({ profile: 'car', points: [oslo, sognsvann], instructions: true });
+    expect(on['instructions']).toBe(true);
   });
 
   it('requests alternatives only for 2-point queries', () => {
@@ -111,6 +119,53 @@ describe('parseRouteResponse', () => {
     expect(() => parseRouteResponse({ paths: [{ points: { coordinates: [] } }] })).toThrow(
       /no usable paths/,
     );
+  });
+
+  it('parses turn instructions when present, skipping malformed entries', () => {
+    const withInstructions = {
+      paths: [
+        {
+          distance: 100,
+          time: 20_000,
+          points: {
+            coordinates: [
+              [10.75, 59.91],
+              [10.76, 59.92],
+              [10.77, 59.93],
+            ],
+          },
+          instructions: [
+            {
+              text: 'Head north on Karl Johans gate',
+              distance: 60,
+              time: 12_000,
+              sign: 0,
+              street_name: 'Karl Johans gate',
+              interval: [0, 1],
+            },
+            { text: 'Turn right', distance: 40, time: 8000, sign: 2, interval: [1, 2] },
+            { text: 'no interval', sign: 4 }, // malformed → skipped
+          ],
+        },
+      ],
+    };
+    const [path] = parseRouteResponse(withInstructions).paths;
+    expect(path!.instructions).toHaveLength(2);
+    expect(path!.instructions![0]).toEqual({
+      text: 'Head north on Karl Johans gate',
+      distanceM: 60,
+      timeMs: 12_000,
+      sign: 0,
+      streetName: 'Karl Johans gate',
+      interval: [0, 1],
+    });
+    expect(path!.instructions![1]!.sign).toBe(2);
+    expect(path!.instructions![1]!.streetName).toBeUndefined();
+  });
+
+  it('omits instructions when the response has none', () => {
+    const [path] = parseRouteResponse(ghResponse).paths;
+    expect(path!.instructions).toBeUndefined();
   });
 });
 
@@ -209,5 +264,29 @@ describe('optimizeWaypointOrder', () => {
     expect(order[0]).toBe(0);
     expect(order[order.length - 1]).toBe(5);
     expect([...order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
+
+describe('httpRouteProvider', () => {
+  it('routes through fetchRoute against the configured base URL', async () => {
+    let captured: string | null = null;
+    const fetchImpl: typeof fetch = async (url) => {
+      captured = String(url);
+      return new Response(JSON.stringify(ghResponse), { status: 200 });
+    };
+    const provider = httpRouteProvider({ baseUrl: 'https://atlas.example', fetchImpl });
+    const result = await provider.route({ profile: 'car', points: [oslo, sognsvann] });
+    expect(result.paths).toHaveLength(2);
+    expect(captured).toBe('https://atlas.example/api/route');
+  });
+
+  it('forwards an abort signal to the request', async () => {
+    const controller = new AbortController();
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      return new Response(JSON.stringify(ghResponse), { status: 200 });
+    };
+    const provider = httpRouteProvider({ fetchImpl });
+    await provider.route({ profile: 'car', points: [oslo, sognsvann] }, controller.signal);
   });
 });

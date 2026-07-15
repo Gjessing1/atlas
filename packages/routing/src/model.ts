@@ -26,12 +26,32 @@ export interface RouteQuery {
   points: LatLng[];
   /** Ask for alternative paths (GraphHopper supports this for 2-point queries only). */
   alternatives?: boolean;
+  /** Ask for turn-by-turn instructions (needed for navigation; off by default). */
+  instructions?: boolean;
   /** Loop from-and-back-to the single starting point, aiming for the given length. */
   roundTrip?: {
     distanceM: number;
     /** Vary the seed to get a different loop for the same distance. */
     seed?: number;
   };
+}
+
+/**
+ * One turn-by-turn maneuver along a path. `sign` follows GraphHopper's turn
+ * codes (…-2 left, -1 slight left, 0 continue, 1 slight right, 2 right…;
+ * 4 = finish, 5 = via reached, 6 = roundabout). `interval` is the inclusive
+ * `[start, end]` index range into `RoutePath.points` that this maneuver spans —
+ * the turn itself happens at `points[start]`.
+ */
+export interface RouteInstruction {
+  text: string;
+  distanceM: number;
+  timeMs: number;
+  sign: number;
+  streetName?: string;
+  interval: [number, number];
+  /** Which exit to take, for roundabout maneuvers (`sign === 6`). */
+  exitNumber?: number;
 }
 
 /** One routable path (the primary route or an alternative). */
@@ -44,6 +64,8 @@ export interface RoutePath {
   ascentM: number;
   descentM: number;
   bbox?: BBox;
+  /** Turn-by-turn maneuvers, present only when the query asked for instructions. */
+  instructions?: RouteInstruction[];
 }
 
 /** A successful routing response: the primary path first, then alternatives. */

@@ -1,10 +1,11 @@
 import type { TrackPoint } from '@atlas/gpx';
-import type { RoutePath, RouteQuery, RouteResult } from './model.js';
+import type { RouteInstruction, RoutePath, RouteQuery, RouteResult } from './model.js';
 
 /**
  * Body for a GraphHopper `POST /route` request. Geometry comes back as plain
  * GeoJSON coordinates (`points_encoded: false`) with elevation as the third
- * ordinate; turn instructions are off until navigation (Phase 7) needs them.
+ * ordinate; turn instructions are requested only when navigation asks for them
+ * (`query.instructions`), since they inflate the response.
  */
 export function buildRouteRequest(query: RouteQuery): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -12,7 +13,7 @@ export function buildRouteRequest(query: RouteQuery): Record<string, unknown> {
     points: query.points.map((p) => [p.lng, p.lat]),
     elevation: true,
     points_encoded: false,
-    instructions: false,
+    instructions: query.instructions ?? false,
     locale: 'en',
   };
   if (query.roundTrip) {
@@ -35,7 +36,40 @@ interface GraphHopperResponse {
     descend?: number;
     points?: { coordinates?: number[][] };
     bbox?: number[];
+    instructions?: {
+      text?: string;
+      distance?: number;
+      time?: number;
+      sign?: number;
+      street_name?: string;
+      interval?: number[];
+      exit_number?: number;
+    }[];
   }[];
+}
+
+/** Map GraphHopper's `instructions` array to Atlas RouteInstructions (skips malformed entries). */
+function parseInstructions(
+  raw: NonNullable<NonNullable<GraphHopperResponse['paths']>[number]['instructions']>,
+): RouteInstruction[] {
+  const out: RouteInstruction[] = [];
+  for (const ins of raw) {
+    const interval = ins.interval;
+    if (!Array.isArray(interval) || interval.length < 2) continue;
+    const [start, end] = interval;
+    if (typeof start !== 'number' || typeof end !== 'number') continue;
+    const instruction: RouteInstruction = {
+      text: ins.text ?? '',
+      distanceM: ins.distance ?? 0,
+      timeMs: ins.time ?? 0,
+      sign: ins.sign ?? 0,
+      interval: [start, end],
+    };
+    if (ins.street_name) instruction.streetName = ins.street_name;
+    if (typeof ins.exit_number === 'number') instruction.exitNumber = ins.exit_number;
+    out.push(instruction);
+  }
+  return out;
 }
 
 /**
@@ -57,7 +91,7 @@ export function parseRouteResponse(json: unknown): RouteResult {
       return p;
     });
     const [west, south, east, north] = path.bbox ?? [];
-    result.push({
+    const routePath: RoutePath = {
       points,
       distanceM: path.distance ?? 0,
       timeMs: path.time ?? 0,
@@ -67,7 +101,11 @@ export function parseRouteResponse(json: unknown): RouteResult {
         west !== undefined && south !== undefined && east !== undefined && north !== undefined
           ? { sw: { lat: south, lng: west }, ne: { lat: north, lng: east } }
           : undefined,
-    });
+    };
+    if (Array.isArray(path.instructions)) {
+      routePath.instructions = parseInstructions(path.instructions);
+    }
+    result.push(routePath);
   }
   if (result.length === 0) throw new Error('routing response contains no usable paths');
   return { paths: result };

@@ -19,6 +19,8 @@ import {
   loadStyleTemplate,
 } from './src/mapStyle';
 import type { LocalPack } from './src/regions/packs';
+import { NavBanner } from './src/nav/NavBanner';
+import { useNavigation } from './src/nav/useNavigation';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
@@ -36,9 +38,18 @@ function placesToGeoJSON(places: PlaceRecord[]) {
   };
 }
 
+function routeToGeoJSON(coords: number[][]) {
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: { type: 'LineString' as const, coordinates: coords },
+  };
+}
+
 export default function App() {
   const data = useUserData();
   const sync = useSync(data.storage, data.refreshAll, data.places);
+  const nav = useNavigation();
 
   const [template, setTemplate] = useState<string | null>(null);
   const [serverUp, setServerUp] = useState<boolean | null>(null);
@@ -92,9 +103,26 @@ export default function App() {
         mapStyle={mapStyle}
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
-          void data.savePlace({ name: `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+          Alert.alert(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, undefined, [
+            { text: 'Navigate here', onPress: () => void nav.start({ lat, lng }) },
+            {
+              text: 'Save pin',
+              onPress: () =>
+                void data.savePlace({ name: `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng }),
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]);
         }}
       >
+        {nav.routeCoords.length > 1 ? (
+          <GeoJSONSource id="atlas-route" data={routeToGeoJSON(nav.routeCoords)}>
+            <Layer
+              type="line"
+              id="atlas-route-line"
+              paint={{ 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.85 }}
+            />
+          </GeoJSONSource>
+        ) : null}
         <Camera ref={cameraRef} initialViewState={{ center: [10.75, 59.91], zoom: 10 }} />
         <GeoJSONSource
           id="atlas-places"
@@ -103,13 +131,20 @@ export default function App() {
             const feature = e.nativeEvent.features[0];
             const props = feature?.properties as { id?: string; name?: string } | undefined;
             if (!props?.id) return;
+            const [lng, lat] =
+              feature!.geometry.type === 'Point'
+                ? (feature!.geometry.coordinates as [number, number])
+                : [undefined, undefined];
             Alert.alert(props.name ?? 'Place', undefined, [
+              ...(lat !== undefined && lng !== undefined
+                ? [{ text: 'Navigate here', onPress: () => void nav.start({ lat, lng }) }]
+                : []),
               {
                 text: 'Remove',
-                style: 'destructive',
+                style: 'destructive' as const,
                 onPress: () => void data.deletePlace(props.id!),
               },
-              { text: 'Keep', style: 'cancel' },
+              { text: 'Keep', style: 'cancel' as const },
             ]);
           }}
         >
@@ -125,6 +160,8 @@ export default function App() {
           />
         </GeoJSONSource>
       </MapLibreMap>
+
+      <NavBanner nav={nav} />
 
       <SearchBar packs={packs} onPick={onPickResult} />
 

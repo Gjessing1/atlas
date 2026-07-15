@@ -1,0 +1,24 @@
+{
+  "name": "@atlas/navigation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas turn-by-turn navigation engine — route following, maneuvers, ETA, rerouting, voice prompts.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*",
+    "@atlas/routing": "*"
+  }
+}
