@@ -6,6 +6,8 @@ COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/gpx/package.json ./packages/gpx/
 COPY packages/storage/package.json ./packages/storage/
+COPY packages/routing/package.json ./packages/routing/
+COPY packages/sync/package.json ./packages/sync/
 COPY apps/web/package.json ./apps/web/
 COPY backend/package.json ./backend/
 # Single deterministic install for every workspace. The npm download cache persists
@@ -32,6 +34,9 @@ ENV GIT_SHA=$GIT_SHA
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/core/package.json ./packages/core/
 COPY --from=build /app/packages/core/dist ./packages/core/dist
+# @atlas/sync is a runtime import of the backend (LWW + protocol helpers).
+COPY --from=build /app/packages/sync/package.json ./packages/sync/
+COPY --from=build /app/packages/sync/dist ./packages/sync/dist
 COPY --from=build /app/backend/package.json ./backend/
 COPY --from=build /app/backend/dist ./backend/dist
 # Built web app → backend/public, served same-origin by backend/src/index.ts.
