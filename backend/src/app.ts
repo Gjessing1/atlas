@@ -16,6 +16,8 @@ export interface AppOptions {
   publicDir?: string;
   /** Photon geocoder base URL (PHOTON_URL). */
   photonUrl?: string;
+  /** GraphHopper routing engine base URL (GRAPHHOPPER_URL). */
+  graphhopperUrl?: string;
   logger?: boolean;
 }
 
@@ -69,6 +71,39 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     } catch (err) {
       request.log.error({ err }, 'photon unreachable');
       return reply.code(502).send({ error: 'search unavailable' });
+    }
+  });
+
+  // Routing: thin proxy over the self-hosted GraphHopper service (same
+  // rationale as the Photon proxy — single origin, service URL stays private).
+  // The request body is a GraphHopper /route payload built by @atlas/routing.
+  const graphhopperUrl =
+    opts.graphhopperUrl ?? process.env.GRAPHHOPPER_URL ?? 'http://127.0.0.1:8989';
+  app.post('/api/route', async (request, reply) => {
+    try {
+      const res = await fetch(new URL('/route', graphhopperUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request.body ?? {}),
+        // Long leash: LM queries across Norway can take a few seconds.
+        signal: AbortSignal.timeout(30_000),
+      });
+      const json: unknown = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Pass GraphHopper's message through ("point out of bounds", …) but
+        // collapse the status: 4xx = bad request, anything else = upstream.
+        const message =
+          json !== null && typeof json === 'object' && 'message' in json
+            ? String((json as { message: unknown }).message)
+            : 'routing failed';
+        const status = res.status >= 400 && res.status < 500 ? 400 : 502;
+        if (status === 502) request.log.error({ status: res.status, message }, 'graphhopper error');
+        return reply.code(status).send({ message });
+      }
+      return json;
+    } catch (err) {
+      request.log.error({ err }, 'graphhopper unreachable');
+      return reply.code(502).send({ message: 'routing unavailable' });
     }
   });
 

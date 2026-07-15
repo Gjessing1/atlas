@@ -1,0 +1,59 @@
+# GraphHopper server configuration for Atlas (GraphHopper 11).
+#
+# Four profiles built on GraphHopper's bundled custom models. All profiles get
+# a landmarks (LM/hybrid) preparation instead of contraction hierarchies:
+# LM queries are plenty fast for a single-user instance and — unlike CH — keep
+# every algorithm available (alternative_route, round_trip) without separate
+# preparations.
+graphhopper:
+  # Overridden by the entrypoint via -Ddw.graphhopper.datareader.file.
+  datareader.file: /data/norway.osm.pbf
+  graph.location: /data/graph-cache
+
+  profiles:
+    - name: car
+      turn_costs:
+        vehicle_types: [motorcar, motor_vehicle]
+        u_turn_costs: 60
+      custom_model_files: [car.json]
+    - name: bike
+      custom_model_files: [bike.json, bike_elevation.json]
+    - name: foot
+      custom_model_files: [foot.json]
+    - name: hike
+      custom_model_files: [hike.json, foot_elevation.json]
+
+  profiles_lm:
+    - profile: car
+    - profile: bike
+    - profile: foot
+    - profile: hike
+
+  # Union of the encoded values the bundled custom models above reference
+  # (each model's header comment lists its requirements).
+  graph.encoded_values: >-
+    car_access, car_average_speed, road_access,
+    bike_access, bike_priority, bike_average_speed, bike_road_access, roundabout,
+    foot_access, foot_priority, foot_average_speed, foot_road_access, foot_network,
+    hike_rating, mtb_rating, average_slope, country, road_class
+
+  # Foot/hike profiles need paths and footways; ignore nothing at import.
+  import.osm.ignored_highways: ''
+
+  # Elevation makes route points 3D (powers the planned-route elevation
+  # profile) and feeds the *_elevation custom models. Skadi = 1° HGT tiles
+  # fetched on demand during import and cached persistently.
+  graph.elevation.provider: skadi
+  graph.elevation.cache_dir: /data/elevation-cache
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+  request_log:
+    appenders: []
+  admin_connectors:
+    - type: http
+      port: 8991
+      bind_host: localhost

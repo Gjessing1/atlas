@@ -64,9 +64,18 @@ interface MapViewProps {
   /** Save the dropped pin as a place (favorites). */
   onSavePin: (pin: LatLng) => void;
   onMapReady: (map: maplibregl.Map) => void;
+  /** While `.current` is true, POI click popups are suppressed (route mode owns clicks). */
+  suppressPoiClicks?: { readonly current: boolean };
 }
 
-export function MapView({ initialView, pin, onPinChange, onSavePin, onMapReady }: MapViewProps) {
+export function MapView({
+  initialView,
+  pin,
+  onPinChange,
+  onSavePin,
+  onMapReady,
+  suppressPoiClicks,
+}: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const pinRef = useRef(pin);
@@ -119,6 +128,7 @@ export function MapView({ initialView, pin, onPinChange, onSavePin, onMapReady }
     // POI popups from the vector tiles.
     for (const layer of POI_LAYERS) {
       map.on('click', layer, (e) => {
+        if (suppressPoiClicks?.current) return;
         const feature = e.features?.[0];
         if (!feature) return;
         const props = feature.properties as Record<string, unknown>;

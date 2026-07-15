@@ -10,8 +10,20 @@ services:
     environment:
       NODE_ENV: production
       ATLAS_DATA_DIR: /data
+      # Self-hosted services on the shared external `atlas` docker network.
+      PHOTON_URL: http://atlas-photon:2322
+      GRAPHHOPPER_URL: http://atlas-graphhopper:8989
     ports:
       # The app defaults to 3100 (3000 is taken by Forgejo on this host).
       - '3100:3100'
     volumes:
       - /mnt/data/atlas:/data
+    networks:
+      - default
+      - atlas
+
+networks:
+  # Shared with the self-hosted services (photon, graphhopper):
+  # docker network create atlas
+  atlas:
+    external: true

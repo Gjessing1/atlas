@@ -1,0 +1,57 @@
+import type { BBox, LatLng } from '@atlas/core';
+import type { TrackData, TrackPoint } from '@atlas/gpx';
+
+/** Routing profiles served by the self-hosted GraphHopper instance. */
+export type RoutingProfile = 'car' | 'bike' | 'foot' | 'hike';
+
+export interface RoutingProfileInfo {
+  id: RoutingProfile;
+  label: string;
+  /** Pictogram for compact profile pickers. */
+  icon: string;
+}
+
+/** All profiles, in display order (must match infrastructure/graphhopper/config.yml). */
+export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
+  { id: 'car', label: 'Drive', icon: '🚗' },
+  { id: 'bike', label: 'Cycle', icon: '🚲' },
+  { id: 'foot', label: 'Walk', icon: '🚶' },
+  { id: 'hike', label: 'Hike', icon: '🥾' },
+];
+
+/** A route request in app terms, decoupled from the GraphHopper wire format. */
+export interface RouteQuery {
+  profile: RoutingProfile;
+  /** Waypoints in visiting order. Two or more — except round trips, which take exactly one. */
+  points: LatLng[];
+  /** Ask for alternative paths (GraphHopper supports this for 2-point queries only). */
+  alternatives?: boolean;
+  /** Loop from-and-back-to the single starting point, aiming for the given length. */
+  roundTrip?: {
+    distanceM: number;
+    /** Vary the seed to get a different loop for the same distance. */
+    seed?: number;
+  };
+}
+
+/** One routable path (the primary route or an alternative). */
+export interface RoutePath {
+  /** Geometry with elevation when the server has DEM data. */
+  points: TrackPoint[];
+  distanceM: number;
+  /** Travel time — the ETA is `departure + timeMs`. */
+  timeMs: number;
+  ascentM: number;
+  descentM: number;
+  bbox?: BBox;
+}
+
+/** A successful routing response: the primary path first, then alternatives. */
+export interface RouteResult {
+  paths: RoutePath[];
+}
+
+/** Convert a routed path to track data, e.g. for GPX export or an elevation profile. */
+export function routePathToTrackData(path: RoutePath, name: string): TrackData {
+  return { name, segments: [path.points], waypoints: [] };
+}

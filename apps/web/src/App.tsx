@@ -6,12 +6,16 @@ import {
   type SearchResult,
 } from '@atlas/core';
 import { trackBounds, type TrackData } from '@atlas/gpx';
+import { routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ElevationProfile } from './ElevationProfile.js';
 import { MapView } from './MapView.js';
+import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
+import { RoutePanel } from './routing/RoutePanel.js';
+import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
 import { Sidebar } from './Sidebar.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
@@ -34,6 +38,25 @@ export function App() {
   } | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userData = useUserData();
+
+  // ---- route planning ----
+
+  const route = useRoute();
+  useRouteLayers(map, route);
+  // Route mode owns map clicks; MapView reads this ref to skip POI popups.
+  const routeActiveRef = useRef(route.active);
+  routeActiveRef.current = route.active;
+  // The route elevation profile can be dismissed; it comes back per route session.
+  const [routeProfileHidden, setRouteProfileHidden] = useState(false);
+  useEffect(() => {
+    if (route.active) setRouteProfileHidden(false);
+  }, [route.active]);
+
+  const routePath = route.active ? route.paths?.[route.selectedPath] : undefined;
+  const routeTrackData = useMemo(
+    () => (routePath ? routePathToTrackData(routePath, 'Planned route') : null),
+    [routePath],
+  );
 
   const getBias = useCallback((): LatLng | null => {
     const center = mapRef.current?.getCenter();
@@ -187,6 +210,7 @@ export function App() {
           mapRef.current = m;
           setMap(m);
         }}
+        suppressPoiClicks={routeActiveRef}
       />
       <div className="topbar">
         <div className="app-title">{APP_NAME}</div>
@@ -199,7 +223,20 @@ export function App() {
         >
           ★ Saved
         </button>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-pressed={route.active}
+          onClick={() => {
+            // Starting from a dropped pin routes "from here".
+            if (route.active) route.stop();
+            else route.start(pin ?? undefined);
+          }}
+        >
+          ⇄ Route
+        </button>
       </div>
+      {route.active && <RoutePanel route={route} />}
       {sidebarOpen && (
         <Sidebar
           data={userData}
@@ -210,13 +247,30 @@ export function App() {
           onClose={() => setSidebarOpen(false)}
         />
       )}
-      {selectedTrack && (
+      {routePath && routeTrackData && !routeProfileHidden ? (
         <ElevationProfile
-          track={selectedTrack.track}
-          data={selectedTrack.data}
-          onClose={() => selectTrack(null)}
+          title="Planned route"
+          stats={{
+            distanceM: routePath.distanceM,
+            ascentM: routePath.ascentM,
+            descentM: routePath.descentM,
+            durationMs: routePath.timeMs,
+          }}
+          data={routeTrackData}
+          onClose={() => setRouteProfileHidden(true)}
           onHoverPoint={onProfileHover}
         />
+      ) : (
+        selectedTrack &&
+        !route.active && (
+          <ElevationProfile
+            title={selectedTrack.track.name}
+            stats={selectedTrack.track.stats}
+            data={selectedTrack.data}
+            onClose={() => selectTrack(null)}
+            onHoverPoint={onProfileHover}
+          />
+        )
       )}
     </div>
   );

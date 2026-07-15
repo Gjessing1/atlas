@@ -1,8 +1,8 @@
 import type { LatLng } from '@atlas/core';
 import { haversineM } from '@atlas/core';
 import type { TrackData } from '@atlas/gpx';
-import type { TrackRecord } from '@atlas/storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fmtDuration, fmtKm } from './format.js';
 
 interface ProfilePoint {
   distM: number;
@@ -40,16 +40,10 @@ function niceStep(range: number, target: number): number {
   return 10 * mag;
 }
 
-const fmtKm = (m: number): string =>
-  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
-
-function fmtDuration(ms: number): string {
-  const minutes = Math.round(ms / 60_000);
-  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
-}
-
 interface ElevationProfileProps {
-  track: TrackRecord;
+  title: string;
+  /** Summary stats to show in the header (subset of @atlas/gpx TrackStats keys). */
+  stats: Record<string, number>;
   data: TrackData;
   onClose: () => void;
   /** Fired while hovering the chart so the map can mark the position. */
@@ -59,7 +53,13 @@ interface ElevationProfileProps {
 const HEIGHT = 120;
 const MARGIN = { top: 10, right: 12, bottom: 20, left: 44 };
 
-export function ElevationProfile({ track, data, onClose, onHoverPoint }: ElevationProfileProps) {
+export function ElevationProfile({
+  title,
+  stats,
+  data,
+  onClose,
+  onHoverPoint,
+}: ElevationProfileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(680);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -74,10 +74,9 @@ export function ElevationProfile({ track, data, onClose, onHoverPoint }: Elevati
     return () => observer.disconnect();
   }, []);
 
-  // Clear the map hover marker when the panel unmounts or the track changes.
-  useEffect(() => () => onHoverPoint(null), [track.id, onHoverPoint]);
+  // Clear the map hover marker when the panel unmounts or the data changes.
+  useEffect(() => () => onHoverPoint(null), [data, onHoverPoint]);
 
-  const stats = track.stats;
   const statParts = [
     stats['distanceM'] !== undefined && fmtKm(stats['distanceM']),
     stats['ascentM'] !== undefined && `↗ ${Math.round(stats['ascentM'])} m`,
@@ -163,7 +162,7 @@ export function ElevationProfile({ track, data, onClose, onHoverPoint }: Elevati
   return (
     <div className="elevation-panel" ref={containerRef}>
       <div className="elevation-header">
-        <strong>{track.name}</strong>
+        <strong>{title}</strong>
         <span className="elevation-stats">{statParts.join(' · ')}</span>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close profile">
           ✕
@@ -175,7 +174,7 @@ export function ElevationProfile({ track, data, onClose, onHoverPoint }: Elevati
             width={width}
             height={HEIGHT}
             role="img"
-            aria-label={`Elevation profile of ${track.name}`}
+            aria-label={`Elevation profile of ${title}`}
             tabIndex={0}
             onPointerMove={onPointerMove}
             onPointerLeave={() => setHover(null)}

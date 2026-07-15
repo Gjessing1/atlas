@@ -8,6 +8,7 @@ import { buildApp } from './app.js';
 let dataDir: string;
 let app: FastifyInstance;
 let photonStub: FastifyInstance;
+let graphhopperStub: FastifyInstance;
 
 beforeAll(async () => {
   dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-test-'));
@@ -40,12 +41,36 @@ beforeAll(async () => {
   }));
   const photonAddress = await photonStub.listen({ port: 0, host: '127.0.0.1' });
 
-  app = await buildApp({ dataDir, photonUrl: photonAddress });
+  graphhopperStub = Fastify();
+  graphhopperStub.post<{ Body: { points?: unknown[] } }>('/route', (request, reply) => {
+    if (!Array.isArray(request.body.points) || request.body.points.length < 1) {
+      return reply.code(400).send({ message: 'You have to pass at least one point' });
+    }
+    return {
+      paths: [
+        {
+          distance: 1234.5,
+          time: 90_000,
+          points: {
+            type: 'LineString',
+            coordinates: [
+              [10.75, 59.91, 3.0],
+              [10.76, 59.92, 8.0],
+            ],
+          },
+        },
+      ],
+    };
+  });
+  const graphhopperAddress = await graphhopperStub.listen({ port: 0, host: '127.0.0.1' });
+
+  app = await buildApp({ dataDir, photonUrl: photonAddress, graphhopperUrl: graphhopperAddress });
 });
 
 afterAll(async () => {
   await app.close();
   await photonStub.close();
+  await graphhopperStub.close();
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -120,6 +145,43 @@ describe('search proxy', () => {
     const downApp = await buildApp({ dataDir, photonUrl: 'http://127.0.0.1:1' });
     const res = await downApp.inject({ url: '/api/search?q=oslo' });
     expect(res.statusCode).toBe(502);
+    await downApp.close();
+  });
+});
+
+describe('route proxy', () => {
+  it('forwards route requests to graphhopper', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/route',
+      payload: {
+        profile: 'car',
+        points: [
+          [10.75, 59.91],
+          [10.76, 59.92],
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { paths: { distance: number }[] };
+    expect(body.paths[0]!.distance).toBe(1234.5);
+  });
+
+  it('passes graphhopper 4xx messages through as 400', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/route', payload: { points: [] } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ message: 'You have to pass at least one point' });
+  });
+
+  it('502s when graphhopper is unreachable', async () => {
+    const downApp = await buildApp({ dataDir, graphhopperUrl: 'http://127.0.0.1:1' });
+    const res = await downApp.inject({
+      method: 'POST',
+      url: '/api/route',
+      payload: { profile: 'car', points: [] },
+    });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ message: 'routing unavailable' });
     await downApp.close();
   });
 });
