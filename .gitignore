@@ -21,6 +21,8 @@ backend/public/
 
 # --- Persistent data (host: /mnt/data/atlas) ---
 data/
+# Dev symlink to the host data dir (trailing-slash patterns don't match symlinks).
+backend/data
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -8,6 +8,8 @@
 CLAUDE.md
 docs
 data
+# Dev-only symlink to the host data dir (/mnt/data/atlas).
+backend/data
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

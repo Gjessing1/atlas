@@ -1,0 +1,29 @@
+# Photon geocoding service (search box backend). Independent of CI — bring it
+# up manually on the host:
+#
+#   docker network create atlas        # once; shared with the backend container
+#   docker compose up -d --build       # from this directory
+#
+# First start downloads the Norway dump (~0.5 GB) and imports it (takes a
+# while on the N150); the index persists in /mnt/data/atlas/photon.
+# The backend reaches it as http://atlas-photon:2322 over the shared network;
+# 127.0.0.1:2322 is published for local dev (npm run dev) and debugging only.
+services:
+  photon:
+    build: .
+    container_name: atlas-photon
+    restart: unless-stopped
+    environment:
+      PHOTON_REGION: europe
+      PHOTON_COUNTRY: norway
+      JAVA_OPTS: -Xmx2g
+    ports:
+      - '127.0.0.1:2322:2322'
+    volumes:
+      - /mnt/data/atlas/photon:/photon/data
+    networks:
+      - atlas
+
+networks:
+  atlas:
+    external: true

@@ -1,24 +1,50 @@
-import { APP_NAME } from '@atlas/core';
+import {
+  APP_NAME,
+  decodeMapHash,
+  type LatLng,
+  type MapViewState,
+  type SearchResult,
+} from '@atlas/core';
+import type maplibregl from 'maplibre-gl';
+import { useCallback, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
+import { SearchBox } from './SearchBox.js';
+
+const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
+
+// Decoded once at startup; afterwards the map keeps the hash in sync.
+const initialView = decodeMapHash(window.location.hash) ?? DEFAULT_VIEW;
 
 export function App() {
+  const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+
+  const getBias = useCallback((): LatLng | null => {
+    const center = mapRef.current?.getCenter();
+    return center ? { lat: center.lat, lng: center.lng } : null;
+  }, []);
+
+  const onSearchSelect = useCallback((result: SearchResult) => {
+    setPin(result.position);
+    const map = mapRef.current;
+    if (map) {
+      map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
+    }
+  }, []);
+
   return (
     <div style={{ height: '100%', position: 'relative' }}>
-      <MapView />
-      <div
-        style={{
-          position: 'absolute',
-          top: 12,
-          left: 12,
-          padding: '6px 14px',
-          borderRadius: 8,
-          background: 'rgba(255, 255, 255, 0.9)',
-          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.2)',
-          fontWeight: 600,
-          fontSize: 18,
+      <MapView
+        initialView={initialView}
+        pin={pin}
+        onPinChange={setPin}
+        onMapReady={(map) => {
+          mapRef.current = map;
         }}
-      >
-        {APP_NAME}
+      />
+      <div className="topbar">
+        <div className="app-title">{APP_NAME}</div>
+        <SearchBox onSelect={onSearchSelect} getBias={getBias} />
       </div>
     </div>
   );
