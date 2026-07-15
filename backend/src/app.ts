@@ -8,6 +8,9 @@ import {
   type SearchResult,
 } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { createPgStores } from './pg.js';
+import { registerSyncApi } from './sync-api.js';
+import { createMemoryStores, type Stores } from './stores.js';
 
 export interface AppOptions {
   /** Persistent data directory containing tiles/ and assets/ (ATLAS_DATA_DIR). */
@@ -18,16 +21,43 @@ export interface AppOptions {
   photonUrl?: string;
   /** GraphHopper routing engine base URL (GRAPHHOPPER_URL). */
   graphhopperUrl?: string;
+  /**
+   * Sync database (DATABASE_URL). A postgres:// URL, or the literal 'memory'
+   * for throwaway in-process stores (dev/e2e). Unset = no accounts, no sync —
+   * the app runs anonymous local-only (backend services stay optional).
+   */
+  databaseUrl?: string;
+  /** Secret for signing JWTs (JWT_SECRET); required when databaseUrl is set. */
+  jwtSecret?: string;
+  /** Test seam: inject stores directly instead of via databaseUrl. */
+  stores?: Stores;
   logger?: boolean;
 }
 
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false });
 
+  // Accounts + sync are optional: only live when a database is configured.
+  let stores = opts.stores ?? null;
+  if (!stores && opts.databaseUrl) {
+    if (opts.databaseUrl === 'memory') {
+      stores = createMemoryStores();
+    } else {
+      const pgStores = await createPgStores(opts.databaseUrl);
+      app.addHook('onClose', () => pgStores.close());
+      stores = pgStores;
+    }
+  }
+  if (stores) {
+    if (!opts.jwtSecret) throw new Error('JWT_SECRET is required when the sync database is set');
+    await registerSyncApi(app, stores, opts.jwtSecret);
+  }
+
   app.get('/api/health', () => ({
     status: 'ok',
     app: APP_NAME,
     gitSha: process.env.GIT_SHA || 'dev',
+    sync: stores !== null,
   }));
 
   // Geocoding: thin proxy over the self-hosted Photon service so the client

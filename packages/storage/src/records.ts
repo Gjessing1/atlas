@@ -71,6 +71,33 @@ export interface TrackPatch {
   visible?: boolean;
 }
 
+/** The record kinds that sync between devices via the server. */
+export type SyncEntity = 'collection' | 'place' | 'track' | 'setting';
+
+/**
+ * A pending local mutation awaiting push. One entry per record — last-write-wins
+ * means only the latest state matters, so newer mutations overwrite older entries.
+ */
+export interface OutboxEntry {
+  entity: SyncEntity;
+  /** Record id, or the settings key for entity 'setting'. */
+  id: string;
+  op: 'upsert' | 'delete';
+  updatedAt: number;
+}
+
+/**
+ * One record state travelling through sync, in either direction.
+ * `data` holds the full record payload (minus id/updatedAt); null for deletes.
+ */
+export interface SyncChange {
+  entity: SyncEntity;
+  id: string;
+  updatedAt: number;
+  deleted: boolean;
+  data: Record<string, unknown> | null;
+}
+
 /** Complete dump of user data, for export-all / backup. */
 export interface ExportedData {
   exportedAt: number;

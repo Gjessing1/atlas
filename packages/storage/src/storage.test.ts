@@ -104,6 +104,136 @@ describe('AtlasStorage', () => {
     expect(await storage.getSetting('view')).toBe('b');
   });
 
+  describe('sync support', () => {
+    it('records every mutation in the outbox, one entry per record (LWW)', async () => {
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await storage.updatePlace(place.id, { notes: 'x' });
+      const outbox = await storage.listOutbox();
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0]).toMatchObject({ entity: 'place', id: place.id, op: 'upsert' });
+
+      await storage.deletePlace(place.id);
+      expect(await storage.listOutbox()).toMatchObject([
+        { entity: 'place', id: place.id, op: 'delete' },
+      ]);
+    });
+
+    it('does not enqueue local-only settings', async () => {
+      await storage.setSetting('local.syncCursor', '42');
+      await storage.setSetting('theme', 'dark');
+      const outbox = await storage.listOutbox();
+      expect(outbox).toMatchObject([{ entity: 'setting', id: 'theme', op: 'upsert' }]);
+    });
+
+    it('enqueues records moved when their folder is deleted', async () => {
+      const folder = await storage.createCollection('F');
+      const place = await storage.createPlace({
+        name: 'P',
+        lat: 1,
+        lng: 2,
+        collectionId: folder.id,
+      });
+      await storage.clearOutbox(await storage.listOutbox());
+
+      await storage.deleteCollection(folder.id);
+      const outbox = await storage.listOutbox();
+      expect(outbox).toContainEqual(
+        expect.objectContaining({ entity: 'place', id: place.id, op: 'upsert' }),
+      );
+      expect(outbox).toContainEqual(
+        expect.objectContaining({ entity: 'collection', id: folder.id, op: 'delete' }),
+      );
+    });
+
+    it('clearOutbox leaves entries that changed since the snapshot', async () => {
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      const snapshot = await storage.listOutbox();
+      // A newer mutation lands between snapshot and clear (updated_at moves on).
+      await new Promise((r) => setTimeout(r, 2));
+      await storage.updatePlace(place.id, { notes: 'newer' });
+      await storage.clearOutbox(snapshot);
+      expect(await storage.listOutbox()).toHaveLength(1);
+    });
+
+    it('reads sync payloads including the track GPX body', async () => {
+      const track = await storage.createTrack({ name: 'T', gpx: '<gpx/>', stats: { d: 1 } });
+      const record = await storage.readSyncRecord('track', track.id);
+      expect(record!.data).toMatchObject({ name: 'T', gpx: '<gpx/>', stats: { d: 1 } });
+      expect(await storage.readSyncRecord('track', 'missing')).toBeNull();
+
+      await storage.setSetting('theme', 'dark');
+      expect((await storage.readSyncRecord('setting', 'theme'))!.data).toEqual({ value: 'dark' });
+    });
+
+    it('applies newer remote changes and skips older ones', async () => {
+      const place = await storage.createPlace({ name: 'Local', lat: 1, lng: 2 });
+
+      const stale = await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: place.updatedAt - 1000,
+        deleted: false,
+        data: { name: 'Stale', lat: 9, lng: 9, createdAt: 1 },
+      });
+      expect(stale).toBe('skipped');
+      expect((await storage.listPlaces())[0]!.name).toBe('Local');
+
+      const fresh = await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: place.updatedAt + 1000,
+        deleted: false,
+        data: { name: 'Remote', lat: 9, lng: 9, notes: 'n', tags: ['a'], createdAt: 1 },
+      });
+      expect(fresh).toBe('applied');
+      expect((await storage.listPlaces())[0]).toMatchObject({ name: 'Remote', tags: ['a'] });
+      // The superseded local outbox entry is gone — no echo back to the server.
+      expect(await storage.listOutbox()).toHaveLength(0);
+    });
+
+    it('applies remote deletes as removals', async () => {
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: place.updatedAt + 1,
+        deleted: true,
+        data: null,
+      });
+      expect(await storage.listPlaces()).toEqual([]);
+    });
+
+    it('creates records from remote changes for ids never seen locally', async () => {
+      await storage.applyRemoteChange({
+        entity: 'track',
+        id: 'remote-track',
+        updatedAt: 5,
+        deleted: false,
+        data: { name: 'From phone', gpx: '<gpx/>', visible: false, createdAt: 4 },
+      });
+      expect((await storage.listTracks())[0]).toMatchObject({
+        id: 'remote-track',
+        name: 'From phone',
+        visible: false,
+      });
+      expect(await storage.getTrackGpx('remote-track')).toBe('<gpx/>');
+    });
+
+    it('enqueueFullState queues everything except local settings', async () => {
+      await storage.createCollection('C');
+      await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await storage.createTrack({ name: 'T', gpx: '<gpx/>' });
+      await storage.setSetting('theme', 'dark');
+      await storage.setSetting('local.syncCursor', '9');
+      await storage.clearOutbox(await storage.listOutbox());
+
+      await storage.enqueueFullState();
+      const outbox = await storage.listOutbox();
+      expect(outbox).toHaveLength(4);
+      expect(outbox.every((e) => e.op === 'upsert')).toBe(true);
+    });
+  });
+
   it('exports everything', async () => {
     const collection = await storage.createCollection('C');
     await storage.createPlace({ name: 'P', lat: 1, lng: 2, collectionId: collection.id });

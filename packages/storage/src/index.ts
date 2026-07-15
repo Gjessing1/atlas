@@ -4,12 +4,15 @@ export type {
   ExportedData,
   NewPlace,
   NewTrack,
+  OutboxEntry,
   PlacePatch,
   PlaceRecord,
+  SyncChange,
+  SyncEntity,
   TrackPatch,
   TrackRecord,
 } from './records.js';
 export type { StorageWorkerRequest, StorageWorkerResponse } from './protocol.js';
 export { MIGRATIONS, migrate } from './migrations.js';
-export { AtlasStorage } from './storage.js';
+export { AtlasStorage, LOCAL_SETTING_PREFIX } from './storage.js';
 export { createWorkerSqlDriver } from './worker-driver.js';

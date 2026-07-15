@@ -1,9 +1,12 @@
 import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
 import type { ImportResult, UserData } from './storage/useUserData.js';
+import { AccountPanel } from './sync/AccountPanel.js';
+import type { SyncState } from './sync/useSync.js';
 
 interface SidebarProps {
   data: UserData;
+  sync: SyncState;
   selectedTrackId: string | null;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
@@ -104,6 +107,7 @@ function ItemEditor({
 
 export function Sidebar({
   data,
+  sync,
   selectedTrackId,
   onShowPlace,
   onShowTrack,
@@ -347,6 +351,7 @@ export function Sidebar({
         )}
         {data.status === 'ready' && branch(null, 0)}
       </div>
+      {data.status === 'ready' && <AccountPanel sync={sync} />}
     </aside>
   );
 }

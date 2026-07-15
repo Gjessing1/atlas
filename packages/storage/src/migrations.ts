@@ -47,6 +47,15 @@ export const MIGRATIONS: readonly string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE outbox (
+    entity TEXT NOT NULL,
+    id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (entity, id)
+  );
+  `,
 ];
 
 /** Bring the database up to the latest schema version. */

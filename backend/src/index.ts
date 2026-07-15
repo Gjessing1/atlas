@@ -13,6 +13,8 @@ const publicDir = path.resolve(here, '../public');
 const app = await buildApp({
   dataDir,
   publicDir: existsSync(publicDir) ? publicDir : undefined,
+  databaseUrl: process.env.DATABASE_URL,
+  jwtSecret: process.env.JWT_SECRET,
   logger: true,
 });
 

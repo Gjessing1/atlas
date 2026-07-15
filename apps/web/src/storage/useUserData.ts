@@ -33,6 +33,11 @@ export interface UserData {
   places: PlaceRecord[];
   tracks: TrackRecord[];
 
+  /** The open storage (null until ready) — for wiring the sync engine only. */
+  storage: AtlasStorage | null;
+  /** Reload all lists from storage, e.g. after sync applied remote changes. */
+  refreshAll: () => Promise<void>;
+
   savePlace: (input: NewPlace) => Promise<PlaceRecord | null>;
   updatePlace: (id: string, patch: PlacePatch) => Promise<void>;
   deletePlace: (id: string) => Promise<void>;
@@ -119,6 +124,9 @@ export function useUserData(): UserData {
   const refreshCollections = useCallback(async () => {
     if (storageRef.current) setCollections(await storageRef.current.listCollections());
   }, []);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshCollections(), refreshPlaces(), refreshTracks()]);
+  }, [refreshCollections, refreshPlaces, refreshTracks]);
 
   const savePlace = useCallback(
     async (input: NewPlace) => {
@@ -305,6 +313,8 @@ export function useUserData(): UserData {
     collections,
     places,
     tracks,
+    storage: status === 'ready' ? storageRef.current : null,
+    refreshAll,
     savePlace,
     updatePlace,
     deletePlace,

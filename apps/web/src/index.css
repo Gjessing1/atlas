@@ -686,3 +686,78 @@ body {
 .editor-actions button:not(.danger):hover {
   background: #ececec;
 }
+
+/* ---- account & sync panel (sidebar footer) ---- */
+
+.account-panel {
+  padding: 10px 12px;
+  border-top: 1px solid #e1e0d9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.account-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.account-panel input {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.account-actions button {
+  padding: 4px 9px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f7f7f7;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.account-actions button:hover:enabled {
+  background: #ececec;
+}
+
+.account-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.account-note {
+  margin: 0;
+  color: #52514e;
+  font-size: 12px;
+}
+
+.account-error {
+  margin: 0;
+  color: #a4262c;
+  font-size: 12px;
+}
+
+.account-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-line strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

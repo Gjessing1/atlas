@@ -19,6 +19,7 @@ import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
 import { Sidebar } from './Sidebar.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
+import { useSync } from './sync/useSync.js';
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const LAST_VIEW_SETTING = 'lastView';
@@ -38,6 +39,7 @@ export function App() {
   } | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userData = useUserData();
+  const sync = useSync(userData);
 
   // ---- route planning ----
 
@@ -240,6 +242,7 @@ export function App() {
       {sidebarOpen && (
         <Sidebar
           data={userData}
+          sync={sync}
           selectedTrackId={selectedTrack?.track.id ?? null}
           onShowPlace={showPlace}
           onShowTrack={showTrack}
