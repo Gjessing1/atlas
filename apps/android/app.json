@@ -3,13 +3,13 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -19,6 +19,7 @@
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
+      "./plugins/withReleaseSigning.js",
       "expo-dev-client",
       "expo-sqlite",
       "@maplibre/maplibre-react-native",
