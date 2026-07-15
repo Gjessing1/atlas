@@ -1,0 +1,33 @@
+# --- Personal planning docs (kept local, not committed) ---
+CLAUDE.md
+.claude/
+docs/
+
+# --- Dependencies ---
+node_modules/
+.npm/
+
+# --- Build output ---
+dist/
+build/
+*.tsbuildinfo
+# Built web app copied here by backend/Dockerfile for production serving.
+backend/public/
+
+# --- Env & secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Persistent data (host: /mnt/data/atlas) ---
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# --- Logs / misc ---
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+.vite/

@@ -1,0 +1,36 @@
+{
+  "name": "atlas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline-first mapping and navigation platform (OsmAnd-inspired) for Android + Web.",
+  "workspaces": [
+    "packages/*",
+    "apps/web",
+    "backend"
+  ],
+  "scripts": {
+    "build": "npm run build -w @atlas/core && npm run build -w @atlas/backend && npm run build -w @atlas/web",
+    "dev": "npm run build -w @atlas/core && concurrently -k -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
+    "dev:backend": "npm run dev -w @atlas/backend",
+    "dev:web": "npm run dev -w @atlas/web",
+    "typecheck": "npm run build -w @atlas/core && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
