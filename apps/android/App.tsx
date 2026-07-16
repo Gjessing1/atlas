@@ -9,7 +9,11 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  initialWindowMetrics,
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
@@ -23,10 +27,12 @@ import {
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { useNavigation } from './src/nav/useNavigation';
+import { useTrackRecording } from './src/nav/useTrackRecording';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
+import { RecordControls } from './src/ui/RecordControls';
 import { SettingsSheet } from './src/ui/SettingsSheet';
 import { useUserData } from './src/useUserData';
 
@@ -49,12 +55,25 @@ function routeToGeoJSON(coords: number[][]) {
   };
 }
 
+/**
+ * Fallback system-bar sizes (dp) used only when the measured safe-area inset is
+ * 0 — a defence against Android edge-to-edge occasionally not delivering the
+ * window insets to JS, which would otherwise leave our controls hidden under the
+ * system navigation bar. A real gesture/3-button bar always reports a non-zero
+ * inset, so these never over-pad a correctly-measured layout.
+ */
+const NAV_BAR_FALLBACK = 48;
+const STATUS_BAR_FALLBACK = 28;
+
 function AppInner() {
   const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
+  const topInset = insets.top || STATUS_BAR_FALLBACK;
   const data = useUserData();
   const serverOrigin = useServerOrigin();
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
+  const rec = useTrackRecording(data.saveTrack);
 
   const [originReady, setOriginReady] = useState(false);
   const [template, setTemplate] = useState<string | null>(null);
@@ -123,8 +142,8 @@ function AppInner() {
         mapStyle={mapStyle}
         // Edge-to-edge: the map draws behind the system nav bar, so lift the
         // MapLibre attribution/logo ornaments clear of it.
-        attributionPosition={{ bottom: insets.bottom + 8, right: 8 }}
-        logoPosition={{ bottom: insets.bottom + 8, left: 8 }}
+        attributionPosition={{ bottom: bottomInset + 8, right: 8 }}
+        logoPosition={{ bottom: bottomInset + 8, left: 8 }}
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
           Alert.alert(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, undefined, [
@@ -185,11 +204,11 @@ function AppInner() {
         </GeoJSONSource>
       </MapLibreMap>
 
-      <NavBanner nav={nav} topInset={insets.top} />
+      <NavBanner nav={nav} topInset={topInset} />
 
-      <SearchBar packs={packs} onPick={onPickResult} topInset={insets.top} />
+      <SearchBar packs={packs} onPick={onPickResult} topInset={topInset} />
 
-      <View style={[styles.buttonColumn, { top: insets.top + 8 }]}>
+      <View style={[styles.buttonColumn, { top: topInset + 8 }]}>
         <Pressable
           style={styles.roundButton}
           onPress={() => setSettingsOpen(true)}
@@ -204,23 +223,45 @@ function AppInner() {
         >
           <Text style={styles.gearText}>★</Text>
         </Pressable>
+        {rec.phase === 'idle' ? (
+          <Pressable
+            style={styles.roundButton}
+            onPress={() => void rec.start()}
+            testID="record-start"
+          >
+            <Text style={styles.recordDot}>⏺</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      {useOffline ? (
-        <View style={[styles.offlineBadge, { bottom: insets.bottom + 84 }]}>
+      <RecordControls
+        rec={rec}
+        bottomInset={bottomInset}
+        onSaved={(name) =>
+          Alert.alert(name ? 'Track saved' : 'Nothing recorded', name ?? 'No fixes were recorded.')
+        }
+      />
+
+      {useOffline && rec.phase === 'idle' ? (
+        <View style={[styles.offlineBadge, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 ? (
-        <View style={[styles.offlineToggle, { bottom: insets.bottom + 24 }]}>
+      {packs.length > 0 && rec.phase === 'idle' ? (
+        <View style={[styles.offlineToggle, { bottom: bottomInset + 24 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
         </View>
       ) : null}
 
       {data.status === 'error' ? (
-        <View style={[styles.banner, { top: insets.top + 60 }]}>
+        <View style={[styles.banner, { top: topInset + 60 }]}>
           <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
+        </View>
+      ) : null}
+      {rec.error ? (
+        <View style={[styles.banner, { top: topInset + 60 }]}>
+          <Text style={styles.bannerText}>Recording: {rec.error}</Text>
         </View>
       ) : null}
 
@@ -247,7 +288,7 @@ function AppInner() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <AppInner />
     </SafeAreaProvider>
   );
@@ -268,6 +309,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   gearText: { fontSize: 22 },
+  recordDot: { fontSize: 20, color: '#d63f3f' },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,

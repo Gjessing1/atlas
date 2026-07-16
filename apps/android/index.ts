@@ -7,6 +7,7 @@ import './src/polyfills';
 // Registers the background-location TaskManager task in the global scope, before
 // the foreground service can fire it on a cold start.
 import './src/nav/locationTask';
+import './src/nav/trackTask';
 import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

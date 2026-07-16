@@ -1,4 +1,4 @@
-import type { AtlasStorage, NewPlace, PlaceRecord } from '@atlas/storage';
+import type { AtlasStorage, NewPlace, NewTrack, PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { openStorage } from './db';
@@ -13,6 +13,7 @@ export interface UserData {
   refreshAll: () => Promise<void>;
   savePlace: (input: NewPlace) => Promise<void>;
   deletePlace: (id: string) => Promise<void>;
+  saveTrack: (input: NewTrack) => Promise<void>;
 }
 
 /**
@@ -71,5 +72,9 @@ export function useUserData(): UserData {
     [refreshAll],
   );
 
-  return { status, error, places, storage, refreshAll, savePlace, deletePlace };
+  const saveTrack = useCallback(async (input: NewTrack) => {
+    await storageRef.current?.createTrack(input);
+  }, []);
+
+  return { status, error, places, storage, refreshAll, savePlace, deletePlace, saveTrack };
 }
