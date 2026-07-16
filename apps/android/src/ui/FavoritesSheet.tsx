@@ -1,14 +1,14 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { PlacePatch, PlaceRecord } from '@atlas/storage';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 /**
  * Favorites/saved-places list — the mobile counterpart of the web Sidebar's
  * favorites, so saved pins are browsable (and synced ones from other devices
  * appear here), not only tappable on the map. Fly to, navigate to, remove, or
- * (tap the emoji badge) restyle a place with a different icon/colour — the
- * mobile counterpart of the web Sidebar's style picker.
+ * (tap the emoji badge) edit a place: rename it and pick a different
+ * icon/colour — the mobile counterpart of the web Sidebar's style panel.
  */
 export function FavoritesSheet({
   visible,
@@ -16,7 +16,7 @@ export function FavoritesSheet({
   places,
   onFlyTo,
   onNavigate,
-  onStyle,
+  onPatch,
   onDelete,
   bottomInset = 0,
 }: {
@@ -25,13 +25,13 @@ export function FavoritesSheet({
   places: PlaceRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
-  /** Patch a place's icon/colour (auto-saved + synced, same as the web picker). */
-  onStyle: (id: string, patch: Pick<PlacePatch, 'icon' | 'color'>) => void;
+  /** Patch a place's name/icon/colour (auto-saved + synced, same as the web panel). */
+  onPatch: (id: string, patch: Pick<PlacePatch, 'name' | 'icon' | 'color'>) => void;
   onDelete: (id: string) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
-  // Which row's style picker is currently open (tap the emoji badge to toggle).
+  // Which row's edit panel is currently open (tap the emoji badge to toggle).
   const [editingId, setEditingId] = useState<string | null>(null);
 
   return (
@@ -91,12 +91,25 @@ export function FavoritesSheet({
                   </View>
                   {editingId === place.id ? (
                     <View style={styles.picker}>
+                      <TextInput
+                        style={styles.nameInput}
+                        defaultValue={place.name}
+                        placeholder="Name"
+                        // Commit when editing ends (like the web name field's
+                        // blur): rename only when non-empty and actually changed.
+                        onEndEditing={(e) => {
+                          const value = e.nativeEvent.text.trim();
+                          if (value && value !== place.name) onPatch(place.id, { name: value });
+                        }}
+                        returnKeyType="done"
+                        testID={`favorite-name-${place.id}`}
+                      />
                       <View style={styles.choiceRow}>
                         {PLACE_ICONS.map((ic) => (
                           <Pressable
                             key={ic}
                             style={[styles.iconChoice, ic === place.icon && styles.choiceSelected]}
-                            onPress={() => onStyle(place.id, { icon: ic })}
+                            onPress={() => onPatch(place.id, { icon: ic })}
                             testID={`favorite-icon-${place.id}-${ic}`}
                           >
                             <Text style={styles.iconChoiceText}>{ic}</Text>
@@ -112,7 +125,7 @@ export function FavoritesSheet({
                               { backgroundColor: c },
                               c === place.color && styles.colorChoiceSelected,
                             ]}
-                            onPress={() => onStyle(place.id, { color: c })}
+                            onPress={() => onPatch(place.id, { color: c })}
                             testID={`favorite-color-${place.id}-${c}`}
                           />
                         ))}
@@ -171,6 +184,15 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingLeft: 42,
     gap: 8,
+  },
+  nameInput: {
+    borderWidth: 1,
+    borderColor: '#cdd3dd',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    color: '#111',
   },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconChoice: {

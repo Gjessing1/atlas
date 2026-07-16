@@ -33,6 +33,7 @@ import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
+import { PromptModal } from './src/ui/PromptModal';
 import { RecordControls } from './src/ui/RecordControls';
 import { SettingsSheet } from './src/ui/SettingsSheet';
 import { useUserData } from './src/useUserData';
@@ -84,6 +85,8 @@ function AppInner() {
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const [navHeight, setNavHeight] = useState(0);
+  // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
+  const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
   const cameraRef = useRef<CameraRef>(null);
 
   // While a trip is active the nav banner owns the top of the screen, so drop
@@ -158,11 +161,7 @@ function AppInner() {
           const [lng, lat] = e.nativeEvent.lngLat;
           Alert.alert(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, undefined, [
             { text: 'Navigate here', onPress: () => void nav.start({ lat, lng }) },
-            {
-              text: 'Save pin',
-              onPress: () =>
-                void data.savePlace({ name: `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng }),
-            },
+            { text: 'Save pin', onPress: () => setPendingPin({ lat, lng }) },
             { text: 'Cancel', style: 'cancel' },
           ]);
         }}
@@ -293,7 +292,7 @@ function AppInner() {
         places={data.places}
         onFlyTo={(p) => flyTo(p)}
         onNavigate={(p) => void nav.start({ lat: p.lat, lng: p.lng })}
-        onStyle={(id, patch) => void data.updatePlace(id, patch)}
+        onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
         bottomInset={bottomInset}
       />
@@ -305,6 +304,20 @@ function AppInner() {
         onPacksChanged={refreshPacks}
         storage={data.storage}
         bottomInset={bottomInset}
+      />
+      <PromptModal
+        visible={pendingPin !== null}
+        title="Name this pin"
+        placeholder="e.g. Home, Trailhead…"
+        confirmLabel="Save pin"
+        onCancel={() => setPendingPin(null)}
+        onConfirm={(value) => {
+          if (!pendingPin) return;
+          const { lat, lng } = pendingPin;
+          const name = value.trim() || `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+          void data.savePlace({ name, lat, lng });
+          setPendingPin(null);
+        }}
       />
       <StatusBar style="auto" />
     </View>
