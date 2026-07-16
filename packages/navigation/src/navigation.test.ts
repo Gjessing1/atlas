@@ -90,11 +90,13 @@ describe('NavigationSession progress', () => {
     expect(start.upcoming?.distanceToM).toBeCloseTo(routeCum[10]!, 0);
     expect(start.timeRemainingMs).toBeCloseTo(120_000, -2);
     expect(start.etaEpochMs).toBeCloseTo(now + 120_000, -2);
+    expect(start.routeProgress).toBeCloseTo(0, 3);
 
     const mid = s.update(pointAtAlong(routeCum[10]!), now).state;
     expect(mid.distanceRemainingM).toBeCloseTo(routeTotal - routeCum[10]!, 0);
     expect(mid.upcoming?.instruction.text).toBe('Arrive at destination');
     expect(mid.timeRemainingMs).toBeCloseTo(60_000, -2);
+    expect(mid.routeProgress).toBeCloseTo(0.5, 2);
   });
 
   it('declares arrival within the arrival radius', () => {
@@ -103,6 +105,7 @@ describe('NavigationSession progress', () => {
     expect(end.status).toBe('arrived');
     expect(end.upcoming).toBeNull();
     expect(end.distanceRemainingM).toBeLessThanOrEqual(25);
+    expect(end.routeProgress).toBe(1);
   });
 
   it('estimates remaining time proportionally when there are no instructions', () => {

@@ -48,10 +48,20 @@ export function NavBanner({ nav, topInset = 0 }: { nav: NavController; topInset?
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
 
         {state && nav.phase !== 'arrived' ? (
-          <Text style={styles.summary}>
-            {formatDistance(state.distanceRemainingM)} · {formatDuration(state.timeRemainingMs)} ·
-            arrive {formatEta(state.etaEpochMs)}
-          </Text>
+          <>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${Math.round(Math.min(1, Math.max(0, state.routeProgress)) * 100)}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.summary}>
+              {formatDistance(state.distanceRemainingM)} · {formatDuration(state.timeRemainingMs)} ·
+              arrive {formatEta(state.etaEpochMs)}
+            </Text>
+          </>
         ) : null}
       </View>
 
@@ -74,7 +84,15 @@ const styles = StyleSheet.create({
   maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   distanceTo: { color: '#7ec8ff', fontSize: 22, fontWeight: '700', minWidth: 72 },
   maneuver: { color: '#fff', fontSize: 17, fontWeight: '600', flexShrink: 1 },
-  summary: { color: '#cdd6e0', fontSize: 13, marginTop: 8 },
+  progressTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  progressFill: { height: 4, borderRadius: 2, backgroundColor: '#7ec8ff' },
+  summary: { color: '#cdd6e0', fontSize: 13, marginTop: 6 },
   reroute: { color: '#ffcf7e', fontSize: 13, marginTop: 6 },
   error: { color: '#ff9a8f', fontSize: 15, fontWeight: '600' },
   stop: {

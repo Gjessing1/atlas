@@ -81,6 +81,7 @@ export class NavigationSession {
       snapped: snap.point,
       offRouteM: snap.crossTrackM,
       traveledM: alongM,
+      routeProgress: this.arrived ? 1 : this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
       distanceRemainingM,
       timeRemainingMs: this.remainingTimeMs(alongM, distanceRemainingM),
       etaEpochMs: nowMs + this.remainingTimeMs(alongM, distanceRemainingM),

@@ -29,6 +29,8 @@ export interface NavState {
   offRouteM: number;
   /** Distance (m) already covered along the route. */
   traveledM: number;
+  /** Fraction of the route completed, 0..1 (`traveledM / total`; 1 on arrival). */
+  routeProgress: number;
   /** Distance (m) still to travel to the destination. */
   distanceRemainingM: number;
   /** Estimated travel time (ms) still remaining. */
