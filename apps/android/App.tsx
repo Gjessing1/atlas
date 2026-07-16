@@ -50,6 +50,7 @@ import { PromptModal } from './src/ui/PromptModal';
 import { RecordControls } from './src/ui/RecordControls';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { SettingsSheet } from './src/ui/SettingsSheet';
+import { UpdateNotices } from './src/update/UpdateNotices';
 import { TracksSheet } from './src/ui/TracksSheet';
 import { useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData } from './src/useUserData';
@@ -489,6 +490,7 @@ function AppInner() {
           <Text style={styles.bannerText}>Recording: {rec.error}</Text>
         </View>
       ) : null}
+      <UpdateNotices storage={data.storage} topInset={topInset} />
 
       {destination && !planning ? (
         <DestinationCard

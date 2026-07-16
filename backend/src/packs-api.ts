@@ -87,7 +87,9 @@ export async function registerPacksApi(app: FastifyInstance, dataDir: string): P
       root: appDir,
       prefix: '/app/',
       decorateReply: false,
-      allowedPath: (pathname) => pathname.endsWith('.apk'),
+      // .apk = self-update installs; updates/ = expo-updates OTA bundles
+      // (immutable content-hashed exports, see updates-api.ts).
+      allowedPath: (pathname) => pathname.endsWith('.apk') || pathname.startsWith('/updates/'),
       maxAge: '5m',
     });
   }

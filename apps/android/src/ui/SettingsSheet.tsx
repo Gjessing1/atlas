@@ -18,6 +18,7 @@ import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
+import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 
 const STATUS_LABEL: Record<SyncState['status'], string> = {
   unavailable: 'Server has no accounts configured',
@@ -293,10 +294,14 @@ function ServerSection({ storage }: { storage: AtlasStorage | null }) {
 
 function UpdateSection() {
   const { current, update, download } = useAppUpdate();
+  const ota = useOtaUpdate();
   return (
     <View>
-      <Text style={styles.muted}>Installed: {current}</Text>
+      <Text style={styles.muted}>
+        Version {JS_VERSION} · app binary {current}
+      </Text>
       {update ? (
+        // Full APK (native change on the server side — higher versionCode).
         <View style={styles.buttonRow}>
           <Pressable style={styles.button} onPress={download} testID="app-update-download">
             <Text style={styles.buttonText}>
@@ -304,9 +309,37 @@ function UpdateSection() {
             </Text>
           </Pressable>
         </View>
-      ) : (
+      ) : null}
+      {ota.enabled ? (
+        ota.status === 'ready' ? (
+          <View style={styles.buttonRow}>
+            <Pressable style={styles.button} onPress={ota.restart} testID="ota-restart-settings">
+              <Text style={styles.buttonText}>Restart to finish update</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.buttonRow}>
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              disabled={ota.status === 'checking' || ota.status === 'downloading'}
+              onPress={ota.check}
+              testID="ota-check"
+            >
+              <Text style={styles.buttonQuietText}>
+                {ota.status === 'checking'
+                  ? 'Checking…'
+                  : ota.status === 'downloading'
+                    ? 'Downloading…'
+                    : 'Check for updates'}
+              </Text>
+            </Pressable>
+            {ota.status === 'uptodate' ? <Text style={styles.muted}>Up to date.</Text> : null}
+            {ota.status === 'error' ? <Text style={styles.muted}>Check failed.</Text> : null}
+          </View>
+        )
+      ) : !update ? (
         <Text style={styles.muted}>Up to date.</Text>
-      )}
+      ) : null}
     </View>
   );
 }

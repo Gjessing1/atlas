@@ -9,6 +9,7 @@ import {
 } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerPacksApi } from './packs-api.js';
+import { registerUpdatesApi } from './updates-api.js';
 import { createPgStores } from './pg.js';
 import { registerSyncApi } from './sync-api.js';
 import { createMemoryStores, type Stores } from './stores.js';
@@ -168,6 +169,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // Offline region packs + Android app self-update (Phase 6).
   await registerPacksApi(app, opts.dataDir);
+  registerUpdatesApi(app, opts.dataDir);
 
   // In production the built web app is copied to backend/public (see backend/Dockerfile)
   // and served same-origin. In dev, Vite serves the web app and proxies here.
