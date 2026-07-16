@@ -72,6 +72,27 @@ describe('AtlasStorage', () => {
     expect((await storage.listCollections())[0]!.visible).toBe(true);
   });
 
+  it('reorders places and folders via sequential sort indexes', async () => {
+    const a = await storage.createPlace({ name: 'A', lat: 1, lng: 1 });
+    const b = await storage.createPlace({ name: 'B', lat: 2, lng: 2 });
+    const c = await storage.createPlace({ name: 'C', lat: 3, lng: 3 });
+    await storage.reorderPlaces([c.id, a.id, b.id]);
+    expect((await storage.listPlaces()).map((p) => p.name)).toEqual(['C', 'A', 'B']);
+
+    const f1 = await storage.createCollection('One');
+    const f2 = await storage.createCollection('Two');
+    await storage.reorderCollections([f2.id, f1.id]);
+    expect((await storage.listCollections()).map((f) => f.name)).toEqual(['Two', 'One']);
+  });
+
+  it('new places list after a manually arranged order', async () => {
+    const a = await storage.createPlace({ name: 'Z-first', lat: 1, lng: 1 });
+    const b = await storage.createPlace({ name: 'A-second', lat: 2, lng: 2 });
+    await storage.reorderPlaces([a.id, b.id]);
+    const later = await storage.createPlace({ name: 'B-later', lat: 3, lng: 3 });
+    expect((await storage.listPlaces()).map((p) => p.id)).toEqual([a.id, b.id, later.id]);
+  });
+
   it('supports moving a place to a collection and back to root', async () => {
     const collection = await storage.createCollection('Hikes');
     const place = await storage.createPlace({ name: 'A', lat: 1, lng: 2 });
@@ -300,6 +321,25 @@ describe('AtlasStorage', () => {
       expect((await storage.listCollections()).find((c) => c.id === 'remote-folder')!.visible).toBe(
         true,
       );
+    });
+
+    it('round-trips sort order through sync payloads', async () => {
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await storage.updatePlace(place.id, { sortIndex: 7 });
+      expect((await storage.readSyncRecord('place', place.id))!.data).toMatchObject({
+        sortIndex: 7,
+      });
+
+      // A remote change carries its order; a legacy one falls back to createdAt.
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'remote-ordered',
+        updatedAt: 5,
+        deleted: false,
+        data: { name: 'First', lat: 3, lng: 4, sortIndex: 1, createdAt: 4 },
+      });
+      const places = await storage.listPlaces();
+      expect(places.map((p) => p.id)).toEqual(['remote-ordered', place.id]);
     });
 
     it('enqueueFullState queues everything except local settings', async () => {

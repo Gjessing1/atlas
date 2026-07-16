@@ -3,6 +3,7 @@ import { DEFAULT_PLACE_COLOR, DEFAULT_PLACE_ICON } from '@atlas/core';
 import type { SqlDriver, SqlRow, SqlValue } from './driver.js';
 import { migrate } from './migrations.js';
 import type {
+  CollectionPatch,
   CollectionRecord,
   ExportedData,
   NewPlace,
@@ -46,6 +47,7 @@ function rowToCollection(r: SqlRow): CollectionRecord {
     name: String(r['name']),
     parentId: r['parent_id'] === null ? null : String(r['parent_id']),
     visible: r['visible'] == null ? true : Number(r['visible']) !== 0,
+    sortIndex: r['sort_index'] == null ? 0 : Number(r['sort_index']),
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -63,6 +65,7 @@ function rowToPlace(r: SqlRow): PlaceRecord {
     icon: r['icon'] == null ? DEFAULT_PLACE_ICON : String(r['icon']),
     color: r['color'] == null ? DEFAULT_PLACE_COLOR : String(r['color']),
     visible: r['visible'] == null ? true : Number(r['visible']) !== 0,
+    sortIndex: r['sort_index'] == null ? 0 : Number(r['sort_index']),
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -102,7 +105,7 @@ export class AtlasStorage {
   // ---- collections ----
 
   async listCollections(): Promise<CollectionRecord[]> {
-    const rows = await this.driver.query('SELECT * FROM collections ORDER BY name');
+    const rows = await this.driver.query('SELECT * FROM collections ORDER BY sort_index, name');
     return rows.map(rowToCollection);
   }
 
@@ -113,18 +116,22 @@ export class AtlasStorage {
       name,
       parentId,
       visible: true,
+      // created_at dwarfs the renumbered ranks (1..n), so new rows list last.
+      sortIndex: now,
       createdAt: now,
       updatedAt: now,
     };
     // Column order matches the collections table incl. the migration-appended
-    // `visible` (id, name, parent_id, created_at, updated_at, visible).
-    await this.driver.query('INSERT INTO collections VALUES (?, ?, ?, ?, ?, ?)', [
+    // `visible` and `sort_index` (id, name, parent_id, created_at, updated_at,
+    // visible, sort_index).
+    await this.driver.query('INSERT INTO collections VALUES (?, ?, ?, ?, ?, ?, ?)', [
       record.id,
       record.name,
       record.parentId,
       record.createdAt,
       record.updatedAt,
       record.visible ? 1 : 0,
+      record.sortIndex,
     ]);
     await this.enqueue('collection', record.id, 'upsert', now);
     return record;
@@ -142,7 +149,14 @@ export class AtlasStorage {
 
   /** Show or hide a folder (and, via effective visibility, everything under it). */
   async setCollectionVisible(id: string, visible: boolean): Promise<void> {
-    await this.applyPatch('collections', 'collection', id, { visible: visible ? 1 : 0 });
+    await this.updateCollection(id, { visible });
+  }
+
+  async updateCollection(id: string, patch: CollectionPatch): Promise<void> {
+    await this.applyPatch('collections', 'collection', id, {
+      visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
+      sort_index: patch.sortIndex,
+    });
   }
 
   /**
@@ -182,7 +196,7 @@ export class AtlasStorage {
   // ---- places ----
 
   async listPlaces(): Promise<PlaceRecord[]> {
-    const rows = await this.driver.query('SELECT * FROM places ORDER BY name');
+    const rows = await this.driver.query('SELECT * FROM places ORDER BY sort_index, name');
     return rows.map(rowToPlace);
   }
 
@@ -199,13 +213,15 @@ export class AtlasStorage {
       icon: input.icon ?? DEFAULT_PLACE_ICON,
       color: input.color ?? DEFAULT_PLACE_COLOR,
       visible: true,
+      // created_at dwarfs the renumbered ranks (1..n), so new rows list last.
+      sortIndex: now,
       createdAt: now,
       updatedAt: now,
     };
     // Column order matches the places table incl. the migration-appended
-    // icon/color/visible (id, name, lat, lng, collection_id, notes, tags,
-    // created_at, updated_at, icon, color, visible).
-    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+    // icon/color/visible/sort_index (id, name, lat, lng, collection_id, notes,
+    // tags, created_at, updated_at, icon, color, visible, sort_index).
+    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
       record.id,
       record.name,
       record.lat,
@@ -218,6 +234,7 @@ export class AtlasStorage {
       record.icon,
       record.color,
       record.visible ? 1 : 0,
+      record.sortIndex,
     ]);
     await this.enqueue('place', record.id, 'upsert', now);
     return record;
@@ -234,7 +251,35 @@ export class AtlasStorage {
       icon: patch.icon,
       color: patch.color,
       visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
+      sort_index: patch.sortIndex,
     });
+  }
+
+  /**
+   * Persist a drag-and-drop arrangement: the ids in their new order get
+   * sequential sort indexes (1..n). Only rows whose position actually changed
+   * are written, so an unchanged drop doesn't churn updated_at or the outbox.
+   */
+  async reorderPlaces(orderedIds: string[]): Promise<void> {
+    await this.reorderRows('places', 'place', orderedIds);
+  }
+
+  async reorderCollections(orderedIds: string[]): Promise<void> {
+    await this.reorderRows('collections', 'collection', orderedIds);
+  }
+
+  private async reorderRows(
+    table: 'places' | 'collections',
+    entity: SyncEntity,
+    orderedIds: string[],
+  ): Promise<void> {
+    const rows = await this.driver.query(`SELECT id, sort_index FROM ${table}`);
+    const current = new Map(rows.map((r) => [String(r['id']), Number(r['sort_index'])]));
+    for (const [i, id] of orderedIds.entries()) {
+      const sortIndex = i + 1;
+      if (!current.has(id) || current.get(id) === sortIndex) continue;
+      await this.applyPatch(table, entity, id, { sort_index: sortIndex });
+    }
   }
 
   async deletePlace(id: string): Promise<void> {
@@ -392,7 +437,13 @@ export class AtlasStorage {
       const c = rowToCollection(r);
       return {
         updatedAt,
-        data: { name: c.name, parentId: c.parentId, visible: c.visible, createdAt: c.createdAt },
+        data: {
+          name: c.name,
+          parentId: c.parentId,
+          visible: c.visible,
+          sortIndex: c.sortIndex,
+          createdAt: c.createdAt,
+        },
       };
     }
     if (entity === 'place') {
@@ -409,6 +460,7 @@ export class AtlasStorage {
           icon: p.icon,
           color: p.color,
           visible: p.visible,
+          sortIndex: p.sortIndex,
           createdAt: p.createdAt,
         },
       };
@@ -513,18 +565,19 @@ export class AtlasStorage {
     const createdAt = num('createdAt', change.updatedAt);
     switch (change.entity) {
       case 'collection':
-        await this.driver.query('INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?, ?)', [
+        await this.driver.query('INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?, ?, ?)', [
           change.id,
           str('name', '(unnamed)'),
           strOrNull('parentId'),
           createdAt,
           change.updatedAt,
           d['visible'] === false ? 0 : 1,
+          num('sortIndex', createdAt),
         ]);
         break;
       case 'place':
         await this.driver.query(
-          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             change.id,
             str('name', '(unnamed)'),
@@ -538,6 +591,7 @@ export class AtlasStorage {
             str('icon', DEFAULT_PLACE_ICON),
             str('color', DEFAULT_PLACE_COLOR),
             d['visible'] === false ? 0 : 1,
+            num('sortIndex', createdAt),
           ],
         );
         break;

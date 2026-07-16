@@ -154,9 +154,71 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  // Drag-and-drop arranging: what's being dragged and which row it hovers.
+  const [drag, setDrag] = useState<{ kind: 'place' | 'folder'; id: string } | null>(null);
+  const [dropKey, setDropKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
+
+  const endDrag = () => {
+    setDrag(null);
+    setDropKey(null);
+  };
+
+  /** Drop a dragged place onto another place: reorder, moving folders if needed. */
+  const dropOnPlace = (target: PlaceRecord) => {
+    if (!drag || drag.kind !== 'place' || drag.id === target.id) return;
+    const dragged = data.places.find((p) => p.id === drag.id);
+    if (!dragged) return;
+    if (dragged.collectionId !== target.collectionId) {
+      void data.updatePlace(drag.id, { collectionId: target.collectionId });
+    }
+    const ids = data.places.map((p) => p.id).filter((id) => id !== drag.id);
+    ids.splice(ids.indexOf(target.id), 0, drag.id);
+    void data.reorderPlaces(ids);
+  };
+
+  /** Drop onto a folder row: places move into the folder, folders reorder. */
+  const dropOnFolder = (folder: CollectionRecord) => {
+    if (!drag) return;
+    if (drag.kind === 'place') {
+      void data.updatePlace(drag.id, { collectionId: folder.id });
+    } else if (drag.id !== folder.id) {
+      const ids = data.collections.map((c) => c.id).filter((id) => id !== drag.id);
+      ids.splice(ids.indexOf(folder.id), 0, drag.id);
+      void data.reorderCollections(ids);
+    }
+  };
+
+  /** Shared drag/drop handlers for one row. */
+  const dragProps = (
+    key: string,
+    kind: 'place' | 'folder',
+    id: string,
+    accepts: (drag: { kind: 'place' | 'folder'; id: string }) => boolean,
+    onDrop: () => void,
+  ) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.effectAllowed = 'move';
+      setDrag({ kind, id });
+    },
+    onDragEnd: endDrag,
+    onDragOver: (e: React.DragEvent) => {
+      if (drag && accepts(drag)) {
+        e.preventDefault();
+        setDropKey(key);
+      }
+    },
+    onDragLeave: () => setDropKey((k) => (k === key ? null : k)),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onDrop();
+      endDrag();
+    },
+  });
 
   // "Show all" appears once anything is hidden; otherwise the button hides all.
   const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);
@@ -179,7 +241,16 @@ export function Sidebar({
     const key = `place:${place.id}`;
     return (
       <li key={key} className={`item-row${place.visible ? '' : ' hidden'}`}>
-        <div className="item-line">
+        <div
+          className={`item-line${dropKey === key ? ' drop-target' : ''}${drag?.id === place.id ? ' dragging' : ''}`}
+          {...dragProps(
+            key,
+            'place',
+            place.id,
+            (d) => d.kind === 'place' && d.id !== place.id,
+            () => dropOnPlace(place),
+          )}
+        >
           <input
             type="checkbox"
             checked={place.visible}
@@ -296,7 +367,16 @@ export function Sidebar({
       <ul className="item-list" style={depth > 0 ? { paddingLeft: 14 } : undefined}>
         {folders.map((folder) => (
           <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
-            <div className="item-line">
+            <div
+              className={`item-line${dropKey === `folder:${folder.id}` ? ' drop-target' : ''}${drag?.id === folder.id ? ' dragging' : ''}`}
+              {...dragProps(
+                `folder:${folder.id}`,
+                'folder',
+                folder.id,
+                (d) => d.id !== folder.id,
+                () => dropOnFolder(folder),
+              )}
+            >
               <input
                 type="checkbox"
                 checked={folder.visible}

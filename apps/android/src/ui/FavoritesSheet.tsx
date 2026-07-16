@@ -3,6 +3,8 @@ import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { ReorderableList } from './ReorderableList';
+
 /**
  * A drawn eye / crossed-out eye for the visibility toggles (an emoji eye reads
  * as alarming and renders inconsistently across Android skins).
@@ -63,6 +65,8 @@ export function FavoritesSheet({
   onSetFolderVisible,
   onDeleteFolder,
   onSetAllVisible,
+  onReorderPlaces,
+  onReorderCollections,
   editId = null,
   bottomInset = 0,
 }: {
@@ -84,6 +88,9 @@ export function FavoritesSheet({
   onDeleteFolder: (id: string) => void;
   /** Show or hide every place and folder at once (header toggle). */
   onSetAllVisible: (visible: boolean) => void;
+  /** Persist a drag arrangement (row ≡ handles) — ids in their new order. */
+  onReorderPlaces: (orderedIds: string[]) => void;
+  onReorderCollections: (orderedIds: string[]) => void;
   /** Open with this place's edit panel expanded (map pin → "Edit"). */
   editId?: string | null;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
@@ -92,6 +99,13 @@ export function FavoritesSheet({
   // Which row's edit panel is currently open (the ✎ button or icon badge toggles it).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newFolder, setNewFolder] = useState('');
+  // A row is being dragged: freeze the sheet's scroll and close any editor so
+  // row heights are uniform while the drag measures its way through the list.
+  const [dragActive, setDragActive] = useState(false);
+  const onDragActive = (active: boolean) => {
+    setDragActive(active);
+    if (active) setEditingId(null);
+  };
 
   // Jump straight to a place's edit panel when the sheet is opened for it.
   useEffect(() => {
@@ -132,40 +146,47 @@ export function FavoritesSheet({
             ) : null}
           </View>
 
-          <ScrollView>
+          <ScrollView scrollEnabled={!dragActive}>
             {/* Folders */}
             <Text style={styles.sectionLabel}>Folders</Text>
-            {collections.map((folder) => (
-              <View key={folder.id} style={[styles.row, folder.visible ? null : styles.rowHidden]}>
-                <Text style={styles.folderIcon}>📁</Text>
-                <TextInput
-                  style={styles.folderName}
-                  defaultValue={folder.name}
-                  onEndEditing={(e) => {
-                    const value = e.nativeEvent.text.trim();
-                    if (value && value !== folder.name) onRenameFolder(folder.id, value);
-                  }}
-                  returnKeyType="done"
-                  testID={`folder-name-${folder.id}`}
-                />
-                <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
-                {/* The eye sits just left of the actions on folder and place rows alike. */}
-                <Pressable
-                  style={styles.eyeButton}
-                  onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
-                  testID={`folder-visible-${folder.id}`}
-                >
-                  <EyeIcon off={!folder.visible} />
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => onDeleteFolder(folder.id)}
-                  testID={`folder-delete-${folder.id}`}
-                >
-                  <Text style={styles.buttonQuietText}>Delete</Text>
-                </Pressable>
-              </View>
-            ))}
+            <ReorderableList
+              items={collections}
+              keyOf={(folder) => folder.id}
+              onReorder={onReorderCollections}
+              onDragActive={onDragActive}
+              renderRow={(folder, handle) => (
+                <View style={[styles.row, folder.visible ? null : styles.rowHidden]}>
+                  {handle}
+                  <Text style={styles.folderIcon}>📁</Text>
+                  <TextInput
+                    style={styles.folderName}
+                    defaultValue={folder.name}
+                    onEndEditing={(e) => {
+                      const value = e.nativeEvent.text.trim();
+                      if (value && value !== folder.name) onRenameFolder(folder.id, value);
+                    }}
+                    returnKeyType="done"
+                    testID={`folder-name-${folder.id}`}
+                  />
+                  <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
+                  {/* The eye sits just left of the actions on folder and place rows alike. */}
+                  <Pressable
+                    style={styles.eyeButton}
+                    onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+                    testID={`folder-visible-${folder.id}`}
+                  >
+                    <EyeIcon off={!folder.visible} />
+                  </Pressable>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => onDeleteFolder(folder.id)}
+                    testID={`folder-delete-${folder.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>Delete</Text>
+                  </Pressable>
+                </View>
+              )}
+            />
             <View style={styles.row}>
               <TextInput
                 style={[styles.folderName, styles.newFolderInput]}
@@ -194,137 +215,147 @@ export function FavoritesSheet({
                 favorites from your other devices.
               </Text>
             ) : (
-              places.map((place) => (
-                <View key={place.id}>
-                  <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
-                    <Pressable
-                      style={[styles.badge, { backgroundColor: place.color }]}
-                      onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
-                      testID={`favorite-style-${place.id}`}
-                    >
-                      <Text style={styles.badgeIcon}>{place.icon}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.rowMain}
-                      onPress={() => {
-                        onFlyTo(place);
-                        onClose();
-                      }}
-                      testID={`favorite-${place.id}`}
-                    >
-                      <Text style={styles.rowText} numberOfLines={1}>
-                        {place.name}
-                      </Text>
-                      <Text style={styles.muted}>
-                        {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.eyeButton}
-                      onPress={() => onPatch(place.id, { visible: !place.visible })}
-                      testID={`favorite-visible-${place.id}`}
-                    >
-                      <EyeIcon off={!place.visible} />
-                    </Pressable>
-                    <Pressable
-                      style={[styles.button, styles.buttonQuiet]}
-                      onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
-                      testID={`favorite-edit-${place.id}`}
-                    >
-                      <Text style={styles.buttonQuietText}>✎</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.button}
-                      onPress={() => {
-                        onNavigate(place);
-                        onClose();
-                      }}
-                      testID={`favorite-nav-${place.id}`}
-                    >
-                      <Text style={styles.buttonText}>Go</Text>
-                    </Pressable>
-                  </View>
-                  {editingId === place.id ? (
-                    <View style={styles.picker}>
-                      <TextInput
-                        style={styles.nameInput}
-                        defaultValue={place.name}
-                        placeholder="Name"
-                        // Commit when editing ends (like the web name field's
-                        // blur): rename only when non-empty and actually changed.
-                        onEndEditing={(e) => {
-                          const value = e.nativeEvent.text.trim();
-                          if (value && value !== place.name) onPatch(place.id, { name: value });
-                        }}
-                        returnKeyType="done"
-                        testID={`favorite-name-${place.id}`}
-                      />
-                      <View style={styles.choiceRow}>
-                        {PLACE_ICONS.map((ic) => (
-                          <Pressable
-                            key={ic}
-                            style={[styles.iconChoice, ic === place.icon && styles.choiceSelected]}
-                            onPress={() => onPatch(place.id, { icon: ic })}
-                            testID={`favorite-icon-${place.id}-${ic}`}
-                          >
-                            <Text style={styles.iconChoiceText}>{ic}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <View style={styles.choiceRow}>
-                        {PLACE_COLORS.map((c) => (
-                          <Pressable
-                            key={c}
-                            style={[
-                              styles.colorChoice,
-                              { backgroundColor: c },
-                              c === place.color && styles.colorChoiceSelected,
-                            ]}
-                            onPress={() => onPatch(place.id, { color: c })}
-                            testID={`favorite-color-${place.id}-${c}`}
-                          />
-                        ))}
-                      </View>
-                      {/* Folder assignment — parity with the web place folder picker. */}
-                      <View style={styles.choiceRow}>
-                        <Pressable
-                          style={[
-                            styles.folderChip,
-                            place.collectionId === null && styles.folderChipSelected,
-                          ]}
-                          onPress={() => onPatch(place.id, { collectionId: null })}
-                          testID={`favorite-folder-${place.id}-none`}
-                        >
-                          <Text style={styles.folderChipText}>No folder</Text>
-                        </Pressable>
-                        {collections.map((folder) => (
-                          <Pressable
-                            key={folder.id}
-                            style={[
-                              styles.folderChip,
-                              place.collectionId === folder.id && styles.folderChipSelected,
-                            ]}
-                            onPress={() => onPatch(place.id, { collectionId: folder.id })}
-                            testID={`favorite-folder-${place.id}-${folder.id}`}
-                          >
-                            <Text style={styles.folderChipText}>📁 {folder.name}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
+              <ReorderableList
+                items={places}
+                keyOf={(place) => place.id}
+                onReorder={onReorderPlaces}
+                onDragActive={onDragActive}
+                renderRow={(place, handle) => (
+                  <View>
+                    <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
+                      {handle}
                       <Pressable
-                        style={[styles.button, styles.buttonDanger]}
-                        onPress={() => {
-                          setEditingId(null);
-                          onDelete(place.id);
-                        }}
-                        testID={`favorite-delete-${place.id}`}
+                        style={[styles.badge, { backgroundColor: place.color }]}
+                        onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
+                        testID={`favorite-style-${place.id}`}
                       >
-                        <Text style={styles.buttonText}>Delete place</Text>
+                        <Text style={styles.badgeIcon}>{place.icon}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.rowMain}
+                        onPress={() => {
+                          onFlyTo(place);
+                          onClose();
+                        }}
+                        testID={`favorite-${place.id}`}
+                      >
+                        <Text style={styles.rowText} numberOfLines={1}>
+                          {place.name}
+                        </Text>
+                        <Text style={styles.muted}>
+                          {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.eyeButton}
+                        onPress={() => onPatch(place.id, { visible: !place.visible })}
+                        testID={`favorite-visible-${place.id}`}
+                      >
+                        <EyeIcon off={!place.visible} />
+                      </Pressable>
+                      <Pressable
+                        style={[styles.button, styles.buttonQuiet]}
+                        onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
+                        testID={`favorite-edit-${place.id}`}
+                      >
+                        <Text style={styles.buttonQuietText}>✎</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.button}
+                        onPress={() => {
+                          onNavigate(place);
+                          onClose();
+                        }}
+                        testID={`favorite-nav-${place.id}`}
+                      >
+                        <Text style={styles.buttonText}>Go</Text>
                       </Pressable>
                     </View>
-                  ) : null}
-                </View>
-              ))
+                    {editingId === place.id ? (
+                      <View style={styles.picker}>
+                        <TextInput
+                          style={styles.nameInput}
+                          defaultValue={place.name}
+                          placeholder="Name"
+                          // Commit when editing ends (like the web name field's
+                          // blur): rename only when non-empty and actually changed.
+                          onEndEditing={(e) => {
+                            const value = e.nativeEvent.text.trim();
+                            if (value && value !== place.name) onPatch(place.id, { name: value });
+                          }}
+                          returnKeyType="done"
+                          testID={`favorite-name-${place.id}`}
+                        />
+                        <View style={styles.choiceRow}>
+                          {PLACE_ICONS.map((ic) => (
+                            <Pressable
+                              key={ic}
+                              style={[
+                                styles.iconChoice,
+                                ic === place.icon && styles.choiceSelected,
+                              ]}
+                              onPress={() => onPatch(place.id, { icon: ic })}
+                              testID={`favorite-icon-${place.id}-${ic}`}
+                            >
+                              <Text style={styles.iconChoiceText}>{ic}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        <View style={styles.choiceRow}>
+                          {PLACE_COLORS.map((c) => (
+                            <Pressable
+                              key={c}
+                              style={[
+                                styles.colorChoice,
+                                { backgroundColor: c },
+                                c === place.color && styles.colorChoiceSelected,
+                              ]}
+                              onPress={() => onPatch(place.id, { color: c })}
+                              testID={`favorite-color-${place.id}-${c}`}
+                            />
+                          ))}
+                        </View>
+                        {/* Folder assignment — parity with the web place folder picker. */}
+                        <View style={styles.choiceRow}>
+                          <Pressable
+                            style={[
+                              styles.folderChip,
+                              place.collectionId === null && styles.folderChipSelected,
+                            ]}
+                            onPress={() => onPatch(place.id, { collectionId: null })}
+                            testID={`favorite-folder-${place.id}-none`}
+                          >
+                            <Text style={styles.folderChipText}>No folder</Text>
+                          </Pressable>
+                          {collections.map((folder) => (
+                            <Pressable
+                              key={folder.id}
+                              style={[
+                                styles.folderChip,
+                                place.collectionId === folder.id && styles.folderChipSelected,
+                              ]}
+                              onPress={() => onPatch(place.id, { collectionId: folder.id })}
+                              testID={`favorite-folder-${place.id}-${folder.id}`}
+                            >
+                              <Text style={styles.folderChipText}>📁 {folder.name}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        <Pressable
+                          style={[styles.button, styles.buttonDanger]}
+                          onPress={() => {
+                            setEditingId(null);
+                            onDelete(place.id);
+                          }}
+                          testID={`favorite-delete-${place.id}`}
+                        >
+                          <Text style={styles.buttonText}>Delete place</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              />
             )}
           </ScrollView>
           <Pressable

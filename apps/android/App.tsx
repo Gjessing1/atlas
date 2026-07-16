@@ -651,6 +651,8 @@ function AppInner() {
         onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
+        onReorderPlaces={(ids) => void data.reorderPlaces(ids)}
+        onReorderCollections={(ids) => void data.reorderCollections(ids)}
         bottomInset={bottomInset}
       />
       <TracksSheet

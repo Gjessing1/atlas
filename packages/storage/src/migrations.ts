@@ -68,6 +68,21 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE places ADD COLUMN visible INTEGER NOT NULL DEFAULT 1;
   ALTER TABLE collections ADD COLUMN visible INTEGER NOT NULL DEFAULT 1;
   `,
+  // Manual ordering (drag-and-drop arranging). Lists sort by sort_index, then
+  // name. Existing rows are backfilled with their alphabetical rank so nothing
+  // visibly moves on upgrade; new rows use created_at, appending at the end.
+  `
+  ALTER TABLE places ADD COLUMN sort_index REAL NOT NULL DEFAULT 0;
+  ALTER TABLE collections ADD COLUMN sort_index REAL NOT NULL DEFAULT 0;
+  UPDATE places SET sort_index = (
+    SELECT COUNT(*) FROM places p2
+    WHERE p2.name < places.name OR (p2.name = places.name AND p2.id < places.id)
+  ) + 1;
+  UPDATE collections SET sort_index = (
+    SELECT COUNT(*) FROM collections c2
+    WHERE c2.name < collections.name OR (c2.name = collections.name AND c2.id < collections.id)
+  ) + 1;
+  `,
 ];
 
 /** Bring the database up to the latest schema version. */

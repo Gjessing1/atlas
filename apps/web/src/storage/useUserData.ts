@@ -41,6 +41,10 @@ export interface UserData {
   savePlace: (input: NewPlace) => Promise<PlaceRecord | null>;
   updatePlace: (id: string, patch: PlacePatch) => Promise<void>;
   deletePlace: (id: string) => Promise<void>;
+  /** Persist a drag-and-drop arrangement of places (ids in their new order). */
+  reorderPlaces: (orderedIds: string[]) => Promise<void>;
+  /** Persist a drag-and-drop arrangement of folders (ids in their new order). */
+  reorderCollections: (orderedIds: string[]) => Promise<void>;
 
   importFiles: (files: File[]) => Promise<ImportResult>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
@@ -157,6 +161,22 @@ export function useUserData(): UserData {
       await refreshPlaces();
     },
     [refreshPlaces],
+  );
+
+  const reorderPlaces = useCallback(
+    async (orderedIds: string[]) => {
+      await storageRef.current?.reorderPlaces(orderedIds);
+      await refreshPlaces();
+    },
+    [refreshPlaces],
+  );
+
+  const reorderCollections = useCallback(
+    async (orderedIds: string[]) => {
+      await storageRef.current?.reorderCollections(orderedIds);
+      await refreshCollections();
+    },
+    [refreshCollections],
   );
 
   const importFiles = useCallback(
@@ -350,6 +370,8 @@ export function useUserData(): UserData {
     savePlace,
     updatePlace,
     deletePlace,
+    reorderPlaces,
+    reorderCollections,
     importFiles,
     updateTrack,
     deleteTrack,

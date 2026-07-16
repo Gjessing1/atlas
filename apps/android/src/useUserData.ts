@@ -41,6 +41,10 @@ export interface UserData {
   savePlace: (input: NewPlace) => Promise<void>;
   updatePlace: (id: string, patch: PlacePatch) => Promise<void>;
   deletePlace: (id: string) => Promise<void>;
+  /** Persist a drag arrangement of places (ids in their new order). */
+  reorderPlaces: (orderedIds: string[]) => Promise<void>;
+  /** Persist a drag arrangement of folders (ids in their new order). */
+  reorderCollections: (orderedIds: string[]) => Promise<void>;
 
   /** Import GPX/KML/KMZ files picked from the device; returns a per-file summary. */
   importFiles: (files: PickedFile[]) => Promise<ImportResult>;
@@ -152,6 +156,22 @@ export function useUserData(): UserData {
   const deletePlace = useCallback(
     async (id: string) => {
       await storageRef.current?.deletePlace(id);
+      await refreshAll();
+    },
+    [refreshAll],
+  );
+
+  const reorderPlaces = useCallback(
+    async (orderedIds: string[]) => {
+      await storageRef.current?.reorderPlaces(orderedIds);
+      await refreshAll();
+    },
+    [refreshAll],
+  );
+
+  const reorderCollections = useCallback(
+    async (orderedIds: string[]) => {
+      await storageRef.current?.reorderCollections(orderedIds);
       await refreshAll();
     },
     [refreshAll],
@@ -299,6 +319,8 @@ export function useUserData(): UserData {
     savePlace,
     updatePlace,
     deletePlace,
+    reorderPlaces,
+    reorderCollections,
     importFiles,
     updateTrack,
     deleteTrack,
