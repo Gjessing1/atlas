@@ -4,11 +4,13 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
+import { SearchIcon } from '../ui/icons';
 import { searchOffline } from './offlineSearch';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
- * downloaded packs' FTS5 databases when it can't be reached.
+ * downloaded packs' FTS5 databases when it can't be reached. Collapsed to a
+ * round 🔍 button until tapped, so it doesn't eat map real estate.
  */
 export function SearchBar({
   packs,
@@ -20,6 +22,7 @@ export function SearchBar({
   /** Absolute top offset (px) — App lifts this below the nav banner while navigating. */
   top?: number;
 }) {
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [offline, setOffline] = useState(false);
@@ -57,16 +60,40 @@ export function SearchBar({
     return () => clearTimeout(t);
   }, [query, search]);
 
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+    setResults([]);
+  }, []);
+
+  if (!open) {
+    return (
+      <Pressable
+        style={[styles.iconButton, { top }]}
+        onPress={() => setOpen(true)}
+        testID="search-open"
+      >
+        <SearchIcon />
+      </Pressable>
+    );
+  }
+
   return (
     <View style={[styles.wrap, { top }]}>
-      <TextInput
-        style={styles.input}
-        placeholder="Search places"
-        value={query}
-        onChangeText={setQuery}
-        autoCorrect={false}
-        testID="search-input"
-      />
+      <View style={styles.inputRow}>
+        <TextInput
+          style={styles.input}
+          placeholder="Search places"
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoFocus
+          testID="search-input"
+        />
+        <Pressable style={styles.closeButton} onPress={close} testID="search-close">
+          <Text style={styles.closeText}>✕</Text>
+        </Pressable>
+      </View>
       {results.length > 0 ? (
         <View style={styles.results}>
           {offline ? <Text style={styles.offlineTag}>offline results</Text> : null}
@@ -76,8 +103,7 @@ export function SearchBar({
               style={styles.result}
               testID={`search-result-${i}`}
               onPress={() => {
-                setQuery('');
-                setResults([]);
+                close();
                 onPick(r);
               }}
             >
@@ -93,14 +119,32 @@ export function SearchBar({
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 12, right: 68 },
-  input: {
+  iconButton: {
+    position: 'absolute',
+    left: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 10,
+    elevation: 4,
+  },
+  input: {
+    flex: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    elevation: 4,
   },
+  closeButton: { paddingHorizontal: 12, paddingVertical: 10 },
+  closeText: { fontSize: 16, color: '#778' },
   results: {
     backgroundColor: '#fff',
     borderRadius: 10,

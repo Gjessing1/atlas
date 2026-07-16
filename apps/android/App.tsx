@@ -44,7 +44,7 @@ import { useRoute } from './src/routing/useRoute';
 import { shareText } from './src/share';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
-import { CrosshairIcon, PlacePin } from './src/ui/icons';
+import { CrosshairIcon, MenuIcon, PlacePin } from './src/ui/icons';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { SettingsSheet } from './src/ui/SettingsSheet';
@@ -138,6 +138,7 @@ function AppInner() {
   const [template, setTemplate] = useState<string | null>(null);
   const [serverUp, setServerUp] = useState<boolean | null>(null);
   const [packs, setPacks] = useState<LocalPack[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   // Place whose edit panel the Favorites sheet should open with (map pin → Edit).
@@ -302,9 +303,10 @@ function AppInner() {
         style={styles.map}
         mapStyle={mapStyle}
         // Edge-to-edge: the map draws behind the system nav bar, so lift the
-        // MapLibre attribution/logo ornaments clear of it.
+        // MapLibre attribution/logo ornaments clear of it. The logo also moves
+        // right, out from under the bottom-left menu button.
         attributionPosition={{ bottom: bottomInset + 8, right: 8 }}
-        logoPosition={{ bottom: bottomInset + 8, left: 8 }}
+        logoPosition={{ bottom: bottomInset + 8, left: 68 }}
         // While planning a route, a tap drops a stop; otherwise long-press picks
         // a destination (the destination card). Both gestures add a stop in plan
         // mode so it feels the same as the web map click.
@@ -374,6 +376,25 @@ function AppInner() {
               type="line"
               id="atlas-plan-line"
               paint={{ 'line-color': '#7c3aed', 'line-width': 6, 'line-opacity': 0.85 }}
+            />
+            {/* Travel-direction chevrons — the only cue to which way a round
+                trip runs. keep-upright must stay off or right-to-left segments
+                would flip the glyph and point it backwards. */}
+            <Layer
+              type="symbol"
+              id="atlas-plan-arrows"
+              layout={{
+                'symbol-placement': 'line',
+                'symbol-spacing': 80,
+                'text-field': '›',
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 20,
+                'text-offset': [0, -0.12],
+                'text-keep-upright': false,
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
             />
           </GeoJSONSource>
         ) : null}
@@ -452,29 +473,6 @@ function AppInner() {
       {following ? null : <SearchBar packs={packs} onPick={onPickResult} top={controlsTop} />}
 
       <View style={[styles.buttonColumn, { top: controlsTop }]}>
-        <Pressable
-          style={styles.roundButton}
-          onPress={() => setSettingsOpen(true)}
-          testID="open-settings"
-        >
-          {/* U+FE0E forces the text (non-emoji) gear, which some Android skins
-              otherwise render as a black emoji blob. */}
-          <Text style={styles.gearText}>{'⚙︎'}</Text>
-        </Pressable>
-        <Pressable
-          style={styles.roundButton}
-          onPress={() => setFavoritesOpen(true)}
-          testID="open-favorites"
-        >
-          <Text style={styles.gearText}>★</Text>
-        </Pressable>
-        <Pressable
-          style={styles.roundButton}
-          onPress={() => setTracksOpen(true)}
-          testID="open-tracks"
-        >
-          <Text style={styles.gearText}>🗺</Text>
-        </Pressable>
         {!following && !planning ? (
           <Pressable style={styles.roundButton} onPress={() => route.start()} testID="plan-route">
             {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
@@ -494,6 +492,44 @@ function AppInner() {
           </Pressable>
         ) : null}
       </View>
+
+      {/* Bottom-left hamburger: the app menu (places, tracks, settings live in
+          sheets it opens). Hidden while planning — the RoutePanel owns the
+          bottom of the screen then. */}
+      {!planning ? (
+        <View style={[styles.menuWrap, { bottom: bottomInset + 24 }]} pointerEvents="box-none">
+          {menuOpen ? (
+            <View style={styles.menuCard}>
+              {(
+                [
+                  ['Places & folders', 'open-favorites', () => setFavoritesOpen(true)],
+                  ['Tracks', 'open-tracks', () => setTracksOpen(true)],
+                  ['Settings', 'open-settings', () => setSettingsOpen(true)],
+                ] as const
+              ).map(([label, testID, openSheet]) => (
+                <Pressable
+                  key={testID}
+                  style={styles.menuItem}
+                  testID={testID}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    openSheet();
+                  }}
+                >
+                  <Text style={styles.menuItemText}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          <Pressable
+            style={styles.roundButton}
+            onPress={() => setMenuOpen((o) => !o)}
+            testID="open-menu"
+          >
+            <MenuIcon />
+          </Pressable>
+        </View>
+      ) : null}
 
       {useOffline && !planning ? (
         <View style={[styles.offlineBadge, { bottom: bottomInset + 84 }]}>
@@ -616,6 +652,16 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
+  menuWrap: { position: 'absolute', left: 12, alignItems: 'flex-start', gap: 8 },
+  menuCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 4,
+    minWidth: 180,
+    elevation: 6,
+  },
+  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuItemText: { fontSize: 15, color: '#1c2733' },
   roundButton: {
     width: 44,
     height: 44,
@@ -625,7 +671,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 4,
   },
-  gearText: { fontSize: 22, color: '#3a4455' },
   routeArrow: { fontSize: 24, fontWeight: '800', color: '#1a73e8' },
   orientButton: { backgroundColor: '#1a73e8' },
   orientText: { fontSize: 20, fontWeight: '800', color: '#fff' },

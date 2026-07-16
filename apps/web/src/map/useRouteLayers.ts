@@ -10,7 +10,8 @@ const ALT_CASING = 'atlas-route-alt-casing';
 const ALT_LINE = 'atlas-route-alt-line';
 const SEL_CASING = 'atlas-route-sel-casing';
 const SEL_LINE = 'atlas-route-sel-line';
-const ROUTE_LAYERS = [ALT_CASING, ALT_LINE, SEL_CASING, SEL_LINE];
+const SEL_ARROWS = 'atlas-route-sel-arrows';
+const ROUTE_LAYERS = [ALT_CASING, ALT_LINE, SEL_CASING, SEL_LINE, SEL_ARROWS];
 const ROUTE_COLOR = '#7048c9';
 
 function routeCollection(paths: RoutePath[], selected: number): FeatureCollection {
@@ -93,6 +94,28 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
           filter: selected,
           layout: line,
           paint: { 'line-color': ROUTE_COLOR, 'line-width': 4.5 },
+        });
+        // Travel-direction chevrons along the selected path — the only cue to
+        // which way a round trip runs (its Reverse button flips these).
+        // keep-upright must stay off or right-to-left segments would flip the
+        // glyph "upright" and point it backwards.
+        map.addLayer({
+          id: SEL_ARROWS,
+          type: 'symbol',
+          source: SOURCE_ID,
+          filter: selected,
+          layout: {
+            'symbol-placement': 'line',
+            'symbol-spacing': 80,
+            'text-field': '›',
+            'text-font': ['Noto Sans Bold'],
+            'text-size': 20,
+            'text-offset': [0, -0.12],
+            'text-keep-upright': false,
+            'text-allow-overlap': true,
+            'text-ignore-placement': true,
+          },
+          paint: { 'text-color': '#ffffff' },
         });
       }
     };

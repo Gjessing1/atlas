@@ -53,6 +53,54 @@ export function CrosshairIcon({ color = '#3a4455' }: { color?: string }) {
   );
 }
 
+/** Magnifier (ring + diagonal handle) for the collapsed search button. */
+export function SearchIcon({ color = '#3a4455' }: { color?: string }) {
+  return (
+    <View style={sStyles.box}>
+      <View style={[sStyles.ring, { borderColor: color }]} />
+      <View style={[sStyles.handle, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
+const sStyles = StyleSheet.create({
+  box: { width: 24, height: 24 },
+  ring: {
+    position: 'absolute',
+    left: 3,
+    top: 3,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    borderWidth: 2.5,
+  },
+  handle: {
+    position: 'absolute',
+    left: 12,
+    top: 15.5,
+    width: 9,
+    height: 3,
+    borderRadius: 1.5,
+    transform: [{ rotate: '45deg' }],
+  },
+});
+
+/** Three-bar hamburger for the bottom-left menu button. */
+export function MenuIcon({ color = '#3a4455' }: { color?: string }) {
+  return (
+    <View style={mStyles.box}>
+      <View style={[mStyles.bar, { top: 4, backgroundColor: color }]} />
+      <View style={[mStyles.bar, { top: 10.5, backgroundColor: color }]} />
+      <View style={[mStyles.bar, { top: 17, backgroundColor: color }]} />
+    </View>
+  );
+}
+
+const mStyles = StyleSheet.create({
+  box: { width: 24, height: 24 },
+  bar: { position: 'absolute', left: 2, width: 20, height: 3, borderRadius: 1.5 },
+});
+
 const xStyles = StyleSheet.create({
   box: { width: 24, height: 24 },
   ring: {
