@@ -19,7 +19,15 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -44,7 +52,7 @@ import { useRoute } from './src/routing/useRoute';
 import { shareText } from './src/share';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
-import { CrosshairIcon, MenuIcon, PlacePin } from './src/ui/icons';
+import { CrosshairIcon, MenuIcon, NavArrowIcon, PlacePin, SearchIcon } from './src/ui/icons';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { SettingsSheet } from './src/ui/SettingsSheet';
@@ -118,6 +126,7 @@ function AppInner() {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
   const topInset = insets.top || STATUS_BAR_FALLBACK;
+  const win = useWindowDimensions();
   const data = useUserData();
   // Draw only effectively-visible places (own toggle on, no hiding folder). The
   // Favorites sheet still lists hidden ones so they can be shown again.
@@ -139,6 +148,8 @@ function AppInner() {
   const [serverUp, setServerUp] = useState<boolean | null>(null);
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The expanded search overlay (the 🔍 button in the bottom-left cluster opens it).
+  const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   // Place whose edit panel the Favorites sheet should open with (map pin → Edit).
@@ -303,10 +314,22 @@ function AppInner() {
         style={styles.map}
         mapStyle={mapStyle}
         // Edge-to-edge: the map draws behind the system nav bar, so lift the
-        // MapLibre attribution/logo ornaments clear of it. The logo also moves
-        // right, out from under the bottom-left menu button.
-        attributionPosition={{ bottom: bottomInset + 8, right: 8 }}
-        logoPosition={{ bottom: bottomInset + 8, left: 68 }}
+        // MapLibre attribution/logo ornaments clear of it. Attribution sits
+        // left of the bottom-right locate button; the logo takes the (now
+        // empty) top-left corner, clear of the bottom button clusters.
+        attributionPosition={{ bottom: bottomInset + 8, right: 64 }}
+        logoPosition={{ top: topInset + 8, left: 8 }}
+        // The scale bar was lost in the maplibre-react-native v11 upgrade (the
+        // default flipped to off). Android's native ScaleBarPlugin only anchors
+        // top-left, so bottom-centre is expressed as top/left margins computed
+        // from the window size; the native side adds the status-bar inset to
+        // the top margin, so subtract it here. The bar keeps the middle of the
+        // bottom edge, between the menu cluster and the locate button.
+        scaleBar
+        scaleBarPosition={{
+          top: Math.max(0, Math.round(win.height - bottomInset - 88 - topInset)),
+          left: Math.round(win.width * 0.3),
+        }}
         // While planning a route, a tap drops a stop; otherwise long-press picks
         // a destination (the destination card). Both gestures add a stop in plan
         // mode so it feels the same as the web map click.
@@ -469,33 +492,44 @@ function AppInner() {
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
 
-      {/* The search bar sits under the banner while navigating, so hide it then. */}
-      {following ? null : <SearchBar packs={packs} onPick={onPickResult} top={controlsTop} />}
+      {/* Expanded search overlay (input at the top, clear of the keyboard);
+          hidden while navigating — the banner owns the top then. */}
+      {searchOpen && !following && !planning ? (
+        <SearchBar
+          packs={packs}
+          onPick={onPickResult}
+          onClose={() => setSearchOpen(false)}
+          top={controlsTop}
+        />
+      ) : null}
 
-      <View style={[styles.buttonColumn, { top: controlsTop }]}>
-        {!following && !planning ? (
-          <Pressable style={styles.roundButton} onPress={() => route.start()} testID="plan-route">
-            {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
-            <Text style={styles.routeArrow}>{'↱'}</Text>
-          </Pressable>
-        ) : null}
-        <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
-          <CrosshairIcon />
-        </Pressable>
-        {following ? (
+      {/* Top-right keeps only the map-orientation toggle during navigation. */}
+      {following ? (
+        <View style={[styles.buttonColumn, { top: controlsTop }]}>
           <Pressable
-            style={[styles.roundButton, styles.orientButton]}
+            style={styles.roundButton}
             onPress={() => setNavFollow((m) => (m === 'course' ? 'north' : 'course'))}
             testID="toggle-orientation"
           >
-            <Text style={styles.orientText}>{navFollow === 'north' ? 'N' : '⤴'}</Text>
+            {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
+            {navFollow === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
           </Pressable>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
-      {/* Bottom-left hamburger: the app menu (places, tracks, settings live in
-          sheets it opens). Hidden while planning — the RoutePanel owns the
-          bottom of the screen then. */}
+      {/* Bottom-right: recentre on the current position (RoutePanel owns the
+          bottom while planning, so hide it then). */}
+      {!planning ? (
+        <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
+          <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
+            <CrosshairIcon />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Bottom-left cluster: hamburger menu (places, tracks, settings live in
+          sheets it opens) + search + route planning. Hidden while planning —
+          the RoutePanel owns the bottom of the screen then. */}
       {!planning ? (
         <View style={[styles.menuWrap, { bottom: bottomInset + 24 }]} pointerEvents="box-none">
           {menuOpen ? (
@@ -521,23 +555,46 @@ function AppInner() {
               ))}
             </View>
           ) : null}
-          <Pressable
-            style={styles.roundButton}
-            onPress={() => setMenuOpen((o) => !o)}
-            testID="open-menu"
-          >
-            <MenuIcon />
-          </Pressable>
+          <View style={styles.bottomRow}>
+            <Pressable
+              style={styles.roundButton}
+              onPress={() => setMenuOpen((o) => !o)}
+              testID="open-menu"
+            >
+              <MenuIcon />
+            </Pressable>
+            {!following ? (
+              <Pressable
+                style={styles.roundButton}
+                onPress={() => setSearchOpen(true)}
+                testID="search-open"
+              >
+                <SearchIcon />
+              </Pressable>
+            ) : null}
+            {!following ? (
+              <Pressable
+                style={styles.roundButton}
+                onPress={() => route.start()}
+                testID="plan-route"
+              >
+                {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
+                <Text style={styles.routeArrow}>{'↱'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
       {useOffline && !planning ? (
-        <View style={[styles.offlineBadge, { bottom: bottomInset + 84 }]}>
+        // Above the scalebar strip (bottom-centre) so the two never overlap.
+        <View style={[styles.offlineBadge, { bottom: bottomInset + 116 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
       {packs.length > 0 && !planning ? (
-        <View style={[styles.offlineToggle, { bottom: bottomInset + 24 }]}>
+        // Stacked above the bottom-right locate button.
+        <View style={[styles.offlineToggle, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
         </View>
@@ -653,6 +710,8 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   menuWrap: { position: 'absolute', left: 12, alignItems: 'flex-start', gap: 8 },
+  bottomRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  locateWrap: { position: 'absolute', right: 12 },
   menuCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -672,8 +731,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   routeArrow: { fontSize: 24, fontWeight: '800', color: '#1a73e8' },
-  orientButton: { backgroundColor: '#1a73e8' },
-  orientText: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  orientText: { fontSize: 18, fontWeight: '800', color: '#1a73e8' },
   wpMarker: {
     width: 26,
     height: 26,

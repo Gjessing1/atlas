@@ -130,8 +130,20 @@ body {
   color: #666;
 }
 
-/* Saved-place map marker: an emoji badge on the place's colour. */
+/* Colour-badged teardrop map marker (saved places, dropped pin) — the twin of
+   Android's PlacePin. The wrapper is sized to the rotated badge's diagonal so
+   the tail tip touches its bottom edge, making it safe to anchor the map
+   Marker at "bottom". */
 .place-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+
+.place-marker-badge {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -141,15 +153,23 @@ body {
   line-height: 1;
   background: var(--place-color, #e11d48);
   border: 2px solid #fff;
+  /* The sharp corner becomes the tail once rotated -45°. */
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-  cursor: pointer;
 }
 
 /* Un-rotate the emoji inside the rotated teardrop. */
-.place-marker > span {
+.place-marker-badge > span {
   transform: rotate(45deg);
+}
+
+/* Icon-less badge (the dropped pin): a plain white dot, as on Android. */
+.place-marker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
 }
 
 /* ---- sidebar (saved places & tracks) ---- */

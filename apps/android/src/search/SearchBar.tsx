@@ -4,25 +4,26 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
-import { SearchIcon } from '../ui/icons';
 import { searchOffline } from './offlineSearch';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
- * downloaded packs' FTS5 databases when it can't be reached. Collapsed to a
- * round 🔍 button until tapped, so it doesn't eat map real estate.
+ * downloaded packs' FTS5 databases when it can't be reached. The expanded
+ * overlay only — App owns the round 🔍 button (bottom-left cluster) and the
+ * open state; the input stays at the top so the keyboard never covers it.
  */
 export function SearchBar({
   packs,
   onPick,
+  onClose,
   top = 0,
 }: {
   packs: LocalPack[];
   onPick: (result: SearchResult) => void;
-  /** Absolute top offset (px) — App lifts this below the nav banner while navigating. */
+  onClose: () => void;
+  /** Absolute top offset (px) for the expanded input. */
   top?: number;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [offline, setOffline] = useState(false);
@@ -61,22 +62,10 @@ export function SearchBar({
   }, [query, search]);
 
   const close = useCallback(() => {
-    setOpen(false);
     setQuery('');
     setResults([]);
-  }, []);
-
-  if (!open) {
-    return (
-      <Pressable
-        style={[styles.iconButton, { top }]}
-        onPress={() => setOpen(true)}
-        testID="search-open"
-      >
-        <SearchIcon />
-      </Pressable>
-    );
-  }
+    onClose();
+  }, [onClose]);
 
   return (
     <View style={[styles.wrap, { top }]}>
@@ -118,18 +107,7 @@ export function SearchBar({
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 12, right: 68 },
-  iconButton: {
-    position: 'absolute',
-    left: 12,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-  },
+  wrap: { position: 'absolute', left: 12, right: 12 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',

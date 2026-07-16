@@ -39,6 +39,49 @@ const pinStyles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
 });
 
+/**
+ * Solid course-up navigation arrow (forward = up on screen) with the classic
+ * swallow-tail notch, for the map-orientation toggle while navigating.
+ */
+export function NavArrowIcon({
+  color = '#1a73e8',
+  notchColor = '#fff',
+}: {
+  color?: string;
+  notchColor?: string;
+}) {
+  return (
+    <View style={aStyles.box}>
+      <View style={[aStyles.body, { borderBottomColor: color }]} />
+      <View style={[aStyles.notch, { borderBottomColor: notchColor }]} />
+    </View>
+  );
+}
+
+const aStyles = StyleSheet.create({
+  box: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  body: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderBottomWidth: 18,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+  },
+  notch: {
+    position: 'absolute',
+    bottom: 3,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderBottomWidth: 5,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+  },
+});
+
 /** The standard GPS crosshair (ring + four ticks + centre dot) for the locate button. */
 export function CrosshairIcon({ color = '#3a4455' }: { color?: string }) {
   return (

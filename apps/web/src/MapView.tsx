@@ -57,15 +57,27 @@ function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void):
   return el;
 }
 
-/** A colour-badged emoji marker element for a saved place. */
-function placeMarkerElement(place: PlaceRecord): HTMLElement {
+/**
+ * A colour-badged teardrop marker element (Android PlacePin twin): an emoji
+ * badge when an icon is given, a plain white dot otherwise (the dropped pin).
+ */
+function teardropElement(color: string, icon?: string): HTMLElement {
   const el = document.createElement('div');
   el.className = 'place-marker';
-  el.style.setProperty('--place-color', place.color);
   // The badge is a rotated teardrop; the emoji sits in a child that rotates back.
-  const glyph = document.createElement('span');
-  glyph.textContent = place.icon;
-  el.appendChild(glyph);
+  const badge = document.createElement('div');
+  badge.className = 'place-marker-badge';
+  badge.style.setProperty('--place-color', color);
+  if (icon) {
+    const glyph = document.createElement('span');
+    glyph.textContent = icon;
+    badge.appendChild(glyph);
+  } else {
+    const dot = document.createElement('div');
+    dot.className = 'place-marker-dot';
+    badge.appendChild(dot);
+  }
+  el.appendChild(badge);
   return el;
 }
 
@@ -185,14 +197,19 @@ export function MapView({
     markerRef.current?.remove();
     markerRef.current = null;
     if (pin) {
-      const popup = new maplibregl.Popup({ closeButton: false, offset: 32 }).setDOMContent(
+      const popup = new maplibregl.Popup({ closeButton: false, offset: 44 }).setDOMContent(
         pinPopupContent(
           pin,
           () => onPinChange(null),
           () => onSavePin(pin),
         ),
       );
-      const marker = new maplibregl.Marker({ draggable: true, color: '#d33' })
+      // Same red teardrop as the Android destination pick (#d33939).
+      const marker = new maplibregl.Marker({
+        element: teardropElement('#d33939'),
+        anchor: 'bottom',
+        draggable: true,
+      })
         .setLngLat(pin)
         .setPopup(popup)
         .addTo(map);
@@ -222,8 +239,11 @@ export function MapView({
     if (!map) return;
     for (const m of placeMarkersRef.current) m.remove();
     placeMarkersRef.current = places.map((place) => {
-      const popup = new maplibregl.Popup({ closeButton: false, offset: 18 }).setText(place.name);
-      return new maplibregl.Marker({ element: placeMarkerElement(place), anchor: 'bottom' })
+      const popup = new maplibregl.Popup({ closeButton: false, offset: 44 }).setText(place.name);
+      return new maplibregl.Marker({
+        element: teardropElement(place.color, place.icon),
+        anchor: 'bottom',
+      })
         .setLngLat({ lat: place.lat, lng: place.lng })
         .setPopup(popup)
         .addTo(map);
