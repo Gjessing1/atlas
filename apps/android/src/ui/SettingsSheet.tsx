@@ -314,6 +314,7 @@ export function SettingsSheet({
   packs,
   onPacksChanged,
   storage,
+  onExportAll,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -322,6 +323,8 @@ export function SettingsSheet({
   packs: LocalPack[];
   onPacksChanged: () => void;
   storage: AtlasStorage | null;
+  /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
+  onExportAll: () => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -338,6 +341,13 @@ export function SettingsSheet({
             <ServerSection storage={storage} />
             <Text style={styles.heading}>App</Text>
             <UpdateSection />
+            <Text style={styles.heading}>Your data</Text>
+            <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
+            <View style={styles.buttonRow}>
+              <Pressable style={styles.button} onPress={onExportAll} testID="export-all">
+                <Text style={styles.buttonText}>Export all data</Text>
+              </Pressable>
+            </View>
           </ScrollView>
           <Pressable
             style={[styles.button, styles.closeButton]}

@@ -1,52 +1,153 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
-import type { PlacePatch, PlaceRecord } from '@atlas/storage';
-import { useState } from 'react';
+import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
+import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 /**
- * Favorites/saved-places list — the mobile counterpart of the web Sidebar's
- * favorites, so saved pins are browsable (and synced ones from other devices
- * appear here), not only tappable on the map. Fly to, navigate to, remove, or
- * (tap the emoji badge) edit a place: rename it and pick a different
- * icon/colour — the mobile counterpart of the web Sidebar's style panel.
+ * Places & folders — the mobile counterpart of the web Sidebar: browse saved
+ * pins (synced ones from other devices appear here too), organise them into
+ * folders, and control what's drawn on the map. Fly to, navigate to, remove, or
+ * (tap the emoji badge) edit a place: rename it, assign it to a folder, and pick
+ * an icon/colour. Folders can be created, renamed, hidden (hiding their places
+ * too) and deleted; a header toggle shows or hides everything at once.
  */
 export function FavoritesSheet({
   visible,
   onClose,
   places,
+  collections,
   onFlyTo,
   onNavigate,
   onPatch,
   onDelete,
+  onCreateFolder,
+  onRenameFolder,
+  onSetFolderVisible,
+  onDeleteFolder,
+  onSetAllVisible,
   bottomInset = 0,
 }: {
   visible: boolean;
   onClose: () => void;
   places: PlaceRecord[];
+  collections: CollectionRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
-  /** Patch a place's name/icon/colour/visibility (auto-saved + synced, same as the web panel). */
-  onPatch: (id: string, patch: Pick<PlacePatch, 'name' | 'icon' | 'color' | 'visible'>) => void;
+  /** Patch a place (name/icon/colour/visibility/folder) — auto-saved + synced, same as web. */
+  onPatch: (
+    id: string,
+    patch: Pick<PlacePatch, 'name' | 'icon' | 'color' | 'visible' | 'collectionId'>,
+  ) => void;
   onDelete: (id: string) => void;
+  onCreateFolder: (name: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onSetFolderVisible: (id: string, visible: boolean) => void;
+  onDeleteFolder: (id: string) => void;
+  /** Show or hide every place and folder at once (header toggle). */
+  onSetAllVisible: (visible: boolean) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
   // Which row's edit panel is currently open (tap the emoji badge to toggle).
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [newFolder, setNewFolder] = useState('');
+
+  const counts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of places) {
+      if (p.collectionId) map.set(p.collectionId, (map.get(p.collectionId) ?? 0) + 1);
+    }
+    return map;
+  }, [places]);
+
+  const allShown = places.every((p) => p.visible) && collections.every((c) => c.visible);
+
+  const addFolder = () => {
+    const name = newFolder.trim();
+    if (!name) return;
+    onCreateFolder(name);
+    setNewFolder('');
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
-          <Text style={styles.heading}>Favorites</Text>
-          {places.length === 0 ? (
-            <Text style={styles.muted}>
-              No saved places yet. Long-press the map to save a pin — or sign in to sync the
-              favorites from your other devices.
-            </Text>
-          ) : (
-            <ScrollView>
-              {places.map((place) => (
+          <View style={styles.headerRow}>
+            <Text style={styles.heading}>Places &amp; folders</Text>
+            {places.length > 0 || collections.length > 0 ? (
+              <Pressable
+                style={[styles.button, styles.buttonQuiet]}
+                onPress={() => onSetAllVisible(!allShown)}
+                testID="toggle-all-visible"
+              >
+                <Text style={styles.buttonQuietText}>{allShown ? 'Hide all' : 'Show all'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView>
+            {/* Folders */}
+            <Text style={styles.sectionLabel}>Folders</Text>
+            {collections.map((folder) => (
+              <View key={folder.id} style={[styles.row, folder.visible ? null : styles.rowHidden]}>
+                <Pressable
+                  style={styles.eyeButton}
+                  onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+                  testID={`folder-visible-${folder.id}`}
+                >
+                  <Text style={styles.eyeText}>{folder.visible ? '👁' : '🚫'}</Text>
+                </Pressable>
+                <Text style={styles.folderIcon}>📁</Text>
+                <TextInput
+                  style={styles.folderName}
+                  defaultValue={folder.name}
+                  onEndEditing={(e) => {
+                    const value = e.nativeEvent.text.trim();
+                    if (value && value !== folder.name) onRenameFolder(folder.id, value);
+                  }}
+                  returnKeyType="done"
+                  testID={`folder-name-${folder.id}`}
+                />
+                <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
+                <Pressable
+                  style={[styles.button, styles.buttonQuiet]}
+                  onPress={() => onDeleteFolder(folder.id)}
+                  testID={`folder-delete-${folder.id}`}
+                >
+                  <Text style={styles.buttonQuietText}>Delete</Text>
+                </Pressable>
+              </View>
+            ))}
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.folderName, styles.newFolderInput]}
+                value={newFolder}
+                onChangeText={setNewFolder}
+                placeholder="New folder…"
+                returnKeyType="done"
+                onSubmitEditing={addFolder}
+                testID="folder-new-name"
+              />
+              <Pressable
+                style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
+                disabled={!newFolder.trim()}
+                onPress={addFolder}
+                testID="folder-add"
+              >
+                <Text style={styles.buttonText}>Add</Text>
+              </Pressable>
+            </View>
+
+            {/* Places */}
+            <Text style={styles.sectionLabel}>Places</Text>
+            {places.length === 0 ? (
+              <Text style={styles.muted}>
+                No saved places yet. Long-press the map to save a pin — or sign in to sync the
+                favorites from your other devices.
+              </Text>
+            ) : (
+              places.map((place) => (
                 <View key={place.id}>
                   <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
                     <Pressable
@@ -137,12 +238,38 @@ export function FavoritesSheet({
                           />
                         ))}
                       </View>
+                      {/* Folder assignment — parity with the web place folder picker. */}
+                      <View style={styles.choiceRow}>
+                        <Pressable
+                          style={[
+                            styles.folderChip,
+                            place.collectionId === null && styles.folderChipSelected,
+                          ]}
+                          onPress={() => onPatch(place.id, { collectionId: null })}
+                          testID={`favorite-folder-${place.id}-none`}
+                        >
+                          <Text style={styles.folderChipText}>No folder</Text>
+                        </Pressable>
+                        {collections.map((folder) => (
+                          <Pressable
+                            key={folder.id}
+                            style={[
+                              styles.folderChip,
+                              place.collectionId === folder.id && styles.folderChipSelected,
+                            ]}
+                            onPress={() => onPatch(place.id, { collectionId: folder.id })}
+                            testID={`favorite-folder-${place.id}-${folder.id}`}
+                          >
+                            <Text style={styles.folderChipText}>📁 {folder.name}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
                     </View>
                   ) : null}
                 </View>
-              ))}
-            </ScrollView>
-          )}
+              ))
+            )}
+          </ScrollView>
           <Pressable
             style={[styles.button, styles.closeButton]}
             onPress={onClose}
@@ -163,14 +290,36 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334', marginBottom: 10 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  heading: { fontSize: 15, fontWeight: '700', color: '#334' },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#889', marginTop: 14, marginBottom: 4 },
   muted: { fontSize: 13, color: '#778', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
   eyeText: { fontSize: 18 },
+  folderIcon: { fontSize: 18 },
+  folderName: {
+    flexGrow: 1,
+    flexShrink: 1,
+    fontSize: 16,
+    color: '#111',
+    paddingVertical: 4,
+  },
+  newFolderInput: {
+    borderWidth: 1,
+    borderColor: '#cdd3dd',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   badge: {
     width: 34,
     height: 34,
@@ -187,6 +336,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
+  buttonDisabled: { opacity: 0.5 },
   buttonText: { color: '#fff', fontWeight: '600' },
   buttonQuiet: { backgroundColor: '#eef1f6' },
   buttonQuietText: { color: '#334', fontWeight: '600' },
@@ -225,5 +375,15 @@ const styles = StyleSheet.create({
   },
   colorChoiceSelected: { borderColor: '#111' },
   choiceSelected: { borderColor: '#1a73e8' },
+  folderChip: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f1f3f7',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  folderChipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
+  folderChipText: { fontSize: 13, color: '#334', fontWeight: '600' },
   closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });

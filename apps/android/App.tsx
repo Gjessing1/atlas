@@ -1,4 +1,5 @@
 import { placeIsVisible, type SearchResult, type VisibilityFolder } from '@atlas/core';
+import { buildGpx } from '@atlas/gpx';
 import {
   Camera,
   GeoJSONSource,
@@ -8,7 +9,13 @@ import {
   UserLocation,
   type CameraRef,
 } from '@maplibre/maplibre-react-native';
-import type { RoutingProfile } from '@atlas/routing';
+import {
+  ROUTING_PROFILES,
+  routePathToTrackData,
+  type RoutePath,
+  type RoutingProfile,
+} from '@atlas/routing';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,11 +42,16 @@ import { useTrackRecording } from './src/nav/useTrackRecording';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
+import { useRoute } from './src/routing/useRoute';
+import { shareText } from './src/share';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
 import { PromptModal } from './src/ui/PromptModal';
 import { RecordControls } from './src/ui/RecordControls';
+import { RoutePanel } from './src/ui/RoutePanel';
 import { SettingsSheet } from './src/ui/SettingsSheet';
+import { TracksSheet } from './src/ui/TracksSheet';
+import { useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData } from './src/useUserData';
 
 function placesToGeoJSON(places: PlaceRecord[]) {
@@ -88,6 +100,9 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const rec = useTrackRecording(data.saveTrack);
+  const route = useRoute();
+  // Geometry of the visible tracks, for the map's track line layer.
+  const trackGeo = useTrackGeometry(data.storage, data.tracks);
 
   const [originReady, setOriginReady] = useState(false);
   const [template, setTemplate] = useState<string | null>(null);
@@ -95,6 +110,7 @@ function AppInner() {
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [tracksOpen, setTracksOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const [navHeight, setNavHeight] = useState(0);
   // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
@@ -142,6 +158,37 @@ function AppInner() {
     void nav.start({ lat: destination.lat, lng: destination.lng }, travelMode);
     setDestination(null);
   }, [destination, travelMode, nav]);
+
+  // Route planning owns the bottom of the screen and repurposes map taps to add
+  // stops, so it can't share the screen with a destination card.
+  const planning = route.active;
+  // The routed line to draw while planning (selected path, primary or alt).
+  const planPath = route.paths?.[route.selectedPath] ?? null;
+
+  // Share the planned route as GPX (parity with the web RoutePanel export).
+  const exportRoute = useCallback(
+    (path: RoutePath) => {
+      const profile = ROUTING_PROFILES.find((p) => p.id === route.profile);
+      const name = `Atlas ${profile?.label.toLowerCase() ?? route.profile} route`;
+      void shareText(
+        `atlas-route-${route.profile}.gpx`,
+        buildGpx(routePathToTrackData(path, name)),
+      );
+    },
+    [route.profile],
+  );
+
+  // Pick GPX/KML/KMZ files from the device and import them (parser validates by
+  // name/content, so we allow any type through the picker).
+  const importTracks = useCallback(async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: '*/*',
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (res.canceled) return null;
+    return data.importFiles(res.assets.map((a) => ({ name: a.name, uri: a.uri })));
+  }, [data]);
 
   // Recentre on the user's position. While navigating this pulls the camera back
   // onto the (course-/north-up) follow after a manual pan; when idle it's a
@@ -221,8 +268,23 @@ function AppInner() {
         // MapLibre attribution/logo ornaments clear of it.
         attributionPosition={{ bottom: bottomInset + 8, right: 8 }}
         logoPosition={{ bottom: bottomInset + 8, left: 8 }}
+        // While planning a route, a tap drops a stop; otherwise long-press picks
+        // a destination (the destination card). Both gestures add a stop in plan
+        // mode so it feels the same as the web map click.
+        onPress={
+          planning
+            ? (e) => {
+                const [lng, lat] = e.nativeEvent.lngLat;
+                route.addWaypoint({ lat, lng });
+              }
+            : undefined
+        }
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
+          if (planning) {
+            route.addWaypoint({ lat, lng });
+            return;
+          }
           pickDestination({
             lat,
             lng,
@@ -231,6 +293,16 @@ function AppInner() {
           });
         }}
       >
+        {/* Saved/imported/recorded tracks (visible ones), drawn under the routes. */}
+        {trackGeo.features.length > 0 ? (
+          <GeoJSONSource id="atlas-tracks" data={trackGeo}>
+            <Layer
+              type="line"
+              id="atlas-tracks-line"
+              paint={{ 'line-color': '#2a78d6', 'line-width': 4, 'line-opacity': 0.9 }}
+            />
+          </GeoJSONSource>
+        ) : null}
         {nav.routeCoords.length > 1 ? (
           <GeoJSONSource id="atlas-route" data={routeToGeoJSON(nav.routeCoords)}>
             <Layer
@@ -240,6 +312,34 @@ function AppInner() {
             />
           </GeoJSONSource>
         ) : null}
+        {/* Planned route (route-planning panel): distinct colour from navigation. */}
+        {planning && planPath ? (
+          <GeoJSONSource
+            id="atlas-plan"
+            data={routeToGeoJSON(planPath.points.map((p) => [p.lng, p.lat]))}
+          >
+            <Layer
+              type="line"
+              id="atlas-plan-line"
+              paint={{ 'line-color': '#7c3aed', 'line-width': 6, 'line-opacity': 0.85 }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {planning
+          ? route.waypoints.map((w, i) => (
+              <Marker key={w.id} lngLat={[w.pos.lng, w.pos.lat]} anchor="bottom">
+                <View style={styles.wpMarker}>
+                  <Text style={styles.wpMarkerText}>
+                    {route.roundTrip || route.waypoints.length === 1
+                      ? '⟳'
+                      : i < 26
+                        ? String.fromCharCode(65 + i)
+                        : String(i + 1)}
+                  </Text>
+                </View>
+              </Marker>
+            ))
+          : null}
         <Camera
           ref={cameraRef}
           initialViewState={{ center: [10.75, 59.91], zoom: 10 }}
@@ -324,6 +424,18 @@ function AppInner() {
         >
           <Text style={styles.gearText}>★</Text>
         </Pressable>
+        <Pressable
+          style={styles.roundButton}
+          onPress={() => setTracksOpen(true)}
+          testID="open-tracks"
+        >
+          <Text style={styles.gearText}>🗺</Text>
+        </Pressable>
+        {!following && !planning ? (
+          <Pressable style={styles.roundButton} onPress={() => route.start()} testID="plan-route">
+            <Text style={styles.gearText}>🧭</Text>
+          </Pressable>
+        ) : null}
         <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
           <Text style={styles.gearText}>◎</Text>
         </Pressable>
@@ -336,7 +448,7 @@ function AppInner() {
             <Text style={styles.orientText}>{navFollow === 'north' ? 'N' : '⤴'}</Text>
           </Pressable>
         ) : null}
-        {rec.phase === 'idle' ? (
+        {rec.phase === 'idle' && !planning ? (
           <Pressable
             style={styles.roundButton}
             onPress={() => void rec.start()}
@@ -355,12 +467,12 @@ function AppInner() {
         }
       />
 
-      {useOffline && rec.phase === 'idle' ? (
+      {useOffline && rec.phase === 'idle' && !planning ? (
         <View style={[styles.offlineBadge, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && rec.phase === 'idle' ? (
+      {packs.length > 0 && rec.phase === 'idle' && !planning ? (
         <View style={[styles.offlineToggle, { bottom: bottomInset + 24 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
@@ -378,7 +490,7 @@ function AppInner() {
         </View>
       ) : null}
 
-      {destination ? (
+      {destination && !planning ? (
         <DestinationCard
           target={destination}
           mode={travelMode}
@@ -405,6 +517,7 @@ function AppInner() {
         visible={favoritesOpen}
         onClose={() => setFavoritesOpen(false)}
         places={data.places}
+        collections={data.collections}
         onFlyTo={(p) => flyTo(p)}
         onNavigate={(p) => {
           setFavoritesOpen(false);
@@ -412,6 +525,22 @@ function AppInner() {
         }}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
+        onCreateFolder={(name) => void data.createCollection(name)}
+        onRenameFolder={(id, name) => void data.renameCollection(id, name)}
+        onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
+        onDeleteFolder={(id) => void data.deleteCollection(id)}
+        onSetAllVisible={(v) => void data.setAllVisible(v)}
+        bottomInset={bottomInset}
+      />
+      <TracksSheet
+        visible={tracksOpen}
+        onClose={() => setTracksOpen(false)}
+        tracks={data.tracks}
+        onSetVisible={(id, v) => void data.updateTrack(id, { visible: v })}
+        onRename={(id, name) => void data.updateTrack(id, { name })}
+        onExport={(id, format) => void data.exportTrack(id, format)}
+        onDelete={(id) => void data.deleteTrack(id)}
+        onImport={importTracks}
         bottomInset={bottomInset}
       />
       <SettingsSheet
@@ -421,6 +550,7 @@ function AppInner() {
         packs={packs}
         onPacksChanged={refreshPacks}
         storage={data.storage}
+        onExportAll={() => void data.exportAll()}
         bottomInset={bottomInset}
       />
       <PromptModal
@@ -437,6 +567,9 @@ function AppInner() {
           setPendingPin(null);
         }}
       />
+      {planning ? (
+        <RoutePanel route={route} onExport={exportRoute} bottomInset={bottomInset} />
+      ) : null}
       <StatusBar style="auto" />
     </View>
   );
@@ -468,6 +601,17 @@ const styles = StyleSheet.create({
   orientButton: { backgroundColor: '#1a73e8' },
   orientText: { fontSize: 20, fontWeight: '800', color: '#fff' },
   destinationPin: { fontSize: 30 },
+  wpMarker: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  wpMarkerText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   recordDot: { fontSize: 20, color: '#d63f3f' },
   offlineBadge: {
     position: 'absolute',
