@@ -9,7 +9,9 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { LatLng } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
 import { SERVER_ORIGIN } from './src/config';
 import {
@@ -24,6 +26,7 @@ import { useNavigation } from './src/nav/useNavigation';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
+import { FavoritesSheet } from './src/ui/FavoritesSheet';
 import { SettingsSheet } from './src/ui/SettingsSheet';
 import { useUserData } from './src/useUserData';
 
@@ -46,7 +49,8 @@ function routeToGeoJSON(coords: number[][]) {
   };
 }
 
-export default function App() {
+function AppInner() {
+  const insets = useSafeAreaInsets();
   const data = useUserData();
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
@@ -55,8 +59,13 @@ export default function App() {
   const [serverUp, setServerUp] = useState<boolean | null>(null);
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
+
+  const flyTo = useCallback((p: LatLng) => {
+    cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
+  }, []);
 
   const refreshPacks = useCallback(() => {
     void listLocalPacks().then(setPacks);
@@ -101,6 +110,10 @@ export default function App() {
       <MapLibreMap
         style={styles.map}
         mapStyle={mapStyle}
+        // Edge-to-edge: the map draws behind the system nav bar, so lift the
+        // MapLibre attribution/logo ornaments clear of it.
+        attributionPosition={{ bottom: insets.bottom + 8, right: 8 }}
+        logoPosition={{ bottom: insets.bottom + 8, left: 8 }}
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
           Alert.alert(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, undefined, [
@@ -161,32 +174,53 @@ export default function App() {
         </GeoJSONSource>
       </MapLibreMap>
 
-      <NavBanner nav={nav} />
+      <NavBanner nav={nav} topInset={insets.top} />
 
-      <SearchBar packs={packs} onPick={onPickResult} />
+      <SearchBar packs={packs} onPick={onPickResult} topInset={insets.top} />
 
-      <Pressable style={styles.gear} onPress={() => setSettingsOpen(true)} testID="open-settings">
-        <Text style={styles.gearText}>⚙</Text>
-      </Pressable>
+      <View style={[styles.buttonColumn, { top: insets.top + 8 }]}>
+        <Pressable
+          style={styles.roundButton}
+          onPress={() => setSettingsOpen(true)}
+          testID="open-settings"
+        >
+          <Text style={styles.gearText}>⚙</Text>
+        </Pressable>
+        <Pressable
+          style={styles.roundButton}
+          onPress={() => setFavoritesOpen(true)}
+          testID="open-favorites"
+        >
+          <Text style={styles.gearText}>★</Text>
+        </Pressable>
+      </View>
 
       {useOffline ? (
-        <View style={styles.offlineBadge}>
+        <View style={[styles.offlineBadge, { bottom: insets.bottom + 84 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
       {packs.length > 0 ? (
-        <View style={styles.offlineToggle}>
+        <View style={[styles.offlineToggle, { bottom: insets.bottom + 24 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
         </View>
       ) : null}
 
       {data.status === 'error' ? (
-        <View style={styles.banner}>
+        <View style={[styles.banner, { top: insets.top + 60 }]}>
           <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
         </View>
       ) : null}
 
+      <FavoritesSheet
+        visible={favoritesOpen}
+        onClose={() => setFavoritesOpen(false)}
+        places={data.places}
+        onFlyTo={(p) => flyTo(p)}
+        onNavigate={(p) => void nav.start({ lat: p.lat, lng: p.lng })}
+        onDelete={(id) => void data.deletePlace(id)}
+      />
       <SettingsSheet
         visible={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -199,14 +233,20 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  gear: {
-    position: 'absolute',
-    top: 48,
-    right: 12,
+  buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
+  roundButton: {
     width: 44,
     height: 44,
     borderRadius: 22,

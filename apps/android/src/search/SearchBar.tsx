@@ -13,9 +13,11 @@ import { searchOffline } from './offlineSearch';
 export function SearchBar({
   packs,
   onPick,
+  topInset = 0,
 }: {
   packs: LocalPack[];
   onPick: (result: SearchResult) => void;
+  topInset?: number;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -55,7 +57,7 @@ export function SearchBar({
   }, [query, search]);
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { top: topInset + 8 }]}>
       <TextInput
         style={styles.input}
         placeholder="Search places"
@@ -89,7 +91,7 @@ export function SearchBar({
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', top: 48, left: 12, right: 68 },
+  wrap: { position: 'absolute', left: 12, right: 68 },
   input: {
     backgroundColor: '#fff',
     borderRadius: 10,

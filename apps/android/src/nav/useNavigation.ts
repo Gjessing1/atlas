@@ -10,6 +10,15 @@ import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locat
 
 export type NavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
 
+/** Speak a voice prompt, never letting a TTS engine error interrupt navigation. */
+function speak(text: string): void {
+  try {
+    Speech.speak(text);
+  } catch (err) {
+    console.warn('tts failed', err);
+  }
+}
+
 export interface NavController {
   phase: NavPhase;
   state: NavState | null;
@@ -99,14 +108,20 @@ export function useNavigation(): NavController {
     (fix: LocationFix) => {
       const session = sessionRef.current;
       if (!session) return;
-      const { state: next, prompts } = session.update(fix, Date.now());
-      setState(next);
-      for (const prompt of prompts) Speech.speak(prompt.text);
-      if (next.status === 'arrived') {
-        Speech.speak('You have arrived');
-        stop(true);
-      } else if (next.status === 'off-route') {
-        void reroute(fix);
+      // Runs on every GPS fix (incl. the headless background task); an uncaught
+      // throw here would take the whole app down in a release build.
+      try {
+        const { state: next, prompts } = session.update(fix, Date.now());
+        setState(next);
+        for (const prompt of prompts) speak(prompt.text);
+        if (next.status === 'arrived') {
+          speak('You have arrived');
+          stop(true);
+        } else if (next.status === 'off-route') {
+          void reroute(fix);
+        }
+      } catch (err) {
+        console.warn('navigation fix failed', err);
       }
     },
     [reroute, stop],

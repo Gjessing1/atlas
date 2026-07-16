@@ -19,14 +19,14 @@ function formatEta(epochMs: number): string {
 }
 
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
-export function NavBanner({ nav }: { nav: NavController }) {
+export function NavBanner({ nav, topInset = 0 }: { nav: NavController; topInset?: number }) {
   if (nav.phase === 'idle') return null;
 
   const { state } = nav;
   const maneuver = state?.upcoming;
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View style={[styles.wrap, { top: topInset + 8 }]} pointerEvents="box-none">
       <View style={styles.card}>
         {nav.phase === 'starting' ? (
           <Text style={styles.maneuver}>Finding route…</Text>
@@ -63,7 +63,7 @@ export function NavBanner({ nav }: { nav: NavController }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', top: 40, left: 12, right: 12, gap: 8 },
+  wrap: { position: 'absolute', left: 12, right: 12, gap: 8 },
   card: {
     backgroundColor: 'rgba(17,17,17,0.9)',
     borderRadius: 14,

@@ -46,4 +46,12 @@ export GRADLE_USER_HOME="$PWD/.gradle-home"
 APK="$PWD/android/app/build/outputs/apk/release/app-release.apk"
 echo
 echo "APK: $APK"
-"$JAVA_HOME/bin/keytool" -printcert -jarfile "$APK" | grep -E "Owner|Valid" | head -2
+
+# Verify the signature with apksigner (keytool -printcert only reads the legacy
+# v1/JAR signature and prints "Not a signed jar file" for v2/v3-only APKs).
+APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
+if [ -n "$APKSIGNER" ]; then
+  "$APKSIGNER" verify --print-certs "$APK" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
+else
+  echo "(apksigner not found under \$ANDROID_HOME/build-tools; skipping signature check)"
+fi
