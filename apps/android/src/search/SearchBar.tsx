@@ -13,11 +13,12 @@ import { searchOffline } from './offlineSearch';
 export function SearchBar({
   packs,
   onPick,
-  topInset = 0,
+  top = 0,
 }: {
   packs: LocalPack[];
   onPick: (result: SearchResult) => void;
-  topInset?: number;
+  /** Absolute top offset (px) — App lifts this below the nav banner while navigating. */
+  top?: number;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -57,7 +58,7 @@ export function SearchBar({
   }, [query, search]);
 
   return (
-    <View style={[styles.wrap, { top: topInset + 8 }]}>
+    <View style={[styles.wrap, { top }]}>
       <TextInput
         style={styles.input}
         placeholder="Search places"

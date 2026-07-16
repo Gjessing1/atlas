@@ -314,6 +314,7 @@ export function SettingsSheet({
   packs,
   onPacksChanged,
   storage,
+  bottomInset = 0,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -321,11 +322,13 @@ export function SettingsSheet({
   packs: LocalPack[];
   onPacksChanged: () => void;
   storage: AtlasStorage | null;
+  /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
+  bottomInset?: number;
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
           <ScrollView>
             <Text style={styles.heading}>Account</Text>
             <AccountSection sync={sync} />

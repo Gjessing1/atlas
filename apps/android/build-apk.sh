@@ -29,8 +29,18 @@ if [ -f "$KEYSTORE_ENV" ]; then
   # shellcheck disable=SC1090
   source "$KEYSTORE_ENV"
   set +a
+elif [ "${ATLAS_ALLOW_DEBUG_SIGNING:-}" = "1" ]; then
+  echo "WARNING: $KEYSTORE_ENV not found — building a DEBUG-signed APK (ATLAS_ALLOW_DEBUG_SIGNING=1)" >&2
 else
-  echo "WARNING: $KEYSTORE_ENV not found — release APK will be DEBUG-signed" >&2
+  # A debug-signed "release" is a trap: once users install it, a later
+  # release-keyed update is a signature mismatch, so Android forces
+  # uninstall+reinstall and wipes their local data (login, favorites, packs).
+  # Refuse rather than ship an update-incompatible build. For a throwaway local
+  # build, re-run with ATLAS_ALLOW_DEBUG_SIGNING=1.
+  echo "ERROR: $KEYSTORE_ENV not found — refusing to build a debug-signed release." >&2
+  echo "       Set up the release keystore, or re-run with ATLAS_ALLOW_DEBUG_SIGNING=1" >&2
+  echo "       for a throwaway build that must NOT be published for self-update." >&2
+  exit 1
 fi
 
 [ -d ../../node_modules ] || (cd ../.. && npm install)

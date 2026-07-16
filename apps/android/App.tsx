@@ -4,6 +4,7 @@ import {
   GeoJSONSource,
   Layer,
   Map as MapLibreMap,
+  UserLocation,
   type CameraRef,
 } from '@maplibre/maplibre-react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -82,7 +83,16 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
+  const [navHeight, setNavHeight] = useState(0);
   const cameraRef = useRef<CameraRef>(null);
+
+  // While a trip is active the nav banner owns the top of the screen, so drop
+  // the search bar + button column below its measured height (issue: the banner
+  // was covering both). `following` also turns the map course-up (issue: no map
+  // orientation while travelling).
+  const navActive = nav.phase !== 'idle';
+  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const controlsTop = topInset + 8 + (navActive ? navHeight + 8 : 0);
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -166,7 +176,16 @@ function AppInner() {
             />
           </GeoJSONSource>
         ) : null}
-        <Camera ref={cameraRef} initialViewState={{ center: [10.75, 59.91], zoom: 10 }} />
+        <Camera
+          ref={cameraRef}
+          initialViewState={{ center: [10.75, 59.91], zoom: 10 }}
+          // Course-up: centre on the traveller and rotate the map to the
+          // direction of travel while navigating; released back to free pan
+          // when the trip ends.
+          trackUserLocation={following ? 'course' : undefined}
+          {...(following ? { zoom: 16 } : {})}
+        />
+        {following ? <UserLocation heading animated /> : null}
         <GeoJSONSource
           id="atlas-places"
           data={placesToGeoJSON(data.places)}
@@ -204,11 +223,11 @@ function AppInner() {
         </GeoJSONSource>
       </MapLibreMap>
 
-      <NavBanner nav={nav} topInset={topInset} />
+      <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
 
-      <SearchBar packs={packs} onPick={onPickResult} topInset={topInset} />
+      <SearchBar packs={packs} onPick={onPickResult} top={controlsTop} />
 
-      <View style={[styles.buttonColumn, { top: topInset + 8 }]}>
+      <View style={[styles.buttonColumn, { top: controlsTop }]}>
         <Pressable
           style={styles.roundButton}
           onPress={() => setSettingsOpen(true)}
@@ -272,6 +291,7 @@ function AppInner() {
         onFlyTo={(p) => flyTo(p)}
         onNavigate={(p) => void nav.start({ lat: p.lat, lng: p.lng })}
         onDelete={(id) => void data.deletePlace(id)}
+        bottomInset={bottomInset}
       />
       <SettingsSheet
         visible={settingsOpen}
@@ -280,6 +300,7 @@ function AppInner() {
         packs={packs}
         onPacksChanged={refreshPacks}
         storage={data.storage}
+        bottomInset={bottomInset}
       />
       <StatusBar style="auto" />
     </View>

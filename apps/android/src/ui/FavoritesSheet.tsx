@@ -13,6 +13,7 @@ export function FavoritesSheet({
   onFlyTo,
   onNavigate,
   onDelete,
+  bottomInset = 0,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -20,11 +21,13 @@ export function FavoritesSheet({
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
   onDelete: (id: string) => void;
+  /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
+  bottomInset?: number;
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
           <Text style={styles.heading}>Favorites</Text>
           {places.length === 0 ? (
             <Text style={styles.muted}>

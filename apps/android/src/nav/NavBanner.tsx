@@ -19,14 +19,27 @@ function formatEta(epochMs: number): string {
 }
 
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
-export function NavBanner({ nav, topInset = 0 }: { nav: NavController; topInset?: number }) {
+export function NavBanner({
+  nav,
+  topInset = 0,
+  onHeight,
+}: {
+  nav: NavController;
+  topInset?: number;
+  /** Reports the banner's laid-out height so siblings can sit clear of it. */
+  onHeight?: (height: number) => void;
+}) {
   if (nav.phase === 'idle') return null;
 
   const { state } = nav;
   const maneuver = state?.upcoming;
 
   return (
-    <View style={[styles.wrap, { top: topInset + 8 }]} pointerEvents="box-none">
+    <View
+      style={[styles.wrap, { top: topInset + 8 }]}
+      pointerEvents="box-none"
+      onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+    >
       <View style={styles.card}>
         {nav.phase === 'starting' ? (
           <Text style={styles.maneuver}>Finding route…</Text>
