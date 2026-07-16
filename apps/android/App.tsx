@@ -42,7 +42,7 @@ function placesToGeoJSON(places: PlaceRecord[]) {
     type: 'FeatureCollection' as const,
     features: places.map((p) => ({
       type: 'Feature' as const,
-      properties: { id: p.id, name: p.name },
+      properties: { id: p.id, name: p.name, icon: p.icon, color: p.color },
       geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
     })),
   };
@@ -214,8 +214,11 @@ function AppInner() {
             type="circle"
             id="atlas-places-circles"
             paint={{
-              'circle-radius': 6,
-              'circle-color': '#d63f3f',
+              'circle-radius': 7,
+              // Per-place colour (chosen via the Favorites style picker); falls
+              // back to the default red for rows written before the icon/colour
+              // migration that somehow lack the property.
+              'circle-color': ['coalesce', ['get', 'color'], '#e11d48'],
               'circle-stroke-width': 2,
               'circle-stroke-color': '#ffffff',
             }}
@@ -290,6 +293,7 @@ function AppInner() {
         places={data.places}
         onFlyTo={(p) => flyTo(p)}
         onNavigate={(p) => void nav.start({ lat: p.lat, lng: p.lng })}
+        onStyle={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
         bottomInset={bottomInset}
       />

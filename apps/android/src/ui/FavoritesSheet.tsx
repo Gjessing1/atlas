@@ -1,10 +1,14 @@
-import type { PlaceRecord } from '@atlas/storage';
+import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
+import type { PlacePatch, PlaceRecord } from '@atlas/storage';
+import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 /**
  * Favorites/saved-places list — the mobile counterpart of the web Sidebar's
  * favorites, so saved pins are browsable (and synced ones from other devices
- * appear here), not only tappable on the map. Fly to, navigate to, or remove.
+ * appear here), not only tappable on the map. Fly to, navigate to, remove, or
+ * (tap the emoji badge) restyle a place with a different icon/colour — the
+ * mobile counterpart of the web Sidebar's style picker.
  */
 export function FavoritesSheet({
   visible,
@@ -12,6 +16,7 @@ export function FavoritesSheet({
   places,
   onFlyTo,
   onNavigate,
+  onStyle,
   onDelete,
   bottomInset = 0,
 }: {
@@ -20,10 +25,15 @@ export function FavoritesSheet({
   places: PlaceRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
+  /** Patch a place's icon/colour (auto-saved + synced, same as the web picker). */
+  onStyle: (id: string, patch: Pick<PlacePatch, 'icon' | 'color'>) => void;
   onDelete: (id: string) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
+  // Which row's style picker is currently open (tap the emoji badge to toggle).
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -37,39 +47,78 @@ export function FavoritesSheet({
           ) : (
             <ScrollView>
               {places.map((place) => (
-                <View key={place.id} style={styles.row}>
-                  <Pressable
-                    style={styles.rowMain}
-                    onPress={() => {
-                      onFlyTo(place);
-                      onClose();
-                    }}
-                    testID={`favorite-${place.id}`}
-                  >
-                    <Text style={styles.rowText} numberOfLines={1}>
-                      {place.name}
-                    </Text>
-                    <Text style={styles.muted}>
-                      {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.button}
-                    onPress={() => {
-                      onNavigate(place);
-                      onClose();
-                    }}
-                    testID={`favorite-nav-${place.id}`}
-                  >
-                    <Text style={styles.buttonText}>Go</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.button, styles.buttonQuiet]}
-                    onPress={() => onDelete(place.id)}
-                    testID={`favorite-delete-${place.id}`}
-                  >
-                    <Text style={styles.buttonQuietText}>Remove</Text>
-                  </Pressable>
+                <View key={place.id}>
+                  <View style={styles.row}>
+                    <Pressable
+                      style={[styles.badge, { backgroundColor: place.color }]}
+                      onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
+                      testID={`favorite-style-${place.id}`}
+                    >
+                      <Text style={styles.badgeIcon}>{place.icon}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.rowMain}
+                      onPress={() => {
+                        onFlyTo(place);
+                        onClose();
+                      }}
+                      testID={`favorite-${place.id}`}
+                    >
+                      <Text style={styles.rowText} numberOfLines={1}>
+                        {place.name}
+                      </Text>
+                      <Text style={styles.muted}>
+                        {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.button}
+                      onPress={() => {
+                        onNavigate(place);
+                        onClose();
+                      }}
+                      testID={`favorite-nav-${place.id}`}
+                    >
+                      <Text style={styles.buttonText}>Go</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.button, styles.buttonQuiet]}
+                      onPress={() => onDelete(place.id)}
+                      testID={`favorite-delete-${place.id}`}
+                    >
+                      <Text style={styles.buttonQuietText}>Remove</Text>
+                    </Pressable>
+                  </View>
+                  {editingId === place.id ? (
+                    <View style={styles.picker}>
+                      <View style={styles.choiceRow}>
+                        {PLACE_ICONS.map((ic) => (
+                          <Pressable
+                            key={ic}
+                            style={[styles.iconChoice, ic === place.icon && styles.choiceSelected]}
+                            onPress={() => onStyle(place.id, { icon: ic })}
+                            testID={`favorite-icon-${place.id}-${ic}`}
+                          >
+                            <Text style={styles.iconChoiceText}>{ic}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <View style={styles.choiceRow}>
+                        {PLACE_COLORS.map((c) => (
+                          <Pressable
+                            key={c}
+                            style={[
+                              styles.colorChoice,
+                              { backgroundColor: c },
+                              c === place.color && styles.colorChoiceSelected,
+                            ]}
+                            onPress={() => onStyle(place.id, { color: c })}
+                            testID={`favorite-color-${place.id}-${c}`}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               ))}
             </ScrollView>
@@ -99,6 +148,14 @@ const styles = StyleSheet.create({
   heading: { fontSize: 15, fontWeight: '700', color: '#334', marginBottom: 10 },
   muted: { fontSize: 13, color: '#778', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  badge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeIcon: { fontSize: 17 },
   rowMain: { flexShrink: 1, flexGrow: 1 },
   rowText: { fontSize: 16, color: '#111' },
   button: {
@@ -110,5 +167,31 @@ const styles = StyleSheet.create({
   buttonText: { color: '#fff', fontWeight: '600' },
   buttonQuiet: { backgroundColor: '#eef1f6' },
   buttonQuietText: { color: '#334', fontWeight: '600' },
+  picker: {
+    paddingBottom: 10,
+    paddingLeft: 42,
+    gap: 8,
+  },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  iconChoice: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1f3f7',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  iconChoiceText: { fontSize: 18 },
+  colorChoice: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  colorChoiceSelected: { borderColor: '#111' },
+  choiceSelected: { borderColor: '#1a73e8' },
   closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });
