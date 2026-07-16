@@ -1,3 +1,4 @@
+import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
 import type { ImportResult, UserData } from './storage/useUserData.js';
@@ -28,8 +29,12 @@ interface EditorProps {
     notes?: string;
     tags?: string[];
     collectionId?: string | null;
+    icon?: string;
+    color?: string;
   }) => void;
   onDelete: () => void;
+  /** Present for places: the current icon/colour, enabling the style picker. */
+  style?: { icon: string; color: string };
   /** Extra actions rendered beside Delete (e.g. track downloads). */
   actions?: React.ReactNode;
 }
@@ -43,10 +48,42 @@ function ItemEditor({
   collections,
   onPatch,
   onDelete,
+  style,
   actions,
 }: EditorProps) {
   return (
     <div className="item-editor">
+      {style && (
+        <div className="style-picker">
+          <div className="icon-choices">
+            {PLACE_ICONS.map((ic) => (
+              <button
+                key={ic}
+                type="button"
+                className={`icon-choice${ic === style.icon ? ' selected' : ''}`}
+                aria-label={`Icon ${ic}`}
+                aria-pressed={ic === style.icon}
+                onClick={() => onPatch({ icon: ic })}
+              >
+                {ic}
+              </button>
+            ))}
+          </div>
+          <div className="color-choices">
+            {PLACE_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`color-choice${c === style.color ? ' selected' : ''}`}
+                style={{ background: c }}
+                aria-label={`Colour ${c}`}
+                aria-pressed={c === style.color}
+                onClick={() => onPatch({ color: c })}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       <label>
         Name
         <input
@@ -139,7 +176,9 @@ export function Sidebar({
     return (
       <li key={key} className="item-row">
         <div className="item-line">
-          <span className="item-icon">📍</span>
+          <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
+            {place.icon}
+          </span>
           <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
             {place.name}
           </button>
@@ -161,6 +200,7 @@ export function Sidebar({
             tags={place.tags}
             collectionId={place.collectionId}
             collections={data.collections}
+            style={{ icon: place.icon, color: place.color }}
             onPatch={(patch) => void data.updatePlace(place.id, patch)}
             onDelete={() => {
               if (confirm(`Delete place "${place.name}"?`)) void data.deletePlace(place.id);

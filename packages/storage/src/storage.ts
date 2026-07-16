@@ -1,3 +1,5 @@
+import { DEFAULT_PLACE_COLOR, DEFAULT_PLACE_ICON } from '@atlas/core';
+
 import type { SqlDriver, SqlRow, SqlValue } from './driver.js';
 import { migrate } from './migrations.js';
 import type {
@@ -57,6 +59,8 @@ function rowToPlace(r: SqlRow): PlaceRecord {
     collectionId: r['collection_id'] === null ? null : String(r['collection_id']),
     notes: String(r['notes']),
     tags: parseTags(r['tags']),
+    icon: r['icon'] == null ? DEFAULT_PLACE_ICON : String(r['icon']),
+    color: r['color'] == null ? DEFAULT_PLACE_COLOR : String(r['color']),
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -181,10 +185,15 @@ export class AtlasStorage {
       collectionId: input.collectionId ?? null,
       notes: input.notes ?? '',
       tags: input.tags ?? [],
+      icon: input.icon ?? DEFAULT_PLACE_ICON,
+      color: input.color ?? DEFAULT_PLACE_COLOR,
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+    // Column order matches the places table incl. the migration-appended
+    // icon/color (id, name, lat, lng, collection_id, notes, tags, created_at,
+    // updated_at, icon, color).
+    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
       record.id,
       record.name,
       record.lat,
@@ -194,6 +203,8 @@ export class AtlasStorage {
       JSON.stringify(record.tags),
       record.createdAt,
       record.updatedAt,
+      record.icon,
+      record.color,
     ]);
     await this.enqueue('place', record.id, 'upsert', now);
     return record;
@@ -207,6 +218,8 @@ export class AtlasStorage {
       collection_id: patch.collectionId,
       notes: patch.notes,
       tags: patch.tags === undefined ? undefined : JSON.stringify(patch.tags),
+      icon: patch.icon,
+      color: patch.color,
     });
   }
 
@@ -376,6 +389,8 @@ export class AtlasStorage {
           collectionId: p.collectionId,
           notes: p.notes,
           tags: p.tags,
+          icon: p.icon,
+          color: p.color,
           createdAt: p.createdAt,
         },
       };
@@ -490,7 +505,7 @@ export class AtlasStorage {
         break;
       case 'place':
         await this.driver.query(
-          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             change.id,
             str('name', '(unnamed)'),
@@ -501,6 +516,8 @@ export class AtlasStorage {
             json('tags', '[]'),
             createdAt,
             change.updatedAt,
+            str('icon', DEFAULT_PLACE_ICON),
+            str('color', DEFAULT_PLACE_COLOR),
           ],
         );
         break;

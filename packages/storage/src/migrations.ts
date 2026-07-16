@@ -56,6 +56,11 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (entity, id)
   );
   `,
+  // Per-place icon + colour (defaults match @atlas/core DEFAULT_PLACE_ICON/COLOR).
+  `
+  ALTER TABLE places ADD COLUMN icon TEXT NOT NULL DEFAULT '📍';
+  ALTER TABLE places ADD COLUMN color TEXT NOT NULL DEFAULT '#e11d48';
+  `,
 ];
 
 /** Bring the database up to the latest schema version. */

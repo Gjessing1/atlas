@@ -206,6 +206,7 @@ export function App() {
       <MapView
         initialView={initialView}
         pin={pin}
+        places={userData.places}
         onPinChange={setPin}
         onSavePin={onSavePin}
         onMapReady={(m) => {

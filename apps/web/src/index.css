@@ -130,6 +130,28 @@ body {
   color: #666;
 }
 
+/* Saved-place map marker: an emoji badge on the place's colour. */
+.place-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+  line-height: 1;
+  background: var(--place-color, #e11d48);
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+/* Un-rotate the emoji inside the rotated teardrop. */
+.place-marker > span {
+  transform: rotate(45deg);
+}
+
 /* ---- sidebar (saved places & tracks) ---- */
 
 .sidebar-toggle {
@@ -317,6 +339,56 @@ body {
 
 .item-editor textarea {
   resize: vertical;
+}
+
+.place-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.style-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.icon-choices,
+.color-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.icon-choice {
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.color-choice {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.icon-choice.selected {
+  border-color: #1a73e8;
+  background: #eaf1fd;
+}
+
+.color-choice.selected {
+  border-color: #1a1a1a;
+  box-shadow: 0 0 0 1px #fff inset;
 }
 
 .item-editor button.danger {

@@ -16,6 +16,10 @@ export interface PlaceRecord {
   collectionId: string | null;
   notes: string;
   tags: string[];
+  /** Emoji icon shown for the pin (see @atlas/core PLACE_ICONS). */
+  icon: string;
+  /** Marker colour as a hex string (see @atlas/core PLACE_COLORS). */
+  color: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +46,8 @@ export interface NewPlace {
   collectionId?: string | null;
   notes?: string;
   tags?: string[];
+  icon?: string;
+  color?: string;
 }
 
 export interface NewTrack {
@@ -61,6 +67,8 @@ export interface PlacePatch {
   collectionId?: string | null;
   notes?: string;
   tags?: string[];
+  icon?: string;
+  color?: string;
 }
 
 export interface TrackPatch {

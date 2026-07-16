@@ -1,4 +1,5 @@
 import { encodeMapHash, resolveStyleTemplate, type LatLng, type MapViewState } from '@atlas/core';
+import type { PlaceRecord } from '@atlas/storage';
 import maplibregl, { type MapMouseEvent, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
@@ -56,10 +57,24 @@ function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void):
   return el;
 }
 
+/** A colour-badged emoji marker element for a saved place. */
+function placeMarkerElement(place: PlaceRecord): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'place-marker';
+  el.style.setProperty('--place-color', place.color);
+  // The badge is a rotated teardrop; the emoji sits in a child that rotates back.
+  const glyph = document.createElement('span');
+  glyph.textContent = place.icon;
+  el.appendChild(glyph);
+  return el;
+}
+
 interface MapViewProps {
   /** Initial camera; typically decoded from the URL hash. */
   initialView: MapViewState;
   pin: LatLng | null;
+  /** Saved places, drawn as colour-badged emoji markers. */
+  places: PlaceRecord[];
   onPinChange: (pin: LatLng | null) => void;
   /** Save the dropped pin as a place (favorites). */
   onSavePin: (pin: LatLng) => void;
@@ -71,6 +86,7 @@ interface MapViewProps {
 export function MapView({
   initialView,
   pin,
+  places,
   onPinChange,
   onSavePin,
   onMapReady,
@@ -198,6 +214,25 @@ export function MapView({
       }),
     );
   }, [map, pin, onPinChange, onSavePin]);
+
+  // Draw saved places as colour-badged emoji markers (favourites are few, so
+  // DOM markers render real emoji + colour that vector-tile glyphs can't).
+  const placeMarkersRef = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    if (!map) return;
+    for (const m of placeMarkersRef.current) m.remove();
+    placeMarkersRef.current = places.map((place) => {
+      const popup = new maplibregl.Popup({ closeButton: false, offset: 18 }).setText(place.name);
+      return new maplibregl.Marker({ element: placeMarkerElement(place), anchor: 'bottom' })
+        .setLngLat({ lat: place.lat, lng: place.lng })
+        .setPopup(popup)
+        .addTo(map);
+    });
+    return () => {
+      for (const m of placeMarkersRef.current) m.remove();
+      placeMarkersRef.current = [];
+    };
+  }, [map, places]);
 
   return <div ref={containerRef} style={{ height: '100%' }} />;
 }

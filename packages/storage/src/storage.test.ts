@@ -33,14 +33,23 @@ describe('AtlasStorage', () => {
     const place = await storage.createPlace({ name: 'Preikestolen', lat: 58.9864, lng: 6.1904 });
     expect(place.id).toMatch(/[0-9a-f-]{36}/);
     expect(place.tags).toEqual([]);
+    // New places get the default icon/colour.
+    expect(place).toMatchObject({ icon: '📍', color: '#e11d48' });
 
-    await storage.updatePlace(place.id, { notes: 'Steep!', tags: ['hike', 'view'] });
+    await storage.updatePlace(place.id, {
+      notes: 'Steep!',
+      tags: ['hike', 'view'],
+      icon: '🏔️',
+      color: '#16a34a',
+    });
     const [listed] = await storage.listPlaces();
     expect(listed).toMatchObject({
       name: 'Preikestolen',
       lat: 58.9864,
       notes: 'Steep!',
       tags: ['hike', 'view'],
+      icon: '🏔️',
+      color: '#16a34a',
     });
     expect(listed!.updatedAt).toBeGreaterThanOrEqual(place.updatedAt);
 
@@ -217,6 +226,29 @@ describe('AtlasStorage', () => {
         visible: false,
       });
       expect(await storage.getTrackGpx('remote-track')).toBe('<gpx/>');
+    });
+
+    it('round-trips place icon/colour through sync payloads', async () => {
+      const place = await storage.createPlace({
+        name: 'Cabin',
+        lat: 1,
+        lng: 2,
+        icon: '🏠',
+        color: '#2563eb',
+      });
+      const payload = await storage.readSyncRecord('place', place.id);
+      expect(payload!.data).toMatchObject({ icon: '🏠', color: '#2563eb' });
+
+      // A remote change without icon/colour falls back to the defaults.
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'remote-place',
+        updatedAt: 5,
+        deleted: false,
+        data: { name: 'Legacy', lat: 3, lng: 4, createdAt: 4 },
+      });
+      const legacy = (await storage.listPlaces()).find((p) => p.id === 'remote-place');
+      expect(legacy).toMatchObject({ icon: '📍', color: '#e11d48' });
     });
 
     it('enqueueFullState queues everything except local settings', async () => {

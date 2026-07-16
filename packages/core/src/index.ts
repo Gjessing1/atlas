@@ -191,3 +191,46 @@ export interface AppVersionResponse {
   apkUrl: string;
   bytes: number;
 }
+
+// ---- Place styling (favorites/pins icons + colors) ----
+
+/**
+ * The colour palette offered for places/pins. Stored on each place as the hex
+ * string itself (rendering stays a trivial `['get','color']`); the palette here
+ * is only what the pickers present. Shared so web and Android show one set.
+ */
+export const PLACE_COLORS = [
+  '#e11d48', // red
+  '#f97316', // orange
+  '#f59e0b', // amber
+  '#16a34a', // green
+  '#0d9488', // teal
+  '#2563eb', // blue
+  '#7c3aed', // violet
+  '#db2777', // pink
+  '#475569', // slate
+] as const;
+
+/** Emoji icons offered for places/pins (stored verbatim as the place's icon). */
+export const PLACE_ICONS = [
+  '📍',
+  '⭐',
+  '🏠',
+  '🏢',
+  '🍽️',
+  '☕',
+  '🏔️',
+  '🏕️',
+  '🏖️',
+  '🅿️',
+  '⛽',
+  '⚠️',
+  '❤️',
+  '🎣',
+  '🚲',
+  '🐟',
+] as const;
+
+/** Defaults for a freshly saved place (also the storage column defaults). */
+export const DEFAULT_PLACE_COLOR = '#e11d48';
+export const DEFAULT_PLACE_ICON = '📍';
