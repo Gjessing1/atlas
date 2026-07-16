@@ -1,0 +1,37 @@
+# Valhalla routing service — Atlas's single routing stack (replaces
+# GraphHopper; same engine runs embedded on Android for offline routing).
+# Independent of CI — bring it up manually on the host:
+#
+#   docker network create atlas        # once; shared with the backend container
+#   docker compose up -d --build       # from this directory
+#
+# First start downloads the Norway extract (unless one is already at
+# /mnt/data/atlas/valhalla/norway.osm.pbf — hardlink it from
+# graphhopper/ or planetiler/sources to skip the download) and builds the
+# routing tiles; tiles persist in /mnt/data/atlas/valhalla. The backend
+# reaches it as http://atlas-valhalla:8002 over the shared network
+# (VALHALLA_URL); 127.0.0.1:8002 is published for local dev and debugging.
+#
+# This host runs ~30 other containers in 15 GiB of RAM: the tile build runs
+# inside the same caps as serving (worst case the build is OOM-killed and
+# retried, never the host).
+services:
+  valhalla:
+    build: .
+    container_name: atlas-valhalla
+    restart: unless-stopped
+    environment:
+      VALHALLA_CONCURRENCY: '2'
+    ports:
+      - '127.0.0.1:8002:8002'
+    volumes:
+      - /mnt/data/atlas/valhalla:/data
+    mem_limit: 6g
+    memswap_limit: 6g
+    cpus: 2
+    networks:
+      - atlas
+
+networks:
+  atlas:
+    external: true

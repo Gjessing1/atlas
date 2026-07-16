@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 # Build an offline region pack for the Android app (Phase 6).
 #
-#   ./build-pack.sh <id> "<Name>" <minLng,minLat,maxLng,maxLat> [--graph-dir <dir>]
+#   ./build-pack.sh <id> "<Name>" <minLng,minLat,maxLng,maxLat>
 #   ./build-pack.sh oslo "Oslo" 10.4,59.7,11.0,60.1
 #
 # Produces <DATA_DIR>/packs/<id>/ containing:
 #   basemap.pmtiles   extracted from the master basemap (tiles/norway.pmtiles)
 #   search.sqlite     FTS5 index of named OSM features (build-search-db.mjs)
-#   graph.zip         GraphHopper graph-cache for the region (offline routing)
+#   valhalla.tar      Valhalla tile extract for the region (offline routing —
+#                     the same engine version the server runs, so offline and
+#                     online routes agree)
 #   assets.zip        map glyphs + sprites (offline labels/icons)
 #   pack.json         manifest served by /api/regions
 #
 # Sources: the master .pmtiles and the Norway .osm.pbf under DATA_DIR (see
-# CLAUDE.md data dir layout). Building the routing graph runs the same
-# GraphHopper image the server uses (infrastructure/graphhopper) in import
-# mode; pass --graph-dir to reuse an existing graph-cache instead.
+# CLAUDE.md data dir layout). Building the routing tiles runs the same
+# Valhalla image the server uses (infrastructure/valhalla) and reuses the
+# server's admins/timezones databases from DATA_DIR/valhalla (bring the
+# server service up once before building packs).
 set -euo pipefail
 
 # This host runs ~30 other containers in 15 GiB of RAM. Every docker step gets
 # a hard memory cap (memory-swap == memory, so no host swap pressure) and a CPU
 # cap; worst case the build container is OOM-killed (exit 137), never the host.
 # The steps whose memory would grow with region size run disk-backed (osmium
-# file index, GraphHopper MMAP_STORE), so bigger regions cost time, not RAM.
+# file index, Valhalla tile build), so bigger regions cost time, not RAM.
 LIMITS=(--memory 4g --memory-swap 4g --cpus 2)
 
 # Refuse to start if the host doesn't have headroom for the capped builds
@@ -35,16 +38,12 @@ fi
 
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 MASTER_PMTILES="$DATA_DIR/tiles/norway.pmtiles"
-MASTER_PBF="$DATA_DIR/graphhopper/norway.osm.pbf"
+MASTER_PBF="$DATA_DIR/valhalla/norway.osm.pbf"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ID="${1:?region id, e.g. oslo}"
 NAME="${2:?region name, e.g. Oslo}"
 BBOX="${3:?bbox as minLng,minLat,maxLng,maxLat}"
-GRAPH_DIR=""
-if [[ "${4:-}" == "--graph-dir" ]]; then
-  GRAPH_DIR="${5:?--graph-dir needs a path}"
-fi
 
 OUT="$DATA_DIR/packs/$ID"
 WORK="$DATA_DIR/packs-build/$ID"
@@ -67,33 +66,35 @@ docker run --rm "${LIMITS[@]}" -v "$WORK:/work" iboates/osmium:latest \
 node "$SCRIPT_DIR/build-search-db.mjs" "$OUT/search.sqlite" "$NAME" < "$WORK/$ID.geojsonseq"
 rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
 
-if [[ -z "$GRAPH_DIR" ]]; then
-  echo "==> [$ID] building GraphHopper graph (import mode)"
-  GRAPH_DIR="$WORK/graph-cache"
-  # The import container runs as root, so stale graph-cache files are
-  # root-owned and a plain host rm can't remove them.
-  docker run --rm -v "$WORK:/work" alpine:latest rm -rf /work/graph-cache
-  # MMAP_STORE keeps the graph on disk during import instead of on the heap:
-  # slower, but import memory no longer scales with region size, so big
-  # regions just take longer rather than needing a bigger cap. It can't be set
-  # via -Ddw.… (Dropwizard nests on the dots inside GH's literal keys), so
-  # generate an import config from the server one.
-  sed '/^graphhopper:/a\  graph.dataaccess.default_type: MMAP_STORE' \
-    "$SCRIPT_DIR/../graphhopper/config.yml" > "$WORK/gh-import.yml"
-  # Run the import directly rather than through the image entrypoint: the
-  # entrypoint ignores CLI args (defaults to downloading all of Norway) and
-  # execs into server mode after importing, which would hang the build.
-  docker run --rm "${LIMITS[@]}" \
-    -v "$WORK:/data" \
-    -v "$DATA_DIR/graphhopper/elevation-cache:/data/elevation-cache" \
-    --entrypoint java \
-    graphhopper-graphhopper:latest \
-    -Xmx3g \
-    -Ddw.graphhopper.datareader.file="/data/$ID.osm.pbf" \
-    -jar /graphhopper/graphhopper.jar import /data/gh-import.yml
-fi
+echo "==> [$ID] building Valhalla routing tiles"
+# Reuse the server's admins/timezones (built by infrastructure/valhalla on
+# first start) — same data source, and skips a shapefile download per pack.
+VALHALLA_MASTER="$DATA_DIR/valhalla"
+for f in admins.sqlite timezones.sqlite; do
+  [[ -f "$VALHALLA_MASTER/$f" ]] || {
+    echo "missing $VALHALLA_MASTER/$f — start infrastructure/valhalla once first." >&2
+    exit 1
+  }
+done
+# Tile builds run as root in the container; clean any stale root-owned dir.
+docker run --rm -v "$WORK:/work" alpine:latest rm -rf /work/valhalla-tiles /work/valhalla.tar
+docker run --rm "${LIMITS[@]}" \
+  -v "$WORK:/work" \
+  -v "$VALHALLA_MASTER:/master:ro" \
+  --entrypoint bash \
+  ghcr.io/valhalla/valhalla:3.8.2 \
+  -c "set -euo pipefail
+      valhalla_build_config \
+        --mjolnir-tile-dir /work/valhalla-tiles \
+        --mjolnir-tile-extract /work/valhalla.tar \
+        --mjolnir-timezone /master/timezones.sqlite \
+        --mjolnir-admin /master/admins.sqlite \
+        --mjolnir-concurrency 2 > /work/valhalla.json
+      valhalla_build_tiles -c /work/valhalla.json /work/$ID.osm.pbf
+      valhalla_build_extract -c /work/valhalla.json -v --overwrite"
+cp "$WORK/valhalla.tar" "$OUT/valhalla.tar"
 
-echo "==> [$ID] zipping graph + assets"
+echo "==> [$ID] zipping assets"
 # No zip binary on the host; python3 stdlib makes an equivalent deflated zip.
 zipdir() { # zipdir <srcdir> <out.zip> [entries…, default all of srcdir]
   python3 - "$@" <<'PY'
@@ -112,7 +113,6 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
                 z.write(full, os.path.relpath(full, src))
 PY
 }
-zipdir "$GRAPH_DIR" "$OUT/graph.zip"
 zipdir "$DATA_DIR/assets" "$OUT/assets.zip" fonts sprites
 
 echo "==> [$ID] writing pack.json"
@@ -130,11 +130,24 @@ writeFileSync(out + '/pack.json', JSON.stringify({
   files: {
     basemap: file('basemap.pmtiles'),
     search: file('search.sqlite'),
-    graph: file('graph.zip'),
+    routing: file('valhalla.tar'),
     assets: file('assets.zip'),
   },
 }, null, 2));
 " "$OUT" "$ID" "$NAME"
+
+echo "==> [$ID] removing stale files"
+# Drop leftovers from earlier builds (e.g. graph.zip from the GraphHopper era)
+# so the pack dir only ever holds what pack.json references.
+for f in "$OUT"/*; do
+  case "$(basename "$f")" in
+    basemap.pmtiles | search.sqlite | valhalla.tar | assets.zip | pack.json) ;;
+    *)
+      echo "    removing stale $(basename "$f")"
+      rm -rf "$f"
+      ;;
+  esac
+done
 
 echo "==> [$ID] done:"
 ls -la "$OUT"

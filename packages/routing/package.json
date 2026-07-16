@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Atlas route planning — GraphHopper requests, alternatives, ETA, waypoint optimization.",
+  "description": "Atlas route planning — Valhalla requests, alternatives, ETA, waypoint optimization.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

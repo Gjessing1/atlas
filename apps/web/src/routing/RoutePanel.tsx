@@ -169,7 +169,11 @@ export function RoutePanel({ route }: { route: RoutePlanner }) {
       {path && (
         <div className="route-stats">
           <strong>{fmtKm(path.distanceM)}</strong> · {fmtDuration(path.timeMs)} · ETA{' '}
-          {fmtEta(path.timeMs)} · ↗ {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+          {fmtEta(path.timeMs)}
+          {/* Valhalla tiles carry no elevation data, so 0/0 means "unknown". */}
+          {path.ascentM > 0 || path.descentM > 0
+            ? ` · ↗ ${Math.round(path.ascentM)} m ↘ ${Math.round(path.descentM)} m`
+            : null}
         </div>
       )}
       {route.paths && route.paths.length > 1 && (

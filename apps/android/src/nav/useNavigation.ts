@@ -1,10 +1,11 @@
 import type { LatLng } from '@atlas/core';
 import { NavigationSession, type NavState } from '@atlas/navigation';
-import { httpRouteProvider, type RoutePath, type RoutingProfile } from '@atlas/routing';
+import { type RoutePath, type RoutingProfile } from '@atlas/routing';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { makeRouteProvider } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locationTask';
 
@@ -31,13 +32,13 @@ export interface NavController {
 /**
  * Drives @atlas/navigation's NavigationSession from live device GPS, speaks its
  * voice prompts (expo-speech), and re-routes when the traveller leaves the line.
- * Routing goes through the online RouteProvider (the server's GraphHopper) —
- * offline on-device routing is deferred (see docs/ROADMAP.md Phase 7). Location
+ * Routing goes through the shared offline-first provider: the embedded Valhalla
+ * engine when a downloaded pack covers the trip, otherwise the server. Location
  * runs under an Android foreground service so guidance survives screen-off.
  */
 export function useNavigation(): NavController {
   const serverOrigin = useServerOrigin();
-  const provider = useMemo(() => httpRouteProvider({ baseUrl: serverOrigin }), [serverOrigin]);
+  const provider = useMemo(() => makeRouteProvider(serverOrigin), [serverOrigin]);
 
   const [phase, setPhase] = useState<NavPhase>('idle');
   const [state, setState] = useState<NavState | null>(null);

@@ -1,15 +1,15 @@
 import type { LatLng } from '@atlas/core';
 import {
-  fetchRoute,
   optimizeWaypointOrder,
   RoutingError,
   type RoutePath,
   type RouteQuery,
   type RoutingProfile,
 } from '@atlas/routing';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useServerOrigin } from '../serverOrigin';
+import { makeRouteProvider } from './offlineRouting';
 
 export interface RouteWaypoint {
   /** Stable identity for markers and list rows across reorders. */
@@ -20,8 +20,9 @@ export interface RouteWaypoint {
 /**
  * Route-planning state for mobile — the counterpart of the web app's useRoute
  * (apps/web/src/routing/useRoute.ts). Waypoints in, routed paths out, debounced
- * auto-refresh. Routing goes to the configured server's GraphHopper (baseUrl =
- * the runtime server origin), the same online provider navigation already uses.
+ * auto-refresh. Routing goes through the shared offline-first provider
+ * (embedded Valhalla when a downloaded pack covers the query, else the
+ * server), the same provider navigation uses.
  */
 export interface RoutePlanner {
   active: boolean;
@@ -55,6 +56,7 @@ export interface RoutePlanner {
 
 export function useRoute(): RoutePlanner {
   const baseUrl = useServerOrigin();
+  const provider = useMemo(() => makeRouteProvider(baseUrl), [baseUrl]);
   const [active, setActive] = useState(false);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [waypoints, setWaypoints] = useState<RouteWaypoint[]>([]);
@@ -98,7 +100,7 @@ export function useRoute(): RoutePlanner {
             alternatives: waypoints.length === 2,
           };
       try {
-        const result = await fetchRoute(query, { baseUrl, signal: controller.signal });
+        const result = await provider.route(query, controller.signal);
         setPaths(result.paths);
         setSelectedPath(0);
         setError(null);
@@ -114,7 +116,7 @@ export function useRoute(): RoutePlanner {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [active, profile, waypoints, roundTrip, roundTripKm, seed, baseUrl]);
+  }, [active, profile, waypoints, roundTrip, roundTripKm, seed, provider]);
 
   const start = useCallback(
     (at?: LatLng) => {

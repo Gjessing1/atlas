@@ -166,8 +166,8 @@ export interface RegionPackManifest {
     basemap?: RegionPackFile;
     /** Offline search database: SQLite with an FTS5 `places` index. */
     search?: RegionPackFile;
-    /** Offline routing graph: zipped GraphHopper graph-cache directory. */
-    graph?: RegionPackFile;
+    /** Offline routing tiles: a Valhalla tile extract (.tar, read in place). */
+    routing?: RegionPackFile;
     /** Map assets (glyphs + sprites) as a zip, for offline label/icon rendering. */
     assets?: RegionPackFile;
   };

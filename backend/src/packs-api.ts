@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
  * Offline content for the Android app (Phase 6):
  *
  * - Region packs: `<dataDir>/packs/<id>/pack.json` manifests plus their files
- *   (basemap.pmtiles, search.sqlite, graph.zip), produced out-of-band by
+ *   (basemap.pmtiles, search.sqlite, valhalla.tar), produced out-of-band by
  *   infrastructure/packs/build-pack.sh. Listed at /api/regions, downloaded
  *   from /packs/<id>/<file> (range requests supported for resume).
  * - App self-update: `<dataDir>/app/version.json` naming the newest .apk in

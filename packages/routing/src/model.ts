@@ -1,7 +1,7 @@
 import type { BBox, LatLng } from '@atlas/core';
 import type { TrackData, TrackPoint } from '@atlas/gpx';
 
-/** Routing profiles served by the self-hosted GraphHopper instance. */
+/** Routing profiles, mapped to Valhalla costing models in the adapter. */
 export type RoutingProfile = 'car' | 'bike' | 'foot' | 'hike';
 
 export interface RoutingProfileInfo {
@@ -11,7 +11,7 @@ export interface RoutingProfileInfo {
   icon: string;
 }
 
-/** All profiles, in display order (must match infrastructure/graphhopper/config.yml). */
+/** All profiles, in display order. */
 export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
   { id: 'car', label: 'Drive', icon: '🚗' },
   { id: 'bike', label: 'Cycle', icon: '🚲' },
@@ -19,12 +19,12 @@ export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
   { id: 'hike', label: 'Hike', icon: '🥾' },
 ];
 
-/** A route request in app terms, decoupled from the GraphHopper wire format. */
+/** A route request in app terms, decoupled from the Valhalla wire format. */
 export interface RouteQuery {
   profile: RoutingProfile;
   /** Waypoints in visiting order. Two or more — except round trips, which take exactly one. */
   points: LatLng[];
-  /** Ask for alternative paths (GraphHopper supports this for 2-point queries only). */
+  /** Ask for alternative paths (Valhalla supports this for 2-point queries only). */
   alternatives?: boolean;
   /** Ask for turn-by-turn instructions (needed for navigation; off by default). */
   instructions?: boolean;
@@ -37,9 +37,10 @@ export interface RouteQuery {
 }
 
 /**
- * One turn-by-turn maneuver along a path. `sign` follows GraphHopper's turn
- * codes (…-2 left, -1 slight left, 0 continue, 1 slight right, 2 right…;
- * 4 = finish, 5 = via reached, 6 = roundabout). `interval` is the inclusive
+ * One turn-by-turn maneuver along a path. `sign` is Atlas's turn code
+ * (numbering inherited from GraphHopper: …-2 left, -1 slight left, 0 continue,
+ * 1 slight right, 2 right…; 4 = finish, 5 = via reached, 6 = roundabout,
+ * ±7 keep right/left, ±8 u-turn). `interval` is the inclusive
  * `[start, end]` index range into `RoutePath.points` that this maneuver spans —
  * the turn itself happens at `points[start]`.
  */

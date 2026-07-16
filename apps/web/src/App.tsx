@@ -263,7 +263,12 @@ export function App() {
           onClose={() => setSidebarOpen(false)}
         />
       )}
-      {routePath && routeTrackData && !routeProfileHidden ? (
+      {/* Valhalla routes carry no elevation data — skip the profile rather
+          than draw an empty chart. */}
+      {routePath &&
+      routeTrackData &&
+      !routeProfileHidden &&
+      routePath.points.some((p) => p.ele !== undefined) ? (
         <ElevationProfile
           title="Planned route"
           stats={{

@@ -51,8 +51,9 @@ export type PackProgress = (fraction: number) => void;
 
 /**
  * Download every file of a pack into its directory, unzipping archives
- * (assets, routing graph) as they land. pack.json is written only after
- * everything succeeded — a crash mid-download leaves no phantom pack.
+ * (assets) as they land — the Valhalla routing tar is read in place, no
+ * unpacking. pack.json is written only after everything succeeded — a crash
+ * mid-download leaves no phantom pack.
  */
 export async function downloadPack(
   manifest: RegionPackManifest,
@@ -80,7 +81,7 @@ export async function downloadPack(
     doneBytes += file.bytes;
     onProgress(doneBytes / totalBytes);
     if (file.path.endsWith('.zip')) {
-      // assets.zip → <dir>/assets/…, graph.zip → <dir>/graph/…
+      // assets.zip → <dir>/assets/…
       const targetDir = kind === 'assets' ? `${dir}/assets` : `${dir}/${kind}`;
       await unzip(uriToPath(target), uriToPath(targetDir));
       await FileSystem.deleteAsync(target, { idempotent: true });

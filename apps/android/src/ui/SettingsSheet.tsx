@@ -14,6 +14,7 @@ import {
 
 import type { LocalPack } from '../regions/packs';
 import { deletePack, downloadPack, fetchAvailableRegions } from '../regions/packs';
+import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
@@ -163,6 +164,9 @@ function RegionsSection({
 
   const remove = useCallback(
     async (id: string) => {
+      // The routing engine may hold this pack's tile extract open (mmap) —
+      // release it before deleting the files under it.
+      await closeEngine().catch(() => undefined);
       await deletePack(id);
       onPacksChanged();
     },
