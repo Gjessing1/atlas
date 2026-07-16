@@ -13,7 +13,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 
 import type { LatLng } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
-import { SERVER_ORIGIN } from './src/config';
+import { hydrateServerOrigin, useServerOrigin } from './src/serverOrigin';
 import {
   buildOfflineStyle,
   buildOnlineStyle,
@@ -52,9 +52,11 @@ function routeToGeoJSON(coords: number[][]) {
 function AppInner() {
   const insets = useSafeAreaInsets();
   const data = useUserData();
+  const serverOrigin = useServerOrigin();
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
 
+  const [originReady, setOriginReady] = useState(false);
   const [template, setTemplate] = useState<string | null>(null);
   const [serverUp, setServerUp] = useState<boolean | null>(null);
   const [packs, setPacks] = useState<LocalPack[]>([]);
@@ -71,13 +73,22 @@ function AppInner() {
     void listLocalPacks().then(setPacks);
   }, []);
 
+  // Load the persisted server override before any server request fires, so the
+  // first health check / style fetch already targets the configured server.
   useEffect(() => {
+    if (!data.storage) return;
+    void hydrateServerOrigin(data.storage).finally(() => setOriginReady(true));
+  }, [data.storage]);
+
+  useEffect(() => {
+    if (!originReady) return;
+    setServerUp(null);
     void loadStyleTemplate().then(setTemplate);
-    fetch(`${SERVER_ORIGIN}/api/health`, { signal: AbortSignal.timeout(4000) })
+    fetch(`${serverOrigin}/api/health`, { signal: AbortSignal.timeout(4000) })
       .then((res) => setServerUp(res.ok))
       .catch(() => setServerUp(false));
     refreshPacks();
-  }, [refreshPacks]);
+  }, [originReady, serverOrigin, refreshPacks]);
 
   // Offline first: local pack when the server is unreachable (or forced);
   // otherwise the server-hosted style. Fallback keeps the map usable bare.
@@ -97,7 +108,7 @@ function AppInner() {
     });
   }, []);
 
-  if (data.status === 'loading' || mapStyle === null) {
+  if (data.status === 'loading' || !originReady || mapStyle === null) {
     return (
       <View style={styles.loading}>
         <Text>Loading map…</Text>
@@ -227,6 +238,7 @@ function AppInner() {
         sync={sync}
         packs={packs}
         onPacksChanged={refreshPacks}
+        storage={data.storage}
       />
       <StatusBar style="auto" />
     </View>

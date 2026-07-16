@@ -3,7 +3,7 @@ import * as Application from 'expo-application';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking } from 'react-native';
 
-import { SERVER_ORIGIN } from '../config';
+import { useServerOrigin } from '../serverOrigin';
 
 export interface AppUpdateState {
   /** Installed versionName/versionCode, for display. */
@@ -20,11 +20,12 @@ export interface AppUpdateState {
  * when the server has a build with a higher versionCode than this install.
  */
 export function useAppUpdate(): AppUpdateState {
+  const serverOrigin = useServerOrigin();
   const [update, setUpdate] = useState<AppVersionResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${SERVER_ORIGIN}/api/app/version`, { signal: AbortSignal.timeout(5000) })
+    fetch(`${serverOrigin}/api/app/version`, { signal: AbortSignal.timeout(5000) })
       .then((res) => (res.ok ? (res.json() as Promise<AppVersionResponse>) : null))
       .then((info) => {
         if (cancelled || !info) return;
@@ -35,11 +36,11 @@ export function useAppUpdate(): AppUpdateState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [serverOrigin]);
 
   const download = useCallback(() => {
-    if (update) void Linking.openURL(`${SERVER_ORIGIN}${update.apkUrl}`);
-  }, [update]);
+    if (update) void Linking.openURL(`${serverOrigin}${update.apkUrl}`);
+  }, [update, serverOrigin]);
 
   return {
     current: `${Application.nativeApplicationVersion ?? '?'} (${Application.nativeBuildVersion ?? '?'})`,

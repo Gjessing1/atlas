@@ -2,7 +2,7 @@ import type { RegionPackFile, RegionPackManifest, RegionsResponse } from '@atlas
 import * as FileSystem from 'expo-file-system/legacy';
 import { unzip } from 'react-native-zip-archive';
 
-import { SERVER_ORIGIN } from '../config';
+import { getServerOrigin } from '../serverOrigin';
 
 /** file:// URI of the directory holding one downloaded pack per subdirectory. */
 export const PACKS_DIR = `${FileSystem.documentDirectory}packs/`;
@@ -39,7 +39,9 @@ export async function listLocalPacks(): Promise<LocalPack[]> {
 }
 
 export async function fetchAvailableRegions(): Promise<RegionPackManifest[]> {
-  const res = await fetch(`${SERVER_ORIGIN}/api/regions`, { signal: AbortSignal.timeout(5000) });
+  const res = await fetch(`${getServerOrigin()}/api/regions`, {
+    signal: AbortSignal.timeout(5000),
+  });
   if (!res.ok) throw new Error(`regions: HTTP ${res.status}`);
   const body = (await res.json()) as RegionsResponse;
   return body.regions;
@@ -66,7 +68,7 @@ export async function downloadPack(
   let doneBytes = 0;
 
   for (const [kind, file] of entries) {
-    const url = `${SERVER_ORIGIN}/packs/${manifest.id}/${file.path}`;
+    const url = `${getServerOrigin()}/packs/${manifest.id}/${file.path}`;
     const target = `${dir}/${file.path}`;
     const download = FileSystem.createDownloadResumable(url, target, {}, (p) => {
       onProgress((doneBytes + p.totalBytesWritten) / totalBytes);

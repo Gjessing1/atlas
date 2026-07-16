@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { SERVER_ORIGIN } from '../config';
+import { useServerOrigin } from '../serverOrigin';
 import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locationTask';
 
 export type NavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
@@ -38,7 +38,8 @@ export interface NavController {
  * runs under an Android foreground service so guidance survives screen-off.
  */
 export function useNavigation(): NavController {
-  const provider = useMemo(() => httpRouteProvider({ baseUrl: SERVER_ORIGIN }), []);
+  const serverOrigin = useServerOrigin();
+  const provider = useMemo(() => httpRouteProvider({ baseUrl: serverOrigin }), [serverOrigin]);
 
   const [phase, setPhase] = useState<NavPhase>('idle');
   const [state, setState] = useState<NavState | null>(null);

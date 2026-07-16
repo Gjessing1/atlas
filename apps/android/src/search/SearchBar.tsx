@@ -2,8 +2,8 @@ import type { SearchResult } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { SERVER_ORIGIN } from '../config';
 import type { LocalPack } from '../regions/packs';
+import { getServerOrigin } from '../serverOrigin';
 import { searchOffline } from './offlineSearch';
 
 /**
@@ -34,7 +34,7 @@ export function SearchBar({
       let found: SearchResult[] = [];
       let usedOffline = false;
       try {
-        const res = await fetch(`${SERVER_ORIGIN}/api/search?q=${encodeURIComponent(text)}`, {
+        const res = await fetch(`${getServerOrigin()}/api/search?q=${encodeURIComponent(text)}`, {
           signal: AbortSignal.timeout(4000),
         });
         if (!res.ok) throw new Error(`search: HTTP ${res.status}`);

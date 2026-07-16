@@ -4,7 +4,7 @@ import { SyncEngine, SyncError } from '@atlas/sync';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { SERVER_ORIGIN } from '../config';
+import { useServerOrigin } from '../serverOrigin';
 
 /** JWT session, persisted in a local-only setting (never synced). */
 const SESSION_SETTING = 'local.sync.session';
@@ -45,6 +45,7 @@ export function useSync(
   /** Bump on any local mutation to schedule a debounced push. */
   changeToken: unknown,
 ): SyncState {
+  const serverOrigin = useServerOrigin();
   const [available, setAvailable] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -59,7 +60,8 @@ export function useSync(
   // Probe the server's sync capability (mirrors the web Account panel).
   useEffect(() => {
     let cancelled = false;
-    fetch(`${SERVER_ORIGIN}/api/health`, { signal: AbortSignal.timeout(5000) })
+    setAvailable(null);
+    fetch(`${serverOrigin}/api/health`, { signal: AbortSignal.timeout(5000) })
       .then((res) => res.json())
       .then((health: { sync?: boolean }) => {
         if (!cancelled) setAvailable(health.sync === true);
@@ -70,7 +72,7 @@ export function useSync(
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [serverOrigin]);
 
   // Restore the persisted session once storage is open.
   useEffect(() => {
@@ -100,11 +102,11 @@ export function useSync(
       storage
         ? new SyncEngine({
             storage,
-            baseUrl: SERVER_ORIGIN,
+            baseUrl: serverOrigin,
             getToken: () => sessionRef.current?.token ?? null,
           })
         : null,
-    [storage],
+    [storage, serverOrigin],
   );
 
   const doSync = useCallback(() => {
@@ -138,7 +140,7 @@ export function useSync(
       let res: Response;
       try {
         res = await fetch(
-          `${SERVER_ORIGIN}/api/auth/${mode === 'register' ? 'register' : 'login'}`,
+          `${serverOrigin}/api/auth/${mode === 'register' ? 'register' : 'login'}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -168,7 +170,7 @@ export function useSync(
       doSync();
       return null;
     },
-    [storage, engine, doSync],
+    [storage, engine, doSync, serverOrigin],
   );
 
   const signOut = useCallback(() => {

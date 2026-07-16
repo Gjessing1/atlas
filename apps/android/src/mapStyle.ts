@@ -1,7 +1,7 @@
 import { resolveStyleTemplate } from '@atlas/core';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { SERVER_ORIGIN } from './config';
+import { getServerOrigin } from './serverOrigin';
 
 // Self-hosted style template written by infrastructure/tiles/fetch-map-assets.sh,
 // served by the backend; same template the web app uses (see apps/web MapView).
@@ -26,7 +26,7 @@ async function readCachedTemplate(): Promise<string | null> {
  */
 export async function loadStyleTemplate(): Promise<string | null> {
   try {
-    const res = await fetch(`${SERVER_ORIGIN}${STYLE_TEMPLATE_PATH}`, {
+    const res = await fetch(`${getServerOrigin()}${STYLE_TEMPLATE_PATH}`, {
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) throw new Error(`style template: HTTP ${res.status}`);
@@ -40,7 +40,7 @@ export async function loadStyleTemplate(): Promise<string | null> {
 
 /** Online style: template with {origin} pointed at the Atlas server. */
 export function buildOnlineStyle(template: string): string {
-  return resolveStyleTemplate(template, SERVER_ORIGIN);
+  return resolveStyleTemplate(template, getServerOrigin());
 }
 
 /**

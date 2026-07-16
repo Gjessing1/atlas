@@ -1,4 +1,5 @@
 import type { RegionPackManifest } from '@atlas/core';
+import type { AtlasStorage } from '@atlas/storage';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,6 +14,7 @@ import {
 
 import type { LocalPack } from '../regions/packs';
 import { deletePack, downloadPack, fetchAvailableRegions } from '../regions/packs';
+import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
 
@@ -219,6 +221,72 @@ function RegionsSection({
   );
 }
 
+function ServerSection({ storage }: { storage: AtlasStorage | null }) {
+  const origin = useServerOrigin();
+  const [draft, setDraft] = useState(origin);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // Keep the field in step with the live origin when it isn't being edited
+  // (e.g. after hydration, or a reset).
+  useEffect(() => {
+    setDraft(origin);
+  }, [origin]);
+
+  const save = useCallback(async () => {
+    if (!storage) return;
+    const problem = await setServerOrigin(storage, draft);
+    setMessage(problem ?? 'Saved — reconnecting to the new server.');
+  }, [storage, draft]);
+
+  const reset = useCallback(async () => {
+    if (!storage) return;
+    await setServerOrigin(storage, '');
+    setMessage('Reset to the default server.');
+  }, [storage]);
+
+  const dirty = draft.trim().replace(/\/+$/, '') !== origin;
+  const isDefault = origin === defaultServerOrigin();
+
+  return (
+    <View>
+      <TextInput
+        style={styles.input}
+        placeholder={defaultServerOrigin()}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        value={draft}
+        onChangeText={(t) => {
+          setDraft(t);
+          setMessage(null);
+        }}
+        testID="server-origin"
+      />
+      {message ? <Text style={styles.muted}>{message}</Text> : null}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[styles.button, !storage || !dirty ? styles.buttonDisabled : null]}
+          disabled={!storage || !dirty}
+          onPress={() => void save()}
+          testID="server-save"
+        >
+          <Text style={styles.buttonText}>Save</Text>
+        </Pressable>
+        {!isDefault ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            disabled={!storage}
+            onPress={() => void reset()}
+            testID="server-reset"
+          >
+            <Text style={styles.buttonQuietText}>Reset to default</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 function UpdateSection() {
   const { current, update, download } = useAppUpdate();
   return (
@@ -245,12 +313,14 @@ export function SettingsSheet({
   sync,
   packs,
   onPacksChanged,
+  storage,
 }: {
   visible: boolean;
   onClose: () => void;
   sync: SyncState;
   packs: LocalPack[];
   onPacksChanged: () => void;
+  storage: AtlasStorage | null;
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -261,6 +331,8 @@ export function SettingsSheet({
             <AccountSection sync={sync} />
             <Text style={styles.heading}>Offline regions</Text>
             <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
+            <Text style={styles.heading}>Server</Text>
+            <ServerSection storage={storage} />
             <Text style={styles.heading}>App</Text>
             <UpdateSection />
           </ScrollView>
@@ -307,6 +379,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   buttonText: { color: '#fff', fontWeight: '600' },
+  buttonDisabled: { opacity: 0.5 },
   buttonQuiet: { backgroundColor: '#eef1f6' },
   buttonQuietText: { color: '#334', fontWeight: '600' },
   regionRow: {
