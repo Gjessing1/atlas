@@ -158,6 +158,10 @@ export function Sidebar({
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
 
+  // "Show all" appears once anything is hidden; otherwise the button hides all.
+  const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);
+  const hasItems = data.places.length + data.collections.length > 0;
+
   const onImportFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setImporting(true);
@@ -174,8 +178,15 @@ export function Sidebar({
   const placeRow = (place: PlaceRecord) => {
     const key = `place:${place.id}`;
     return (
-      <li key={key} className="item-row">
+      <li key={key} className={`item-row${place.visible ? '' : ' hidden'}`}>
         <div className="item-line">
+          <input
+            type="checkbox"
+            checked={place.visible}
+            title="Show on map"
+            aria-label={`Show ${place.name} on map`}
+            onChange={(e) => void data.updatePlace(place.id, { visible: e.target.checked })}
+          />
           <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
             {place.icon}
           </span>
@@ -284,8 +295,15 @@ export function Sidebar({
     return (
       <ul className="item-list" style={depth > 0 ? { paddingLeft: 14 } : undefined}>
         {folders.map((folder) => (
-          <li key={folder.id} className="folder-row">
+          <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
             <div className="item-line">
+              <input
+                type="checkbox"
+                checked={folder.visible}
+                title="Show folder on map"
+                aria-label={`Show folder ${folder.name} on map`}
+                onChange={(e) => void data.setCollectionVisible(folder.id, e.target.checked)}
+              />
               <span className="item-icon">📁</span>
               <span className="folder-name">{folder.name}</span>
               <button
@@ -350,6 +368,14 @@ export function Sidebar({
             disabled={data.status !== 'ready'}
           >
             Export all
+          </button>
+          <button
+            type="button"
+            onClick={() => void data.setAllVisible(anyHidden)}
+            disabled={data.status !== 'ready' || !hasItems}
+            title={anyHidden ? 'Show all places and folders' : 'Hide all places and folders'}
+          >
+            {anyHidden ? 'Show all' : 'Hide all'}
           </button>
           <button
             type="button"

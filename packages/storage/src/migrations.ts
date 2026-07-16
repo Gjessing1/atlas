@@ -61,6 +61,13 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE places ADD COLUMN icon TEXT NOT NULL DEFAULT '📍';
   ALTER TABLE places ADD COLUMN color TEXT NOT NULL DEFAULT '#e11d48';
   `,
+  // Visibility toggles: hide/show individual places and whole folders on the
+  // map. A place is drawn only when its own flag and every ancestor folder are
+  // visible (see @atlas/core placeIsVisible). Existing rows default to shown.
+  `
+  ALTER TABLE places ADD COLUMN visible INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE collections ADD COLUMN visible INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 /** Bring the database up to the latest schema version. */

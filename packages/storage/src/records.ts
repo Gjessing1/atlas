@@ -3,6 +3,8 @@ export interface CollectionRecord {
   id: string;
   name: string;
   parentId: string | null;
+  /** Whether this folder (and its places) is drawn on the map; hides its subtree when off. */
+  visible: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -20,6 +22,8 @@ export interface PlaceRecord {
   icon: string;
   /** Marker colour as a hex string (see @atlas/core PLACE_COLORS). */
   color: string;
+  /** Whether the pin is drawn on the map (its folder may still hide it — see @atlas/core placeIsVisible). */
+  visible: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -69,6 +73,12 @@ export interface PlacePatch {
   tags?: string[];
   icon?: string;
   color?: string;
+  visible?: boolean;
+}
+
+/** Editable fields of a folder (name via renameCollection; visibility here). */
+export interface CollectionPatch {
+  visible?: boolean;
 }
 
 export interface TrackPatch {

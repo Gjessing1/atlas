@@ -1,9 +1,11 @@
 import {
   APP_NAME,
   decodeMapHash,
+  placeIsVisible,
   type LatLng,
   type MapViewState,
   type SearchResult,
+  type VisibilityFolder,
 } from '@atlas/core';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { routePathToTrackData } from '@atlas/routing';
@@ -53,6 +55,16 @@ export function App() {
   useEffect(() => {
     if (route.active) setRouteProfileHidden(false);
   }, [route.active]);
+
+  // Only draw places that are effectively visible — their own toggle on and no
+  // ancestor folder hidden (@atlas/core placeIsVisible). The Sidebar still lists
+  // every place so hidden ones can be shown again.
+  const visiblePlaces = useMemo(() => {
+    const folders = new Map<string, VisibilityFolder>(
+      userData.collections.map((c) => [c.id, { parentId: c.parentId, visible: c.visible }]),
+    );
+    return userData.places.filter((p) => placeIsVisible(p, folders));
+  }, [userData.places, userData.collections]);
 
   const routePath = route.active ? route.paths?.[route.selectedPath] : undefined;
   const routeTrackData = useMemo(
@@ -206,7 +218,7 @@ export function App() {
       <MapView
         initialView={initialView}
         pin={pin}
-        places={userData.places}
+        places={visiblePlaces}
         onPinChange={setPin}
         onSavePin={onSavePin}
         onMapReady={(m) => {

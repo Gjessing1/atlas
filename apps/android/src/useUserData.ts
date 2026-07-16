@@ -1,4 +1,11 @@
-import type { AtlasStorage, NewPlace, NewTrack, PlacePatch, PlaceRecord } from '@atlas/storage';
+import type {
+  AtlasStorage,
+  CollectionRecord,
+  NewPlace,
+  NewTrack,
+  PlacePatch,
+  PlaceRecord,
+} from '@atlas/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { openStorage } from './db';
@@ -7,6 +14,8 @@ export interface UserData {
   status: 'loading' | 'ready' | 'error';
   error: string | null;
   places: PlaceRecord[];
+  /** Folders — used to resolve a place's effective map visibility (folders can hide their contents). */
+  collections: CollectionRecord[];
   /** The open storage (null until ready) — for wiring the sync engine only. */
   storage: AtlasStorage | null;
   /** Reload from storage, e.g. after sync applied remote changes. */
@@ -26,13 +35,16 @@ export function useUserData(): UserData {
   const [status, setStatus] = useState<UserData['status']>('loading');
   const [error, setError] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceRecord[]>([]);
+  const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const storageRef = useRef<AtlasStorage | null>(null);
   const [storage, setStorage] = useState<AtlasStorage | null>(null);
 
   const refreshAll = useCallback(async () => {
     const s = storageRef.current;
     if (!s) return;
-    setPlaces(await s.listPlaces());
+    const [p, c] = await Promise.all([s.listPlaces(), s.listCollections()]);
+    setPlaces(p);
+    setCollections(c);
   }, []);
 
   useEffect(() => {
@@ -42,7 +54,9 @@ export function useUserData(): UserData {
         if (cancelled) return;
         storageRef.current = s;
         setStorage(s);
-        setPlaces(await s.listPlaces());
+        const [p, c] = await Promise.all([s.listPlaces(), s.listCollections()]);
+        setPlaces(p);
+        setCollections(c);
         setStatus('ready');
       })
       .catch((err: unknown) => {
@@ -89,6 +103,7 @@ export function useUserData(): UserData {
     status,
     error,
     places,
+    collections,
     storage,
     refreshAll,
     savePlace,

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   bboxContains,
+  collectionIsVisible,
   decodeMapHash,
   encodeMapHash,
   photonFeatureToSearchResult,
+  placeIsVisible,
   resolveStyleTemplate,
   type BBox,
   type PhotonFeature,
+  type VisibilityFolder,
 } from './index.js';
 
 describe('map hash', () => {
@@ -112,5 +115,41 @@ describe('bboxContains', () => {
 
   it('includes the boundary', () => {
     expect(bboxContains(norway, { lat: 57.9, lng: 4.5 })).toBe(true);
+  });
+});
+
+describe('place / folder visibility', () => {
+  // root (visible) → sub (visible); away (hidden)
+  const folders = new Map<string, VisibilityFolder>([
+    ['root', { parentId: null, visible: true }],
+    ['sub', { parentId: 'root', visible: true }],
+    ['away', { parentId: null, visible: false }],
+    ['under-away', { parentId: 'away', visible: true }],
+  ]);
+
+  it('shows a place whose own flag and folder chain are all visible', () => {
+    expect(placeIsVisible({ visible: true, collectionId: 'sub' }, folders)).toBe(true);
+    expect(placeIsVisible({ visible: true, collectionId: null }, folders)).toBe(true);
+  });
+
+  it('hides a place with its own flag off regardless of folder', () => {
+    expect(placeIsVisible({ visible: false, collectionId: 'root' }, folders)).toBe(false);
+  });
+
+  it('hides a place when an ancestor folder is hidden', () => {
+    expect(placeIsVisible({ visible: true, collectionId: 'away' }, folders)).toBe(false);
+    expect(placeIsVisible({ visible: true, collectionId: 'under-away' }, folders)).toBe(false);
+  });
+
+  it('treats a dangling parent id as visible', () => {
+    expect(collectionIsVisible('ghost', folders)).toBe(true);
+  });
+
+  it('does not loop on a cyclic parent chain', () => {
+    const cyclic = new Map<string, VisibilityFolder>([
+      ['a', { parentId: 'b', visible: true }],
+      ['b', { parentId: 'a', visible: true }],
+    ]);
+    expect(collectionIsVisible('a', cyclic)).toBe(true);
   });
 });

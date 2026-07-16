@@ -25,8 +25,8 @@ export function FavoritesSheet({
   places: PlaceRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
-  /** Patch a place's name/icon/colour (auto-saved + synced, same as the web panel). */
-  onPatch: (id: string, patch: Pick<PlacePatch, 'name' | 'icon' | 'color'>) => void;
+  /** Patch a place's name/icon/colour/visibility (auto-saved + synced, same as the web panel). */
+  onPatch: (id: string, patch: Pick<PlacePatch, 'name' | 'icon' | 'color' | 'visible'>) => void;
   onDelete: (id: string) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
@@ -48,13 +48,20 @@ export function FavoritesSheet({
             <ScrollView>
               {places.map((place) => (
                 <View key={place.id}>
-                  <View style={styles.row}>
+                  <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
                     <Pressable
                       style={[styles.badge, { backgroundColor: place.color }]}
                       onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
                       testID={`favorite-style-${place.id}`}
                     >
                       <Text style={styles.badgeIcon}>{place.icon}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.eyeButton}
+                      onPress={() => onPatch(place.id, { visible: !place.visible })}
+                      testID={`favorite-visible-${place.id}`}
+                    >
+                      <Text style={styles.eyeText}>{place.visible ? '👁' : '🚫'}</Text>
                     </Pressable>
                     <Pressable
                       style={styles.rowMain}
@@ -161,6 +168,9 @@ const styles = StyleSheet.create({
   heading: { fontSize: 15, fontWeight: '700', color: '#334', marginBottom: 10 },
   muted: { fontSize: 13, color: '#778', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  rowHidden: { opacity: 0.45 },
+  eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
+  eyeText: { fontSize: 18 },
   badge: {
     width: 34,
     height: 34,

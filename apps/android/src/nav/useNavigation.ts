@@ -10,23 +10,21 @@ import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locat
 
 export type NavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
 
-/** Speak a voice prompt, never letting a TTS engine error interrupt navigation. */
-function speak(text: string): void {
-  try {
-    Speech.speak(text);
-  } catch (err) {
-    console.warn('tts failed', err);
-  }
-}
-
 export interface NavController {
   phase: NavPhase;
   state: NavState | null;
   /** Active route geometry as [lng, lat] pairs, for the map line source. */
   routeCoords: number[][];
   profile: RoutingProfile;
+  /** Where the trip is headed (for the finish marker); null when idle. */
+  destination: LatLng | null;
+  /** Latest ground speed in m/s, or null when unknown/stationary. */
+  speedMps: number | null;
+  /** Whether voice prompts are muted. */
+  muted: boolean;
   error: string | null;
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
+  toggleMute: () => void;
   stop: () => void;
 }
 
@@ -45,12 +43,36 @@ export function useNavigation(): NavController {
   const [state, setState] = useState<NavState | null>(null);
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
   const [profile, setProfile] = useState<RoutingProfile>('car');
+  const [destination, setDestination] = useState<LatLng | null>(null);
+  const [speedMps, setSpeedMps] = useState<number | null>(null);
+  const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
   const destRef = useRef<LatLng | null>(null);
   const profileRef = useRef<RoutingProfile>('car');
   const rerouteInFlight = useRef(false);
+  // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
+  const mutedRef = useRef(false);
+
+  /** Speak a voice prompt, unless muted; never let a TTS error interrupt navigation. */
+  const speak = useCallback((text: string): void => {
+    if (mutedRef.current) return;
+    try {
+      Speech.speak(text);
+    } catch (err) {
+      console.warn('tts failed', err);
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setMuted((m) => {
+      const next = !m;
+      mutedRef.current = next;
+      if (next) Speech.stop();
+      return next;
+    });
+  }, []);
 
   const fetchPath = useCallback(
     async (origin: LatLng, destination: LatLng, prof: RoutingProfile): Promise<RoutePath> => {
@@ -80,7 +102,11 @@ export function useNavigation(): NavController {
       destRef.current = null;
       rerouteInFlight.current = false;
       setRouteCoords([]);
-      if (!arrived) setState(null);
+      setSpeedMps(null);
+      if (!arrived) {
+        setState(null);
+        setDestination(null);
+      }
       setPhase(arrived ? 'arrived' : 'idle');
     },
     [stopUpdates],
@@ -114,6 +140,7 @@ export function useNavigation(): NavController {
       try {
         const { state: next, prompts } = session.update(fix, Date.now());
         setState(next);
+        setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
         for (const prompt of prompts) speak(prompt.text);
         if (next.status === 'arrived') {
           speak('You have arrived');
@@ -125,7 +152,7 @@ export function useNavigation(): NavController {
         console.warn('navigation fix failed', err);
       }
     },
-    [reroute, stop],
+    [reroute, stop, speak],
   );
 
   const start = useCallback(
@@ -145,6 +172,8 @@ export function useNavigation(): NavController {
         destRef.current = destination;
         profileRef.current = prof;
         setProfile(prof);
+        setDestination(destination);
+        setSpeedMps(null);
 
         const path = await fetchPath(origin, destination, prof);
         sessionRef.current = new NavigationSession(path);
@@ -169,6 +198,7 @@ export function useNavigation(): NavController {
         setLocationHandler(null);
         sessionRef.current = null;
         destRef.current = null;
+        setDestination(null);
         setError(err instanceof Error ? err.message : String(err));
         setPhase('error');
       }
@@ -179,5 +209,17 @@ export function useNavigation(): NavController {
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);
 
-  return { phase, state, routeCoords, profile, error, start, stop: () => stop(false) };
+  return {
+    phase,
+    state,
+    routeCoords,
+    profile,
+    destination,
+    speedMps,
+    muted,
+    error,
+    start,
+    toggleMute,
+    stop: () => stop(false),
+  };
 }

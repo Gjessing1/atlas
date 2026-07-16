@@ -247,6 +247,14 @@ body {
   border-radius: 6px;
 }
 
+/* Hidden-from-map places/folders: dim the label but keep the toggle crisp. */
+.item-row.hidden > .item-line > .item-name,
+.item-row.hidden > .item-line > .item-icon,
+.folder-row.hidden > .item-line > .folder-name,
+.folder-row.hidden > .item-line > .item-icon {
+  opacity: 0.45;
+}
+
 .item-line {
   display: flex;
   align-items: center;

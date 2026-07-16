@@ -57,6 +57,21 @@ describe('AtlasStorage', () => {
     expect(await storage.listPlaces()).toEqual([]);
   });
 
+  it('defaults places and folders to visible and toggles them', async () => {
+    const folder = await storage.createCollection('F');
+    const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+    expect(place.visible).toBe(true);
+    expect(folder.visible).toBe(true);
+
+    await storage.updatePlace(place.id, { visible: false });
+    expect((await storage.listPlaces())[0]!.visible).toBe(false);
+
+    await storage.setCollectionVisible(folder.id, false);
+    expect((await storage.listCollections())[0]!.visible).toBe(false);
+    await storage.setCollectionVisible(folder.id, true);
+    expect((await storage.listCollections())[0]!.visible).toBe(true);
+  });
+
   it('supports moving a place to a collection and back to root', async () => {
     const collection = await storage.createCollection('Hikes');
     const place = await storage.createPlace({ name: 'A', lat: 1, lng: 2 });
@@ -249,6 +264,42 @@ describe('AtlasStorage', () => {
       });
       const legacy = (await storage.listPlaces()).find((p) => p.id === 'remote-place');
       expect(legacy).toMatchObject({ icon: '📍', color: '#e11d48' });
+    });
+
+    it('round-trips place/folder visibility through sync payloads', async () => {
+      const folder = await storage.createCollection('F');
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await storage.updatePlace(place.id, { visible: false });
+      await storage.setCollectionVisible(folder.id, false);
+
+      expect((await storage.readSyncRecord('place', place.id))!.data).toMatchObject({
+        visible: false,
+      });
+      expect((await storage.readSyncRecord('collection', folder.id))!.data).toMatchObject({
+        visible: false,
+      });
+
+      // A remote change with visible:false applies; a legacy one (no field) shows.
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'remote-hidden',
+        updatedAt: 5,
+        deleted: false,
+        data: { name: 'Hidden', lat: 3, lng: 4, visible: false, createdAt: 4 },
+      });
+      await storage.applyRemoteChange({
+        entity: 'collection',
+        id: 'remote-folder',
+        updatedAt: 5,
+        deleted: false,
+        data: { name: 'Legacy', createdAt: 4 },
+      });
+      expect((await storage.listPlaces()).find((p) => p.id === 'remote-hidden')!.visible).toBe(
+        false,
+      );
+      expect((await storage.listCollections()).find((c) => c.id === 'remote-folder')!.visible).toBe(
+        true,
+      );
     });
 
     it('enqueueFullState queues everything except local settings', async () => {

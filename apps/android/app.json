@@ -3,13 +3,13 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.4.1",
+    "version": "0.6.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 8,
+      "versionCode": 10,
       "permissions": ["android.permission.RECEIVE_BOOT_COMPLETED"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

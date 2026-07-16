@@ -45,6 +45,7 @@ function rowToCollection(r: SqlRow): CollectionRecord {
     id: String(r['id']),
     name: String(r['name']),
     parentId: r['parent_id'] === null ? null : String(r['parent_id']),
+    visible: r['visible'] == null ? true : Number(r['visible']) !== 0,
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -61,6 +62,7 @@ function rowToPlace(r: SqlRow): PlaceRecord {
     tags: parseTags(r['tags']),
     icon: r['icon'] == null ? DEFAULT_PLACE_ICON : String(r['icon']),
     color: r['color'] == null ? DEFAULT_PLACE_COLOR : String(r['color']),
+    visible: r['visible'] == null ? true : Number(r['visible']) !== 0,
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -110,15 +112,19 @@ export class AtlasStorage {
       id: crypto.randomUUID(),
       name,
       parentId,
+      visible: true,
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query('INSERT INTO collections VALUES (?, ?, ?, ?, ?)', [
+    // Column order matches the collections table incl. the migration-appended
+    // `visible` (id, name, parent_id, created_at, updated_at, visible).
+    await this.driver.query('INSERT INTO collections VALUES (?, ?, ?, ?, ?, ?)', [
       record.id,
       record.name,
       record.parentId,
       record.createdAt,
       record.updatedAt,
+      record.visible ? 1 : 0,
     ]);
     await this.enqueue('collection', record.id, 'upsert', now);
     return record;
@@ -132,6 +138,11 @@ export class AtlasStorage {
       id,
     ]);
     await this.enqueue('collection', id, 'upsert', now);
+  }
+
+  /** Show or hide a folder (and, via effective visibility, everything under it). */
+  async setCollectionVisible(id: string, visible: boolean): Promise<void> {
+    await this.applyPatch('collections', 'collection', id, { visible: visible ? 1 : 0 });
   }
 
   /**
@@ -187,13 +198,14 @@ export class AtlasStorage {
       tags: input.tags ?? [],
       icon: input.icon ?? DEFAULT_PLACE_ICON,
       color: input.color ?? DEFAULT_PLACE_COLOR,
+      visible: true,
       createdAt: now,
       updatedAt: now,
     };
     // Column order matches the places table incl. the migration-appended
-    // icon/color (id, name, lat, lng, collection_id, notes, tags, created_at,
-    // updated_at, icon, color).
-    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+    // icon/color/visible (id, name, lat, lng, collection_id, notes, tags,
+    // created_at, updated_at, icon, color, visible).
+    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
       record.id,
       record.name,
       record.lat,
@@ -205,6 +217,7 @@ export class AtlasStorage {
       record.updatedAt,
       record.icon,
       record.color,
+      record.visible ? 1 : 0,
     ]);
     await this.enqueue('place', record.id, 'upsert', now);
     return record;
@@ -220,6 +233,7 @@ export class AtlasStorage {
       tags: patch.tags === undefined ? undefined : JSON.stringify(patch.tags),
       icon: patch.icon,
       color: patch.color,
+      visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
     });
   }
 
@@ -376,7 +390,10 @@ export class AtlasStorage {
     const updatedAt = Number(r['updated_at']);
     if (entity === 'collection') {
       const c = rowToCollection(r);
-      return { updatedAt, data: { name: c.name, parentId: c.parentId, createdAt: c.createdAt } };
+      return {
+        updatedAt,
+        data: { name: c.name, parentId: c.parentId, visible: c.visible, createdAt: c.createdAt },
+      };
     }
     if (entity === 'place') {
       const p = rowToPlace(r);
@@ -391,6 +408,7 @@ export class AtlasStorage {
           tags: p.tags,
           icon: p.icon,
           color: p.color,
+          visible: p.visible,
           createdAt: p.createdAt,
         },
       };
@@ -495,17 +513,18 @@ export class AtlasStorage {
     const createdAt = num('createdAt', change.updatedAt);
     switch (change.entity) {
       case 'collection':
-        await this.driver.query('INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?)', [
+        await this.driver.query('INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?, ?)', [
           change.id,
           str('name', '(unnamed)'),
           strOrNull('parentId'),
           createdAt,
           change.updatedAt,
+          d['visible'] === false ? 0 : 1,
         ]);
         break;
       case 'place':
         await this.driver.query(
-          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             change.id,
             str('name', '(unnamed)'),
@@ -518,6 +537,7 @@ export class AtlasStorage {
             change.updatedAt,
             str('icon', DEFAULT_PLACE_ICON),
             str('color', DEFAULT_PLACE_COLOR),
+            d['visible'] === false ? 0 : 1,
           ],
         );
         break;
@@ -564,7 +584,7 @@ export class AtlasStorage {
 
   /** UPDATE the defined entries of `columns` on one row, stamping updated_at. */
   private async applyPatch(
-    table: 'places' | 'tracks',
+    table: 'places' | 'tracks' | 'collections',
     entity: SyncEntity,
     id: string,
     columns: Record<string, SqlValue | undefined>,

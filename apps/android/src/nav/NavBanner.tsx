@@ -15,7 +15,18 @@ function formatDuration(ms: number): string {
 }
 
 function formatEta(epochMs: number): string {
-  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // 24-hour clock (no AM/PM) regardless of device locale.
+  return new Date(epochMs).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+/** Ground speed in km/h, or null when stationary/unknown. */
+function formatSpeed(speedMps: number | null): string | null {
+  if (speedMps == null || speedMps < 0.5) return null;
+  return `${Math.round(speedMps * 3.6)} km/h`;
 }
 
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
@@ -33,6 +44,8 @@ export function NavBanner({
 
   const { state } = nav;
   const maneuver = state?.upcoming;
+  const speed = formatSpeed(nav.speedMps);
+  const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
 
   return (
     <View
@@ -78,9 +91,30 @@ export function NavBanner({
         ) : null}
       </View>
 
-      <Pressable style={styles.stop} onPress={nav.stop} testID="stop-nav">
-        <Text style={styles.stopText}>{nav.phase === 'arrived' ? 'Done' : 'End'}</Text>
-      </Pressable>
+      <View style={styles.actionRow}>
+        {moving ? (
+          <View style={styles.speedPill}>
+            <Text style={styles.speedValue}>{speed ?? '0 km/h'}</Text>
+          </View>
+        ) : (
+          <View style={styles.actionSpacer} />
+        )}
+        <View style={styles.actionButtons}>
+          {moving ? (
+            <Pressable
+              style={styles.muteButton}
+              onPress={nav.toggleMute}
+              testID="toggle-mute"
+              hitSlop={8}
+            >
+              <Text style={styles.muteIcon}>{nav.muted ? '🔇' : '🔊'}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable style={styles.stop} onPress={nav.stop} testID="stop-nav">
+            <Text style={styles.stopText}>{nav.phase === 'arrived' ? 'Done' : 'End'}</Text>
+          </Pressable>
+        </View>
+      </View>
     </View>
   );
 }
@@ -108,8 +142,30 @@ const styles = StyleSheet.create({
   summary: { color: '#cdd6e0', fontSize: 13, marginTop: 6 },
   reroute: { color: '#ffcf7e', fontSize: 13, marginTop: 6 },
   error: { color: '#ff9a8f', fontSize: 15, fontWeight: '600' },
+  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  actionSpacer: { flex: 1 },
+  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  speedPill: {
+    backgroundColor: 'rgba(17,17,17,0.9)',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    minWidth: 78,
+    alignItems: 'center',
+    elevation: 4,
+  },
+  speedValue: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  muteButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(17,17,17,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  muteIcon: { fontSize: 18 },
   stop: {
-    alignSelf: 'center',
     backgroundColor: '#b3261e',
     borderRadius: 20,
     paddingHorizontal: 22,

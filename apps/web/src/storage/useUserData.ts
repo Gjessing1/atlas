@@ -52,7 +52,11 @@ export interface UserData {
 
   createCollection: (name: string, parentId?: string | null) => Promise<void>;
   renameCollection: (id: string, name: string) => Promise<void>;
+  setCollectionVisible: (id: string, visible: boolean) => Promise<void>;
   deleteCollection: (id: string) => Promise<void>;
+
+  /** Show or hide every place and folder at once (the "show/hide all" action). */
+  setAllVisible: (visible: boolean) => Promise<void>;
 
   exportAll: () => Promise<void>;
   getSetting: (key: string) => Promise<string | null>;
@@ -262,12 +266,40 @@ export function useUserData(): UserData {
     [refreshCollections],
   );
 
+  const setCollectionVisible = useCallback(
+    async (id: string, visible: boolean) => {
+      await storageRef.current?.setCollectionVisible(id, visible);
+      await refreshCollections();
+    },
+    [refreshCollections],
+  );
+
   const deleteCollection = useCallback(
     async (id: string) => {
       await storageRef.current?.deleteCollection(id);
       await Promise.all([refreshCollections(), refreshPlaces(), refreshTracks()]);
     },
     [refreshCollections, refreshPlaces, refreshTracks],
+  );
+
+  const setAllVisible = useCallback(
+    async (visible: boolean) => {
+      const storage = storageRef.current;
+      if (!storage) return;
+      const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
+      // Only flip rows that differ, so we don't churn updated_at (and the sync
+      // outbox) for records already in the wanted state.
+      await Promise.all([
+        ...ps
+          .filter((p) => p.visible !== visible)
+          .map((p) => storage.updatePlace(p.id, { visible })),
+        ...cs
+          .filter((c) => c.visible !== visible)
+          .map((c) => storage.setCollectionVisible(c.id, visible)),
+      ]);
+      await Promise.all([refreshPlaces(), refreshCollections()]);
+    },
+    [refreshPlaces, refreshCollections],
   );
 
   const exportAll = useCallback(async () => {
@@ -325,7 +357,9 @@ export function useUserData(): UserData {
     downloadTrack,
     createCollection,
     renameCollection,
+    setCollectionVisible,
     deleteCollection,
+    setAllVisible,
     exportAll,
     getSetting,
     setSetting,

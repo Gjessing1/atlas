@@ -234,3 +234,44 @@ export const PLACE_ICONS = [
 /** Defaults for a freshly saved place (also the storage column defaults). */
 export const DEFAULT_PLACE_COLOR = '#e11d48';
 export const DEFAULT_PLACE_ICON = '📍';
+
+// ---- Place / folder visibility (hide/show on the map) ----
+
+/** Minimal folder shape for visibility resolution — folders nest via `parentId`. */
+export interface VisibilityFolder {
+  parentId: string | null;
+  visible: boolean;
+}
+
+/**
+ * Whether a folder is effectively visible: false if it or any ancestor folder
+ * is hidden. Unknown ids (dangling parents) are treated as visible. Guards
+ * against cyclic parent chains.
+ */
+export function collectionIsVisible(
+  id: string | null,
+  folders: ReadonlyMap<string, VisibilityFolder>,
+): boolean {
+  const seen = new Set<string>();
+  let cur = id;
+  while (cur !== null) {
+    if (seen.has(cur)) break; // defensive: never loop on a cyclic chain
+    seen.add(cur);
+    const folder = folders.get(cur);
+    if (!folder) break; // dangling parent — treat the rest of the chain as shown
+    if (!folder.visible) return false;
+    cur = folder.parentId;
+  }
+  return true;
+}
+
+/**
+ * Effective visibility of a place on the map: hidden when its own flag is off,
+ * or when any folder in its collection ancestry is hidden.
+ */
+export function placeIsVisible(
+  place: { visible: boolean; collectionId: string | null },
+  folders: ReadonlyMap<string, VisibilityFolder>,
+): boolean {
+  return place.visible && collectionIsVisible(place.collectionId, folders);
+}
