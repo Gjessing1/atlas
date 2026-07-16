@@ -50,16 +50,65 @@ export async function fetchAvailableRegions(): Promise<RegionPackManifest[]> {
 export type PackProgress = (fraction: number) => void;
 
 /**
+ * Download one pack file, continuing a previous partial download instead of
+ * starting over (the backend serves /packs with HTTP range support, and
+ * resumeAsync requests `Range: bytes=<partial size>-`). A file a previous
+ * attempt already completed is kept as-is. The result is size-checked against
+ * the manifest so a mangled resume (e.g. a proxy that ignored the Range
+ * header) is deleted and retried from scratch rather than kept corrupt.
+ */
+async function downloadFile(
+  url: string,
+  target: string,
+  expectedBytes: number,
+  onBytes: (written: number) => void,
+): Promise<void> {
+  const partial = await FileSystem.getInfoAsync(target);
+  if (partial.exists && partial.size === expectedBytes) {
+    onBytes(expectedBytes);
+    return;
+  }
+  let resumeFromBytes = partial.exists ? partial.size : 0;
+  if (resumeFromBytes > expectedBytes) {
+    // Leftover from something else (e.g. an older pack version) — not resumable.
+    await FileSystem.deleteAsync(target, { idempotent: true });
+    resumeFromBytes = 0;
+  }
+  const download = FileSystem.createDownloadResumable(url, target, {}, (p) =>
+    onBytes(Math.min(p.totalBytesWritten, expectedBytes)),
+  );
+  const result =
+    resumeFromBytes > 0 ? await download.resumeAsync() : await download.downloadAsync();
+  const status = result?.status ?? 0;
+  if (status !== 200 && status !== 206) {
+    throw new Error(`download failed: HTTP ${status || '?'}`);
+  }
+  const done = await FileSystem.getInfoAsync(target);
+  if (!done.exists || done.size !== expectedBytes) {
+    await FileSystem.deleteAsync(target, { idempotent: true });
+    throw new Error('download incomplete — tap again to retry');
+  }
+}
+
+/**
  * Download every file of a pack into its directory, unzipping archives
  * (assets) as they land — the Valhalla routing tar is read in place, no
- * unpacking. pack.json is written only after everything succeeded — a crash
- * mid-download leaves no phantom pack.
+ * unpacking. Downloads are incremental: an interrupted attempt keeps its
+ * partial files and the next attempt resumes them (and skips finished ones).
+ * pack.json is written only after everything succeeded — a crash mid-download
+ * leaves no phantom pack.
  */
 export async function downloadPack(
   manifest: RegionPackManifest,
   onProgress: PackProgress,
 ): Promise<LocalPack> {
   const dir = packDir(manifest.id);
+  // Updating an installed pack: wipe it first so same-sized (or unzipped) files
+  // from the old version can't be mistaken for already-downloaded pieces.
+  // Interrupted first-time downloads have no pack.json and resume untouched.
+  if ((await FileSystem.getInfoAsync(`${dir}/pack.json`)).exists) {
+    await FileSystem.deleteAsync(dir, { idempotent: true });
+  }
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
 
   const entries = Object.entries(manifest.files).filter(
@@ -71,19 +120,29 @@ export async function downloadPack(
   for (const [kind, file] of entries) {
     const url = `${getServerOrigin()}/packs/${manifest.id}/${file.path}`;
     const target = `${dir}/${file.path}`;
-    const download = FileSystem.createDownloadResumable(url, target, {}, (p) => {
-      onProgress((doneBytes + p.totalBytesWritten) / totalBytes);
-    });
-    const result = await download.downloadAsync();
-    if (!result || result.status !== 200) {
-      throw new Error(`download failed: ${file.path} (HTTP ${result?.status ?? '?'})`);
+    const isZip = file.path.endsWith('.zip');
+    // assets.zip → <dir>/assets/…
+    const unzipDir = kind === 'assets' ? `${dir}/assets` : `${dir}/${kind}`;
+
+    // An archive a previous attempt already unpacked (the .zip is deleted
+    // right after unzipping, so the unpacked dir is the completion marker).
+    if (isZip && (await FileSystem.getInfoAsync(unzipDir)).exists) {
+      doneBytes += file.bytes;
+      onProgress(doneBytes / totalBytes);
+      continue;
+    }
+
+    try {
+      await downloadFile(url, target, file.bytes, (written) =>
+        onProgress((doneBytes + written) / totalBytes),
+      );
+    } catch (err) {
+      throw err instanceof Error ? new Error(`${file.path}: ${err.message}`) : err;
     }
     doneBytes += file.bytes;
     onProgress(doneBytes / totalBytes);
-    if (file.path.endsWith('.zip')) {
-      // assets.zip → <dir>/assets/…
-      const targetDir = kind === 'assets' ? `${dir}/assets` : `${dir}/${kind}`;
-      await unzip(uriToPath(target), uriToPath(targetDir));
+    if (isZip) {
+      await unzip(uriToPath(target), uriToPath(unzipDir));
       await FileSystem.deleteAsync(target, { idempotent: true });
     }
   }

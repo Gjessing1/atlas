@@ -29,6 +29,46 @@ function formatSpeed(speedMps: number | null): string | null {
   return `${Math.round(speedMps * 3.6)} km/h`;
 }
 
+/**
+ * Rotation (deg) of the shared ↑ glyph for an Atlas turn sign (see
+ * RouteInstruction: -2 left … 0 continue … 2 right, ±3 sharp, ±7 keep,
+ * ±8 u-turn), or null for signs drawn as their own glyph.
+ */
+function turnRotation(sign: number): number | null {
+  if (sign >= -3 && sign <= 3) return sign * 45;
+  if (sign === 7 || sign === -7) return Math.sign(sign) * 30;
+  if (sign === 8 || sign === -8) return 180;
+  return null;
+}
+
+/** Visual for the upcoming maneuver: a rotated arrow, ↻ roundabout, ⚑ arrive/via. */
+function TurnArrow({ sign, exitNumber }: { sign: number; exitNumber?: number }) {
+  if (sign === 6) {
+    return (
+      <View style={styles.turnBox}>
+        <Text style={styles.turnGlyph}>{'↻'}</Text>
+        {exitNumber ? <Text style={styles.turnExit}>{exitNumber}</Text> : null}
+      </View>
+    );
+  }
+  if (sign === 4 || sign === 5) {
+    return (
+      <View style={styles.turnBox}>
+        <Text style={styles.turnGlyph}>{'⚑'}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.turnBox}>
+      <Text
+        style={[styles.turnGlyph, { transform: [{ rotate: `${turnRotation(sign) ?? 0}deg` }] }]}
+      >
+        {'↑'}
+      </Text>
+    </View>
+  );
+}
+
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
 export function NavBanner({
   nav,
@@ -62,6 +102,10 @@ export function NavBanner({
           <Text style={styles.maneuver}>You have arrived</Text>
         ) : maneuver ? (
           <View style={styles.maneuverRow}>
+            <TurnArrow
+              sign={maneuver.instruction.sign}
+              exitNumber={maneuver.instruction.exitNumber}
+            />
             <Text style={styles.distanceTo}>{formatDistance(maneuver.distanceToM)}</Text>
             <Text style={styles.maneuver} numberOfLines={2}>
               {maneuver.instruction.text}
@@ -128,8 +172,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     elevation: 6,
   },
-  maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  distanceTo: { color: '#7ec8ff', fontSize: 22, fontWeight: '700', minWidth: 72 },
+  maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  turnBox: { width: 40, alignItems: 'center', justifyContent: 'center' },
+  turnGlyph: { color: '#fff', fontSize: 32, fontWeight: '800', lineHeight: 38 },
+  turnExit: {
+    position: 'absolute',
+    bottom: -2,
+    right: 2,
+    color: '#7ec8ff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  distanceTo: { color: '#7ec8ff', fontSize: 22, fontWeight: '700', minWidth: 68 },
   maneuver: { color: '#fff', fontSize: 17, fontWeight: '600', flexShrink: 1 },
   progressTrack: {
     height: 4,

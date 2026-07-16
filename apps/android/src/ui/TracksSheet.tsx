@@ -107,7 +107,7 @@ export function TracksSheet({
 
           {tracks.length === 0 ? (
             <Text style={styles.muted}>
-              No tracks yet. Import a GPX/KML/KMZ file, or record one with the ⏺ button.
+              No tracks yet. Import a GPX/KML/KMZ file to see it on the map.
             </Text>
           ) : (
             <ScrollView>

@@ -147,6 +147,9 @@ function RegionsSection({
     async (manifest: RegionPackManifest) => {
       setProgress((p) => ({ ...p, [manifest.id]: 0 }));
       try {
+        // Updating an installed pack replaces files the routing engine may
+        // hold open (mmap) — release it first, same as on delete.
+        await closeEngine().catch(() => undefined);
         await downloadPack(manifest, (fraction) =>
           setProgress((p) => ({ ...p, [manifest.id]: fraction })),
         );

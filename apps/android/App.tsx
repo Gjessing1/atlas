@@ -27,7 +27,6 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
-import type { PlaceRecord } from '@atlas/storage';
 import { hydrateServerOrigin, useServerOrigin } from './src/serverOrigin';
 import {
   buildOfflineStyle,
@@ -38,7 +37,6 @@ import {
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { useNavigation } from './src/nav/useNavigation';
-import { useTrackRecording } from './src/nav/useTrackRecording';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
@@ -46,8 +44,8 @@ import { useRoute } from './src/routing/useRoute';
 import { shareText } from './src/share';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { FavoritesSheet } from './src/ui/FavoritesSheet';
+import { CrosshairIcon, PlacePin } from './src/ui/icons';
 import { PromptModal } from './src/ui/PromptModal';
-import { RecordControls } from './src/ui/RecordControls';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { SettingsSheet } from './src/ui/SettingsSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
@@ -55,23 +53,55 @@ import { TracksSheet } from './src/ui/TracksSheet';
 import { useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData } from './src/useUserData';
 
-function placesToGeoJSON(places: PlaceRecord[]) {
-  return {
-    type: 'FeatureCollection' as const,
-    features: places.map((p) => ({
-      type: 'Feature' as const,
-      properties: { id: p.id, name: p.name, icon: p.icon, color: p.color },
-      geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-    })),
-  };
-}
-
 function routeToGeoJSON(coords: number[][]) {
   return {
     type: 'Feature' as const,
     properties: {},
     geometry: { type: 'LineString' as const, coordinates: coords },
   };
+}
+
+/** Dashed rectangles showing what the downloaded offline packs cover. */
+function packOutlinesGeoJSON(packs: LocalPack[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: packs.map((p) => {
+      const { sw, ne } = p.manifest.bbox;
+      return {
+        type: 'Feature' as const,
+        properties: { name: p.manifest.name },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [
+            [sw.lng, sw.lat],
+            [ne.lng, sw.lat],
+            [ne.lng, ne.lat],
+            [sw.lng, ne.lat],
+            [sw.lng, sw.lat],
+          ],
+        },
+      };
+    }),
+  };
+}
+
+/**
+ * Follow-mode zoom from ground speed — the OsmAnd/Google approach: rather than
+ * a fixed zoom, keep a constant look-ahead *time*, i.e. pick the zoom at which
+ * the distance covered in the next ~12 s fits the forward part of the screen.
+ * 78271.5 m is the ground size of one 512px tile pixel at zoom 0 on the
+ * equator; cos(lat) corrects for Web Mercator stretch. Clamped to a sane
+ * range and quantized so GPS jitter doesn't constantly re-target the camera.
+ */
+function zoomForSpeed(speedMps: number | null, lat: number | undefined): number {
+  const LOOKAHEAD_S = 12;
+  const FORWARD_DP = 400; // roughly the screen half ahead of the position puck
+  const v = speedMps ?? 0;
+  if (v < 1) return 17; // stationary/unknown: close-in city zoom
+  const metersAhead = v * LOOKAHEAD_S;
+  const scale = 78271.5 * Math.cos(((lat ?? 60) * Math.PI) / 180);
+  const z = Math.log2((scale * FORWARD_DP) / metersAhead);
+  return Math.round(Math.min(17.5, Math.max(15, z)) * 4) / 4;
 }
 
 /**
@@ -100,7 +130,6 @@ function AppInner() {
   const serverOrigin = useServerOrigin();
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
-  const rec = useTrackRecording(data.saveTrack);
   const route = useRoute();
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
@@ -111,6 +140,8 @@ function AppInner() {
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  // Place whose edit panel the Favorites sheet should open with (map pin → Edit).
+  const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const [navHeight, setNavHeight] = useState(0);
@@ -139,6 +170,11 @@ function AppInner() {
   // Camera follow: course-up / north-up while navigating; free pan when idle
   // (the locate button does a one-shot recentre instead of locking the camera).
   const trackUserLocation = following ? (navFollow === 'north' ? 'default' : 'course') : undefined;
+  // Speed-appropriate follow zoom (constant look-ahead time, see zoomForSpeed).
+  const navZoom = useMemo(
+    () => zoomForSpeed(nav.speedMps, nav.state?.snapped.lat),
+    [nav.speedMps, nav.state?.snapped.lat],
+  );
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -294,7 +330,22 @@ function AppInner() {
           });
         }}
       >
-        {/* Saved/imported/recorded tracks (visible ones), drawn under the routes. */}
+        {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
+        {packs.length > 0 ? (
+          <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>
+            <Layer
+              type="line"
+              id="atlas-pack-outlines-line"
+              paint={{
+                'line-color': '#1a73e8',
+                'line-width': 1.5,
+                'line-opacity': 0.45,
+                'line-dasharray': [2, 2],
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Saved/imported tracks (visible ones), drawn under the routes. */}
         {trackGeo.features.length > 0 ? (
           <GeoJSONSource id="atlas-tracks" data={trackGeo}>
             <Layer
@@ -347,62 +398,52 @@ function AppInner() {
           // Course-up / north-up follow while navigating (see `trackUserLocation`),
           // a plain centre-on-user when the locate button engaged it, else free pan.
           trackUserLocation={trackUserLocation}
-          {...(following ? { zoom: 16 } : {})}
+          {...(following ? { zoom: navZoom } : {})}
         />
         {following || showPuck ? <UserLocation heading={following} animated /> : null}
         {nav.destination ? (
           <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
-            <Text style={styles.destinationPin}>🏁</Text>
+            <PlacePin color="#16324f" icon="🏁" />
           </Marker>
         ) : destination ? (
           <Marker lngLat={[destination.lng, destination.lat]} anchor="bottom">
-            <Text style={styles.destinationPin}>📍</Text>
+            <PlacePin color="#d33939" />
           </Marker>
         ) : null}
-        <GeoJSONSource
-          id="atlas-places"
-          data={placesToGeoJSON(visiblePlaces)}
-          onPress={(e) => {
-            const feature = e.nativeEvent.features[0];
-            const props = feature?.properties as { id?: string; name?: string } | undefined;
-            if (!props?.id) return;
-            const [lng, lat] =
-              feature!.geometry.type === 'Point'
-                ? (feature!.geometry.coordinates as [number, number])
-                : [undefined, undefined];
-            Alert.alert(props.name ?? 'Place', undefined, [
-              ...(lat !== undefined && lng !== undefined
-                ? [
-                    {
-                      text: 'Navigate here',
-                      onPress: () =>
-                        pickDestination({ lat, lng, name: props.name ?? 'Place', canSave: false }),
+        {/* Saved places as colour-badged teardrop pins (web-parity markers). A
+            tap opens Navigate/Edit — Edit jumps straight to the place's edit
+            panel in the Favorites sheet (rename, folder, icon/colour, delete). */}
+        {visiblePlaces.map((place) => (
+          <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
+            <Pressable
+              onPress={() =>
+                Alert.alert(place.name, undefined, [
+                  {
+                    text: 'Navigate here',
+                    onPress: () =>
+                      pickDestination({
+                        lat: place.lat,
+                        lng: place.lng,
+                        name: place.name,
+                        canSave: false,
+                      }),
+                  },
+                  {
+                    text: 'Edit',
+                    onPress: () => {
+                      setEditPlaceId(place.id);
+                      setFavoritesOpen(true);
                     },
-                  ]
-                : []),
-              {
-                text: 'Remove',
-                style: 'destructive' as const,
-                onPress: () => void data.deletePlace(props.id!),
-              },
-              { text: 'Keep', style: 'cancel' as const },
-            ]);
-          }}
-        >
-          <Layer
-            type="circle"
-            id="atlas-places-circles"
-            paint={{
-              'circle-radius': 7,
-              // Per-place colour (chosen via the Favorites style picker); falls
-              // back to the default red for rows written before the icon/colour
-              // migration that somehow lack the property.
-              'circle-color': ['coalesce', ['get', 'color'], '#e11d48'],
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#ffffff',
-            }}
-          />
-        </GeoJSONSource>
+                  },
+                  { text: 'Close', style: 'cancel' as const },
+                ])
+              }
+              testID={`place-pin-${place.id}`}
+            >
+              <PlacePin color={place.color} icon={place.icon} />
+            </Pressable>
+          </Marker>
+        ))}
       </MapLibreMap>
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
@@ -416,7 +457,9 @@ function AppInner() {
           onPress={() => setSettingsOpen(true)}
           testID="open-settings"
         >
-          <Text style={styles.gearText}>⚙</Text>
+          {/* U+FE0E forces the text (non-emoji) gear, which some Android skins
+              otherwise render as a black emoji blob. */}
+          <Text style={styles.gearText}>{'⚙︎'}</Text>
         </Pressable>
         <Pressable
           style={styles.roundButton}
@@ -434,11 +477,12 @@ function AppInner() {
         </Pressable>
         {!following && !planning ? (
           <Pressable style={styles.roundButton} onPress={() => route.start()} testID="plan-route">
-            <Text style={styles.gearText}>🧭</Text>
+            {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
+            <Text style={styles.routeArrow}>{'↱'}</Text>
           </Pressable>
         ) : null}
         <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
-          <Text style={styles.gearText}>◎</Text>
+          <CrosshairIcon />
         </Pressable>
         {following ? (
           <Pressable
@@ -449,31 +493,14 @@ function AppInner() {
             <Text style={styles.orientText}>{navFollow === 'north' ? 'N' : '⤴'}</Text>
           </Pressable>
         ) : null}
-        {rec.phase === 'idle' && !planning ? (
-          <Pressable
-            style={styles.roundButton}
-            onPress={() => void rec.start()}
-            testID="record-start"
-          >
-            <Text style={styles.recordDot}>⏺</Text>
-          </Pressable>
-        ) : null}
       </View>
 
-      <RecordControls
-        rec={rec}
-        bottomInset={bottomInset}
-        onSaved={(name) =>
-          Alert.alert(name ? 'Track saved' : 'Nothing recorded', name ?? 'No fixes were recorded.')
-        }
-      />
-
-      {useOffline && rec.phase === 'idle' && !planning ? (
+      {useOffline && !planning ? (
         <View style={[styles.offlineBadge, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && rec.phase === 'idle' && !planning ? (
+      {packs.length > 0 && !planning ? (
         <View style={[styles.offlineToggle, { bottom: bottomInset + 24 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
@@ -483,11 +510,6 @@ function AppInner() {
       {data.status === 'error' ? (
         <View style={[styles.banner, { top: topInset + 60 }]}>
           <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
-        </View>
-      ) : null}
-      {rec.error ? (
-        <View style={[styles.banner, { top: topInset + 60 }]}>
-          <Text style={styles.bannerText}>Recording: {rec.error}</Text>
         </View>
       ) : null}
       <UpdateNotices storage={data.storage} topInset={topInset} />
@@ -517,7 +539,11 @@ function AppInner() {
 
       <FavoritesSheet
         visible={favoritesOpen}
-        onClose={() => setFavoritesOpen(false)}
+        onClose={() => {
+          setFavoritesOpen(false);
+          setEditPlaceId(null);
+        }}
+        editId={editPlaceId}
         places={data.places}
         collections={data.collections}
         onFlyTo={(p) => flyTo(p)}
@@ -599,10 +625,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 4,
   },
-  gearText: { fontSize: 22 },
+  gearText: { fontSize: 22, color: '#3a4455' },
+  routeArrow: { fontSize: 24, fontWeight: '800', color: '#1a73e8' },
   orientButton: { backgroundColor: '#1a73e8' },
   orientText: { fontSize: 20, fontWeight: '800', color: '#fff' },
-  destinationPin: { fontSize: 30 },
   wpMarker: {
     width: 26,
     height: 26,
@@ -614,7 +640,6 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   wpMarkerText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  recordDot: { fontSize: 20, color: '#d63f3f' },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,

@@ -3,11 +3,3 @@ export { trackBounds } from './model.js';
 export { computeTrackStats } from './stats.js';
 export { parseGpx, parseKml, parseKmz, parseTrackFile } from './parse.js';
 export { buildGpx, buildKml } from './build.js';
-export { TrackRecorder } from './recorder.js';
-export type {
-  RecordFix,
-  RecorderOptions,
-  RecorderSnapshot,
-  RecorderStats,
-  RecorderStatus,
-} from './recorder.js';

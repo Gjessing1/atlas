@@ -3,7 +3,6 @@ import type {
   AtlasStorage,
   CollectionRecord,
   NewPlace,
-  NewTrack,
   PlacePatch,
   PlaceRecord,
   TrackPatch,
@@ -43,8 +42,6 @@ export interface UserData {
   updatePlace: (id: string, patch: PlacePatch) => Promise<void>;
   deletePlace: (id: string) => Promise<void>;
 
-  /** Persist a recorded track (track recording) — refreshes the tracks list. */
-  saveTrack: (input: NewTrack) => Promise<void>;
   /** Import GPX/KML/KMZ files picked from the device; returns a per-file summary. */
   importFiles: (files: PickedFile[]) => Promise<ImportResult>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
@@ -155,14 +152,6 @@ export function useUserData(): UserData {
   const deletePlace = useCallback(
     async (id: string) => {
       await storageRef.current?.deletePlace(id);
-      await refreshAll();
-    },
-    [refreshAll],
-  );
-
-  const saveTrack = useCallback(
-    async (input: NewTrack) => {
-      await storageRef.current?.createTrack(input);
       await refreshAll();
     },
     [refreshAll],
@@ -310,7 +299,6 @@ export function useUserData(): UserData {
     savePlace,
     updatePlace,
     deletePlace,
-    saveTrack,
     importFiles,
     updateTrack,
     deleteTrack,
