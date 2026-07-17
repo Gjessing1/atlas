@@ -38,6 +38,10 @@ COPY --from=build /app/packages/core/dist ./packages/core/dist
 COPY --from=build /app/packages/sync/package.json ./packages/sync/
 COPY --from=build /app/packages/sync/dist ./packages/sync/dist
 COPY --from=build /app/backend/package.json ./backend/
+# Workspace-nested deps (npm nests a package here when the root already holds a
+# different version — e.g. @sinclair/typebox 0.34 vs a transitive 0.27): the
+# root node_modules copy alone loses them and the server crashes on import.
+COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 # Built web app → backend/public, served same-origin by backend/src/index.ts.
 COPY --from=build /app/apps/web/dist ./backend/public
