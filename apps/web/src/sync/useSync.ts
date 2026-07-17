@@ -118,38 +118,47 @@ export function useSync(data: UserData): SyncState {
       .finally(() => setBusy(false));
   }, [engine, refreshAll]);
 
+  // Single-flight, like SyncEngine.sync(): a second sign-in while the first is
+  // still bootstrapping must not interleave (cursor reset vs in-flight push).
+  const signInFlight = useRef(false);
   const signIn = useCallback(
     async (email: string, password: string, mode: 'login' | 'register') => {
       if (!storage || !engine) return 'Storage is not ready.';
-      let res: Response;
+      if (signInFlight.current) return 'Sign-in already in progress.';
+      signInFlight.current = true;
       try {
-        res = await fetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-      } catch {
-        return 'Server unreachable.';
+        let res: Response;
+        try {
+          res = await fetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+        } catch {
+          return 'Server unreachable.';
+        }
+        const body = (await res.json().catch(() => ({}))) as Partial<AuthResponse> & {
+          error?: string;
+        };
+        if (!res.ok || typeof body.token !== 'string' || typeof body.email !== 'string') {
+          return body.error ?? `Sign-in failed (${res.status}).`;
+        }
+        const next: Session = { token: body.token, email: body.email };
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next));
+        sessionRef.current = next;
+        setSession(next);
+        setProblem(null);
+        setError(null);
+        // First sync for this account on this device pushes everything local.
+        if ((await storage.getSetting(ACCOUNT_SETTING)) !== body.email) {
+          await engine.bootstrap();
+          await storage.setSetting(ACCOUNT_SETTING, body.email);
+        }
+        doSync();
+        return null;
+      } finally {
+        signInFlight.current = false;
       }
-      const body = (await res.json().catch(() => ({}))) as Partial<AuthResponse> & {
-        error?: string;
-      };
-      if (!res.ok || typeof body.token !== 'string' || typeof body.email !== 'string') {
-        return body.error ?? `Sign-in failed (${res.status}).`;
-      }
-      const next: Session = { token: body.token, email: body.email };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next));
-      sessionRef.current = next;
-      setSession(next);
-      setProblem(null);
-      setError(null);
-      // First sync for this account on this device pushes everything local.
-      if ((await storage.getSetting(ACCOUNT_SETTING)) !== body.email) {
-        await engine.bootstrap();
-        await storage.setSetting(ACCOUNT_SETTING, body.email);
-      }
-      doSync();
-      return null;
     },
     [storage, engine, doSync],
   );

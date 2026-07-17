@@ -1,6 +1,8 @@
+import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import { ROUTING_PROFILES, routePathToTrackData } from '@atlas/routing';
-import { useState } from 'react';
+import type { PlaceRecord } from '@atlas/storage';
+import { useEffect, useState } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
 import type { RoutePlanner } from './useRoute.js';
 
@@ -22,8 +24,116 @@ function waypointLabel(index: number, roundTrip: boolean, count: number): string
   return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
 }
 
+interface StopHit {
+  name: string;
+  label: string;
+  position: LatLng;
+  /** True for the user's saved places — listed first, marked with a star. */
+  saved: boolean;
+}
+
+/** Search box that adds a stop by name: saved places first, then addresses (Photon). */
+function StopSearch({
+  places,
+  getBias,
+  onPick,
+}: {
+  places: PlaceRecord[];
+  getBias: () => LatLng | null;
+  onPick: (position: LatLng) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<StopHit[]>([]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setHits([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      const saved: StopHit[] = matchPlacesByName(places, q, 4).map((p) => ({
+        name: p.name,
+        label: 'Saved place',
+        position: { lat: p.lat, lng: p.lng },
+        saved: true,
+      }));
+      let remote: StopHit[] = [];
+      try {
+        const params = new URLSearchParams({ q });
+        const bias = getBias();
+        if (bias) {
+          params.set('lat', String(bias.lat));
+          params.set('lon', String(bias.lng));
+        }
+        const res = await fetch(`/api/search?${params}`, { signal: controller.signal });
+        if (res.ok) {
+          remote = ((await res.json()) as { results: SearchResult[] }).results.map((r) => ({
+            name: r.name,
+            label: r.label,
+            position: r.position,
+            saved: false,
+          }));
+        }
+      } catch {
+        // Aborted or offline — saved places still match.
+      }
+      if (!controller.signal.aborted) setHits([...saved, ...remote].slice(0, 8));
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, places, getBias]);
+
+  return (
+    <div className="route-stop-search">
+      <input
+        type="search"
+        placeholder="Add stop: address or saved place…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        aria-label="Search for a stop"
+      />
+      {hits.length > 0 && (
+        <ul>
+          {hits.map((hit, i) => (
+            <li key={`${hit.position.lat}/${hit.position.lng}/${i}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  onPick(hit.position);
+                  setQuery('');
+                  setHits([]);
+                }}
+              >
+                <span className="result-name">
+                  {hit.saved ? '★ ' : ''}
+                  {hit.name}
+                </span>
+                {hit.label && <span className="result-label">{hit.label}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** Route-planning panel: profile, stops, round trip, result stats, GPX export. */
-export function RoutePanel({ route }: { route: RoutePlanner }) {
+export function RoutePanel({
+  route,
+  places,
+  getBias,
+}: {
+  route: RoutePlanner;
+  /** Saved places, offered in the stop search alongside geocoder results. */
+  places: PlaceRecord[];
+  /** Current map center, biasing the geocoder towards the viewport. */
+  getBias: () => LatLng | null;
+}) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const path = route.paths?.[route.selectedPath];
 
@@ -92,6 +202,12 @@ export function RoutePanel({ route }: { route: RoutePlanner }) {
           </>
         )}
       </div>
+
+      <StopSearch
+        places={places}
+        getBias={getBias}
+        onPick={(position) => route.addWaypoint(position)}
+      />
 
       {route.waypoints.length > 0 ? (
         <ol className="route-waypoints">

@@ -1,10 +1,9 @@
 import type { SearchResult } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
-import { getServerOrigin } from '../serverOrigin';
-import { searchOffline } from './offlineSearch';
+import { geoSearch } from './geoSearch';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
@@ -36,18 +35,7 @@ export function SearchBar({
         setResults([]);
         return;
       }
-      let found: SearchResult[] = [];
-      let usedOffline = false;
-      try {
-        const res = await fetch(`${getServerOrigin()}/api/search?q=${encodeURIComponent(text)}`, {
-          signal: AbortSignal.timeout(4000),
-        });
-        if (!res.ok) throw new Error(`search: HTTP ${res.status}`);
-        found = ((await res.json()) as { results: SearchResult[] }).results;
-      } catch {
-        found = await searchOffline(packs, text);
-        usedOffline = true;
-      }
+      const { results: found, offline: usedOffline } = await geoSearch(packs, text);
       if (gen === generation.current) {
         setResults(found);
         setOffline(usedOffline);
@@ -62,10 +50,17 @@ export function SearchBar({
   }, [query, search]);
 
   const close = useCallback(() => {
+    Keyboard.dismiss();
     setQuery('');
     setResults([]);
     onClose();
   }, [onClose]);
+
+  // The overlay can also be unmounted from outside (navigation starting, route
+  // planning opening) — the soft keyboard must never outlive the input.
+  useEffect(() => {
+    return () => Keyboard.dismiss();
+  }, []);
 
   return (
     <View style={[styles.wrap, { top }]}>

@@ -4,6 +4,7 @@ import {
   collectionIsVisible,
   decodeMapHash,
   encodeMapHash,
+  matchPlacesByName,
   photonFeatureToSearchResult,
   placeIsVisible,
   resolveStyleTemplate,
@@ -151,5 +152,31 @@ describe('place / folder visibility', () => {
       ['b', { parentId: 'a', visible: true }],
     ]);
     expect(collectionIsVisible('a', cyclic)).toBe(true);
+  });
+});
+
+describe('matchPlacesByName', () => {
+  const places = [
+    { name: 'Home' },
+    { name: 'Cabin at Norefjell' },
+    { name: 'Office (Oslo)' },
+    { name: 'Grandma' },
+    { name: 'Homebrew shop' },
+  ];
+
+  it('ranks whole-name prefix matches before substring matches', () => {
+    expect(matchPlacesByName(places, 'home').map((p) => p.name)).toEqual(['Home', 'Homebrew shop']);
+    expect(matchPlacesByName(places, 'norefjell').map((p) => p.name)).toEqual([
+      'Cabin at Norefjell',
+    ]);
+  });
+
+  it('is case-insensitive and trims the query', () => {
+    expect(matchPlacesByName(places, '  OSLO ').map((p) => p.name)).toEqual(['Office (Oslo)']);
+  });
+
+  it('returns nothing for an empty query and respects the limit', () => {
+    expect(matchPlacesByName(places, '   ')).toEqual([]);
+    expect(matchPlacesByName(places, 'o', 2)).toHaveLength(2);
   });
 });

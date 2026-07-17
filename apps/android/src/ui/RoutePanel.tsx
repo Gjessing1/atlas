@@ -1,7 +1,12 @@
+import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import { ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { PlaceRecord } from '@atlas/storage';
+import { useEffect, useRef, useState } from 'react';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
+import { geoSearch } from '../search/geoSearch';
 
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -27,19 +32,117 @@ function waypointLabel(index: number, roundTrip: boolean, count: number): string
   return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
 }
 
+interface StopHit {
+  name: string;
+  label: string;
+  position: LatLng;
+  /** True for the user's saved places — listed first, marked with a star. */
+  saved: boolean;
+}
+
+/** Search box that adds a stop by name: saved places first, then addresses. */
+function StopSearch({
+  packs,
+  places,
+  onPick,
+}: {
+  packs: LocalPack[];
+  places: PlaceRecord[];
+  onPick: (position: LatLng) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<StopHit[]>([]);
+  const generation = useRef(0);
+
+  useEffect(() => {
+    const q = query.trim();
+    const gen = ++generation.current;
+    if (q.length < 2) {
+      setHits([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        const saved: StopHit[] = matchPlacesByName(places, q, 4).map((p) => ({
+          name: p.name,
+          label: 'Saved place',
+          position: { lat: p.lat, lng: p.lng },
+          saved: true,
+        }));
+        const { results } = await geoSearch(packs, q);
+        const remote: StopHit[] = results.map((r: SearchResult) => ({
+          name: r.name,
+          label: r.label,
+          position: r.position,
+          saved: false,
+        }));
+        if (gen === generation.current) setHits([...saved, ...remote].slice(0, 6));
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, packs, places]);
+
+  return (
+    <View>
+      <TextInput
+        style={styles.stopInput}
+        placeholder="Add stop: address or saved place"
+        value={query}
+        onChangeText={setQuery}
+        autoCorrect={false}
+        testID="route-stop-search"
+      />
+      {hits.length > 0 ? (
+        <View style={styles.stopResults}>
+          {hits.map((hit, i) => (
+            <Pressable
+              key={`${hit.position.lat}/${hit.position.lng}/${i}`}
+              style={styles.stopResult}
+              testID={`route-stop-result-${i}`}
+              onPress={() => {
+                Keyboard.dismiss();
+                onPick(hit.position);
+                setQuery('');
+                setHits([]);
+              }}
+            >
+              <Text style={styles.stopResultName} numberOfLines={1}>
+                {hit.saved ? '★ ' : ''}
+                {hit.name}
+              </Text>
+              {hit.label ? (
+                <Text style={styles.stopResultLabel} numberOfLines={1}>
+                  {hit.label}
+                </Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * Route-planning panel — the mobile counterpart of the web RoutePanel
  * (apps/web/src/routing/RoutePanel.tsx). Bottom-docked (not modal) so the map
- * stays tappable to add stops. Profile, round trip, ordered stops (reorder with
- * ▲/▼ since there's no drag on the map list), reverse/optimize/clear, result
- * stats, alternatives, and GPX export via the OS share sheet.
+ * stays tappable to add stops. Profile, round trip, stop search (addresses +
+ * saved places), ordered stops (reorder with ▲/▼ since there's no drag on the
+ * map list), reverse/optimize/clear, result stats, alternatives, and GPX
+ * export via the OS share sheet.
  */
 export function RoutePanel({
   route,
+  packs,
+  places,
   onExport,
   bottomInset = 0,
 }: {
   route: RoutePlanner;
+  /** Downloaded packs — the stop search falls back to their FTS index offline. */
+  packs: LocalPack[];
+  /** Saved places, offered in the stop search alongside geocoder results. */
+  places: PlaceRecord[];
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
   bottomInset?: number;
@@ -99,6 +202,12 @@ export function RoutePanel({
           </>
         ) : null}
       </View>
+
+      <StopSearch
+        packs={packs}
+        places={places}
+        onPick={(position) => route.addWaypoint(position)}
+      />
 
       {route.waypoints.length > 0 ? (
         <ScrollView style={styles.wpList}>
@@ -284,4 +393,23 @@ const styles = StyleSheet.create({
   buttonQuietText: { color: '#334', fontWeight: '600' },
   error: { fontSize: 13, color: '#b3261e' },
   stats: { fontSize: 14, color: '#111', fontWeight: '600' },
+  stopInput: {
+    borderWidth: 1,
+    borderColor: '#cdd3dd',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 14,
+    color: '#111',
+  },
+  stopResults: {
+    borderWidth: 1,
+    borderColor: '#e2e6ee',
+    borderRadius: 8,
+    marginTop: 4,
+    paddingVertical: 2,
+  },
+  stopResult: { paddingHorizontal: 10, paddingVertical: 6 },
+  stopResultName: { fontSize: 14, color: '#111', fontWeight: '600' },
+  stopResultLabel: { fontSize: 11, color: '#778' },
 });

@@ -177,6 +177,14 @@ export function App() {
     hoverMarkerRef.current.setLngLat(point).addTo(map);
   }, []);
 
+  // Auto-dismiss the write-error toast; a new failure restarts the timer.
+  const { writeError, clearWriteError } = userData;
+  useEffect(() => {
+    if (!writeError) return;
+    const t = setTimeout(clearWriteError, 8000);
+    return () => clearTimeout(t);
+  }, [writeError, clearWriteError]);
+
   // Auto-save the camera; restore it on startup when the URL has no view hash.
   useEffect(() => {
     if (!map || userData.status !== 'ready') return;
@@ -251,7 +259,15 @@ export function App() {
           ⇄ Route
         </button>
       </div>
-      {route.active && <RoutePanel route={route} />}
+      {writeError && (
+        <div className="write-error-toast" role="alert">
+          <span>{writeError} — the change was not saved.</span>
+          <button type="button" onClick={clearWriteError} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+      {route.active && <RoutePanel route={route} places={userData.places} getBias={getBias} />}
       {sidebarOpen && (
         <Sidebar
           data={userData}

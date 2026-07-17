@@ -101,6 +101,8 @@ export function useRoute(): RoutePlanner {
           };
       try {
         const result = await provider.route(query, controller.signal);
+        // A superseded request can resolve after its abort — don't paint it.
+        if (controller.signal.aborted) return;
         setPaths(result.paths);
         setSelectedPath(0);
         setError(null);

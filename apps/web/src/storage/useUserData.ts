@@ -29,6 +29,9 @@ export interface UserData {
   /** 'error' means persistent storage is unavailable (no OPFS/WASM). */
   status: 'loading' | 'ready' | 'error';
   error: string | null;
+  /** Latest failed storage write, for a dismissible toast — null when none. */
+  writeError: string | null;
+  clearWriteError: () => void;
   collections: CollectionRecord[];
   places: PlaceRecord[];
   tracks: TrackRecord[];
@@ -88,11 +91,20 @@ function download(fileName: string, bytes: Uint8Array, type: string): void {
 export function useUserData(): UserData {
   const [status, setStatus] = useState<UserData['status']>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [places, setPlaces] = useState<PlaceRecord[]>([]);
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const storageRef = useRef<AtlasStorage | null>(null);
   const trackDataCache = useRef(new Map<string, TrackData>());
+
+  const clearWriteError = useCallback(() => setWriteError(null), []);
+  // A rejected write means the change was NOT saved — surface it rather than
+  // letting it look like a no-op (never *silently* lose user data).
+  const reportWriteFailure = useCallback((action: string, err: unknown) => {
+    console.error(`${action} failed`, err);
+    setWriteError(`${action} failed — ${err instanceof Error ? err.message : String(err)}`);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,43 +152,64 @@ export function useUserData(): UserData {
     async (input: NewPlace) => {
       const storage = storageRef.current;
       if (!storage) return null;
-      const place = await storage.createPlace(input);
-      await refreshPlaces();
-      return place;
+      try {
+        const place = await storage.createPlace(input);
+        await refreshPlaces();
+        return place;
+      } catch (err) {
+        reportWriteFailure('Saving place', err);
+        return null;
+      }
     },
-    [refreshPlaces],
+    [refreshPlaces, reportWriteFailure],
   );
 
   const updatePlace = useCallback(
     async (id: string, patch: PlacePatch) => {
-      await storageRef.current?.updatePlace(id, patch);
-      await refreshPlaces();
+      try {
+        await storageRef.current?.updatePlace(id, patch);
+        await refreshPlaces();
+      } catch (err) {
+        reportWriteFailure('Updating place', err);
+      }
     },
-    [refreshPlaces],
+    [refreshPlaces, reportWriteFailure],
   );
 
   const deletePlace = useCallback(
     async (id: string) => {
-      await storageRef.current?.deletePlace(id);
-      await refreshPlaces();
+      try {
+        await storageRef.current?.deletePlace(id);
+        await refreshPlaces();
+      } catch (err) {
+        reportWriteFailure('Deleting place', err);
+      }
     },
-    [refreshPlaces],
+    [refreshPlaces, reportWriteFailure],
   );
 
   const reorderPlaces = useCallback(
     async (orderedIds: string[]) => {
-      await storageRef.current?.reorderPlaces(orderedIds);
-      await refreshPlaces();
+      try {
+        await storageRef.current?.reorderPlaces(orderedIds);
+        await refreshPlaces();
+      } catch (err) {
+        reportWriteFailure('Reordering places', err);
+      }
     },
-    [refreshPlaces],
+    [refreshPlaces, reportWriteFailure],
   );
 
   const reorderCollections = useCallback(
     async (orderedIds: string[]) => {
-      await storageRef.current?.reorderCollections(orderedIds);
-      await refreshCollections();
+      try {
+        await storageRef.current?.reorderCollections(orderedIds);
+        await refreshCollections();
+      } catch (err) {
+        reportWriteFailure('Reordering folders', err);
+      }
     },
-    [refreshCollections],
+    [refreshCollections, reportWriteFailure],
   );
 
   const importFiles = useCallback(
@@ -229,19 +262,27 @@ export function useUserData(): UserData {
 
   const updateTrack = useCallback(
     async (id: string, patch: TrackPatch) => {
-      await storageRef.current?.updateTrack(id, patch);
-      await refreshTracks();
+      try {
+        await storageRef.current?.updateTrack(id, patch);
+        await refreshTracks();
+      } catch (err) {
+        reportWriteFailure('Updating track', err);
+      }
     },
-    [refreshTracks],
+    [refreshTracks, reportWriteFailure],
   );
 
   const deleteTrack = useCallback(
     async (id: string) => {
-      await storageRef.current?.deleteTrack(id);
-      trackDataCache.current.delete(id);
-      await refreshTracks();
+      try {
+        await storageRef.current?.deleteTrack(id);
+        trackDataCache.current.delete(id);
+        await refreshTracks();
+      } catch (err) {
+        reportWriteFailure('Deleting track', err);
+      }
     },
-    [refreshTracks],
+    [refreshTracks, reportWriteFailure],
   );
 
   const getTrackData = useCallback(async (id: string): Promise<TrackData | null> => {
@@ -272,54 +313,74 @@ export function useUserData(): UserData {
 
   const createCollection = useCallback(
     async (name: string, parentId: string | null = null) => {
-      await storageRef.current?.createCollection(name, parentId);
-      await refreshCollections();
+      try {
+        await storageRef.current?.createCollection(name, parentId);
+        await refreshCollections();
+      } catch (err) {
+        reportWriteFailure('Creating folder', err);
+      }
     },
-    [refreshCollections],
+    [refreshCollections, reportWriteFailure],
   );
 
   const renameCollection = useCallback(
     async (id: string, name: string) => {
-      await storageRef.current?.renameCollection(id, name);
-      await refreshCollections();
+      try {
+        await storageRef.current?.renameCollection(id, name);
+        await refreshCollections();
+      } catch (err) {
+        reportWriteFailure('Renaming folder', err);
+      }
     },
-    [refreshCollections],
+    [refreshCollections, reportWriteFailure],
   );
 
   const setCollectionVisible = useCallback(
     async (id: string, visible: boolean) => {
-      await storageRef.current?.setCollectionVisible(id, visible);
-      await refreshCollections();
+      try {
+        await storageRef.current?.setCollectionVisible(id, visible);
+        await refreshCollections();
+      } catch (err) {
+        reportWriteFailure('Updating folder', err);
+      }
     },
-    [refreshCollections],
+    [refreshCollections, reportWriteFailure],
   );
 
   const deleteCollection = useCallback(
     async (id: string) => {
-      await storageRef.current?.deleteCollection(id);
-      await Promise.all([refreshCollections(), refreshPlaces(), refreshTracks()]);
+      try {
+        await storageRef.current?.deleteCollection(id);
+        await Promise.all([refreshCollections(), refreshPlaces(), refreshTracks()]);
+      } catch (err) {
+        reportWriteFailure('Deleting folder', err);
+      }
     },
-    [refreshCollections, refreshPlaces, refreshTracks],
+    [refreshCollections, refreshPlaces, refreshTracks, reportWriteFailure],
   );
 
   const setAllVisible = useCallback(
     async (visible: boolean) => {
       const storage = storageRef.current;
       if (!storage) return;
-      const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
-      // Only flip rows that differ, so we don't churn updated_at (and the sync
-      // outbox) for records already in the wanted state.
-      await Promise.all([
-        ...ps
-          .filter((p) => p.visible !== visible)
-          .map((p) => storage.updatePlace(p.id, { visible })),
-        ...cs
-          .filter((c) => c.visible !== visible)
-          .map((c) => storage.setCollectionVisible(c.id, visible)),
-      ]);
-      await Promise.all([refreshPlaces(), refreshCollections()]);
+      try {
+        const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
+        // Only flip rows that differ, so we don't churn updated_at (and the sync
+        // outbox) for records already in the wanted state.
+        await Promise.all([
+          ...ps
+            .filter((p) => p.visible !== visible)
+            .map((p) => storage.updatePlace(p.id, { visible })),
+          ...cs
+            .filter((c) => c.visible !== visible)
+            .map((c) => storage.setCollectionVisible(c.id, visible)),
+        ]);
+        await Promise.all([refreshPlaces(), refreshCollections()]);
+      } catch (err) {
+        reportWriteFailure('Updating visibility', err);
+      }
     },
-    [refreshPlaces, refreshCollections],
+    [refreshPlaces, refreshCollections, reportWriteFailure],
   );
 
   const exportAll = useCallback(async () => {
@@ -362,6 +423,8 @@ export function useUserData(): UserData {
   return {
     status,
     error,
+    writeError,
+    clearWriteError,
     collections,
     places,
     tracks,

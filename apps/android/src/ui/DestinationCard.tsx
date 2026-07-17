@@ -8,6 +8,8 @@ export interface DestinationTarget {
   name: string;
   /** Search results / long-press points can be saved as a pin; saved places can't. */
   canSave?: boolean;
+  /** Set when the target is a saved place — enables the Edit action. */
+  placeId?: string;
 }
 
 /**
@@ -22,6 +24,7 @@ export function DestinationCard({
   onModeChange,
   onNavigate,
   onSave,
+  onEdit,
   onCancel,
   bottomInset = 0,
 }: {
@@ -30,6 +33,8 @@ export function DestinationCard({
   onModeChange: (mode: RoutingProfile) => void;
   onNavigate: () => void;
   onSave?: () => void;
+  /** Open the saved place's edit panel (only for targets with a placeId). */
+  onEdit?: () => void;
   onCancel: () => void;
   bottomInset?: number;
 }) {
@@ -67,6 +72,11 @@ export function DestinationCard({
         {target.canSave && onSave ? (
           <Pressable style={styles.save} onPress={onSave} testID="destination-save">
             <Text style={styles.saveText}>Save pin</Text>
+          </Pressable>
+        ) : null}
+        {onEdit ? (
+          <Pressable style={styles.save} onPress={onEdit} testID="destination-edit">
+            <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
       </View>

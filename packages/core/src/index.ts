@@ -108,6 +108,29 @@ export function photonFeatureToSearchResult(feature: PhotonFeature): SearchResul
 }
 
 /**
+ * Match saved places against a search query — the route planner's stop search
+ * shows these alongside geocoder results so a favorite can be picked directly
+ * as a stop. Case-insensitive; whole-name prefix matches rank first, then
+ * word-prefix and substring matches, in the input order.
+ */
+export function matchPlacesByName<T extends { name: string }>(
+  places: T[],
+  query: string,
+  limit = 5,
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return [];
+  const prefix: T[] = [];
+  const rest: T[] = [];
+  for (const place of places) {
+    const name = place.name.toLowerCase();
+    if (name.startsWith(q)) prefix.push(place);
+    else if (name.includes(q)) rest.push(place);
+  }
+  return [...prefix, ...rest].slice(0, limit);
+}
+
+/**
  * Substitute the `{origin}` placeholders in a self-hosted map style template
  * (see infrastructure/tiles/fetch-map-assets.sh) with the actual origin the
  * app is served from, e.g. `https://atlas.gjessing.io` or a dev server.

@@ -29,6 +29,9 @@ export interface ImportResult {
 export interface UserData {
   status: 'loading' | 'ready' | 'error';
   error: string | null;
+  /** Latest failed storage write, for a dismissible banner — null when none. */
+  writeError: string | null;
+  clearWriteError: () => void;
   places: PlaceRecord[];
   /** Folders — resolve a place's effective map visibility and group places/tracks. */
   collections: CollectionRecord[];
@@ -97,11 +100,20 @@ function base64ToBytes(b64: string): Uint8Array {
 export function useUserData(): UserData {
   const [status, setStatus] = useState<UserData['status']>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceRecord[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const storageRef = useRef<AtlasStorage | null>(null);
   const [storage, setStorage] = useState<AtlasStorage | null>(null);
+
+  const clearWriteError = useCallback(() => setWriteError(null), []);
+  // A rejected write means the change was NOT saved — surface it rather than
+  // letting it look like a no-op (never *silently* lose user data).
+  const reportWriteFailure = useCallback((action: string, err: unknown) => {
+    console.error(`${action} failed`, err);
+    setWriteError(`${action} failed — ${err instanceof Error ? err.message : String(err)}`);
+  }, []);
 
   const refreshAll = useCallback(async () => {
     const s = storageRef.current;
@@ -139,42 +151,62 @@ export function useUserData(): UserData {
 
   const savePlace = useCallback(
     async (input: NewPlace) => {
-      await storageRef.current?.createPlace(input);
-      await refreshAll();
+      try {
+        await storageRef.current?.createPlace(input);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Saving place', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const updatePlace = useCallback(
     async (id: string, patch: PlacePatch) => {
-      await storageRef.current?.updatePlace(id, patch);
-      await refreshAll();
+      try {
+        await storageRef.current?.updatePlace(id, patch);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Updating place', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const deletePlace = useCallback(
     async (id: string) => {
-      await storageRef.current?.deletePlace(id);
-      await refreshAll();
+      try {
+        await storageRef.current?.deletePlace(id);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Deleting place', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const reorderPlaces = useCallback(
     async (orderedIds: string[]) => {
-      await storageRef.current?.reorderPlaces(orderedIds);
-      await refreshAll();
+      try {
+        await storageRef.current?.reorderPlaces(orderedIds);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Reordering places', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const reorderCollections = useCallback(
     async (orderedIds: string[]) => {
-      await storageRef.current?.reorderCollections(orderedIds);
-      await refreshAll();
+      try {
+        await storageRef.current?.reorderCollections(orderedIds);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Reordering folders', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const importFiles = useCallback(
@@ -224,18 +256,26 @@ export function useUserData(): UserData {
 
   const updateTrack = useCallback(
     async (id: string, patch: TrackPatch) => {
-      await storageRef.current?.updateTrack(id, patch);
-      await refreshAll();
+      try {
+        await storageRef.current?.updateTrack(id, patch);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Updating track', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const deleteTrack = useCallback(
     async (id: string) => {
-      await storageRef.current?.deleteTrack(id);
-      await refreshAll();
+      try {
+        await storageRef.current?.deleteTrack(id);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Deleting track', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const exportTrack = useCallback(async (id: string, format: 'gpx' | 'kml') => {
@@ -250,54 +290,74 @@ export function useUserData(): UserData {
 
   const createCollection = useCallback(
     async (name: string, parentId: string | null = null) => {
-      await storageRef.current?.createCollection(name, parentId);
-      await refreshAll();
+      try {
+        await storageRef.current?.createCollection(name, parentId);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Creating folder', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const renameCollection = useCallback(
     async (id: string, name: string) => {
-      await storageRef.current?.renameCollection(id, name);
-      await refreshAll();
+      try {
+        await storageRef.current?.renameCollection(id, name);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Renaming folder', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const setCollectionVisible = useCallback(
     async (id: string, visible: boolean) => {
-      await storageRef.current?.setCollectionVisible(id, visible);
-      await refreshAll();
+      try {
+        await storageRef.current?.setCollectionVisible(id, visible);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Updating folder', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const deleteCollection = useCallback(
     async (id: string) => {
-      await storageRef.current?.deleteCollection(id);
-      await refreshAll();
+      try {
+        await storageRef.current?.deleteCollection(id);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Deleting folder', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const setAllVisible = useCallback(
     async (visible: boolean) => {
       const storage = storageRef.current;
       if (!storage) return;
-      const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
-      // Only flip rows that differ, so we don't churn updated_at (and the sync
-      // outbox) for records already in the wanted state.
-      await Promise.all([
-        ...ps
-          .filter((p) => p.visible !== visible)
-          .map((p) => storage.updatePlace(p.id, { visible })),
-        ...cs
-          .filter((c) => c.visible !== visible)
-          .map((c) => storage.setCollectionVisible(c.id, visible)),
-      ]);
-      await refreshAll();
+      try {
+        const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
+        // Only flip rows that differ, so we don't churn updated_at (and the sync
+        // outbox) for records already in the wanted state.
+        await Promise.all([
+          ...ps
+            .filter((p) => p.visible !== visible)
+            .map((p) => storage.updatePlace(p.id, { visible })),
+          ...cs
+            .filter((c) => c.visible !== visible)
+            .map((c) => storage.setCollectionVisible(c.id, visible)),
+        ]);
+        await refreshAll();
+      } catch (err) {
+        reportWriteFailure('Updating visibility', err);
+      }
     },
-    [refreshAll],
+    [refreshAll, reportWriteFailure],
   );
 
   const exportAll = useCallback(async () => {
@@ -311,6 +371,8 @@ export function useUserData(): UserData {
   return {
     status,
     error,
+    writeError,
+    clearWriteError,
     places,
     collections,
     tracks,

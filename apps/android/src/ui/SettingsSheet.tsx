@@ -146,15 +146,19 @@ function RegionsSection({
   const download = useCallback(
     async (manifest: RegionPackManifest) => {
       setProgress((p) => ({ ...p, [manifest.id]: 0 }));
+      setRegionsError(null);
       try {
         // Updating an installed pack replaces files the routing engine may
-        // hold open (mmap) — release it first, same as on delete.
-        await closeEngine().catch(() => undefined);
+        // hold open (mmap) — release it first, same as on delete. A failed
+        // close would leave the old files pinned, so it must surface too.
+        await closeEngine();
         await downloadPack(manifest, (fraction) =>
           setProgress((p) => ({ ...p, [manifest.id]: fraction })),
         );
       } catch (err) {
-        setRegionsError(err instanceof Error ? err.message : String(err));
+        setRegionsError(
+          `Download of ${manifest.name} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setProgress((p) => {
           const { [manifest.id]: _done, ...rest } = p;
@@ -168,10 +172,17 @@ function RegionsSection({
 
   const remove = useCallback(
     async (id: string) => {
-      // The routing engine may hold this pack's tile extract open (mmap) —
-      // release it before deleting the files under it.
-      await closeEngine().catch(() => undefined);
-      await deletePack(id);
+      setRegionsError(null);
+      try {
+        // The routing engine may hold this pack's tile extract open (mmap) —
+        // release it before deleting the files under it.
+        await closeEngine();
+        await deletePack(id);
+      } catch (err) {
+        setRegionsError(
+          `Deleting the pack failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       onPacksChanged();
     },
     [onPacksChanged],

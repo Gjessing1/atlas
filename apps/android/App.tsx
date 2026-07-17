@@ -1,4 +1,4 @@
-import { placeIsVisible, type SearchResult, type VisibilityFolder } from '@atlas/core';
+import { haversineM, placeIsVisible, type SearchResult, type VisibilityFolder } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import {
   Camera,
@@ -8,6 +8,7 @@ import {
   Marker,
   UserLocation,
   type CameraRef,
+  type MapRef,
 } from '@maplibre/maplibre-react-native';
 import {
   ROUTING_PROFILES,
@@ -19,15 +20,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, useWindowDimensions, View } from 'react-native';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -170,6 +163,7 @@ function AppInner() {
   // never locks the camera and fights a pan.
   const [showPuck, setShowPuck] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
+  const mapRef = useRef<MapRef>(null);
 
   // While a trip is active the nav banner owns the top of the screen, so drop
   // the search bar + button column below its measured height (issue: the banner
@@ -199,6 +193,49 @@ function AppInner() {
       flyTo({ lat: target.lat, lng: target.lng });
     },
     [flyTo],
+  );
+
+  // One handler for every map tap: dismiss the ☰ menu if it's open, add a stop
+  // while planning, otherwise hit-test the saved pins. Pins are picked here at
+  // the map level because touches on Marker child views are not delivered
+  // reliably on-device — the map press always is.
+  const onMapPress = useCallback(
+    (lng: number, lat: number) => {
+      if (menuOpen) {
+        setMenuOpen(false);
+        return;
+      }
+      if (route.active) {
+        route.addWaypoint({ lat, lng });
+        return;
+      }
+      void (async () => {
+        const zoom = await mapRef.current?.getZoom();
+        if (zoom === undefined) return;
+        // Ground size of one screen pixel at this zoom (512px tiles) makes the
+        // tap tolerance a constant ~36 px at any zoom level.
+        const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+        let best: (typeof visiblePlaces)[number] | undefined;
+        let bestM = Infinity;
+        for (const place of visiblePlaces) {
+          const d = haversineM({ lat, lng }, { lat: place.lat, lng: place.lng });
+          if (d < bestM) {
+            bestM = d;
+            best = place;
+          }
+        }
+        if (best && bestM <= 36 * metersPerPx) {
+          pickDestination({
+            lat: best.lat,
+            lng: best.lng,
+            name: best.name,
+            canSave: false,
+            placeId: best.id,
+          });
+        }
+      })();
+    },
+    [menuOpen, route, visiblePlaces, pickDestination],
   );
 
   const startNavigation = useCallback(() => {
@@ -261,6 +298,14 @@ function AppInner() {
     void listLocalPacks().then(setPacks);
   }, []);
 
+  // Auto-dismiss the write-error banner; a new failure restarts the timer.
+  const { writeError, clearWriteError } = data;
+  useEffect(() => {
+    if (!writeError) return;
+    const t = setTimeout(clearWriteError, 8000);
+    return () => clearTimeout(t);
+  }, [writeError, clearWriteError]);
+
   // Load the persisted server override before any server request fires, so the
   // first health check / style fetch already targets the configured server.
   useEffect(() => {
@@ -311,6 +356,7 @@ function AppInner() {
   return (
     <View style={styles.container}>
       <MapLibreMap
+        ref={mapRef}
         style={styles.map}
         mapStyle={mapStyle}
         // Edge-to-edge: the map draws behind the system nav bar, so lift the
@@ -330,17 +376,14 @@ function AppInner() {
           top: Math.max(0, Math.round(win.height - bottomInset - 88 - topInset)),
           left: Math.round(win.width * 0.3),
         }}
-        // While planning a route, a tap drops a stop; otherwise long-press picks
-        // a destination (the destination card). Both gestures add a stop in plan
-        // mode so it feels the same as the web map click.
-        onPress={
-          planning
-            ? (e) => {
-                const [lng, lat] = e.nativeEvent.lngLat;
-                route.addWaypoint({ lat, lng });
-              }
-            : undefined
-        }
+        // While planning a route, a tap drops a stop; otherwise a tap dismisses
+        // the ☰ menu or picks a saved pin (see onMapPress). Long-press picks any
+        // point as a destination. Both gestures add a stop in plan mode so it
+        // feels the same as the web map click.
+        onPress={(e) => {
+          const [lng, lat] = e.nativeEvent.lngLat;
+          onMapPress(lng, lat);
+        }}
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
           if (planning) {
@@ -454,38 +497,15 @@ function AppInner() {
             <PlacePin color="#d33939" />
           </Marker>
         ) : null}
-        {/* Saved places as colour-badged teardrop pins (web-parity markers). A
-            tap opens Navigate/Edit — Edit jumps straight to the place's edit
-            panel in the Favorites sheet (rename, folder, icon/colour, delete). */}
+        {/* Saved places as colour-badged teardrop pins (web-parity markers).
+            The marker view itself never handles touches (they aren't delivered
+            reliably) — taps fall through to the map, and onMapPress hit-tests
+            the pins to open the destination card (Navigate / Edit). */}
         {visiblePlaces.map((place) => (
           <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
-            <Pressable
-              onPress={() =>
-                Alert.alert(place.name, undefined, [
-                  {
-                    text: 'Navigate here',
-                    onPress: () =>
-                      pickDestination({
-                        lat: place.lat,
-                        lng: place.lng,
-                        name: place.name,
-                        canSave: false,
-                      }),
-                  },
-                  {
-                    text: 'Edit',
-                    onPress: () => {
-                      setEditPlaceId(place.id);
-                      setFavoritesOpen(true);
-                    },
-                  },
-                  { text: 'Close', style: 'cancel' as const },
-                ])
-              }
-              testID={`place-pin-${place.id}`}
-            >
+            <View pointerEvents="none" testID={`place-pin-${place.id}`}>
               <PlacePin color={place.color} icon={place.icon} />
-            </Pressable>
+            </View>
           </Marker>
         ))}
       </MapLibreMap>
@@ -605,6 +625,15 @@ function AppInner() {
           <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
         </View>
       ) : null}
+      {writeError ? (
+        <Pressable
+          style={[styles.banner, { top: topInset + 60 }]}
+          onPress={clearWriteError}
+          testID="write-error-banner"
+        >
+          <Text style={styles.bannerText}>{writeError} — the change was not saved.</Text>
+        </Pressable>
+      ) : null}
       <UpdateNotices storage={data.storage} topInset={topInset} />
 
       {destination && !planning ? (
@@ -621,6 +650,15 @@ function AppInner() {
                     lat: destination.lat,
                     lng: destination.lng,
                   });
+                  setDestination(null);
+                }
+              : undefined
+          }
+          onEdit={
+            destination.placeId
+              ? () => {
+                  setEditPlaceId(destination.placeId!);
+                  setFavoritesOpen(true);
                   setDestination(null);
                 }
               : undefined
@@ -691,7 +729,13 @@ function AppInner() {
         }}
       />
       {planning ? (
-        <RoutePanel route={route} onExport={exportRoute} bottomInset={bottomInset} />
+        <RoutePanel
+          route={route}
+          packs={packs}
+          places={data.places}
+          onExport={exportRoute}
+          bottomInset={bottomInset}
+        />
       ) : null}
       <StatusBar style="auto" />
     </View>

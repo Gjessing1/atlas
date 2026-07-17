@@ -874,3 +874,77 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Failed storage write (useUserData.writeError) — the change was NOT saved. */
+.write-error-toast {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(90vw, 480px);
+  padding: 10px 14px;
+  background: #a4262c;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.write-error-toast button {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+}
+
+/* Stop search inside the route panel: saved places first, then addresses. */
+.route-stop-search input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.route-stop-search ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.route-stop-search li button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.route-stop-search li button:hover {
+  background: #eef3fb;
+}
+
+.route-stop-search .result-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.route-stop-search .result-label {
+  font-size: 11px;
+  color: #666;
+}
