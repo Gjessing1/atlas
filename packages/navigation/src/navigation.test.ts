@@ -2,8 +2,15 @@ import type { LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 import { describe, expect, it } from 'vitest';
 
-import { zoomForSpeed } from './camera.js';
-import { cumulativeDistances, snapToPolyline } from './geometry.js';
+import { followZoom, zoomForSpeed } from './camera.js';
+import {
+  bearingDeg,
+  cumulativeDistances,
+  pointAtDistance,
+  snapToPolyline,
+  subPolyline,
+} from './geometry.js';
+import { maneuverArrowsGeoJSON } from './overlays.js';
 import { NavigationSession } from './session.js';
 
 // A straight eastward route at lat 60: 21 points, lng 10.000 → 10.020.
@@ -213,5 +220,103 @@ describe('zoomForSpeed', () => {
   it('quantizes to quarter-zoom steps', () => {
     const z = zoomForSpeed(13, 60);
     expect(Math.round(z * 4) / 4).toBe(z);
+  });
+});
+
+describe('followZoom', () => {
+  it('matches the speed zoom far from a maneuver', () => {
+    expect(followZoom(25, 60, null)).toBe(zoomForSpeed(25, 60));
+    expect(followZoom(25, 60, 1000)).toBe(zoomForSpeed(25, 60));
+  });
+
+  it('ramps monotonically to the intersection zoom as the turn nears', () => {
+    const far = followZoom(25, 60, 290);
+    const mid = followZoom(25, 60, 200);
+    const near = followZoom(25, 60, 100);
+    expect(far).toBeGreaterThanOrEqual(zoomForSpeed(25, 60));
+    expect(mid).toBeGreaterThanOrEqual(far);
+    expect(near).toBeGreaterThanOrEqual(mid);
+    expect(near).toBe(17.5);
+  });
+
+  it('never zooms below the speed zoom', () => {
+    // Slow approach: the speed zoom is already at/above the approach zoom.
+    expect(followZoom(0, 60, 50)).toBeGreaterThanOrEqual(17);
+  });
+});
+
+describe('geometry helpers', () => {
+  it('bearingDeg follows the compass', () => {
+    const a = { lat: 60, lng: 10 };
+    expect(bearingDeg(a, { lat: 60.001, lng: 10 })).toBeCloseTo(0, 1);
+    expect(bearingDeg(a, { lat: 60, lng: 10.001 })).toBeCloseTo(90, 1);
+    expect(bearingDeg(a, { lat: 59.999, lng: 10 })).toBeCloseTo(180, 1);
+    expect(bearingDeg(a, { lat: 60, lng: 9.999 })).toBeCloseTo(270, 1);
+  });
+
+  it('pointAtDistance interpolates and clamps to the ends', () => {
+    const half = pointAtDistance(routePoints, routeCum, routeTotal / 2);
+    expect(half.lat).toBeCloseTo(60, 6);
+    expect(half.lng).toBeCloseTo(10.01, 4);
+    expect(pointAtDistance(routePoints, routeCum, -5)).toEqual(routePoints[0]);
+    expect(pointAtDistance(routePoints, routeCum, routeTotal + 5)).toEqual(
+      routePoints[routePoints.length - 1],
+    );
+  });
+
+  it('subPolyline cuts an interpolated slice of the line', () => {
+    const slice = subPolyline(routePoints, routeCum, routeCum[5]! - 10, routeCum[5]! + 10);
+    expect(slice.length).toBeGreaterThanOrEqual(2);
+    const len = cumulativeDistances(slice).at(-1)!;
+    expect(len).toBeCloseTo(20, 0);
+    expect(subPolyline(routePoints, routeCum, 50, 50)).toEqual([]);
+  });
+});
+
+describe('NavState course and then-maneuver', () => {
+  it('reports the route tangent as the course', () => {
+    const s = new NavigationSession(route());
+    // Eastward route: course ≈ 90° everywhere, including at the very end
+    // (where the tangent looks back instead of ahead).
+    expect(s.update(pointAtAlong(100), 0).state.courseDeg).toBeCloseTo(90, 0);
+    expect(s.update(pointAtAlong(routeTotal - 30), 0).state.courseDeg).toBeCloseTo(90, 0);
+  });
+
+  it('exposes the maneuver after the upcoming one', () => {
+    const s = new NavigationSession(route());
+    const start = s.update(pointAtAlong(0), 0).state;
+    expect(start.upcoming?.instruction.text).toBe('Turn right onto Elm Street');
+    expect(start.then?.instruction.text).toBe('Arrive at destination');
+    expect(start.then!.distanceToM).toBeGreaterThan(start.upcoming!.distanceToM);
+
+    const late = s.update(pointAtAlong(routeCum[10]! + 5), 0).state;
+    expect(late.upcoming?.instruction.text).toBe('Arrive at destination');
+    expect(late.then).toBeNull();
+  });
+});
+
+describe('maneuverArrowsGeoJSON', () => {
+  it('emits one body + tip pair per real turn, skipping continue and arrive', () => {
+    const fc = maneuverArrowsGeoJSON(route());
+    // Only the sign-2 turn qualifies (sign 0 head-east and sign 4 arrive do not).
+    expect(fc.features).toHaveLength(2);
+    const body = fc.features.find((f) => f.properties.kind === 'body')!;
+    const tip = fc.features.find((f) => f.properties.kind === 'tip')!;
+    expect(body.properties.alongM).toBeCloseTo(routeCum[10]!, 0);
+
+    // The body spans ~35 m either side of the maneuver point.
+    const coords = (body.geometry as { coordinates: number[][] }).coordinates;
+    const line = coords.map(([lng, lat]) => ({ lat: lat!, lng: lng! }));
+    expect(cumulativeDistances(line).at(-1)!).toBeCloseTo(70, 0);
+
+    // Straight eastward route: the tip points east and sits past the turn.
+    expect((tip.properties as { bearingDeg: number }).bearingDeg).toBeCloseTo(90, 0);
+    const [tipLng] = (tip.geometry as { coordinates: number[] }).coordinates;
+    expect(tipLng!).toBeGreaterThan(10.01);
+  });
+
+  it('returns no arrows for instruction-less or degenerate routes', () => {
+    expect(maneuverArrowsGeoJSON(route(false)).features).toEqual([]);
+    expect(maneuverArrowsGeoJSON({ points: [{ lat: 60, lng: 10 }] }).features).toEqual([]);
   });
 });

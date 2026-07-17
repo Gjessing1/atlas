@@ -9,5 +9,13 @@ export {
   type UpcomingManeuver,
   type VoicePrompt,
 } from './model.js';
-export { cumulativeDistances, snapToPolyline, type Snap } from './geometry.js';
-export { zoomForSpeed } from './camera.js';
+export {
+  bearingDeg,
+  cumulativeDistances,
+  pointAtDistance,
+  snapToPolyline,
+  subPolyline,
+  type Snap,
+} from './geometry.js';
+export { followZoom, zoomForSpeed } from './camera.js';
+export { maneuverArrowsGeoJSON } from './overlays.js';

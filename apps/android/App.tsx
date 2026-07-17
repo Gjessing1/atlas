@@ -39,6 +39,7 @@ import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { RoutePreview } from './src/nav/RoutePreview';
+import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
@@ -142,6 +143,9 @@ function AppInner() {
   // orientation while travelling).
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  // The follow camera: bottom-anchored, course-up, speed/turn-aware zoom; a
+  // manual pan pauses it (re-centre pill / locate button / timeout resume it).
+  const navCam = useNavCamera(cameraRef, nav, navFollow);
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
@@ -417,10 +421,15 @@ function AppInner() {
     return data.importFiles(res.assets.map((a) => ({ name: a.name, uri: a.uri })));
   }, [data]);
 
-  // Recentre on the user's position. While navigating this pulls the camera back
-  // onto the (course-/north-up) follow after a manual pan; when idle it's a
-  // one-shot fly-to that also reveals the location puck.
+  // Recentre on the user's position. While navigating this re-engages the
+  // follow camera after a manual pan; when idle it's a one-shot fly-to that
+  // also reveals the location puck.
+  const { resumeFollow } = navCam;
   const locate = useCallback(async () => {
+    if (following) {
+      resumeFollow();
+      return;
+    }
     try {
       const fg = await Location.requestForegroundPermissionsAsync();
       if (!fg.granted) return;
@@ -433,7 +442,7 @@ function AppInner() {
     } catch {
       // Location unavailable — nothing to recentre on.
     }
-  }, []);
+  }, [following, resumeFollow]);
 
   const refreshPacks = useCallback(() => {
     void listLocalPacks().then(setPacks);
@@ -489,12 +498,12 @@ function AppInner() {
         route={route}
         destination={destination}
         visiblePlaces={visiblePlaces}
-        navFollow={navFollow}
         showPuck={showPuck}
         initialView={initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
         onViewChange={onViewChange}
+        onUserGesture={navCam.onUserGesture}
         onDestinationMoved={onDestinationMoved}
       />
 
@@ -522,6 +531,17 @@ function AppInner() {
           >
             {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
             {navFollow === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Free look-around during navigation: a pan pauses the follow camera;
+          this pill (or the locate button, or a 12 s timeout) re-engages it. */}
+      {following && navCam.followPaused ? (
+        <View style={[styles.recentreWrap, { bottom: bottomInset + 88 }]} pointerEvents="box-none">
+          <Pressable style={styles.recentrePill} onPress={navCam.resumeFollow} testID="recentre">
+            <NavArrowIcon />
+            <Text style={styles.recentreText}>Re-centre</Text>
           </Pressable>
         </View>
       ) : null}
@@ -666,6 +686,18 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
+  recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  recentrePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(17,17,17,0.9)',
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    elevation: 5,
+  },
+  recentreText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   roundButton: {
     width: 44,
     height: 44,

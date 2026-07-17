@@ -1,7 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 
-import { cumulativeDistances, snapToPolyline } from './geometry.js';
+import { bearingDeg, cumulativeDistances, pointAtDistance, snapToPolyline } from './geometry.js';
 import {
   DEFAULT_NAV_OPTIONS,
   type NavigationOptions,
@@ -73,7 +73,7 @@ export class NavigationSession {
     else this.offRouteCount = 0;
     const offRoute = this.offRouteCount >= this.opts.offRouteGraceUpdates;
 
-    const upcoming = this.arrived ? null : this.findUpcoming(alongM);
+    const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
     const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming);
 
     const state: NavState = {
@@ -86,18 +86,38 @@ export class NavigationSession {
       timeRemainingMs: this.remainingTimeMs(alongM, distanceRemainingM),
       etaEpochMs: nowMs + this.remainingTimeMs(alongM, distanceRemainingM),
       upcoming,
+      then,
+      courseDeg: this.courseAt(alongM),
     };
     return { state, prompts };
   }
 
-  /** The maneuver being approached: the first one strictly ahead of `alongM`. */
-  private findUpcoming(alongM: number): UpcomingManeuver | null {
-    for (const m of this.maneuvers) {
+  /** The maneuver being approached (first strictly ahead of `alongM`) plus the one after it. */
+  private findUpcoming(alongM: number): [UpcomingManeuver | null, UpcomingManeuver | null] {
+    for (let i = 0; i < this.maneuvers.length; i++) {
+      const m = this.maneuvers[i]!;
       if (m.alongStartM > alongM + EPS) {
-        return { instruction: m.instruction, distanceToM: m.alongStartM - alongM };
+        const next = this.maneuvers[i + 1];
+        return [
+          { instruction: m.instruction, distanceToM: m.alongStartM - alongM },
+          next ? { instruction: next.instruction, distanceToM: next.alongStartM - alongM } : null,
+        ];
       }
     }
-    return null;
+    return [null, null];
+  }
+
+  /** Route direction at `alongM`, from a ~25 m tangent (looking back at the very end). */
+  private courseAt(alongM: number): number | null {
+    if (this.points.length < 2 || this.totalM <= 0) return null;
+    const LOOKAHEAD_M = 25;
+    const from = Math.min(alongM, Math.max(0, this.totalM - LOOKAHEAD_M));
+    const to = Math.min(this.totalM, from + LOOKAHEAD_M);
+    if (to <= from) return null;
+    return bearingDeg(
+      pointAtDistance(this.points, this.cum, from),
+      pointAtDistance(this.points, this.cum, to),
+    );
   }
 
   private remainingTimeMs(alongM: number, distanceRemainingM: number): number {

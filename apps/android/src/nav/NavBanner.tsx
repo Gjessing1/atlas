@@ -42,27 +42,36 @@ function turnRotation(sign: number): number | null {
 }
 
 /** Visual for the upcoming maneuver: a rotated arrow, ↻ roundabout, ⚑ arrive/via. */
-function TurnArrow({ sign, exitNumber }: { sign: number; exitNumber?: number }) {
+function TurnArrow({
+  sign,
+  exitNumber,
+  small = false,
+}: {
+  sign: number;
+  exitNumber?: number;
+  /** Compact variant for the "then …" hint row. */
+  small?: boolean;
+}) {
+  const box = small ? styles.turnBoxSmall : styles.turnBox;
+  const glyph = small ? [styles.turnGlyph, styles.turnGlyphSmall] : [styles.turnGlyph];
   if (sign === 6) {
     return (
-      <View style={styles.turnBox}>
-        <Text style={styles.turnGlyph}>{'↻'}</Text>
+      <View style={box}>
+        <Text style={glyph}>{'↻'}</Text>
         {exitNumber ? <Text style={styles.turnExit}>{exitNumber}</Text> : null}
       </View>
     );
   }
   if (sign === 4 || sign === 5) {
     return (
-      <View style={styles.turnBox}>
-        <Text style={styles.turnGlyph}>{'⚑'}</Text>
+      <View style={box}>
+        <Text style={glyph}>{'⚑'}</Text>
       </View>
     );
   }
   return (
-    <View style={styles.turnBox}>
-      <Text
-        style={[styles.turnGlyph, { transform: [{ rotate: `${turnRotation(sign) ?? 0}deg` }] }]}
-      >
+    <View style={box}>
+      <Text style={[...glyph, { transform: [{ rotate: `${turnRotation(sign) ?? 0}deg` }] }]}>
         {'↑'}
       </Text>
     </View>
@@ -87,6 +96,12 @@ export function NavBanner({
   const maneuver = state?.upcoming;
   const speed = formatSpeed(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  // "then …" hint when the maneuver after the current one follows hot on its
+  // heels — the heads-up that matters for lane choice (Google-style).
+  const thenManeuver =
+    maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
+      ? state.then
+      : null;
 
   return (
     <View
@@ -115,6 +130,17 @@ export function NavBanner({
         ) : (
           <Text style={styles.maneuver}>Continue on route</Text>
         )}
+
+        {thenManeuver ? (
+          <View style={styles.thenRow}>
+            <Text style={styles.thenLabel}>then</Text>
+            <TurnArrow
+              small
+              sign={thenManeuver.instruction.sign}
+              exitNumber={thenManeuver.instruction.exitNumber}
+            />
+          </View>
+        ) : null}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
 
@@ -175,7 +201,11 @@ const styles = StyleSheet.create({
   },
   maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   turnBox: { width: 40, alignItems: 'center', justifyContent: 'center' },
+  turnBoxSmall: { width: 24, alignItems: 'center', justifyContent: 'center' },
   turnGlyph: { color: '#fff', fontSize: 32, fontWeight: '800', lineHeight: 38 },
+  turnGlyphSmall: { fontSize: 18, lineHeight: 22 },
+  thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  thenLabel: { color: '#cdd6e0', fontSize: 14, fontWeight: '600' },
   turnExit: {
     position: 'absolute',
     bottom: -2,

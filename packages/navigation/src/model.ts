@@ -39,6 +39,14 @@ export interface NavState {
   etaEpochMs: number;
   /** The next maneuver, or null once past the final turn. */
   upcoming: UpcomingManeuver | null;
+  /** The maneuver after `upcoming` (for "then …" hints), or null. */
+  then: UpcomingManeuver | null;
+  /**
+   * Direction of the route (deg, 0 = north) at the snapped position, looking
+   * ~25 m ahead — a stable course-up camera bearing, unlike raw GPS course.
+   * Null when the route is a single point.
+   */
+  courseDeg: number | null;
 }
 
 /** A spoken-guidance cue emitted as the traveller nears a maneuver. */

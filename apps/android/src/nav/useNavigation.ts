@@ -1,6 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import { NavigationSession, type NavState } from '@atlas/navigation';
 import { type RoutePath, type RoutingProfile } from '@atlas/routing';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +18,8 @@ export interface NavController {
   state: NavState | null;
   /** Active route geometry as [lng, lat] pairs, for the map line source. */
   routeCoords: number[][];
+  /** The route being followed (instructions included, for on-map turn arrows). */
+  activePath: RoutePath | null;
   profile: RoutingProfile;
   /** Where the trip is headed (for the finish marker); null when idle. */
   destination: LatLng | null;
@@ -57,6 +60,7 @@ export function useNavigation(): NavController {
   const [phase, setPhase] = useState<NavPhase>('idle');
   const [state, setState] = useState<NavState | null>(null);
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
+  const [activePath, setActivePath] = useState<RoutePath | null>(null);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
@@ -119,6 +123,7 @@ export function useNavigation(): NavController {
       destRef.current = null;
       rerouteInFlight.current = false;
       setRouteCoords([]);
+      setActivePath(null);
       setPreviewPaths(null);
       setPreviewIndex(0);
       setSpeedMps(null);
@@ -140,6 +145,7 @@ export function useNavigation(): NavController {
         const path = await fetchPath(from, destRef.current, profileRef.current);
         sessionRef.current = new NavigationSession(path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+        setActivePath(path);
       } catch {
         // Keep the old session; the next off-route fix retries.
       } finally {
@@ -226,6 +232,7 @@ export function useNavigation(): NavController {
     try {
       sessionRef.current = new NavigationSession(path);
       setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+      setActivePath(path);
       setPreviewPaths(null);
       setPreviewIndex(0);
       setState(null);
@@ -257,10 +264,21 @@ export function useNavigation(): NavController {
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);
 
+  // A navigating phone is a dashboard: keep the screen on for the whole trip.
+  const guiding = phase === 'navigating' || phase === 'rerouting';
+  useEffect(() => {
+    if (!guiding) return;
+    void activateKeepAwakeAsync('atlas-nav').catch(() => undefined);
+    return () => {
+      void deactivateKeepAwake('atlas-nav').catch(() => undefined);
+    };
+  }, [guiding]);
+
   return {
     phase,
     state,
     routeCoords,
+    activePath,
     profile,
     destination,
     previewPaths,

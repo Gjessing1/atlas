@@ -15,7 +15,7 @@ import {
   type CameraRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
-import { zoomForSpeed } from '@atlas/navigation';
+import { maneuverArrowsGeoJSON } from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -75,8 +75,6 @@ interface MapSceneProps {
   /** Picked destination awaiting the travel-mode card (red pin). */
   destination: DestinationTarget | null;
   visiblePlaces: PlaceRecord[];
-  /** Course-up ('course') / north-up ('north') camera while navigating. */
-  navFollow: 'course' | 'north';
   showPuck: boolean;
   /** Boot camera (persisted last view, falling back to DEFAULT_VIEW). */
   initialView: { center: LatLng; zoom: number };
@@ -86,6 +84,8 @@ interface MapSceneProps {
   onPickPoint: (point: LatLng) => void;
   /** The camera moved (persist-last-view + search bias read the latest value). */
   onViewChange: (view: { center: LatLng; zoom: number }) => void;
+  /** A manual pan/zoom/rotate gesture (the nav follow camera pauses on it). */
+  onUserGesture: () => void;
   /** The red destination pin was dragged to a new point. */
   onDestinationMoved: (point: LatLng) => void;
 }
@@ -107,23 +107,31 @@ export function MapScene({
   route,
   destination,
   visiblePlaces,
-  navFollow,
   showPuck,
   initialView,
   onMapPress,
   onPickPoint,
   onViewChange,
+  onUserGesture,
   onDestinationMoved,
 }: MapSceneProps) {
   const win = useWindowDimensions();
+  // The follow camera itself lives in useNavCamera (App drives it through
+  // cameraRef) — the scene only renders the puck and reports gestures.
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  // Camera follow: course-up / north-up while navigating; free pan when idle
-  // (the locate button does a one-shot recentre instead of locking the camera).
-  const trackUserLocation = following ? (navFollow === 'north' ? 'default' : 'course') : undefined;
-  // Speed-appropriate follow zoom (constant look-ahead time, see zoomForSpeed).
-  const navZoom = useMemo(
-    () => zoomForSpeed(nav.speedMps, nav.state?.snapped.lat),
-    [nav.speedMps, nav.state?.snapped.lat],
+
+  // On-map turn arrows for the active route; turns already passed are hidden
+  // by the alongM filter below rather than by rebuilding the geometry.
+  const navArrows = useMemo(
+    () => (nav.activePath ? maneuverArrowsGeoJSON(nav.activePath) : null),
+    [nav.activePath],
+  );
+  // Quantized so the per-fix re-render only changes the filter/gradient when
+  // the values move visibly.
+  const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
+  const routeProgress = Math.min(
+    0.999,
+    Math.max(0.001, Math.round((nav.state?.routeProgress ?? 0) * 200) / 200),
   );
 
   const planning = route.active;
@@ -152,8 +160,12 @@ export function MapScene({
       // locate button. The MapLibre logo watermark is off (attribution stays).
       logo={false}
       attributionPosition={{ bottom: bottomInset + 8, right: 64 }}
-      // Track the zoom for zoom-proportional pin sizes.
-      onRegionIsChanging={(e) => onRegionChange(e.nativeEvent.zoom)}
+      // Track the zoom for zoom-proportional pin sizes; a user-driven move
+      // additionally pauses the nav follow camera (free look-around).
+      onRegionIsChanging={(e) => {
+        onRegionChange(e.nativeEvent.zoom);
+        if (e.nativeEvent.userInteraction) onUserGesture();
+      }}
       onRegionDidChange={(e) => {
         onRegionChange(e.nativeEvent.zoom);
         const [lng, lat] = e.nativeEvent.center;
@@ -214,11 +226,71 @@ export function MapScene({
         </GeoJSONSource>
       ) : null}
       {nav.routeCoords.length > 1 ? (
-        <GeoJSONSource id="atlas-route" data={lineStringFeature(nav.routeCoords)}>
+        <GeoJSONSource id="atlas-route" data={lineStringFeature(nav.routeCoords)} lineMetrics>
           <Layer
             type="line"
             id="atlas-route-line"
-            paint={{ 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.85 }}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{
+              'line-width': 6,
+              'line-opacity': 0.85,
+              // The stretch already driven greys out behind the car.
+              'line-gradient': ['step', ['line-progress'], '#98a2b3', routeProgress, '#2b6cff'],
+            }}
+          />
+        </GeoJSONSource>
+      ) : null}
+      {/* Turn arrows over the route (web-style white-on-blue): every remaining
+          maneuver gets a short arrow across the turn plus an oriented head, so
+          the turn is visible on the map itself, not only in the banner. */}
+      {navArrows && navArrows.features.length > 0 ? (
+        <GeoJSONSource id="atlas-nav-arrows" data={navArrows}>
+          <Layer
+            type="line"
+            id="atlas-nav-arrows-casing"
+            filter={[
+              'all',
+              ['==', ['get', 'kind'], 'body'],
+              ['>', ['get', 'alongM'], traveledM - 10],
+            ]}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': '#16324f', 'line-width': 9, 'line-opacity': 0.9 }}
+          />
+          <Layer
+            type="line"
+            id="atlas-nav-arrows-line"
+            filter={[
+              'all',
+              ['==', ['get', 'kind'], 'body'],
+              ['>', ['get', 'alongM'], traveledM - 10],
+            ]}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': '#ffffff', 'line-width': 5 }}
+          />
+          {/* Arrowhead: the proven '›' glyph (see the plan-route chevrons)
+              rotated from east-pointing to the tip's exit bearing. */}
+          <Layer
+            type="symbol"
+            id="atlas-nav-arrows-head"
+            filter={[
+              'all',
+              ['==', ['get', 'kind'], 'tip'],
+              ['>', ['get', 'alongM'], traveledM - 10],
+            ]}
+            layout={{
+              'text-field': '›',
+              'text-font': ['Noto Sans Bold'],
+              'text-size': 26,
+              'text-rotate': ['-', ['get', 'bearingDeg'], 90],
+              'text-rotation-alignment': 'map',
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+            }}
+            paint={{
+              'text-color': '#ffffff',
+              'text-halo-color': '#16324f',
+              'text-halo-width': 2,
+            }}
           />
         </GeoJSONSource>
       ) : null}
@@ -310,10 +382,6 @@ export function MapScene({
           center: [initialView.center.lng, initialView.center.lat],
           zoom: initialView.zoom,
         }}
-        // Course-up / north-up follow while navigating (see `trackUserLocation`),
-        // a plain centre-on-user when the locate button engaged it, else free pan.
-        trackUserLocation={trackUserLocation}
-        {...(following ? { zoom: navZoom } : {})}
       />
       {following || showPuck ? <UserLocation heading={following} animated /> : null}
       {nav.destination ? (
