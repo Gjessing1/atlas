@@ -3,6 +3,7 @@ import {
   bboxContains,
   collectionIsVisible,
   decodeMapHash,
+  decodeMapLink,
   encodeMapHash,
   markerScaleForZoom,
   matchPlacesByName,
@@ -40,6 +41,22 @@ describe('map hash', () => {
     expect(decodeMapHash('')).toBeNull();
     expect(decodeMapHash('#pin=1/2')).toBeNull();
     expect(decodeMapHash('#map=abc/1/2')).toBeNull();
+  });
+});
+
+describe('decodeMapLink', () => {
+  const state = { center: { lat: 59.91, lng: 10.75 }, zoom: 13, pin: { lat: 59.9, lng: 10.7 } };
+  const hash = encodeMapHash(state);
+
+  it('parses web share links and scheme deep links alike', () => {
+    expect(decodeMapLink(`https://atlas.example/${hash}`)).toEqual(state);
+    expect(decodeMapLink(`atlas://${hash.slice(1)}`)).toEqual(state);
+    expect(decodeMapLink(`atlas:${hash}`)).toEqual(state);
+  });
+
+  it('rejects URLs without a map fragment', () => {
+    expect(decodeMapLink('https://atlas.example/')).toBeNull();
+    expect(decodeMapLink('atlas://remap=1/2/3')).toBeNull();
   });
 });
 

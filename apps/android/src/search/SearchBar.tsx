@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
-import { geoSearch } from './geoSearch';
+import { geoSearch, type SearchBias } from './geoSearch';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
@@ -13,11 +13,14 @@ import { geoSearch } from './geoSearch';
  */
 export function SearchBar({
   packs,
+  getBias,
   onPick,
   onClose,
   top = 0,
 }: {
   packs: LocalPack[];
+  /** Current map centre, to bias results towards the viewport (web parity). */
+  getBias: SearchBias;
   onPick: (result: SearchResult) => void;
   onClose: () => void;
   /** Absolute top offset (px) for the expanded input. */
@@ -35,13 +38,13 @@ export function SearchBar({
         setResults([]);
         return;
       }
-      const { results: found, offline: usedOffline } = await geoSearch(packs, text);
+      const { results: found, offline: usedOffline } = await geoSearch(packs, text, getBias);
       if (gen === generation.current) {
         setResults(found);
         setOffline(usedOffline);
       }
     },
-    [packs],
+    [packs, getBias],
   );
 
   useEffect(() => {

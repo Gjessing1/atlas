@@ -11,6 +11,7 @@ import {
   Map as MapLibreMap,
   Marker,
   UserLocation,
+  ViewAnnotation,
   type CameraRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
@@ -33,6 +34,12 @@ function packOutlinesGeoJSON(packs: LocalPack[]) {
   );
 }
 
+/** Layer id of the planned-route line — App hit-tests taps on it to insert vias. */
+export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
+
+/** The default boot view (Oslo) when no camera has been persisted yet. */
+export const DEFAULT_VIEW = { center: { lat: 59.91, lng: 10.75 }, zoom: 10 };
+
 interface MapSceneProps {
   mapRef: RefObject<MapRef | null>;
   cameraRef: RefObject<CameraRef | null>;
@@ -50,10 +57,16 @@ interface MapSceneProps {
   /** Course-up ('course') / north-up ('north') camera while navigating. */
   navFollow: 'course' | 'north';
   showPuck: boolean;
-  /** Every map tap (menu dismissal, plan stops, pin hit-test live in the app). */
-  onMapPress: (lng: number, lat: number) => void;
+  /** Boot camera (persisted last view, falling back to DEFAULT_VIEW). */
+  initialView: { center: LatLng; zoom: number };
+  /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
+  onMapPress: (point: LatLng, pixel: { x: number; y: number }) => void;
   /** Long-press outside route planning: pick the point as a destination. */
   onPickPoint: (point: LatLng) => void;
+  /** The camera moved (persist-last-view + search bias read the latest value). */
+  onViewChange: (view: { center: LatLng; zoom: number }) => void;
+  /** The red destination pin was dragged to a new point. */
+  onDestinationMoved: (point: LatLng) => void;
 }
 
 /**
@@ -75,8 +88,11 @@ export function MapScene({
   visiblePlaces,
   navFollow,
   showPuck,
+  initialView,
   onMapPress,
   onPickPoint,
+  onViewChange,
+  onDestinationMoved,
 }: MapSceneProps) {
   const win = useWindowDimensions();
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
@@ -117,7 +133,11 @@ export function MapScene({
       attributionPosition={{ bottom: bottomInset + 8, right: 64 }}
       // Track the zoom for zoom-proportional pin sizes.
       onRegionIsChanging={(e) => onRegionChange(e.nativeEvent.zoom)}
-      onRegionDidChange={(e) => onRegionChange(e.nativeEvent.zoom)}
+      onRegionDidChange={(e) => {
+        onRegionChange(e.nativeEvent.zoom);
+        const [lng, lat] = e.nativeEvent.center;
+        onViewChange({ center: { lat, lng }, zoom: e.nativeEvent.zoom });
+      }}
       // The scale bar was lost in the maplibre-react-native v11 upgrade (the
       // default flipped to off). Android's native ScaleBarPlugin only anchors
       // top-left, so bottom-centre is expressed as top/left margins computed
@@ -135,7 +155,8 @@ export function MapScene({
       // feels the same as the web map click.
       onPress={(e) => {
         const [lng, lat] = e.nativeEvent.lngLat;
-        onMapPress(lng, lat);
+        const [x, y] = e.nativeEvent.point;
+        onMapPress({ lat, lng }, { x, y });
       }}
       onLongPress={(e) => {
         const [lng, lat] = e.nativeEvent.lngLat;
@@ -212,9 +233,22 @@ export function MapScene({
           />
         </GeoJSONSource>
       ) : null}
+      {/* Waypoints are draggable (long-press, then drag — MapLibre Native's
+          annotation drag gesture); releasing re-routes through the new point.
+          ViewAnnotation, not Marker: only annotations support native dragging. */}
       {planning
         ? route.waypoints.map((w, i) => (
-            <Marker key={w.id} lngLat={[w.pos.lng, w.pos.lat]} anchor="bottom">
+            <ViewAnnotation
+              key={w.id}
+              id={`waypoint-${w.id}`}
+              lngLat={[w.pos.lng, w.pos.lat]}
+              anchor="bottom"
+              draggable
+              onDragEnd={(e) => {
+                const [lng, lat] = e.nativeEvent.lngLat;
+                route.moveWaypointTo(w.id, { lat, lng });
+              }}
+            >
               <View style={styles.wpMarker}>
                 <Text style={styles.wpMarkerText}>
                   {route.roundTrip || route.waypoints.length === 1
@@ -224,12 +258,15 @@ export function MapScene({
                       : String(i + 1)}
                 </Text>
               </View>
-            </Marker>
+            </ViewAnnotation>
           ))
         : null}
       <Camera
         ref={cameraRef}
-        initialViewState={{ center: [10.75, 59.91], zoom: 10 }}
+        initialViewState={{
+          center: [initialView.center.lng, initialView.center.lat],
+          zoom: initialView.zoom,
+        }}
         // Course-up / north-up follow while navigating (see `trackUserLocation`),
         // a plain centre-on-user when the locate button engaged it, else free pan.
         trackUserLocation={trackUserLocation}
@@ -243,11 +280,21 @@ export function MapScene({
           </View>
         </Marker>
       ) : destination ? (
-        <Marker lngLat={[destination.lng, destination.lat]} anchor="bottom">
-          <View style={pinScaleStyle}>
-            <PlacePin color="#d33939" />
-          </View>
-        </Marker>
+        // Draggable (long-press + drag) so a picked point can be fine-tuned;
+        // full-size on purpose: the annotation renders to a bitmap, so the
+        // zoom-proportional transform the Markers use wouldn't refresh it.
+        <ViewAnnotation
+          id="destination-pin"
+          lngLat={[destination.lng, destination.lat]}
+          anchor="bottom"
+          draggable
+          onDragEnd={(e) => {
+            const [lng, lat] = e.nativeEvent.lngLat;
+            onDestinationMoved({ lat, lng });
+          }}
+        >
+          <PlacePin color="#d33939" />
+        </ViewAnnotation>
       ) : null}
       {/* Saved places as colour-badged teardrop pins (web-parity markers).
           The marker view itself never handles touches (they aren't delivered

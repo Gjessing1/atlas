@@ -1,9 +1,35 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ReorderableList } from './ReorderableList';
+
+/** Folders flattened depth-first, with their nesting depth (for indented lists). */
+function flattenFolders(
+  collections: CollectionRecord[],
+): { folder: CollectionRecord; depth: number }[] {
+  const byParent = new Map<string | null, CollectionRecord[]>();
+  for (const c of collections) {
+    const key = c.parentId && collections.some((p) => p.id === c.parentId) ? c.parentId : null;
+    const list = byParent.get(key) ?? [];
+    list.push(c);
+    byParent.set(key, list);
+  }
+  const out: { folder: CollectionRecord; depth: number }[] = [];
+  const walk = (parentId: string | null, depth: number) => {
+    for (const folder of byParent.get(parentId) ?? []) {
+      out.push({ folder, depth });
+      walk(folder.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  // Defensive: folders stranded by a cyclic parent chain still get listed.
+  for (const c of collections) {
+    if (!out.some((f) => f.folder.id === c.id)) out.push({ folder: c, depth: 0 });
+  }
+  return out;
+}
 
 /**
  * A drawn eye / crossed-out eye for the visibility toggles (an emoji eye reads
@@ -76,13 +102,17 @@ export function FavoritesSheet({
   collections: CollectionRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
-  /** Patch a place (name/icon/colour/visibility/folder) — auto-saved + synced, same as web. */
+  /** Patch a place (name/icon/colour/notes/tags/visibility/folder) — auto-saved + synced, same as web. */
   onPatch: (
     id: string,
-    patch: Pick<PlacePatch, 'name' | 'icon' | 'color' | 'visible' | 'collectionId'>,
+    patch: Pick<
+      PlacePatch,
+      'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
+    >,
   ) => void;
   onDelete: (id: string) => void;
-  onCreateFolder: (name: string) => void;
+  /** Create a folder — at the root, or nested under `parentId` (subfolder). */
+  onCreateFolder: (name: string, parentId: string | null) => void;
   onRenameFolder: (id: string, name: string) => void;
   onSetFolderVisible: (id: string, visible: boolean) => void;
   onDeleteFolder: (id: string) => void;
@@ -99,6 +129,8 @@ export function FavoritesSheet({
   // Which row's edit panel is currently open (the ✎ button or icon badge toggles it).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newFolder, setNewFolder] = useState('');
+  // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
+  const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
   // A row is being dragged: freeze the sheet's scroll and close any editor so
   // row heights are uniform while the drag measures its way through the list.
   const [dragActive, setDragActive] = useState(false);
@@ -120,13 +152,86 @@ export function FavoritesSheet({
     return map;
   }, [places]);
 
+  // Folder tree (folders nest via parentId; dangling parents count as roots).
+  const flatFolders = useMemo(() => flattenFolders(collections), [collections]);
+  const childrenOf = useMemo(() => {
+    const map = new Map<string | null, CollectionRecord[]>();
+    for (const { folder, depth } of flatFolders) {
+      const key = depth === 0 ? null : folder.parentId;
+      const list = map.get(key) ?? [];
+      list.push(folder);
+      map.set(key, list);
+    }
+    return map;
+  }, [flatFolders]);
+
   const allShown = places.every((p) => p.visible) && collections.every((c) => c.visible);
 
   const addFolder = () => {
     const name = newFolder.trim();
     if (!name) return;
-    onCreateFolder(name);
+    onCreateFolder(name, newFolderParent);
     setNewFolder('');
+    setNewFolderParent(null);
+  };
+
+  /** One nesting level of the folder tree: siblings reorder among themselves,
+      each row followed by its (indented) subtree so a drag carries it along. */
+  const renderFolderLevel = (parentId: string | null, depth: number): ReactNode => {
+    const level = childrenOf.get(parentId) ?? [];
+    if (level.length === 0) return null;
+    return (
+      <View style={depth > 0 ? styles.subLevel : undefined}>
+        <ReorderableList
+          items={level}
+          keyOf={(folder) => folder.id}
+          onReorder={onReorderCollections}
+          onDragActive={onDragActive}
+          renderRow={(folder, handle) => (
+            <View>
+              <View style={[styles.row, folder.visible ? null : styles.rowHidden]}>
+                {handle}
+                <Text style={styles.folderIcon}>📁</Text>
+                <TextInput
+                  style={styles.folderName}
+                  defaultValue={folder.name}
+                  onEndEditing={(e) => {
+                    const value = e.nativeEvent.text.trim();
+                    if (value && value !== folder.name) onRenameFolder(folder.id, value);
+                  }}
+                  returnKeyType="done"
+                  testID={`folder-name-${folder.id}`}
+                />
+                <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
+                <Pressable
+                  style={styles.eyeButton}
+                  onPress={() => setNewFolderParent((id) => (id === folder.id ? null : folder.id))}
+                  testID={`folder-sub-${folder.id}`}
+                >
+                  <Text style={styles.subButtonText}>＋</Text>
+                </Pressable>
+                {/* The eye sits just left of the actions on folder and place rows alike. */}
+                <Pressable
+                  style={styles.eyeButton}
+                  onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+                  testID={`folder-visible-${folder.id}`}
+                >
+                  <EyeIcon off={!folder.visible} />
+                </Pressable>
+                <Pressable
+                  style={[styles.button, styles.buttonQuiet]}
+                  onPress={() => onDeleteFolder(folder.id)}
+                  testID={`folder-delete-${folder.id}`}
+                >
+                  <Text style={styles.buttonQuietText}>Delete</Text>
+                </Pressable>
+              </View>
+              {renderFolderLevel(folder.id, depth + 1)}
+            </View>
+          )}
+        />
+      </View>
+    );
   };
 
   return (
@@ -147,56 +252,32 @@ export function FavoritesSheet({
           </View>
 
           <ScrollView scrollEnabled={!dragActive}>
-            {/* Folders */}
+            {/* Folders (nested — a folder row's ＋ targets the new-folder input at it) */}
             <Text style={styles.sectionLabel}>Folders</Text>
-            <ReorderableList
-              items={collections}
-              keyOf={(folder) => folder.id}
-              onReorder={onReorderCollections}
-              onDragActive={onDragActive}
-              renderRow={(folder, handle) => (
-                <View style={[styles.row, folder.visible ? null : styles.rowHidden]}>
-                  {handle}
-                  <Text style={styles.folderIcon}>📁</Text>
-                  <TextInput
-                    style={styles.folderName}
-                    defaultValue={folder.name}
-                    onEndEditing={(e) => {
-                      const value = e.nativeEvent.text.trim();
-                      if (value && value !== folder.name) onRenameFolder(folder.id, value);
-                    }}
-                    returnKeyType="done"
-                    testID={`folder-name-${folder.id}`}
-                  />
-                  <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
-                  {/* The eye sits just left of the actions on folder and place rows alike. */}
-                  <Pressable
-                    style={styles.eyeButton}
-                    onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
-                    testID={`folder-visible-${folder.id}`}
-                  >
-                    <EyeIcon off={!folder.visible} />
-                  </Pressable>
-                  <Pressable
-                    style={[styles.button, styles.buttonQuiet]}
-                    onPress={() => onDeleteFolder(folder.id)}
-                    testID={`folder-delete-${folder.id}`}
-                  >
-                    <Text style={styles.buttonQuietText}>Delete</Text>
-                  </Pressable>
-                </View>
-              )}
-            />
+            {renderFolderLevel(null, 0)}
             <View style={styles.row}>
               <TextInput
                 style={[styles.folderName, styles.newFolderInput]}
                 value={newFolder}
                 onChangeText={setNewFolder}
-                placeholder="New folder…"
+                placeholder={
+                  newFolderParent
+                    ? `New subfolder in ${collections.find((c) => c.id === newFolderParent)?.name ?? 'folder'}…`
+                    : 'New folder…'
+                }
                 returnKeyType="done"
                 onSubmitEditing={addFolder}
                 testID="folder-new-name"
               />
+              {newFolderParent ? (
+                <Pressable
+                  style={[styles.button, styles.buttonQuiet]}
+                  onPress={() => setNewFolderParent(null)}
+                  testID="folder-new-parent-clear"
+                >
+                  <Text style={styles.buttonQuietText}>Root</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
                 disabled={!newFolder.trim()}
@@ -315,7 +396,8 @@ export function FavoritesSheet({
                             />
                           ))}
                         </View>
-                        {/* Folder assignment — parity with the web place folder picker. */}
+                        {/* Folder assignment — parity with the web place folder picker
+                            (depth-first order, subfolders marked with └). */}
                         <View style={styles.choiceRow}>
                           <Pressable
                             style={[
@@ -327,7 +409,7 @@ export function FavoritesSheet({
                           >
                             <Text style={styles.folderChipText}>No folder</Text>
                           </Pressable>
-                          {collections.map((folder) => (
+                          {flatFolders.map(({ folder, depth }) => (
                             <Pressable
                               key={folder.id}
                               style={[
@@ -337,10 +419,39 @@ export function FavoritesSheet({
                               onPress={() => onPatch(place.id, { collectionId: folder.id })}
                               testID={`favorite-folder-${place.id}-${folder.id}`}
                             >
-                              <Text style={styles.folderChipText}>📁 {folder.name}</Text>
+                              <Text style={styles.folderChipText}>
+                                {depth > 0 ? '└ ' : ''}📁 {folder.name}
+                              </Text>
                             </Pressable>
                           ))}
                         </View>
+                        {/* Notes + tags — storage and sync carry both (web parity). */}
+                        <TextInput
+                          style={[styles.nameInput, styles.notesInput]}
+                          defaultValue={place.notes}
+                          placeholder="Notes"
+                          multiline
+                          onEndEditing={(e) => {
+                            const value = e.nativeEvent.text;
+                            if (value !== place.notes) onPatch(place.id, { notes: value });
+                          }}
+                          testID={`favorite-notes-${place.id}`}
+                        />
+                        <TextInput
+                          style={styles.nameInput}
+                          defaultValue={place.tags.join(', ')}
+                          placeholder="Tags: hike, family, todo"
+                          onEndEditing={(e) => {
+                            const next = e.nativeEvent.text
+                              .split(',')
+                              .map((t) => t.trim())
+                              .filter(Boolean);
+                            if (next.join('\n') !== place.tags.join('\n'))
+                              onPatch(place.id, { tags: next });
+                          }}
+                          returnKeyType="done"
+                          testID={`favorite-tags-${place.id}`}
+                        />
                         <Pressable
                           style={[styles.button, styles.buttonDanger]}
                           onPress={() => {
@@ -392,6 +503,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
+  subButtonText: { fontSize: 16, color: '#4a5568', fontWeight: '700' },
+  subLevel: { paddingLeft: 18 },
   folderIcon: { fontSize: 18 },
   folderName: {
     flexGrow: 1,
@@ -442,6 +555,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#111',
   },
+  notesInput: { minHeight: 60, textAlignVertical: 'top' },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconChoice: {
     width: 38,

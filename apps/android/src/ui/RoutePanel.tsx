@@ -1,12 +1,13 @@
 import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
-import { ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
+import { ROUTING_PROFILES, routePathToTrackData, type RoutePath } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
-import { geoSearch } from '../search/geoSearch';
+import { geoSearch, type SearchBias } from '../search/geoSearch';
+import { ElevationChart } from './ElevationChart';
 
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -44,10 +45,13 @@ interface StopHit {
 function StopSearch({
   packs,
   places,
+  getBias,
   onPick,
 }: {
   packs: LocalPack[];
   places: PlaceRecord[];
+  /** Current map centre, to bias geocoder results towards the viewport. */
+  getBias: SearchBias;
   onPick: (position: LatLng) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -69,7 +73,7 @@ function StopSearch({
           position: { lat: p.lat, lng: p.lng },
           saved: true,
         }));
-        const { results } = await geoSearch(packs, q);
+        const { results } = await geoSearch(packs, q, getBias);
         const remote: StopHit[] = results.map((r: SearchResult) => ({
           name: r.name,
           label: r.label,
@@ -80,7 +84,7 @@ function StopSearch({
       })();
     }, 300);
     return () => clearTimeout(timer);
-  }, [query, packs, places]);
+  }, [query, packs, places, getBias]);
 
   return (
     <View>
@@ -135,6 +139,7 @@ export function RoutePanel({
   route,
   packs,
   places,
+  getBias,
   onExport,
   bottomInset = 0,
 }: {
@@ -143,11 +148,20 @@ export function RoutePanel({
   packs: LocalPack[];
   /** Saved places, offered in the stop search alongside geocoder results. */
   places: PlaceRecord[];
+  /** Current map centre, to bias the stop search towards the viewport. */
+  getBias: SearchBias;
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
   bottomInset?: number;
 }) {
   const path = route.paths?.[route.selectedPath] ?? null;
+  const [profileOpen, setProfileOpen] = useState(false);
+  // Server routes carry elevation (DEM); offline-pack routes don't — no chart then.
+  const hasElevation = path?.points.some((p) => p.ele !== undefined) ?? false;
+  const profileData = useMemo(
+    () => (path && hasElevation ? routePathToTrackData(path, 'route') : null),
+    [path, hasElevation],
+  );
 
   return (
     <View style={[styles.panel, { paddingBottom: bottomInset + 12 }]}>
@@ -206,6 +220,7 @@ export function RoutePanel({
       <StopSearch
         packs={packs}
         places={places}
+        getBias={getBias}
         onPick={(position) => route.addWaypoint(position)}
       />
 
@@ -298,11 +313,23 @@ export function RoutePanel({
 
       {route.error ? <Text style={styles.error}>{route.error}</Text> : null}
       {path ? (
-        <Text style={styles.stats}>
-          {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
-          {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
-        </Text>
+        <View style={styles.statsRow}>
+          <Text style={styles.stats}>
+            {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
+            {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+          </Text>
+          {profileData ? (
+            <Pressable
+              style={[styles.chip, profileOpen && styles.chipSelected]}
+              onPress={() => setProfileOpen((o) => !o)}
+              testID="route-profile-toggle"
+            >
+              <Text style={styles.chipText}>Profile</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
+      {profileOpen && profileData ? <ElevationChart data={profileData} /> : null}
       {route.paths && route.paths.length > 1 ? (
         <View style={styles.chipRow}>
           {route.paths.map((p, i) => (
@@ -392,7 +419,8 @@ const styles = StyleSheet.create({
   buttonQuiet: { backgroundColor: '#eef1f6' },
   buttonQuietText: { color: '#334', fontWeight: '600' },
   error: { fontSize: 13, color: '#b3261e' },
-  stats: { fontSize: 14, color: '#111', fontWeight: '600' },
+  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  stats: { fontSize: 14, color: '#111', fontWeight: '600', flexShrink: 1 },
   stopInput: {
     borderWidth: 1,
     borderColor: '#cdd3dd',

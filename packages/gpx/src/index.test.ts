@@ -1,6 +1,7 @@
 import { zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import {
+  buildElevationProfile,
   buildGpx,
   buildKml,
   computeTrackStats,
@@ -192,6 +193,37 @@ describe('computeTrackStats', () => {
   it('handles tracks without elevation or time', () => {
     const stats = computeTrackStats({ segments: [[{ lat: 1, lng: 2 }]], waypoints: [] });
     expect(stats).toEqual({ points: 1, distanceM: 0, ascentM: 0, descentM: 0 });
+  });
+});
+
+describe('buildElevationProfile', () => {
+  it('accumulates distance across segments and skips points without elevation', () => {
+    const data: TrackData = {
+      segments: [
+        [
+          { lat: 59.9, lng: 10.7, ele: 100 },
+          { lat: 59.901, lng: 10.7 }, // no ele — adds distance but no sample
+          { lat: 59.902, lng: 10.7, ele: 120 },
+        ],
+      ],
+      waypoints: [],
+    };
+    const profile = buildElevationProfile(data);
+    expect(profile).toHaveLength(2);
+    expect(profile[0]).toMatchObject({ distM: 0, ele: 100 });
+    expect(profile[1]!.ele).toBe(120);
+    expect(profile[1]!.distM).toBeGreaterThan(200);
+  });
+
+  it('downsamples long series but keeps the final point', () => {
+    const segment = Array.from({ length: 1000 }, (_, i) => ({
+      lat: 59.9 + i * 0.0001,
+      lng: 10.7,
+      ele: i,
+    }));
+    const profile = buildElevationProfile({ segments: [segment], waypoints: [] }, 100);
+    expect(profile).toHaveLength(101);
+    expect(profile[profile.length - 1]!.ele).toBe(999);
   });
 });
 

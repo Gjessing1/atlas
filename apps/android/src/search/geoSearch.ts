@@ -1,8 +1,15 @@
-import type { SearchResult } from '@atlas/core';
+import type { LatLng, SearchResult } from '@atlas/core';
 
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
 import { searchOffline } from './offlineSearch';
+
+/**
+ * Supplier of the current map centre, used to bias geocoder results towards
+ * the viewport (web parity — SearchBox sends lat/lon the same way). Async
+ * because the native map exposes its camera through promise-returning getters.
+ */
+export type SearchBias = () => Promise<LatLng | null>;
 
 /**
  * Geocode a query: the server's Photon proxy (/api/search) when online, the
@@ -12,9 +19,16 @@ import { searchOffline } from './offlineSearch';
 export async function geoSearch(
   packs: LocalPack[],
   text: string,
+  getBias?: SearchBias,
 ): Promise<{ results: SearchResult[]; offline: boolean }> {
   try {
-    const res = await fetch(`${getServerOrigin()}/api/search?q=${encodeURIComponent(text)}`, {
+    const params = new URLSearchParams({ q: text });
+    const bias = await getBias?.().catch(() => null);
+    if (bias) {
+      params.set('lat', String(bias.lat));
+      params.set('lon', String(bias.lng));
+    }
+    const res = await fetch(`${getServerOrigin()}/api/search?${params}`, {
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) throw new Error(`search: HTTP ${res.status}`);

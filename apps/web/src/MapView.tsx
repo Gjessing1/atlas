@@ -1,6 +1,7 @@
 import {
   encodeMapHash,
   markerScaleForZoom,
+  POI_LAYER_IDS,
   resolveStyleTemplate,
   type LatLng,
   type MapViewState,
@@ -20,9 +21,6 @@ maplibregl.addProtocol('pmtiles', new Protocol().tile);
 const STYLE_TEMPLATE_URL = '/assets/styles/liberty.json';
 // Fallback so a fresh checkout without provisioned tiles still shows a map.
 const FALLBACK_STYLE_URL = 'https://demotiles.maplibre.org/style.json';
-
-// Layers of the liberty style that render the OpenMapTiles `poi` source layer.
-const POI_LAYERS = ['poi_r20', 'poi_r7', 'poi_r1', 'poi_transit'];
 
 const LONG_PRESS_MS = 600;
 
@@ -178,7 +176,7 @@ export function MapView({
     map.on('move', cancelLongPress);
 
     // POI popups from the vector tiles.
-    for (const layer of POI_LAYERS) {
+    for (const layer of POI_LAYER_IDS) {
       map.on('click', layer, (e) => {
         if (suppressPoiClicks?.current) return;
         const feature = e.features?.[0];

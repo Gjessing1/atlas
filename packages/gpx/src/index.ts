@@ -3,3 +3,4 @@ export { trackBounds } from './model.js';
 export { computeTrackStats } from './stats.js';
 export { parseGpx, parseKml, parseKmz, parseTrackFile } from './parse.js';
 export { buildGpx, buildKml } from './build.js';
+export { buildElevationProfile, type ElevationProfilePoint } from './profile.js';

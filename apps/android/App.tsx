@@ -1,9 +1,18 @@
-import { haversineM, placeIsVisible, type SearchResult, type VisibilityFolder } from '@atlas/core';
+import {
+  decodeMapLink,
+  encodeMapHash,
+  haversineM,
+  placeIsVisible,
+  POI_LAYER_IDS,
+  type SearchResult,
+  type VisibilityFolder,
+} from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
   ROUTING_PROFILES,
   routePathToTrackData,
+  viaInsertIndex,
   type RoutePath,
   type RoutingProfile,
 } from '@atlas/routing';
@@ -11,7 +20,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -19,7 +28,8 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
-import { MapScene } from './src/map/MapScene';
+import { DEFAULT_VIEW, MapScene, PLAN_LINE_LAYER_ID } from './src/map/MapScene';
+import { getServerOrigin } from './src/serverOrigin';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
@@ -47,6 +57,26 @@ import { useUserData } from './src/useUserData';
  */
 const NAV_BAR_FALLBACK = 48;
 const STATUS_BAR_FALLBACK = 28;
+
+/** Settings key for the persisted camera (device-local — `local.` never syncs). */
+const CAMERA_SETTING = 'local.map.camera';
+
+const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
+
+type MapView = { center: LatLng; zoom: number };
+
+/** Parse a persisted camera setting; null when absent or malformed. */
+function parseCameraSetting(raw: string | null): MapView | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as { lat?: number; lng?: number; zoom?: number };
+    if (![v.lat, v.lng, v.zoom].every((n) => typeof n === 'number' && Number.isFinite(n)))
+      return null;
+    return { center: { lat: v.lat!, lng: v.lng! }, zoom: v.zoom! };
+  } catch {
+    return null;
+  }
+}
 
 function AppInner() {
   const insets = useSafeAreaInsets();
@@ -92,6 +122,13 @@ function AppInner() {
   const [showPuck, setShowPuck] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
+  // Boot camera: a #map= launch link wins, else the persisted last view. Null
+  // until resolved — the map holds at the loading screen so the first frame is
+  // already at the right place (no Oslo flash).
+  const [initialView, setInitialView] = useState<MapView | null>(null);
+  // Latest settled camera — feeds the search bias, share links and persistence.
+  const viewRef = useRef<MapView | null>(null);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // While a trip is active the nav banner owns the top of the screen, so drop
   // the search bar + button column below its measured height (issue: the banner
@@ -114,18 +151,126 @@ function AppInner() {
     [flyTo],
   );
 
-  // One handler for every map tap: dismiss the ☰ menu if it's open, add a stop
-  // while planning, otherwise hit-test the saved pins. Pins are picked here at
-  // the map level because touches on Marker child views are not delivered
-  // reliably on-device — the map press always is.
+  // Resolve the boot camera once storage has settled: a #map= launch link
+  // (share link / atlas: deep link) wins, else the persisted last view.
+  const { getSetting, setSetting } = data;
+  useEffect(() => {
+    if (data.status === 'loading' || initialView !== null) return;
+    let cancelled = false;
+    void (async () => {
+      const launch = decodeMapLink((await Linking.getInitialURL().catch(() => null)) ?? '');
+      if (cancelled) return;
+      if (launch) {
+        setInitialView({ center: launch.center, zoom: launch.zoom });
+        if (launch.pin) {
+          const p = launch.pin;
+          setDestination({ lat: p.lat, lng: p.lng, name: coordName(p), canSave: true });
+        }
+        return;
+      }
+      const saved = parseCameraSetting(await getSetting(CAMERA_SETTING));
+      if (!cancelled) setInitialView(saved ?? DEFAULT_VIEW);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.status, initialView, getSetting]);
+
+  // #map= links arriving while the app is running: fly there, pin included.
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const view = decodeMapLink(url);
+      if (!view) return;
+      if (view.pin) {
+        const p = view.pin;
+        setDestination({ lat: p.lat, lng: p.lng, name: coordName(p), canSave: true });
+      }
+      cameraRef.current?.flyTo({
+        center: [view.center.lng, view.center.lat],
+        zoom: view.zoom,
+        duration: 900,
+      });
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Track the settled camera and persist it (debounced) as the boot view.
+  const onViewChange = useCallback(
+    (view: MapView) => {
+      viewRef.current = view;
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+      persistTimer.current = setTimeout(() => {
+        setSetting(
+          CAMERA_SETTING,
+          JSON.stringify({
+            lat: Number(view.center.lat.toFixed(5)),
+            lng: Number(view.center.lng.toFixed(5)),
+            zoom: Number(view.zoom.toFixed(2)),
+          }),
+        );
+      }, 800);
+    },
+    [setSetting],
+  );
+
+  // Viewport bias for geocoding (web parity: SearchBox sends lat/lon).
+  const getBias = useCallback(async () => viewRef.current?.center ?? null, []);
+
+  // Share the destination as a web #map= link (opens in any browser; the
+  // installed app also answers atlas: links with the same fragment).
+  const shareDestination = useCallback(() => {
+    if (!destination) return;
+    const pin = { lat: destination.lat, lng: destination.lng };
+    const hash = encodeMapHash({ center: pin, zoom: viewRef.current?.zoom ?? 14, pin });
+    void Share.share({ message: `${destination.name} — ${getServerOrigin()}/${hash}` });
+  }, [destination]);
+
+  // The red pin was dragged: the destination becomes that adjusted point.
+  const onDestinationMoved = useCallback((p: LatLng) => {
+    setDestination((d) => (d ? { lat: p.lat, lng: p.lng, name: coordName(p), canSave: true } : d));
+  }, []);
+
+  // One handler for every map tap: dismiss the ☰ menu if it's open; while
+  // planning, a tap on the routed line inserts a via into that leg and any
+  // other tap appends a stop; otherwise hit-test the saved pins, then the
+  // basemap POIs. Pins are picked here at the map level because touches on
+  // Marker child views are not delivered reliably on-device — the map press
+  // always is.
   const onMapPress = useCallback(
-    (lng: number, lat: number) => {
+    ({ lat, lng }: LatLng, pixel: { x: number; y: number }) => {
+      // Finger-sized query box for layer hit-tests (a 1px point is too strict).
+      const pixelBounds: [[number, number], [number, number]] = [
+        [pixel.x - 12, pixel.y - 12],
+        [pixel.x + 12, pixel.y + 12],
+      ];
       if (menuOpen) {
         setMenuOpen(false);
         return;
       }
       if (route.active) {
-        route.addWaypoint({ lat, lng });
+        void (async () => {
+          // Tap on the selected line: insert a via there (web parity — the
+          // shared viaInsertIndex picks the leg the tapped point belongs to).
+          const path = route.paths?.[route.selectedPath];
+          if (path && !route.roundTrip && route.waypoints.length >= 2) {
+            const hits = await mapRef.current
+              ?.queryRenderedFeatures(pixelBounds, { layers: [PLAN_LINE_LAYER_ID] })
+              .catch(() => undefined);
+            if (hits && hits.length > 0) {
+              const at = { lat, lng };
+              route.insertWaypoint(
+                viaInsertIndex(
+                  path.points,
+                  route.waypoints.map((w) => w.pos),
+                  at,
+                ),
+                at,
+              );
+              return;
+            }
+          }
+          route.addWaypoint({ lat, lng });
+        })();
         return;
       }
       void (async () => {
@@ -151,7 +296,30 @@ function AppInner() {
             canSave: false,
             placeId: best.id,
           });
+          return;
         }
+        // No pin hit — try the basemap POIs (name/class popup, web parity).
+        const pois = await mapRef.current
+          ?.queryRenderedFeatures(pixelBounds, { layers: POI_LAYER_IDS })
+          .catch(() => undefined);
+        const poi = pois?.[0];
+        if (!poi) return;
+        const props = (poi.properties ?? {}) as Record<string, unknown>;
+        const name = (props['name'] ?? props['name:latin']) as string | undefined;
+        if (!name) return;
+        const kind = [props['class'], props['subclass']]
+          .filter((v): v is string => typeof v === 'string' && v !== name)
+          .join(' · ');
+        // Anchor on the POI's own coordinate when it has one, not the tap.
+        const [poiLng, poiLat] =
+          poi.geometry?.type === 'Point' ? (poi.geometry.coordinates as number[]) : [lng, lat];
+        pickDestination({
+          lat: poiLat ?? lat,
+          lng: poiLng ?? lng,
+          name,
+          detail: kind || undefined,
+          canSave: true,
+        });
       })();
     },
     [menuOpen, route, visiblePlaces, pickDestination],
@@ -256,7 +424,7 @@ function AppInner() {
     [pickDestination],
   );
 
-  if (data.status === 'loading' || !originReady || mapStyle === null) {
+  if (data.status === 'loading' || !originReady || mapStyle === null || initialView === null) {
     return (
       <View style={styles.loading}>
         <Text>Loading map…</Text>
@@ -280,8 +448,11 @@ function AppInner() {
         visiblePlaces={visiblePlaces}
         navFollow={navFollow}
         showPuck={showPuck}
+        initialView={initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
+        onViewChange={onViewChange}
+        onDestinationMoved={onDestinationMoved}
       />
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
@@ -291,6 +462,7 @@ function AppInner() {
       {searchOpen && !following && !planning ? (
         <SearchBar
           packs={packs}
+          getBias={getBias}
           onPick={onPickResult}
           onClose={() => setSearchOpen(false)}
           top={controlsTop}
@@ -393,6 +565,7 @@ function AppInner() {
                 }
               : undefined
           }
+          onShare={shareDestination}
           onCancel={() => setDestination(null)}
           bottomInset={bottomInset}
         />
@@ -425,6 +598,7 @@ function AppInner() {
           route={route}
           packs={packs}
           places={data.places}
+          getBias={getBias}
           onExport={exportRoute}
           bottomInset={bottomInset}
         />

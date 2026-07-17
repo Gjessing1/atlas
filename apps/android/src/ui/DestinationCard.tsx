@@ -6,6 +6,8 @@ export interface DestinationTarget {
   lng: number;
   /** Label to show (search result name, place name, or coordinates). */
   name: string;
+  /** Secondary line, e.g. a tapped POI's category ("cafe · restaurant"). */
+  detail?: string;
   /** Search results / long-press points can be saved as a pin; saved places can't. */
   canSave?: boolean;
   /** Set when the target is a saved place — enables the Edit action. */
@@ -25,6 +27,7 @@ export function DestinationCard({
   onNavigate,
   onSave,
   onEdit,
+  onShare,
   onCancel,
   bottomInset = 0,
 }: {
@@ -35,15 +38,24 @@ export function DestinationCard({
   onSave?: () => void;
   /** Open the saved place's edit panel (only for targets with a placeId). */
   onEdit?: () => void;
+  /** Share the point as a web #map= link via the OS share sheet. */
+  onShare: () => void;
   onCancel: () => void;
   bottomInset?: number;
 }) {
   return (
     <View style={[styles.wrap, { paddingBottom: bottomInset + 14 }]}>
       <View style={styles.header}>
-        <Text style={styles.name} numberOfLines={1}>
-          {target.name}
-        </Text>
+        <View style={styles.titles}>
+          <Text style={styles.name} numberOfLines={1}>
+            {target.name}
+          </Text>
+          {target.detail ? (
+            <Text style={styles.detail} numberOfLines={1}>
+              {target.detail}
+            </Text>
+          ) : null}
+        </View>
         <Pressable onPress={onCancel} testID="destination-cancel" hitSlop={10}>
           <Text style={styles.close}>✕</Text>
         </Pressable>
@@ -79,6 +91,9 @@ export function DestinationCard({
             <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
+        <Pressable style={styles.save} onPress={onShare} testID="destination-share">
+          <Text style={styles.saveText}>Share</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -98,7 +113,9 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  name: { fontSize: 17, fontWeight: '700', color: '#111', flexShrink: 1, paddingRight: 12 },
+  titles: { flexShrink: 1, paddingRight: 12 },
+  name: { fontSize: 17, fontWeight: '700', color: '#111' },
+  detail: { fontSize: 13, color: '#778', marginTop: 1 },
   close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
   modes: { flexDirection: 'row', gap: 8, marginTop: 14 },
   mode: {

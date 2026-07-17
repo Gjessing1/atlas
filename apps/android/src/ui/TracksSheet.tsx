@@ -1,5 +1,6 @@
+import type { TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 
 import type { ImportResult } from '../useUserData';
+import { ElevationChart } from './ElevationChart';
 
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -48,6 +50,7 @@ export function TracksSheet({
   onExport,
   onDelete,
   onImport,
+  onLoadTrackData,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -59,11 +62,32 @@ export function TracksSheet({
   onDelete: (id: string) => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
   onImport: () => Promise<ImportResult | null>;
+  /** Parsed geometry for the elevation profile (cached by the shared hook). */
+  onLoadTrackData: (id: string) => Promise<TrackData | null>;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Track whose elevation profile is expanded, and its lazily-loaded geometry
+  // (null = still loading; the wrapper marks "loaded but unparseable" apart).
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<{ data: TrackData | null } | null>(null);
+  const profileGeneration = useRef(0);
+
+  const toggleProfile = (id: string) => {
+    const gen = ++profileGeneration.current;
+    if (profileId === id) {
+      setProfileId(null);
+      return;
+    }
+    setProfileId(id);
+    setProfile(null);
+    void onLoadTrackData(id).then((data) => {
+      // Ignore a slow load that resolves after another profile was toggled.
+      if (gen === profileGeneration.current) setProfile({ data });
+    });
+  };
 
   const runImport = async () => {
     setImporting(true);
@@ -135,6 +159,13 @@ export function TracksSheet({
                     <View style={styles.actionRow}>
                       <Pressable
                         style={[styles.button, styles.buttonQuiet]}
+                        onPress={() => toggleProfile(track.id)}
+                        testID={`track-profile-${track.id}`}
+                      >
+                        <Text style={styles.buttonQuietText}>Profile</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.button, styles.buttonQuiet]}
                         onPress={() => onExport(track.id, 'gpx')}
                         testID={`track-export-gpx-${track.id}`}
                       >
@@ -155,6 +186,15 @@ export function TracksSheet({
                         <Text style={styles.buttonQuietText}>Delete</Text>
                       </Pressable>
                     </View>
+                    {profileId === track.id ? (
+                      profile === null ? (
+                        <ActivityIndicator style={styles.profileLoading} />
+                      ) : profile.data ? (
+                        <ElevationChart data={profile.data} />
+                      ) : (
+                        <Text style={styles.muted}>Track data unavailable.</Text>
+                      )
+                    ) : null}
                   </View>
                 </View>
               ))}
@@ -205,6 +245,7 @@ const styles = StyleSheet.create({
     color: '#111',
   },
   actionRow: { flexDirection: 'row', gap: 8 },
+  profileLoading: { marginVertical: 12 },
   button: {
     backgroundColor: '#1a73e8',
     borderRadius: 8,

@@ -53,6 +53,27 @@ export function decodeMapHash(hash: string): MapViewState | null {
   return state;
 }
 
+/**
+ * Parse a full shared/deep-link URL into a map view. Accepts every form Atlas
+ * produces or registers: `https://…/#map=…` (web share links) and
+ * `atlas://map=…` / `atlas:#map=…` (the Android scheme). Null when the URL
+ * carries no `map=` fragment.
+ */
+export function decodeMapLink(url: string): MapViewState | null {
+  const hashIndex = url.indexOf('#');
+  // No explicit hash: treat everything after the scheme as the fragment, so
+  // `atlas://map=…` parses like `#map=…`.
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : '#' + url.replace(/^[a-z+.-]+:\/{0,2}/i, '');
+  return decodeMapHash(hash);
+}
+
+/**
+ * Layer ids of the OpenFreeMap Liberty style that render the OpenMapTiles
+ * `poi` source layer — the tap/click targets for POI info popups. Shared so
+ * web and Android query the same set (see infrastructure/tiles/fetch-map-assets.sh).
+ */
+export const POI_LAYER_IDS = ['poi_r20', 'poi_r7', 'poi_r1', 'poi_transit'];
+
 /** A geocoding result in app terms, decoupled from the Photon wire format. */
 export interface SearchResult {
   /** Primary display name, e.g. "Preikestolen". */

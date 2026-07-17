@@ -74,7 +74,7 @@ export function AppSheets({
         }}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
-        onCreateFolder={(name) => void data.createCollection(name)}
+        onCreateFolder={(name, parentId) => void data.createCollection(name, parentId)}
         onRenameFolder={(id, name) => void data.renameCollection(id, name)}
         onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
         onDeleteFolder={(id) => void data.deleteCollection(id)}
@@ -92,6 +92,7 @@ export function AppSheets({
         onExport={(id, format) => void data.exportTrack(id, format)}
         onDelete={(id) => void data.deleteTrack(id)}
         onImport={onImportTracks}
+        onLoadTrackData={(id) => data.getTrackData(id)}
         bottomInset={bottomInset}
       />
       <SettingsSheet

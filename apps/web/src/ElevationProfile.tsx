@@ -1,36 +1,8 @@
 import type { LatLng } from '@atlas/core';
-import { haversineM } from '@atlas/core';
+import { buildElevationProfile } from '@atlas/gpx';
 import type { TrackData } from '@atlas/gpx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDuration, fmtKm } from './format.js';
-
-interface ProfilePoint {
-  distM: number;
-  ele: number;
-  lat: number;
-  lng: number;
-}
-
-const MAX_POINTS = 600;
-
-/** Flatten segments into an elevation-vs-distance series (points lacking elevation are skipped). */
-function buildProfile(data: TrackData): ProfilePoint[] {
-  const points: ProfilePoint[] = [];
-  let distM = 0;
-  for (const segment of data.segments) {
-    for (let i = 0; i < segment.length; i++) {
-      const p = segment[i]!;
-      if (i > 0) distM += haversineM(segment[i - 1]!, p);
-      if (p.ele !== undefined) points.push({ distM, ele: p.ele, lat: p.lat, lng: p.lng });
-    }
-  }
-  if (points.length <= MAX_POINTS) return points;
-  const step = points.length / MAX_POINTS;
-  const sampled: ProfilePoint[] = [];
-  for (let i = 0; i < MAX_POINTS; i++) sampled.push(points[Math.floor(i * step)]!);
-  sampled.push(points[points.length - 1]!);
-  return sampled;
-}
 
 /** A "nice" tick step (1/2/5 × 10^k) giving roughly `target` intervals. */
 function niceStep(range: number, target: number): number {
@@ -64,7 +36,7 @@ export function ElevationProfile({
   const [width, setWidth] = useState(680);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const profile = useMemo(() => buildProfile(data), [data]);
+  const profile = useMemo(() => buildElevationProfile(data), [data]);
 
   useEffect(() => {
     const el = containerRef.current;
