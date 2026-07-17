@@ -5,8 +5,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import { useEffect, useRef, useState } from 'react';
 
-// Self-hosted basemap: PMTiles archives are fetched piecewise over HTTP range
-// requests; the pmtiles protocol handler turns tile requests into range reads.
+// The current style template sources tiles from the backend's merged
+// /api/tiles endpoint (local basemap + streamed world coverage); the pmtiles
+// protocol is kept so older deployed templates (pmtiles://…) still render.
 maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
 // Self-hosted style template written by infrastructure/tiles/fetch-map-assets.sh.

@@ -8,9 +8,10 @@
 #   assets/fonts/<stack>/*.pbf   glyph ranges for the font stacks the style uses
 #   assets/sprites/ofm*          sprite sheet (json/png, 1x + 2x)
 #
-# The style's vector source is pointed at the PMTiles archive built by
-# build-basemap.sh; its low-zoom natural-earth raster source is dropped
-# (planet-wide raster tiles are not worth self-hosting for a regional map).
+# The style's vector source is pointed at the backend's merged tile endpoint
+# (/api/tiles/<area>/… — local archive from build-basemap.sh where covered,
+# streamed world tiles everywhere else); its low-zoom natural-earth raster
+# source is dropped (planet-wide raster tiles are not worth self-hosting).
 #
 # Usage: ./fetch-map-assets.sh [area]     # default area: norway
 set -euo pipefail
@@ -28,12 +29,14 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 echo ">> Style: liberty"
 curl -fsSL "$OFM/styles/liberty" -o "$tmp/liberty.json"
 
-jq --arg tiles "pmtiles://{origin}/tiles/$AREA.pmtiles" '
+jq --arg tiles "{origin}/api/tiles/$AREA/{z}/{x}/{y}.pbf" '
   del(.sources.ne2_shaded)
   | .layers |= map(select(.source != "ne2_shaded"))
   | .sources.openmaptiles = {
       type: "vector",
-      url: $tiles,
+      tiles: [$tiles],
+      minzoom: 0,
+      maxzoom: 14,
       attribution: "<a href=\"https://openmaptiles.org/\" target=\"_blank\">&copy; OpenMapTiles</a> <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\">&copy; OpenStreetMap contributors</a>"
     }
   | .glyphs = "{origin}/assets/fonts/{fontstack}/{range}.pbf"

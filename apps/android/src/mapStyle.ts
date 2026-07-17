@@ -53,12 +53,16 @@ export function buildOfflineStyle(template: string, packDir: string): string {
   // packDir is a file:// URI (expo-file-system documentDirectory-based).
   const dir = packDir.replace(/\/+$/, '');
   const style = JSON.parse(template) as {
-    sources: Record<string, { type: string; url?: string }>;
+    sources: Record<string, { type: string; url?: string; tiles?: string[] }>;
     glyphs?: string;
     sprite?: string;
   };
   for (const source of Object.values(style.sources)) {
-    if (source.type === 'vector' && source.url?.startsWith('pmtiles://')) {
+    // The template's basemap source is either a z/x/y tiles array (the
+    // backend's merged /api/tiles endpoint) or a pmtiles:// url (older
+    // templates); offline, both become the pack's local PMTiles.
+    if (source.type === 'vector' && (source.tiles || source.url?.startsWith('pmtiles://'))) {
+      delete source.tiles;
       source.url = `pmtiles://${dir}/basemap.pmtiles`;
     }
   }

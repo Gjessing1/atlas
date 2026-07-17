@@ -9,6 +9,7 @@ import {
 } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerPacksApi } from './packs-api.js';
+import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
 import { createPgStores } from './pg.js';
 import { registerSyncApi } from './sync-api.js';
@@ -31,6 +32,14 @@ export interface AppOptions {
   databaseUrl?: string;
   /** Secret for signing JWTs (JWT_SECRET); required when databaseUrl is set. */
   jwtSecret?: string;
+  /**
+   * Upstream world tile source for /api/tiles (WORLD_TILES_URL): a
+   * `{z}/{x}/{y}` URL template or a TileJSON URL. Defaults to OpenFreeMap's
+   * planet TileJSON. See tiles-api.ts.
+   */
+  worldTilesUrl?: string;
+  /** Test seams for the world tile proxy. */
+  tilesApi?: Pick<TilesApiOptions, 'localTiles' | 'fetchImpl'>;
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
@@ -140,10 +149,20 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     }
   });
 
-  // Map tiles: single-file .pmtiles archives that clients read piecewise via
-  // HTTP range requests (@fastify/static answers Range with 206 slices).
-  // Tiles are produced out-of-band by infrastructure/tiles/build-basemap.sh.
+  // Map tiles, two ways:
+  // - /api/tiles/<area>/{z}/{x}/{y}.pbf — merged endpoint the map style uses:
+  //   local archive tiles where available, streamed from an upstream world
+  //   source everywhere else (tiles-api.ts).
+  // - /tiles/*.pmtiles — the raw archives via HTTP range requests
+  //   (@fastify/static answers Range with 206 slices), still used by tooling
+  //   and older clients.
+  // Archives are produced out-of-band by infrastructure/tiles/build-basemap.sh.
   const tilesDir = path.join(opts.dataDir, 'tiles');
+  registerTilesApi(app, {
+    tilesDir,
+    worldTilesUrl: opts.worldTilesUrl ?? process.env.WORLD_TILES_URL,
+    ...opts.tilesApi,
+  });
   if (existsSync(tilesDir)) {
     await app.register(fastifyStatic, {
       root: tilesDir,
