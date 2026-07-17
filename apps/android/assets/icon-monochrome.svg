@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Adaptive-icon monochrome: pin silhouette (themed icons tint this shape) -->
+  <path fill="#ffffff" fill-rule="evenodd" d="M256 116 c-58 0 -105 47 -105 105 0 78 105 175 105 175 s105 -97 105 -175 c0 -58 -47 -105 -105 -105 Z
+    M256 260 a39 39 0 1 1 0 -78 39 39 0 0 1 0 78 Z"/>
+</svg>

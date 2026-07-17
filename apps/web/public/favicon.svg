@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Brand-blue rounded square (same family as nodecal/maily) -->
+  <rect width="512" height="512" rx="112" fill="#2563eb"/>
+
+  <!-- Folded map: three panels, zigzag top/bottom edges -->
+  <path d="M96 150 L202 122 L308 150 L416 122 V362 L308 390 L202 362 L96 390 Z" fill="#ffffff"/>
+  <!-- Middle panel shaded to read as a fold -->
+  <path d="M202 122 L308 150 V390 L202 362 Z" fill="#dbeafe"/>
+
+  <!-- Location pin -->
+  <path d="M256 156 c-46 0 -83 37 -83 83 0 62 83 143 83 143 s83 -81 83 -143 c0 -46 -37 -83 -83 -83 Z" fill="#1e40af"/>
+  <circle cx="256" cy="239" r="31" fill="#ffffff"/>
+</svg>

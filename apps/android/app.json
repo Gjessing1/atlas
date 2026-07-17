@@ -3,8 +3,8 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.9.6",
-    "runtimeVersion": "1",
+    "version": "0.9.7",
+    "runtimeVersion": "2",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",
       "enabled": true,
@@ -16,10 +16,10 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 13,
+      "versionCode": 14,
       "permissions": ["android.permission.RECEIVE_BOOT_COMPLETED"],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#2563eb",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
