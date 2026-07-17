@@ -1,5 +1,10 @@
 import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
-import { ROUTING_PROFILES, routePathToTrackData, type RoutePath } from '@atlas/routing';
+import {
+  pathViaLabels,
+  ROUTING_PROFILES,
+  routePathToTrackData,
+  type RoutePath,
+} from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -26,6 +31,15 @@ const fmtEta = (timeMs: number): string =>
     minute: '2-digit',
     hour12: false,
   });
+
+/** Alternative chip: the fastest shows its duration, others their extra minutes. */
+function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {
+  const extraMin = Math.round((paths[i]!.timeMs - paths[0]!.timeMs) / 60000);
+  const head =
+    i === 0 ? fmtDuration(paths[0]!.timeMs) : extraMin < 1 ? '+<1 min' : `+${extraMin} min`;
+  const via = vias[i];
+  return via ? `${head} via ${via}` : head;
+}
 
 /** Waypoint label, matching the map markers: A, B, C… (⟳ for a round trip). */
 function waypointLabel(index: number, roundTrip: boolean, count: number): string {
@@ -155,6 +169,8 @@ export function RoutePanel({
   bottomInset?: number;
 }) {
   const path = route.paths?.[route.selectedPath] ?? null;
+  // "via …" labels distinguishing the alternatives (needs instructions).
+  const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
   // Server routes carry elevation (DEM); offline-pack routes don't — no chart then.
   const hasElevation = path?.points.some((p) => p.ele !== undefined) ?? false;
@@ -340,7 +356,7 @@ export function RoutePanel({
               testID={`route-alt-${i}`}
             >
               <Text style={styles.chipText}>
-                {i === 0 ? 'Best' : `Alt ${i}`}: {fmtKm(p.distanceM)} · {fmtDuration(p.timeMs)}
+                {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
               </Text>
             </Pressable>
           ))}

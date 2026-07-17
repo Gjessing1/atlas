@@ -37,6 +37,27 @@ function packOutlinesGeoJSON(packs: LocalPack[]) {
 /** Layer id of the planned-route line — App hit-tests taps on it to insert vias. */
 export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
 
+/** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
+export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
+
+/** All route choices as one collection; `index` rides on each feature for tap pick. */
+function previewRoutesGeoJSON(paths: { points: LatLng[] }[], selected: number) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: paths
+      .map((path, index) => ({
+        type: 'Feature' as const,
+        properties: { index, selected: index === selected },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: path.points.map((p) => [p.lng, p.lat]),
+        },
+      }))
+      // Selected drawn last so it wins overlaps with the muted alternatives.
+      .sort((a, b) => Number(a.properties.selected) - Number(b.properties.selected)),
+  };
+}
+
 /** The default boot view (Oslo) when no camera has been persisted yet. */
 export const DEFAULT_VIEW = { center: { lat: 59.91, lng: 10.75 }, zoom: 10 };
 
@@ -198,6 +219,28 @@ export function MapScene({
             type="line"
             id="atlas-route-line"
             paint={{ 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.85 }}
+          />
+        </GeoJSONSource>
+      ) : null}
+      {/* Route choices before guidance starts: muted alternatives under the
+          selected line; a tap on a grey line switches to it (App hit-tests
+          NAV_PREVIEW_LAYER_IDS and calls nav.selectPreview). */}
+      {nav.phase === 'preview' && nav.previewPaths ? (
+        <GeoJSONSource
+          id="atlas-nav-preview"
+          data={previewRoutesGeoJSON(nav.previewPaths, nav.previewIndex)}
+        >
+          <Layer
+            type="line"
+            id="atlas-nav-preview-alt"
+            filter={['!', ['to-boolean', ['get', 'selected']]]}
+            paint={{ 'line-color': '#8f8f9d', 'line-width': 5, 'line-opacity': 0.8 }}
+          />
+          <Layer
+            type="line"
+            id="atlas-nav-preview-sel"
+            filter={['to-boolean', ['get', 'selected']]}
+            paint={{ 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.9 }}
           />
         </GeoJSONSource>
       ) : null}

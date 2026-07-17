@@ -9,7 +9,8 @@ import { makeRouteProvider } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locationTask';
 
-export type NavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+export type NavPhase =
+  'idle' | 'starting' | 'preview' | 'navigating' | 'rerouting' | 'arrived' | 'error';
 
 export interface NavController {
   phase: NavPhase;
@@ -19,12 +20,20 @@ export interface NavController {
   profile: RoutingProfile;
   /** Where the trip is headed (for the finish marker); null when idle. */
   destination: LatLng | null;
+  /** Route choices while in the preview phase (fastest first); null otherwise. */
+  previewPaths: RoutePath[] | null;
+  /** Index into previewPaths of the choice guidance will follow. */
+  previewIndex: number;
   /** Latest ground speed in m/s, or null when unknown/stationary. */
   speedMps: number | null;
   /** Whether voice prompts are muted. */
   muted: boolean;
   error: string | null;
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
+  /** Pick one of the preview route choices (preview phase only). */
+  selectPreview: (index: number) => void;
+  /** Begin guidance along the selected preview choice. */
+  go: () => Promise<void>;
   toggleMute: () => void;
   stop: () => void;
 }
@@ -35,6 +44,11 @@ export interface NavController {
  * Routing goes through the shared offline-first provider: the embedded Valhalla
  * engine when a downloaded pack covers the trip, otherwise the server. Location
  * runs under an Android foreground service so guidance survives screen-off.
+ *
+ * Starting a trip is two-step (Google-style): `start` fetches the route plus
+ * up to two alternatives and enters the `preview` phase — the fastest is
+ * pre-selected, the map shows all choices — then `go` begins guidance along
+ * the selected one. Re-routes after leaving the line always take the fastest.
  */
 export function useNavigation(): NavController {
   const serverOrigin = useServerOrigin();
@@ -45,6 +59,8 @@ export function useNavigation(): NavController {
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [destination, setDestination] = useState<LatLng | null>(null);
+  const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +119,8 @@ export function useNavigation(): NavController {
       destRef.current = null;
       rerouteInFlight.current = false;
       setRouteCoords([]);
+      setPreviewPaths(null);
+      setPreviewIndex(0);
       setSpeedMps(null);
       if (!arrived) {
         setState(null);
@@ -175,26 +193,21 @@ export function useNavigation(): NavController {
         setProfile(prof);
         setDestination(destination);
         setSpeedMps(null);
-
-        const path = await fetchPath(origin, destination, prof);
-        sessionRef.current = new NavigationSession(path);
-        setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setState(null);
+        setRouteCoords([]);
 
-        setLocationHandler(onFix);
-        const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
-        if (!already) {
-          await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
-            accuracy: Location.Accuracy.BestForNavigation,
-            distanceInterval: 5,
-            showsBackgroundLocationIndicator: true,
-            foregroundService: {
-              notificationTitle: 'Atlas navigation',
-              notificationBody: 'Guiding you to your destination',
-            },
-          });
-        }
-        setPhase('navigating');
+        // Route choices: the fastest plus up to two alternatives, offered
+        // before guidance starts. Selecting nothing keeps the fastest.
+        const result = await provider.route({
+          profile: prof,
+          points: [origin, destination],
+          instructions: true,
+          alternatives: true,
+        });
+        if (result.paths.length === 0) throw new Error('no route found');
+        setPreviewPaths(result.paths);
+        setPreviewIndex(0);
+        setPhase('preview');
       } catch (err) {
         setLocationHandler(null);
         sessionRef.current = null;
@@ -204,8 +217,42 @@ export function useNavigation(): NavController {
         setPhase('error');
       }
     },
-    [fetchPath, onFix],
+    [provider],
   );
+
+  const go = useCallback(async () => {
+    const path = previewPaths?.[previewIndex];
+    if (!path) return;
+    try {
+      sessionRef.current = new NavigationSession(path);
+      setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+      setPreviewPaths(null);
+      setPreviewIndex(0);
+      setState(null);
+
+      setLocationHandler(onFix);
+      const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
+      if (!already) {
+        await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
+          accuracy: Location.Accuracy.BestForNavigation,
+          distanceInterval: 5,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'Atlas navigation',
+            notificationBody: 'Guiding you to your destination',
+          },
+        });
+      }
+      setPhase('navigating');
+    } catch (err) {
+      setLocationHandler(null);
+      sessionRef.current = null;
+      destRef.current = null;
+      setDestination(null);
+      setError(err instanceof Error ? err.message : String(err));
+      setPhase('error');
+    }
+  }, [previewPaths, previewIndex, onFix]);
 
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);
@@ -216,10 +263,14 @@ export function useNavigation(): NavController {
     routeCoords,
     profile,
     destination,
+    previewPaths,
+    previewIndex,
     speedMps,
     muted,
     error,
     start,
+    selectPreview: setPreviewIndex,
+    go,
     toggleMute,
     stop: () => stop(false),
   };

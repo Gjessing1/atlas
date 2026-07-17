@@ -28,11 +28,17 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
-import { DEFAULT_VIEW, MapScene, PLAN_LINE_LAYER_ID } from './src/map/MapScene';
+import {
+  DEFAULT_VIEW,
+  MapScene,
+  NAV_PREVIEW_LAYER_IDS,
+  PLAN_LINE_LAYER_ID,
+} from './src/map/MapScene';
 import { getServerOrigin } from './src/serverOrigin';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
+import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavigation } from './src/nav/useNavigation';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
@@ -136,7 +142,10 @@ function AppInner() {
   // orientation while travelling).
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const controlsTop = topInset + 8 + (navActive ? navHeight + 8 : 0);
+  // Route-choice preview: the choice card owns the bottom of the screen and
+  // map taps switch between the drawn choices (no banner at the top).
+  const previewing = nav.phase === 'preview';
+  const controlsTop = topInset + 8 + (navActive && !previewing ? navHeight + 8 : 0);
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -247,6 +256,17 @@ function AppInner() {
         setMenuOpen(false);
         return;
       }
+      if (nav.phase === 'preview') {
+        // A tap on one of the drawn route choices makes it the selection.
+        void (async () => {
+          const hits = await mapRef.current
+            ?.queryRenderedFeatures(pixelBounds, { layers: NAV_PREVIEW_LAYER_IDS })
+            .catch(() => undefined);
+          const index = hits?.[0]?.properties?.['index'] as number | undefined;
+          if (typeof index === 'number') nav.selectPreview(index);
+        })();
+        return;
+      }
       if (route.active) {
         void (async () => {
           // Tap on the selected line: insert a via there (web parity — the
@@ -322,8 +342,31 @@ function AppInner() {
         });
       })();
     },
-    [menuOpen, route, visiblePlaces, pickDestination],
+    [menuOpen, nav, route, visiblePlaces, pickDestination],
   );
+
+  // Entering the route-choice preview (or switching choice): fit the whole
+  // selected route on screen, clear of the top inset and the choice card.
+  useEffect(() => {
+    if (nav.phase !== 'preview') return;
+    const path = nav.previewPaths?.[nav.previewIndex];
+    if (!path) return;
+    let west = Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let north = -Infinity;
+    for (const p of path.points) {
+      if (p.lng < west) west = p.lng;
+      if (p.lng > east) east = p.lng;
+      if (p.lat < south) south = p.lat;
+      if (p.lat > north) north = p.lat;
+    }
+    if (!Number.isFinite(west) || west === east || south === north) return;
+    cameraRef.current?.fitBounds([west, south, east, north], {
+      padding: { top: topInset + 48, right: 48, bottom: bottomInset + 300, left: 48 },
+      duration: 700,
+    });
+  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset]);
 
   // Long-press outside route planning: pick any point as a destination.
   const onPickPoint = useCallback(
@@ -459,7 +502,7 @@ function AppInner() {
 
       {/* Expanded search overlay (input at the top, clear of the keyboard);
           hidden while navigating — the banner owns the top then. */}
-      {searchOpen && !following && !planning ? (
+      {searchOpen && !following && !planning && !previewing ? (
         <SearchBar
           packs={packs}
           getBias={getBias}
@@ -485,7 +528,7 @@ function AppInner() {
 
       {/* Bottom-right: recentre on the current position (RoutePanel owns the
           bottom while planning, so hide it then). */}
-      {!planning ? (
+      {!planning && !previewing ? (
         <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
           <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
             <CrosshairIcon />
@@ -493,8 +536,8 @@ function AppInner() {
         </View>
       ) : null}
 
-      {/* Hidden while planning — the RoutePanel owns the bottom of the screen. */}
-      {!planning ? (
+      {/* Hidden while planning/previewing — a panel owns the bottom then. */}
+      {!planning && !previewing ? (
         <MenuCluster
           bottomInset={bottomInset}
           menuOpen={menuOpen}
@@ -508,13 +551,13 @@ function AppInner() {
         />
       ) : null}
 
-      {useOffline && !planning ? (
+      {useOffline && !planning && !previewing ? (
         // Above the scalebar strip (bottom-centre) so the two never overlap.
         <View style={[styles.offlineBadge, { bottom: bottomInset + 116 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && !planning ? (
+      {packs.length > 0 && !planning && !previewing ? (
         // Stacked above the bottom-right locate button.
         <View style={[styles.offlineToggle, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
@@ -570,6 +613,8 @@ function AppInner() {
           bottomInset={bottomInset}
         />
       ) : null}
+
+      <RoutePreview nav={nav} bottomInset={bottomInset} />
 
       <AppSheets
         data={data}

@@ -1,8 +1,13 @@
 import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
-import { ROUTING_PROFILES, routePathToTrackData } from '@atlas/routing';
+import {
+  pathViaLabels,
+  ROUTING_PROFILES,
+  routePathToTrackData,
+  type RoutePath,
+} from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
 import type { RoutePlanner } from './useRoute.js';
 
@@ -17,6 +22,15 @@ function downloadText(fileName: string, text: string, type: string): void {
 
 const fmtEta = (timeMs: number): string =>
   new Date(Date.now() + timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** Alternative chip: the fastest shows its duration, others their extra minutes. */
+function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {
+  const extraMin = Math.round((paths[i]!.timeMs - paths[0]!.timeMs) / 60000);
+  const head =
+    i === 0 ? fmtDuration(paths[0]!.timeMs) : extraMin < 1 ? '+<1 min' : `+${extraMin} min`;
+  const via = vias[i];
+  return via ? `${head} via ${via}` : head;
+}
 
 /** Waypoint label, matching the map markers: A, B, C… (⟳ for a round trip). */
 function waypointLabel(index: number, roundTrip: boolean, count: number): string {
@@ -136,6 +150,8 @@ export function RoutePanel({
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const path = route.paths?.[route.selectedPath];
+  // "via …" labels distinguishing the alternatives (needs instructions).
+  const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
 
   const exportGpx = () => {
     if (!path) return;
@@ -301,7 +317,7 @@ export function RoutePanel({
               aria-pressed={i === route.selectedPath}
               onClick={() => route.selectPath(i)}
             >
-              {i === 0 ? 'Best' : `Alt ${i}`}: {fmtKm(p.distanceM)} · {fmtDuration(p.timeMs)}
+              {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
             </button>
           ))}
         </div>

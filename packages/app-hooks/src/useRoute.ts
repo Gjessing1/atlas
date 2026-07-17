@@ -98,6 +98,9 @@ export function useRoute(route: RouteFn): RoutePlanner {
             profile,
             points: waypoints.map((w) => w.pos),
             alternatives: waypoints.length === 2,
+            // Street names ride on instructions — needed for "via …" labels
+            // that tell the alternatives apart in the panel.
+            instructions: waypoints.length === 2,
           };
       try {
         const result = await route(query, controller.signal);

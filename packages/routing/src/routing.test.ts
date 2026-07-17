@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { viaInsertIndex } from './insert.js';
 import { routePathToTrackData, type RoutePath } from './model.js';
 import { optimizeWaypointOrder } from './optimize.js';
+import { pathViaLabels } from './via.js';
 
 const oslo = { lat: 59.9139, lng: 10.7522 };
 const sognsvann = { lat: 59.9706, lng: 10.7305 };
@@ -74,5 +75,79 @@ describe('optimizeWaypointOrder', () => {
     expect(order[0]).toBe(0);
     expect(order[order.length - 1]).toBe(5);
     expect([...order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
+
+describe('pathViaLabels', () => {
+  const instr = (streetName: string, distanceM: number) => ({
+    text: '',
+    distanceM,
+    timeMs: 0,
+    sign: 0,
+    interval: [0, 1] as [number, number],
+    streetName,
+  });
+  const path = (distanceM: number, streets: [string, number][]): RoutePath => ({
+    points: [oslo, sognsvann],
+    distanceM,
+    timeMs: 0,
+    ascentM: 0,
+    descentM: 0,
+    instructions: streets.map(([name, m]) => instr(name, m)),
+  });
+
+  it('labels each path with the road the others do not use', () => {
+    const e18 = path(45000, [
+      ['Ring 1', 2000],
+      ['E18', 38000],
+      ['Sentrumsgata', 1000],
+    ]);
+    const e134 = path(52000, [
+      ['Ring 1', 2000],
+      ['E134', 44000],
+      ['Sentrumsgata', 1000],
+    ]);
+    expect(pathViaLabels([e18, e134])).toEqual(['E18', 'E134']);
+  });
+
+  it('ignores shared trunk roads and picks the distinguishing stretch', () => {
+    const viaDrammen = path(60000, [
+      ['E18', 30000],
+      ['Rv282', 12000],
+    ]);
+    const viaSandvika = path(55000, [
+      ['E18', 34000],
+      ['E16', 9000],
+    ]);
+    expect(pathViaLabels([viaDrammen, viaSandvika])).toEqual(['Rv282', 'E16']);
+  });
+
+  it('returns null without instructions or when the difference is trivial', () => {
+    const bare: RoutePath = {
+      points: [oslo, sognsvann],
+      distanceM: 6000,
+      timeMs: 0,
+      ascentM: 0,
+      descentM: 0,
+    };
+    expect(pathViaLabels([bare])).toEqual([null]);
+    // Two paths differing only by a 300 m ramp: not worth a label.
+    const a = path(40000, [
+      ['E18', 39000],
+      ['Ramp A', 300],
+    ]);
+    const b = path(40100, [
+      ['E18', 39000],
+      ['Ramp B', 400],
+    ]);
+    expect(pathViaLabels([a, b])).toEqual([null, null]);
+  });
+
+  it('labels a single path with its dominant road', () => {
+    const only = path(45000, [
+      ['Ring 1', 2000],
+      ['E18', 38000],
+    ]);
+    expect(pathViaLabels([only])).toEqual(['E18']);
   });
 });

@@ -80,7 +80,8 @@ export function NavBanner({
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
-  if (nav.phase === 'idle') return null;
+  // The preview phase has its own bottom card (RoutePreview) — no banner.
+  if (nav.phase === 'idle' || nav.phase === 'preview') return null;
 
   const { state } = nav;
   const maneuver = state?.upcoming;

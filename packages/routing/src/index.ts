@@ -16,4 +16,5 @@ export {
   type ValhallaTransport,
 } from './provider.js';
 export { optimizeWaypointOrder } from './optimize.js';
+export { pathViaLabels } from './via.js';
 export { viaInsertIndex } from './insert.js';
