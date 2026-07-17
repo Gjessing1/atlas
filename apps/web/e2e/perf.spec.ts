@@ -1,4 +1,5 @@
 import { test } from '@playwright/test';
+import './helpers.js'; // window.__atlasMap global declaration
 
 // Use the host iGPU (container run with --device /dev/dri) instead of SwiftShader.
 test.use({
@@ -13,21 +14,19 @@ test.use({
  */
 test('measure startup and rendering FPS', async ({ page }) => {
   await page.goto('/');
-  await page.waitForFunction(() =>
-    Boolean((window as never as { __atlasMap?: unknown }).__atlasMap),
-  );
+  await page.waitForFunction(() => Boolean(window.__atlasMap));
   const startup = await page.evaluate(
     () =>
       new Promise<{ mapIdleMs: number; loadEventMs: number }>((resolve) => {
-        const w = window as never as { __atlasMap: import('maplibre-gl').Map };
+        const map = window.__atlasMap!;
         const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
         const done = (): void =>
           resolve({
             mapIdleMs: Math.round(performance.now()),
             loadEventMs: Math.round(nav.loadEventEnd),
           });
-        if (w.__atlasMap.loaded()) done();
-        else w.__atlasMap.once('idle', done);
+        if (map.loaded()) done();
+        else map.once('idle', done);
       }),
   );
   console.log(`STARTUP map-idle=${startup.mapIdleMs}ms load-event=${startup.loadEventMs}ms`);
@@ -35,7 +34,7 @@ test('measure startup and rendering FPS', async ({ page }) => {
   const fps = await page.evaluate(
     () =>
       new Promise<number>((resolve) => {
-        const w = window as never as { __atlasMap: import('maplibre-gl').Map };
+        const map = window.__atlasMap!;
         let frames = 0;
         const durationMs = 2500;
         const start = performance.now();
@@ -45,11 +44,7 @@ test('measure startup and rendering FPS', async ({ page }) => {
           else resolve(Math.round((frames / (performance.now() - start)) * 1000));
         };
         // Animate a pan+zoom so the measurement covers active tile rendering.
-        w.__atlasMap.easeTo({
-          center: { lat: 60.39, lng: 5.32 },
-          zoom: 11,
-          duration: durationMs,
-        });
+        map.easeTo({ center: { lat: 60.39, lng: 5.32 }, zoom: 11, duration: durationMs });
         requestAnimationFrame(tick);
       }),
   );
