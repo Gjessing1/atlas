@@ -72,8 +72,8 @@ export function TracksSheet({
       const result = await onImport();
       if (result) {
         const bits: string[] = [];
-        if (result.tracks) bits.push(`${result.tracks} track(s)`);
-        if (result.places) bits.push(`${result.places} place(s)`);
+        if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
+        if (result.places.length) bits.push(`${result.places.length} place(s)`);
         setMessage(bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing importable found.');
         if (result.errors.length) setMessage((m) => `${m ?? ''} ${result.errors[0]}`.trim());
       }

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@atlas/app-hooks": "*",
     "@atlas/core": "*",
     "@atlas/gpx": "*",
     "@atlas/navigation": "*",

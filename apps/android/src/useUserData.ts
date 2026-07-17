@@ -1,18 +1,12 @@
-import { buildGpx, buildKml, computeTrackStats, parseGpx, parseTrackFile } from '@atlas/gpx';
-import type {
-  AtlasStorage,
-  CollectionRecord,
-  NewPlace,
-  PlacePatch,
-  PlaceRecord,
-  TrackPatch,
-  TrackRecord,
-} from '@atlas/storage';
+import {
+  useUserData as useSharedUserData,
+  type UserData as SharedUserData,
+  type UserDataPlatform,
+} from '@atlas/app-hooks';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { openStorage } from './db';
-import { sanitizeFileName, shareText } from './share';
+import { shareText } from './share';
 
 /** A file handed to the importer (from expo-document-picker); name drives the parser. */
 export interface PickedFile {
@@ -20,52 +14,8 @@ export interface PickedFile {
   uri: string;
 }
 
-export interface ImportResult {
-  tracks: number;
-  places: number;
-  errors: string[];
-}
-
-export interface UserData {
-  status: 'loading' | 'ready' | 'error';
-  error: string | null;
-  /** Latest failed storage write, for a dismissible banner — null when none. */
-  writeError: string | null;
-  clearWriteError: () => void;
-  places: PlaceRecord[];
-  /** Folders — resolve a place's effective map visibility and group places/tracks. */
-  collections: CollectionRecord[];
-  tracks: TrackRecord[];
-  /** The open storage (null until ready) — for wiring the sync engine only. */
-  storage: AtlasStorage | null;
-  /** Reload from storage, e.g. after sync applied remote changes. */
-  refreshAll: () => Promise<void>;
-
-  savePlace: (input: NewPlace) => Promise<void>;
-  updatePlace: (id: string, patch: PlacePatch) => Promise<void>;
-  deletePlace: (id: string) => Promise<void>;
-  /** Persist a drag arrangement of places (ids in their new order). */
-  reorderPlaces: (orderedIds: string[]) => Promise<void>;
-  /** Persist a drag arrangement of folders (ids in their new order). */
-  reorderCollections: (orderedIds: string[]) => Promise<void>;
-
-  /** Import GPX/KML/KMZ files picked from the device; returns a per-file summary. */
-  importFiles: (files: PickedFile[]) => Promise<ImportResult>;
-  updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
-  deleteTrack: (id: string) => Promise<void>;
-  /** Share one track as .gpx (stored original) or .kml (converted) via the OS share sheet. */
-  exportTrack: (id: string, format: 'gpx' | 'kml') => Promise<void>;
-
-  createCollection: (name: string, parentId?: string | null) => Promise<void>;
-  renameCollection: (id: string, name: string) => Promise<void>;
-  setCollectionVisible: (id: string, visible: boolean) => Promise<void>;
-  deleteCollection: (id: string) => Promise<void>;
-  /** Show or hide every place and folder at once (the "show/hide all" action). */
-  setAllVisible: (visible: boolean) => Promise<void>;
-
-  /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
-  exportAll: () => Promise<void>;
-}
+export type { ImportResult } from '@atlas/app-hooks';
+export type UserData = SharedUserData<PickedFile>;
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -92,306 +42,23 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 /**
- * Android counterpart of the web app's useUserData: the same @atlas/storage
- * layer over the device's native SQLite (see src/db.ts). Local data is
- * authoritative — the server only syncs (ARCHITECTURE.md rule 3). Mirrors the
- * web surface (places / folders / tracks + import/export) for mobile parity.
+ * Android configuration of the shared useUserData (@atlas/app-hooks): the
+ * device's native SQLite (see ./db.ts), expo-document-picker files read via
+ * expo-file-system, exports through the OS share sheet (full export as the
+ * JSON dump — no binary zip over the share-text bridge).
  */
+const platform: UserDataPlatform<PickedFile> = {
+  openStorage,
+  readFile: async (file) => {
+    const isText = /\.(gpx|kml)$/i.test(file.name);
+    const bytes = isText
+      ? new TextEncoder().encode(await FileSystem.readAsStringAsync(file.uri))
+      : base64ToBytes(await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' }));
+    return { name: file.name, bytes };
+  },
+  saveTextFile: (name, body) => shareText(name, body),
+};
+
 export function useUserData(): UserData {
-  const [status, setStatus] = useState<UserData['status']>('loading');
-  const [error, setError] = useState<string | null>(null);
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const [places, setPlaces] = useState<PlaceRecord[]>([]);
-  const [collections, setCollections] = useState<CollectionRecord[]>([]);
-  const [tracks, setTracks] = useState<TrackRecord[]>([]);
-  const storageRef = useRef<AtlasStorage | null>(null);
-  const [storage, setStorage] = useState<AtlasStorage | null>(null);
-
-  const clearWriteError = useCallback(() => setWriteError(null), []);
-  // A rejected write means the change was NOT saved — surface it rather than
-  // letting it look like a no-op (never *silently* lose user data).
-  const reportWriteFailure = useCallback((action: string, err: unknown) => {
-    console.error(`${action} failed`, err);
-    setWriteError(`${action} failed — ${err instanceof Error ? err.message : String(err)}`);
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    const s = storageRef.current;
-    if (!s) return;
-    const [p, c, t] = await Promise.all([s.listPlaces(), s.listCollections(), s.listTracks()]);
-    setPlaces(p);
-    setCollections(c);
-    setTracks(t);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void openStorage()
-      .then(async (s) => {
-        if (cancelled) return;
-        storageRef.current = s;
-        setStorage(s);
-        const [p, c, t] = await Promise.all([s.listPlaces(), s.listCollections(), s.listTracks()]);
-        setPlaces(p);
-        setCollections(c);
-        setTracks(t);
-        setStatus('ready');
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setStatus('error');
-        }
-      });
-    return () => {
-      cancelled = true;
-      storageRef.current = null;
-    };
-  }, []);
-
-  const savePlace = useCallback(
-    async (input: NewPlace) => {
-      try {
-        await storageRef.current?.createPlace(input);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Saving place', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const updatePlace = useCallback(
-    async (id: string, patch: PlacePatch) => {
-      try {
-        await storageRef.current?.updatePlace(id, patch);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Updating place', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const deletePlace = useCallback(
-    async (id: string) => {
-      try {
-        await storageRef.current?.deletePlace(id);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Deleting place', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const reorderPlaces = useCallback(
-    async (orderedIds: string[]) => {
-      try {
-        await storageRef.current?.reorderPlaces(orderedIds);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Reordering places', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const reorderCollections = useCallback(
-    async (orderedIds: string[]) => {
-      try {
-        await storageRef.current?.reorderCollections(orderedIds);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Reordering folders', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const importFiles = useCallback(
-    async (files: PickedFile[]): Promise<ImportResult> => {
-      const storage = storageRef.current;
-      const result: ImportResult = { tracks: 0, places: 0, errors: [] };
-      if (!storage) return result;
-
-      for (const file of files) {
-        try {
-          const isText = /\.(gpx|kml)$/i.test(file.name);
-          const bytes = isText
-            ? new TextEncoder().encode(await FileSystem.readAsStringAsync(file.uri))
-            : base64ToBytes(await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' }));
-          const data = parseTrackFile(file.name, bytes);
-          if (data.segments.length > 0) {
-            // Preserve original GPX byte-for-byte (rule 5: never trap user data);
-            // KML/KMZ are converted to canonical GPX.
-            const gpx = file.name.toLowerCase().endsWith('.gpx')
-              ? new TextDecoder().decode(bytes)
-              : buildGpx(data);
-            const stats = computeTrackStats(data) as unknown as Record<string, number>;
-            await storage.createTrack({ name: data.name ?? file.name, gpx, stats });
-            result.tracks += 1;
-          } else if (data.waypoints.length > 0) {
-            // A waypoints-only file is a list of favorites, not a track.
-            for (const w of data.waypoints) {
-              await storage.createPlace({
-                name: w.name ?? `${w.lat.toFixed(5)}, ${w.lng.toFixed(5)}`,
-                lat: w.lat,
-                lng: w.lng,
-              });
-              result.places += 1;
-            }
-          } else {
-            result.errors.push(`${file.name}: no tracks or waypoints found`);
-          }
-        } catch (err) {
-          result.errors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      await refreshAll();
-      return result;
-    },
-    [refreshAll],
-  );
-
-  const updateTrack = useCallback(
-    async (id: string, patch: TrackPatch) => {
-      try {
-        await storageRef.current?.updateTrack(id, patch);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Updating track', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const deleteTrack = useCallback(
-    async (id: string) => {
-      try {
-        await storageRef.current?.deleteTrack(id);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Deleting track', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const exportTrack = useCallback(async (id: string, format: 'gpx' | 'kml') => {
-    const storage = storageRef.current;
-    if (!storage) return;
-    const track = (await storage.listTracks()).find((t) => t.id === id);
-    const gpx = await storage.getTrackGpx(id);
-    if (!track || !gpx) return;
-    const body = format === 'gpx' ? gpx : buildKml(parseGpx(gpx));
-    await shareText(`${sanitizeFileName(track.name)}.${format}`, body);
-  }, []);
-
-  const createCollection = useCallback(
-    async (name: string, parentId: string | null = null) => {
-      try {
-        await storageRef.current?.createCollection(name, parentId);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Creating folder', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const renameCollection = useCallback(
-    async (id: string, name: string) => {
-      try {
-        await storageRef.current?.renameCollection(id, name);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Renaming folder', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const setCollectionVisible = useCallback(
-    async (id: string, visible: boolean) => {
-      try {
-        await storageRef.current?.setCollectionVisible(id, visible);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Updating folder', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const deleteCollection = useCallback(
-    async (id: string) => {
-      try {
-        await storageRef.current?.deleteCollection(id);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Deleting folder', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const setAllVisible = useCallback(
-    async (visible: boolean) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      try {
-        const [ps, cs] = await Promise.all([storage.listPlaces(), storage.listCollections()]);
-        // Only flip rows that differ, so we don't churn updated_at (and the sync
-        // outbox) for records already in the wanted state.
-        await Promise.all([
-          ...ps
-            .filter((p) => p.visible !== visible)
-            .map((p) => storage.updatePlace(p.id, { visible })),
-          ...cs
-            .filter((c) => c.visible !== visible)
-            .map((c) => storage.setCollectionVisible(c.id, visible)),
-        ]);
-        await refreshAll();
-      } catch (err) {
-        reportWriteFailure('Updating visibility', err);
-      }
-    },
-    [refreshAll, reportWriteFailure],
-  );
-
-  const exportAll = useCallback(async () => {
-    const storage = storageRef.current;
-    if (!storage) return;
-    const dump = await storage.exportAll();
-    const date = new Date().toISOString().slice(0, 10);
-    await shareText(`atlas-export-${date}.json`, JSON.stringify(dump, null, 2));
-  }, []);
-
-  return {
-    status,
-    error,
-    writeError,
-    clearWriteError,
-    places,
-    collections,
-    tracks,
-    storage,
-    refreshAll,
-    savePlace,
-    updatePlace,
-    deletePlace,
-    reorderPlaces,
-    reorderCollections,
-    importFiles,
-    updateTrack,
-    deleteTrack,
-    exportTrack,
-    createCollection,
-    renameCollection,
-    setCollectionVisible,
-    deleteCollection,
-    setAllVisible,
-    exportAll,
-  };
+  return useSharedUserData(platform);
 }

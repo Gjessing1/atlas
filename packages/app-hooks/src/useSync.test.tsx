@@ -1,0 +1,221 @@
+// @vitest-environment jsdom
+import { DatabaseSync } from 'node:sqlite';
+import { AtlasStorage } from '@atlas/storage';
+import type { SqlDriver, SqlRow, SqlValue, SyncChange } from '@atlas/storage';
+import { lwwWins } from '@atlas/sync';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SyncPlatform, SyncSession } from './useSync.js';
+import { useSync } from './useSync.js';
+
+function createNodeDriver(): SqlDriver {
+  const db = new DatabaseSync(':memory:');
+  return {
+    query: (sql: string, params: SqlValue[] = []) =>
+      Promise.resolve(db.prepare(sql).all(...params) as SqlRow[]),
+    execScript: (sql: string) => {
+      db.exec(sql);
+      return Promise.resolve();
+    },
+  };
+}
+
+/** Fake backend: health + auth + the LWW sync store the engine talks to. */
+class FakeServer {
+  syncEnabled = true;
+  authorized = true;
+  pushes = 0;
+  pulls = 0;
+  private rows = new Map<string, { change: SyncChange; seq: number; deviceId: string }>();
+  private seq = 0;
+
+  seed(change: SyncChange): void {
+    this.rows.set(`${change.entity}|${change.id}`, { change, seq: ++this.seq, deviceId: 'other' });
+  }
+
+  get rowCount(): number {
+    return this.rows.size;
+  }
+
+  readonly fetchFn: typeof fetch = (input, init) => {
+    const url = new URL(String(input), 'http://server');
+    if (url.pathname === '/api/health') {
+      return Promise.resolve(Response.json({ status: 'ok', sync: this.syncEnabled }));
+    }
+    if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/register') {
+      const body = JSON.parse(String(init?.body)) as { email: string; password: string };
+      if (!this.authorized) {
+        return Promise.resolve(Response.json({ error: 'invalid credentials' }, { status: 401 }));
+      }
+      return Promise.resolve(Response.json({ token: 'jwt-token', email: body.email }));
+    }
+    if (!this.authorized) {
+      return Promise.resolve(Response.json({ error: 'nope' }, { status: 401 }));
+    }
+    if (url.pathname === '/api/sync/push') {
+      this.pushes++;
+      const body = JSON.parse(String(init?.body)) as { deviceId: string; changes: SyncChange[] };
+      let applied = 0;
+      let skipped = 0;
+      for (const change of body.changes) {
+        const key = `${change.entity}|${change.id}`;
+        const existing = this.rows.get(key);
+        if (lwwWins(change.updatedAt, existing?.change.updatedAt ?? null)) {
+          this.rows.set(key, { change, seq: ++this.seq, deviceId: body.deviceId });
+          applied++;
+        } else {
+          skipped++;
+        }
+      }
+      return Promise.resolve(Response.json({ applied, skipped }));
+    }
+    if (url.pathname === '/api/sync/pull') {
+      this.pulls++;
+      const since = Number(url.searchParams.get('since'));
+      const device = url.searchParams.get('device');
+      const all = [...this.rows.values()]
+        .filter((r) => r.seq > since && r.deviceId !== device)
+        .sort((a, b) => a.seq - b.seq);
+      const cursor = all.length > 0 ? all[all.length - 1]!.seq : this.seq;
+      return Promise.resolve(
+        Response.json({ changes: all.map((r) => r.change), cursor: String(cursor), done: true }),
+      );
+    }
+    return Promise.resolve(Response.json({ error: 'not found' }, { status: 404 }));
+  };
+}
+
+interface Harness {
+  server: FakeServer;
+  storage: AtlasStorage;
+  platform: SyncPlatform;
+  onPulled: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  persisted: () => SyncSession | null;
+}
+
+async function createHarness(opts?: {
+  session?: SyncSession | null;
+  syncEnabled?: boolean;
+}): Promise<Harness> {
+  const server = new FakeServer();
+  server.syncEnabled = opts?.syncEnabled ?? true;
+  const storage = new AtlasStorage(createNodeDriver());
+  await storage.init();
+  let session: SyncSession | null = opts?.session ?? null;
+  const platform: SyncPlatform = {
+    loadSession: () => session,
+    saveSession: (_storage, next) => {
+      session = next;
+    },
+    fetchImpl: server.fetchFn,
+  };
+  const onPulled = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  return { server, storage, platform, onPulled, persisted: () => session };
+}
+
+const SESSION: SyncSession = { token: 'jwt-token', email: 'a@b.c' };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('useSync', () => {
+  it('reports unavailable when the server has no sync configured', async () => {
+    const h = await createHarness({ syncEnabled: false });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.available).toBe(false));
+    expect(result.current.status).toBe('unavailable');
+  });
+
+  it('restores a persisted session and syncs on start', async () => {
+    const h = await createHarness({ session: SESSION });
+    await h.storage.createPlace({ name: 'Home', lat: 59.9, lng: 10.7 });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.lastSyncAt).not.toBeNull());
+    expect(result.current.email).toBe('a@b.c');
+    expect(result.current.status).toBe('idle');
+    expect(h.server.rowCount).toBe(1); // the local place got pushed
+  });
+
+  it('signIn stores the session, bootstraps a new account, and reports bad credentials', async () => {
+    const h = await createHarness();
+    await h.storage.createPlace({ name: 'Cabin', lat: 61, lng: 9 });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.available).toBe(true));
+    expect(result.current.status).toBe('signedOut');
+
+    h.server.authorized = false;
+    let message: string | null = null;
+    await act(async () => {
+      message = await result.current.signIn('a@b.c', 'wrong', 'login');
+    });
+    expect(message).toBe('invalid credentials');
+
+    h.server.authorized = true;
+    await act(async () => {
+      message = await result.current.signIn('a@b.c', 'pw', 'login');
+    });
+    expect(message).toBeNull();
+    expect(h.persisted()).toEqual(SESSION);
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+    expect(h.server.rowCount).toBe(1); // bootstrap pushed the pre-existing place
+    expect(await h.storage.getSetting('local.sync.account')).toBe('a@b.c');
+  });
+
+  it('flags an expired session and recovers on the next successful sync', async () => {
+    const h = await createHarness({ session: SESSION });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+
+    h.server.authorized = false;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('authExpired'));
+    expect(result.current.error).toMatch(/expired/i);
+
+    h.server.authorized = true;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+  });
+
+  it('refreshes the UI after a pull and does not re-push in response (pull echo)', async () => {
+    const h = await createHarness({ session: SESSION });
+    h.server.seed({
+      entity: 'place',
+      id: 'remote-1',
+      updatedAt: Date.now(),
+      deleted: false,
+      data: { name: 'Remote', lat: 60, lng: 10 },
+    });
+
+    let token = 0;
+    const { rerender } = renderHook(
+      ({ changeToken }) => useSync(h.storage, h.onPulled, changeToken, h.platform),
+      { initialProps: { changeToken: token } },
+    );
+    // Startup sync pulls the seeded remote row and refreshes the UI.
+    await waitFor(() => expect(h.onPulled).toHaveBeenCalledTimes(1));
+    const pushesAfterPull = h.server.pushes;
+    const pullsAfterPull = h.server.pulls;
+
+    // The refresh bumps the change token (list identities changed) — that must
+    // NOT schedule another sync cycle (an empty-outbox cycle still pulls).
+    vi.useFakeTimers();
+    rerender({ changeToken: ++token });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(h.server.pushes).toBe(pushesAfterPull);
+    expect(h.server.pulls).toBe(pullsAfterPull);
+
+    // A genuine local edit (mutation + token bump) does schedule the debounced push.
+    await act(async () => {
+      await h.storage.createPlace({ name: 'Local edit', lat: 59, lng: 10 });
+    });
+    rerender({ changeToken: ++token });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(h.server.pushes).toBeGreaterThan(pushesAfterPull);
+    expect(h.server.rowCount).toBe(2); // remote seed + the local edit
+  });
+});

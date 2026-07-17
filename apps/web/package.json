@@ -11,12 +11,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@atlas/app-hooks": "*",
     "@atlas/core": "*",
     "@atlas/gpx": "*",
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
-    "fflate": "^0.8.2",
     "maplibre-gl": "^5.0.0",
     "pmtiles": "^4.4.1",
     "react": "^19.0.0",

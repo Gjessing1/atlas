@@ -337,10 +337,10 @@ export function Sidebar({
             }}
             actions={
               <>
-                <button type="button" onClick={() => void data.downloadTrack(track.id, 'gpx')}>
+                <button type="button" onClick={() => void data.exportTrack(track.id, 'gpx')}>
                   Download GPX
                 </button>
-                <button type="button" onClick={() => void data.downloadTrack(track.id, 'kml')}>
+                <button type="button" onClick={() => void data.exportTrack(track.id, 'kml')}>
                   Download KML
                 </button>
               </>

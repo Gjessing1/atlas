@@ -10,7 +10,7 @@
     "backend"
   ],
   "scripts": {
-    "build:packages": "npm run build -w @atlas/core && npm run build -w @atlas/gpx -w @atlas/storage && npm run build -w @atlas/routing -w @atlas/sync && npm run build -w @atlas/navigation",
+    "build:packages": "npm run build -w @atlas/core && npm run build -w @atlas/gpx -w @atlas/storage && npm run build -w @atlas/routing -w @atlas/sync && npm run build -w @atlas/navigation -w @atlas/app-hooks",
     "build": "npm run build:packages && npm run build -w @atlas/backend && npm run build -w @atlas/web",
     "dev": "npm run build:packages && concurrently -k -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
     "dev:backend": "npm run dev -w @atlas/backend",

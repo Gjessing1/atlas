@@ -1,0 +1,37 @@
+{
+  "name": "@atlas/app-hooks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas app hooks — the web/Android-shared React state layer (sync, routing, user data), parameterized by platform seams.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*",
+    "@atlas/gpx": "*",
+    "@atlas/routing": "*",
+    "@atlas/storage": "*",
+    "@atlas/sync": "*",
+    "fflate": "^0.8.2"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "jsdom": "^26.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
