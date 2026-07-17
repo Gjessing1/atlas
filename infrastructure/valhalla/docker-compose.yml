@@ -5,12 +5,15 @@
 #   docker network create atlas        # once; shared with the backend container
 #   docker compose up -d --build       # from this directory
 #
-# First start downloads the Norway extract (unless one is already at
-# /mnt/data/atlas/valhalla/norway.osm.pbf — hardlink it from
-# graphhopper/ or planetiler/sources to skip the download) and builds the
-# routing tiles; tiles persist in /mnt/data/atlas/valhalla. The backend
-# reaches it as http://atlas-valhalla:8002 over the shared network
-# (VALHALLA_URL); 127.0.0.1:8002 is published for local dev and debugging.
+# First start downloads the extracts in VALHALLA_PBF_URLS (default
+# Norway + Sweden, so cross-border routes like Oslo→Stockholm work; a
+# pre-existing norway.osm.pbf from the Norway-only era is reused) and
+# builds one combined routing tileset; tiles persist in
+# /mnt/data/atlas/valhalla. To widen coverage later: extend
+# VALHALLA_PBF_URLS, delete tiles.tar, restart (overnight job — routing
+# is down during the rebuild). The backend reaches it as
+# http://atlas-valhalla:8002 over the shared network (VALHALLA_URL);
+# 127.0.0.1:8002 is published for local dev and debugging.
 #
 # This host runs ~30 other containers in 15 GiB of RAM: the tile build runs
 # inside the same caps as serving (worst case the build is OOM-killed and

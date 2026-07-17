@@ -1,6 +1,7 @@
-import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
-import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
+import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
+import { ItemEditor } from './sidebar/ItemEditor.js';
+import { useSidebarDnd } from './sidebar/useSidebarDnd.js';
 import type { ImportResult, UserData } from './storage/useUserData.js';
 import { AccountPanel } from './sync/AccountPanel.js';
 import type { SyncState } from './sync/useSync.js';
@@ -18,130 +19,6 @@ interface SidebarProps {
 const fmtKm = (m: number): string =>
   m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 
-interface EditorProps {
-  name: string;
-  notes: string;
-  tags: string[];
-  collectionId: string | null;
-  collections: CollectionRecord[];
-  onPatch: (patch: {
-    name?: string;
-    notes?: string;
-    tags?: string[];
-    collectionId?: string | null;
-    icon?: string;
-    color?: string;
-  }) => void;
-  onDelete: () => void;
-  /** Present for places: the current icon/colour, enabling the style picker. */
-  style?: { icon: string; color: string };
-  /** Extra actions rendered beside Delete (e.g. track downloads). */
-  actions?: React.ReactNode;
-}
-
-/** Inline detail editor shared by places and tracks; every change auto-saves. */
-function ItemEditor({
-  name,
-  notes,
-  tags,
-  collectionId,
-  collections,
-  onPatch,
-  onDelete,
-  style,
-  actions,
-}: EditorProps) {
-  return (
-    <div className="item-editor">
-      {style && (
-        <div className="style-picker">
-          <div className="icon-choices">
-            {PLACE_ICONS.map((ic) => (
-              <button
-                key={ic}
-                type="button"
-                className={`icon-choice${ic === style.icon ? ' selected' : ''}`}
-                aria-label={`Icon ${ic}`}
-                aria-pressed={ic === style.icon}
-                onClick={() => onPatch({ icon: ic })}
-              >
-                {ic}
-              </button>
-            ))}
-          </div>
-          <div className="color-choices">
-            {PLACE_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={`color-choice${c === style.color ? ' selected' : ''}`}
-                style={{ background: c }}
-                aria-label={`Colour ${c}`}
-                aria-pressed={c === style.color}
-                onClick={() => onPatch({ color: c })}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-      <label>
-        Name
-        <input
-          defaultValue={name}
-          onBlur={(e) => {
-            const value = e.target.value.trim();
-            if (value && value !== name) onPatch({ name: value });
-          }}
-        />
-      </label>
-      <label>
-        Folder
-        <select
-          value={collectionId ?? ''}
-          onChange={(e) => onPatch({ collectionId: e.target.value || null })}
-        >
-          <option value="">(none)</option>
-          {collections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Tags
-        <input
-          defaultValue={tags.join(', ')}
-          placeholder="hike, family, todo"
-          onBlur={(e) => {
-            const next = e.target.value
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean);
-            if (next.join('\n') !== tags.join('\n')) onPatch({ tags: next });
-          }}
-        />
-      </label>
-      <label>
-        Notes
-        <textarea
-          defaultValue={notes}
-          rows={2}
-          onBlur={(e) => {
-            if (e.target.value !== notes) onPatch({ notes: e.target.value });
-          }}
-        />
-      </label>
-      <div className="editor-actions">
-        {actions}
-        <button type="button" className="danger" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function Sidebar({
   data,
   sync,
@@ -154,71 +31,10 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
-  // Drag-and-drop arranging: what's being dragged and which row it hovers.
-  const [drag, setDrag] = useState<{ kind: 'place' | 'folder'; id: string } | null>(null);
-  const [dropKey, setDropKey] = useState<string | null>(null);
+  const { drag, dropKey, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
-
-  const endDrag = () => {
-    setDrag(null);
-    setDropKey(null);
-  };
-
-  /** Drop a dragged place onto another place: reorder, moving folders if needed. */
-  const dropOnPlace = (target: PlaceRecord) => {
-    if (!drag || drag.kind !== 'place' || drag.id === target.id) return;
-    const dragged = data.places.find((p) => p.id === drag.id);
-    if (!dragged) return;
-    if (dragged.collectionId !== target.collectionId) {
-      void data.updatePlace(drag.id, { collectionId: target.collectionId });
-    }
-    const ids = data.places.map((p) => p.id).filter((id) => id !== drag.id);
-    ids.splice(ids.indexOf(target.id), 0, drag.id);
-    void data.reorderPlaces(ids);
-  };
-
-  /** Drop onto a folder row: places move into the folder, folders reorder. */
-  const dropOnFolder = (folder: CollectionRecord) => {
-    if (!drag) return;
-    if (drag.kind === 'place') {
-      void data.updatePlace(drag.id, { collectionId: folder.id });
-    } else if (drag.id !== folder.id) {
-      const ids = data.collections.map((c) => c.id).filter((id) => id !== drag.id);
-      ids.splice(ids.indexOf(folder.id), 0, drag.id);
-      void data.reorderCollections(ids);
-    }
-  };
-
-  /** Shared drag/drop handlers for one row. */
-  const dragProps = (
-    key: string,
-    kind: 'place' | 'folder',
-    id: string,
-    accepts: (drag: { kind: 'place' | 'folder'; id: string }) => boolean,
-    onDrop: () => void,
-  ) => ({
-    draggable: true,
-    onDragStart: (e: React.DragEvent) => {
-      e.dataTransfer.effectAllowed = 'move';
-      setDrag({ kind, id });
-    },
-    onDragEnd: endDrag,
-    onDragOver: (e: React.DragEvent) => {
-      if (drag && accepts(drag)) {
-        e.preventDefault();
-        setDropKey(key);
-      }
-    },
-    onDragLeave: () => setDropKey((k) => (k === key ? null : k)),
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onDrop();
-      endDrag();
-    },
-  });
 
   // "Show all" appears once anything is hidden; otherwise the button hides all.
   const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);

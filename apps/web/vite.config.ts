@@ -16,6 +16,13 @@ export default defineConfig({
     // Vite's default assetsDir is "assets", which would collide with the
     // backend's /assets/ mount for map data (styles, glyphs, sprites).
     assetsDir: 'static',
+    rollupOptions: {
+      output: {
+        // maplibre-gl is by far the largest dependency and changes only on
+        // upgrades — its own chunk keeps app-code deploys cache-friendly.
+        manualChunks: { maplibre: ['maplibre-gl'] },
+      },
+    },
   },
   server: {
     proxy: {

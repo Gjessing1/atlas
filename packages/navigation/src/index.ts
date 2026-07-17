@@ -10,3 +10,4 @@ export {
   type VoicePrompt,
 } from './model.js';
 export { cumulativeDistances, snapToPolyline, type Snap } from './geometry.js';
+export { zoomForSpeed } from './camera.js';

@@ -121,18 +121,19 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    // Column order matches the collections table incl. the migration-appended
-    // `visible` and `sort_index` (id, name, parent_id, created_at, updated_at,
-    // visible, sort_index).
-    await this.driver.query('INSERT INTO collections VALUES (?, ?, ?, ?, ?, ?, ?)', [
-      record.id,
-      record.name,
-      record.parentId,
-      record.createdAt,
-      record.updatedAt,
-      record.visible ? 1 : 0,
-      record.sortIndex,
-    ]);
+    await this.driver.query(
+      `INSERT INTO collections (id, name, parent_id, created_at, updated_at, visible, sort_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.name,
+        record.parentId,
+        record.createdAt,
+        record.updatedAt,
+        record.visible ? 1 : 0,
+        record.sortIndex,
+      ],
+    );
     await this.enqueue('collection', record.id, 'upsert', now);
     return record;
   }
@@ -218,24 +219,26 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    // Column order matches the places table incl. the migration-appended
-    // icon/color/visible/sort_index (id, name, lat, lng, collection_id, notes,
-    // tags, created_at, updated_at, icon, color, visible, sort_index).
-    await this.driver.query('INSERT INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-      record.id,
-      record.name,
-      record.lat,
-      record.lng,
-      record.collectionId,
-      record.notes,
-      JSON.stringify(record.tags),
-      record.createdAt,
-      record.updatedAt,
-      record.icon,
-      record.color,
-      record.visible ? 1 : 0,
-      record.sortIndex,
-    ]);
+    await this.driver.query(
+      `INSERT INTO places (id, name, lat, lng, collection_id, notes, tags,
+                           created_at, updated_at, icon, color, visible, sort_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.name,
+        record.lat,
+        record.lng,
+        record.collectionId,
+        record.notes,
+        JSON.stringify(record.tags),
+        record.createdAt,
+        record.updatedAt,
+        record.icon,
+        record.color,
+        record.visible ? 1 : 0,
+        record.sortIndex,
+      ],
+    );
     await this.enqueue('place', record.id, 'upsert', now);
     return record;
   }
@@ -313,18 +316,23 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query('INSERT INTO tracks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-      record.id,
-      record.name,
-      input.gpx,
-      JSON.stringify(record.stats),
-      record.collectionId,
-      record.notes,
-      JSON.stringify(record.tags),
-      1,
-      record.createdAt,
-      record.updatedAt,
-    ]);
+    await this.driver.query(
+      `INSERT INTO tracks (id, name, gpx, stats, collection_id, notes, tags,
+                           visible, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.name,
+        input.gpx,
+        JSON.stringify(record.stats),
+        record.collectionId,
+        record.notes,
+        JSON.stringify(record.tags),
+        1,
+        record.createdAt,
+        record.updatedAt,
+      ],
+    );
     await this.enqueue('track', record.id, 'upsert', now);
     return record;
   }
@@ -565,19 +573,27 @@ export class AtlasStorage {
     const createdAt = num('createdAt', change.updatedAt);
     switch (change.entity) {
       case 'collection':
-        await this.driver.query('INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?, ?, ?)', [
-          change.id,
-          str('name', '(unnamed)'),
-          strOrNull('parentId'),
-          createdAt,
-          change.updatedAt,
-          d['visible'] === false ? 0 : 1,
-          num('sortIndex', createdAt),
-        ]);
+        await this.driver.query(
+          `INSERT OR REPLACE INTO collections
+             (id, name, parent_id, created_at, updated_at, visible, sort_index)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            change.id,
+            str('name', '(unnamed)'),
+            strOrNull('parentId'),
+            createdAt,
+            change.updatedAt,
+            d['visible'] === false ? 0 : 1,
+            num('sortIndex', createdAt),
+          ],
+        );
         break;
       case 'place':
         await this.driver.query(
-          'INSERT OR REPLACE INTO places VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          `INSERT OR REPLACE INTO places
+             (id, name, lat, lng, collection_id, notes, tags,
+              created_at, updated_at, icon, color, visible, sort_index)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             change.id,
             str('name', '(unnamed)'),
@@ -597,7 +613,10 @@ export class AtlasStorage {
         break;
       case 'track':
         await this.driver.query(
-          'INSERT OR REPLACE INTO tracks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          `INSERT OR REPLACE INTO tracks
+             (id, name, gpx, stats, collection_id, notes, tags,
+              visible, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             change.id,
             str('name', '(unnamed)'),
@@ -628,12 +647,10 @@ export class AtlasStorage {
     op: OutboxEntry['op'],
     updatedAt: number,
   ): Promise<void> {
-    await this.driver.query('INSERT OR REPLACE INTO outbox VALUES (?, ?, ?, ?)', [
-      entity,
-      id,
-      op,
-      updatedAt,
-    ]);
+    await this.driver.query(
+      'INSERT OR REPLACE INTO outbox (entity, id, op, updated_at) VALUES (?, ?, ?, ?)',
+      [entity, id, op, updatedAt],
+    );
   }
 
   /** UPDATE the defined entries of `columns` on one row, stamping updated_at. */

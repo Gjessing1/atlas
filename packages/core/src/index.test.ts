@@ -4,6 +4,7 @@ import {
   collectionIsVisible,
   decodeMapHash,
   encodeMapHash,
+  markerScaleForZoom,
   matchPlacesByName,
   photonFeatureToSearchResult,
   placeIsVisible,
@@ -178,5 +179,20 @@ describe('matchPlacesByName', () => {
   it('returns nothing for an empty query and respects the limit', () => {
     expect(matchPlacesByName(places, '   ')).toEqual([]);
     expect(matchPlacesByName(places, 'o', 2)).toHaveLength(2);
+  });
+});
+
+describe('markerScaleForZoom', () => {
+  it('keeps full size at city zooms and clamps when far out', () => {
+    expect(markerScaleForZoom(12)).toBe(1);
+    expect(markerScaleForZoom(16)).toBe(1);
+    expect(markerScaleForZoom(7)).toBe(0.5);
+    expect(markerScaleForZoom(3)).toBe(0.5);
+  });
+
+  it('shrinks monotonically between the clamp zooms', () => {
+    expect(markerScaleForZoom(9.5)).toBe(0.75);
+    expect(markerScaleForZoom(11)).toBeGreaterThan(markerScaleForZoom(10));
+    expect(markerScaleForZoom(10)).toBeGreaterThan(markerScaleForZoom(8));
   });
 });

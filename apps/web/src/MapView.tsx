@@ -1,4 +1,10 @@
-import { encodeMapHash, resolveStyleTemplate, type LatLng, type MapViewState } from '@atlas/core';
+import {
+  encodeMapHash,
+  markerScaleForZoom,
+  resolveStyleTemplate,
+  type LatLng,
+  type MapViewState,
+} from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
 import maplibregl, { type MapMouseEvent, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -65,6 +71,11 @@ function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void):
 function teardropElement(color: string, icon?: string): HTMLElement {
   const el = document.createElement('div');
   el.className = 'place-marker';
+  // Inner wrapper scaled by --marker-scale (set per zoom on the map container);
+  // MapLibre owns the root element's transform, so scaling must live one level in.
+  const scale = document.createElement('div');
+  scale.className = 'place-marker-scale';
+  el.appendChild(scale);
   // The badge is a rotated teardrop; the emoji sits in a child that rotates back.
   const badge = document.createElement('div');
   badge.className = 'place-marker-badge';
@@ -78,7 +89,7 @@ function teardropElement(color: string, icon?: string): HTMLElement {
     dot.className = 'place-marker-dot';
     badge.appendChild(dot);
   }
-  el.appendChild(badge);
+  scale.appendChild(badge);
   return el;
 }
 
@@ -135,6 +146,18 @@ export function MapView({
       history.replaceState(null, '', encodeMapHash(state));
     };
     map.on('moveend', syncHash);
+
+    // Keep pin markers zoom-proportional: full size in close, half size zoomed
+    // out (see markerScaleForZoom). Markers are DOM elements, so the scale is a
+    // CSS var on the container that .place-marker-scale picks up.
+    const applyMarkerScale = () => {
+      containerRef.current?.style.setProperty(
+        '--marker-scale',
+        String(markerScaleForZoom(map.getZoom())),
+      );
+    };
+    map.on('zoom', applyMarkerScale);
+    applyMarkerScale();
 
     // Pin placement: right-click on desktop, long-press on touch devices.
     map.on('contextmenu', (e: MapMouseEvent) => {

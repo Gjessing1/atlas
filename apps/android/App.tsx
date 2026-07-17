@@ -1,15 +1,6 @@
 import { haversineM, placeIsVisible, type SearchResult, type VisibilityFolder } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
-import {
-  Camera,
-  GeoJSONSource,
-  Layer,
-  Map as MapLibreMap,
-  Marker,
-  UserLocation,
-  type CameraRef,
-  type MapRef,
-} from '@maplibre/maplibre-react-native';
+import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
   ROUTING_PROFILES,
   routePathToTrackData,
@@ -20,7 +11,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -28,13 +19,8 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
-import { hydrateServerOrigin, useServerOrigin } from './src/serverOrigin';
-import {
-  buildOfflineStyle,
-  buildOnlineStyle,
-  FALLBACK_STYLE_URL,
-  loadStyleTemplate,
-} from './src/mapStyle';
+import { MapScene } from './src/map/MapScene';
+import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { useNavigation } from './src/nav/useNavigation';
@@ -43,67 +29,14 @@ import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { useRoute } from './src/routing/useRoute';
 import { shareText } from './src/share';
+import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
-import { FavoritesSheet } from './src/ui/FavoritesSheet';
-import { CrosshairIcon, MenuIcon, NavArrowIcon, PlacePin, SearchIcon } from './src/ui/icons';
-import { PromptModal } from './src/ui/PromptModal';
+import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
+import { MenuCluster } from './src/ui/MenuCluster';
 import { RoutePanel } from './src/ui/RoutePanel';
-import { SettingsSheet } from './src/ui/SettingsSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
-import { TracksSheet } from './src/ui/TracksSheet';
 import { useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData } from './src/useUserData';
-
-function routeToGeoJSON(coords: number[][]) {
-  return {
-    type: 'Feature' as const,
-    properties: {},
-    geometry: { type: 'LineString' as const, coordinates: coords },
-  };
-}
-
-/** Dashed rectangles showing what the downloaded offline packs cover. */
-function packOutlinesGeoJSON(packs: LocalPack[]) {
-  return {
-    type: 'FeatureCollection' as const,
-    features: packs.map((p) => {
-      const { sw, ne } = p.manifest.bbox;
-      return {
-        type: 'Feature' as const,
-        properties: { name: p.manifest.name },
-        geometry: {
-          type: 'LineString' as const,
-          coordinates: [
-            [sw.lng, sw.lat],
-            [ne.lng, sw.lat],
-            [ne.lng, ne.lat],
-            [sw.lng, ne.lat],
-            [sw.lng, sw.lat],
-          ],
-        },
-      };
-    }),
-  };
-}
-
-/**
- * Follow-mode zoom from ground speed — the OsmAnd/Google approach: rather than
- * a fixed zoom, keep a constant look-ahead *time*, i.e. pick the zoom at which
- * the distance covered in the next ~12 s fits the forward part of the screen.
- * 78271.5 m is the ground size of one 512px tile pixel at zoom 0 on the
- * equator; cos(lat) corrects for Web Mercator stretch. Clamped to a sane
- * range and quantized so GPS jitter doesn't constantly re-target the camera.
- */
-function zoomForSpeed(speedMps: number | null, lat: number | undefined): number {
-  const LOOKAHEAD_S = 12;
-  const FORWARD_DP = 400; // roughly the screen half ahead of the position puck
-  const v = speedMps ?? 0;
-  if (v < 1) return 17; // stationary/unknown: close-in city zoom
-  const metersAhead = v * LOOKAHEAD_S;
-  const scale = 78271.5 * Math.cos(((lat ?? 60) * Math.PI) / 180);
-  const z = Math.log2((scale * FORWARD_DP) / metersAhead);
-  return Math.round(Math.min(17.5, Math.max(15, z)) * 4) / 4;
-}
 
 /**
  * Fallback system-bar sizes (dp) used only when the measured safe-area inset is
@@ -119,7 +52,6 @@ function AppInner() {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
   const topInset = insets.top || STATUS_BAR_FALLBACK;
-  const win = useWindowDimensions();
   const data = useUserData();
   // Draw only effectively-visible places (own toggle on, no hiding folder). The
   // Favorites sheet still lists hidden ones so they can be shown again.
@@ -129,16 +61,12 @@ function AppInner() {
     );
     return data.places.filter((p) => placeIsVisible(p, folders));
   }, [data.places, data.collections]);
-  const serverOrigin = useServerOrigin();
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
 
-  const [originReady, setOriginReady] = useState(false);
-  const [template, setTemplate] = useState<string | null>(null);
-  const [serverUp, setServerUp] = useState<boolean | null>(null);
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   // The expanded search overlay (the 🔍 button in the bottom-left cluster opens it).
@@ -172,15 +100,6 @@ function AppInner() {
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const controlsTop = topInset + 8 + (navActive ? navHeight + 8 : 0);
-
-  // Camera follow: course-up / north-up while navigating; free pan when idle
-  // (the locate button does a one-shot recentre instead of locking the camera).
-  const trackUserLocation = following ? (navFollow === 'north' ? 'default' : 'course') : undefined;
-  // Speed-appropriate follow zoom (constant look-ahead time, see zoomForSpeed).
-  const navZoom = useMemo(
-    () => zoomForSpeed(nav.speedMps, nav.state?.snapped.lat),
-    [nav.speedMps, nav.state?.snapped.lat],
-  );
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -238,6 +157,19 @@ function AppInner() {
     [menuOpen, route, visiblePlaces, pickDestination],
   );
 
+  // Long-press outside route planning: pick any point as a destination.
+  const onPickPoint = useCallback(
+    ({ lat, lng }: LatLng) => {
+      pickDestination({
+        lat,
+        lng,
+        name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+        canSave: true,
+      });
+    },
+    [pickDestination],
+  );
+
   const startNavigation = useCallback(() => {
     if (!destination) return;
     setNavFollow('course');
@@ -248,8 +180,6 @@ function AppInner() {
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
   const planning = route.active;
-  // The routed line to draw while planning (selected path, primary or alt).
-  const planPath = route.paths?.[route.selectedPath] ?? null;
 
   // Share the planned route as GPX (parity with the web RoutePanel export).
   const exportRoute = useCallback(
@@ -306,32 +236,13 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
 
-  // Load the persisted server override before any server request fires, so the
-  // first health check / style fetch already targets the configured server.
-  useEffect(() => {
-    if (!data.storage) return;
-    void hydrateServerOrigin(data.storage).finally(() => setOriginReady(true));
-  }, [data.storage]);
-
-  useEffect(() => {
-    if (!originReady) return;
-    setServerUp(null);
-    void loadStyleTemplate().then(setTemplate);
-    fetch(`${serverOrigin}/api/health`, { signal: AbortSignal.timeout(4000) })
-      .then((res) => setServerUp(res.ok))
-      .catch(() => setServerUp(false));
-    refreshPacks();
-  }, [originReady, serverOrigin, refreshPacks]);
-
-  // Offline first: local pack when the server is unreachable (or forced);
-  // otherwise the server-hosted style. Fallback keeps the map usable bare.
   const offlinePack = packs.find((p) => p.manifest.files.basemap);
-  const useOffline = (forceOffline || serverUp === false) && offlinePack && template;
-  const mapStyle = useMemo(() => {
-    if (useOffline && offlinePack && template) return buildOfflineStyle(template, offlinePack.dir);
-    if (template) return buildOnlineStyle(template);
-    return serverUp === null ? null : FALLBACK_STYLE_URL;
-  }, [useOffline, offlinePack, template, serverUp]);
+  const { mapStyle, originReady, useOffline } = useMapStyle(
+    data.storage,
+    offlinePack,
+    forceOffline,
+    refreshPacks,
+  );
 
   const onPickResult = useCallback(
     (result: SearchResult) => {
@@ -355,160 +266,23 @@ function AppInner() {
 
   return (
     <View style={styles.container}>
-      <MapLibreMap
-        ref={mapRef}
-        style={styles.map}
+      <MapScene
+        mapRef={mapRef}
+        cameraRef={cameraRef}
         mapStyle={mapStyle}
-        // Edge-to-edge: the map draws behind the system nav bar, so lift the
-        // MapLibre attribution/logo ornaments clear of it. Attribution sits
-        // left of the bottom-right locate button; the logo takes the (now
-        // empty) top-left corner, clear of the bottom button clusters.
-        attributionPosition={{ bottom: bottomInset + 8, right: 64 }}
-        logoPosition={{ top: topInset + 8, left: 8 }}
-        // The scale bar was lost in the maplibre-react-native v11 upgrade (the
-        // default flipped to off). Android's native ScaleBarPlugin only anchors
-        // top-left, so bottom-centre is expressed as top/left margins computed
-        // from the window size; the native side adds the status-bar inset to
-        // the top margin, so subtract it here. The bar keeps the middle of the
-        // bottom edge, between the menu cluster and the locate button.
-        scaleBar
-        scaleBarPosition={{
-          top: Math.max(0, Math.round(win.height - bottomInset - 88 - topInset)),
-          left: Math.round(win.width * 0.3),
-        }}
-        // While planning a route, a tap drops a stop; otherwise a tap dismisses
-        // the ☰ menu or picks a saved pin (see onMapPress). Long-press picks any
-        // point as a destination. Both gestures add a stop in plan mode so it
-        // feels the same as the web map click.
-        onPress={(e) => {
-          const [lng, lat] = e.nativeEvent.lngLat;
-          onMapPress(lng, lat);
-        }}
-        onLongPress={(e) => {
-          const [lng, lat] = e.nativeEvent.lngLat;
-          if (planning) {
-            route.addWaypoint({ lat, lng });
-            return;
-          }
-          pickDestination({
-            lat,
-            lng,
-            name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-            canSave: true,
-          });
-        }}
-      >
-        {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
-        {packs.length > 0 ? (
-          <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>
-            <Layer
-              type="line"
-              id="atlas-pack-outlines-line"
-              paint={{
-                'line-color': '#1a73e8',
-                'line-width': 1.5,
-                'line-opacity': 0.45,
-                'line-dasharray': [2, 2],
-              }}
-            />
-          </GeoJSONSource>
-        ) : null}
-        {/* Saved/imported tracks (visible ones), drawn under the routes. */}
-        {trackGeo.features.length > 0 ? (
-          <GeoJSONSource id="atlas-tracks" data={trackGeo}>
-            <Layer
-              type="line"
-              id="atlas-tracks-line"
-              paint={{ 'line-color': '#2a78d6', 'line-width': 4, 'line-opacity': 0.9 }}
-            />
-          </GeoJSONSource>
-        ) : null}
-        {nav.routeCoords.length > 1 ? (
-          <GeoJSONSource id="atlas-route" data={routeToGeoJSON(nav.routeCoords)}>
-            <Layer
-              type="line"
-              id="atlas-route-line"
-              paint={{ 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.85 }}
-            />
-          </GeoJSONSource>
-        ) : null}
-        {/* Planned route (route-planning panel): distinct colour from navigation. */}
-        {planning && planPath ? (
-          <GeoJSONSource
-            id="atlas-plan"
-            data={routeToGeoJSON(planPath.points.map((p) => [p.lng, p.lat]))}
-          >
-            <Layer
-              type="line"
-              id="atlas-plan-line"
-              paint={{ 'line-color': '#7c3aed', 'line-width': 6, 'line-opacity': 0.85 }}
-            />
-            {/* Travel-direction chevrons — the only cue to which way a round
-                trip runs. keep-upright must stay off or right-to-left segments
-                would flip the glyph and point it backwards. */}
-            <Layer
-              type="symbol"
-              id="atlas-plan-arrows"
-              layout={{
-                'symbol-placement': 'line',
-                'symbol-spacing': 80,
-                'text-field': '›',
-                'text-font': ['Noto Sans Bold'],
-                'text-size': 20,
-                'text-offset': [0, -0.12],
-                'text-keep-upright': false,
-                'text-allow-overlap': true,
-                'text-ignore-placement': true,
-              }}
-              paint={{ 'text-color': '#ffffff' }}
-            />
-          </GeoJSONSource>
-        ) : null}
-        {planning
-          ? route.waypoints.map((w, i) => (
-              <Marker key={w.id} lngLat={[w.pos.lng, w.pos.lat]} anchor="bottom">
-                <View style={styles.wpMarker}>
-                  <Text style={styles.wpMarkerText}>
-                    {route.roundTrip || route.waypoints.length === 1
-                      ? '⟳'
-                      : i < 26
-                        ? String.fromCharCode(65 + i)
-                        : String(i + 1)}
-                  </Text>
-                </View>
-              </Marker>
-            ))
-          : null}
-        <Camera
-          ref={cameraRef}
-          initialViewState={{ center: [10.75, 59.91], zoom: 10 }}
-          // Course-up / north-up follow while navigating (see `trackUserLocation`),
-          // a plain centre-on-user when the locate button engaged it, else free pan.
-          trackUserLocation={trackUserLocation}
-          {...(following ? { zoom: navZoom } : {})}
-        />
-        {following || showPuck ? <UserLocation heading={following} animated /> : null}
-        {nav.destination ? (
-          <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
-            <PlacePin color="#16324f" icon="🏁" />
-          </Marker>
-        ) : destination ? (
-          <Marker lngLat={[destination.lng, destination.lat]} anchor="bottom">
-            <PlacePin color="#d33939" />
-          </Marker>
-        ) : null}
-        {/* Saved places as colour-badged teardrop pins (web-parity markers).
-            The marker view itself never handles touches (they aren't delivered
-            reliably) — taps fall through to the map, and onMapPress hit-tests
-            the pins to open the destination card (Navigate / Edit). */}
-        {visiblePlaces.map((place) => (
-          <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
-            <View pointerEvents="none" testID={`place-pin-${place.id}`}>
-              <PlacePin color={place.color} icon={place.icon} />
-            </View>
-          </Marker>
-        ))}
-      </MapLibreMap>
+        topInset={topInset}
+        bottomInset={bottomInset}
+        packs={packs}
+        trackGeo={trackGeo}
+        nav={nav}
+        route={route}
+        destination={destination}
+        visiblePlaces={visiblePlaces}
+        navFollow={navFollow}
+        showPuck={showPuck}
+        onMapPress={onMapPress}
+        onPickPoint={onPickPoint}
+      />
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
 
@@ -547,63 +321,19 @@ function AppInner() {
         </View>
       ) : null}
 
-      {/* Bottom-left cluster: hamburger menu (places, tracks, settings live in
-          sheets it opens) + search + route planning. Hidden while planning —
-          the RoutePanel owns the bottom of the screen then. */}
+      {/* Hidden while planning — the RoutePanel owns the bottom of the screen. */}
       {!planning ? (
-        <View style={[styles.menuWrap, { bottom: bottomInset + 24 }]} pointerEvents="box-none">
-          {menuOpen ? (
-            <View style={styles.menuCard}>
-              {(
-                [
-                  ['Places & folders', 'open-favorites', () => setFavoritesOpen(true)],
-                  ['Tracks', 'open-tracks', () => setTracksOpen(true)],
-                  ['Settings', 'open-settings', () => setSettingsOpen(true)],
-                ] as const
-              ).map(([label, testID, openSheet]) => (
-                <Pressable
-                  key={testID}
-                  style={styles.menuItem}
-                  testID={testID}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    openSheet();
-                  }}
-                >
-                  <Text style={styles.menuItemText}>{label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          <View style={styles.bottomRow}>
-            <Pressable
-              style={styles.roundButton}
-              onPress={() => setMenuOpen((o) => !o)}
-              testID="open-menu"
-            >
-              <MenuIcon />
-            </Pressable>
-            {!following ? (
-              <Pressable
-                style={styles.roundButton}
-                onPress={() => setSearchOpen(true)}
-                testID="search-open"
-              >
-                <SearchIcon />
-              </Pressable>
-            ) : null}
-            {!following ? (
-              <Pressable
-                style={styles.roundButton}
-                onPress={() => route.start()}
-                testID="plan-route"
-              >
-                {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
-                <Text style={styles.routeArrow}>{'↱'}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
+        <MenuCluster
+          bottomInset={bottomInset}
+          menuOpen={menuOpen}
+          onToggleMenu={() => setMenuOpen((o) => !o)}
+          following={following}
+          onOpenFavorites={() => setFavoritesOpen(true)}
+          onOpenTracks={() => setTracksOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSearch={() => setSearchOpen(true)}
+          onPlanRoute={() => route.start()}
+        />
       ) : null}
 
       {useOffline && !planning ? (
@@ -668,65 +398,27 @@ function AppInner() {
         />
       ) : null}
 
-      <FavoritesSheet
-        visible={favoritesOpen}
-        onClose={() => {
-          setFavoritesOpen(false);
-          setEditPlaceId(null);
-        }}
-        editId={editPlaceId}
-        places={data.places}
-        collections={data.collections}
-        onFlyTo={(p) => flyTo(p)}
-        onNavigate={(p) => {
-          setFavoritesOpen(false);
-          pickDestination({ lat: p.lat, lng: p.lng, name: p.name ?? 'Favorite', canSave: false });
-        }}
-        onPatch={(id, patch) => void data.updatePlace(id, patch)}
-        onDelete={(id) => void data.deletePlace(id)}
-        onCreateFolder={(name) => void data.createCollection(name)}
-        onRenameFolder={(id, name) => void data.renameCollection(id, name)}
-        onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
-        onDeleteFolder={(id) => void data.deleteCollection(id)}
-        onSetAllVisible={(v) => void data.setAllVisible(v)}
-        onReorderPlaces={(ids) => void data.reorderPlaces(ids)}
-        onReorderCollections={(ids) => void data.reorderCollections(ids)}
-        bottomInset={bottomInset}
-      />
-      <TracksSheet
-        visible={tracksOpen}
-        onClose={() => setTracksOpen(false)}
-        tracks={data.tracks}
-        onSetVisible={(id, v) => void data.updateTrack(id, { visible: v })}
-        onRename={(id, name) => void data.updateTrack(id, { name })}
-        onExport={(id, format) => void data.exportTrack(id, format)}
-        onDelete={(id) => void data.deleteTrack(id)}
-        onImport={importTracks}
-        bottomInset={bottomInset}
-      />
-      <SettingsSheet
-        visible={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+      <AppSheets
+        data={data}
         sync={sync}
         packs={packs}
         onPacksChanged={refreshPacks}
-        storage={data.storage}
-        onExportAll={() => void data.exportAll()}
         bottomInset={bottomInset}
-      />
-      <PromptModal
-        visible={pendingPin !== null}
-        title="Name this pin"
-        placeholder="e.g. Home, Trailhead…"
-        confirmLabel="Save pin"
-        onCancel={() => setPendingPin(null)}
-        onConfirm={(value) => {
-          if (!pendingPin) return;
-          const { lat, lng } = pendingPin;
-          const name = value.trim() || `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-          void data.savePlace({ name, lat, lng });
-          setPendingPin(null);
+        favoritesOpen={favoritesOpen}
+        onCloseFavorites={() => {
+          setFavoritesOpen(false);
+          setEditPlaceId(null);
         }}
+        editPlaceId={editPlaceId}
+        tracksOpen={tracksOpen}
+        onCloseTracks={() => setTracksOpen(false)}
+        settingsOpen={settingsOpen}
+        onCloseSettings={() => setSettingsOpen(false)}
+        pendingPin={pendingPin}
+        onDismissPendingPin={() => setPendingPin(null)}
+        onFlyTo={flyTo}
+        onPickDestination={pickDestination}
+        onImportTracks={importTracks}
       />
       {planning ? (
         <RoutePanel
@@ -752,21 +444,9 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
-  menuWrap: { position: 'absolute', left: 12, alignItems: 'flex-start', gap: 8 },
-  bottomRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
-  menuCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 4,
-    minWidth: 180,
-    elevation: 6,
-  },
-  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
-  menuItemText: { fontSize: 15, color: '#1c2733' },
   roundButton: {
     width: 44,
     height: 44,
@@ -776,19 +456,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 4,
   },
-  routeArrow: { fontSize: 24, fontWeight: '800', color: '#1a73e8' },
   orientText: { fontSize: 18, fontWeight: '800', color: '#1a73e8' },
-  wpMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#7c3aed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  wpMarkerText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,

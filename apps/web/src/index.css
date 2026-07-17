@@ -26,15 +26,6 @@ body {
   gap: 8px;
 }
 
-.app-title {
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  font-weight: 600;
-  font-size: 18px;
-}
-
 .searchbox {
   position: relative;
   width: min(320px, calc(100vw - 160px));
@@ -135,12 +126,22 @@ body {
    the tail tip touches its bottom edge, making it safe to anchor the map
    Marker at "bottom". */
 .place-marker {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 40px;
   height: 40px;
   cursor: pointer;
+}
+
+/* Zoom-proportional marker size: --marker-scale is set on the map container
+   from markerScaleForZoom. Scaling about the bottom-centre keeps the tail tip
+   on the anchored coordinate. */
+.place-marker-scale {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  transform: scale(var(--marker-scale, 1));
+  transform-origin: 50% 100%;
 }
 
 .place-marker-badge {

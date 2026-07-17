@@ -1,5 +1,4 @@
 import {
-  APP_NAME,
   decodeMapHash,
   placeIsVisible,
   type LatLng,
@@ -11,17 +10,24 @@ import { trackBounds, type TrackData } from '@atlas/gpx';
 import { routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ElevationProfile } from './ElevationProfile.js';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
-import { RoutePanel } from './routing/RoutePanel.js';
 import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
-import { Sidebar } from './Sidebar.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
+
+// The side/overlay panels are code-split: none of them is needed for the
+// initial map render, and Sidebar pulls in the GPX/KML import machinery.
+const Sidebar = lazy(() => import('./Sidebar.js').then((m) => ({ default: m.Sidebar })));
+const RoutePanel = lazy(() =>
+  import('./routing/RoutePanel.js').then((m) => ({ default: m.RoutePanel })),
+);
+const ElevationProfile = lazy(() =>
+  import('./ElevationProfile.js').then((m) => ({ default: m.ElevationProfile })),
+);
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const LAST_VIEW_SETTING = 'lastView';
@@ -236,7 +242,6 @@ export function App() {
         suppressPoiClicks={routeActiveRef}
       />
       <div className="topbar">
-        <div className="app-title">{APP_NAME}</div>
         <SearchBox onSelect={onSearchSelect} getBias={getBias} />
         <button
           type="button"
@@ -267,48 +272,50 @@ export function App() {
           </button>
         </div>
       )}
-      {route.active && <RoutePanel route={route} places={userData.places} getBias={getBias} />}
-      {sidebarOpen && (
-        <Sidebar
-          data={userData}
-          sync={sync}
-          selectedTrackId={selectedTrack?.track.id ?? null}
-          onShowPlace={showPlace}
-          onShowTrack={showTrack}
-          onImported={onImported}
-          onClose={() => setSidebarOpen(false)}
-        />
-      )}
-      {/* Valhalla routes carry no elevation data — skip the profile rather
-          than draw an empty chart. */}
-      {routePath &&
-      routeTrackData &&
-      !routeProfileHidden &&
-      routePath.points.some((p) => p.ele !== undefined) ? (
-        <ElevationProfile
-          title="Planned route"
-          stats={{
-            distanceM: routePath.distanceM,
-            ascentM: routePath.ascentM,
-            descentM: routePath.descentM,
-            durationMs: routePath.timeMs,
-          }}
-          data={routeTrackData}
-          onClose={() => setRouteProfileHidden(true)}
-          onHoverPoint={onProfileHover}
-        />
-      ) : (
-        selectedTrack &&
-        !route.active && (
+      <Suspense fallback={null}>
+        {route.active && <RoutePanel route={route} places={userData.places} getBias={getBias} />}
+        {sidebarOpen && (
+          <Sidebar
+            data={userData}
+            sync={sync}
+            selectedTrackId={selectedTrack?.track.id ?? null}
+            onShowPlace={showPlace}
+            onShowTrack={showTrack}
+            onImported={onImported}
+            onClose={() => setSidebarOpen(false)}
+          />
+        )}
+        {/* Valhalla routes carry no elevation data — skip the profile rather
+            than draw an empty chart. */}
+        {routePath &&
+        routeTrackData &&
+        !routeProfileHidden &&
+        routePath.points.some((p) => p.ele !== undefined) ? (
           <ElevationProfile
-            title={selectedTrack.track.name}
-            stats={selectedTrack.track.stats}
-            data={selectedTrack.data}
-            onClose={() => selectTrack(null)}
+            title="Planned route"
+            stats={{
+              distanceM: routePath.distanceM,
+              ascentM: routePath.ascentM,
+              descentM: routePath.descentM,
+              durationMs: routePath.timeMs,
+            }}
+            data={routeTrackData}
+            onClose={() => setRouteProfileHidden(true)}
             onHoverPoint={onProfileHover}
           />
-        )
-      )}
+        ) : (
+          selectedTrack &&
+          !route.active && (
+            <ElevationProfile
+              title={selectedTrack.track.name}
+              stats={selectedTrack.track.stats}
+              data={selectedTrack.data}
+              onClose={() => selectTrack(null)}
+              onHoverPoint={onProfileHover}
+            />
+          )
+        )}
+      </Suspense>
     </div>
   );
 }

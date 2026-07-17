@@ -274,6 +274,55 @@ export const PLACE_ICONS = [
 export const DEFAULT_PLACE_COLOR = '#e11d48';
 export const DEFAULT_PLACE_ICON = '📍';
 
+// ---- Map GeoJSON helpers (line sources shared by the app map scenes) ----
+
+/** A route/track line as a GeoJSON Feature, from [lng, lat] coordinate pairs. */
+export function lineStringFeature(coords: number[][]) {
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: { type: 'LineString' as const, coordinates: coords },
+  };
+}
+
+/** Named bounding-box outlines (e.g. offline-pack coverage rectangles). */
+export function bboxOutlinesFeatureCollection(items: { name: string; bbox: BBox }[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: items.map(({ name, bbox: { sw, ne } }) => ({
+      type: 'Feature' as const,
+      properties: { name },
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [
+          [sw.lng, sw.lat],
+          [ne.lng, sw.lat],
+          [ne.lng, ne.lat],
+          [sw.lng, ne.lat],
+          [sw.lng, sw.lat],
+        ],
+      },
+    })),
+  };
+}
+
+// ---- Map marker scaling ----
+
+/**
+ * Screen-size scale factor for place/pin markers at a given zoom. Markers keep
+ * full size at city zooms and shrink linearly to half size when zoomed out to
+ * region/country level, so a screenful of saved pins doesn't blanket the map.
+ * Shared by web (CSS var) and Android (view transform) so both platforms agree.
+ */
+export function markerScaleForZoom(zoom: number): number {
+  const full = 12; // full size from this zoom in
+  const min = 7; // fully shrunk from this zoom out
+  const minScale = 0.5;
+  if (zoom >= full) return 1;
+  if (zoom <= min) return minScale;
+  return minScale + ((zoom - min) / (full - min)) * (1 - minScale);
+}
+
 // ---- Place / folder visibility (hide/show on the map) ----
 
 /** Minimal folder shape for visibility resolution — folders nest via `parentId`. */

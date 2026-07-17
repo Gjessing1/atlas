@@ -2,6 +2,7 @@ import type { LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 import { describe, expect, it } from 'vitest';
 
+import { zoomForSpeed } from './camera.js';
 import { cumulativeDistances, snapToPolyline } from './geometry.js';
 import { NavigationSession } from './session.js';
 
@@ -192,5 +193,25 @@ describe('NavigationSession voice prompts', () => {
 describe('NavigationSession guards', () => {
   it('rejects an empty route', () => {
     expect(() => new NavigationSession({ ...route(), points: [] })).toThrow(/empty route/);
+  });
+});
+
+describe('zoomForSpeed', () => {
+  it('uses the close-in city zoom when stationary or unknown', () => {
+    expect(zoomForSpeed(null, 60)).toBe(17);
+    expect(zoomForSpeed(0.5, 60)).toBe(17);
+  });
+
+  it('zooms out as speed rises, within the clamp range', () => {
+    const walking = zoomForSpeed(1.5, 60);
+    const driving = zoomForSpeed(25, 60);
+    expect(walking).toBeGreaterThan(driving);
+    expect(driving).toBeGreaterThanOrEqual(15);
+    expect(walking).toBeLessThanOrEqual(17.5);
+  });
+
+  it('quantizes to quarter-zoom steps', () => {
+    const z = zoomForSpeed(13, 60);
+    expect(Math.round(z * 4) / 4).toBe(z);
   });
 });
