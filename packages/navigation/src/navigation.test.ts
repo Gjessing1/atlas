@@ -2,7 +2,7 @@ import type { LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 import { describe, expect, it } from 'vitest';
 
-import { followZoom, zoomForSpeed } from './camera.js';
+import { followZoom, remainingRouteBounds, zoomForSpeed } from './camera.js';
 import {
   bearingDeg,
   cumulativeDistances,
@@ -23,12 +23,20 @@ const routeCum = cumulativeDistances(routePoints);
 const routeTotal = routeCum[routeCum.length - 1]!;
 
 const instructions: RouteInstruction[] = [
-  { text: 'Head east', distanceM: routeCum[10]!, timeMs: 60_000, sign: 0, interval: [0, 10] },
+  {
+    text: 'Head east',
+    distanceM: routeCum[10]!,
+    timeMs: 60_000,
+    sign: 0,
+    streetName: 'Main Street',
+    interval: [0, 10],
+  },
   {
     text: 'Turn right onto Elm Street',
     distanceM: routeTotal - routeCum[10]!,
     timeMs: 60_000,
     sign: 2,
+    streetName: 'Elm Street',
     interval: [10, 20],
   },
   { text: 'Arrive at destination', distanceM: 0, timeMs: 0, sign: 4, interval: [20, 20] },
@@ -172,6 +180,14 @@ describe('NavigationSession progress', () => {
     const mid = s.update(pointAtAlong(routeTotal / 2), 0).state;
     expect(mid.upcoming).toBeNull();
     expect(mid.timeRemainingMs).toBeCloseTo(60_000, -2);
+  });
+
+  it('names the road of the maneuver leg containing the position', () => {
+    const s = new NavigationSession(route());
+    expect(s.update(pointAtAlong(routeCum[5]!), 0).state.currentRoad).toBe('Main Street');
+    expect(s.update(pointAtAlong(routeCum[15]!), 0).state.currentRoad).toBe('Elm Street');
+    const bare = new NavigationSession(route(false));
+    expect(bare.update(pointAtAlong(routeCum[5]!), 0).state.currentRoad).toBeNull();
   });
 });
 
@@ -569,5 +585,35 @@ describe('maneuverArrowsGeoJSON', () => {
   it('returns no arrows for instruction-less or degenerate routes', () => {
     expect(maneuverArrowsGeoJSON(route(false)).features).toEqual([]);
     expect(maneuverArrowsGeoJSON({ points: [{ lat: 60, lng: 10 }] }).features).toEqual([]);
+  });
+
+  it('marks straight-ahead decision points (ramp/keep/merge kinds)', () => {
+    const straightKeep: RouteInstruction = {
+      text: 'Keep straight to stay on E6',
+      distanceM: 0,
+      timeMs: 0,
+      sign: 0,
+      kind: 'keep',
+      interval: [10, 20],
+    };
+    const fc = maneuverArrowsGeoJSON({
+      points: routePoints,
+      instructions: [instructions[0]!, straightKeep, instructions[2]!],
+    });
+    expect(fc.features.filter((f) => f.properties.kind === 'body')).toHaveLength(1);
+  });
+});
+
+describe('remainingRouteBounds', () => {
+  it('bounds the route from the traveled position to the destination', () => {
+    const b = remainingRouteBounds(routePoints, routeCum[10]!)!;
+    expect(b.sw.lng).toBeCloseTo(10.01, 5);
+    expect(b.ne.lng).toBeCloseTo(10.02, 5);
+    expect(b.sw.lat).toBeCloseTo(60, 5);
+  });
+
+  it('is null for degenerate input or a finished route', () => {
+    expect(remainingRouteBounds([{ lat: 60, lng: 10 }], 0)).toBeNull();
+    expect(remainingRouteBounds(routePoints, routeTotal)).toBeNull();
   });
 });

@@ -34,6 +34,9 @@ const ElevationProfile = lazy(() =>
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const LAST_VIEW_SETTING = 'lastView';
+// Nav preferences are device-local (`local.` keys never sync).
+const NAV_MUTED_SETTING = 'local.nav.muted';
+const NAV_FOLLOW_SETTING = 'local.nav.follow';
 
 // Decoded once at startup; afterwards the map keeps the hash in sync. A share
 // link (hash) always wins over the persisted last view.
@@ -209,6 +212,32 @@ export function App() {
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
 
+  // Nav preferences survive across trips (device-local — `local.` never syncs).
+  const { setMuted } = nav;
+  const { setFollowMode } = follow;
+  useEffect(() => {
+    if (userData.status !== 'ready') return;
+    void getSetting(NAV_MUTED_SETTING).then((raw) => {
+      if (raw != null) setMuted(raw === 'true');
+    });
+    void getSetting(NAV_FOLLOW_SETTING).then((raw) => {
+      if (raw === 'north' || raw === 'course') setFollowMode(raw);
+    });
+  }, [userData.status, getSetting, setMuted, setFollowMode]);
+  const onToggleFollowMode = useCallback(() => {
+    const next = follow.followMode === 'course' ? 'north' : 'course';
+    setFollowMode(next);
+    setSetting(NAV_FOLLOW_SETTING, next);
+  }, [follow.followMode, setFollowMode, setSetting]);
+  // Mute toggles through nav.toggleMute (banner button); persist the result.
+  const prevMutedRef = useRef(nav.muted);
+  useEffect(() => {
+    if (prevMutedRef.current !== nav.muted) {
+      prevMutedRef.current = nav.muted;
+      if (userData.status === 'ready') setSetting(NAV_MUTED_SETTING, String(nav.muted));
+    }
+  }, [nav.muted, userData.status, setSetting]);
+
   // Auto-save the camera; restore it on startup when the URL has no view hash.
   useEffect(() => {
     if (!map || userData.status !== 'ready') return;
@@ -265,7 +294,9 @@ export function App() {
         followPaused={follow.followPaused}
         onResumeFollow={follow.resumeFollow}
         followMode={follow.followMode}
-        onToggleFollowMode={follow.toggleFollowMode}
+        onToggleFollowMode={onToggleFollowMode}
+        overview={follow.overview}
+        onToggleOverview={follow.toggleOverview}
       />
       <div className="topbar">
         <SearchBox onSelect={onSearchSelect} getBias={getBias} />

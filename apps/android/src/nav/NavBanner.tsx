@@ -1,3 +1,4 @@
+import type { RouteInstruction } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { NavController } from './useNavigation';
@@ -41,17 +42,21 @@ function turnRotation(sign: number): number | null {
   return null;
 }
 
-/** Visual for the upcoming maneuver: a rotated arrow, ↻ roundabout, ⚑ arrive/via. */
+/**
+ * Visual for the upcoming maneuver: a rotated arrow, ↻ roundabout, ⚑ arrive/
+ * via. Ramp/exit/keep/merge maneuvers (RouteInstruction.kind, no longer
+ * collapsed into a plain keep by the Valhalla adapter) get a small label under
+ * the arrow — a drawn icon set needs react-native-svg, i.e. an APK cycle.
+ */
 function TurnArrow({
-  sign,
-  exitNumber,
+  instruction,
   small = false,
 }: {
-  sign: number;
-  exitNumber?: number;
+  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
   /** Compact variant for the "then …" hint row. */
   small?: boolean;
 }) {
+  const { sign, kind, exitNumber } = instruction;
   const box = small ? styles.turnBoxSmall : styles.turnBox;
   const glyph = small ? [styles.turnGlyph, styles.turnGlyphSmall] : [styles.turnGlyph];
   if (sign === 6) {
@@ -74,6 +79,7 @@ function TurnArrow({
       <Text style={[...glyph, { transform: [{ rotate: `${turnRotation(sign) ?? 0}deg` }] }]}>
         {'↑'}
       </Text>
+      {kind && !small ? <Text style={styles.turnKind}>{kind}</Text> : null}
     </View>
   );
 }
@@ -123,13 +129,18 @@ export function NavBanner({
         ) : nav.phase === 'error' ? (
           <Text style={styles.error}>{nav.error ?? 'Navigation error'}</Text>
         ) : nav.phase === 'arrived' ? (
-          <Text style={styles.maneuver}>You have arrived</Text>
+          <>
+            <Text style={styles.maneuver}>You have arrived</Text>
+            {nav.tripSummary ? (
+              <Text style={styles.summary}>
+                {formatDistance(nav.tripSummary.distanceM)} ·{' '}
+                {formatDuration(nav.tripSummary.durationMs)}
+              </Text>
+            ) : null}
+          </>
         ) : maneuver ? (
           <View style={styles.maneuverRow}>
-            <TurnArrow
-              sign={maneuver.instruction.sign}
-              exitNumber={maneuver.instruction.exitNumber}
-            />
+            <TurnArrow instruction={maneuver.instruction} />
             <Text style={styles.distanceTo}>{formatDistance(maneuver.distanceToM)}</Text>
             <Text style={styles.maneuver} numberOfLines={2}>
               {maneuver.instruction.text}
@@ -142,11 +153,7 @@ export function NavBanner({
         {thenManeuver ? (
           <View style={styles.thenRow}>
             <Text style={styles.thenLabel}>then</Text>
-            <TurnArrow
-              small
-              sign={thenManeuver.instruction.sign}
-              exitNumber={thenManeuver.instruction.exitNumber}
-            />
+            <TurnArrow small instruction={thenManeuver.instruction} />
           </View>
         ) : null}
 
@@ -214,6 +221,7 @@ const styles = StyleSheet.create({
   turnGlyphSmall: { fontSize: 18, lineHeight: 22 },
   thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   thenLabel: { color: '#cdd6e0', fontSize: 14, fontWeight: '600' },
+  turnKind: { color: '#cdd6e0', fontSize: 10, fontWeight: '700', marginTop: -2 },
   turnExit: {
     position: 'absolute',
     bottom: -2,

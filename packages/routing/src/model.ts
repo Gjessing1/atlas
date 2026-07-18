@@ -59,6 +59,12 @@ export interface RouteInstruction {
   interval: [number, number];
   /** Which exit to take, for roundabout maneuvers (`sign === 6`). */
   exitNumber?: number;
+  /**
+   * Refines the coarse `sign` for maneuvers it flattens: a highway on-ramp,
+   * a highway exit, a keep-at-fork, or a merge (all otherwise just ±7/0).
+   * UIs may render these with distinct icons; absent for plain turns.
+   */
+  kind?: 'ramp' | 'exit' | 'keep' | 'merge';
 }
 
 /** One routable path (the primary route or an alternative). */

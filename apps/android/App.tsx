@@ -76,6 +76,9 @@ const STATUS_BAR_FALLBACK = 28;
 
 /** Settings key for the persisted camera (device-local — `local.` never syncs). */
 const CAMERA_SETTING = 'local.map.camera';
+/** Nav preferences that survive across trips (device-local, web parity). */
+const NAV_MUTED_SETTING = 'local.nav.muted';
+const NAV_FOLLOW_SETTING = 'local.nav.follow';
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
 
@@ -169,6 +172,7 @@ function AppInner() {
   const navPuckVisible =
     following &&
     !navCam.followPaused &&
+    !navCam.overview &&
     nav.state !== null &&
     nav.state.status !== 'off-route' &&
     nav.state.offRouteM <= 40;
@@ -234,6 +238,33 @@ function AppInner() {
     });
     return () => sub.remove();
   }, []);
+
+  // Nav preferences (mute, course-up/north-up) survive across trips.
+  const { setMuted: setNavMuted } = nav;
+  useEffect(() => {
+    if (data.status !== 'ready') return;
+    void getSetting(NAV_MUTED_SETTING).then((raw) => {
+      if (raw != null) setNavMuted(raw === 'true');
+    });
+    void getSetting(NAV_FOLLOW_SETTING).then((raw) => {
+      if (raw === 'north' || raw === 'course') setNavFollow(raw);
+    });
+  }, [data.status, getSetting, setNavMuted]);
+  const toggleNavFollow = useCallback(() => {
+    setNavFollow((m) => {
+      const next = m === 'course' ? 'north' : 'course';
+      setSetting(NAV_FOLLOW_SETTING, next);
+      return next;
+    });
+  }, [setSetting]);
+  // Mute toggles through nav.toggleMute (banner button); persist the result.
+  const prevMutedRef = useRef(nav.muted);
+  useEffect(() => {
+    if (prevMutedRef.current !== nav.muted) {
+      prevMutedRef.current = nav.muted;
+      if (data.status === 'ready') setSetting(NAV_MUTED_SETTING, String(nav.muted));
+    }
+  }, [nav.muted, data.status, setSetting]);
 
   // Track the settled camera and persist it (debounced) as the boot view.
   const onViewChange = useCallback(
@@ -571,17 +602,36 @@ function AppInner() {
         />
       ) : null}
 
-      {/* Top-right keeps only the map-orientation toggle during navigation. */}
+      {/* Top-right during navigation: map orientation + route overview. */}
       {following ? (
         <View style={[styles.buttonColumn, { top: controlsTop }]}>
           <Pressable
             style={styles.roundButton}
-            onPress={() => setNavFollow((m) => (m === 'course' ? 'north' : 'course'))}
+            onPress={toggleNavFollow}
             testID="toggle-orientation"
           >
             {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
             {navFollow === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
           </Pressable>
+          {/* Whole-remaining-route overview; tap again (or wait) to re-follow. */}
+          <Pressable
+            style={[styles.roundButton, navCam.overview && styles.roundButtonActive]}
+            onPress={navCam.toggleOverview}
+            testID="toggle-overview"
+          >
+            <Text style={styles.orientText}>{'🗺'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Name of the road being driven, pinned bottom-centre (Google-style). */}
+      {following && nav.state?.currentRoad ? (
+        <View style={[styles.roadChipWrap, { bottom: bottomInset + 26 }]} pointerEvents="none">
+          <View style={styles.roadChip}>
+            <Text style={styles.roadChipText} numberOfLines={1}>
+              {nav.state.currentRoad}
+            </Text>
+          </View>
         </View>
       ) : null}
 
@@ -768,6 +818,17 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   orientText: { fontSize: 18, fontWeight: '800', color: '#1a73e8' },
+  roundButtonActive: { backgroundColor: '#d7e7ff' },
+  roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  roadChip: {
+    backgroundColor: 'rgba(17,17,17,0.85)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    maxWidth: '70%',
+    elevation: 4,
+  },
+  roadChipText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,

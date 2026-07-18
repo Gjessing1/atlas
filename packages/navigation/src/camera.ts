@@ -1,3 +1,34 @@
+import type { LatLng } from '@atlas/core';
+
+import { cumulativeDistances, subPolyline } from './geometry.js';
+
+/**
+ * Bounding box of the not-yet-driven part of the route, for the guidance
+ * overview camera (Google's overview button): fit everything from the current
+ * along-route position to the destination. Null for degenerate routes.
+ */
+export function remainingRouteBounds(
+  points: LatLng[],
+  traveledM: number,
+): { sw: LatLng; ne: LatLng } | null {
+  if (points.length < 2) return null;
+  const cum = cumulativeDistances(points);
+  const totalM = cum[cum.length - 1]!;
+  const rest = subPolyline(points, cum, Math.min(traveledM, totalM), totalM);
+  if (rest.length < 2) return null;
+  let minLat = Infinity;
+  let minLng = Infinity;
+  let maxLat = -Infinity;
+  let maxLng = -Infinity;
+  for (const p of rest) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  return { sw: { lat: minLat, lng: minLng }, ne: { lat: maxLat, lng: maxLng } };
+}
+
 /**
  * Follow-mode zoom from ground speed — the OsmAnd/Google approach: rather than
  * a fixed zoom, keep a constant look-ahead *time*, i.e. pick the zoom at which

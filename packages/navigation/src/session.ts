@@ -133,6 +133,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + remainMs,
       upcoming,
       then,
+      currentRoad: this.roadAt(alongM),
       courseDeg: this.courseAt(alongM, speedMps),
       fix: 'live',
     };
@@ -189,6 +190,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + remainMs,
       upcoming,
       then,
+      currentRoad: this.roadAt(alongM),
       courseDeg: this.courseAt(alongM, speed),
       fix: 'estimated',
     };
@@ -275,6 +277,16 @@ export class NavigationSession {
     // Traffic adaptation: scale the route's static estimate by the observed
     // pace so a jam (or a clear road) actually moves the ETA.
     return base / Math.min(PACE_MAX, Math.max(PACE_MIN, this.paceFactor));
+  }
+
+  /**
+   * Street name of the road being driven at `alongM` — the name on the
+   * maneuver whose leg contains the position (Valhalla names each maneuver
+   * with the road it puts the traveller on). Null when the data has none.
+   */
+  private roadAt(alongM: number): string | null {
+    if (this.maneuvers.length === 0) return null;
+    return this.maneuvers[this.currentManeuverIndex(alongM)]!.instruction.streetName ?? null;
   }
 
   /** Index of the maneuver whose leg contains `alongM` (last one started). */

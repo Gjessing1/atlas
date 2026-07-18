@@ -13,6 +13,12 @@ import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locat
 export type NavPhase =
   'idle' | 'starting' | 'preview' | 'navigating' | 'rerouting' | 'arrived' | 'error';
 
+/** What the arrival card shows once the trip is over. */
+export interface TripSummary {
+  distanceM: number;
+  durationMs: number;
+}
+
 export interface NavController {
   phase: NavPhase;
   state: NavState | null;
@@ -31,6 +37,8 @@ export interface NavController {
   speedMps: number | null;
   /** Whether voice prompts are muted. */
   muted: boolean;
+  /** Distance/time of the finished trip (arrived phase only), else null. */
+  tripSummary: TripSummary | null;
   error: string | null;
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
@@ -38,6 +46,8 @@ export interface NavController {
   /** Begin guidance along the selected preview choice. */
   go: () => Promise<void>;
   toggleMute: () => void;
+  /** Set mute directly (the persisted preference applies through this). */
+  setMuted: (muted: boolean) => void;
   stop: () => void;
 }
 
@@ -66,7 +76,8 @@ export function useNavigation(): NavController {
   const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMutedState] = useState(false);
+  const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
@@ -75,6 +86,12 @@ export function useNavigation(): NavController {
   const rerouteInFlight = useRef(false);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
   const mutedRef = useRef(false);
+  /** When guidance began, for the arrival card's elapsed time. */
+  const tripStartRef = useRef<number | null>(null);
+  /** Distance driven across reroutes (each reroute starts a fresh session). */
+  const traveledBaseRef = useRef(0);
+  /** Latest NavState, readable from callbacks without a stale closure. */
+  const lastStateRef = useRef<NavState | null>(null);
 
   /** Speak a voice prompt, unless muted; never let a TTS error interrupt navigation. */
   const speak = useCallback((text: string): void => {
@@ -88,14 +105,13 @@ export function useNavigation(): NavController {
     }
   }, []);
 
-  const toggleMute = useCallback(() => {
-    setMuted((m) => {
-      const next = !m;
-      mutedRef.current = next;
-      if (next) Speech.stop();
-      return next;
-    });
+  const setMuted = useCallback((next: boolean) => {
+    mutedRef.current = next;
+    if (next) Speech.stop();
+    setMutedState(next);
   }, []);
+
+  const toggleMute = useCallback(() => setMuted(!mutedRef.current), [setMuted]);
 
   const fetchPath = useCallback(
     async (
@@ -138,7 +154,10 @@ export function useNavigation(): NavController {
       if (!arrived) {
         setState(null);
         setDestination(null);
+        setTripSummary(null);
       }
+      tripStartRef.current = null;
+      traveledBaseRef.current = 0;
       setPhase(arrived ? 'arrived' : 'idle');
     },
     [stopUpdates],
@@ -155,6 +174,8 @@ export function useNavigation(): NavController {
         const heading =
           typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
         const path = await fetchPath(from, destRef.current, profileRef.current, heading);
+        // The old session dies here — bank its driven distance for the summary.
+        traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         sessionRef.current = new NavigationSession(path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
@@ -180,10 +201,15 @@ export function useNavigation(): NavController {
       try {
         const { state: next, prompts } = session.update(fix, Date.now());
         setState(next);
+        lastStateRef.current = next;
         setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
         for (const prompt of prompts) speak(prompt.text);
         if (next.status === 'arrived') {
           speak(session.arrivalText());
+          setTripSummary({
+            distanceM: traveledBaseRef.current + next.traveledM,
+            durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
+          });
           stop(true);
         } else if (next.status === 'off-route') {
           void reroute(fix);
@@ -247,6 +273,10 @@ export function useNavigation(): NavController {
     try {
       const session = new NavigationSession(path);
       sessionRef.current = session;
+      tripStartRef.current = Date.now();
+      traveledBaseRef.current = 0;
+      lastStateRef.current = null;
+      setTripSummary(null);
       setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
       setActivePath(path);
       setPreviewPaths(null);
@@ -301,6 +331,7 @@ export function useNavigation(): NavController {
         const update = session.tick(Date.now());
         if (!update) return;
         setState(update.state);
+        lastStateRef.current = update.state;
         for (const prompt of update.prompts) speak(prompt.text);
       } catch (err) {
         console.warn('navigation tick failed', err);
@@ -327,11 +358,13 @@ export function useNavigation(): NavController {
     previewIndex,
     speedMps,
     muted,
+    tripSummary,
     error,
     start,
     selectPreview: setPreviewIndex,
     go,
     toggleMute,
+    setMuted,
     stop: () => stop(false),
   };
 }

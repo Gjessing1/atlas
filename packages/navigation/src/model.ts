@@ -53,6 +53,11 @@ export interface NavState {
   upcoming: UpcomingManeuver | null;
   /** The maneuver after `upcoming` (for "then …" hints), or null. */
   then: UpcomingManeuver | null;
+  /**
+   * Name of the road currently being driven ("E6"), from the street name of
+   * the maneuver leg containing the position; null when the data has none.
+   */
+  currentRoad: string | null;
   /** Whether this position is a live fix, an extrapolation, or signal-lost. */
   fix: NavFix;
   /**

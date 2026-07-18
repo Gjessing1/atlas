@@ -159,8 +159,8 @@ function decodeShape(encoded: string, precision = 6): [number, number][] {
  * Atlas already speaks (the web instruction list renders icons from it; the nav
  * engine reads only text + interval). Anything unrecognised means "continue" (0).
  * Valhalla types: 9 slight-right, 10 right, 11 sharp-right, 12/13 u-turn r/l,
- * 14 sharp-left, 15 left, 16 slight-left, 18/20/23 ramp/exit/stay right,
- * 19/21/24 ramp/exit/stay left, 26 roundabout-enter, 4/5/6 destination.
+ * 14 sharp-left, 15 left, 16 slight-left, 17/18/19 ramp s/r/l, 20/21 exit r/l,
+ * 22/23/24 stay s/r/l, 25/37/38 merge, 26 roundabout-enter, 4/5/6 destination.
  */
 const SIGN_BY_TYPE: Readonly<Record<number, number>> = {
   4: 4,
@@ -174,13 +174,37 @@ const SIGN_BY_TYPE: Readonly<Record<number, number>> = {
   14: -3,
   15: -2,
   16: -1,
+  17: 0, // ramp straight — the kind carries the flavor, the sign the geometry
   18: 7,
   19: -7,
   20: 7,
   21: -7,
+  22: 0, // stay straight
   23: 7,
   24: -7,
+  25: 0, // merge (side unknown)
   26: 6,
+  37: 7,
+  38: -7,
+};
+
+/**
+ * The maneuver flavor a coarse ±7 sign hides — Valhalla distinguishes taking
+ * an on-ramp, leaving via an exit, keeping a side at a fork, and merging;
+ * UIs render each with its own icon (see RouteInstruction.kind).
+ */
+const KIND_BY_TYPE: Readonly<Record<number, 'ramp' | 'exit' | 'keep' | 'merge'>> = {
+  17: 'ramp',
+  18: 'ramp',
+  19: 'ramp',
+  20: 'exit',
+  21: 'exit',
+  22: 'keep',
+  23: 'keep',
+  24: 'keep',
+  25: 'merge',
+  37: 'merge',
+  38: 'merge',
 };
 
 interface ValhallaManeuver {
@@ -254,6 +278,8 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       };
       const street = m.street_names?.[0];
       if (street) instruction.streetName = street;
+      const kind = KIND_BY_TYPE[m.type ?? 0];
+      if (kind) instruction.kind = kind;
       if (m.type === 26 && typeof m.roundabout_exit_count === 'number') {
         instruction.exitNumber = m.roundabout_exit_count;
       }

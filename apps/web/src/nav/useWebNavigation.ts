@@ -1,15 +1,23 @@
 import type { LatLng } from '@atlas/core';
 import { NavigationSession, type NavState, type Position } from '@atlas/navigation';
-import { fetchRoute, RoutingError, type RoutingProfile } from '@atlas/routing';
+import { fetchRoute, RoutingError, type RoutePath, type RoutingProfile } from '@atlas/routing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type WebNavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+
+/** What the arrival card shows once the trip is over. */
+export interface TripSummary {
+  distanceM: number;
+  durationMs: number;
+}
 
 export interface WebNavController {
   phase: WebNavPhase;
   state: NavState | null;
   /** Active route geometry as [lng, lat] pairs, for the map line source. */
   routeCoords: number[][];
+  /** The route being followed (instructions included, for on-map turn arrows). */
+  activePath: RoutePath | null;
   profile: RoutingProfile;
   /** Where the trip is headed (finish marker); null when idle. */
   destination: LatLng | null;
@@ -18,9 +26,13 @@ export interface WebNavController {
   /** Latest compass course in degrees, for the course-up camera. */
   headingDeg: number | null;
   muted: boolean;
+  /** Distance/time of the finished trip (arrived phase only), else null. */
+  tripSummary: TripSummary | null;
   error: string | null;
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
   toggleMute: () => void;
+  /** Set mute directly (the persisted preference applies through this). */
+  setMuted: (muted: boolean) => void;
   stop: () => void;
 }
 
@@ -49,11 +61,13 @@ export function useWebNavigation(): WebNavController {
   const [phase, setPhase] = useState<WebNavPhase>('idle');
   const [state, setState] = useState<NavState | null>(null);
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
+  const [activePath, setActivePath] = useState<RoutePath | null>(null);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [headingDeg, setHeadingDeg] = useState<number | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMutedState] = useState(false);
+  const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
@@ -62,6 +76,12 @@ export function useWebNavigation(): WebNavController {
   const watchIdRef = useRef<number | null>(null);
   const rerouteInFlight = useRef(false);
   const mutedRef = useRef(false);
+  /** When guidance began, for the arrival card's elapsed time. */
+  const tripStartRef = useRef<number | null>(null);
+  /** Distance driven across reroutes (each reroute starts a fresh session). */
+  const traveledBaseRef = useRef(0);
+  /** Latest NavState, readable from callbacks without a stale closure. */
+  const lastStateRef = useRef<NavState | null>(null);
 
   /** Speak a voice prompt, unless muted; never let speech errors break nav. */
   const speak = useCallback((text: string): void => {
@@ -77,14 +97,13 @@ export function useWebNavigation(): WebNavController {
     }
   }, []);
 
-  const toggleMute = useCallback(() => {
-    setMuted((m) => {
-      const next = !m;
-      mutedRef.current = next;
-      if (next && 'speechSynthesis' in window) window.speechSynthesis.cancel();
-      return next;
-    });
+  const setMuted = useCallback((next: boolean) => {
+    mutedRef.current = next;
+    if (next && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    setMutedState(next);
   }, []);
+
+  const toggleMute = useCallback(() => setMuted(!mutedRef.current), [setMuted]);
 
   const fetchPath = useCallback(
     async (origin: LatLng, dest: LatLng, prof: RoutingProfile, headingDeg?: number) => {
@@ -115,12 +134,16 @@ export function useWebNavigation(): WebNavController {
       destRef.current = null;
       rerouteInFlight.current = false;
       setRouteCoords([]);
+      setActivePath(null);
       setSpeedMps(null);
       setHeadingDeg(null);
       if (!arrived) {
         setState(null);
         setDestination(null);
+        setTripSummary(null);
       }
+      tripStartRef.current = null;
+      traveledBaseRef.current = 0;
       setPhase(arrived ? 'arrived' : 'idle');
     },
     [clearWatch],
@@ -137,8 +160,11 @@ export function useWebNavigation(): WebNavController {
         const heading =
           typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
         const path = await fetchPath(from, destRef.current, profileRef.current, heading);
+        // The old session dies here — bank its driven distance for the summary.
+        traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         sessionRef.current = new NavigationSession(path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+        setActivePath(path);
         // "Which way now?" is most urgent right after recalculating.
         const depart = sessionRef.current.departurePrompt();
         if (depart) speak(depart.text);
@@ -173,9 +199,14 @@ export function useWebNavigation(): WebNavController {
       }
       const { state: next, prompts } = session.update(fix, Date.now());
       setState(next);
+      lastStateRef.current = next;
       for (const prompt of prompts) speak(prompt.text);
       if (next.status === 'arrived') {
         speak(session.arrivalText());
+        setTripSummary({
+          distanceM: traveledBaseRef.current + next.traveledM,
+          durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
+        });
         stop(true);
       } else if (next.status === 'off-route') {
         void reroute(fix);
@@ -198,11 +229,16 @@ export function useWebNavigation(): WebNavController {
         setDestination(dest);
         setSpeedMps(null);
         setState(null);
+        setTripSummary(null);
+        lastStateRef.current = null;
+        traveledBaseRef.current = 0;
 
         const path = await fetchPath(origin, dest, prof);
         const session = new NavigationSession(path);
         sessionRef.current = session;
+        tripStartRef.current = Date.now();
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+        setActivePath(path);
 
         clearWatch();
         watchIdRef.current = navigator.geolocation.watchPosition(
@@ -242,10 +278,37 @@ export function useWebNavigation(): WebNavController {
       const update = session.tick(Date.now());
       if (!update) return;
       setState(update.state);
+      lastStateRef.current = update.state;
       for (const prompt of update.prompts) speak(prompt.text);
     }, 1000);
     return () => clearInterval(timer);
   }, [guiding, speak]);
+
+  // A navigating phone browser is a dashboard: hold a screen wake lock for
+  // the trip (best-effort — Safari < 16.4 has none). The lock is silently
+  // released when the tab is hidden, so reacquire on return.
+  useEffect(() => {
+    if (!guiding || !('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let stopped = false;
+    const acquire = () => {
+      if (document.visibilityState !== 'visible') return;
+      void navigator.wakeLock
+        .request('screen')
+        .then((sentinel) => {
+          if (stopped) void sentinel.release();
+          else lock = sentinel;
+        })
+        .catch(() => undefined);
+    };
+    acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', acquire);
+      void lock?.release().catch(() => undefined);
+    };
+  }, [guiding]);
 
   // Drop the geolocation watch if the app unmounts mid-trip.
   useEffect(() => clearWatch, [clearWatch]);
@@ -254,14 +317,17 @@ export function useWebNavigation(): WebNavController {
     phase,
     state,
     routeCoords,
+    activePath,
     profile,
     destination,
     speedMps,
     headingDeg,
     muted,
+    tripSummary,
     error,
     start,
     toggleMute,
+    setMuted,
     stop: () => stop(false),
   };
 }

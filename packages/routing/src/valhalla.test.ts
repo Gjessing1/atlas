@@ -303,6 +303,41 @@ describe('parseValhallaResponse', () => {
     expect(ins.exitNumber).toBe(2);
   });
 
+  it('keeps ramp/exit/keep/merge maneuvers distinct via kind', () => {
+    const shape = encodeShape([
+      [60, 10],
+      [60, 10.01],
+    ]);
+    const trip = (type: number) => ({
+      trip: {
+        units: 'kilometers',
+        summary: { length: 1, time: 10 },
+        legs: [{ shape, maneuvers: [{ type, begin_shape_index: 0, end_shape_index: 1 }] }],
+      },
+    });
+    // type → [sign, kind]: on-ramps, exits, forks and merges no longer
+    // collapse into one indistinguishable ±7 keep.
+    const cases: [number, number, string | undefined][] = [
+      [18, 7, 'ramp'],
+      [19, -7, 'ramp'],
+      [20, 7, 'exit'],
+      [21, -7, 'exit'],
+      [23, 7, 'keep'],
+      [24, -7, 'keep'],
+      [17, 0, 'ramp'], // ramp straight: straight geometry, still a decision
+      [22, 0, 'keep'],
+      [25, 0, 'merge'],
+      [37, 7, 'merge'],
+      [38, -7, 'merge'],
+      [10, 2, undefined], // a plain turn carries no kind
+    ];
+    for (const [type, sign, kind] of cases) {
+      const ins = parseValhallaResponse(trip(type)).paths[0]!.instructions![0]!;
+      expect(ins.sign, `type ${type}`).toBe(sign);
+      expect(ins.kind, `type ${type}`).toBe(kind);
+    }
+  });
+
   it('reads alternates as extra paths', () => {
     const withAlt = {
       ...valhallaResponse,

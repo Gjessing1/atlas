@@ -48,8 +48,10 @@ export function maneuverArrowsGeoJSON(path: Pick<RoutePath, 'points' | 'instruct
     const totalM = cum[cum.length - 1]!;
     for (const instruction of path.instructions ?? []) {
       // Signs: 0 continue, 4/5 arrive/via — no arrow. Turns/keeps/roundabout/
-      // u-turn (±1..3, 6, ±7, ±8) all get one.
-      if (instruction.sign === 0 || instruction.sign === 4 || instruction.sign === 5) continue;
+      // u-turn (±1..3, 6, ±7, ±8) all get one, as does a straight-ahead
+      // maneuver that is still a decision point (kind: ramp/keep/merge).
+      if (instruction.sign === 4 || instruction.sign === 5) continue;
+      if (instruction.sign === 0 && !instruction.kind) continue;
       const start = Math.min(Math.max(instruction.interval[0], 0), points.length - 1);
       const alongM = cum[start]!;
       if (alongM <= 0 || alongM >= totalM) continue;
