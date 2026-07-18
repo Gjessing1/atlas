@@ -1,4 +1,4 @@
-import { pathViaLabels } from '@atlas/routing';
+import { pathViaLabels, ROUTING_PROFILES } from '@atlas/routing';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
@@ -50,7 +50,34 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
         },
       ]}
     >
-      <ScrollView style={styles.choices} bounces={false}>
+      {/* A walk to the car ferry is a different trip: switch the profile here
+          and the choices refetch for the same origin/destination. */}
+      <View style={styles.profileRow}>
+        {ROUTING_PROFILES.map((p) => {
+          const active = p.id === nav.profile;
+          return (
+            <Pressable
+              key={p.id}
+              style={[styles.profileChip, active && styles.profileChipActive]}
+              onPress={() => nav.setProfile(p.id)}
+              disabled={nav.previewLoading}
+              testID={`nav-profile-${p.id}`}
+            >
+              <Text style={styles.profileIcon}>{p.icon}</Text>
+              <Text style={[styles.profileLabel, active && styles.profileLabelActive]}>
+                {p.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {nav.previewError ? (
+        <Text style={styles.previewError}>No route for that profile — kept the current one</Text>
+      ) : null}
+      <ScrollView
+        style={[styles.choices, nav.previewLoading && styles.choicesLoading]}
+        bounces={false}
+      >
         {paths.map((path, i) => {
           const selected = i === nav.previewIndex;
           return (
@@ -58,6 +85,7 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
               key={i}
               style={[styles.choice, selected && styles.choiceSelected]}
               onPress={() => nav.selectPreview(i)}
+              disabled={nav.previewLoading}
               testID={`route-choice-${i}`}
             >
               <View style={styles.choiceMain}>
@@ -81,8 +109,13 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
         <Pressable style={styles.cancel} onPress={nav.stop} testID="preview-cancel">
           <Text style={styles.cancelText}>Cancel</Text>
         </Pressable>
-        <Pressable style={styles.go} onPress={() => void nav.go()} testID="preview-go">
-          <Text style={styles.goText}>Start</Text>
+        <Pressable
+          style={[styles.go, nav.previewLoading && styles.goDisabled]}
+          onPress={() => void nav.go()}
+          disabled={nav.previewLoading}
+          testID="preview-go"
+        >
+          <Text style={styles.goText}>{nav.previewLoading ? 'Finding routes…' : 'Start'}</Text>
         </Pressable>
       </View>
     </View>
@@ -103,7 +136,23 @@ const styles = StyleSheet.create({
     elevation: 12,
     gap: 10,
   },
+  profileRow: { flexDirection: 'row', gap: 8 },
+  profileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#eceef2',
+  },
+  profileChipActive: { backgroundColor: '#d7e4ff' },
+  profileIcon: { fontSize: 14 },
+  profileLabel: { fontSize: 13, fontWeight: '600', color: '#5c6270' },
+  profileLabelActive: { color: '#1d4fd7' },
+  previewError: { fontSize: 13, color: '#b3261e' },
   choices: { maxHeight: 220 },
+  choicesLoading: { opacity: 0.45 },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -144,5 +193,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1a73e8',
   },
+  goDisabled: { backgroundColor: '#9db9e8' },
   goText: { fontSize: 15, fontWeight: '700', color: '#fff' },
 });

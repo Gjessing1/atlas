@@ -33,6 +33,10 @@ export interface NavController {
   previewPaths: RoutePath[] | null;
   /** Index into previewPaths of the choice guidance will follow. */
   previewIndex: number;
+  /** True while a profile switch is refetching the preview choices. */
+  previewLoading: boolean;
+  /** Why the last profile switch kept the old choices (no route, offline …). */
+  previewError: string | null;
   /** Latest ground speed in m/s, or null when unknown/stationary. */
   speedMps: number | null;
   /** Whether voice prompts are muted. */
@@ -43,6 +47,8 @@ export interface NavController {
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
   selectPreview: (index: number) => void;
+  /** Switch profile and refetch the preview choices (preview phase only). */
+  setProfile: (profile: RoutingProfile) => void;
   /** Begin guidance along the selected preview choice. */
   go: () => Promise<void>;
   toggleMute: () => void;
@@ -75,6 +81,8 @@ export function useNavigation(): NavController {
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [muted, setMutedState] = useState(false);
   const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
@@ -82,6 +90,10 @@ export function useNavigation(): NavController {
 
   const sessionRef = useRef<NavigationSession | null>(null);
   const destRef = useRef<LatLng | null>(null);
+  /** Where the preview was requested from, so a profile switch can refetch. */
+  const originRef = useRef<LatLng | null>(null);
+  /** Guards against an older profile fetch landing after a newer one. */
+  const previewSeq = useRef(0);
   const profileRef = useRef<RoutingProfile>('car');
   const rerouteInFlight = useRef(false);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
@@ -145,11 +157,15 @@ export function useNavigation(): NavController {
       stopUpdates();
       sessionRef.current = null;
       destRef.current = null;
+      originRef.current = null;
+      previewSeq.current++;
       rerouteInFlight.current = false;
       setRouteCoords([]);
       setActivePath(null);
       setPreviewPaths(null);
       setPreviewIndex(0);
+      setPreviewLoading(false);
+      setPreviewError(null);
       setSpeedMps(null);
       if (!arrived) {
         setState(null);
@@ -236,12 +252,14 @@ export function useNavigation(): NavController {
         const origin = { lat: cur.coords.latitude, lng: cur.coords.longitude };
 
         destRef.current = destination;
+        originRef.current = origin;
         profileRef.current = prof;
         setProfile(prof);
         setDestination(destination);
         setSpeedMps(null);
         setState(null);
         setRouteCoords([]);
+        setPreviewError(null);
 
         // Route choices: the fastest plus up to two alternatives, offered
         // before guidance starts. Selecting nothing keeps the fastest.
@@ -259,10 +277,47 @@ export function useNavigation(): NavController {
         setLocationHandler(null);
         sessionRef.current = null;
         destRef.current = null;
+        originRef.current = null;
         setDestination(null);
         setError(err instanceof Error ? err.message : String(err));
         setPhase('error');
       }
+    },
+    [provider],
+  );
+
+  // Profile switch on the preview card: refetch the choices for the same trip.
+  // On failure the previous profile's choices stay up (with a note) — a dead
+  // end here (no bike route, brief offline) must not kill the whole preview.
+  const setNavProfile = useCallback(
+    (prof: RoutingProfile) => {
+      const origin = originRef.current;
+      const dest = destRef.current;
+      if (!origin || !dest || prof === profileRef.current) return;
+      const seq = ++previewSeq.current;
+      setPreviewLoading(true);
+      setPreviewError(null);
+      void (async () => {
+        try {
+          const result = await provider.route({
+            profile: prof,
+            points: [origin, dest],
+            instructions: true,
+            alternatives: true,
+          });
+          if (seq !== previewSeq.current) return;
+          if (result.paths.length === 0) throw new Error('no route found');
+          profileRef.current = prof;
+          setProfile(prof);
+          setPreviewPaths(result.paths);
+          setPreviewIndex(0);
+        } catch (err) {
+          if (seq !== previewSeq.current) return;
+          setPreviewError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (seq === previewSeq.current) setPreviewLoading(false);
+        }
+      })();
     },
     [provider],
   );
@@ -279,8 +334,11 @@ export function useNavigation(): NavController {
       setTripSummary(null);
       setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
       setActivePath(path);
+      previewSeq.current++;
       setPreviewPaths(null);
       setPreviewIndex(0);
+      setPreviewLoading(false);
+      setPreviewError(null);
       setState(null);
 
       setLocationHandler(onFix);
@@ -308,6 +366,7 @@ export function useNavigation(): NavController {
       setLocationHandler(null);
       sessionRef.current = null;
       destRef.current = null;
+      originRef.current = null;
       setDestination(null);
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
@@ -356,12 +415,15 @@ export function useNavigation(): NavController {
     destination,
     previewPaths,
     previewIndex,
+    previewLoading,
+    previewError,
     speedMps,
     muted,
     tripSummary,
     error,
     start,
     selectPreview: setPreviewIndex,
+    setProfile: setNavProfile,
     go,
     toggleMute,
     setMuted,
