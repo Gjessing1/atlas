@@ -36,7 +36,12 @@ async function loadStyle(): Promise<string | StyleSpecification> {
   }
 }
 
-function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void): HTMLElement {
+function pinPopupContent(
+  pin: LatLng,
+  onRemove: () => void,
+  onSave: () => void,
+  onNavigate: () => void,
+): HTMLElement {
   const el = document.createElement('div');
   el.className = 'pin-popup';
   const coords = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
@@ -53,6 +58,7 @@ function pinPopupContent(pin: LatLng, onRemove: () => void, onSave: () => void):
     b.addEventListener('click', action);
     buttons.appendChild(b);
   };
+  mkButton('Navigate', onNavigate);
   mkButton('Save', onSave);
   mkButton('Copy coords', () => void navigator.clipboard.writeText(coords));
   // The URL hash always reflects camera + pin, so the current URL is the share link.
@@ -100,6 +106,8 @@ interface MapViewProps {
   onPinChange: (pin: LatLng | null) => void;
   /** Save the dropped pin as a place (favorites). */
   onSavePin: (pin: LatLng) => void;
+  /** Start turn-by-turn navigation to the dropped pin. */
+  onNavigateToPin: (pin: LatLng) => void;
   onMapReady: (map: maplibregl.Map) => void;
   /** While `.current` is true, POI click popups are suppressed (route mode owns clicks). */
   suppressPoiClicks?: { readonly current: boolean };
@@ -111,6 +119,7 @@ export function MapView({
   places,
   onPinChange,
   onSavePin,
+  onNavigateToPin,
   onMapReady,
   suppressPoiClicks,
 }: MapViewProps) {
@@ -131,6 +140,15 @@ export function MapView({
     });
     void loadStyle().then((style) => map.setStyle(style));
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    // Location puck + accuracy circle with a locate/recenter button; keeps
+    // following until the user pans away (web-nav prerequisite, Android parity).
+    map.addControl(
+      new maplibregl.GeolocateControl({
+        positionOptions: { enableHighAccuracy: true },
+        trackUserLocation: true,
+      }),
+      'top-right',
+    );
     map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
     // Keep the URL hash shareable: it always encodes camera + pin.
@@ -224,6 +242,7 @@ export function MapView({
           pin,
           () => onPinChange(null),
           () => onSavePin(pin),
+          () => onNavigateToPin(pin),
         ),
       );
       // Same red teardrop as the Android destination pick (#d33939).
@@ -252,7 +271,7 @@ export function MapView({
         pin: pin ?? undefined,
       }),
     );
-  }, [map, pin, onPinChange, onSavePin]);
+  }, [map, pin, onPinChange, onSavePin, onNavigateToPin]);
 
   // Draw saved places as colour-badged emoji markers (favourites are few, so
   // DOM markers render real emoji + colour that vector-tile glyphs can't).

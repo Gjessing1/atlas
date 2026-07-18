@@ -12,8 +12,11 @@ import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
+import { useNavLayers } from './map/useNavLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
+import { NavBanner } from './nav/NavBanner.js';
+import { useWebNavigation } from './nav/useWebNavigation.js';
 import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
@@ -53,6 +56,21 @@ export function App() {
 
   const route = useRoute();
   useRouteLayers(map, route);
+
+  // ---- turn-by-turn navigation ----
+
+  const nav = useWebNavigation();
+  const follow = useNavLayers(map, nav);
+  const { start: startNav } = nav;
+  const { stop: stopRoute } = route;
+  const onNavigateToPin = useCallback(
+    (dest: LatLng) => {
+      setPin(null);
+      stopRoute(); // navigation owns the map now; a plan would fight it
+      void startNav(dest);
+    },
+    [startNav, stopRoute],
+  );
   // Route mode owns map clicks; MapView reads this ref to skip POI popups.
   const routeActiveRef = useRef(route.active);
   routeActiveRef.current = route.active;
@@ -235,11 +253,19 @@ export function App() {
         places={visiblePlaces}
         onPinChange={setPin}
         onSavePin={onSavePin}
+        onNavigateToPin={onNavigateToPin}
         onMapReady={(m) => {
           mapRef.current = m;
           setMap(m);
         }}
         suppressPoiClicks={routeActiveRef}
+      />
+      <NavBanner
+        nav={nav}
+        followPaused={follow.followPaused}
+        onResumeFollow={follow.resumeFollow}
+        followMode={follow.followMode}
+        onToggleFollowMode={follow.toggleFollowMode}
       />
       <div className="topbar">
         <SearchBox onSelect={onSearchSelect} getBias={getBias} />

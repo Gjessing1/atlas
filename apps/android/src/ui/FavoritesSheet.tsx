@@ -69,7 +69,7 @@ const eyeStyles = StyleSheet.create({
 });
 
 /**
- * Places & folders — the mobile counterpart of the web Sidebar: browse saved
+ * Saved (places & folders) — the mobile counterpart of the web Sidebar: browse saved
  * pins (synced ones from other devices appear here too), organise them into
  * folders, and control what's drawn on the map. Fly to, navigate to, or edit a
  * place (the ✎ button or the icon badge): rename it, assign it to a folder,
@@ -239,7 +239,7 @@ export function FavoritesSheet({
       <View style={styles.backdrop}>
         <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
           <View style={styles.headerRow}>
-            <Text style={styles.heading}>Places &amp; folders</Text>
+            <Text style={styles.heading}>Saved</Text>
             {places.length > 0 || collections.length > 0 ? (
               <Pressable
                 style={[styles.button, styles.buttonQuiet]}
