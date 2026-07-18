@@ -119,6 +119,14 @@ export interface NavigationOptions {
   deadReckonMinSpeedMps?: number;
   /** Longest gap (ms) dead reckoning may bridge before reporting `lost`. */
   deadReckonMaxMs?: number;
+  /** Farthest distance (m) dead reckoning may extrapolate before `lost`. */
+  deadReckonMaxM?: number;
+  /**
+   * Time constant (ms) over which the extrapolation speed eases from the last
+   * GPS speed toward the leg's expected speed. Non-finite disables the blend
+   * (pure last-speed extrapolation).
+   */
+  deadReckonBlendTauMs?: number;
   /** Chain "…, then X" into a prompt when X follows within this distance (m). */
   chainManeuverM?: number;
   /** Time constant (ms) of the observed-pace average that adapts the ETA. */
@@ -138,7 +146,12 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   fixGapMs: 3000,
   signalLostMs: 5000,
   deadReckonMinSpeedMps: 3, // below ~11 km/h a stop is likelier than a tunnel
-  deadReckonMaxMs: 180_000, // ~3 min bridges most tunnels without runaway
+  // The distance cap does the real bounding: 25 km covers Lærdal (24.5 km,
+  // the world's longest road tunnel). The time cap is a backstop so a dead
+  // GPS at crawling speed can't fake progress for hours.
+  deadReckonMaxMs: 1_200_000,
+  deadReckonMaxM: 25_000,
+  deadReckonBlendTauMs: 45_000,
   chainManeuverM: 300,
   paceTauMs: 90_000,
 };

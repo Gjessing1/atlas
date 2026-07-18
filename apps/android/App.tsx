@@ -21,6 +21,7 @@ import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Linking,
   Pressable,
   Share,
@@ -50,6 +51,7 @@ import { NavBanner } from './src/nav/NavBanner';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
+import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
@@ -158,6 +160,7 @@ function AppInner() {
   // The follow camera: bottom-anchored, course-up, speed/turn-aware zoom; a
   // manual pan pauses it (re-centre pill / locate button / timeout resume it).
   const navCam = useNavCamera(cameraRef, nav, navFollow);
+  const tunnelDim = useTunnelDim(nav.state?.fix);
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
@@ -574,6 +577,12 @@ function AppInner() {
         onDestinationMoved={onDestinationMoved}
       />
 
+      {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
+          top stays bright) until live GPS returns. */}
+      {nav.state !== null ? (
+        <Animated.View pointerEvents="none" style={[styles.tunnelDim, { opacity: tunnelDim }]} />
+      ) : null}
+
       {/* The screen-fixed nav chevron (see navPuckVisible above). */}
       {navPuckVisible ? (
         <View
@@ -784,6 +793,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  tunnelDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(4, 8, 16, 0.4)' },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
   recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },

@@ -16,6 +16,7 @@ import { useNavLayers } from './map/useNavLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
+import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
@@ -63,6 +64,7 @@ export function App() {
   // ---- turn-by-turn navigation ----
 
   const nav = useWebNavigation();
+  const tunnelDim = useTunnelDim(nav.state?.fix);
   const follow = useNavLayers(map, nav);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
@@ -289,6 +291,9 @@ export function App() {
         }}
         suppressPoiClicks={routeActiveRef}
       />
+      {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
+          top stays bright) until live GPS returns. */}
+      <div className={`tunnel-dim${tunnelDim ? ' tunnel-dim-on' : ''}`} />
       <NavBanner
         nav={nav}
         followPaused={follow.followPaused}

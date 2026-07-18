@@ -409,23 +409,36 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     expect(s.tick(1000)).toBeNull(); // within the gap tolerance
   });
 
-  it('extrapolates along-route at the last speed through a gap', () => {
+  it('extrapolates along-route through a gap, anchored at the last fix', () => {
     const s = new NavigationSession(route());
-    s.update({ ...pointAtAlong(200), speedMps: 20 }, 0);
+    // Driving at the leg's own expected speed, so the speed blend is identity.
+    const legMps = routeCum[10]! / 60;
+    s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
     const est = s.tick(5000);
     expect(est).not.toBeNull();
     expect(est!.state.fix).toBe('estimated');
     expect(est!.state.status).toBe('navigating');
-    expect(est!.state.traveledM).toBeCloseTo(200 + 20 * 5, 0);
-    // Anchored at the fix, not compounding: 10 s of gap = 200 m, not more.
-    expect(s.tick(10_000)!.state.traveledM).toBeCloseTo(200 + 20 * 10, 0);
+    expect(est!.state.traveledM).toBeCloseTo(200 + legMps * 5, 0);
+    // Anchored at the fix, not compounding: 10 s of gap = 10 s of travel.
+    expect(s.tick(10_000)!.state.traveledM).toBeCloseTo(200 + legMps * 10, 0);
+  });
+
+  it('eases the extrapolation speed toward the leg expected pace', () => {
+    const s = new NavigationSession(route());
+    const legMps = routeCum[10]! / 60; // ≈9.3 m/s expected on leg 1
+    s.update({ ...pointAtAlong(200), speedMps: 20 }, 0);
+    // 20 s in, the reckoned distance sits between pure last-speed (which would
+    // overshoot after a limit drop) and pure leg-pace extrapolation.
+    const est = s.tick(20_000)!;
+    expect(est.state.traveledM).toBeGreaterThan(200 + legMps * 20);
+    expect(est.state.traveledM).toBeLessThan(200 + 20 * 20);
   });
 
   it('keeps firing voice prompts from extrapolated positions', () => {
     const s = new NavigationSession(route());
     const maneuverAlong = routeCum[10]!;
     s.update({ ...pointAtAlong(maneuverAlong - 513), speedMps: 20 }, 0);
-    // 10 s later the estimated position is ~313 m out: the 400 m prompt fires.
+    // 10 s later the estimated position is ~324 m out: the 400 m prompt fires.
     const est = s.tick(10_000)!;
     expect(est.prompts).toHaveLength(1);
     expect(est.prompts[0]).toMatchObject({ kind: 'approach', thresholdM: 400 });
@@ -449,10 +462,35 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     expect(lost!.state.traveledM).toBeCloseTo(100, 0);
   });
 
-  it('gives up dead reckoning after the maximum gap', () => {
+  it('gives up dead reckoning after the time backstop', () => {
     const s = new NavigationSession(route());
     s.update({ ...pointAtAlong(100), speedMps: 20 }, 0);
-    expect(s.tick(200_000)!.state.fix).toBe('lost');
+    expect(s.tick(1_250_000)!.state.fix).toBe('lost');
+  });
+
+  it('bridges a long tunnel but gives up past the distance cap', () => {
+    // A ~33 km straight route (Lærdal-scale) driven at its expected speed.
+    const points: LatLng[] = Array.from({ length: 21 }, (_, i) => ({
+      lat: 60,
+      lng: 10 + i * 0.03,
+    }));
+    const totalM = cumulativeDistances(points).at(-1)!;
+    const s = new NavigationSession({
+      points,
+      distanceM: totalM,
+      timeMs: (totalM / 30) * 1000,
+      ascentM: 0,
+      descentM: 0,
+    });
+    s.update({ ...points[0]!, speedMps: 30 }, 0);
+    // 10 min without GPS: 18 km in and still guiding (the old 3 min cap
+    // froze the puck a fraction into tunnels like this).
+    const inTunnel = s.tick(600_000)!;
+    expect(inTunnel.state.fix).toBe('estimated');
+    expect(inTunnel.state.traveledM).toBeCloseTo(18_000, -2);
+    // 15 min would put it 27 km in — past the 25 km cap the extrapolation
+    // is fiction, not a tunnel.
+    expect(s.tick(900_000)!.state.fix).toBe('lost');
   });
 });
 

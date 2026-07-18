@@ -1129,6 +1129,22 @@ body {
   background: #9aa0a6;
 }
 
+/* Tunnel dimming: fades in slowly once dead reckoning has persisted (eyes
+   adjusting to the dark), snaps back out at the bright portal. */
+.tunnel-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 8, 16, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.tunnel-dim-on {
+  opacity: 1;
+  transition: opacity 0.8s ease;
+}
+
 .nav-dest-marker {
   font-size: 26px;
   line-height: 1;

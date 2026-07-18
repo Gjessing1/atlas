@@ -145,8 +145,8 @@ export class NavigationSession {
    * Advance the session without a fix — call ~1×/s from a timer. When fixes
    * stop while moving (tunnel, underpass) the position is extrapolated
    * along-route at the last speed, Google/OsmAnd-style, still firing voice
-   * prompts; once the gap is too long (or there is no speed to extrapolate
-   * with) the state goes `lost` so the UI can grey the puck. Returns null
+   * prompts; once the gap is too long or too far (or there is no speed to
+   * extrapolate with) the state goes `lost` so the UI can grey the puck. Returns null
    * while fixes are flowing normally — nothing to re-render.
    */
   tick(nowMs: number = Date.now()): NavUpdate | null {
@@ -156,12 +156,29 @@ export class NavigationSession {
     if (gapMs < this.opts.fixGapMs) return null;
 
     const speed = this.lastSpeedMps;
-    const reckon =
+    // Reckoned distance since the fix. The speed eases from the last GPS speed
+    // toward the leg's expected speed (closed form of an exponential blend) —
+    // through a long tunnel with a limit change, the route's own pace is
+    // better evidence than a minutes-old GPS reading. Anchored at the fix and
+    // recomputed each tick, so it never compounds.
+    let reckonedM: number | null = null;
+    if (
       this.alongAtFixM !== null &&
       speed !== null &&
       speed >= this.opts.deadReckonMinSpeedMps &&
-      gapMs <= this.opts.deadReckonMaxMs;
-    if (!reckon) {
+      gapMs <= this.opts.deadReckonMaxMs
+    ) {
+      const tSec = gapMs / 1000;
+      const tauSec = this.opts.deadReckonBlendTauMs / 1000;
+      const expected = this.expectedSpeedAt(this.alongAtFixM);
+      const d =
+        expected !== null && Number.isFinite(tauSec) && tauSec > 0
+          ? expected * tSec + (speed - expected) * tauSec * (1 - Math.exp(-tSec / tauSec))
+          : speed * tSec;
+      // Past the distance cap the extrapolation is fiction, not a tunnel.
+      if (d <= this.opts.deadReckonMaxM) reckonedM = d;
+    }
+    if (reckonedM === null) {
       if (gapMs < this.opts.signalLostMs) return null;
       const state: NavState = { ...last, fix: 'lost', etaEpochMs: nowMs + last.timeRemainingMs };
       this.lastState = state;
@@ -171,7 +188,7 @@ export class NavigationSession {
     // Dead-reckon along the route, but stop just short of the destination —
     // only a real fix may declare arrival.
     const ceiling = Math.max(this.alongAtFixM!, this.totalM - this.opts.arrivalRadiusM);
-    const alongM = Math.min(this.alongAtFixM! + (speed * gapMs) / 1000, ceiling);
+    const alongM = Math.min(this.alongAtFixM! + reckonedM, ceiling);
     this.lastAlongM = alongM; // keep the matcher's continuity hint moving too
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
     const [upcoming, then] = this.findUpcoming(alongM);
