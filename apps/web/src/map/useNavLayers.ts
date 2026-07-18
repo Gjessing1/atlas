@@ -90,6 +90,9 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
         puckRef.current = new maplibregl.Marker({ element: el });
       }
       puckRef.current.setLngLat(snapped).addTo(map);
+      // Grey when the GPS signal is lost, so a frozen puck reads as
+      // "no signal", not "we're still here".
+      puckRef.current.getElement().classList.toggle('nav-puck-lost', nav.state?.fix === 'lost');
     } else {
       puckRef.current?.remove();
       puckRef.current = null;
@@ -107,7 +110,7 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [map, active, nav.state?.snapped, nav.destination]);
+  }, [map, active, nav.state?.snapped, nav.state?.fix, nav.destination]);
   useEffect(
     () => () => {
       puckRef.current?.remove();

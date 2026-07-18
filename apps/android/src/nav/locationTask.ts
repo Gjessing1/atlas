@@ -13,7 +13,13 @@ import * as TaskManager from 'expo-task-manager';
  */
 export const NAV_LOCATION_TASK = 'atlas-nav-location';
 
-export type LocationFix = { lat: number; lng: number; headingDeg?: number; speedMps?: number };
+export type LocationFix = {
+  lat: number;
+  lng: number;
+  headingDeg?: number;
+  speedMps?: number;
+  accuracyM?: number;
+};
 
 let handler: ((fix: LocationFix) => void) | null = null;
 
@@ -33,5 +39,6 @@ TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
     lng: c.longitude,
     headingDeg: c.heading ?? undefined,
     speedMps: c.speed ?? undefined,
+    accuracyM: c.accuracy ?? undefined,
   });
 });

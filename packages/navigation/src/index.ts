@@ -1,6 +1,7 @@
 export { NavigationSession } from './session.js';
 export {
   DEFAULT_NAV_OPTIONS,
+  type NavFix,
   type NavigationOptions,
   type NavState,
   type NavStatus,

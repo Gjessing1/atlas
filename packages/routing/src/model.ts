@@ -28,6 +28,12 @@ export interface RouteQuery {
   alternatives?: boolean;
   /** Ask for turn-by-turn instructions (needed for navigation; off by default). */
   instructions?: boolean;
+  /**
+   * Travel direction (deg, 0 = north) at the first waypoint. Navigation
+   * reroutes pass the current course so the new route continues the way the
+   * vehicle is already pointing instead of proposing a U-turn.
+   */
+  headingDeg?: number;
   /** Loop from-and-back-to the single starting point, aiming for the given length. */
   roundTrip?: {
     distanceM: number;

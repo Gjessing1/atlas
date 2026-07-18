@@ -80,7 +80,9 @@ export function useNavigation(): NavController {
   const speak = useCallback((text: string): void => {
     if (mutedRef.current) return;
     try {
-      Speech.speak(text);
+      // Instructions are English; without a pinned language a Norwegian
+      // device voice garbles them.
+      Speech.speak(text, { language: 'en' });
     } catch (err) {
       console.warn('tts failed', err);
     }
@@ -96,11 +98,17 @@ export function useNavigation(): NavController {
   }, []);
 
   const fetchPath = useCallback(
-    async (origin: LatLng, destination: LatLng, prof: RoutingProfile): Promise<RoutePath> => {
+    async (
+      origin: LatLng,
+      destination: LatLng,
+      prof: RoutingProfile,
+      headingDeg?: number,
+    ): Promise<RoutePath> => {
       const result = await provider.route({
         profile: prof,
         points: [origin, destination],
         instructions: true,
+        ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
       });
       const path = result.paths[0];
       if (!path) throw new Error('no route found');
@@ -142,10 +150,17 @@ export function useNavigation(): NavController {
       rerouteInFlight.current = true;
       setPhase('rerouting');
       try {
-        const path = await fetchPath(from, destRef.current, profileRef.current);
+        // Pass the travel direction (only meaningful when moving) so the new
+        // route continues the way the car points instead of via a U-turn.
+        const heading =
+          typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
+        const path = await fetchPath(from, destRef.current, profileRef.current, heading);
         sessionRef.current = new NavigationSession(path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
+        // "Which way now?" is most urgent right after recalculating.
+        const depart = sessionRef.current.departurePrompt();
+        if (depart) speak(depart.text);
       } catch {
         // Keep the old session; the next off-route fix retries.
       } finally {
@@ -153,7 +168,7 @@ export function useNavigation(): NavController {
         setPhase('navigating');
       }
     },
-    [fetchPath],
+    [fetchPath, speak],
   );
 
   const onFix = useCallback(
@@ -168,7 +183,7 @@ export function useNavigation(): NavController {
         setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
         for (const prompt of prompts) speak(prompt.text);
         if (next.status === 'arrived') {
-          speak('You have arrived');
+          speak(session.arrivalText());
           stop(true);
         } else if (next.status === 'off-route') {
           void reroute(fix);
@@ -230,7 +245,8 @@ export function useNavigation(): NavController {
     const path = previewPaths?.[previewIndex];
     if (!path) return;
     try {
-      sessionRef.current = new NavigationSession(path);
+      const session = new NavigationSession(path);
+      sessionRef.current = session;
       setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
       setActivePath(path);
       setPreviewPaths(null);
@@ -242,7 +258,10 @@ export function useNavigation(): NavController {
       if (!already) {
         await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
           accuracy: Location.Accuracy.BestForNavigation,
-          distanceInterval: 5,
+          // Time-based, not distance-based: with a distance filter no fixes
+          // arrive at a standstill, freezing the ETA at every red light.
+          timeInterval: 1000,
+          distanceInterval: 0,
           showsBackgroundLocationIndicator: true,
           foregroundService: {
             notificationTitle: 'Atlas navigation',
@@ -251,6 +270,10 @@ export function useNavigation(): NavController {
         });
       }
       setPhase('navigating');
+      // Guidance used to be silent until the first approach threshold —
+      // exactly when the driver wonders "which way?".
+      const depart = session.departurePrompt();
+      if (depart) speak(depart.text);
     } catch (err) {
       setLocationHandler(null);
       sessionRef.current = null;
@@ -259,13 +282,32 @@ export function useNavigation(): NavController {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
-  }, [previewPaths, previewIndex, onFix]);
+  }, [previewPaths, previewIndex, onFix, speak]);
 
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);
 
   // A navigating phone is a dashboard: keep the screen on for the whole trip.
   const guiding = phase === 'navigating' || phase === 'rerouting';
+
+  // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
+  // state to signal-lost when fixes stop, so the puck never just freezes.
+  useEffect(() => {
+    if (!guiding) return;
+    const timer = setInterval(() => {
+      const session = sessionRef.current;
+      if (!session) return;
+      try {
+        const update = session.tick(Date.now());
+        if (!update) return;
+        setState(update.state);
+        for (const prompt of update.prompts) speak(prompt.text);
+      } catch (err) {
+        console.warn('navigation tick failed', err);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [guiding, speak]);
   useEffect(() => {
     if (!guiding) return;
     void activateKeepAwakeAsync('atlas-nav').catch(() => undefined);

@@ -67,7 +67,11 @@ export function useWebNavigation(): WebNavController {
   const speak = useCallback((text: string): void => {
     if (mutedRef.current || !('speechSynthesis' in window)) return;
     try {
-      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      const utterance = new SpeechSynthesisUtterance(text);
+      // Instructions are English; without a pinned language a Norwegian
+      // system voice garbles them.
+      utterance.lang = 'en';
+      window.speechSynthesis.speak(utterance);
     } catch {
       // Speech is best-effort.
     }
@@ -82,16 +86,20 @@ export function useWebNavigation(): WebNavController {
     });
   }, []);
 
-  const fetchPath = useCallback(async (origin: LatLng, dest: LatLng, prof: RoutingProfile) => {
-    const result = await fetchRoute({
-      profile: prof,
-      points: [origin, dest],
-      instructions: true,
-    });
-    const path = result.paths[0];
-    if (!path) throw new Error('no route found');
-    return path;
-  }, []);
+  const fetchPath = useCallback(
+    async (origin: LatLng, dest: LatLng, prof: RoutingProfile, headingDeg?: number) => {
+      const result = await fetchRoute({
+        profile: prof,
+        points: [origin, dest],
+        instructions: true,
+        ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
+      });
+      const path = result.paths[0];
+      if (!path) throw new Error('no route found');
+      return path;
+    },
+    [],
+  );
 
   const clearWatch = useCallback(() => {
     if (watchIdRef.current !== null) {
@@ -119,14 +127,21 @@ export function useWebNavigation(): WebNavController {
   );
 
   const reroute = useCallback(
-    async (from: LatLng) => {
+    async (from: Position) => {
       if (rerouteInFlight.current || !destRef.current) return;
       rerouteInFlight.current = true;
       setPhase('rerouting');
       try {
-        const path = await fetchPath(from, destRef.current, profileRef.current);
+        // Pass the travel direction (only meaningful when moving) so the new
+        // route continues the way the car points instead of via a U-turn.
+        const heading =
+          typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
+        const path = await fetchPath(from, destRef.current, profileRef.current, heading);
         sessionRef.current = new NavigationSession(path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+        // "Which way now?" is most urgent right after recalculating.
+        const depart = sessionRef.current.departurePrompt();
+        if (depart) speak(depart.text);
       } catch {
         // Keep the old session; the next off-route fix retries.
       } finally {
@@ -134,7 +149,7 @@ export function useWebNavigation(): WebNavController {
         setPhase('navigating');
       }
     },
-    [fetchPath],
+    [fetchPath, speak],
   );
 
   const onFix = useCallback(
@@ -143,6 +158,9 @@ export function useWebNavigation(): WebNavController {
       if (!session) return;
       const { coords } = geo;
       const fix: Position = { lat: coords.latitude, lng: coords.longitude };
+      if (typeof coords.accuracy === 'number' && coords.accuracy >= 0) {
+        fix.accuracyM = coords.accuracy;
+      }
       if (typeof coords.heading === 'number' && !Number.isNaN(coords.heading)) {
         fix.headingDeg = coords.heading;
         setHeadingDeg(coords.heading);
@@ -157,7 +175,7 @@ export function useWebNavigation(): WebNavController {
       setState(next);
       for (const prompt of prompts) speak(prompt.text);
       if (next.status === 'arrived') {
-        speak('You have arrived');
+        speak(session.arrivalText());
         stop(true);
       } else if (next.status === 'off-route') {
         void reroute(fix);
@@ -182,7 +200,8 @@ export function useWebNavigation(): WebNavController {
         setState(null);
 
         const path = await fetchPath(origin, dest, prof);
-        sessionRef.current = new NavigationSession(path);
+        const session = new NavigationSession(path);
+        sessionRef.current = session;
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
 
         clearWatch();
@@ -194,6 +213,10 @@ export function useWebNavigation(): WebNavController {
           { enableHighAccuracy: true },
         );
         setPhase('navigating');
+        // Guidance used to be silent until the first approach threshold —
+        // exactly when the driver wonders "which way?".
+        const depart = session.departurePrompt();
+        if (depart) speak(depart.text);
         // Process the first fix immediately rather than waiting for movement.
         onFix(cur);
       } catch (err) {
@@ -205,8 +228,24 @@ export function useWebNavigation(): WebNavController {
         setPhase('error');
       }
     },
-    [fetchPath, onFix, clearWatch],
+    [fetchPath, onFix, clearWatch, speak],
   );
+
+  // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
+  // state to signal-lost when fixes stop, so the puck never just freezes.
+  const guiding = phase === 'navigating' || phase === 'rerouting';
+  useEffect(() => {
+    if (!guiding) return;
+    const timer = setInterval(() => {
+      const session = sessionRef.current;
+      if (!session) return;
+      const update = session.tick(Date.now());
+      if (!update) return;
+      setState(update.state);
+      for (const prompt of update.prompts) speak(prompt.text);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [guiding, speak]);
 
   // Drop the geolocation watch if the app unmounts mid-trip.
   useEffect(() => clearWatch, [clearWatch]);

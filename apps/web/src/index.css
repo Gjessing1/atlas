@@ -1091,6 +1091,11 @@ body {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
 }
 
+/* GPS signal lost: a grey puck reads as "no signal", not "we're still here". */
+.nav-puck-lost {
+  background: #9aa0a6;
+}
+
 .nav-dest-marker {
   font-size: 26px;
   line-height: 1;

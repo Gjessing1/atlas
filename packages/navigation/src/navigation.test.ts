@@ -354,6 +354,176 @@ describe('geometry helpers', () => {
   });
 });
 
+describe('NavigationSession GPS accuracy', () => {
+  const offPoint = { lat: 60.001, lng: 10.01 }; // ~110 m off the line
+
+  it('never counts poor-accuracy fixes toward off-route', () => {
+    const s = new NavigationSession(route());
+    // Urban-canyon fixes: far off the line but with a large error radius.
+    for (let i = 0; i < 6; i++) {
+      expect(s.update({ ...offPoint, accuracyM: 80 }, i * 1000).state.status).toBe('navigating');
+    }
+    // Accurate off-route fixes still trip detection at the usual grace count.
+    s.update({ ...offPoint, accuracyM: 10 }, 7000);
+    s.update({ ...offPoint, accuracyM: 10 }, 8000);
+    expect(s.update({ ...offPoint, accuracyM: 10 }, 9000).state.status).toBe('off-route');
+  });
+
+  it('ignores hopeless fixes entirely, holding the last state', () => {
+    const s = new NavigationSession(route());
+    const good = s.update({ ...pointAtAlong(500), accuracyM: 10 }, 0).state;
+    // A 500 m error radius fix far away must not teleport the puck.
+    const junk = s.update({ lat: 60.01, lng: 10, accuracyM: 500 }, 1000).state;
+    expect(junk.snapped).toEqual(good.snapped);
+    expect(junk.traveledM).toBeCloseTo(good.traveledM, 5);
+  });
+
+  it('accepts a poor first fix rather than starting blind', () => {
+    const s = new NavigationSession(route());
+    const state = s.update({ ...pointAtAlong(100), accuracyM: 500 }, 0).state;
+    expect(state.traveledM).toBeCloseTo(100, 0);
+  });
+});
+
+describe('NavigationSession tick: dead reckoning and signal loss', () => {
+  it('returns null while fixes are flowing', () => {
+    const s = new NavigationSession(route());
+    expect(s.tick(0)).toBeNull(); // before the first fix
+    s.update({ ...pointAtAlong(200), speedMps: 20 }, 0);
+    expect(s.tick(1000)).toBeNull(); // within the gap tolerance
+  });
+
+  it('extrapolates along-route at the last speed through a gap', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(200), speedMps: 20 }, 0);
+    const est = s.tick(5000);
+    expect(est).not.toBeNull();
+    expect(est!.state.fix).toBe('estimated');
+    expect(est!.state.status).toBe('navigating');
+    expect(est!.state.traveledM).toBeCloseTo(200 + 20 * 5, 0);
+    // Anchored at the fix, not compounding: 10 s of gap = 200 m, not more.
+    expect(s.tick(10_000)!.state.traveledM).toBeCloseTo(200 + 20 * 10, 0);
+  });
+
+  it('keeps firing voice prompts from extrapolated positions', () => {
+    const s = new NavigationSession(route());
+    const maneuverAlong = routeCum[10]!;
+    s.update({ ...pointAtAlong(maneuverAlong - 513), speedMps: 20 }, 0);
+    // 10 s later the estimated position is ~313 m out: the 400 m prompt fires.
+    const est = s.tick(10_000)!;
+    expect(est.prompts).toHaveLength(1);
+    expect(est.prompts[0]).toMatchObject({ kind: 'approach', thresholdM: 400 });
+  });
+
+  it('never declares arrival from extrapolation alone', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(routeTotal - 300), speedMps: 30 }, 0);
+    const est = s.tick(60_000)!; // would be 1.8 km past the destination
+    expect(est.state.status).toBe('navigating');
+    expect(est.state.distanceRemainingM).toBeGreaterThan(0);
+  });
+
+  it('reports signal-lost when stationary fixes stop', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(100), speedMps: 0 }, 0);
+    expect(s.tick(4000)).toBeNull(); // gapped but not yet lost
+    const lost = s.tick(6000);
+    expect(lost).not.toBeNull();
+    expect(lost!.state.fix).toBe('lost');
+    expect(lost!.state.traveledM).toBeCloseTo(100, 0);
+  });
+
+  it('gives up dead reckoning after the maximum gap', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(100), speedMps: 20 }, 0);
+    expect(s.tick(200_000)!.state.fix).toBe('lost');
+  });
+});
+
+describe('NavigationSession adaptive ETA', () => {
+  it('stretches the ETA when actual pace falls behind the route estimate', () => {
+    const s = new NavigationSession(route());
+    const still = { ...pointAtAlong(300), speedMps: 0 };
+    const base = s.update(still, 0).state.timeRemainingMs;
+    // Stuck for five minutes: the pace factor sinks to its clamp.
+    let remaining = base;
+    for (let t = 10_000; t <= 300_000; t += 10_000) {
+      remaining = s.update(still, t).state.timeRemainingMs;
+    }
+    expect(remaining).toBeGreaterThan(base * 2);
+    expect(remaining).toBeLessThanOrEqual(base * 2.6); // clamped, never runaway
+  });
+
+  it('shrinks the ETA when running ahead of the route estimate', () => {
+    const s = new NavigationSession(route());
+    // ~30 m/s over legs the route budgeted ~9 m/s for.
+    let along = 100;
+    let state = s.update({ ...pointAtAlong(along), speedMps: 30 }, 0).state;
+    for (let t = 5000; t <= 25_000; t += 5000) {
+      along += 150;
+      state = s.update({ ...pointAtAlong(along), speedMps: 30 }, t).state;
+    }
+    const unadapted = new NavigationSession(route()).update(pointAtAlong(along), 0).state;
+    expect(state.timeRemainingMs).toBeLessThan(unadapted.timeRemainingMs * 0.9);
+  });
+});
+
+describe('NavigationSession voice extras', () => {
+  // Two maneuvers ~222 m apart: close enough to chain into one prompt.
+  const chained: RouteInstruction[] = [
+    { text: 'Head east.', distanceM: routeCum[10]!, timeMs: 60_000, sign: 0, interval: [0, 10] },
+    {
+      text: 'Turn right onto Elm Street.',
+      distanceM: routeCum[12]! - routeCum[10]!,
+      timeMs: 20_000,
+      sign: 2,
+      interval: [10, 12],
+    },
+    {
+      text: 'Keep left at the fork.',
+      distanceM: routeTotal - routeCum[12]!,
+      timeMs: 40_000,
+      sign: -7,
+      interval: [12, 20],
+    },
+    {
+      text: 'You have arrived. It is on the right.',
+      distanceM: 0,
+      timeMs: 0,
+      sign: 4,
+      interval: [20, 20],
+    },
+  ];
+
+  it('offers the first instruction as a departure prompt', () => {
+    const depart = new NavigationSession(route()).departurePrompt();
+    expect(depart).toMatchObject({ kind: 'depart', text: 'Head east' });
+    expect(new NavigationSession(route(false)).departurePrompt()).toBeNull();
+  });
+
+  it('chains a close following maneuver into approach and now prompts', () => {
+    const s = new NavigationSession({ ...route(), instructions: chained });
+    const approach = s.update(pointAtAlong(routeCum[10]! - 350), 0).prompts;
+    expect(approach[0]!.text).toBe(
+      'In 400 meters, Turn right onto Elm Street, then keep left at the fork.',
+    );
+    const now = s.update(pointAtAlong(routeCum[10]! - 20), 0).prompts;
+    expect(now[0]!.text).toBe('Turn right onto Elm Street, then keep left at the fork.');
+  });
+
+  it('does not chain maneuvers that are far apart', () => {
+    const s = new NavigationSession(route());
+    const prompts = s.update(pointAtAlong(routeCum[10]! - 350), 0).prompts;
+    expect(prompts[0]!.text).toBe('In 400 meters, Turn right onto Elm Street');
+  });
+
+  it('speaks the destination side on arrival when the route carries it', () => {
+    const withSide = new NavigationSession({ ...route(), instructions: chained });
+    expect(withSide.arrivalText()).toBe('You have arrived. It is on the right.');
+    expect(new NavigationSession(route(false)).arrivalText()).toBe('You have arrived');
+  });
+});
+
 describe('NavState course and then-maneuver', () => {
   it('reports the route tangent as the course', () => {
     const s = new NavigationSession(route());

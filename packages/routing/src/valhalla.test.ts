@@ -126,6 +126,27 @@ describe('buildValhallaRequest', () => {
     ).toBeUndefined();
   });
 
+  it('puts the travel direction on the first location only', () => {
+    const body = buildValhallaRequest({
+      profile: 'car',
+      points: [oslo, sognsvann],
+      headingDeg: 123.6,
+    });
+    const locations = body['locations'] as Record<string, unknown>[];
+    expect(locations[0]).toMatchObject({ lat: oslo.lat, lon: oslo.lng, heading: 124 });
+    expect(locations[1]!['heading']).toBeUndefined();
+    // Negative headings normalize onto the compass.
+    const wrapped = buildValhallaRequest({
+      profile: 'car',
+      points: [oslo, sognsvann],
+      headingDeg: -90,
+    });
+    expect((wrapped['locations'] as Record<string, unknown>[])[0]!['heading']).toBe(270);
+    // No heading given — none sent.
+    const plain = buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann] });
+    expect((plain['locations'] as Record<string, unknown>[])[0]!['heading']).toBeUndefined();
+  });
+
   it('requests maneuvers only when instructions are asked for', () => {
     const planning = buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann] });
     expect(planning['directions_type']).toBe('none');

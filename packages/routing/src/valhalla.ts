@@ -86,7 +86,7 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   // Round trips route start -> synthesized vias -> start. The vias are
   // `through` locations: shaping points the route must pass, not stops (no
   // leg split, no u-turn allowed at them).
-  const locations = query.roundTrip
+  const locations: { lat: number; lon: number; type?: string; heading?: number }[] = query.roundTrip
     ? roundTripLocations(
         query.points[0]!,
         query.roundTrip.distanceM,
@@ -97,6 +97,12 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
         type: i === 0 || i === all.length - 1 ? 'break' : 'through',
       }))
     : query.points.map((p) => ({ lat: p.lat, lon: p.lng }));
+  // Continue in the direction of travel: Valhalla penalizes edges leaving the
+  // first location against its heading (within the default 60° tolerance), so
+  // a mid-drive reroute doesn't open with "make a U-turn".
+  if (!query.roundTrip && typeof query.headingDeg === 'number' && locations[0]) {
+    locations[0] = { ...locations[0], heading: Math.round(((query.headingDeg % 360) + 360) % 360) };
+  }
   const body: Record<string, unknown> = {
     locations,
     costing: costingFor(query.profile),

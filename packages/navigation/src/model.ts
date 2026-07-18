@@ -9,9 +9,19 @@ export interface Position {
   headingDeg?: number;
   /** Ground speed in m/s, if known (used only for display). */
   speedMps?: number;
+  /** Horizontal accuracy radius (m), if the device reports it. */
+  accuracyM?: number;
 }
 
 export type NavStatus = 'navigating' | 'off-route' | 'arrived';
+
+/**
+ * How the position in a NavState was obtained: `live` from a fresh usable GPS
+ * fix, `estimated` dead-reckoned along the route through a GPS gap (tunnel),
+ * `lost` when fixes have stopped and there is no basis to extrapolate — UIs
+ * should grey the puck.
+ */
+export type NavFix = 'live' | 'estimated' | 'lost';
 
 /** The maneuver the traveller is approaching. */
 export interface UpcomingManeuver {
@@ -43,6 +53,8 @@ export interface NavState {
   upcoming: UpcomingManeuver | null;
   /** The maneuver after `upcoming` (for "then …" hints), or null. */
   then: UpcomingManeuver | null;
+  /** Whether this position is a live fix, an extrapolation, or signal-lost. */
+  fix: NavFix;
   /**
    * Direction of the route (deg, 0 = north) at the snapped position, looking
    * ~25 m ahead — a stable course-up camera bearing, unlike raw GPS course.
@@ -55,8 +67,12 @@ export interface NavState {
 export interface VoicePrompt {
   /** Ready-to-speak text, e.g. "In 200 meters, turn right onto Main Street". */
   text: string;
-  /** `approach` fires at a distance threshold; `now` fires at the maneuver. */
-  kind: 'approach' | 'now';
+  /**
+   * `approach` fires at a distance threshold; `now` fires at the maneuver;
+   * `depart` is the first instruction, offered by `departurePrompt()` at
+   * guidance start (it is behind the traveller, so it never fires otherwise).
+   */
+  kind: 'approach' | 'now' | 'depart';
   /** Index of the maneuver instruction this prompt refers to. */
   maneuverIndex: number;
   /** The distance threshold (m) that triggered an `approach` prompt (0 for `now`). */
@@ -86,6 +102,22 @@ export interface NavigationOptions {
   farApproachM?: number;
   /** Ground speed (m/s) above which the far approach prompt is armed. */
   farApproachMinSpeedMps?: number;
+  /** Fix accuracy (m) beyond which a fix may not count toward off-route. */
+  offRouteMaxAccuracyM?: number;
+  /** Fix accuracy (m) beyond which a fix is ignored entirely (pure noise). */
+  discardAccuracyM?: number;
+  /** Fix age (ms) at which `tick()` starts treating the signal as gapped. */
+  fixGapMs?: number;
+  /** Fix age (ms) beyond which, absent dead reckoning, the fix is `lost`. */
+  signalLostMs?: number;
+  /** Minimum last-known speed (m/s) required to dead-reckon through a gap. */
+  deadReckonMinSpeedMps?: number;
+  /** Longest gap (ms) dead reckoning may bridge before reporting `lost`. */
+  deadReckonMaxMs?: number;
+  /** Chain "…, then X" into a prompt when X follows within this distance (m). */
+  chainManeuverM?: number;
+  /** Time constant (ms) of the observed-pace average that adapts the ETA. */
+  paceTauMs?: number;
 }
 
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
@@ -96,4 +128,12 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   nowThresholdM: 40,
   farApproachM: 800,
   farApproachMinSpeedMps: 19, // ~70 km/h: 400 m is under 20 s of warning
+  offRouteMaxAccuracyM: 30, // urban-canyon fixes must not trigger reroutes
+  discardAccuracyM: 100,
+  fixGapMs: 3000,
+  signalLostMs: 5000,
+  deadReckonMinSpeedMps: 3, // below ~11 km/h a stop is likelier than a tunnel
+  deadReckonMaxMs: 180_000, // ~3 min bridges most tunnels without runaway
+  chainManeuverM: 300,
+  paceTauMs: 90_000,
 };

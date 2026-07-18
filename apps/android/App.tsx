@@ -550,7 +550,9 @@ function AppInner() {
           style={[styles.navPuckWrap, { top: navPuckTop - 21, left: win.width / 2 - 21 }]}
         >
           <View style={{ transform: [{ rotate: `${navPuckRotation}deg` }] }}>
-            <NavArrowIcon color="#1a73e8" />
+            {/* Grey when the GPS signal is lost, so a frozen puck reads as
+                "no signal", not "we're still here". */}
+            <NavArrowIcon color={nav.state?.fix === 'lost' ? '#9aa0a6' : '#1a73e8'} />
           </View>
         </View>
       ) : null}
