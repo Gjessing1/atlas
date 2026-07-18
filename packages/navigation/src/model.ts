@@ -25,6 +25,8 @@ export interface NavState {
   status: NavStatus;
   /** The position snapped onto the route (what a nav UI should render). */
   snapped: LatLng;
+  /** The raw GPS fix that produced this state (for off-route display fallback). */
+  raw: LatLng;
   /** Perpendicular distance (m) from the raw fix to the route. */
   offRouteM: number;
   /** Distance (m) already covered along the route. */
@@ -80,6 +82,10 @@ export interface NavigationOptions {
   approachThresholdsM?: number[];
   /** Distance (m) to the maneuver at which to emit the "now" prompt. */
   nowThresholdM?: number;
+  /** Extra far-out approach distance (m) used only at highway speeds. */
+  farApproachM?: number;
+  /** Ground speed (m/s) above which the far approach prompt is armed. */
+  farApproachMinSpeedMps?: number;
 }
 
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
@@ -88,4 +94,6 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   arrivalRadiusM: 25,
   approachThresholdsM: [400, 200],
   nowThresholdM: 40,
+  farApproachM: 800,
+  farApproachMinSpeedMps: 19, // ~70 km/h: 400 m is under 20 s of warning
 };

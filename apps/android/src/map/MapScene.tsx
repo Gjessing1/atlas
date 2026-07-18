@@ -76,6 +76,8 @@ interface MapSceneProps {
   destination: DestinationTarget | null;
   visiblePlaces: PlaceRecord[];
   showPuck: boolean;
+  /** App is drawing its own screen-fixed nav puck — hide the native one. */
+  suppressPuck: boolean;
   /** Boot camera (persisted last view, falling back to DEFAULT_VIEW). */
   initialView: { center: LatLng; zoom: number };
   /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
@@ -108,6 +110,7 @@ export function MapScene({
   destination,
   visiblePlaces,
   showPuck,
+  suppressPuck,
   initialView,
   onMapPress,
   onPickPoint,
@@ -227,15 +230,24 @@ export function MapScene({
       ) : null}
       {nav.routeCoords.length > 1 ? (
         <GeoJSONSource id="atlas-route" data={lineStringFeature(nav.routeCoords)} lineMetrics>
+          {/* Google-style solid blue with a darker casing; the line-gradient
+              greys out the stretch already driven behind the car. */}
+          <Layer
+            type="line"
+            id="atlas-route-casing"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{
+              'line-width': 11,
+              'line-gradient': ['step', ['line-progress'], '#7d8590', routeProgress, '#1557b0'],
+            }}
+          />
           <Layer
             type="line"
             id="atlas-route-line"
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
             paint={{
-              'line-width': 6,
-              'line-opacity': 0.85,
-              // The stretch already driven greys out behind the car.
-              'line-gradient': ['step', ['line-progress'], '#98a2b3', routeProgress, '#2b6cff'],
+              'line-width': 7,
+              'line-gradient': ['step', ['line-progress'], '#aab2bd', routeProgress, '#4285f4'],
             }}
           />
         </GeoJSONSource>
@@ -383,7 +395,9 @@ export function MapScene({
           zoom: initialView.zoom,
         }}
       />
-      {following || showPuck ? <UserLocation heading={following} animated /> : null}
+      {!suppressPuck && (following || showPuck) ? (
+        <UserLocation heading={following} animated />
+      ) : null}
       {nav.destination ? (
         <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
           <View style={pinScaleStyle}>

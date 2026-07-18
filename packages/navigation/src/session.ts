@@ -1,7 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 
-import { bearingDeg, cumulativeDistances, pointAtDistance, snapToPolyline } from './geometry.js';
+import { bearingDeg, cumulativeDistances, pointAtDistance, snapToRoute } from './geometry.js';
 import {
   DEFAULT_NAV_OPTIONS,
   type NavigationOptions,
@@ -41,6 +41,8 @@ export class NavigationSession {
   private offRouteCount = 0;
   private arrived = false;
   private readonly firedPrompts = new Set<string>();
+  /** alongM of the previous snap — continuity hint for the map matcher. */
+  private lastAlongM: number | null = null;
 
   constructor(route: RoutePath, options: NavigationOptions = {}) {
     if (route.points.length === 0) throw new Error('cannot navigate an empty route');
@@ -63,7 +65,19 @@ export class NavigationSession {
 
   /** Feed one position fix; returns the new state and any voice prompts it triggered. */
   update(position: Position, nowMs: number = Date.now()): NavUpdate {
-    const snap = snapToPolyline(position, this.points, this.cum);
+    const speedMps =
+      typeof position.speedMps === 'number' && position.speedMps >= 0 ? position.speedMps : null;
+    // The GPS course only disambiguates direction when actually moving —
+    // stationary headings are compass noise.
+    const moving = speedMps !== null && speedMps >= 2;
+    const snap = snapToRoute(position, this.points, this.cum, {
+      prevAlongM: this.lastAlongM,
+      headingDeg:
+        moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
+          ? position.headingDeg
+          : null,
+    });
+    this.lastAlongM = snap.alongM;
     const alongM = snap.alongM;
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
 
@@ -74,11 +88,12 @@ export class NavigationSession {
     const offRoute = this.offRouteCount >= this.opts.offRouteGraceUpdates;
 
     const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
-    const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming);
+    const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming, speedMps);
 
     const state: NavState = {
       status: this.arrived ? 'arrived' : offRoute ? 'off-route' : 'navigating',
       snapped: snap.point,
+      raw: { lat: position.lat, lng: position.lng },
       offRouteM: snap.crossTrackM,
       traveledM: alongM,
       routeProgress: this.arrived ? 1 : this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
@@ -87,7 +102,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + this.remainingTimeMs(alongM, distanceRemainingM),
       upcoming,
       then,
-      courseDeg: this.courseAt(alongM),
+      courseDeg: this.courseAt(alongM, speedMps),
     };
     return { state, prompts };
   }
@@ -107,10 +122,15 @@ export class NavigationSession {
     return [null, null];
   }
 
-  /** Route direction at `alongM`, from a ~25 m tangent (looking back at the very end). */
-  private courseAt(alongM: number): number | null {
+  /**
+   * Route direction at `alongM` from a forward tangent (looking back at the
+   * very end). The tangent length scales with speed — ~1.5 s of travel,
+   * clamped to 25..60 m — so a fast course-up camera starts leaning into a
+   * bend earlier while low-speed turns stay tight.
+   */
+  private courseAt(alongM: number, speedMps: number | null): number | null {
     if (this.points.length < 2 || this.totalM <= 0) return null;
-    const LOOKAHEAD_M = 25;
+    const LOOKAHEAD_M = Math.min(60, Math.max(25, (speedMps ?? 0) * 1.5));
     const from = Math.min(alongM, Math.max(0, this.totalM - LOOKAHEAD_M));
     const to = Math.min(this.totalM, from + LOOKAHEAD_M);
     if (to <= from) return null;
@@ -139,30 +159,41 @@ export class NavigationSession {
     return fractionLeft * cur.timeMs + this.suffixTimeMs[current]!;
   }
 
-  private collectPrompts(upcoming: UpcomingManeuver | null): VoicePrompt[] {
+  private collectPrompts(
+    upcoming: UpcomingManeuver | null,
+    speedMps: number | null,
+  ): VoicePrompt[] {
     if (!upcoming) return [];
     // Locate the maneuver's index in our list to key fired prompts stably.
     const idx = this.maneuvers.find((m) => m.instruction === upcoming.instruction)?.index ?? -1;
     if (idx < 0) return [];
     const d = upcoming.distanceToM;
+    // At highway speed the standard thresholds give under 20 s of warning, so
+    // an extra far-out prompt is armed; skipping it entirely at city speeds
+    // keeps dense urban routes from becoming a monologue.
+    const allThresholds = [this.opts.farApproachM, ...this.opts.approachThresholdsM];
+    const activeThresholds =
+      speedMps !== null && speedMps >= this.opts.farApproachMinSpeedMps
+        ? allThresholds
+        : this.opts.approachThresholdsM;
 
     if (d <= this.opts.nowThresholdM) {
       const key = `${idx}:now`;
       if (this.firedPrompts.has(key)) return [];
       // A jump straight to the maneuver skips its approach prompts for good.
-      for (const t of this.opts.approachThresholdsM) this.firedPrompts.add(`${idx}:${t}`);
+      for (const t of allThresholds) this.firedPrompts.add(`${idx}:${t}`);
       this.firedPrompts.add(key);
       return [{ text: upcoming.instruction.text, kind: 'now', maneuverIndex: idx, thresholdM: 0 }];
     }
 
     // Fire the tightest not-yet-fired threshold we've crossed; mark looser ones
     // fired too so a large GPS jump doesn't replay them later.
-    const crossed = this.opts.approachThresholdsM
+    const crossed = activeThresholds
       .filter((t) => d <= t && !this.firedPrompts.has(`${idx}:${t}`))
       .sort((a, b) => a - b);
     const t = crossed[0];
     if (t === undefined) return [];
-    for (const larger of this.opts.approachThresholdsM) {
+    for (const larger of allThresholds) {
       if (larger >= t) this.firedPrompts.add(`${idx}:${larger}`);
     }
     return [

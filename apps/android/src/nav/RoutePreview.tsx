@@ -1,6 +1,6 @@
 import { pathViaLabels } from '@atlas/routing';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { NavController } from './useNavigation';
 
@@ -29,13 +29,27 @@ function formatExtra(ms: number, fastestMs: number): string {
  * for the slower ones. Start begins guidance along the selected row.
  */
 export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomInset: number }) {
+  const win = useWindowDimensions();
   const paths = nav.previewPaths;
   const vias = useMemo(() => (paths ? pathViaLabels(paths) : []), [paths]);
   if (nav.phase !== 'preview' || !paths || paths.length === 0) return null;
   const fastestMs = paths[0]!.timeMs;
+  // Landscape: a left-anchored card instead of a full-width sheet, so the
+  // drawn route choices stay visible beside it.
+  const landscape = win.width > win.height;
 
   return (
-    <View style={[styles.wrap, { paddingBottom: bottomInset + 12 }]}>
+    <View
+      style={[
+        styles.wrap,
+        { paddingBottom: bottomInset + 12 },
+        landscape && {
+          right: undefined,
+          width: Math.min(420, Math.round(win.width * 0.45)),
+          borderTopRightRadius: 18,
+        },
+      ]}
+    >
       <ScrollView style={styles.choices} bounces={false}>
         {paths.map((path, i) => {
           const selected = i === nav.previewIndex;

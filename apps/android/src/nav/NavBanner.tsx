@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { NavController } from './useNavigation';
 
@@ -89,8 +89,12 @@ export function NavBanner({
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
+  const win = useWindowDimensions();
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
+  // Landscape: park the banner on the left (Google-style side panel) so the
+  // road ahead keeps the rest of the width.
+  const landscape = win.width > win.height;
 
   const { state } = nav;
   const maneuver = state?.upcoming;
@@ -105,7 +109,11 @@ export function NavBanner({
 
   return (
     <View
-      style={[styles.wrap, { top: topInset + 8 }]}
+      style={[
+        styles.wrap,
+        { top: topInset + 8 },
+        landscape && { right: undefined, width: Math.min(400, Math.round(win.width * 0.42)) },
+      ]}
       pointerEvents="box-none"
       onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
     >

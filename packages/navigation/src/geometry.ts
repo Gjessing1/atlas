@@ -91,6 +91,46 @@ export function subPolyline(points: LatLng[], cum: number[], fromM: number, toM:
  * `cumulativeDistances(points)`. Assumes at least one point.
  */
 export function snapToPolyline(query: LatLng, points: LatLng[], cum: number[]): Snap {
+  return snapToRoute(query, points, cum);
+}
+
+/** Continuity hints that turn the plain nearest-segment snap into map matching. */
+export interface SnapHint {
+  /**
+   * `alongM` of the previous snap. Biases the match toward route continuity:
+   * candidates behind the traveller, or implausibly far ahead (the return leg
+   * of an out-and-back passing through the same streets), are penalized.
+   */
+  prevAlongM?: number | null;
+  /**
+   * GPS travel direction (deg, 0 = north). Pass only when actually moving —
+   * a wrong-way segment (parallel carriageway, the other side of a divided
+   * road) then costs as much as ~30 m of cross-track distance.
+   */
+  headingDeg?: number | null;
+}
+
+// Scoring weights: penalties are expressed in metres of equivalent
+// cross-track distance, so a hint only overrides proximity when the
+// geometric ambiguity is genuinely small.
+const BACKTRACK_PENALTY_PER_M = 0.15;
+const AHEAD_SLACK_M = 250;
+const AHEAD_PENALTY_PER_M = 0.05;
+const HEADING_PENALTY_MAX_M = 30;
+
+/**
+ * Snap `query` to the polyline like `snapToPolyline`, but score candidates
+ * with route-continuity and travel-direction penalties (a lightweight map
+ * matcher): with GPS slightly off the road, the fix stays locked to the
+ * segment the traveller is actually driving instead of jumping to whichever
+ * nearby segment happens to be geometrically closest.
+ */
+export function snapToRoute(
+  query: LatLng,
+  points: LatLng[],
+  cum: number[],
+  hint: SnapHint = {},
+): Snap {
   if (points.length < 2) {
     const only = points[0]!;
     return {
@@ -102,7 +142,11 @@ export function snapToPolyline(query: LatLng, points: LatLng[], cum: number[]): 
     };
   }
 
+  const prevAlongM = hint.prevAlongM ?? null;
+  const headingRad = hint.headingDeg != null ? (hint.headingDeg * Math.PI) / 180 : null;
+
   let best: Snap | null = null;
+  let bestScore = Infinity;
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]!;
     const b = points[i + 1]!;
@@ -116,14 +160,21 @@ export function snapToPolyline(query: LatLng, points: LatLng[], cum: number[]): 
     const dx = qx - t * bx;
     const dy = qy - t * by;
     const crossTrackM = Math.sqrt(dx * dx + dy * dy);
-    if (best === null || crossTrackM < best.crossTrackM) {
-      best = {
-        point: lerp(a, b, t),
-        segmentIndex: i,
-        t,
-        crossTrackM,
-        alongM: cum[i]! + t * (cum[i + 1]! - cum[i]!),
-      };
+    const alongM = cum[i]! + t * (cum[i + 1]! - cum[i]!);
+
+    let score = crossTrackM;
+    if (prevAlongM !== null) {
+      score += BACKTRACK_PENALTY_PER_M * Math.max(0, prevAlongM - alongM);
+      score += AHEAD_PENALTY_PER_M * Math.max(0, alongM - prevAlongM - AHEAD_SLACK_M);
+    }
+    if (headingRad !== null && len2 > 0) {
+      // 0 when aligned with the segment, HEADING_PENALTY_MAX_M when opposed.
+      const segRad = Math.atan2(bx, by);
+      score += ((1 - Math.cos(headingRad - segRad)) / 2) * HEADING_PENALTY_MAX_M;
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      best = { point: lerp(a, b, t), segmentIndex: i, t, crossTrackM, alongM };
     }
   }
   return best!;

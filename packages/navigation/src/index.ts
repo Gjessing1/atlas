@@ -14,8 +14,10 @@ export {
   cumulativeDistances,
   pointAtDistance,
   snapToPolyline,
+  snapToRoute,
   subPolyline,
   type Snap,
+  type SnapHint,
 } from './geometry.js';
 export { followZoom, zoomForSpeed } from './camera.js';
 export { maneuverArrowsGeoJSON } from './overlays.js';

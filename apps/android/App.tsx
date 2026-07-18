@@ -20,7 +20,16 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Pressable, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Linking,
+  Pressable,
+  Share,
+  StyleSheet,
+  Switch,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -150,6 +159,25 @@ function AppInner() {
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
   const controlsTop = topInset + 8 + (navActive && !previewing ? navHeight + 8 : 0);
+
+  // While the follow camera is actively tracking, the puck is drawn as a
+  // screen-fixed chevron at the camera's anchor point — the camera eases to
+  // the road-snapped fix, so the chevron sits glued to the route line with
+  // none of the native puck's raw-GPS wobble. Falls back to the native puck
+  // when paused/off-route (the map moves freely under the true position then).
+  const win = useWindowDimensions();
+  const navPuckVisible =
+    following &&
+    !navCam.followPaused &&
+    nav.state !== null &&
+    nav.state.status !== 'off-route' &&
+    nav.state.offRouteM <= 40;
+  // Anchor point of the follow camera (see useNavCamera): course-up pads the
+  // centre down to 75% of the screen; north-up keeps it at the middle.
+  const navPuckTop = navFollow === 'course' ? win.height * 0.75 : win.height * 0.5;
+  // Course-up rotates the map to the course, so the chevron points straight
+  // up; north-up leaves the map at bearing 0, so the chevron shows the course.
+  const navPuckRotation = navFollow === 'course' ? 0 : Math.round(nav.state?.courseDeg ?? 0);
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -366,11 +394,18 @@ function AppInner() {
       if (p.lat > north) north = p.lat;
     }
     if (!Number.isFinite(west) || west === east || south === north) return;
+    // The choice card covers the bottom in portrait but the left in landscape
+    // (a 300 dp bottom pad would swallow a landscape screen whole).
+    const landscape = win.width > win.height;
+    // Mirrors the RoutePreview card width so the fit clears it exactly.
+    const cardW = Math.min(420, Math.round(win.width * 0.45));
     cameraRef.current?.fitBounds([west, south, east, north], {
-      padding: { top: topInset + 48, right: 48, bottom: bottomInset + 300, left: 48 },
+      padding: landscape
+        ? { top: topInset + 48, right: 48, bottom: bottomInset + 48, left: cardW + 40 }
+        : { top: topInset + 48, right: 48, bottom: bottomInset + 300, left: 48 },
       duration: 700,
     });
-  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset]);
+  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset, win.width, win.height]);
 
   // Long-press outside route planning: pick any point as a destination.
   const onPickPoint = useCallback(
@@ -499,6 +534,7 @@ function AppInner() {
         destination={destination}
         visiblePlaces={visiblePlaces}
         showPuck={showPuck}
+        suppressPuck={navPuckVisible}
         initialView={initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
@@ -506,6 +542,18 @@ function AppInner() {
         onUserGesture={navCam.onUserGesture}
         onDestinationMoved={onDestinationMoved}
       />
+
+      {/* The screen-fixed nav chevron (see navPuckVisible above). */}
+      {navPuckVisible ? (
+        <View
+          pointerEvents="none"
+          style={[styles.navPuckWrap, { top: navPuckTop - 21, left: win.width / 2 - 21 }]}
+        >
+          <View style={{ transform: [{ rotate: `${navPuckRotation}deg` }] }}>
+            <NavArrowIcon color="#1a73e8" />
+          </View>
+        </View>
+      ) : null}
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
 
@@ -687,6 +735,16 @@ const styles = StyleSheet.create({
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
   recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  navPuckWrap: {
+    position: 'absolute',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+  },
   recentrePill: {
     flexDirection: 'row',
     alignItems: 'center',

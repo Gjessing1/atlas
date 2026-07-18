@@ -8,6 +8,7 @@ import {
   cumulativeDistances,
   pointAtDistance,
   snapToPolyline,
+  snapToRoute,
   subPolyline,
 } from './geometry.js';
 import { maneuverArrowsGeoJSON } from './overlays.js';
@@ -83,6 +84,56 @@ describe('snapToPolyline', () => {
     const snap = snapToPolyline({ lat: 60.001, lng: 10 }, [{ lat: 60, lng: 10 }], [0]);
     expect(snap.alongM).toBe(0);
     expect(snap.crossTrackM).toBeGreaterThan(0);
+  });
+});
+
+describe('snapToRoute map matching', () => {
+  // An out-and-back: east along lat 60, U-turn, back west ~33 m to the north.
+  // Every point on the outbound leg has a near-equidistant rival on the
+  // return leg — exactly the ambiguity the hints must resolve.
+  const outAndBack: LatLng[] = [
+    ...Array.from({ length: 11 }, (_, i) => ({ lat: 60, lng: 10 + i * 0.001 })),
+    ...Array.from({ length: 11 }, (_, i) => ({ lat: 60.0003, lng: 10.01 - i * 0.001 })),
+  ];
+  const oabCum = cumulativeDistances(outAndBack);
+  const oabTotal = oabCum[oabCum.length - 1]!;
+  // Midway between the legs, slightly nearer the return leg.
+  const between = { lat: 60.00016, lng: 10.005 };
+
+  it('matches snapToPolyline when no hint is given', () => {
+    const q = { lat: 60.0009, lng: 10.01 };
+    expect(snapToRoute(q, routePoints, routeCum)).toEqual(snapToPolyline(q, routePoints, routeCum));
+  });
+
+  it('stays on the outbound leg when progress says so', () => {
+    const plain = snapToRoute(between, outAndBack, oabCum);
+    expect(plain.alongM).toBeGreaterThan(oabTotal / 2); // rival leg wins unhinted
+    const hinted = snapToRoute(between, outAndBack, oabCum, { prevAlongM: 250 });
+    expect(hinted.alongM).toBeLessThan(oabTotal / 2);
+    expect(hinted.point.lat).toBeCloseTo(60, 4);
+  });
+
+  it('follows the return leg once progress has passed the turn-around', () => {
+    const hinted = snapToRoute(between, outAndBack, oabCum, { prevAlongM: oabTotal - 250 });
+    expect(hinted.alongM).toBeGreaterThan(oabTotal / 2);
+    expect(hinted.point.lat).toBeCloseTo(60.0003, 4);
+  });
+
+  it('uses the travel direction to pick between opposing segments', () => {
+    // Nearer the outbound leg, but driving west: the return leg must win.
+    const nearOutbound = { lat: 60.0001, lng: 10.005 };
+    const east = snapToRoute(nearOutbound, outAndBack, oabCum, { headingDeg: 90 });
+    expect(east.point.lat).toBeCloseTo(60, 4);
+    const west = snapToRoute(nearOutbound, outAndBack, oabCum, { headingDeg: 270 });
+    expect(west.point.lat).toBeCloseTo(60.0003, 4);
+  });
+
+  it('never lets hints override a clearly nearest segment', () => {
+    // Right on the outbound leg: even an opposing heading must not drag the
+    // snap 33 m sideways to the return leg.
+    const onOutbound = { lat: 60, lng: 10.005 };
+    const snap = snapToRoute(onOutbound, outAndBack, oabCum, { headingDeg: 270 });
+    expect(snap.point.lat).toBeCloseTo(60, 4);
   });
 });
 
@@ -194,6 +245,36 @@ describe('NavigationSession voice prompts', () => {
     const prompts = s.update(pointAtAlong(maneuverAlong - 10), 0).prompts;
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.kind).toBe('now');
+  });
+
+  it('arms the far 800 m prompt only at highway speed', () => {
+    const fast = new NavigationSession(route());
+    const p800 = fast.update({ ...pointAtAlong(maneuverAlong - 700), speedMps: 25 }, 0).prompts;
+    expect(p800).toHaveLength(1);
+    expect(p800[0]).toMatchObject({ kind: 'approach', thresholdM: 800 });
+    expect(p800[0]!.text).toBe('In 800 meters, Turn right onto Elm Street');
+    // The 400 m prompt still follows normally afterwards.
+    const p400 = fast.update({ ...pointAtAlong(maneuverAlong - 350), speedMps: 25 }, 0).prompts;
+    expect(p400[0]).toMatchObject({ thresholdM: 400 });
+
+    // City speed: silence until the standard 400 m threshold.
+    const slow = new NavigationSession(route());
+    expect(slow.update({ ...pointAtAlong(maneuverAlong - 700), speedMps: 12 }, 0).prompts).toEqual(
+      [],
+    );
+  });
+});
+
+describe('NavigationSession snapped state', () => {
+  it('exposes both the snapped point and the raw fix', () => {
+    const s = new NavigationSession(route());
+    // ~11 m north of the line: display should hug the road, raw kept as-is.
+    const fix = { lat: 60.0001, lng: 10.005 };
+    const state = s.update(fix, 0).state;
+    expect(state.raw).toEqual(fix);
+    expect(state.snapped.lat).toBeCloseTo(60, 5);
+    expect(state.offRouteM).toBeGreaterThan(8);
+    expect(state.offRouteM).toBeLessThan(15);
   });
 });
 
