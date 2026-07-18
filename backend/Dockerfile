@@ -7,6 +7,8 @@ COPY packages/core/package.json ./packages/core/
 COPY packages/gpx/package.json ./packages/gpx/
 COPY packages/storage/package.json ./packages/storage/
 COPY packages/routing/package.json ./packages/routing/
+COPY packages/navigation/package.json ./packages/navigation/
+COPY packages/app-hooks/package.json ./packages/app-hooks/
 COPY packages/sync/package.json ./packages/sync/
 COPY apps/web/package.json ./apps/web/
 COPY backend/package.json ./backend/
