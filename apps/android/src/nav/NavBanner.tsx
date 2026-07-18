@@ -1,6 +1,6 @@
-import type { RouteInstruction } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { TurnIcon } from './TurnIcon';
 import type { NavController } from './useNavigation';
 
 function formatDistance(m: number): string {
@@ -28,60 +28,6 @@ function formatEta(epochMs: number): string {
 function formatSpeed(speedMps: number | null): string | null {
   if (speedMps == null || speedMps < 0.5) return null;
   return `${Math.round(speedMps * 3.6)} km/h`;
-}
-
-/**
- * Rotation (deg) of the shared ↑ glyph for an Atlas turn sign (see
- * RouteInstruction: -2 left … 0 continue … 2 right, ±3 sharp, ±7 keep,
- * ±8 u-turn), or null for signs drawn as their own glyph.
- */
-function turnRotation(sign: number): number | null {
-  if (sign >= -3 && sign <= 3) return sign * 45;
-  if (sign === 7 || sign === -7) return Math.sign(sign) * 30;
-  if (sign === 8 || sign === -8) return 180;
-  return null;
-}
-
-/**
- * Visual for the upcoming maneuver: a rotated arrow, ↻ roundabout, ⚑ arrive/
- * via. Ramp/exit/keep/merge maneuvers (RouteInstruction.kind, no longer
- * collapsed into a plain keep by the Valhalla adapter) get a small label under
- * the arrow — a drawn icon set needs react-native-svg, i.e. an APK cycle.
- */
-function TurnArrow({
-  instruction,
-  small = false,
-}: {
-  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
-  /** Compact variant for the "then …" hint row. */
-  small?: boolean;
-}) {
-  const { sign, kind, exitNumber } = instruction;
-  const box = small ? styles.turnBoxSmall : styles.turnBox;
-  const glyph = small ? [styles.turnGlyph, styles.turnGlyphSmall] : [styles.turnGlyph];
-  if (sign === 6) {
-    return (
-      <View style={box}>
-        <Text style={glyph}>{'↻'}</Text>
-        {exitNumber ? <Text style={styles.turnExit}>{exitNumber}</Text> : null}
-      </View>
-    );
-  }
-  if (sign === 4 || sign === 5) {
-    return (
-      <View style={box}>
-        <Text style={glyph}>{'⚑'}</Text>
-      </View>
-    );
-  }
-  return (
-    <View style={box}>
-      <Text style={[...glyph, { transform: [{ rotate: `${turnRotation(sign) ?? 0}deg` }] }]}>
-        {'↑'}
-      </Text>
-      {kind && !small ? <Text style={styles.turnKind}>{kind}</Text> : null}
-    </View>
-  );
 }
 
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
@@ -140,7 +86,9 @@ export function NavBanner({
           </>
         ) : maneuver ? (
           <View style={styles.maneuverRow}>
-            <TurnArrow instruction={maneuver.instruction} />
+            <View style={styles.turnBox}>
+              <TurnIcon instruction={maneuver.instruction} size={40} />
+            </View>
             <Text style={styles.distanceTo}>{formatDistance(maneuver.distanceToM)}</Text>
             <Text style={styles.maneuver} numberOfLines={2}>
               {maneuver.instruction.text}
@@ -153,11 +101,14 @@ export function NavBanner({
         {thenManeuver ? (
           <View style={styles.thenRow}>
             <Text style={styles.thenLabel}>then</Text>
-            <TurnArrow small instruction={thenManeuver.instruction} />
+            <TurnIcon instruction={thenManeuver.instruction} size={22} color="#cdd6e0" />
           </View>
         ) : null}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
+        {state?.wrongBranch && nav.phase === 'navigating' ? (
+          <Text style={styles.reroute}>Check route — you may have taken a different turn</Text>
+        ) : null}
 
         {state && nav.phase !== 'arrived' ? (
           <>
@@ -215,21 +166,9 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  turnBox: { width: 40, alignItems: 'center', justifyContent: 'center' },
-  turnBoxSmall: { width: 24, alignItems: 'center', justifyContent: 'center' },
-  turnGlyph: { color: '#fff', fontSize: 32, fontWeight: '800', lineHeight: 38 },
-  turnGlyphSmall: { fontSize: 18, lineHeight: 22 },
+  turnBox: { width: 44, alignItems: 'center', justifyContent: 'center' },
   thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   thenLabel: { color: '#cdd6e0', fontSize: 14, fontWeight: '600' },
-  turnKind: { color: '#cdd6e0', fontSize: 10, fontWeight: '700', marginTop: -2 },
-  turnExit: {
-    position: 'absolute',
-    bottom: -2,
-    right: 2,
-    color: '#7ec8ff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
   distanceTo: { color: '#7ec8ff', fontSize: 22, fontWeight: '700', minWidth: 68 },
   maneuver: { color: '#fff', fontSize: 17, fontWeight: '600', flexShrink: 1 },
   progressTrack: {

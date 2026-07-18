@@ -793,7 +793,14 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  tunnelDim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(4, 8, 16, 0.4)' },
+  tunnelDim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(4, 8, 16, 0.4)',
+  },
   buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
   recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },

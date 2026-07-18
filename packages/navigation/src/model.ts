@@ -61,6 +61,13 @@ export interface NavState {
   /** Whether this position is a live fix, an extrapolation, or signal-lost. */
   fix: NavFix;
   /**
+   * True when motion sensors suggest the vehicle turned away from the assumed
+   * route while dead reckoning (an in-tunnel fork or roundabout taken
+   * differently) — the UI should tell the driver to check the route. Cleared
+   * by the next live fix, which settles the question for real.
+   */
+  wrongBranch: boolean;
+  /**
    * Direction of the route (deg, 0 = north) at the snapped position, looking
    * ~25 m ahead — a stable course-up camera bearing, unlike raw GPS course.
    * Null when the route is a single point.
@@ -75,9 +82,10 @@ export interface VoicePrompt {
   /**
    * `approach` fires at a distance threshold; `now` fires at the maneuver;
    * `depart` is the first instruction, offered by `departurePrompt()` at
-   * guidance start (it is behind the traveller, so it never fires otherwise).
+   * guidance start (it is behind the traveller, so it never fires otherwise);
+   * `alert` is a warning outside the maneuver sequence (wrong-branch hint).
    */
-  kind: 'approach' | 'now' | 'depart';
+  kind: 'approach' | 'now' | 'depart' | 'alert';
   /** Index of the maneuver instruction this prompt refers to. */
   maneuverIndex: number;
   /** The distance threshold (m) that triggered an `approach` prompt (0 for `now`). */
@@ -127,6 +135,12 @@ export interface NavigationOptions {
    * (pure last-speed extrapolation).
    */
   deadReckonBlendTauMs?: number;
+  /**
+   * Sensor-vs-route heading divergence (deg) accumulated during one GPS gap
+   * beyond which `wrongBranch` is raised. Large enough that gyro drift and
+   * cornering-tilted gravity readings stay below it through a long tunnel.
+   */
+  wrongBranchDeg?: number;
   /** Chain "…, then X" into a prompt when X follows within this distance (m). */
   chainManeuverM?: number;
   /** Time constant (ms) of the observed-pace average that adapts the ETA. */
@@ -152,6 +166,7 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   deadReckonMaxMs: 1_200_000,
   deadReckonMaxM: 25_000,
   deadReckonBlendTauMs: 45_000,
+  wrongBranchDeg: 50, // an in-tunnel fork/roundabout exit turns well past this
   chainManeuverM: 300,
   paceTauMs: 90_000,
 };

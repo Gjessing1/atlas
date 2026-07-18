@@ -21,11 +21,18 @@ interface Maneuver {
 }
 
 const EPS = 1e-6;
+/** Smallest signed angle (deg, −180..180] equivalent to `d`. */
+function wrapDeg(d: number): number {
+  const w = ((d % 360) + 540) % 360;
+  return w - 180 === -180 ? 180 : w - 180;
+}
 /** Fix-to-fix intervals longer than this are gaps, not pace evidence. */
 const PACE_MAX_SAMPLE_MS = 30_000;
 /** The pace factor's effect on the ETA, clamped: one red light must not triple it. */
 const PACE_MIN = 0.4;
 const PACE_MAX = 2;
+/** Reckoned ticks (~s) the yaw divergence must persist before `wrongBranch`. */
+const WRONG_BRANCH_GRACE_TICKS = 5;
 
 /**
  * Follows a single planned route against a stream of position fixes, producing
@@ -57,6 +64,16 @@ export class NavigationSession {
   private lastState: NavState | null = null;
   /** Observed speed over the route's expected speed, smoothed (1 = on pace). */
   private paceFactor = 1;
+  /** Sensor-measured heading change (deg) accumulated over the current GPS gap. */
+  private yawActualDeg = 0;
+  /** Route-tangent heading change (deg) over the same reckoned stretch. */
+  private yawExpectedDeg = 0;
+  /** Route course at the previous reckoned tick, to step yawExpectedDeg. */
+  private reckonCourseDeg: number | null = null;
+  private wrongBranch = false;
+  private wrongBranchAnnounced = false;
+  /** Consecutive reckoned ticks with the divergence above threshold. */
+  private wrongBranchTicks = 0;
 
   constructor(route: RoutePath, options: NavigationOptions = {}) {
     if (route.points.length === 0) throw new Error('cannot navigate an empty route');
@@ -116,6 +133,14 @@ export class NavigationSession {
     this.lastFixMs = nowMs;
     this.alongAtFixM = alongM;
     this.lastSpeedMps = speedMps;
+    // A live fix settles where the vehicle really is — the gyro comparison
+    // starts over at the next gap, and off-route logic owns the truth now.
+    this.yawActualDeg = 0;
+    this.yawExpectedDeg = 0;
+    this.reckonCourseDeg = null;
+    this.wrongBranch = false;
+    this.wrongBranchAnnounced = false;
+    this.wrongBranchTicks = 0;
 
     const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
     const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming, speedMps);
@@ -136,6 +161,7 @@ export class NavigationSession {
       currentRoad: this.roadAt(alongM),
       courseDeg: this.courseAt(alongM, speedMps),
       fix: 'live',
+      wrongBranch: false,
     };
     this.lastState = state;
     return { state, prompts };
@@ -195,6 +221,36 @@ export class NavigationSession {
     const prompts = this.collectPrompts(upcoming, speed);
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);
     const point = pointAtDistance(this.points, this.cum, alongM);
+    const course = this.courseAt(alongM, speed);
+
+    // Wrong-branch check: the gyro (fed via reportHeadingDelta) says how much
+    // the vehicle actually turned during this gap; the route tangent says how
+    // much the assumed line turns over the same reckoned stretch. A sustained
+    // mismatch means an in-tunnel fork or roundabout was taken differently —
+    // something cross-track can't see while there are no fixes at all.
+    if (this.reckonCourseDeg !== null && course !== null) {
+      this.yawExpectedDeg += wrapDeg(course - this.reckonCourseDeg);
+    }
+    if (course !== null) this.reckonCourseDeg = course;
+    // The expected yaw leads the actual one through a bend (the course tangent
+    // looks ~25–60 m ahead), so a sharp corner spikes the divergence for a few
+    // seconds even when the driver follows the route — only a sustained
+    // mismatch is evidence of a wrong branch.
+    if (Math.abs(this.yawActualDeg - this.yawExpectedDeg) > this.opts.wrongBranchDeg) {
+      this.wrongBranchTicks++;
+      if (this.wrongBranchTicks >= WRONG_BRANCH_GRACE_TICKS) this.wrongBranch = true;
+    } else {
+      this.wrongBranchTicks = 0;
+    }
+    if (this.wrongBranch && !this.wrongBranchAnnounced) {
+      this.wrongBranchAnnounced = true;
+      prompts.push({
+        text: 'Check your route — you may have taken a different turn.',
+        kind: 'alert',
+        maneuverIndex: -1,
+        thresholdM: 0,
+      });
+    }
     const state: NavState = {
       status: 'navigating',
       snapped: point,
@@ -208,11 +264,25 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(alongM),
-      courseDeg: this.courseAt(alongM, speed),
+      courseDeg: course,
       fix: 'estimated',
+      wrongBranch: this.wrongBranch,
     };
     this.lastState = state;
     return { state, prompts };
+  }
+
+  /**
+   * Feed a sensor-measured heading change (deg, clockwise-positive, since the
+   * previous report) from the platform's motion sensors — see
+   * `headingRateDegPerSec` for turning device rotation rates into this.
+   * Consumed only while dead reckoning (`fix: 'estimated'`); while live fixes
+   * flow, GPS is the better heading source and reports are dropped.
+   */
+  reportHeadingDelta(deltaDeg: number): void {
+    if (!Number.isFinite(deltaDeg)) return;
+    if (this.lastState?.fix !== 'estimated') return;
+    this.yawActualDeg += deltaDeg;
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   subPolyline,
 } from './geometry.js';
 import { maneuverArrowsGeoJSON } from './overlays.js';
+import { headingRateDegPerSec } from './sensors.js';
 import { NavigationSession } from './session.js';
 
 // A straight eastward route at lat 60: 21 points, lng 10.000 → 10.020.
@@ -491,6 +492,96 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     // 15 min would put it 27 km in — past the 25 km cap the extrapolation
     // is fiction, not a tunnel.
     expect(s.tick(900_000)!.state.fix).toBe('lost');
+  });
+});
+
+describe('NavigationSession wrong-branch detection (gyro)', () => {
+  const legMps = routeCum[10]! / 60;
+
+  it('raises wrongBranch with one alert when the vehicle turns off a straight reckoned route', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
+    expect(s.tick(5000)!.state.wrongBranch).toBe(false);
+    // The gyro reports a 90° turn while the assumed route runs dead straight.
+    for (let i = 0; i < 10; i++) s.reportHeadingDelta(9);
+    // A bend transient must not trigger — the divergence has to persist.
+    expect(s.tick(6000)!.state.wrongBranch).toBe(false);
+    for (let t = 7; t <= 9; t++) expect(s.tick(t * 1000)!.state.wrongBranch).toBe(false);
+    const est = s.tick(10_000)!; // 5th consecutive divergent tick
+    expect(est.state.wrongBranch).toBe(true);
+    expect(est.prompts.some((p) => p.kind === 'alert')).toBe(true);
+    // The alert speaks once, but the flag holds for the rest of the gap.
+    const later = s.tick(11_000)!;
+    expect(later.state.wrongBranch).toBe(true);
+    expect(later.prompts.filter((p) => p.kind === 'alert')).toHaveLength(0);
+  });
+
+  it('ignores heading reports while live fixes are flowing', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
+    for (let i = 0; i < 10; i++) s.reportHeadingDelta(9); // dropped: fix is live
+    expect(s.tick(5000)!.state.wrongBranch).toBe(false);
+  });
+
+  it('clears the flag and starts over on the next live fix', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
+    s.tick(5000);
+    for (let i = 0; i < 10; i++) s.reportHeadingDelta(9);
+    for (let t = 6; t <= 10; t++) s.tick(t * 1000);
+    expect(s.tick(11_000)!.state.wrongBranch).toBe(true);
+    const live = s.update({ ...pointAtAlong(300), speedMps: legMps }, 12_000);
+    expect(live.state.wrongBranch).toBe(false);
+    // A fresh gap needs fresh divergence — the old 90° is forgotten.
+    for (let t = 17; t <= 23; t++) expect(s.tick(t * 1000)!.state.wrongBranch).toBe(false);
+  });
+
+  it('stays quiet when the gyro matches the route bends', () => {
+    // An L-shaped route: ~560 m east, then a 90° left turn heading north.
+    const points: LatLng[] = [
+      ...Array.from({ length: 11 }, (_, i) => ({ lat: 60, lng: 10 + i * 0.001 })),
+      ...Array.from({ length: 10 }, (_, i) => ({ lat: 60.001 + i * 0.001, lng: 10.01 })),
+    ];
+    const totalM = cumulativeDistances(points).at(-1)!;
+    const s = new NavigationSession({
+      points,
+      distanceM: totalM,
+      timeMs: (totalM / 15) * 1000,
+      ascentM: 0,
+      descentM: 0,
+    });
+    s.update({ ...points[0]!, speedMps: 15 }, 0);
+    // A perfect gyro reports exactly the course change the route imposes.
+    let prevCourse: number | null = null;
+    for (let t = 4; t <= 60; t++) {
+      const est = s.tick(t * 1000);
+      expect(est!.state.wrongBranch).toBe(false);
+      const course = est!.state.courseDeg;
+      if (prevCourse !== null && course !== null) {
+        const d = ((course - prevCourse + 540) % 360) - 180;
+        s.reportHeadingDelta(d);
+      }
+      prevCourse = course;
+    }
+  });
+});
+
+describe('headingRateDegPerSec', () => {
+  it('projects yaw about the vertical for a flat-mounted device', () => {
+    // Screen up, rotating counterclockwise seen from above → bearing falls.
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: 9.81 })).toBeCloseTo(-10);
+  });
+
+  it('is mount-agnostic: portrait in a windshield cradle reads the same turn', () => {
+    // Upright portrait: gravity reaction along +y, world yaw is device y.
+    expect(headingRateDegPerSec({ x: 0, y: 10, z: 0 }, { x: 0, y: 9.81, z: 0 })).toBeCloseTo(-10);
+    // Rotation about the other axes (pitch/roll in this mount) is not a turn.
+    expect(headingRateDegPerSec({ x: 15, y: 0, z: 0 }, { x: 0, y: 9.81, z: 0 })).toBeCloseTo(0);
+  });
+
+  it('returns null when the accelerometer is far from 1 g', () => {
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: 0.5 })).toBeNull();
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 9, y: 9, z: 9 })).toBeNull();
   });
 });
 

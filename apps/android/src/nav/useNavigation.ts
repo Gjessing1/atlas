@@ -1,11 +1,13 @@
 import type { LatLng } from '@atlas/core';
-import { NavigationSession, type NavState } from '@atlas/navigation';
+import { headingRateDegPerSec, NavigationSession, type NavState } from '@atlas/navigation';
 import { type RoutePath, type RoutingProfile } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
+import { DeviceMotion } from 'expo-sensors';
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AudioFocus } from '../../modules/audiofocus';
 import { makeRouteProvider } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locationTask';
@@ -104,15 +106,40 @@ export function useNavigation(): NavController {
   const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
   const lastStateRef = useRef<NavState | null>(null);
+  /** Utterances queued or playing — audio focus is held while it's non-zero. */
+  const utterancesRef = useRef(0);
 
   /** Speak a voice prompt, unless muted; never let a TTS error interrupt navigation. */
   const speak = useCallback((text: string): void => {
     if (mutedRef.current) return;
+    // Duck music/podcasts for the duration of the prompt (expo-speech never
+    // asks for audio focus itself, so prompts used to talk over media). One
+    // focus hold spans a whole queued burst of utterances.
+    const focus = (on: boolean) => {
+      try {
+        if (on) AudioFocus?.requestDuck();
+        else AudioFocus?.abandon();
+      } catch (err) {
+        console.warn('audio focus failed', err);
+      }
+    };
+    if (utterancesRef.current === 0) focus(true);
+    utterancesRef.current++;
+    const release = () => {
+      utterancesRef.current = Math.max(0, utterancesRef.current - 1);
+      if (utterancesRef.current === 0) focus(false);
+    };
     try {
       // Instructions are English; without a pinned language a Norwegian
       // device voice garbles them.
-      Speech.speak(text, { language: 'en' });
+      Speech.speak(text, {
+        language: 'en',
+        onDone: release,
+        onStopped: release,
+        onError: release,
+      });
     } catch (err) {
+      release();
       console.warn('tts failed', err);
     }
   }, []);
@@ -248,8 +275,18 @@ export function useNavigation(): NavController {
         // app is foregrounded even if the user declines "allow all the time".
         await Location.requestBackgroundPermissionsAsync().catch(() => undefined);
 
-        const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        const origin = { lat: cur.coords.latitude, lng: cur.coords.longitude };
+        // getCurrentPositionAsync has no timeout of its own — indoors it can
+        // simply never resolve, wedging the phase in `starting` forever (the
+        // web hook already races a 20 s limit). Fall back to the last known
+        // position: a slightly stale preview origin beats no preview, and
+        // guidance reroutes from the first live fix anyway.
+        const cur = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000)),
+        ]);
+        const pos = cur ?? (await Location.getLastKnownPositionAsync({ maxAge: 120_000 }));
+        if (!pos) throw new Error('Could not get a GPS fix — is location on?');
+        const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
 
         destRef.current = destination;
         originRef.current = origin;
@@ -398,6 +435,36 @@ export function useNavigation(): NavController {
     }, 1000);
     return () => clearInterval(timer);
   }, [guiding, speak]);
+  // While dead reckoning (tunnel), feed the gyro's world-vertical yaw into the
+  // session so it can notice the car turning off the assumed line — an
+  // in-tunnel fork or roundabout exit that cross-track can't see without GPS.
+  // The magnetometer is useless in a car in a tunnel; the gyro's relative yaw
+  // since the last good fix is the reliable signal. Subscribed only during
+  // gaps: while fixes flow the session ignores reports anyway.
+  const reckoning = guiding && state?.fix === 'estimated';
+  useEffect(() => {
+    if (!reckoning) return;
+    DeviceMotion.setUpdateInterval(100);
+    let lastMs: number | null = null;
+    const sub = DeviceMotion.addListener((m) => {
+      const session = sessionRef.current;
+      const rot = m.rotationRate;
+      const grav = m.accelerationIncludingGravity;
+      if (!session || !rot || !grav) return;
+      const now = Date.now();
+      const dtSec = lastMs === null ? 0 : Math.min(0.5, (now - lastMs) / 1000);
+      lastMs = now;
+      if (dtSec <= 0) return;
+      // W3C device axes: beta about x, gamma about y, alpha about z (deg/s).
+      const rate = headingRateDegPerSec(
+        { x: rot.beta ?? 0, y: rot.gamma ?? 0, z: rot.alpha ?? 0 },
+        grav,
+      );
+      if (rate !== null) session.reportHeadingDelta(rate * dtSec);
+    });
+    return () => sub.remove();
+  }, [reckoning]);
+
   useEffect(() => {
     if (!guiding) return;
     void activateKeepAwakeAsync('atlas-nav').catch(() => undefined);

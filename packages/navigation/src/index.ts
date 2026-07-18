@@ -20,5 +20,6 @@ export {
   type Snap,
   type SnapHint,
 } from './geometry.js';
+export { headingRateDegPerSec, type Vec3 } from './sensors.js';
 export { followZoom, remainingRouteBounds, zoomForSpeed } from './camera.js';
 export { maneuverArrowsGeoJSON } from './overlays.js';
