@@ -129,4 +129,15 @@ describe('/api/app/manifest', () => {
     const res = await app.inject({ url: '/api/app/manifest' });
     expect(res.statusCode).toBe(400);
   });
+
+  it('rejects a runtime version that is not a plain integer', async () => {
+    // The header lands in a filesystem path, so traversal must not reach the disk.
+    for (const bad of ['../../../etc', '1/../../..', '1; rm -rf /', '']) {
+      const res = await app.inject({
+        url: '/api/app/manifest',
+        headers: { ...headers, 'expo-runtime-version': bad },
+      });
+      expect(res.statusCode, `runtime version ${JSON.stringify(bad)}`).toBe(400);
+    }
+  });
 });

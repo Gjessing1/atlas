@@ -1,0 +1,99 @@
+import type { SyncChange } from '@atlas/storage';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createPgStores } from './pg.js';
+
+/**
+ * Exercises the real Postgres store — skipped unless ATLAS_TEST_DATABASE_URL
+ * points at a throwaway database (the schema is created on connect, and these
+ * tests write freely). Run with:
+ *
+ *   ATLAS_TEST_DATABASE_URL=postgres://atlas:pw@127.0.0.1:5433/atlas_test npm test -w @atlas/backend
+ */
+const url = process.env.ATLAS_TEST_DATABASE_URL;
+
+describe.skipIf(!url)('createPgStores', () => {
+  let stores: Awaited<ReturnType<typeof createPgStores>>;
+  let userId: string;
+
+  beforeAll(async () => {
+    stores = await createPgStores(url!);
+    const email = `race-${Date.now()}@example.test`;
+    const user = await stores.users.createUser(email, 'hash');
+    userId = user!.id;
+  });
+
+  afterAll(async () => {
+    await stores?.close();
+  });
+
+  const change = (id: string, updatedAt: number): SyncChange => ({
+    entity: 'place',
+    id,
+    updatedAt,
+    deleted: false,
+    data: { name: id, lat: 1, lng: 2 },
+  });
+
+  it('applies changes and returns them to another device', async () => {
+    const res = await stores.sync.apply(userId, 'writer', [change('p1', 1000)]);
+    expect(res.applied).toBe(1);
+
+    const pull = await stores.sync.changesSince(userId, 0, 'reader', 10);
+    expect(pull.changes.map((c) => c.id)).toContain('p1');
+
+    // The writer's own rows are filtered out of its pull.
+    const own = await stores.sync.changesSince(userId, 0, 'writer', 10);
+    expect(own.changes.map((c) => c.id)).not.toContain('p1');
+  });
+
+  it('skips older writes (last-write-wins)', async () => {
+    await stores.sync.apply(userId, 'writer', [change('lww', 5000)]);
+    const stale = await stores.sync.apply(userId, 'writer', [change('lww', 4000)]);
+    expect(stale.applied).toBe(0);
+    expect(stale.skipped).toBe(1);
+  });
+
+  /**
+   * The pull-cursor skip race: `seq` is assigned by nextval at write time but
+   * only becomes visible at commit, so without per-user serialization a pull can
+   * read seq N+1 while seq N is still uncommitted — and then move its cursor past
+   * N forever. A reader that follows its cursor while writes are in flight must
+   * still end up having seen every row.
+   */
+  it('never skips a row when pulls interleave with concurrent writes', async () => {
+    const writers = ['w1', 'w2', 'w3'];
+    const perWriter = 25;
+    const expected = new Set<string>();
+    for (const w of writers) {
+      for (let i = 0; i < perWriter; i++) expected.add(`${w}-${i}`);
+    }
+
+    let writing = true;
+    const writes = Promise.all(
+      writers.map(async (w) => {
+        for (let i = 0; i < perWriter; i++) {
+          await stores.sync.apply(userId, w, [change(`${w}-${i}`, 10_000 + i)]);
+        }
+      }),
+    ).finally(() => {
+      writing = false;
+    });
+
+    // A reader that only ever advances its cursor, exactly like SyncEngine.pull.
+    const seen = new Set<string>();
+    let cursor = 0;
+    const read = async (): Promise<void> => {
+      const page = await stores.sync.changesSince(userId, cursor, 'reader', 5);
+      for (const c of page.changes) seen.add(c.id);
+      cursor = page.cursor;
+    };
+
+    while (writing) await read();
+    await writes;
+    // Final drain, as the client would do on its next sync.
+    for (let i = 0; i < 40; i++) await read();
+
+    const missed = [...expected].filter((id) => !seen.has(id));
+    expect(missed).toEqual([]);
+  });
+});

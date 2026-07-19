@@ -23,8 +23,20 @@ class FakeServer {
   online = true;
   authorized = true;
   pushes = 0;
+  /** Mirrors Fastify's bodyLimit: an oversized push is rejected with 413. */
+  bodyLimit = Infinity;
+  rejections = 0;
   private rows = new Map<string, { change: SyncChange; seq: number; deviceId: string }>();
   private seq = 0;
+
+  /** Inject a row as if another device had written it (for pull-side tests). */
+  seed(change: SyncChange): void {
+    this.rows.set(`${change.entity}|${change.id}`, {
+      change,
+      seq: ++this.seq,
+      deviceId: 'other-device',
+    });
+  }
 
   readonly fetchFn: typeof fetch = (input, init) => {
     const url = new URL(String(input), 'http://server');
@@ -32,6 +44,10 @@ class FakeServer {
     if (!this.authorized) return Promise.resolve(Response.json({ error: 'nope' }, { status: 401 }));
     if (url.pathname === '/api/sync/push') {
       this.pushes++;
+      if (String(init?.body).length > this.bodyLimit) {
+        this.rejections++;
+        return Promise.resolve(Response.json({ error: 'too large' }, { status: 413 }));
+      }
       const body = JSON.parse(String(init?.body)) as SyncPushRequest;
       let applied = 0;
       let skipped = 0;
@@ -69,6 +85,7 @@ class FakeServer {
 
 async function createDevice(
   server: FakeServer,
+  opts: { maxPushBytes?: number } = {},
 ): Promise<{ storage: AtlasStorage; engine: SyncEngine }> {
   const storage = new AtlasStorage(createNodeDriver());
   await storage.init();
@@ -77,6 +94,7 @@ async function createDevice(
     getToken: () => 'test-token',
     fetchFn: server.fetchFn,
     batchSize: 3,
+    ...opts,
   });
   return { storage, engine };
 }
@@ -231,6 +249,83 @@ describe('SyncEngine', () => {
     expect(outbox.every((e) => !e.id.startsWith('local.'))).toBe(true);
     const result = await a.engine.sync();
     expect(result.pushed).toBeGreaterThan(0);
+  });
+
+  it('splits pushes by payload size, not just count', async () => {
+    const server = new FakeServer();
+    // A batch of 3 large tracks would overflow the server; 2 fit comfortably.
+    server.bodyLimit = 2800;
+    const a = await createDevice(server, { maxPushBytes: 2400 });
+    const gpx = '<gpx>' + 'x'.repeat(1000) + '</gpx>';
+    for (let i = 0; i < 3; i++) {
+      await a.storage.createTrack({ name: `T${i}`, gpx, stats: {} });
+    }
+
+    const result = await a.engine.sync();
+
+    expect(result.failed).toEqual([]);
+    expect(result.pushed).toBe(3);
+    // The budget sized the batches correctly up front — no 413 round-trip was
+    // needed. (Count-only batching would have sent one oversized body first.)
+    expect(server.rejections).toBe(0);
+    expect(server.pushes).toBeGreaterThan(1);
+    expect(await a.storage.listOutbox()).toEqual([]);
+
+    const b = await createDevice(server);
+    expect((await b.engine.sync()).pulled).toBe(3);
+    expect(await b.storage.listTracks()).toHaveLength(3);
+  });
+
+  it('abandons a permanently oversized change instead of wedging the outbox', async () => {
+    const server = new FakeServer();
+    server.bodyLimit = 2000;
+    const a = await createDevice(server, { maxPushBytes: 1500 });
+    const huge = await a.storage.createTrack({
+      name: 'Huge',
+      gpx: '<gpx>' + 'x'.repeat(5000) + '</gpx>',
+      stats: {},
+    });
+    await a.storage.createPlace({ name: 'Small pin', lat: 1, lng: 2 });
+
+    const result = await a.engine.sync();
+
+    // The oversized track is reported and dropped; the small place still lands.
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.entity).toBe('track');
+    expect(result.failed[0]!.id).toBe(huge.id);
+    expect(result.pushed).toBe(1);
+    // The wedge fix: the outbox drains, so the next sync doesn't replay it.
+    expect(await a.storage.listOutbox()).toEqual([]);
+    const pushesAfterFirst = server.pushes;
+    const second = await a.engine.sync();
+    expect(second.failed).toEqual([]);
+    expect(server.pushes).toBe(pushesAfterFirst);
+
+    // The local record is untouched — only the upload was abandoned.
+    expect(await a.storage.listTracks()).toHaveLength(1);
+  });
+
+  it('ignores local.* settings arriving from the server', async () => {
+    const server = new FakeServer();
+    const a = await createDevice(server);
+    await a.storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+    await a.engine.sync();
+    const cursorBefore = await a.storage.getSetting(SYNC_CURSOR_KEY);
+
+    // A buggy or hostile server echoing a device-private key back at us.
+    server.seed({
+      entity: 'setting',
+      id: SYNC_CURSOR_KEY,
+      updatedAt: Date.now() + 10_000,
+      deleted: false,
+      data: { value: '999999' },
+    });
+    await a.engine.sync();
+
+    expect(await a.storage.getSetting(SYNC_CURSOR_KEY)).not.toBe('999999');
+    expect(Number(await a.storage.getSetting(SYNC_CURSOR_KEY))).toBeGreaterThanOrEqual(
+      Number(cursorBefore),
+    );
   });
 
   it('coalesces concurrent sync calls into one run', async () => {

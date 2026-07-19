@@ -108,8 +108,13 @@ export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions
     process.env.METNO_USER_AGENT ??
     'atlas-maps/1.0 git.gjessing.io/gjessing1/atlas lars@gjessing.io';
 
-  /** Keyed by the rounded "lat,lon" actually requested, so nearby callers share a forecast. */
+  /**
+   * Keyed by the rounded "lat,lon" actually requested, so nearby callers share a
+   * forecast. Capped so a scripted client panning the globe can't grow it without
+   * bound (same policy as the elevation proxy).
+   */
   const cache = new Map<string, CacheEntry>();
+  const CACHE_CAP = 500;
   const inflight = new Map<string, Promise<WeatherForecast>>();
 
   async function fetchForecast(lat: number, lon: number): Promise<WeatherForecast> {
@@ -156,6 +161,7 @@ export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions
 
       const lastModified = res.headers.get('last-modified');
       const forecast = normalise(rLat, rLon, lastModified, await res.json());
+      if (cache.size >= CACHE_CAP && !cache.has(key)) cache.clear();
       cache.set(key, {
         forecast,
         lastModified,

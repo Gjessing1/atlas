@@ -5,7 +5,7 @@ import type { SyncPullResponse, SyncPushRequest, SyncPushResponse } from './prot
 export const SYNC_CURSOR_KEY = 'local.sync.cursor';
 export const SYNC_DEVICE_KEY = 'local.sync.device';
 
-export type SyncErrorKind = 'auth' | 'unavailable' | 'protocol';
+export type SyncErrorKind = 'auth' | 'unavailable' | 'protocol' | 'too-large';
 
 export class SyncError extends Error {
   constructor(
@@ -17,11 +17,20 @@ export class SyncError extends Error {
   }
 }
 
+/** A change the server will never accept, dropped from the outbox so it can't wedge the queue. */
+export interface SyncFailure {
+  entity: SyncChange['entity'];
+  id: string;
+  reason: string;
+}
+
 export interface SyncResult {
   /** Local changes accepted by the server. */
   pushed: number;
   /** Remote changes applied locally. */
   pulled: number;
+  /** Changes abandoned as permanently un-pushable (empty on a clean sync). */
+  failed: SyncFailure[];
 }
 
 export interface SyncEngineOptions {
@@ -34,6 +43,21 @@ export interface SyncEngineOptions {
   fetchFn?: typeof fetch;
   /** Changes per push request / rows per pull page. */
   batchSize?: number;
+  /**
+   * Serialized-byte budget per push request. Payloads embed whole GPX documents,
+   * so a count-only limit says nothing about request size; this keeps a batch
+   * comfortably under the server's body limit (32 MB today).
+   */
+  maxPushBytes?: number;
+}
+
+/**
+ * Serialized size of one change. `length` counts UTF-16 units rather than UTF-8
+ * bytes, so it can undercount by up to ~3x on non-ASCII text — the default
+ * budget leaves enough headroom below the server limit to absorb that.
+ */
+function changeBytes(change: SyncChange): number {
+  return JSON.stringify(change).length;
 }
 
 /**
@@ -49,6 +73,7 @@ export class SyncEngine {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly batchSize: number;
+  private readonly maxPushBytes: number;
   private inflight: Promise<SyncResult> | null = null;
 
   constructor(opts: SyncEngineOptions) {
@@ -57,6 +82,7 @@ export class SyncEngine {
     this.baseUrl = opts.baseUrl ?? '';
     this.fetchFn = opts.fetchFn ?? ((...args) => fetch(...args));
     this.batchSize = opts.batchSize ?? 25;
+    this.maxPushBytes = opts.maxPushBytes ?? 8 * 1024 * 1024;
   }
 
   /**
@@ -82,30 +108,93 @@ export class SyncEngine {
 
   private async doSync(): Promise<SyncResult> {
     const deviceId = await this.deviceId();
-    const pushed = await this.push(deviceId);
+    const { pushed, failed } = await this.push(deviceId);
     const pulled = await this.pull(deviceId);
-    return { pushed, pulled };
+    return { pushed, pulled, failed };
   }
 
-  private async push(deviceId: string): Promise<number> {
+  /**
+   * Drain the outbox in batches bounded by both count and serialized size.
+   * Sizing matters because a track's payload embeds its whole GPX document: 25
+   * large tracks (a `bootstrap()` after an import, say) can blow past the
+   * server's body limit, and a rejected batch that never clears would be
+   * retried identically by every later sync — a permanent wedge.
+   */
+  private async push(deviceId: string): Promise<{ pushed: number; failed: SyncFailure[] }> {
     const outbox = await this.storage.listOutbox();
     let pushed = 0;
-    for (let i = 0; i < outbox.length; i += this.batchSize) {
-      const batch = outbox.slice(i, i + this.batchSize);
-      const changes: SyncChange[] = [];
-      for (const entry of batch) {
-        const change = await this.entryToChange(entry);
-        if (change) changes.push(change);
-      }
+    const failed: SyncFailure[] = [];
+
+    let batch: OutboxEntry[] = [];
+    let changes: SyncChange[] = [];
+    let bytes = 0;
+
+    const flush = async (): Promise<void> => {
       if (changes.length > 0) {
-        const body: SyncPushRequest = { deviceId, changes };
-        await this.request<SyncPushResponse>('POST', '/api/sync/push', body);
-        pushed += changes.length;
+        const outcome = await this.sendChanges(deviceId, changes);
+        pushed += outcome.pushed;
+        failed.push(...outcome.failed);
       }
       // Guarded by updated_at — entries that changed mid-push stay queued.
-      await this.storage.clearOutbox(batch);
+      if (batch.length > 0) await this.storage.clearOutbox(batch);
+      batch = [];
+      changes = [];
+      bytes = 0;
+    };
+
+    for (const entry of outbox) {
+      const change = await this.entryToChange(entry);
+      if (change) {
+        const size = changeBytes(change);
+        // Close the batch *before* adding an overflowing change; a change that
+        // exceeds the budget on its own still goes out alone (sendChanges then
+        // decides whether the server can take it at all).
+        if (
+          changes.length > 0 &&
+          (changes.length >= this.batchSize || bytes + size > this.maxPushBytes)
+        ) {
+          await flush();
+        }
+        changes.push(change);
+        bytes += size;
+      }
+      batch.push(entry);
     }
-    return pushed;
+    await flush();
+    return { pushed, failed };
+  }
+
+  /**
+   * Push one batch, halving it on a 413 until either it fits or a lone change is
+   * identified as un-pushable. That change is then abandoned (its outbox entry
+   * clears with the batch) and reported, because keeping it queued would block
+   * every other change behind it forever.
+   */
+  private async sendChanges(
+    deviceId: string,
+    changes: SyncChange[],
+  ): Promise<{ pushed: number; failed: SyncFailure[] }> {
+    const body: SyncPushRequest = { deviceId, changes };
+    try {
+      await this.request<SyncPushResponse>('POST', '/api/sync/push', body);
+      return { pushed: changes.length, failed: [] };
+    } catch (err) {
+      if (!(err instanceof SyncError) || err.kind !== 'too-large') throw err;
+      const only = changes[0];
+      if (changes.length === 1 && only) {
+        return {
+          pushed: 0,
+          failed: [{ entity: only.entity, id: only.id, reason: 'rejected by server as too large' }],
+        };
+      }
+      const mid = Math.ceil(changes.length / 2);
+      const head = await this.sendChanges(deviceId, changes.slice(0, mid));
+      const tail = await this.sendChanges(deviceId, changes.slice(mid));
+      return {
+        pushed: head.pushed + tail.pushed,
+        failed: [...head.failed, ...tail.failed],
+      };
+    }
   }
 
   private async entryToChange(entry: OutboxEntry): Promise<SyncChange | null> {
@@ -171,6 +260,9 @@ export class SyncEngine {
     }
     if (res.status === 401 || res.status === 403) {
       throw new SyncError('auth', 'session expired or unauthorized');
+    }
+    if (res.status === 413) {
+      throw new SyncError('too-large', 'push body rejected as too large');
     }
     if (!res.ok) {
       throw new SyncError(

@@ -41,6 +41,37 @@ export async function createPgStores(
   const pool = new pg.Pool({ connectionString: databaseUrl });
   await pool.query(SCHEMA);
 
+  /**
+   * Run `fn` inside a transaction holding a per-user advisory lock.
+   *
+   * `seq` comes from `nextval` at write time, but rows only become *visible* at
+   * commit — so without serialization a pull can read seq N+1 while the writer of
+   * seq N is still uncommitted, and the client cursor then moves past N forever.
+   * Writers take the lock exclusively (nextval..commit is atomic per user);
+   * readers take it shared, so a pull never overlaps an in-flight write and the
+   * "no gaps below MAX(seq)" assumption in changesSince actually holds.
+   */
+  async function withUserLock<T>(
+    userId: string,
+    mode: 'exclusive' | 'shared',
+    fn: (client: pg.PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const lock = mode === 'shared' ? 'pg_advisory_xact_lock_shared' : 'pg_advisory_xact_lock';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT ${lock}(hashtextextended($1, 0))`, [userId]);
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   const rowToUser = (r: Record<string, unknown>): UserRecord => ({
     id: String(r['id']),
     email: String(r['email']),
@@ -75,53 +106,59 @@ export async function createPgStores(
 
     sync: {
       async apply(userId, deviceId, changes) {
-        let applied = 0;
-        for (const c of changes) {
-          // LWW guard lives in the WHERE clause: older/equal writes touch nothing.
-          const res = await pool.query(
-            `INSERT INTO sync_records (user_id, entity, id, updated_at, deleted, data, device_id, seq)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, nextval('sync_records_seq'))
-             ON CONFLICT (user_id, entity, id) DO UPDATE SET
-               updated_at = EXCLUDED.updated_at,
-               deleted = EXCLUDED.deleted,
-               data = EXCLUDED.data,
-               device_id = EXCLUDED.device_id,
-               seq = nextval('sync_records_seq')
-             WHERE sync_records.updated_at < EXCLUDED.updated_at`,
-            [userId, c.entity, c.id, c.updatedAt, c.deleted, c.data, deviceId],
-          );
-          applied += res.rowCount ?? 0;
-        }
-        return { applied, skipped: changes.length - applied };
+        return withUserLock(userId, 'exclusive', async (client) => {
+          let applied = 0;
+          for (const c of changes) {
+            // LWW guard lives in the WHERE clause: older/equal writes touch nothing.
+            const res = await client.query(
+              `INSERT INTO sync_records (user_id, entity, id, updated_at, deleted, data, device_id, seq)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, nextval('sync_records_seq'))
+               ON CONFLICT (user_id, entity, id) DO UPDATE SET
+                 updated_at = EXCLUDED.updated_at,
+                 deleted = EXCLUDED.deleted,
+                 data = EXCLUDED.data,
+                 device_id = EXCLUDED.device_id,
+                 seq = nextval('sync_records_seq')
+               WHERE sync_records.updated_at < EXCLUDED.updated_at`,
+              [userId, c.entity, c.id, c.updatedAt, c.deleted, c.data, deviceId],
+            );
+            applied += res.rowCount ?? 0;
+          }
+          return { applied, skipped: changes.length - applied };
+        });
       },
 
       async changesSince(userId, since, deviceId, limit) {
-        const res = await pool.query(
-          `SELECT entity, id, updated_at, deleted, data, seq FROM sync_records
-           WHERE user_id = $1 AND seq > $2 AND device_id <> $3
-           ORDER BY seq
-           LIMIT $4`,
-          [userId, since, deviceId, limit + 1],
-        );
-        const hasMore = res.rows.length > limit;
-        const page = (hasMore ? res.rows.slice(0, limit) : res.rows) as Record<string, unknown>[];
-        let cursor = page.length > 0 ? Number(page[page.length - 1]!['seq']) : since;
-        if (!hasMore) {
-          // Advance past this device's own rows so future pulls scan nothing.
-          const max = await pool.query(
-            'SELECT COALESCE(MAX(seq), $2::bigint) AS max FROM sync_records WHERE user_id = $1',
-            [userId, since],
+        return withUserLock(userId, 'shared', async (client) => {
+          const res = await client.query(
+            `SELECT entity, id, updated_at, deleted, data, seq FROM sync_records
+             WHERE user_id = $1 AND seq > $2 AND device_id <> $3
+             ORDER BY seq
+             LIMIT $4`,
+            [userId, since, deviceId, limit + 1],
           );
-          cursor = Math.max(cursor, Number((max.rows[0] as { max: string }).max));
-        }
-        const changes: SyncChange[] = page.map((r) => ({
-          entity: String(r['entity']) as SyncChange['entity'],
-          id: String(r['id']),
-          updatedAt: Number(r['updated_at']),
-          deleted: Boolean(r['deleted']),
-          data: (r['data'] as Record<string, unknown> | null) ?? null,
-        }));
-        return { changes, cursor, hasMore };
+          const hasMore = res.rows.length > limit;
+          const page = (hasMore ? res.rows.slice(0, limit) : res.rows) as Record<string, unknown>[];
+          let cursor = page.length > 0 ? Number(page[page.length - 1]!['seq']) : since;
+          if (!hasMore) {
+            // Advance past this device's own rows so future pulls scan nothing.
+            // Safe only inside the lock: no writer can hold an uncommitted seq
+            // below this MAX, so nothing can be skipped by the fast-forward.
+            const max = await client.query(
+              'SELECT COALESCE(MAX(seq), $2::bigint) AS max FROM sync_records WHERE user_id = $1',
+              [userId, since],
+            );
+            cursor = Math.max(cursor, Number((max.rows[0] as { max: string }).max));
+          }
+          const changes: SyncChange[] = page.map((r) => ({
+            entity: String(r['entity']) as SyncChange['entity'],
+            id: String(r['id']),
+            updatedAt: Number(r['updated_at']),
+            deleted: Boolean(r['deleted']),
+            data: (r['data'] as Record<string, unknown> | null) ?? null,
+          }));
+          return { changes, cursor, hasMore };
+        });
       },
     },
   };

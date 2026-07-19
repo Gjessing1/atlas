@@ -495,6 +495,9 @@ export class AtlasStorage {
    * clears any pending outbox entry the change supersedes.
    */
   async applyRemoteChange(change: SyncChange): Promise<'applied' | 'skipped'> {
+    // `local.` settings are device-private and never pushed; a server echoing one
+    // back (buggy or hostile) must not clobber our sync cursor or device id.
+    if (change.entity === 'setting' && change.id.startsWith(LOCAL_SETTING_PREFIX)) return 'skipped';
     const local = await this.localUpdatedAt(change.entity, change.id);
     if (local !== null && local >= change.updatedAt) return 'skipped';
     if (change.deleted) {

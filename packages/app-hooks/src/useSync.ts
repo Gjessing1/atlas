@@ -147,8 +147,17 @@ export function useSync(
     engine
       .sync()
       .then(async (result) => {
-        setProblem(null);
-        setError(null);
+        if (result.failed.length > 0) {
+          // Abandoned rather than retried forever — say so, or the data silently
+          // stops syncing while the status light stays green.
+          setProblem('error');
+          setError(
+            `${result.failed.length} item(s) could not be synced: ${result.failed[0]!.reason}.`,
+          );
+        } else {
+          setProblem(null);
+          setError(null);
+        }
         setLastSyncAt(Date.now());
         if (result.pulled > 0) {
           pullEcho.current += 1;

@@ -155,7 +155,13 @@ export function registerUpdatesApi(app: FastifyInstance, dataDir: string): void 
     reply.header('expo-sfv-version', '0');
     reply.header('cache-control', 'private, max-age=0');
 
-    if (platform !== 'android' || typeof runtimeVersion !== 'string') {
+    // The header lands in filesystem paths below, so it must be exactly what we
+    // publish under: a plain integer directory name, never a traversal.
+    if (
+      platform !== 'android' ||
+      typeof runtimeVersion !== 'string' ||
+      !/^\d+$/.test(runtimeVersion)
+    ) {
       return reply.code(400).send({ error: 'expo-platform and expo-runtime-version required' });
     }
 
