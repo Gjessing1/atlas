@@ -12,6 +12,7 @@ import { registerOverlayApi, type OverlayApiOptions } from './overlay-api.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
+import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
 import { registerSyncApi } from './sync-api.js';
 import { createMemoryStores, type Stores } from './stores.js';
@@ -43,6 +44,8 @@ export interface AppOptions {
   tilesApi?: Pick<TilesApiOptions, 'localTiles' | 'fetchImpl'>;
   /** Test seams for the overlay layer catalog + WMS proxy. */
   overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
+  /** Test seams for the met.no weather proxy. */
+  weatherApi?: WeatherApiOptions;
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
@@ -183,6 +186,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
     ...opts.overlayApi,
   });
+
+  // Weather: met.no Locationforecast proxy (ToS discipline lives in
+  // weather-api.ts — identifying UA, Expires caching, stale-on-failure).
+  registerWeatherApi(app, opts.weatherApi);
 
   // Map assets (style JSON, glyphs, sprites) fetched by
   // infrastructure/tiles/fetch-map-assets.sh into the data dir.

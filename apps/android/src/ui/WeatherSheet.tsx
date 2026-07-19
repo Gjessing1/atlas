@@ -1,0 +1,435 @@
+import {
+  bestWindows,
+  buildPlanner,
+  compass16,
+  sunDay,
+  symbolEmoji,
+  type ConditionsKind,
+  type FactorRating,
+  type PlannerHour,
+} from '@atlas/conditions';
+import type { LatLng } from '@atlas/core';
+import { useEffect, useMemo, useState } from 'react';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import type { UserData } from '../useUserData';
+import type { WeatherState } from '../weather/useWeather';
+import { theme } from './theme';
+
+// Sheet prefs are device-local (`local.` keys never sync) — same keys as the web panel.
+const MODE_SETTING = 'local.weather.mode';
+const SPECIES_SETTING = 'local.weather.species';
+
+type Mode = 'weather' | ConditionsKind;
+const MODES: { id: Mode; label: string }[] = [
+  { id: 'weather', label: 'Weather' },
+  { id: 'fishing', label: 'Fishing' },
+  { id: 'hunting', label: 'Hunting' },
+];
+const SPECIES = ['trout', 'perch', 'pike', 'char'] as const;
+
+/** Rating → tick/score colour, shared by the timeline strip and the score box. */
+const RATING_COLOR: Record<string, string> = {
+  prime: '#2e9e5b',
+  good: '#6aab2e',
+  fair: '#cf9310',
+  slow: '#a9736f',
+};
+const FACTOR_COLOR: Record<FactorRating, string> = {
+  good: '#2e9e5b',
+  fair: '#f0b429',
+  poor: '#d05a5a',
+};
+
+const fmtTime = (ms: number): string =>
+  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtStep = (ms: number): string =>
+  new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Weather & conditions sheet — the Android twin of the web WeatherPanel. A
+ * tappable hour strip over the proxied met.no forecast with sunrise/sunset,
+ * plain weather first, and an optional transparent fishing/hunting conditions
+ * layer (score + why + best windows). All scoring is the shared @atlas/conditions
+ * engine, so the two platforms read identically. JS-only (no native slider) —
+ * OTA-friendly, like the Layers sheet.
+ */
+export function WeatherSheet({
+  visible,
+  onClose,
+  target,
+  weather,
+  data,
+  bottomInset = 0,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  target: LatLng | null;
+  weather: WeatherState;
+  data: UserData;
+  bottomInset?: number;
+}) {
+  const [mode, setMode] = useState<Mode>('weather');
+  const [species, setSpecies] = useState<string>('trout');
+  const [selected, setSelected] = useState(0);
+  const { status: settingsStatus, getSetting, setSetting } = data;
+
+  // Restore persisted mode/species once storage is ready.
+  useEffect(() => {
+    if (settingsStatus !== 'ready') return;
+    void getSetting(MODE_SETTING).then((raw) => {
+      if (raw === 'weather' || raw === 'fishing' || raw === 'hunting') setMode(raw);
+    });
+    void getSetting(SPECIES_SETTING).then((raw) => {
+      if (raw && (SPECIES as readonly string[]).includes(raw)) setSpecies(raw);
+    });
+  }, [settingsStatus, getSetting]);
+
+  const pickMode = (m: Mode): void => {
+    setMode(m);
+    setSetting(MODE_SETTING, m);
+  };
+  const pickSpecies = (s: string): void => {
+    setSpecies(s);
+    setSetting(SPECIES_SETTING, s);
+  };
+
+  const rows = useMemo(
+    () =>
+      weather.forecast
+        ? buildPlanner(weather.forecast, { kind: mode === 'weather' ? null : mode, species })
+        : [],
+    [weather.forecast, mode, species],
+  );
+  const windows = useMemo(() => (mode === 'weather' ? [] : bestWindows(rows)), [rows, mode]);
+
+  const idx = Math.min(selected, Math.max(0, rows.length - 1));
+  const row = rows[idx];
+  const sun = useMemo(
+    () => (row && target ? sunDay(new Date(row.timeMs), target.lat, target.lng) : null),
+    [row, target],
+  );
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
+          <View style={styles.headerRow}>
+            <Text style={styles.heading}>Weather</Text>
+            {target ? (
+              <Text style={styles.coords}>
+                {target.lat.toFixed(3)}, {target.lng.toFixed(3)}
+              </Text>
+            ) : null}
+            <Pressable onPress={onClose} hitSlop={10} testID="weather-close">
+              <Text style={styles.close}>✕</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.modes}>
+            {MODES.map((m) => (
+              <Pressable
+                key={m.id}
+                style={[styles.mode, mode === m.id ? styles.modeActive : null]}
+                onPress={() => pickMode(m.id)}
+                testID={`weather-mode-${m.id}`}
+              >
+                <Text style={[styles.modeLabel, mode === m.id ? styles.modeLabelActive : null]}>
+                  {m.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {mode === 'fishing' ? (
+            <View style={styles.speciesRow}>
+              {SPECIES.map((s) => (
+                <Pressable
+                  key={s}
+                  style={[styles.chip, species === s ? styles.chipActive : null]}
+                  onPress={() => pickSpecies(s)}
+                >
+                  <Text style={[styles.chipText, species === s ? styles.chipTextActive : null]}>
+                    {s}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {weather.status === 'error' ? (
+            <Text style={styles.muted}>Forecast unavailable right now — try again in a bit.</Text>
+          ) : null}
+          {weather.status === 'loading' && rows.length === 0 ? (
+            <Text style={styles.muted}>Loading forecast…</Text>
+          ) : null}
+
+          {row ? (
+            <ScrollView>
+              <View style={styles.timeRow}>
+                <Text style={styles.stepLabel}>{fmtStep(row.timeMs)}</Text>
+                {sun ? (
+                  <Text style={styles.sun}>
+                    {sun.sunrise && sun.sunset
+                      ? `☀ ${fmtTime(sun.sunrise.getTime())}–${fmtTime(sun.sunset.getTime())}`
+                      : sun.noonAltitude > 0
+                        ? '☀ midnight sun'
+                        : '☀ polar night'}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* Tappable hour strip — the scrubber. Coloured by rating when scoring. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.strip}
+                contentContainerStyle={styles.stripContent}
+              >
+                {rows.map((r, i) => {
+                  const color =
+                    mode === 'weather'
+                      ? '#d7dae0'
+                      : (RATING_COLOR[r.assessment?.rating ?? ''] ?? '#d7dae0');
+                  return (
+                    <Pressable
+                      key={r.point.time}
+                      onPress={() => setSelected(i)}
+                      style={[
+                        styles.tick,
+                        { backgroundColor: color },
+                        i === idx ? styles.tickSelected : null,
+                      ]}
+                    />
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.stepButtons}>
+                <Pressable
+                  style={styles.stepButton}
+                  onPress={() => setSelected(Math.max(0, idx - 1))}
+                  disabled={idx <= 0}
+                >
+                  <Text style={styles.stepButtonText}>◀ Earlier</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.stepButton}
+                  onPress={() => setSelected(Math.min(rows.length - 1, idx + 1))}
+                  disabled={idx >= rows.length - 1}
+                >
+                  <Text style={styles.stepButtonText}>Later ▶</Text>
+                </Pressable>
+              </View>
+
+              <WeatherFacts row={row} />
+
+              {mode !== 'weather' && row.assessment ? (
+                <View style={styles.assessment}>
+                  <View style={styles.scoreRow}>
+                    <View
+                      style={[
+                        styles.scoreBox,
+                        { backgroundColor: RATING_COLOR[row.assessment.rating] ?? '#888' },
+                      ]}
+                    >
+                      <Text style={styles.scoreText}>{row.assessment.score}</Text>
+                    </View>
+                    <Text style={styles.summary}>{row.assessment.summary}</Text>
+                  </View>
+
+                  {windows.length > 0 ? (
+                    <View style={styles.windowsRow}>
+                      <Text style={styles.muted}>Best windows:</Text>
+                      {windows.map((w) => (
+                        <Pressable
+                          key={w.startIdx}
+                          style={styles.windowChip}
+                          onPress={() => setSelected(w.peakIdx)}
+                        >
+                          <Text style={styles.windowChipText}>
+                            {fmtStep(rows[w.startIdx]!.timeMs)}–
+                            {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {row.assessment.factors.map((f) => (
+                    <View key={f.key} style={styles.factor}>
+                      <View
+                        style={[styles.factorDot, { backgroundColor: FACTOR_COLOR[f.rating] }]}
+                      />
+                      <View style={styles.factorBody}>
+                        <Text style={styles.factorLabel}>{f.label}</Text>
+                        <Text style={styles.factorDetail}>{f.detail}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {weather.forecast ? (
+                <Text
+                  style={styles.attribution}
+                  onPress={() => void Linking.openURL('https://www.met.no/en')}
+                >
+                  Forecast: MET Norway (met.no), updated{' '}
+                  {fmtTime(new Date(weather.forecast.updatedAt).getTime())}
+                </Text>
+              ) : null}
+            </ScrollView>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** One block of forecast facts for the selected step (mirrors the web WeatherFacts). */
+function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
+  const p = row.point;
+  const gust = p.windGust != null ? ` (${Math.round(p.windGust)})` : '';
+  const precip =
+    p.precip != null && p.precip > 0
+      ? `${p.precip.toFixed(1)} mm${p.precipProb != null ? ` · ${Math.round(p.precipProb)}%` : ''}`
+      : 'dry';
+  const trend =
+    row.pressureTrendHpa != null
+      ? ` ${row.pressureTrendHpa > 0 ? '↗' : row.pressureTrendHpa < 0 ? '↘' : '→'}`
+      : '';
+  return (
+    <View style={styles.facts}>
+      <View style={styles.headline}>
+        <Text style={styles.emoji}>{symbolEmoji(p.symbol)}</Text>
+        <Text style={styles.temp}>{Math.round(p.temp)}°</Text>
+        <Text style={styles.wind}>
+          {Math.round(p.windSpeed)}
+          {gust} m/s from {compass16(p.windFromDir)}
+        </Text>
+      </View>
+      <View style={styles.detailsRow}>
+        <Text style={styles.detailItem}>☁ {Math.round(p.cloud)}%</Text>
+        <Text style={styles.detailItem}>🌧 {precip}</Text>
+        {p.pressure != null ? (
+          <Text style={styles.detailItem}>
+            {Math.round(p.pressure)} hPa{trend}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: theme.surface,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  heading: { fontSize: 15, fontWeight: '700', color: '#334' },
+  coords: { flex: 1, fontSize: 12, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+  close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
+
+  modes: { flexDirection: 'row', gap: 6, marginTop: 12 },
+  mode: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#eef1f6',
+  },
+  modeActive: { backgroundColor: theme.accent },
+  modeLabel: { fontSize: 13, color: '#334', fontWeight: '600' },
+  modeLabelActive: { color: '#fff' },
+
+  speciesRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  chip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#eef1f6',
+  },
+  chipActive: { backgroundColor: theme.surfaceActive },
+  chipText: { fontSize: 12, color: '#334', textTransform: 'capitalize' },
+  chipTextActive: { color: theme.accent, fontWeight: '700' },
+
+  muted: { fontSize: 13, color: theme.textMuted, marginTop: 8 },
+
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 8,
+  },
+  stepLabel: { fontSize: 14, fontWeight: '700', color: theme.text },
+  sun: { fontSize: 12, color: theme.textMuted },
+
+  strip: { marginTop: 10, maxHeight: 24 },
+  stripContent: { gap: 2, alignItems: 'center' },
+  tick: { width: 6, height: 20, borderRadius: 2 },
+  tickSelected: { borderWidth: 2, borderColor: '#1b1b1b' },
+
+  stepButtons: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  stepButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#eef1f6',
+  },
+  stepButtonText: { fontSize: 13, color: '#334', fontWeight: '600' },
+
+  facts: {
+    marginTop: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+    gap: 6,
+  },
+  headline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  emoji: { fontSize: 22 },
+  temp: { fontSize: 20, fontWeight: '800', color: theme.text },
+  wind: { fontSize: 13, color: theme.text, flexShrink: 1 },
+  detailsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  detailItem: { fontSize: 13, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+
+  assessment: { marginTop: 14, gap: 12 },
+  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  scoreBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreText: { color: '#fff', fontWeight: '800', fontSize: 18 },
+  summary: { flex: 1, fontSize: 13, lineHeight: 18, color: theme.text },
+
+  windowsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  windowChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#f1f7e6',
+    borderWidth: 1,
+    borderColor: '#cbdca9',
+  },
+  windowChipText: { fontSize: 12, color: '#3c5220' },
+
+  factor: { flexDirection: 'row', gap: 10 },
+  factorDot: { width: 10, height: 10, borderRadius: 5, marginTop: 4 },
+  factorBody: { flex: 1 },
+  factorLabel: { fontSize: 13, fontWeight: '700', color: theme.text },
+  factorDetail: { fontSize: 13, lineHeight: 18, color: theme.textMuted, marginTop: 1 },
+
+  attribution: { fontSize: 11, color: '#a3a29c', marginTop: 14 },
+});

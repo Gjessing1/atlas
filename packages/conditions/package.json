@@ -1,0 +1,20 @@
+{
+  "name": "@atlas/conditions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas weather & conditions — forecast types, offline sun math, transparent fishing/hunting condition scoring, planner helpers.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

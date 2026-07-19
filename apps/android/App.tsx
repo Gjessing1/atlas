@@ -64,9 +64,11 @@ import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { RoutePanel } from './src/ui/RoutePanel';
+import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
 import { useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData } from './src/useUserData';
+import { useWeather } from './src/weather/useWeather';
 
 /**
  * Fallback system-bar sizes (dp) used only when the measured safe-area inset is
@@ -140,6 +142,9 @@ function AppInner() {
   // result, long-press, place or favorite). Cleared once navigation starts.
   const [destination, setDestination] = useState<DestinationTarget | null>(null);
   const [travelMode, setTravelMode] = useState<RoutingProfile>('car');
+  // Point the weather & conditions sheet is showing (null = closed).
+  const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
+  const weather = useWeather(weatherTarget);
   // Map orientation while navigating: course-up (direction of travel) or north-up.
   const [navFollow, setNavFollow] = useState<'course' | 'north'>('course');
   // Show the location puck once the user has asked to be located (also true
@@ -754,10 +759,20 @@ function AppInner() {
               : undefined
           }
           onShare={shareDestination}
+          onWeather={() => setWeatherTarget({ lat: destination.lat, lng: destination.lng })}
           onCancel={() => setDestination(null)}
           bottomInset={bottomInset}
         />
       ) : null}
+
+      <WeatherSheet
+        visible={weatherTarget !== null}
+        onClose={() => setWeatherTarget(null)}
+        target={weatherTarget}
+        weather={weather}
+        data={data}
+        bottomInset={bottomInset}
+      />
 
       <RoutePreview nav={nav} bottomInset={bottomInset} />
 

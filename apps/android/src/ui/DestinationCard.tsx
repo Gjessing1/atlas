@@ -28,6 +28,7 @@ export function DestinationCard({
   onSave,
   onEdit,
   onShare,
+  onWeather,
   onCancel,
   bottomInset = 0,
 }: {
@@ -40,6 +41,8 @@ export function DestinationCard({
   onEdit?: () => void;
   /** Share the point as a web #map= link via the OS share sheet. */
   onShare: () => void;
+  /** Open the weather & conditions sheet for this point. */
+  onWeather: () => void;
   onCancel: () => void;
   bottomInset?: number;
 }) {
@@ -91,6 +94,9 @@ export function DestinationCard({
             <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
+        <Pressable style={styles.save} onPress={onWeather} testID="destination-weather">
+          <Text style={styles.saveText}>☀ Weather</Text>
+        </Pressable>
         <Pressable style={styles.save} onPress={onShare} testID="destination-share">
           <Text style={styles.saveText}>Share</Text>
         </Pressable>
@@ -129,9 +135,10 @@ const styles = StyleSheet.create({
   modeIcon: { fontSize: 20 },
   modeLabel: { fontSize: 12, color: '#334', marginTop: 2, fontWeight: '600' },
   modeLabelActive: { color: '#fff' },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '100%',
     backgroundColor: '#1a73e8',
     borderRadius: 10,
     paddingVertical: 12,

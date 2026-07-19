@@ -4,6 +4,7 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
+COPY packages/conditions/package.json ./packages/conditions/
 COPY packages/gpx/package.json ./packages/gpx/
 COPY packages/storage/package.json ./packages/storage/
 COPY packages/routing/package.json ./packages/routing/
@@ -36,6 +37,10 @@ ENV GIT_SHA=$GIT_SHA
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/core/package.json ./packages/core/
 COPY --from=build /app/packages/core/dist ./packages/core/dist
+# @atlas/conditions currently only lends the backend types, but ship its dist
+# so a future value import can't crash the runtime image.
+COPY --from=build /app/packages/conditions/package.json ./packages/conditions/
+COPY --from=build /app/packages/conditions/dist ./packages/conditions/dist
 # @atlas/sync is a runtime import of the backend (LWW + protocol helpers).
 COPY --from=build /app/packages/sync/package.json ./packages/sync/
 COPY --from=build /app/packages/sync/dist ./packages/sync/dist

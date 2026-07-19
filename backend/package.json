@@ -12,6 +12,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@atlas/conditions": "*",
     "@atlas/core": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",

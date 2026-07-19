@@ -24,6 +24,7 @@ import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
+import { useWeather } from './weather/useWeather.js';
 
 // The side/overlay panels are code-split: none of them is needed for the
 // initial map render, and Sidebar pulls in the GPX/KML import machinery.
@@ -33,6 +34,9 @@ const RoutePanel = lazy(() =>
 );
 const ElevationProfile = lazy(() =>
   import('./ElevationProfile.js').then((m) => ({ default: m.ElevationProfile })),
+);
+const WeatherPanel = lazy(() =>
+  import('./weather/WeatherPanel.js').then((m) => ({ default: m.WeatherPanel })),
 );
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
@@ -50,6 +54,8 @@ export function App() {
   const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Weather is targeted at a point (pin / map centre); null = panel closed.
+  const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
     data: TrackData;
@@ -125,6 +131,17 @@ export function App() {
     const center = mapRef.current?.getCenter();
     return center ? { lat: center.lat, lng: center.lng } : null;
   }, []);
+
+  // ---- weather & conditions ----
+
+  const weather = useWeather(weatherTarget);
+  const toggleWeather = useCallback(() => {
+    // Open onto the dropped pin if there is one, else the current map centre.
+    setWeatherTarget((cur) => (cur ? null : (pin ?? getBias() ?? DEFAULT_VIEW.center)));
+  }, [pin, getBias]);
+  const retargetWeather = useCallback(() => {
+    setWeatherTarget(getBias() ?? DEFAULT_VIEW.center);
+  }, [getBias]);
 
   const onSearchSelect = useCallback((result: SearchResult) => {
     setPin(result.position);
@@ -345,6 +362,14 @@ export function App() {
         >
           ⇄ Route
         </button>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-pressed={weatherTarget !== null}
+          onClick={toggleWeather}
+        >
+          ☀ Weather
+        </button>
       </div>
       {writeError && (
         <div className="write-error-toast" role="alert">
@@ -355,6 +380,15 @@ export function App() {
         </div>
       )}
       <Suspense fallback={null}>
+        {weatherTarget && (
+          <WeatherPanel
+            target={weatherTarget}
+            weather={weather}
+            settings={userData}
+            onRetarget={retargetWeather}
+            onClose={() => setWeatherTarget(null)}
+          />
+        )}
         {route.active && <RoutePanel route={route} places={userData.places} getBias={getBias} />}
         {sidebarOpen && (
           <Sidebar
