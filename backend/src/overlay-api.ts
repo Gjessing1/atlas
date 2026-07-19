@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { LayerMeta } from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
+import type { StatusRegistry } from './status.js';
 
 /**
  * Overlay layer registry + WMS/XYZ tile proxy + GetFeatureInfo identify proxy.
@@ -330,6 +331,8 @@ export interface OverlayApiOptions {
   fetchImpl?: typeof fetch;
   /** Test seam: env for token gating / URL substitution. */
   env?: Record<string, string | undefined>;
+  /** Health registry: each configured layer is a probed source. */
+  status?: StatusRegistry;
 }
 
 export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions): void {
@@ -340,6 +343,12 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
     (l) => !l.requiresEnv || Boolean(env[l.requiresEnv]),
   );
   const byId = new Map(layers.map((l) => [l.meta.id, l]));
+
+  // Each catalog source shows on the status page, unknown until a tile/identify
+  // request actually exercises it.
+  const status = opts.status;
+  const probeId = (id: string) => `overlay:${id}`;
+  for (const l of layers) status?.register(probeId(l.meta.id), l.meta.title, 'Overlays');
 
   // Public catalog: LayerMeta only — never the upstream config.
   app.get('/api/layers', () => ({ layers: layers.map((l) => l.meta) }));
@@ -405,9 +414,13 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
         const res = await fetchImpl(upstream, { signal: AbortSignal.timeout(15_000) });
         if (!res.ok) {
           request.log.error({ layer: layer.meta.id, status: res.status }, 'overlay upstream error');
+          status?.record(probeId(layer.meta.id), false, `HTTP ${res.status}`);
           return reply.code(502).send({ error: 'overlay unavailable' });
         }
         const contentType = res.headers.get('content-type') ?? '';
+        // The upstream answered either way — a non-image ServiceException means
+        // "no data here", not "service down", so both count as reachable.
+        status?.record(probeId(layer.meta.id), true);
         if (!contentType.startsWith('image/')) {
           // A 200 with XML is a ServiceException (out of coverage, bad layer,
           // …): serve a transparent tile so the map shows blank, not broken —
@@ -421,6 +434,7 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
         return servePng(data);
       } catch (err) {
         request.log.error({ err, layer: layer.meta.id }, 'overlay upstream unreachable');
+        status?.record(probeId(layer.meta.id), false, 'unreachable');
         return reply.code(502).send({ error: 'overlay unavailable' });
       }
     },
@@ -478,13 +492,18 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
           if (/ServiceException|ExceptionReport/i.test(body)) continue; // format unsupported
           const results = parse(body);
           if (results === null) continue; // unparseable in this format
+          status?.record(probeId(layer.meta.id), true);
           return { results: results.slice(0, 8) };
         } catch (err) {
           request.log.warn({ err, layer: layer.meta.id, format }, 'identify upstream failed');
           upstreamDown = true;
         }
       }
-      if (upstreamDown) return reply.code(502).send({ error: 'identify unavailable' });
+      if (upstreamDown) {
+        status?.record(probeId(layer.meta.id), false, 'identify unreachable');
+        return reply.code(502).send({ error: 'identify unavailable' });
+      }
+      status?.record(probeId(layer.meta.id), true);
       return { results: [] };
     },
   );

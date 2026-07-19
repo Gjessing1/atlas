@@ -38,6 +38,9 @@ const ElevationProfile = lazy(() =>
 const WeatherPanel = lazy(() =>
   import('./weather/WeatherPanel.js').then((m) => ({ default: m.WeatherPanel })),
 );
+const SettingsPanel = lazy(() =>
+  import('./settings/SettingsPanel.js').then((m) => ({ default: m.SettingsPanel })),
+);
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const LAST_VIEW_SETTING = 'lastView';
@@ -54,6 +57,7 @@ export function App() {
   const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Weather is targeted at a point (pin / map centre); null = panel closed.
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<{
@@ -370,6 +374,14 @@ export function App() {
         >
           ☀ Weather
         </button>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          ⚙ Settings
+        </button>
       </div>
       {writeError && (
         <div className="write-error-toast" role="alert">
@@ -393,7 +405,6 @@ export function App() {
         {sidebarOpen && (
           <Sidebar
             data={userData}
-            sync={sync}
             layers={layers}
             mapZoom={mapZoom}
             selectedTrackId={selectedTrack?.track.id ?? null}
@@ -403,6 +414,7 @@ export function App() {
             onClose={() => setSidebarOpen(false)}
           />
         )}
+        {settingsOpen && <SettingsPanel sync={sync} onClose={() => setSettingsOpen(false)} />}
         {/* Valhalla routes carry no elevation data — skip the profile rather
             than draw an empty chart. */}
         {routePath &&

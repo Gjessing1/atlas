@@ -1,5 +1,6 @@
 import type { WeatherForecast, WeatherPoint } from '@atlas/conditions';
 import type { FastifyInstance } from 'fastify';
+import type { StatusRegistry } from './status.js';
 
 /**
  * GET /api/weather?lat=..&lon=.. — point forecast from MET Norway
@@ -92,10 +93,16 @@ export interface WeatherApiOptions {
   userAgent?: string;
   /** Test seam: upstream HTTP. */
   fetchImpl?: typeof fetch;
+  /** Health registry: met.no is one probed source. */
+  status?: StatusRegistry;
 }
+
+const WEATHER_PROBE = 'metno';
 
 export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions = {}): void {
   const fetchImpl = opts.fetchImpl ?? fetch;
+  const status = opts.status;
+  status?.register(WEATHER_PROBE, 'MET Norway (weather)', 'Weather');
   const userAgent =
     opts.userAgent ??
     process.env.METNO_USER_AGENT ??
@@ -128,6 +135,7 @@ export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions
           signal: AbortSignal.timeout(8000),
         });
       } catch (err) {
+        status?.record(WEATHER_PROBE, false, 'unreachable');
         if (cached) return cached.forecast; // network blip → serve stale rather than fail
         throw err;
       }
@@ -135,11 +143,13 @@ export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions
       // 304: forecast unchanged. Push the next refresh to the new Expires; reuse the payload.
       if (res.status === 304 && cached) {
         cached.expiresAt = parseExpires(res.headers.get('expires'));
+        status?.record(WEATHER_PROBE, true);
         return cached.forecast;
       }
       if (!res.ok) {
         // 429 and 5xx alike: the stale forecast is far better than an error,
         // and its unchanged expiresAt keeps us from hammering the upstream.
+        status?.record(WEATHER_PROBE, false, `HTTP ${res.status}`);
         if (cached) return cached.forecast;
         throw new Error(`met.no: ${res.status}`);
       }
@@ -151,6 +161,7 @@ export function registerWeatherApi(app: FastifyInstance, opts: WeatherApiOptions
         lastModified,
         expiresAt: parseExpires(res.headers.get('expires')),
       });
+      status?.record(WEATHER_PROBE, true);
       return forecast;
     })().finally(() => inflight.delete(key));
 

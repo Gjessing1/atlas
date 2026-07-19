@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import {
@@ -6,10 +7,13 @@ import {
   photonFeatureToSearchResult,
   type PhotonFeature,
   type SearchResult,
+  type SystemStatus,
 } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerOverlayApi, type OverlayApiOptions } from './overlay-api.js';
 import { registerPacksApi } from './packs-api.js';
+import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
@@ -46,13 +50,47 @@ export interface AppOptions {
   overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
   /** Test seams for the met.no weather proxy. */
   weatherApi?: WeatherApiOptions;
+  /** Test seams for the Høydedata elevation proxy. */
+  elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
 }
 
+/**
+ * Freshness line for the local PMTiles basemap archives: newest mtime as a
+ * date plus a count. Null when no archive exists (dev / world-tiles-only).
+ */
+async function basemapDetail(tilesDir: string): Promise<string | null> {
+  let names: string[];
+  try {
+    names = (await readdir(tilesDir)).filter((n) => n.endsWith('.pmtiles'));
+  } catch {
+    return null; // no tiles dir at all
+  }
+  if (names.length === 0) return null;
+  let newest = 0;
+  for (const name of names) {
+    try {
+      newest = Math.max(newest, (await stat(path.join(tilesDir, name))).mtimeMs);
+    } catch {
+      // archive vanished between readdir and stat — ignore
+    }
+  }
+  if (newest === 0) return null;
+  const date = new Date(newest).toISOString().slice(0, 10);
+  const count = names.length === 1 ? '1 archive' : `${names.length} archives`;
+  return `map data from ${date} · ${count}`;
+}
+
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false });
+
+  // Per-upstream health, populated by real proxy traffic (see status.ts). The
+  // catalog sources register themselves inside registerOverlayApi/Weather.
+  const status = new StatusRegistry();
+  status.register('photon', 'Photon (search)', 'Search');
+  status.register('valhalla', 'Valhalla (routing)', 'Routing');
 
   // Accounts + sync are optional: only live when a database is configured.
   let stores = opts.stores ?? null;
@@ -68,7 +106,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   if (stores) {
     if (!opts.jwtSecret) throw new Error('JWT_SECRET is required when the sync database is set');
     await registerSyncApi(app, stores, opts.jwtSecret);
+    status.register('postgres', 'PostgreSQL (sync)', 'Sync');
   }
+  const syncStores = stores;
 
   app.get('/api/health', () => ({
     status: 'ok',
@@ -76,6 +116,35 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     gitSha: process.env.GIT_SHA || 'dev',
     sync: stores !== null,
   }));
+
+  // Basemap freshness is read from the PMTiles archives on disk, not probed.
+  status.register('basemap', 'Basemap tiles', 'Map data');
+
+  // GET /api/status — per-upstream health for the settings/status page.
+  // Probe outcomes come from real traffic; freshness/liveness are read here.
+  app.get('/api/status', async (): Promise<SystemStatus> => {
+    const detail = await basemapDetail(path.join(opts.dataDir, 'tiles'));
+    status.setDetail('basemap', detail ?? 'no local archive — using world tiles');
+    // A present, readable archive counts as ok; its absence isn't a failure
+    // (the world-tile upstream covers everything), so leave that unknown.
+    if (detail) status.record('basemap', true);
+    if (syncStores) {
+      try {
+        await syncStores.ping();
+        status.record('postgres', true);
+      } catch (err) {
+        app.log.error({ err }, 'postgres ping failed');
+        status.record('postgres', false, 'unreachable');
+      }
+    }
+    return {
+      app: APP_NAME,
+      gitSha: process.env.GIT_SHA || 'dev',
+      generatedAt: Date.now(),
+      overall: status.overall(),
+      sources: status.toStatus(),
+    };
+  });
 
   // Geocoding: thin proxy over the self-hosted Photon service so the client
   // never talks to it directly (single origin, no CORS, URL stays private).
@@ -99,8 +168,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         request.log.error({ status: res.status }, 'photon error');
+        status.record('photon', false, `HTTP ${res.status}`);
         return reply.code(502).send({ error: 'search unavailable' });
       }
+      status.record('photon', true);
       const geojson = (await res.json()) as { features?: PhotonFeature[] };
       // Photon often returns several OSM objects for one real-world place
       // (peak + trail + viewpoint all named alike); collapse to one per label.
@@ -117,6 +188,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       return { results };
     } catch (err) {
       request.log.error({ err }, 'photon unreachable');
+      status.record('photon', false, 'unreachable');
       return reply.code(502).send({ error: 'search unavailable' });
     }
   });
@@ -144,13 +216,22 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
           json !== null && typeof json === 'object' && 'error' in json
             ? String((json as { error: unknown }).error)
             : 'routing failed';
-        const status = res.status >= 400 && res.status < 500 ? 400 : 502;
-        if (status === 502) request.log.error({ status: res.status, message }, 'valhalla error');
-        return reply.code(status).send({ message });
+        const code = res.status >= 400 && res.status < 500 ? 400 : 502;
+        // A 4xx is a bad route request (no edges near a point), not the engine
+        // being down — only a 5xx counts against Valhalla's health.
+        if (code === 502) {
+          request.log.error({ status: res.status, message }, 'valhalla error');
+          status.record('valhalla', false, `HTTP ${res.status}`);
+        } else {
+          status.record('valhalla', true);
+        }
+        return reply.code(code).send({ message });
       }
+      status.record('valhalla', true);
       return json;
     } catch (err) {
       request.log.error({ err }, 'valhalla unreachable');
+      status.record('valhalla', false, 'unreachable');
       return reply.code(502).send({ message: 'routing unavailable' });
     }
   });
@@ -184,12 +265,17 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // its own disposable path — wiping it only costs re-fetches.
   registerOverlayApi(app, {
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
+    status,
     ...opts.overlayApi,
   });
 
   // Weather: met.no Locationforecast proxy (ToS discipline lives in
   // weather-api.ts — identifying UA, Expires caching, stale-on-failure).
-  registerWeatherApi(app, opts.weatherApi);
+  registerWeatherApi(app, { status, ...opts.weatherApi });
+
+  // Point elevation: Kartverket Høydedata proxy (enriches tapped points /
+  // saved places with a terrain height — no raster pipeline).
+  registerElevationApi(app, { status, ...opts.elevationApi });
 
   // Map assets (style JSON, glyphs, sprites) fetched by
   // infrastructure/tiles/fetch-map-assets.sh into the data dir.

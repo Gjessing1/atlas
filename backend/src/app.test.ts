@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { SystemStatus } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
@@ -188,5 +189,64 @@ describe('asset serving', () => {
     const res = await app.inject({ url: '/assets/styles/test.json' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ version: 8 });
+  });
+});
+
+describe('status page', () => {
+  it('reports per-upstream health driven by real traffic', async () => {
+    // Exercise the proxies so their probes flip from unknown to ok.
+    await app.inject({ url: '/api/search?q=oslo' });
+    await app.inject({
+      method: 'POST',
+      url: '/api/route',
+      payload: {
+        costing: 'auto',
+        locations: [
+          { lat: 59.91, lon: 10.75 },
+          { lat: 59.92, lon: 10.76 },
+        ],
+      },
+    });
+
+    const res = await app.inject({ url: '/api/status' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SystemStatus;
+    expect(body.app).toBe('Atlas');
+    expect(typeof body.generatedAt).toBe('number');
+
+    const byId = new Map(body.sources.map((s) => [s.id, s]));
+    expect(byId.get('photon')?.health).toBe('ok');
+    expect(byId.get('valhalla')?.health).toBe('ok');
+    // A weather call never happened → still unknown, not a failure.
+    expect(byId.get('metno')?.health).toBe('unknown');
+    // The test dataDir has test.pmtiles, so the basemap reads fresh.
+    const basemap = byId.get('basemap');
+    expect(basemap?.health).toBe('ok');
+    expect(basemap?.detail).toMatch(/map data from \d{4}-\d{2}-\d{2}/);
+    // No DATABASE_URL in this app → sync source absent entirely.
+    expect(byId.has('postgres')).toBe(false);
+    expect(body.overall).toBe('ok');
+  });
+
+  it('marks an upstream degraded after it starts failing', async () => {
+    const downApp = await buildApp({ dataDir, valhallaUrl: 'http://127.0.0.1:1' });
+    await downApp.inject({
+      method: 'POST',
+      url: '/api/route',
+      payload: {
+        costing: 'auto',
+        locations: [
+          { lat: 59.91, lon: 10.75 },
+          { lat: 59.92, lon: 10.76 },
+        ],
+      },
+    });
+    const res = await downApp.inject({ url: '/api/status' });
+    const body = res.json() as SystemStatus;
+    const valhalla = body.sources.find((s) => s.id === 'valhalla');
+    expect(valhalla?.health).toBe('down'); // never succeeded this run
+    expect(valhalla?.message).toBe('unreachable');
+    expect(body.overall).toBe('down');
+    await downApp.close();
   });
 });

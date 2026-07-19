@@ -50,6 +50,10 @@ export async function createPgStores(
   return {
     close: () => pool.end(),
 
+    async ping() {
+      await pool.query('SELECT 1');
+    },
+
     users: {
       async createUser(email, passwordHash) {
         const res = await pool.query(

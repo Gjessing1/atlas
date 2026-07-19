@@ -5,8 +5,8 @@ const timeShort = (ts: number): string =>
   new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /**
- * Sidebar footer: account + sync state. Anonymous local-only is the default —
- * this panel is the only place an account enters the picture.
+ * Account + sync state, shown in the Settings panel. Anonymous local-only is
+ * the default — this panel is the only place an account enters the picture.
  */
 export function AccountPanel({ sync }: { sync: SyncState }) {
   const [email, setEmail] = useState('');

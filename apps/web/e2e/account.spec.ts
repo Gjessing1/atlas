@@ -9,7 +9,7 @@ test('register, sync status, sign out', async ({ page, baseURL }) => {
 
   await page.goto('/');
   await waitForMap(page);
-  await page.getByRole('button', { name: '★ Saved' }).click();
+  await page.getByRole('button', { name: '⚙ Settings' }).click();
 
   const email = `e2e-${Date.now()}@example.com`;
   await page.getByPlaceholder('email').fill(email);

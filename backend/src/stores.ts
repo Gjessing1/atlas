@@ -28,6 +28,8 @@ export interface SyncStore {
 export interface Stores {
   users: UserStore;
   sync: SyncStore;
+  /** Cheap liveness check for the status page; resolves ok or throws. */
+  ping(): Promise<void>;
 }
 
 /**
@@ -49,6 +51,7 @@ export function createMemoryStores(): Stores {
   };
 
   return {
+    ping: () => Promise.resolve(),
     users: {
       createUser(email, passwordHash) {
         if (users.has(email)) return Promise.resolve(null);

@@ -5,12 +5,9 @@ import type { LayerCatalog } from './layers/useLayerCatalog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
 import { useSidebarDnd } from './sidebar/useSidebarDnd.js';
 import type { ImportResult, UserData } from './storage/useUserData.js';
-import { AccountPanel } from './sync/AccountPanel.js';
-import type { SyncState } from './sync/useSync.js';
 
 interface SidebarProps {
   data: UserData;
-  sync: SyncState;
   layers: LayerCatalog;
   mapZoom: number;
   selectedTrackId: string | null;
@@ -25,7 +22,6 @@ const fmtKm = (m: number): string =>
 
 export function Sidebar({
   data,
-  sync,
   layers,
   mapZoom,
   selectedTrackId,
@@ -320,7 +316,6 @@ export function Sidebar({
         {data.status === 'ready' && branch(null, 0)}
         <LayersPanel layers={layers} mapZoom={mapZoom} />
       </div>
-      {data.status === 'ready' && <AccountPanel sync={sync} />}
     </aside>
   );
 }

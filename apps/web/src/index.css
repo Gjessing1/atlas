@@ -1542,3 +1542,164 @@ body {
   font-size: 10px;
   color: #a3a29c;
 }
+
+/* --- Settings panel (account, server status, build info) --- */
+
+.settings-panel {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  bottom: 12px;
+  width: min(340px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  overflow-y: auto;
+  /* Reserve the scrollbar's width so it never overlaps the Refresh link. */
+  scrollbar-gutter: stable;
+  padding: 0 0 10px;
+}
+
+.settings-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #fff;
+  border-bottom: 1px solid #e1e0d9;
+  z-index: 1;
+}
+
+.settings-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0efe9;
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #898781;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.settings-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #898781;
+}
+
+.settings-error {
+  color: #c0392b;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #2a78d6;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  color: #a3a29c;
+  cursor: default;
+}
+
+.status-overall {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status-sha {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #a3a29c;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-group {
+  margin-top: 8px;
+}
+
+.status-group-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b6a64;
+  margin-bottom: 2px;
+}
+
+.status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.status-name {
+  flex: 0 0 auto;
+  color: #2b2a26;
+}
+
+.status-detail {
+  flex: 1;
+  text-align: right;
+  font-size: 11px;
+  color: #898781;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b7b6b0;
+}
+
+.status-ok {
+  background: #16a34a;
+}
+
+.status-degraded {
+  background: #f59e0b;
+}
+
+.status-down {
+  background: #e11d48;
+}
+
+.status-unknown {
+  background: #c7c6c0;
+}
