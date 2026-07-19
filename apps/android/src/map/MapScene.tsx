@@ -179,8 +179,9 @@ export function MapScene({
       // top-left, so bottom-centre is expressed as top/left margins computed
       // from the window size; the native side adds the status-bar inset to
       // the top margin, so subtract it here. The bar keeps the middle of the
-      // bottom edge, between the menu cluster and the locate button.
-      scaleBar
+      // bottom edge, between the menu cluster and the locate button. Hidden
+      // during turn-by-turn: it's dead weight on a driving screen.
+      scaleBar={!following}
       scaleBarPosition={{
         top: Math.max(0, Math.round(win.height - bottomInset - 88 - topInset)),
         left: Math.round(win.width * 0.3),

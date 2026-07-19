@@ -54,6 +54,10 @@ export class NavigationSession {
 
   private offRouteCount = 0;
   private arrived = false;
+  /** True once the vehicle has demonstrably started driving (see NavState.departed). */
+  private departed: boolean;
+  /** alongM of the first fix, so progress can also prove departure. */
+  private firstFixAlongM: number | null = null;
   private readonly firedPrompts = new Set<string>();
   /** alongM of the previous snap — continuity hint for the map matcher. */
   private lastAlongM: number | null = null;
@@ -82,6 +86,7 @@ export class NavigationSession {
     this.totalM = this.cum[this.cum.length - 1] ?? 0;
     this.totalTimeMs = route.timeMs;
     this.opts = { ...DEFAULT_NAV_OPTIONS, ...options };
+    this.departed = this.opts.startDeparted;
 
     const lastIdx = this.points.length - 1;
     this.maneuvers = (route.instructions ?? []).map((instruction, index) => {
@@ -129,6 +134,19 @@ export class NavigationSession {
     }
     const offRoute = this.offRouteCount >= this.opts.offRouteGraceUpdates;
 
+    // Departure: the drive has visibly begun once the vehicle moves at
+    // driving pace or has progressed along the route (for devices that
+    // report no speed). Sticky for the session's lifetime.
+    if (!this.departed) {
+      if (this.firstFixAlongM === null) this.firstFixAlongM = alongM;
+      if (
+        (speedMps !== null && speedMps >= this.opts.departMinSpeedMps) ||
+        alongM - this.firstFixAlongM >= this.opts.departProgressM
+      ) {
+        this.departed = true;
+      }
+    }
+
     this.updatePace(nowMs, alongM, snap.crossTrackM);
     this.lastFixMs = nowMs;
     this.alongAtFixM = alongM;
@@ -145,10 +163,37 @@ export class NavigationSession {
     const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
     const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming, speedMps);
 
+    // Display position: glue to the route only while the fix is genuinely
+    // near it (tighter still before departure) — a puck pinned to a road the
+    // car isn't on reads as broken. On the road and moving, project the shown
+    // position slightly ahead along the line so the map agrees with the
+    // windshield despite GPS + camera-animation latency; guidance math
+    // (prompts, distances, off-route) stays on the true position throughout.
+    const snapDisplayM = this.departed ? this.opts.snapDisplayMaxM : this.opts.startSnapDisplayMaxM;
+    let shown: LatLng;
+    let shownCourse: number | null;
+    if (snap.crossTrackM <= snapDisplayM) {
+      let displayAlongM = alongM;
+      if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
+        const aheadM = Math.min(60, speedMps * (this.opts.predictAheadMs / 1000));
+        displayAlongM = Math.min(this.totalM, alongM + aheadM);
+      }
+      shown = pointAtDistance(this.points, this.cum, displayAlongM);
+      shownCourse = this.courseAt(displayAlongM, speedMps);
+    } else {
+      shown = { lat: position.lat, lng: position.lng };
+      // Off the line the route tangent is a lie; the GPS course (when moving)
+      // is the only honest bearing, else leave the camera/chevron alone.
+      shownCourse =
+        moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
+          ? position.headingDeg
+          : null;
+    }
+
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);
     const state: NavState = {
       status: this.arrived ? 'arrived' : offRoute ? 'off-route' : 'navigating',
-      snapped: snap.point,
+      snapped: shown,
       raw: { lat: position.lat, lng: position.lng },
       offRouteM: snap.crossTrackM,
       traveledM: alongM,
@@ -159,7 +204,8 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(alongM),
-      courseDeg: this.courseAt(alongM, speedMps),
+      departed: this.departed,
+      courseDeg: shownCourse,
       fix: 'live',
       wrongBranch: false,
     };
@@ -264,6 +310,7 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(alongM),
+      departed: this.departed,
       courseDeg: course,
       fix: 'estimated',
       wrongBranch: this.wrongBranch,

@@ -283,15 +283,61 @@ describe('NavigationSession voice prompts', () => {
 });
 
 describe('NavigationSession snapped state', () => {
-  it('exposes both the snapped point and the raw fix', () => {
+  it('hugs the road for a near fix, keeping the raw fix as-is', () => {
     const s = new NavigationSession(route());
-    // ~11 m north of the line: display should hug the road, raw kept as-is.
-    const fix = { lat: 60.0001, lng: 10.005 };
+    // ~5 m north of the line: within even the pre-departure display bound.
+    const fix = { lat: 60.000045, lng: 10.005 };
     const state = s.update(fix, 0).state;
     expect(state.raw).toEqual(fix);
     expect(state.snapped.lat).toBeCloseTo(60, 5);
-    expect(state.offRouteM).toBeGreaterThan(8);
-    expect(state.offRouteM).toBeLessThan(15);
+    expect(state.offRouteM).toBeGreaterThan(3);
+    expect(state.offRouteM).toBeLessThan(8);
+  });
+
+  it('shows the raw fix before departure when standing off the road', () => {
+    const s = new NavigationSession(route());
+    // ~11 m off: driving display would snap this, but the trip has not begun.
+    const fix = { lat: 60.0001, lng: 10.005 };
+    const state = s.update(fix, 0).state;
+    expect(state.departed).toBe(false);
+    expect(state.snapped).toEqual(fix);
+  });
+
+  it('departs on driving speed and then snaps the same offset fix', () => {
+    const s = new NavigationSession(route());
+    const rolling = s.update({ ...pointAtAlong(100), speedMps: 8 }, 0).state;
+    expect(rolling.departed).toBe(true);
+    const state = s.update({ lat: 60.0001, lng: 10.007, speedMps: 1 }, 1000).state;
+    expect(state.departed).toBe(true);
+    expect(state.snapped.lat).toBeCloseTo(60, 5);
+  });
+
+  it('departs on along-route progress even without speed data', () => {
+    const s = new NavigationSession(route());
+    expect(s.update(pointAtAlong(10), 0).state.departed).toBe(false);
+    expect(s.update(pointAtAlong(50), 1000).state.departed).toBe(true);
+  });
+
+  it('shows the raw fix when well off the road even while departed', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    // ~33 m off: beyond snapDisplayMaxM but under the 40 m off-route bound.
+    const fix = { lat: 60.0003, lng: 10.005 };
+    const state = s.update(fix, 0).state;
+    expect(state.departed).toBe(true);
+    expect(state.snapped).toEqual(fix);
+    expect(state.status).toBe('navigating');
+  });
+
+  it('projects the shown position ahead at speed, leaving guidance math honest', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const state = s.update({ ...pointAtAlong(200), speedMps: 20 }, 0).state;
+    // predictAheadMs = 1000 → shown ~20 m ahead of the true position.
+    const expected = pointAtAlong(220);
+    expect(state.snapped.lng).toBeCloseTo(expected.lng, 5);
+    expect(state.traveledM).toBeCloseTo(200, 0);
+    const still = new NavigationSession(route(), { startDeparted: true });
+    const noSpeed = still.update(pointAtAlong(200), 0).state;
+    expect(noSpeed.snapped.lng).toBeCloseTo(pointAtAlong(200).lng, 5);
   });
 });
 
@@ -327,14 +373,17 @@ describe('followZoom', () => {
     expect(followZoom(25, 60, 1000)).toBe(zoomForSpeed(25, 60));
   });
 
-  it('ramps monotonically to the intersection zoom as the turn nears', () => {
+  it('ramps monotonically toward the intersection zoom as the turn nears', () => {
     const far = followZoom(25, 60, 290);
     const mid = followZoom(25, 60, 200);
     const near = followZoom(25, 60, 100);
     expect(far).toBeGreaterThanOrEqual(zoomForSpeed(25, 60));
     expect(mid).toBeGreaterThanOrEqual(far);
     expect(near).toBeGreaterThanOrEqual(mid);
-    expect(near).toBe(17.5);
+    // Full intersection zoom only once the turn fits on-screen (last ~60 m) —
+    // leaning in harder would scroll the turn itself off the top.
+    expect(near).toBeLessThan(17.5);
+    expect(followZoom(25, 60, 40)).toBe(17.5);
   });
 
   it('never zooms below the speed zoom', () => {

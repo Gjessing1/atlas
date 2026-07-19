@@ -219,7 +219,11 @@ export function useNavigation(): NavController {
         const path = await fetchPath(from, destRef.current, profileRef.current, heading);
         // The old session dies here — bank its driven distance for the summary.
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
-        sessionRef.current = new NavigationSession(path);
+        // Rerouting happens mid-drive: never regress to the pre-departure
+        // framing (calm camera / no snap-lock) the fresh session starts in.
+        sessionRef.current = new NavigationSession(path, {
+          startDeparted: lastStateRef.current?.departed ?? true,
+        });
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
         // "Which way now?" is most urgent right after recalculating.

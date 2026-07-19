@@ -53,10 +53,15 @@ export function zoomForSpeed(
 
 /**
  * Follow-mode zoom that also leans into the next maneuver: the speed zoom far
- * from a turn, ramping to a close-in intersection zoom over the last 300 m so
- * the turn geometry is readable when it matters (the Google/OsmAnd behavior).
- * `forwardDp` is how much screen (in dp) lies ahead of the position puck — a
- * bottom-anchored puck sees more road than a centered one.
+ * from a turn, zooming in over the last 300 m so the turn geometry is readable
+ * when it matters (the Google/OsmAnd behavior) — but never so far in that the
+ * maneuver point itself leaves the screen. The old fixed ramp did exactly
+ * that (at full lean only ~100 m ahead was visible while the turn was still
+ * 250 m out), which made turns arrive "sooner than the map said". The cap
+ * keeps the turn on-screen (with a margin) all the way in, reaching the full
+ * intersection zoom only in the last ~60 m. `forwardDp` is how much screen
+ * (in dp) lies ahead of the position puck — a bottom-anchored puck sees more
+ * road than a centered one.
  */
 export function followZoom(
   speedMps: number | null,
@@ -67,9 +72,10 @@ export function followZoom(
   const base = zoomForSpeed(speedMps, lat, forwardDp);
   if (nextManeuverM === null || nextManeuverM > 300) return base;
   const APPROACH_ZOOM = 17.5;
-  const RAMP_FROM_M = 300;
-  const FULL_AT_M = 120;
-  const t = Math.min(1, (RAMP_FROM_M - nextManeuverM) / (RAMP_FROM_M - FULL_AT_M));
-  const z = Math.max(base, base + (APPROACH_ZOOM - base) * t);
+  const TURN_MARGIN_M = 40;
+  const scale = 78271.5 * Math.cos(((lat ?? 60) * Math.PI) / 180);
+  // The zoom at which the maneuver point plus a margin still fits ahead.
+  const keepTurnVisible = Math.log2((scale * forwardDp) / (nextManeuverM + TURN_MARGIN_M));
+  const z = Math.min(APPROACH_ZOOM, Math.max(base, keepTurnVisible));
   return Math.round(z * 4) / 4;
 }

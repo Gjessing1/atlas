@@ -33,7 +33,13 @@ export interface UpcomingManeuver {
 /** The full navigation state after processing a position fix. */
 export interface NavState {
   status: NavStatus;
-  /** The position snapped onto the route (what a nav UI should render). */
+  /**
+   * The position a nav UI should render. Glued to the route only while the
+   * raw fix is genuinely near it (`snapDisplayMaxM`, tighter before
+   * departure) — otherwise the raw fix itself, so a car 30 m from the road
+   * is not drawn on it. While moving on-route it is projected slightly ahead
+   * along the line (`predictAheadMs`) to cancel GPS + render latency.
+   */
   snapped: LatLng;
   /** The raw GPS fix that produced this state (for off-route display fallback). */
   raw: LatLng;
@@ -58,6 +64,13 @@ export interface NavState {
    * the maneuver leg containing the position; null when the data has none.
    */
   currentRoad: string | null;
+  /**
+   * False until the vehicle demonstrably starts the drive (moving at
+   * driving pace, or having progressed along the route). UIs keep a calmer
+   * pre-drive framing until then — no full follow camera, no snap-lock —
+   * so starting guidance from a car park doesn't pretend driving has begun.
+   */
+  departed: boolean;
   /** Whether this position is a live fix, an extrapolation, or signal-lost. */
   fix: NavFix;
   /**
@@ -145,6 +158,22 @@ export interface NavigationOptions {
   chainManeuverM?: number;
   /** Time constant (ms) of the observed-pace average that adapts the ETA. */
   paceTauMs?: number;
+  /** Cross-track distance (m) beyond which `snapped` shows the raw fix. */
+  snapDisplayMaxM?: number;
+  /** Tighter `snapDisplayMaxM` used before departure (pre-drive honesty). */
+  startSnapDisplayMaxM?: number;
+  /** Ground speed (m/s) at which the trip counts as departed. */
+  departMinSpeedMps?: number;
+  /** Along-route progress (m) that also counts as departed (no-speed devices). */
+  departProgressM?: number;
+  /** Start with `departed` already true — for sessions created mid-drive (reroutes). */
+  startDeparted?: boolean;
+  /**
+   * How far ahead (ms at current speed) to project the displayed position
+   * along the route, compensating GPS + camera-animation latency so the map
+   * agrees with the windshield at the moment of a turn. 0 disables.
+   */
+  predictAheadMs?: number;
 }
 
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
@@ -169,4 +198,12 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   wrongBranchDeg: 50, // an in-tunnel fork/roundabout exit turns well past this
   chainManeuverM: 300,
   paceTauMs: 90_000,
+  snapDisplayMaxM: 25,
+  startSnapDisplayMaxM: 10,
+  departMinSpeedMps: 3, // ~11 km/h: rolling out of a parking spot counts
+  departProgressM: 30,
+  startDeparted: false,
+  // One fix interval + most of the camera ease: the shown position lands
+  // where the car will be when the animation finishes, not where it was.
+  predictAheadMs: 1000,
 };

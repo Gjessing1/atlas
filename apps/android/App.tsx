@@ -172,13 +172,18 @@ function AppInner() {
   // none of the native puck's raw-GPS wobble. Falls back to the native puck
   // when paused/off-route (the map moves freely under the true position then).
   const win = useWindowDimensions();
+  // Also requires `departed`: before the drive begins the camera holds a calm
+  // north-up frame (see useNavCamera), so the native compass puck is the
+  // honest marker. The 25 m bound matches the session's snapDisplayMaxM —
+  // beyond it `snapped` is the raw fix, no longer glued to the route line.
   const navPuckVisible =
     following &&
     !navCam.followPaused &&
     !navCam.overview &&
     nav.state !== null &&
     nav.state.status !== 'off-route' &&
-    nav.state.offRouteM <= 40;
+    nav.state.departed &&
+    nav.state.offRouteM <= 25;
   // Anchor point of the follow camera (see useNavCamera): course-up pads the
   // centre down to 75% of the screen; north-up keeps it at the middle.
   const navPuckTop = navFollow === 'course' ? win.height * 0.75 : win.height * 0.5;

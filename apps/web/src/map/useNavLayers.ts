@@ -295,7 +295,10 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
     const state = nav.state;
     const snapped = state?.snapped;
     if (!state || !snapped) return;
-    const courseUp = followMode === 'course';
+    // Until the drive has demonstrably begun (state.departed), hold a calm
+    // north-up flat frame instead of the pitched course-up follow (Android
+    // parity — standing still shouldn't look like barreling down the route).
+    const courseUp = followMode === 'course' && state.departed;
     // Standard driving-nav framing (Android parity): top padding of half the
     // viewport puts the car ~75% of the way down in course-up, so the top
     // three quarters show the road ahead; in north-up "ahead" isn't up, so

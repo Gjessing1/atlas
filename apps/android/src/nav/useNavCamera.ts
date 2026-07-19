@@ -114,7 +114,11 @@ export function useNavCamera(
     if (!following || followPaused || overview || !state) return;
     const snapped = state.snapped;
     if (state.courseDeg !== null) bearingRef.current = state.courseDeg;
-    const courseUp = navFollow === 'course';
+    // Until the drive has demonstrably begun (state.departed), hold a calm
+    // north-up flat frame instead of the full pitched course-up follow —
+    // standing next to the car shouldn't look like barreling down the route.
+    // The moment it flips, the ease below rotates into driving view.
+    const courseUp = navFollow === 'course' && state.departed;
     // Bottom-anchor (course-up only — in north-up "ahead" isn't up, so centre):
     // top padding of half the screen puts the car ~75% of the way down.
     const anchorTop = courseUp ? Math.round(win.height * 0.5) : 0;
