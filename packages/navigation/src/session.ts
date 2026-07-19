@@ -53,6 +53,8 @@ export class NavigationSession {
   private readonly opts: Required<NavigationOptions>;
 
   private offRouteCount = 0;
+  /** Consecutive moving fixes whose heading opposes the route direction. */
+  private wrongWayCount = 0;
   private arrived = false;
   /** True once the vehicle has demonstrably started driving (see NavState.departed). */
   private departed: boolean;
@@ -103,36 +105,57 @@ export class NavigationSession {
   update(position: Position, nowMs: number = Date.now()): NavUpdate {
     const accuracyM =
       typeof position.accuracyM === 'number' && position.accuracyM >= 0 ? position.accuracyM : null;
-    // A hopeless fix (urban-canyon multipath) would teleport the puck and
-    // corrupt the matcher's continuity hint; coast on the last state instead.
-    if (accuracyM !== null && accuracyM > this.opts.discardAccuracyM && this.lastState !== null) {
-      return this.tick(nowMs) ?? { state: this.lastState, prompts: [] };
+    if (accuracyM !== null && accuracyM > this.opts.discardAccuracyM) {
+      // A hopeless fix (urban-canyon multipath) would teleport the puck and
+      // corrupt the matcher's continuity hint; coast on the last state instead.
+      // With no state yet there is nothing to coast on — but a cold-start
+      // garbage fix must not become the origin of guidance either, so show a
+      // provisional (greyed) puck at the raw point and wait for a usable fix.
+      if (this.lastState !== null)
+        return this.tick(nowMs) ?? { state: this.lastState, prompts: [] };
+      return { state: this.provisionalState(position, nowMs), prompts: [] };
     }
     const speedMps =
       typeof position.speedMps === 'number' && position.speedMps >= 0 ? position.speedMps : null;
     // The GPS course only disambiguates direction when actually moving —
     // stationary headings are compass noise.
     const moving = speedMps !== null && speedMps >= 2;
+    const headingDeg =
+      moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
+        ? position.headingDeg
+        : null;
     const snap = snapToRoute(position, this.points, this.cum, {
       prevAlongM: this.lastAlongM,
-      headingDeg:
-        moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
-          ? position.headingDeg
-          : null,
+      headingDeg,
     });
     this.lastAlongM = snap.alongM;
     const alongM = snap.alongM;
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
 
-    if (distanceRemainingM <= this.opts.arrivalRadiusM) this.arrived = true;
+    // Only fixes accurate enough to prove a departure count toward off-route
+    // (or arrival) — an uncertain fix leaves the tally untouched either way.
+    const accurate = accuracyM === null || accuracyM <= this.opts.offRouteMaxAccuracyM;
 
-    // Only fixes accurate enough to prove a departure count toward off-route;
-    // an uncertain fix leaves the tally untouched in either direction.
-    if (accuracyM === null || accuracyM <= this.opts.offRouteMaxAccuracyM) {
+    // Tearing the trip down is irreversible, so a poor fix drifting through the
+    // arrival radius must not fire it; only an accurate fix may declare arrival.
+    if (distanceRemainingM <= this.opts.arrivalRadiusM && accurate) this.arrived = true;
+
+    if (accurate) {
       if (snap.crossTrackM > this.opts.offRouteM) this.offRouteCount++;
       else this.offRouteCount = 0;
+      // Wrong-way: heading opposes the route tangent while moving. Cross-track
+      // stays ≈ 0 driving the line backwards (the matcher even pins the puck
+      // via its backtrack penalty), so this is the only signal that catches it.
+      const tangent = headingDeg !== null ? this.courseAt(alongM, speedMps) : null;
+      if (tangent !== null && Math.abs(wrapDeg(headingDeg! - tangent)) > this.opts.wrongWayDeg) {
+        this.wrongWayCount++;
+      } else if (headingDeg !== null) {
+        this.wrongWayCount = 0;
+      }
     }
-    const offRoute = this.offRouteCount >= this.opts.offRouteGraceUpdates;
+    const offRoute =
+      this.offRouteCount >= this.opts.offRouteGraceUpdates ||
+      this.wrongWayCount >= this.opts.offRouteGraceUpdates;
 
     // Departure: the drive has visibly begun once the vehicle moves at
     // driving pace or has progressed along the route (for devices that
@@ -184,10 +207,7 @@ export class NavigationSession {
       shown = { lat: position.lat, lng: position.lng };
       // Off the line the route tangent is a lie; the GPS course (when moving)
       // is the only honest bearing, else leave the camera/chevron alone.
-      shownCourse =
-        moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
-          ? position.headingDeg
-          : null;
+      shownCourse = headingDeg;
     }
 
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);
@@ -358,6 +378,34 @@ export class NavigationSession {
     return last && last.instruction.sign === 4 && last.instruction.text
       ? last.instruction.text
       : 'You have arrived';
+  }
+
+  /**
+   * A state to show before any usable fix has arrived — the raw point, greyed
+   * (`fix: 'lost'`), at the route's start with nothing yet snapped or matched.
+   * Deliberately *not* stored as `lastState`: the next fix is still treated as
+   * the first, so a garbage cold-start fix never anchors guidance.
+   */
+  private provisionalState(position: Position, nowMs: number): NavState {
+    const [upcoming, then] = this.findUpcoming(0);
+    return {
+      status: 'navigating',
+      snapped: { lat: position.lat, lng: position.lng },
+      raw: { lat: position.lat, lng: position.lng },
+      offRouteM: 0,
+      traveledM: 0,
+      routeProgress: 0,
+      distanceRemainingM: this.totalM,
+      timeRemainingMs: this.totalTimeMs,
+      etaEpochMs: nowMs + this.totalTimeMs,
+      upcoming,
+      then,
+      currentRoad: this.roadAt(0),
+      departed: this.departed,
+      courseDeg: null,
+      fix: 'lost',
+      wrongBranch: false,
+    };
   }
 
   /** The maneuver being approached (first strictly ahead of `alongM`) plus the one after it. */

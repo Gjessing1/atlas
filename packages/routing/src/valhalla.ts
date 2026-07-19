@@ -160,7 +160,8 @@ function decodeShape(encoded: string, precision = 6): [number, number][] {
  * engine reads only text + interval). Anything unrecognised means "continue" (0).
  * Valhalla types: 9 slight-right, 10 right, 11 sharp-right, 12/13 u-turn r/l,
  * 14 sharp-left, 15 left, 16 slight-left, 17/18/19 ramp s/r/l, 20/21 exit r/l,
- * 22/23/24 stay s/r/l, 25/37/38 merge, 26 roundabout-enter, 4/5/6 destination.
+ * 22/23/24 stay s/r/l, 25/37/38 merge, 26 roundabout-enter, 27 roundabout-exit,
+ * 28/29 ferry enter/exit, 4/5/6 destination.
  */
 const SIGN_BY_TYPE: Readonly<Record<number, number>> = {
   4: 4,
@@ -183,7 +184,10 @@ const SIGN_BY_TYPE: Readonly<Record<number, number>> = {
   23: 7,
   24: -7,
   25: 0, // merge (side unknown)
-  26: 6,
+  26: 6, // roundabout enter (carries the exit count)
+  27: 6, // roundabout exit — still the ring, no separate arrow needed
+  28: 0, // ferry board — a leg to ride; the kind carries the flavor
+  29: 0, // ferry disembark
   37: 7,
   38: -7,
 };
@@ -193,7 +197,7 @@ const SIGN_BY_TYPE: Readonly<Record<number, number>> = {
  * an on-ramp, leaving via an exit, keeping a side at a fork, and merging;
  * UIs render each with its own icon (see RouteInstruction.kind).
  */
-const KIND_BY_TYPE: Readonly<Record<number, 'ramp' | 'exit' | 'keep' | 'merge'>> = {
+const KIND_BY_TYPE: Readonly<Record<number, 'ramp' | 'exit' | 'keep' | 'merge' | 'ferry'>> = {
   17: 'ramp',
   18: 'ramp',
   19: 'ramp',
@@ -203,6 +207,8 @@ const KIND_BY_TYPE: Readonly<Record<number, 'ramp' | 'exit' | 'keep' | 'merge'>>
   23: 'keep',
   24: 'keep',
   25: 'merge',
+  28: 'ferry',
+  29: 'ferry',
   37: 'merge',
   38: 'merge',
 };

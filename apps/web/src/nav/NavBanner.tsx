@@ -80,6 +80,9 @@ export function NavBanner({
             </div>
           ) : null}
           {nav.phase === 'rerouting' ? <span className="nav-reroute">Rerouting…</span> : null}
+          {nav.rerouteFailed && nav.phase === 'navigating' ? (
+            <span className="nav-reroute">Can’t reroute — continue on the line</span>
+          ) : null}
           {state && nav.phase !== 'arrived' ? (
             <>
               <div className="nav-progress-track">

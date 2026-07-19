@@ -444,10 +444,60 @@ describe('NavigationSession GPS accuracy', () => {
     expect(junk.traveledM).toBeCloseTo(good.traveledM, 5);
   });
 
-  it('accepts a poor first fix rather than starting blind', () => {
+  it('does not anchor guidance to a garbage cold-start fix', () => {
     const s = new NavigationSession(route());
-    const state = s.update({ ...pointAtAlong(100), accuracyM: 500 }, 0).state;
-    expect(state.traveledM).toBeCloseTo(100, 0);
+    // A hopeless first fix must not become the origin of guidance; show a
+    // provisional greyed puck at the raw point instead.
+    const first = s.update({ ...pointAtAlong(100), accuracyM: 500 }, 0).state;
+    expect(first.fix).toBe('lost');
+    expect(first.traveledM).toBe(0);
+    // The next usable fix is still treated as the first, initializing normally.
+    const good = s.update({ ...pointAtAlong(100), accuracyM: 10 }, 1000).state;
+    expect(good.fix).toBe('live');
+    expect(good.traveledM).toBeCloseTo(100, 0);
+  });
+});
+
+describe('NavigationSession arrival gating', () => {
+  it('will not declare arrival from a poor fix', () => {
+    const s = new NavigationSession(route());
+    // Drifted into the arrival radius but with a 60 m error radius — too
+    // uncertain to tear the trip down.
+    const poor = s.update({ ...pointAtAlong(routeTotal), accuracyM: 60 }, 0).state;
+    expect(poor.status).toBe('navigating');
+    // An accurate fix in the radius does arrive.
+    const good = s.update({ ...pointAtAlong(routeTotal), accuracyM: 10 }, 1000).state;
+    expect(good.status).toBe('arrived');
+  });
+});
+
+describe('NavigationSession wrong-way detection', () => {
+  const legMps = routeCum[10]! / 60;
+
+  it('trips off-route when the heading opposes the route while moving', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    // On the eastbound line but driving west (heading 270°): cross-track ≈ 0.
+    const back = { ...pointAtAlong(routeCum[10]!), speedMps: legMps, headingDeg: 270 };
+    expect(s.update(back, 0).state.status).toBe('navigating'); // 1 of 3
+    expect(s.update(back, 1000).state.status).toBe('navigating'); // 2 of 3
+    expect(s.update(back, 2000).state.status).toBe('off-route');
+  });
+
+  it('stays navigating when the heading follows the route', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const fwd = { ...pointAtAlong(routeCum[10]!), speedMps: legMps, headingDeg: 90 };
+    for (let t = 0; t < 5; t++) expect(s.update(fwd, t * 1000).state.status).toBe('navigating');
+  });
+
+  it('ignores an opposing heading from a poor-accuracy fix', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const back = {
+      ...pointAtAlong(routeCum[10]!),
+      speedMps: legMps,
+      headingDeg: 270,
+      accuracyM: 80,
+    };
+    for (let t = 0; t < 5; t++) expect(s.update(back, t * 1000).state.status).toBe('navigating');
   });
 });
 

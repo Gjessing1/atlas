@@ -45,6 +45,8 @@ export interface NavController {
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
   tripSummary: TripSummary | null;
+  /** True while off-route but the reroute keeps failing (routing unreachable). */
+  rerouteFailed: boolean;
   error: string | null;
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
@@ -88,6 +90,7 @@ export function useNavigation(): NavController {
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [muted, setMutedState] = useState(false);
   const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
+  const [rerouteFailed, setRerouteFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
@@ -98,6 +101,10 @@ export function useNavigation(): NavController {
   const previewSeq = useRef(0);
   const profileRef = useRef<RoutingProfile>('car');
   const rerouteInFlight = useRef(false);
+  /** Earliest time (epoch ms) a failed reroute may be retried (backoff). */
+  const rerouteBackoffUntil = useRef(0);
+  /** Consecutive reroute failures, driving the backoff exponent. */
+  const rerouteFailCount = useRef(0);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
   const mutedRef = useRef(false);
   /** When guidance began, for the arrival card's elapsed time. */
@@ -187,6 +194,9 @@ export function useNavigation(): NavController {
       originRef.current = null;
       previewSeq.current++;
       rerouteInFlight.current = false;
+      rerouteBackoffUntil.current = 0;
+      rerouteFailCount.current = 0;
+      setRerouteFailed(false);
       setRouteCoords([]);
       setActivePath(null);
       setPreviewPaths(null);
@@ -209,6 +219,9 @@ export function useNavigation(): NavController {
   const reroute = useCallback(
     async (from: LocationFix) => {
       if (rerouteInFlight.current || !destRef.current) return;
+      // A failed reroute must not retry on every 1 Hz off-route fix — back off
+      // exponentially so an unreachable routing server isn't hammered.
+      if (Date.now() < rerouteBackoffUntil.current) return;
       rerouteInFlight.current = true;
       setPhase('rerouting');
       try {
@@ -217,6 +230,10 @@ export function useNavigation(): NavController {
         const heading =
           typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
         const path = await fetchPath(from, destRef.current, profileRef.current, heading);
+        // End (or arrival) may have fired during the fetch — stop() clears the
+        // in-flight flag and destination. Applying now would resurrect a dead
+        // nav UI with a fresh session, so bail out.
+        if (!rerouteInFlight.current || !destRef.current) return;
         // The old session dies here — bank its driven distance for the summary.
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         // Rerouting happens mid-drive: never regress to the pre-departure
@@ -226,14 +243,24 @@ export function useNavigation(): NavController {
         });
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
+        rerouteFailCount.current = 0;
+        rerouteBackoffUntil.current = 0;
+        setRerouteFailed(false);
         // "Which way now?" is most urgent right after recalculating.
         const depart = sessionRef.current.departurePrompt();
         if (depart) speak(depart.text);
       } catch {
-        // Keep the old session; the next off-route fix retries.
+        // Keep the old session (the driver continues on the drawn line) and
+        // back off before the next attempt: 5 s, 10 s, 20 s … capped at 60 s.
+        rerouteFailCount.current++;
+        rerouteBackoffUntil.current =
+          Date.now() + Math.min(60_000, 5_000 * 2 ** (rerouteFailCount.current - 1));
+        setRerouteFailed(true);
       } finally {
         rerouteInFlight.current = false;
-        setPhase('navigating');
+        // Only resume the navigating UI if the trip is still alive; a race with
+        // End/arrival leaves the session null and must not flip us back.
+        if (sessionRef.current) setPhase('navigating');
       }
     },
     [fetchPath, speak],
@@ -260,6 +287,9 @@ export function useNavigation(): NavController {
           stop(true);
         } else if (next.status === 'off-route') {
           void reroute(fix);
+        } else {
+          // Back on the line: any lingering "can't reroute" notice is stale.
+          setRerouteFailed(false);
         }
       } catch (err) {
         console.warn('navigation fix failed', err);
@@ -491,6 +521,7 @@ export function useNavigation(): NavController {
     speedMps,
     muted,
     tripSummary,
+    rerouteFailed,
     error,
     start,
     selectPreview: setPreviewIndex,

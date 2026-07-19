@@ -329,6 +329,9 @@ describe('parseValhallaResponse', () => {
       [25, 0, 'merge'],
       [37, 7, 'merge'],
       [38, -7, 'merge'],
+      [27, 6, undefined], // roundabout exit → the ring, no ramp/ferry flavor
+      [28, 0, 'ferry'], // board a ferry — a leg to ride, not a turn
+      [29, 0, 'ferry'], // disembark
       [10, 2, undefined], // a plain turn carries no kind
     ];
     for (const [type, sign, kind] of cases) {

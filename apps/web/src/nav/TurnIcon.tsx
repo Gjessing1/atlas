@@ -134,6 +134,29 @@ export function TurnIcon({
       </span>
     );
   }
+  if (instruction.kind === 'ferry') {
+    return (
+      <span className="nav-turn">
+        <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M5 13 H19 L17 17.5 H7 Z M9 13 V9.5 H15 V13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M3.5 20.5 Q5.5 19 7.5 20.5 T11.5 20.5 T15.5 20.5 T19.5 20.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            opacity="0.7"
+          />
+        </svg>
+      </span>
+    );
+  }
   const { spec, mirrored } = specFor(instruction);
   return (
     <span className="nav-turn">

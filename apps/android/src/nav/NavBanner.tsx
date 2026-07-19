@@ -107,6 +107,9 @@ export function NavBanner({
         ) : null}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
+        {nav.rerouteFailed && nav.phase === 'navigating' ? (
+          <Text style={styles.reroute}>Can’t reroute — continue on the line</Text>
+        ) : null}
         {state?.wrongBranch && nav.phase === 'navigating' ? (
           <Text style={styles.reroute}>Check route — you may have taken a different turn</Text>
         ) : null}

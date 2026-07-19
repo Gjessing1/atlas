@@ -118,6 +118,13 @@ export interface NavigationOptions {
   offRouteM?: number;
   /** Consecutive off-route fixes before the session reports `off-route`. */
   offRouteGraceUpdates?: number;
+  /**
+   * Heading-vs-route-tangent opposition (deg) that counts a moving fix as
+   * going the wrong way. Driving the route backwards keeps cross-track ≈ 0, so
+   * only opposition to the route direction reveals it; sustained for the same
+   * grace count it trips `off-route` (and a direction-aware reroute).
+   */
+  wrongWayDeg?: number;
   /** Distance (m) to the destination within which arrival is declared. */
   arrivalRadiusM?: number;
   /** Descending distances (m) at which to emit "in N meters…" prompts. */
@@ -179,6 +186,8 @@ export interface NavigationOptions {
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   offRouteM: 40,
   offRouteGraceUpdates: 3,
+  wrongWayDeg: 120, // near-opposite heading; a wrong turn trips cross-track first
+
   arrivalRadiusM: 25,
   approachThresholdsM: [400, 200],
   nowThresholdM: 40,

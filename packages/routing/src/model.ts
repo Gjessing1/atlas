@@ -61,10 +61,11 @@ export interface RouteInstruction {
   exitNumber?: number;
   /**
    * Refines the coarse `sign` for maneuvers it flattens: a highway on-ramp,
-   * a highway exit, a keep-at-fork, or a merge (all otherwise just ±7/0).
-   * UIs may render these with distinct icons; absent for plain turns.
+   * a highway exit, a keep-at-fork, a merge (all otherwise just ±7/0), or
+   * boarding a `ferry` (sign 0 — a leg to ride, not a turn). UIs may render
+   * these with distinct icons; absent for plain turns.
    */
-  kind?: 'ramp' | 'exit' | 'keep' | 'merge';
+  kind?: 'ramp' | 'exit' | 'keep' | 'merge' | 'ferry';
 }
 
 /** One routable path (the primary route or an alternative). */

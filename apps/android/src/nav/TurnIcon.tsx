@@ -141,6 +141,29 @@ export function TurnIcon({
       </View>
     );
   }
+  if (instruction.kind === 'ferry') {
+    return (
+      <View style={styles.box}>
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path
+            d="M5 13 H19 L17 17.5 H7 Z M9 13 V9.5 H15 V13"
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M3.5 20.5 Q5.5 19 7.5 20.5 T11.5 20.5 T15.5 20.5 T19.5 20.5"
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            opacity={0.7}
+          />
+        </Svg>
+      </View>
+    );
+  }
   const { spec, mirrored } = specFor(instruction);
   return (
     <View style={styles.box}>
