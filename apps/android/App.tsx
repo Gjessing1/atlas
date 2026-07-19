@@ -60,6 +60,7 @@ import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
+import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { UpdateNotices } from './src/update/UpdateNotices';
@@ -613,6 +614,8 @@ function AppInner() {
           onPick={onPickResult}
           onClose={() => setSearchOpen(false)}
           top={controlsTop}
+          getSetting={getSetting}
+          setSetting={setSetting}
         />
       ) : null}
 
@@ -661,8 +664,9 @@ function AppInner() {
       ) : null}
 
       {/* Bottom-right: recentre on the current position (RoutePanel owns the
-          bottom while planning, so hide it then). */}
-      {!planning && !previewing ? (
+          bottom while planning, so hide it then; while navigating the follow
+          camera + Re-centre pill cover it, so it's hidden too). */}
+      {!planning && !previewing && !following ? (
         <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
           <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
             <CrosshairIcon />
@@ -691,8 +695,9 @@ function AppInner() {
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && !planning && !previewing ? (
-        // Stacked above the bottom-right locate button.
+      {packs.length > 0 && !planning && !previewing && !following ? (
+        // Stacked above the bottom-right locate button. Hidden mid-trip: the
+        // offline fallback is automatic (useMapStyle), the switch only forces it.
         <View style={[styles.offlineToggle, { bottom: bottomInset + 84 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
@@ -814,7 +819,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 5,
@@ -823,64 +828,65 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(17,17,17,0.9)',
+    backgroundColor: theme.surface,
     borderRadius: 22,
     paddingHorizontal: 18,
     paddingVertical: 10,
     elevation: 5,
   },
-  recentreText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  recentreText: { color: theme.text, fontWeight: '700', fontSize: 15 },
   roundButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,
   },
-  orientText: { fontSize: 18, fontWeight: '800', color: '#1a73e8' },
-  roundButtonActive: { backgroundColor: '#d7e7ff' },
+  orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
+  roundButtonActive: { backgroundColor: theme.surfaceActive },
   roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   roadChip: {
-    backgroundColor: 'rgba(17,17,17,0.85)',
+    backgroundColor: theme.surfaceOverlay,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 6,
     maxWidth: '70%',
     elevation: 4,
   },
-  roadChipText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  roadChipText: { color: theme.text, fontWeight: '700', fontSize: 14 },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,
     alignSelf: 'center',
-    backgroundColor: 'rgba(17,17,17,0.75)',
+    backgroundColor: theme.surfaceOverlay,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 5,
+    elevation: 2,
   },
-  offlineBadgeText: { color: '#fff', fontSize: 12 },
+  offlineBadgeText: { color: theme.text, fontSize: 12 },
   offlineToggle: {
     position: 'absolute',
     bottom: 36,
     right: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 4,
     elevation: 4,
     gap: 6,
   },
-  offlineToggleText: { fontSize: 13, color: '#334' },
+  offlineToggleText: { fontSize: 13, color: theme.textMuted },
   banner: {
     position: 'absolute',
     top: 100,
     left: 12,
     right: 12,
-    backgroundColor: '#b3261e',
+    backgroundColor: theme.danger,
     borderRadius: 8,
     padding: 10,
   },

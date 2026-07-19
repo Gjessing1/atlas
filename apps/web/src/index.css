@@ -78,6 +78,16 @@ body {
   color: #666;
 }
 
+/* Non-interactive "Recent" header above the recent-picks list. */
+.searchbox-results li.searchbox-tag {
+  padding: 6px 12px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  cursor: default;
+}
+
 .pin-popup code {
   font-size: 13px;
 }

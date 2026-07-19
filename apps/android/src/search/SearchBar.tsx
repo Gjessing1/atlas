@@ -4,12 +4,14 @@ import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 
 import type { LocalPack } from '../regions/packs';
 import { geoSearch, type SearchBias } from './geoSearch';
+import { parseRecentSearches, pushRecentSearch, RECENT_SEARCHES_SETTING } from './recentSearches';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
  * downloaded packs' FTS5 databases when it can't be reached. The expanded
  * overlay only — App owns the round 🔍 button (bottom-left cluster) and the
  * open state; the input stays at the top so the keyboard never covers it.
+ * While the input is empty it lists the recent picks (device-local setting).
  */
 export function SearchBar({
   packs,
@@ -17,6 +19,8 @@ export function SearchBar({
   onPick,
   onClose,
   top = 0,
+  getSetting,
+  setSetting,
 }: {
   packs: LocalPack[];
   /** Current map centre, to bias results towards the viewport (web parity). */
@@ -25,11 +29,19 @@ export function SearchBar({
   onClose: () => void;
   /** Absolute top offset (px) for the expanded input. */
   top?: number;
+  /** Settings accessors, for the persisted recent-searches list. */
+  getSetting: (key: string) => Promise<string | null>;
+  setSetting: (key: string, value: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [recent, setRecent] = useState<SearchResult[]>([]);
   const [offline, setOffline] = useState(false);
   const generation = useRef(0);
+
+  useEffect(() => {
+    void getSetting(RECENT_SEARCHES_SETTING).then((raw) => setRecent(parseRecentSearches(raw)));
+  }, [getSetting]);
 
   const search = useCallback(
     async (text: string) => {
@@ -59,18 +71,31 @@ export function SearchBar({
     onClose();
   }, [onClose]);
 
+  const pick = useCallback(
+    (result: SearchResult) => {
+      setSetting(RECENT_SEARCHES_SETTING, JSON.stringify(pushRecentSearch(recent, result)));
+      close();
+      onPick(result);
+    },
+    [recent, setSetting, close, onPick],
+  );
+
   // The overlay can also be unmounted from outside (navigation starting, route
   // planning opening) — the soft keyboard must never outlive the input.
   useEffect(() => {
     return () => Keyboard.dismiss();
   }, []);
 
+  // An empty input shows the recent picks so frequent trips are two taps.
+  const showingRecent = results.length === 0 && query.trim().length < 2;
+  const shown = showingRecent ? recent : results;
+
   return (
     <View style={[styles.wrap, { top }]}>
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
-          placeholder="Search places"
+          placeholder="Search places or coordinates"
           value={query}
           onChangeText={setQuery}
           autoCorrect={false}
@@ -81,18 +106,19 @@ export function SearchBar({
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
       </View>
-      {results.length > 0 ? (
+      {shown.length > 0 ? (
         <View style={styles.results}>
-          {offline ? <Text style={styles.offlineTag}>offline results</Text> : null}
-          {results.map((r, i) => (
+          {showingRecent ? (
+            <Text style={styles.listTag}>recent</Text>
+          ) : offline ? (
+            <Text style={styles.listTag}>offline results</Text>
+          ) : null}
+          {shown.map((r, i) => (
             <Pressable
               key={`${r.name}-${i}`}
               style={styles.result}
               testID={`search-result-${i}`}
-              onPress={() => {
-                close();
-                onPick(r);
-              }}
+              onPress={() => pick(r)}
             >
               <Text style={styles.resultName}>{r.name}</Text>
               {r.label ? <Text style={styles.resultLabel}>{r.label}</Text> : null}
@@ -128,7 +154,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     elevation: 4,
   },
-  offlineTag: { fontSize: 11, color: '#886', paddingHorizontal: 14, paddingTop: 4 },
+  listTag: { fontSize: 11, color: '#886', paddingHorizontal: 14, paddingTop: 4 },
   result: { paddingHorizontal: 14, paddingVertical: 8 },
   resultName: { fontSize: 15, color: '#111' },
   resultLabel: { fontSize: 12, color: '#778' },

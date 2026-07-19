@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   bboxContains,
   collectionIsVisible,
+  coordinateSearchResult,
   decodeMapHash,
   decodeMapLink,
   encodeMapHash,
   markerScaleForZoom,
   matchPlacesByName,
+  parseCoordinateQuery,
   photonFeatureToSearchResult,
   placeIsVisible,
   resolveStyleTemplate,
@@ -211,5 +213,43 @@ describe('markerScaleForZoom', () => {
     expect(markerScaleForZoom(9.5)).toBe(0.75);
     expect(markerScaleForZoom(11)).toBeGreaterThan(markerScaleForZoom(10));
     expect(markerScaleForZoom(10)).toBeGreaterThan(markerScaleForZoom(8));
+  });
+});
+
+describe('parseCoordinateQuery', () => {
+  it('parses decimal degrees with comma or space separators', () => {
+    expect(parseCoordinateQuery('59.9139, 10.7522')).toEqual({ lat: 59.9139, lng: 10.7522 });
+    expect(parseCoordinateQuery('59.9139 10.7522')).toEqual({ lat: 59.9139, lng: 10.7522 });
+    expect(parseCoordinateQuery('  -33.9 ; 151.2 ')).toEqual({ lat: -33.9, lng: 151.2 });
+  });
+
+  it('parses hemisphere letters before or after each number', () => {
+    expect(parseCoordinateQuery('N 59.9139 E 10.7522')).toEqual({ lat: 59.9139, lng: 10.7522 });
+    expect(parseCoordinateQuery('59.9139S, 10.7522W')).toEqual({ lat: -59.9139, lng: -10.7522 });
+    expect(parseCoordinateQuery('59.9139° N, 10.7522° E')).toEqual({
+      lat: 59.9139,
+      lng: 10.7522,
+    });
+  });
+
+  it('parses decimal commas', () => {
+    expect(parseCoordinateQuery('59,9139 10,7522')).toEqual({ lat: 59.9139, lng: 10.7522 });
+  });
+
+  it('rejects text, partial pairs and out-of-range values', () => {
+    expect(parseCoordinateQuery('Oslo')).toBeNull();
+    expect(parseCoordinateQuery('Storgata 59')).toBeNull();
+    expect(parseCoordinateQuery('59.9139')).toBeNull();
+    expect(parseCoordinateQuery('91, 10')).toBeNull();
+    expect(parseCoordinateQuery('59, 181')).toBeNull();
+    expect(parseCoordinateQuery('-59.9 S, 10.7 E')).toBeNull();
+  });
+
+  it('builds the shared coordinate result', () => {
+    expect(coordinateSearchResult({ lat: 59.913912345, lng: 10.7522 })).toEqual({
+      name: '59.91391, 10.7522',
+      label: 'Coordinates',
+      position: { lat: 59.913912345, lng: 10.7522 },
+    });
   });
 });

@@ -1,4 +1,9 @@
-import type { LatLng, SearchResult } from '@atlas/core';
+import {
+  coordinateSearchResult,
+  parseCoordinateQuery,
+  type LatLng,
+  type SearchResult,
+} from '@atlas/core';
 import { useEffect, useRef, useState } from 'react';
 
 interface SearchBoxProps {
@@ -8,15 +13,33 @@ interface SearchBoxProps {
   getBias: () => LatLng | null;
 }
 
+/** Recently picked results, newest first (device-local, like `atlas.auth`). */
+const RECENT_KEY = 'atlas.search.recent';
+const MAX_RECENT = 8;
+
+function loadRecent(): SearchResult[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as SearchResult[];
+    return Array.isArray(list) ? list.slice(0, MAX_RECENT) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [recent, setRecent] = useState<SearchResult[]>(loadRecent);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   // Picking a result writes its name into the input; that change must not
   // re-trigger a search (which would pop the dropdown right back open).
   const pickedRef = useRef<string | null>(null);
+
+  // An empty (or too-short) query shows the recent picks instead of results.
+  const showingRecent = query.trim().length < 2;
+  const shown = showingRecent ? recent : results;
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -25,7 +48,15 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
     pickedRef.current = null;
     if (q.length < 2) {
       setResults([]);
-      setOpen(false);
+      setHighlighted(0);
+      return;
+    }
+    // A typed-in coordinate pair is its own result — no geocoder round-trip.
+    const coord = parseCoordinateQuery(q);
+    if (coord) {
+      setResults([coordinateSearchResult(coord)]);
+      setHighlighted(0);
+      setOpen(true);
       return;
     }
     const controller = new AbortController();
@@ -55,6 +86,15 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
   }, [query, getBias]);
 
   const pick = (result: SearchResult) => {
+    const key = (r: SearchResult) =>
+      `${r.name}@${r.position.lat.toFixed(5)},${r.position.lng.toFixed(5)}`;
+    const next = [result, ...recent.filter((r) => key(r) !== key(result))].slice(0, MAX_RECENT);
+    setRecent(next);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch {
+      // Storage full/unavailable — recents just don't persist.
+    }
     pickedRef.current = result.name;
     setQuery(result.name);
     setOpen(false);
@@ -62,15 +102,15 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!open || results.length === 0) return;
+    if (!open || shown.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlighted((i) => Math.min(i + 1, results.length - 1));
+      setHighlighted((i) => Math.min(i + 1, shown.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlighted((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
-      const result = results[highlighted];
+      const result = shown[highlighted];
       if (result) pick(result);
     } else if (e.key === 'Escape') {
       setOpen(false);
@@ -81,16 +121,18 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
     <div className="searchbox">
       <input
         type="search"
-        placeholder="Search places…"
+        placeholder="Search places or coordinates…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onKeyDown}
-        onFocus={() => results.length > 0 && setOpen(true)}
+        onFocus={() => shown.length > 0 && setOpen(true)}
+        onBlur={() => setOpen(false)}
         aria-label="Search places"
       />
-      {open && results.length > 0 && (
+      {open && shown.length > 0 && (
         <ul className="searchbox-results" role="listbox">
-          {results.map((result, i) => (
+          {showingRecent && <li className="searchbox-tag">Recent</li>}
+          {shown.map((result, i) => (
             <li
               key={`${result.position.lat}/${result.position.lng}/${result.name}`}
               role="option"

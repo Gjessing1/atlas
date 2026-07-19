@@ -85,6 +85,48 @@ export interface SearchResult {
   kind?: string;
 }
 
+/**
+ * Parse a search query that is nothing but a coordinate pair, in decimal
+ * degrees: "59.9139, 10.7522", "59.9139 10.7522", optional hemisphere letters
+ * before or after each number ("N 59.9139 E 10.7522", "59.9139S, 10.7522W")
+ * and optional degree signs. Latitude always comes first. Null when the text
+ * isn't a pure coordinate pair or is out of range — geocoding proceeds then.
+ */
+export function parseCoordinateQuery(text: string): LatLng | null {
+  const m =
+    /^\s*([NS])?\s*([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?\s*([NS])?\s*[,;\s]\s*([EW])?\s*([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?\s*([EW])?\s*$/i.exec(
+      text,
+    );
+  if (!m) return null;
+  const [, latPre, latRaw, latPost, lngPre, lngRaw, lngPost] = m;
+  // At most one hemisphere letter per number (prefix or suffix, not both).
+  if ((latPre && latPost) || (lngPre && lngPost)) return null;
+  const hemi = (raw: string, letter: string | undefined, negative: string): number | null => {
+    const value = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(value)) return null;
+    if (!letter) return value;
+    if (value < 0) return null; // "-59.9 S" is contradictory
+    return letter.toUpperCase() === negative ? -value : value;
+  };
+  const lat = hemi(latRaw!, latPre || latPost, 'S');
+  const lng = hemi(lngRaw!, lngPre || lngPost, 'W');
+  if (lat === null || lng === null) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+/**
+ * The SearchResult for a query parsed by {@link parseCoordinateQuery} — shared
+ * so web and Android present typed-in coordinates identically.
+ */
+export function coordinateSearchResult(p: LatLng): SearchResult {
+  return {
+    name: `${round(p.lat, 5)}, ${round(p.lng, 5)}`,
+    label: 'Coordinates',
+    position: { lat: p.lat, lng: p.lng },
+  };
+}
+
 /** The subset of a Photon GeoJSON feature Atlas consumes. */
 export interface PhotonFeature {
   geometry?: { type?: string; coordinates?: number[] };

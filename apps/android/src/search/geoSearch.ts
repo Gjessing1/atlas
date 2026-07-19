@@ -1,4 +1,9 @@
-import type { LatLng, SearchResult } from '@atlas/core';
+import {
+  coordinateSearchResult,
+  parseCoordinateQuery,
+  type LatLng,
+  type SearchResult,
+} from '@atlas/core';
 
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
@@ -21,6 +26,10 @@ export async function geoSearch(
   text: string,
   getBias?: SearchBias,
 ): Promise<{ results: SearchResult[]; offline: boolean }> {
+  // A typed-in coordinate pair is its own result — no geocoder involved, so
+  // it also works offline (and in the route planner's stop search).
+  const coord = parseCoordinateQuery(text);
+  if (coord) return { results: [coordinateSearchResult(coord)], offline: false };
   try {
     const params = new URLSearchParams({ q: text });
     const bias = await getBias?.().catch(() => null);

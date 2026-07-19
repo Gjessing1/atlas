@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { theme } from '../ui/theme';
 import { TurnIcon } from './TurnIcon';
 import type { NavController } from './useNavigation';
 
@@ -101,7 +102,7 @@ export function NavBanner({
         {thenManeuver ? (
           <View style={styles.thenRow}>
             <Text style={styles.thenLabel}>then</Text>
-            <TurnIcon instruction={thenManeuver.instruction} size={22} color="#cdd6e0" />
+            <TurnIcon instruction={thenManeuver.instruction} size={22} color={theme.textMuted} />
           </View>
         ) : null}
 
@@ -159,7 +160,7 @@ export function NavBanner({
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 12, right: 12, gap: 8 },
   card: {
-    backgroundColor: 'rgba(17,17,17,0.9)',
+    backgroundColor: theme.surface,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -168,25 +169,25 @@ const styles = StyleSheet.create({
   maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   turnBox: { width: 44, alignItems: 'center', justifyContent: 'center' },
   thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  thenLabel: { color: '#cdd6e0', fontSize: 14, fontWeight: '600' },
-  distanceTo: { color: '#7ec8ff', fontSize: 22, fontWeight: '700', minWidth: 68 },
-  maneuver: { color: '#fff', fontSize: 17, fontWeight: '600', flexShrink: 1 },
+  thenLabel: { color: theme.textMuted, fontSize: 14, fontWeight: '600' },
+  distanceTo: { color: theme.accent, fontSize: 22, fontWeight: '700', minWidth: 68 },
+  maneuver: { color: theme.text, fontSize: 17, fontWeight: '600', flexShrink: 1 },
   progressTrack: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: theme.accentFaint,
     marginTop: 10,
     overflow: 'hidden',
   },
-  progressFill: { height: 4, borderRadius: 2, backgroundColor: '#7ec8ff' },
-  summary: { color: '#cdd6e0', fontSize: 13, marginTop: 6 },
-  reroute: { color: '#ffcf7e', fontSize: 13, marginTop: 6 },
-  error: { color: '#ff9a8f', fontSize: 15, fontWeight: '600' },
+  progressFill: { height: 4, borderRadius: 2, backgroundColor: theme.accent },
+  summary: { color: theme.textMuted, fontSize: 13, marginTop: 6 },
+  reroute: { color: theme.warning, fontSize: 13, marginTop: 6 },
+  error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
   actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   actionSpacer: { flex: 1 },
   actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   speedPill: {
-    backgroundColor: 'rgba(17,17,17,0.9)',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 6,
@@ -194,19 +195,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 4,
   },
-  speedValue: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  speedValue: { color: theme.text, fontWeight: '700', fontSize: 16 },
   muteButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(17,17,17,0.9)',
+    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,
   },
   muteIcon: { fontSize: 18 },
   stop: {
-    backgroundColor: '#b3261e',
+    backgroundColor: theme.danger,
     borderRadius: 20,
     paddingHorizontal: 22,
     paddingVertical: 8,

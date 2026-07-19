@@ -2,6 +2,8 @@ import type { RouteInstruction } from '@atlas/routing';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Path } from 'react-native-svg';
 
+import { theme } from '../ui/theme';
+
 /**
  * One maneuver icon: the arrow's stroke path plus a triangular head placed at
  * `tip`, rotated to `angleDeg` (0 = east, like SVG). `ghost` is the road not
@@ -92,7 +94,7 @@ function specFor(instruction: Pick<RouteInstruction, 'sign' | 'kind'>): {
 export function TurnIcon({
   instruction,
   size = 34,
-  color = '#fff',
+  color = theme.text,
 }: {
   instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
   size?: number;
@@ -155,7 +157,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -2,
     right: -4,
-    color: '#7ec8ff',
+    color: theme.accent,
     fontSize: 13,
     fontWeight: '800',
   },
