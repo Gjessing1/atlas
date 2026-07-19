@@ -1,5 +1,7 @@
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
+import { LayersPanel } from './layers/LayersPanel.js';
+import type { LayerCatalog } from './layers/useLayerCatalog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
 import { useSidebarDnd } from './sidebar/useSidebarDnd.js';
 import type { ImportResult, UserData } from './storage/useUserData.js';
@@ -9,6 +11,8 @@ import type { SyncState } from './sync/useSync.js';
 interface SidebarProps {
   data: UserData;
   sync: SyncState;
+  layers: LayerCatalog;
+  mapZoom: number;
   selectedTrackId: string | null;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
@@ -22,6 +26,8 @@ const fmtKm = (m: number): string =>
 export function Sidebar({
   data,
   sync,
+  layers,
+  mapZoom,
   selectedTrackId,
   onShowPlace,
   onShowTrack,
@@ -312,6 +318,7 @@ export function Sidebar({
           </p>
         )}
         {data.status === 'ready' && branch(null, 0)}
+        <LayersPanel layers={layers} mapZoom={mapZoom} />
       </div>
       {data.status === 'ready' && <AccountPanel sync={sync} />}
     </aside>

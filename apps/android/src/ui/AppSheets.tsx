@@ -1,10 +1,12 @@
 import type { LatLng } from '@atlas/core';
 import type { SyncState } from '@atlas/app-hooks';
 
+import type { OverlaysController } from '../layers/useOverlays';
 import type { LocalPack } from '../regions/packs';
 import type { ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet } from './FavoritesSheet';
+import { LayersSheet } from './LayersSheet';
 import { PromptModal } from './PromptModal';
 import { SettingsSheet } from './SettingsSheet';
 import { TracksSheet } from './TracksSheet';
@@ -22,6 +24,10 @@ interface AppSheetsProps {
   editPlaceId: string | null;
   tracksOpen: boolean;
   onCloseTracks: () => void;
+  layersOpen: boolean;
+  onCloseLayers: () => void;
+  /** Overlay catalog + per-device state for the Layers sheet. */
+  overlays: OverlaysController;
   settingsOpen: boolean;
   onCloseSettings: () => void;
 
@@ -51,6 +57,9 @@ export function AppSheets({
   editPlaceId,
   tracksOpen,
   onCloseTracks,
+  layersOpen,
+  onCloseLayers,
+  overlays,
   settingsOpen,
   onCloseSettings,
   pendingPin,
@@ -93,6 +102,12 @@ export function AppSheets({
         onDelete={(id) => void data.deleteTrack(id)}
         onImport={onImportTracks}
         onLoadTrackData={(id) => data.getTrackData(id)}
+        bottomInset={bottomInset}
+      />
+      <LayersSheet
+        visible={layersOpen}
+        onClose={onCloseLayers}
+        overlays={overlays}
         bottomInset={bottomInset}
       />
       <SettingsSheet

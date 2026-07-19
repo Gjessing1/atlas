@@ -10,6 +10,7 @@ import {
   Layer,
   Map as MapLibreMap,
   Marker,
+  RasterSource,
   UserLocation,
   ViewAnnotation,
   type CameraRef,
@@ -20,6 +21,7 @@ import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import type { ActiveOverlay } from '../layers/useOverlays';
 import type { NavController } from '../nav/useNavigation';
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
@@ -68,6 +70,8 @@ interface MapSceneProps {
   topInset: number;
   bottomInset: number;
   packs: LocalPack[];
+  /** Enabled catalog overlays (WMS rasters proxied by the backend). */
+  overlays: ActiveOverlay[];
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   nav: NavController;
@@ -104,6 +108,7 @@ export function MapScene({
   topInset,
   bottomInset,
   packs,
+  overlays,
   trackGeo,
   nav,
   route,
@@ -204,6 +209,27 @@ export function MapScene({
         onPickPoint({ lat, lng });
       }}
     >
+      {/* Catalog overlays (hillshade, depths, trails, …): mounted first so
+          they sit under every Atlas line/marker layer. maxzoom from the
+          catalog caps requests — the map overzooms beyond it instead of
+          hammering limited-depth upstreams. */}
+      {overlays.map((overlay) => (
+        <RasterSource
+          key={overlay.meta.id}
+          id={`atlas-overlay-${overlay.meta.id}`}
+          tiles={[overlay.tileUrlTemplate]}
+          tileSize={256}
+          maxzoom={overlay.meta.maxzoom}
+          minzoom={overlay.meta.minzoom ?? 0}
+          attribution={overlay.meta.attribution}
+        >
+          <Layer
+            type="raster"
+            id={`atlas-overlay-${overlay.meta.id}-layer`}
+            paint={{ 'raster-opacity': overlay.opacity }}
+          />
+        </RasterSource>
+      ))}
       {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
       {packs.length > 0 ? (
         <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>

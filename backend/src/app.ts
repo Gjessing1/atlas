@@ -8,6 +8,7 @@ import {
   type SearchResult,
 } from '@atlas/core';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { registerOverlayApi, type OverlayApiOptions } from './overlay-api.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
@@ -40,6 +41,8 @@ export interface AppOptions {
   worldTilesUrl?: string;
   /** Test seams for the world tile proxy. */
   tilesApi?: Pick<TilesApiOptions, 'localTiles' | 'fetchImpl'>;
+  /** Test seams for the overlay layer catalog + WMS proxy. */
+  overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
@@ -173,6 +176,13 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       maxAge: '1h',
     });
   }
+
+  // Overlay layer catalog + WMS tile/identify proxy. The tile cache lives on
+  // its own disposable path — wiping it only costs re-fetches.
+  registerOverlayApi(app, {
+    cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
+    ...opts.overlayApi,
+  });
 
   // Map assets (style JSON, glyphs, sprites) fetched by
   // infrastructure/tiles/fetch-map-assets.sh into the data dir.

@@ -10,6 +10,7 @@ interface MenuClusterProps {
   following: boolean;
   onOpenFavorites: () => void;
   onOpenTracks: () => void;
+  onOpenLayers: () => void;
   onOpenSettings: () => void;
   onOpenSearch: () => void;
   onPlanRoute: () => void;
@@ -27,6 +28,7 @@ export function MenuCluster({
   following,
   onOpenFavorites,
   onOpenTracks,
+  onOpenLayers,
   onOpenSettings,
   onOpenSearch,
   onPlanRoute,
@@ -39,6 +41,7 @@ export function MenuCluster({
             [
               ['Saved', 'open-favorites', onOpenFavorites],
               ['Tracks', 'open-tracks', onOpenTracks],
+              ['Layers', 'open-layers', onOpenLayers],
               ['Settings', 'open-settings', onOpenSettings],
             ] as const
           ).map(([label, testID, openSheet]) => (

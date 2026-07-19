@@ -45,6 +45,7 @@ import {
   PLAN_LINE_LAYER_ID,
 } from './src/map/MapScene';
 import { getServerOrigin } from './src/serverOrigin';
+import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
@@ -118,12 +119,15 @@ function AppInner() {
   const route = useRoute();
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
+  // Overlay catalog + per-device visibility/opacity (☰ → Layers sheet).
+  const overlaysCtl = useOverlays(data);
 
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   // The expanded search overlay (the 🔍 button in the bottom-left cluster opens it).
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   // Place whose edit panel the Favorites sheet should open with (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
@@ -568,6 +572,7 @@ function AppInner() {
         topInset={topInset}
         bottomInset={bottomInset}
         packs={packs}
+        overlays={overlaysCtl.overlays}
         trackGeo={trackGeo}
         nav={nav}
         route={route}
@@ -683,6 +688,7 @@ function AppInner() {
           following={following}
           onOpenFavorites={() => setFavoritesOpen(true)}
           onOpenTracks={() => setTracksOpen(true)}
+          onOpenLayers={() => setLayersOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
           onPlanRoute={() => route.start()}
@@ -769,6 +775,9 @@ function AppInner() {
         editPlaceId={editPlaceId}
         tracksOpen={tracksOpen}
         onCloseTracks={() => setTracksOpen(false)}
+        layersOpen={layersOpen}
+        onCloseLayers={() => setLayersOpen(false)}
+        overlays={overlaysCtl}
         settingsOpen={settingsOpen}
         onCloseSettings={() => setSettingsOpen(false)}
         pendingPin={pendingPin}

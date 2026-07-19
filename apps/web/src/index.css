@@ -1160,3 +1160,86 @@ body {
   line-height: 1;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
+
+/* ---- Map layers panel (Sidebar section) ---- */
+
+.layers-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #e1e0d9;
+}
+
+.layers-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #52514e;
+  margin-bottom: 4px;
+}
+
+.layers-group {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #898781;
+}
+
+.layer-row {
+  padding: 4px 0 2px;
+}
+
+.layer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.layer-name {
+  font-size: 14px;
+}
+
+.layer-opacity {
+  display: block;
+  width: 140px;
+  margin: 2px 0 0 22px;
+}
+
+.layer-desc {
+  margin-left: 22px;
+  font-size: 11px;
+  color: #898781;
+}
+
+.layer-desc a {
+  color: #4a6da7;
+}
+
+.layer-hint {
+  margin-left: 22px;
+  font-size: 11px;
+  color: #9a5b00;
+}
+
+/* ---- Overlay identify popup (tap lake → depth, tap parcel → gnr/bnr) ---- */
+
+.identify-popup {
+  max-width: 260px;
+  font-size: 12px;
+}
+
+.identify-popup strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.identify-popup strong:first-child {
+  margin-top: 0;
+}
+
+.identify-row {
+  color: #444;
+  overflow-wrap: anywhere;
+}

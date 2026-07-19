@@ -12,7 +12,9 @@ import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
+import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useNavLayers } from './map/useNavLayers.js';
+import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
@@ -61,6 +63,27 @@ export function App() {
   const route = useRoute();
   useRouteLayers(map, route);
 
+  // Route mode owns map clicks; identify + POI popups read this ref to yield.
+  const routeActiveRef = useRef(route.active);
+  routeActiveRef.current = route.active;
+
+  // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
+
+  const layers = useLayerCatalog(userData);
+  useOverlayLayers(map, layers.overlays);
+  useOverlayIdentify(map, layers.overlays, routeActiveRef);
+  // Rounded zoom for the panel's live "zoom in to z14+" hints.
+  const [mapZoom, setMapZoom] = useState(Math.round(initialView.zoom));
+  useEffect(() => {
+    if (!map) return;
+    const onZoom = () => setMapZoom(Math.round(map.getZoom()));
+    map.on('zoomend', onZoom);
+    onZoom();
+    return () => {
+      map.off('zoomend', onZoom);
+    };
+  }, [map]);
+
   // ---- turn-by-turn navigation ----
 
   const nav = useWebNavigation();
@@ -76,9 +99,6 @@ export function App() {
     },
     [startNav, stopRoute],
   );
-  // Route mode owns map clicks; MapView reads this ref to skip POI popups.
-  const routeActiveRef = useRef(route.active);
-  routeActiveRef.current = route.active;
   // The route elevation profile can be dismissed; it comes back per route session.
   const [routeProfileHidden, setRouteProfileHidden] = useState(false);
   useEffect(() => {
@@ -340,6 +360,8 @@ export function App() {
           <Sidebar
             data={userData}
             sync={sync}
+            layers={layers}
+            mapZoom={mapZoom}
             selectedTrackId={selectedTrack?.track.id ?? null}
             onShowPlace={showPlace}
             onShowTrack={showTrack}

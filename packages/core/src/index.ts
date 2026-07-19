@@ -264,6 +264,58 @@ export interface RegionsResponse {
   regions: RegionPackManifest[];
 }
 
+// ---- Overlay layer catalog (backend layer registry + WMS proxy) ----
+
+/**
+ * One overlay layer as the client sees it. This is the *stripped* public
+ * shape: upstream URLs, WMS layer names, versions and tokens stay on the
+ * backend (the Layer → LayerMeta split) — clients only ever talk to
+ * `/api/overlay/:id/…`.
+ */
+export interface LayerMeta {
+  id: string;
+  title: string;
+  /** One-line description shown in the layer panel. */
+  description: string;
+  /** Panel group heading ("Terrain", "Water & depth", …). */
+  group: string;
+  /** Attribution shown on the map while the layer is visible. */
+  attribution: string;
+  /** Source/metadata link (Geonorge kartkatalog) for the panel. */
+  metadataUrl?: string;
+  /** Below this zoom the upstream draws nothing useful — clients skip requests and show a zoom hint. */
+  minzoom?: number;
+  /** Request cap: the map overzooms beyond it instead of hitting the upstream. */
+  maxzoom: number;
+  /** Default raster opacity (user-adjustable per device). */
+  defaultOpacity: number;
+  /** Whether `/api/overlay/:id/identify` answers tap-to-identify queries. */
+  identify: boolean;
+  /** Coverage caveat surfaced in the panel ("blank ≠ broken"). */
+  coverageNote?: string;
+  /** Activity profiles this layer belongs to (absent = general purpose). */
+  profiles?: string[];
+}
+
+/** GET /api/layers */
+export interface LayersResponse {
+  layers: LayerMeta[];
+}
+
+/**
+ * GET /api/overlay/:id/identify — cleaned upstream attributes per feature
+ * (noise keys filtered by the backend). Values are display-ready strings.
+ */
+export interface OverlayIdentifyResponse {
+  results: Record<string, string>[];
+}
+
+/**
+ * Per-device overlay panel state, stored as JSON under the device-local
+ * setting `local.layers.state` (never syncs — like all `local.` keys).
+ */
+export type OverlayStateMap = Record<string, { on: boolean; opacity?: number }>;
+
 /**
  * GET /api/app/version — newest Android APK available for self-update.
  * Backed by `<dataDir>/app/version.json` + the .apk it names.
