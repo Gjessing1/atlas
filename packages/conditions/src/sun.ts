@@ -27,9 +27,22 @@ export interface SunPos {
 export interface SunDay {
   sunrise: Date | null;
   sunset: Date | null;
+  /** Civil twilight begins (sun 6° below the horizon) — usable light before sunrise. */
+  dawn: Date | null;
+  /** Civil twilight ends — the last usable light after sunset. */
+  dusk: Date | null;
   solarNoon: Date;
   /** Sun altitude at solar noon — how high it climbs that day. */
   noonAltitude: number;
+  /** Sunrise→sunset in ms; a whole day under the midnight sun, 0 in polar night. */
+  daylightMs: number;
+  /**
+   * Why sunrise/sunset are null, when they are. Norway spans the Arctic Circle,
+   * so "no sunrise today" is an ordinary answer here and the two cases mean
+   * opposite things to anyone planning a day outdoors — a card that showed only
+   * a blank would be at its least useful exactly where it matters most.
+   */
+  polar: 'day' | 'night' | null;
 }
 
 function toDays(date: Date): number {
@@ -108,17 +121,25 @@ export function sunDay(date: Date, lat: number, lon: number): SunDay {
   const jNoon = solarTransitJ(ds, m, l);
   const noon = fromJulian(jNoon);
 
-  // h0 = -0.833° accounts for the sun's radius + atmospheric refraction at the horizon.
-  const w = hourAngle(-0.833 * RAD, phi, dec);
-  let sunrise: Date | null = null;
-  let sunset: Date | null = null;
-  if (!Number.isNaN(w)) {
+  // The times the sun crosses a given altitude, either side of solar noon.
+  // NaN out of `hourAngle` means it never reaches that altitude at all today.
+  const crossings = (altitudeDeg: number): [Date | null, Date | null] => {
+    const w = hourAngle(altitudeDeg * RAD, phi, dec);
+    if (Number.isNaN(w)) return [null, null];
     const jSet = solarTransitJ(approxTransit(w, lw, n), m, l);
-    sunset = fromJulian(jSet);
-    sunrise = fromJulian(jNoon - (jSet - jNoon));
-  }
+    return [fromJulian(jNoon - (jSet - jNoon)), fromJulian(jSet)];
+  };
+
+  // h0 = -0.833° accounts for the sun's radius + atmospheric refraction at the horizon.
+  const [sunrise, sunset] = crossings(-0.833);
+  // Civil twilight: the conventional edge of "you can still see what you're doing".
+  const [dawn, dusk] = crossings(-6);
   const noonAltitude = sunPosition(noon, lat, lon).altitude;
-  return { sunrise, sunset, solarNoon: noon, noonAltitude };
+  // No crossing has two opposite causes — read which from how high the sun got.
+  const polar = sunrise ? null : noonAltitude > -0.833 ? 'day' : 'night';
+  const daylightMs =
+    sunrise && sunset ? sunset.valueOf() - sunrise.valueOf() : polar === 'day' ? DAY_MS : 0;
+  return { sunrise, sunset, dawn, dusk, solarNoon: noon, noonAltitude, daylightMs, polar };
 }
 
 const POINTS16 = [

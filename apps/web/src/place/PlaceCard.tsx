@@ -1,4 +1,6 @@
+import { sunDay, type SunDay } from '@atlas/conditions';
 import {
+  fmtClock,
   fmtCoords,
   placeTargetSubtitle,
   placeTargetTitle,
@@ -6,7 +8,8 @@ import {
   type PlaceTarget,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useElevation } from './useElevation.js';
 
 interface PlaceCardProps {
   target: PlaceTarget;
@@ -24,9 +27,32 @@ interface PlaceCardProps {
   onAddStop: () => void;
   /** Copy a share link to this spot; returns once the clipboard write settled. */
   onShare: () => void;
+  /** Open the forecast panel on this spot rather than on the map centre. */
+  onWeather: () => void;
   /** Remove the dropped pin (pin targets only). */
   onRemovePin: () => void;
   onClose: () => void;
+}
+
+/**
+ * The day's light in one line: sunrise/sunset and how long the day is, or what
+ * is happening instead when the sun does not cross the horizon at all.
+ *
+ * Both polar branches still check `dawn`/`dusk` rather than assuming twilight
+ * exists. It does at Tromsø in December — the sun reaches about -3° at noon, so
+ * there are usable hours — but not far enough north (Svalbard, deep winter),
+ * where the sun stays below -6° all day and there is no twilight to name.
+ */
+function describeLight(sun: SunDay): string {
+  if (sun.polar === 'day') return 'Midnight sun — the sun stays up all day';
+  if (sun.polar === 'night') {
+    if (!sun.dawn || !sun.dusk) return 'Polar night — no daylight or twilight';
+    return `Polar night — twilight ${fmtClock(sun.dawn.valueOf())}–${fmtClock(sun.dusk.valueOf())}`;
+  }
+  if (!sun.sunrise || !sun.sunset) return '';
+  const hours = Math.floor(sun.daylightMs / 3600000);
+  const minutes = Math.round((sun.daylightMs % 3600000) / 60000);
+  return `↑ ${fmtClock(sun.sunrise.valueOf())} · ↓ ${fmtClock(sun.sunset.valueOf())} · ${hours} h ${minutes} min of daylight`;
 }
 
 /**
@@ -50,6 +76,7 @@ export function PlaceCard({
   onShowSaved,
   onAddStop,
   onShare,
+  onWeather,
   onRemovePin,
   onClose,
 }: PlaceCardProps) {
@@ -67,6 +94,16 @@ export function PlaceCard({
   // A bare pin already shows its coordinates as the heading; don't repeat them.
   const showCoords = title !== coords;
 
+  const elevation = useElevation(target.position);
+  // Sun times are pure local maths (no network, no coverage limits), so unlike
+  // elevation they are always available — recomputed per position, and per day
+  // only in the sense that the card is short-lived.
+  const sun = useMemo(
+    () => sunDay(new Date(), target.position.lat, target.position.lng),
+    [target.position.lat, target.position.lng],
+  );
+  const light = describeLight(sun);
+
   return (
     <div className={`place-card${shifted ? ' place-card-shifted' : ''}`} role="dialog">
       <div className="place-card-head">
@@ -79,6 +116,28 @@ export function PlaceCard({
           ✕
         </button>
       </div>
+      {/* What this spot is like, as opposed to what you can do with it. Elevation
+          is fetched and Norway-only, so it states its own absence rather than
+          silently leaving the row short. */}
+      <dl className="place-card-facts">
+        <div>
+          <dt>Elevation</dt>
+          <dd>
+            {elevation.status === 'loading' && '…'}
+            {elevation.status === 'error' && 'unavailable'}
+            {elevation.status === 'ready' &&
+              (elevation.elevationM === null
+                ? 'no data here'
+                : `${Math.round(elevation.elevationM)} m`)}
+          </dd>
+        </div>
+        {light && (
+          <div>
+            <dt>Light</dt>
+            <dd>{light}</dd>
+          </div>
+        )}
+      </dl>
       <div className="place-card-actions">
         <button type="button" className="primary" onClick={onNavigate}>
           Navigate
@@ -97,6 +156,9 @@ export function PlaceCard({
             Save
           </button>
         )}
+        <button type="button" onClick={onWeather}>
+          Weather
+        </button>
         <button
           type="button"
           onClick={() => {

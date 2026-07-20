@@ -52,6 +52,31 @@ describe('sun', () => {
     expect(day.sunrise).toBeNull();
     expect(day.sunset).toBeNull();
     expect(day.noonAltitude).toBeGreaterThan(40);
+    // The two no-sunrise cases must be distinguishable, not both a blank.
+    expect(day.polar).toBe('day');
+    expect(day.daylightMs).toBe(86400000);
+  });
+
+  it('reports polar night in Tromsø at midwinter', () => {
+    const day = sunDay(new Date('2026-12-21T12:00:00Z'), 69.65, 18.96);
+    expect(day.sunrise).toBeNull();
+    expect(day.polar).toBe('night');
+    expect(day.daylightMs).toBe(0);
+    // Even in polar night the sun clears -6°, so there is real twilight to plan by.
+    expect(day.noonAltitude).toBeGreaterThan(-6);
+    expect(day.dawn).not.toBeNull();
+    expect(day.dusk).not.toBeNull();
+  });
+
+  it('brackets sunrise/sunset with civil twilight and measures daylight', () => {
+    const day = sunDay(new Date('2026-06-21T12:00:00Z'), OSLO.lat, OSLO.lon);
+    expect(day.dawn!.valueOf()).toBeLessThan(day.sunrise!.valueOf());
+    expect(day.dusk!.valueOf()).toBeGreaterThan(day.sunset!.valueOf());
+    expect(day.polar).toBeNull();
+    // Oslo midsummer: a shade under 19 hours between sunrise and sunset.
+    const hours = day.daylightMs / 3600000;
+    expect(hours).toBeGreaterThan(18);
+    expect(hours).toBeLessThan(19);
   });
 
   it('puts the midday sun roughly south and high, the midnight sun below the horizon', () => {

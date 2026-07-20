@@ -512,6 +512,7 @@ export function App() {
           }}
           onAddStop={onAddStop}
           onShare={onShareTarget}
+          onWeather={() => setWeatherTarget(target.position)}
           onRemovePin={() => onPinChange(null)}
           onClose={() => setTarget(null)}
         />

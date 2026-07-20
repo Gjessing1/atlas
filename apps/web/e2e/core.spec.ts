@@ -22,6 +22,16 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   await expect(card.locator('strong')).toHaveText(/^-?\d+\.\d{5}, -?\d+\.\d{5}$/);
   await expect(card.getByRole('button', { name: 'Navigate' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Save' })).toBeVisible();
+  // The Light row is offline maths, so it is always there and always 24-hour.
+  // Elevation is deliberately not asserted: it comes from a live upstream, and a
+  // Geonorge outage should fail this suite's *own* subject, not this test.
+  await expect(card.locator('.place-card-facts')).toContainText(
+    /↑ \d{2}:\d{2} · ↓ \d{2}:\d{2} · \d+ h \d+ min of daylight/,
+  );
+  // Weather opens the forecast on this spot rather than on the map centre.
+  await card.getByRole('button', { name: 'Weather' }).click();
+  await expect(page.locator('.weather-panel')).toBeVisible();
+  await page.locator('.weather-panel').getByRole('button', { name: 'Close' }).click();
   // Closing the card leaves the pin; removing the pin closes the card.
   await card.getByRole('button', { name: 'Close' }).click();
   await expect(card).toHaveCount(0);

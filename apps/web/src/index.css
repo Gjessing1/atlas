@@ -152,6 +152,33 @@ body {
   color: #888;
 }
 
+/* Facts about the spot itself, between the heading and the action row. Label
+   and value share a line; the value wraps under a fixed-width label rather than
+   letting a long light line ragged-edge the whole block. */
+.place-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  font-size: 12px;
+  color: #555;
+}
+
+.place-card-facts > div {
+  display: flex;
+  gap: 6px;
+}
+
+.place-card-facts dt {
+  flex: 0 0 62px;
+  color: #888;
+}
+
+.place-card-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
 .place-card-actions {
   display: flex;
   flex-wrap: wrap;
