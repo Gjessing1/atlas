@@ -269,6 +269,22 @@ export function AccountPanel({ sync }: { sync: SyncState }) {
           {statusLine}
         </span>
       </div>
+      <div className="account-line">
+        <span className="account-note">
+          {sync.pending === 0
+            ? 'All changes are on the server'
+            : `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting to upload`}
+        </span>
+      </div>
+      {/* A failure that has since recovered still gets said out loud — a sync
+          that silently stopped working is exactly what this is here to catch. */}
+      {sync.lastError && sync.status !== 'error' && sync.status !== 'authExpired' && (
+        <div className="account-line">
+          <span className="account-note">
+            Last problem {timeShort(sync.lastError.at)}: {sync.lastError.message}
+          </span>
+        </div>
+      )}
       <div className="account-actions">
         <button type="button" onClick={sync.syncNow} disabled={sync.status === 'syncing'}>
           Sync now

@@ -264,6 +264,21 @@ body {
   font-size: 12px;
 }
 
+/* Result of a backup restore — informational, not an error. */
+.sidebar-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #eaf5ec;
+  color: #1e6b34;
+  font-size: 12px;
+}
+
+.sidebar-notice p {
+  flex: 1;
+}
+
 .item-list {
   list-style: none;
 }

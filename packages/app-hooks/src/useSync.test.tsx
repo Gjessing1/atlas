@@ -24,6 +24,8 @@ function createNodeDriver(): SqlDriver {
 class FakeServer {
   syncEnabled = true;
   authorized = true;
+  /** False makes fetch reject, the way an offline device fails. */
+  reachable = true;
   registration: 'open' | 'invite' | 'closed' | undefined = 'open';
   password = 'pw';
   deleted = false;
@@ -42,6 +44,7 @@ class FakeServer {
 
   readonly fetchFn: typeof fetch = (input, init) => {
     const url = new URL(String(input), 'http://server');
+    if (!this.reachable) return Promise.reject(new TypeError('Failed to fetch'));
     if (url.pathname === '/api/health') {
       return Promise.resolve(
         Response.json({ status: 'ok', sync: this.syncEnabled, registration: this.registration }),
@@ -215,6 +218,62 @@ describe('useSync', () => {
     h.server.authorized = true;
     act(() => result.current.syncNow());
     await waitFor(() => expect(result.current.status).toBe('idle'));
+  });
+
+  it('reports the pending outbox depth and drains it on a successful sync', async () => {
+    const h = await createHarness({ session: SESSION });
+    const { result, rerender } = renderHook(
+      ({ token }: { token: number }) => useSync(h.storage, h.onPulled, token, h.platform),
+      { initialProps: { token: 0 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+    await waitFor(() => expect(result.current.pending).toBe(0));
+
+    // Two local edits, made while the server is unreachable, must show up as
+    // queued work rather than vanishing into a green status light.
+    h.server.reachable = false;
+    await act(async () => {
+      await h.storage.createPlace({ name: 'A', lat: 1, lng: 1 });
+      await h.storage.createPlace({ name: 'B', lat: 2, lng: 2 });
+    });
+    rerender({ token: 1 });
+    await waitFor(() => expect(result.current.pending).toBe(2));
+
+    h.server.reachable = true;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.pending).toBe(0));
+  });
+
+  it('keeps the last sync error visible after a later success', async () => {
+    const h = await createHarness({ session: SESSION });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+    expect(result.current.lastError).toBeNull();
+
+    h.server.authorized = false;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('authExpired'));
+    expect(result.current.lastError?.message).toMatch(/expired/i);
+
+    // Recovered: `error` clears, but the record of the failure survives — a
+    // sync that breaks and silently fixes itself must leave a trace.
+    h.server.authorized = true;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+    expect(result.current.error).toBeNull();
+    expect(result.current.lastError?.message).toMatch(/expired/i);
+    expect(result.current.lastError?.at).toBeGreaterThan(0);
+  });
+
+  it('does not log going offline as a sync problem', async () => {
+    const h = await createHarness({ session: SESSION });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+
+    h.server.reachable = false;
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('offline'));
+    expect(result.current.lastError).toBeNull();
   });
 
   it('reports the server registration mode and passes an invite code through', async () => {

@@ -469,4 +469,117 @@ describe('AtlasStorage', () => {
     expect(dump.settings).toEqual({ k: 'v' });
     expect(dump.exportedAt).toBeGreaterThan(0);
   });
+
+  describe('importAll (restore a backup)', () => {
+    /** A dump taken from one storage, restored into a fresh empty one. */
+    const freshStorage = async (): Promise<AtlasStorage> => {
+      const s = new AtlasStorage(createNodeDriver());
+      await s.init();
+      return s;
+    };
+
+    it('round-trips a full export into an empty device', async () => {
+      const collection = await storage.createCollection('Trips');
+      await storage.createPlace({
+        name: 'Preikestolen',
+        lat: 58.9864,
+        lng: 6.1904,
+        collectionId: collection.id,
+        notes: 'Steep',
+        tags: ['hike'],
+      });
+      await storage.createTrack({ name: 'Day 1', gpx: '<gpx>original</gpx>' });
+      await storage.setSetting('units', 'metric');
+      const dump = await storage.exportAll();
+
+      const restored = await freshStorage();
+      const summary = await restored.importAll(dump);
+      expect(summary.collections.imported).toBe(1);
+      expect(summary.places.imported).toBe(1);
+      expect(summary.tracks.imported).toBe(1);
+      expect(summary.settings.imported).toBe(1);
+
+      // Ids survive, so a re-import merges rather than duplicating.
+      expect(await restored.listCollections()).toEqual(await storage.listCollections());
+      expect(await restored.listPlaces()).toEqual(await storage.listPlaces());
+      const tracks = await restored.exportAll();
+      expect(tracks.tracks[0]).toMatchObject({ name: 'Day 1', gpx: '<gpx>original</gpx>' });
+      expect(await restored.getSetting('units')).toBe('metric');
+    });
+
+    it('is idempotent — importing twice changes nothing the second time', async () => {
+      await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      const dump = await storage.exportAll();
+      const restored = await freshStorage();
+
+      await restored.importAll(dump);
+      const second = await restored.importAll(dump);
+      expect(second.places).toEqual({ imported: 0, skipped: 1 });
+      expect(await restored.listPlaces()).toHaveLength(1);
+    });
+
+    it('never overwrites a newer local edit (LWW), and never deletes', async () => {
+      const place = await storage.createPlace({ name: 'Old name', lat: 1, lng: 2 });
+      const dump = await storage.exportAll();
+
+      // The local copy is edited after the backup was taken...
+      await new Promise((r) => setTimeout(r, 2));
+      await storage.updatePlace(place.id, { name: 'New name' });
+      // ...and something created since the backup must survive the restore.
+      await storage.createPlace({ name: 'Created later', lat: 3, lng: 4 });
+
+      const summary = await storage.importAll(dump);
+      expect(summary.places.skipped).toBe(1);
+      const names = (await storage.listPlaces()).map((p) => p.name).sort();
+      expect(names).toEqual(['Created later', 'New name']);
+    });
+
+    it('restores an older record the local device has since lost', async () => {
+      const place = await storage.createPlace({ name: 'Deleted by accident', lat: 1, lng: 2 });
+      const dump = await storage.exportAll();
+      await storage.deletePlace(place.id);
+      expect(await storage.listPlaces()).toHaveLength(0);
+
+      await storage.importAll(dump);
+      expect((await storage.listPlaces())[0]).toMatchObject({
+        id: place.id,
+        name: 'Deleted by accident',
+      });
+    });
+
+    it('enqueues imports so a restore propagates to other devices', async () => {
+      await storage.createCollection('C');
+      await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      const dump = await storage.exportAll();
+
+      const restored = await freshStorage();
+      await restored.importAll(dump);
+      const outbox = await restored.listOutbox();
+      expect(outbox.map((e) => e.entity).sort()).toEqual(['collection', 'place']);
+      expect(outbox.every((e) => e.op === 'upsert')).toBe(true);
+    });
+
+    it('skips local.* settings — device-private state must not travel in a backup', async () => {
+      await storage.setSetting('local.sync.cursor', '42');
+      await storage.setSetting('units', 'metric');
+      const dump = await storage.exportAll();
+      expect(dump.settings['local.sync.cursor']).toBe('42');
+
+      const restored = await freshStorage();
+      const summary = await restored.importAll(dump);
+      expect(await restored.getSetting('local.sync.cursor')).toBeNull();
+      expect(await restored.getSetting('units')).toBe('metric');
+      expect(summary.settings).toEqual({ imported: 1, skipped: 1 });
+    });
+
+    it('leaves an existing setting alone (dumps carry no per-setting timestamp)', async () => {
+      await storage.setSetting('units', 'metric');
+      const dump = await storage.exportAll();
+      const restored = await freshStorage();
+      await restored.setSetting('units', 'imperial');
+
+      await restored.importAll(dump);
+      expect(await restored.getSetting('units')).toBe('imperial');
+    });
+  });
 });

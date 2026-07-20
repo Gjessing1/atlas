@@ -7,6 +7,7 @@ import type {
   CollectionRecord,
   DeletedRecord,
   ExportedData,
+  ImportSummary,
   NewPlace,
   NewTrack,
   OutboxEntry,
@@ -23,6 +24,18 @@ import type {
  * never enqueued for sync (used e.g. for the sync cursor itself).
  */
 export const LOCAL_SETTING_PREFIX = 'local.';
+
+/**
+ * The LWW timestamp to import a dumped record under. Hand-edited or
+ * older-format dumps may carry no usable updated_at; falling back to createdAt
+ * (then to 0) keeps such a record importable while making sure it can never
+ * out-rank a real local edit.
+ */
+function stampOf(updatedAt: unknown, createdAt: unknown): number {
+  if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) return updatedAt;
+  if (typeof createdAt === 'number' && Number.isFinite(createdAt)) return createdAt;
+  return 0;
+}
 
 function parseTags(value: SqlValue | undefined): string[] {
   try {
@@ -440,6 +453,118 @@ export class AtlasStorage {
     };
   }
 
+  /**
+   * Merge an export dump back in (restore / backup import). Records merge by
+   * id under the same last-write-wins rule sync uses, so importing is safe to
+   * repeat, safe to do onto a device that already has data, and safe to do on
+   * two devices at once: a record only lands if the dump's copy is newer than
+   * the local one. Unlike a sync pull this *does* write the outbox — an import
+   * is a local mutation and must propagate to the user's other devices.
+   *
+   * A dump has no tombstones, so import only ever adds or updates; it can never
+   * delete. Restoring an old backup therefore cannot remove newer work.
+   */
+  async importAll(dump: ExportedData): Promise<ImportSummary> {
+    const summary: ImportSummary = {
+      collections: { imported: 0, skipped: 0 },
+      places: { imported: 0, skipped: 0 },
+      tracks: { imported: 0, skipped: 0 },
+      settings: { imported: 0, skipped: 0 },
+    };
+    const merge = async (
+      entity: SyncEntity,
+      id: string,
+      updatedAt: number,
+      data: Record<string, unknown>,
+      into: { imported: number; skipped: number },
+    ): Promise<void> => {
+      const local = await this.localUpdatedAt(entity, id);
+      if (local !== null && local >= updatedAt) {
+        into.skipped += 1;
+        return;
+      }
+      await this.upsertFromRemote({ entity, id, updatedAt, deleted: false, data });
+      await this.enqueue(entity, id, 'upsert', updatedAt);
+      into.imported += 1;
+    };
+    // Folders first, so places and tracks land on a parent that already exists.
+    for (const c of dump.collections) {
+      const updatedAt = stampOf(c.updatedAt, c.createdAt);
+      await merge(
+        'collection',
+        c.id,
+        updatedAt,
+        {
+          name: c.name,
+          parentId: c.parentId,
+          visible: c.visible,
+          sortIndex: c.sortIndex,
+          createdAt: c.createdAt,
+        },
+        summary.collections,
+      );
+    }
+    for (const p of dump.places) {
+      await merge(
+        'place',
+        p.id,
+        stampOf(p.updatedAt, p.createdAt),
+        {
+          name: p.name,
+          lat: p.lat,
+          lng: p.lng,
+          collectionId: p.collectionId,
+          notes: p.notes,
+          tags: p.tags,
+          icon: p.icon,
+          color: p.color,
+          visible: p.visible,
+          sortIndex: p.sortIndex,
+          createdAt: p.createdAt,
+        },
+        summary.places,
+      );
+    }
+    for (const t of dump.tracks) {
+      await merge(
+        'track',
+        t.id,
+        stampOf(t.updatedAt, t.createdAt),
+        {
+          name: t.name,
+          gpx: t.gpx,
+          stats: t.stats,
+          collectionId: t.collectionId,
+          notes: t.notes,
+          tags: t.tags,
+          visible: t.visible,
+          createdAt: t.createdAt,
+        },
+        summary.tracks,
+      );
+    }
+    for (const [key, value] of Object.entries(dump.settings)) {
+      // `local.` settings are device-private (sync cursor, device id, map
+      // profile). Restoring another device's copy would corrupt this device's
+      // sync state, so they are never imported — same rule as the pull path.
+      if (key.startsWith(LOCAL_SETTING_PREFIX)) {
+        summary.settings.skipped += 1;
+        continue;
+      }
+      // Dumps carry settings as bare key/value with no timestamp, so an
+      // imported setting cannot claim to be newer than a local edit: it lands
+      // only where the key is absent (localUpdatedAt null).
+      const local = await this.localUpdatedAt('setting', key);
+      if (local !== null) {
+        summary.settings.skipped += 1;
+        continue;
+      }
+      await this.setSetting(key, value);
+      summary.settings.imported += 1;
+    }
+    return summary;
+  }
+
   // ---- sync support (used by @atlas/sync, not by application code) ----
 
   /** Pending local mutations, oldest state wins nothing — LWW keeps one per record. */
@@ -451,6 +576,16 @@ export class AtlasStorage {
       op: String(r['op']) as OutboxEntry['op'],
       updatedAt: Number(r['updated_at']),
     }));
+  }
+
+  /**
+   * How many local changes are waiting to be pushed. Counted in SQL rather
+   * than by reading `listOutbox().length` — the UI polls this and an outbox
+   * row's payload can be a whole GPX document.
+   */
+  async countOutbox(): Promise<number> {
+    const rows = await this.driver.query('SELECT COUNT(*) AS n FROM outbox');
+    return rows.length > 0 ? Number(rows[0]!['n']) : 0;
   }
 
   /**

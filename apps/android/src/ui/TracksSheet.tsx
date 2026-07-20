@@ -1,3 +1,4 @@
+import { importedCount } from '@atlas/app-hooks';
 import type { TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
@@ -98,6 +99,13 @@ export function TracksSheet({
         const bits: string[] = [];
         if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
         if (result.places.length) bits.push(`${result.places.length} place(s)`);
+        // A restored backup merges by id, so it adds nothing to tracks/places —
+        // without this a successful restore would report "nothing importable".
+        const restored = result.restored;
+        if (restored) {
+          const n = importedCount(restored);
+          bits.push(n > 0 ? `${n} record(s) from backup` : 'a backup (already up to date)');
+        }
         setMessage(bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing importable found.');
         if (result.errors.length) setMessage((m) => `${m ?? ''} ${result.errors[0]}`.trim());
       }

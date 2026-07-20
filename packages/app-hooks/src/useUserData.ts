@@ -10,13 +10,15 @@ import type {
   AtlasStorage,
   CollectionRecord,
   DeletedRecord,
+  ImportSummary,
   NewPlace,
   PlacePatch,
   PlaceRecord,
   TrackPatch,
   TrackRecord,
 } from '@atlas/storage';
-import { zipSync } from 'fflate';
+import { parseExportedData } from '@atlas/storage';
+import { unzipSync, zipSync } from 'fflate';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -39,10 +41,64 @@ export interface UserDataPlatform<TFile> {
   saveZipFile?: (name: string, bytes: Uint8Array) => Promise<void>;
 }
 
+/** The file name `exportAll` writes the dump under, inside the export zip. */
+const EXPORT_JSON_NAME = 'atlas-export.json';
+
 export interface ImportResult {
   tracks: TrackRecord[];
   places: PlaceRecord[];
   errors: string[];
+  /**
+   * Totals from any full-backup file in the batch (null when none was picked).
+   * A restore merges by id rather than creating records, so its results do not
+   * appear in `tracks`/`places` — the UI reports it separately.
+   */
+  restored: ImportSummary | null;
+}
+
+const addSummary = (a: ImportSummary | null, b: ImportSummary): ImportSummary => {
+  if (!a) return b;
+  const add = (x: { imported: number; skipped: number }, y: typeof x): typeof x => ({
+    imported: x.imported + y.imported,
+    skipped: x.skipped + y.skipped,
+  });
+  return {
+    collections: add(a.collections, b.collections),
+    places: add(a.places, b.places),
+    tracks: add(a.tracks, b.tracks),
+    settings: add(a.settings, b.settings),
+  };
+};
+
+/** Total records a restore actually wrote — what the UI reports as "restored". */
+export const importedCount = (s: ImportSummary): number =>
+  s.collections.imported + s.places.imported + s.tracks.imported + s.settings.imported;
+
+/**
+ * The export dump inside a picked file, or null when it is not a backup.
+ * Accepts both shapes `exportAll` produces: the bare JSON dump, and the zip
+ * (which also holds GPX copies — those are for other apps to read, the JSON is
+ * the authoritative one, so the GPX entries are deliberately ignored here).
+ */
+function readBackupFile(name: string, bytes: Uint8Array): ReturnType<typeof parseExportedData> {
+  const lower = name.toLowerCase();
+  let json: string;
+  if (lower.endsWith('.zip')) {
+    const entry = unzipSync(bytes, { filter: (f) => f.name === EXPORT_JSON_NAME })[
+      EXPORT_JSON_NAME
+    ];
+    if (!entry) return null;
+    json = new TextDecoder().decode(entry);
+  } else if (lower.endsWith('.json')) {
+    json = new TextDecoder().decode(bytes);
+  } else {
+    return null;
+  }
+  try {
+    return parseExportedData(JSON.parse(json));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -272,7 +328,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const importFiles = useCallback(
     async (files: TFile[]): Promise<ImportResult> => {
       const s = storageRef.current;
-      const result: ImportResult = { tracks: [], places: [], errors: [] };
+      const result: ImportResult = { tracks: [], places: [], errors: [], restored: null };
       if (!s) return result;
 
       for (const file of files) {
@@ -280,6 +336,18 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         try {
           const read = await platform.readFile(file);
           name = read.name;
+          const lower = read.name.toLowerCase();
+          // A .json/.zip pick is a full backup, never a track file — checked
+          // first so a restore is never mistaken for a failed GPX parse.
+          if (lower.endsWith('.json') || lower.endsWith('.zip')) {
+            const dump = readBackupFile(read.name, read.bytes);
+            if (!dump) {
+              result.errors.push(`${read.name}: not an Atlas backup file`);
+              continue;
+            }
+            result.restored = addSummary(result.restored, await s.importAll(dump));
+            continue;
+          }
           const data = parseTrackFile(read.name, read.bytes);
           if (data.segments.length > 0) {
             // Preserve original GPX byte-for-byte (extensions and all — rule 5:
@@ -309,10 +377,11 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
           result.errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      await Promise.all([refreshTracks(), refreshPlaces()]);
+      // A restore also brings folders (and settings) in, so refresh all three.
+      await Promise.all([refreshTracks(), refreshPlaces(), refreshCollections()]);
       return result;
     },
-    [platform, refreshTracks, refreshPlaces],
+    [platform, refreshTracks, refreshPlaces, refreshCollections],
   );
 
   const updateTrack = useCallback(

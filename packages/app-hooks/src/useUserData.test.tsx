@@ -261,6 +261,99 @@ describe('useUserData', () => {
     expect(JSON.parse(plain.savedText[0]!.body)).toHaveProperty('places');
   });
 
+  /**
+   * Rule 5 (no feature traps user data) end-to-end: whatever exportAll writes
+   * must be readable back onto a device with no account and no server.
+   */
+  describe('full-backup restore', () => {
+    it('carries places, tracks and folders from an export zip onto a fresh device', async () => {
+      const source = createPlatform({ zip: true });
+      const hook1 = renderHook(() => useUserData(source.platform));
+      await waitFor(() => expect(hook1.result.current.status).toBe('ready'));
+      await act(async () => {
+        await hook1.result.current.savePlace({ name: 'Home', lat: 59.9, lng: 10.7 });
+        await hook1.result.current.createCollection('Trips');
+        await hook1.result.current.importFiles([gpxFile('ride.gpx')]);
+        await hook1.result.current.exportAll();
+      });
+      const backup: MemFile = {
+        name: 'atlas-export-2026-07-20.zip',
+        bytes: source.savedZips[0]!.bytes,
+      };
+
+      // A brand-new device: separate storage, no account, no sync.
+      const fresh = createPlatform();
+      const hook2 = renderHook(() => useUserData(fresh.platform));
+      await waitFor(() => expect(hook2.result.current.status).toBe('ready'));
+      let outcome!: Awaited<ReturnType<typeof hook2.result.current.importFiles>>;
+      await act(async () => {
+        outcome = await hook2.result.current.importFiles([backup]);
+      });
+
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.restored).toMatchObject({
+        places: { imported: 1 },
+        tracks: { imported: 1 },
+        collections: { imported: 1 },
+      });
+      // The restored records are live in the UI state, under their original ids.
+      expect(hook2.result.current.places.map((p) => p.name)).toEqual(['Home']);
+      expect(hook2.result.current.tracks.map((t) => t.name)).toEqual(['Morning ride']);
+      expect(hook2.result.current.collections.map((c) => c.name)).toEqual(['Trips']);
+      expect(hook2.result.current.places[0]!.id).toBe(hook1.result.current.places[0]!.id);
+      // Track geometry survives, not just the row.
+      const data = await hook2.result.current.getTrackData(hook2.result.current.tracks[0]!.id);
+      expect(data?.segments[0]).toHaveLength(2);
+    });
+
+    it('reads the bare JSON dump too, and re-importing changes nothing', async () => {
+      const source = createPlatform();
+      const hook1 = renderHook(() => useUserData(source.platform));
+      await waitFor(() => expect(hook1.result.current.status).toBe('ready'));
+      await act(async () => {
+        await hook1.result.current.savePlace({ name: 'Cabin', lat: 61, lng: 9 });
+        await hook1.result.current.exportAll();
+      });
+      const backup: MemFile = {
+        name: source.savedText[0]!.name,
+        bytes: new TextEncoder().encode(source.savedText[0]!.body),
+      };
+
+      const fresh = createPlatform();
+      const hook2 = renderHook(() => useUserData(fresh.platform));
+      await waitFor(() => expect(hook2.result.current.status).toBe('ready'));
+      await act(async () => {
+        await hook2.result.current.importFiles([backup]);
+      });
+      expect(hook2.result.current.places).toHaveLength(1);
+
+      let again!: Awaited<ReturnType<typeof hook2.result.current.importFiles>>;
+      await act(async () => {
+        again = await hook2.result.current.importFiles([backup]);
+      });
+      expect(again.restored?.places).toEqual({ imported: 0, skipped: 1 });
+      expect(hook2.result.current.places).toHaveLength(1);
+    });
+
+    it('reports a non-backup json/zip as an error instead of throwing', async () => {
+      const { platform } = createPlatform();
+      const { result } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      let outcome!: Awaited<ReturnType<typeof result.current.importFiles>>;
+      await act(async () => {
+        outcome = await result.current.importFiles([
+          { name: 'geo.json', bytes: new TextEncoder().encode('{"type":"FeatureCollection"}') },
+          { name: 'broken.json', bytes: new TextEncoder().encode('not json at all') },
+          { name: 'photos.zip', bytes: new TextEncoder().encode('PK not really a zip') },
+        ]);
+      });
+      expect(outcome.restored).toBeNull();
+      expect(outcome.errors).toHaveLength(3);
+      expect(outcome.errors[0]).toContain('not an Atlas backup');
+      expect(result.current.places).toEqual([]);
+    });
+  });
+
   it('setAllVisible flips only records that differ', async () => {
     const { storage, platform } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

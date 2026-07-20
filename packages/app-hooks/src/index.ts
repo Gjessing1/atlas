@@ -15,6 +15,7 @@ export {
 export {
   useUserData,
   sanitizeFileName,
+  importedCount,
   type ImportResult,
   type UndoableDelete,
   type UserData,

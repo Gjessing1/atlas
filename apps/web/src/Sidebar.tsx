@@ -1,4 +1,4 @@
-import type { PlaceRecord, TrackRecord } from '@atlas/storage';
+import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
 import { LayersPanel } from './layers/LayersPanel.js';
 import type { LayerCatalog } from './layers/useLayerCatalog.js';
@@ -19,6 +19,25 @@ interface SidebarProps {
 
 const fmtKm = (m: number): string =>
   m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
+/**
+ * Plain-language result of a backup restore. "Skipped" is worth saying out
+ * loud: a merge that writes nothing looks broken otherwise, when in fact it
+ * means the device already had newer copies of everything.
+ */
+function describeRestore(s: ImportSummary): string {
+  const parts: string[] = [];
+  const say = (n: number, one: string, many: string) =>
+    n > 0 ? parts.push(`${n} ${n === 1 ? one : many}`) : undefined;
+  say(s.places.imported, 'place', 'places');
+  say(s.tracks.imported, 'track', 'tracks');
+  say(s.collections.imported, 'folder', 'folders');
+  say(s.settings.imported, 'setting', 'settings');
+  const skipped = s.places.skipped + s.tracks.skipped + s.collections.skipped + s.settings.skipped;
+  const tail = skipped > 0 ? ` ${skipped} already up to date.` : '';
+  if (parts.length === 0) return `Backup restored — everything here was already up to date.`;
+  return `Restored ${parts.join(', ')}.${tail}`;
+}
 
 /**
  * Inline name field for creating/renaming a folder — Enter or blur commits,
@@ -77,6 +96,9 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  // Totals from a restored backup — merges by id, so nothing new shows up in
+  // the lists to tell the user it worked. Reported explicitly instead.
+  const [restored, setRestored] = useState<ImportSummary | null>(null);
   // Folder id being renamed, and where a new folder is being named
   // ({ parentId } — null parent means the root level).
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -96,6 +118,7 @@ export function Sidebar({
     try {
       const result = await data.importFiles([...files]);
       setImportErrors(result.errors);
+      setRestored(result.restored);
       onImported(result);
     } finally {
       setImporting(false);
@@ -226,7 +249,8 @@ export function Sidebar({
     ) {
       return (
         <p className="sidebar-empty">
-          Nothing saved yet. Drop a pin and save it, or import a GPX/KML/KMZ file.
+          Nothing saved yet. Drop a pin and save it, import a GPX/KML/KMZ file, or restore an Atlas
+          backup.
         </p>
       );
     }
@@ -326,6 +350,7 @@ export function Sidebar({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={importing || data.status !== 'ready'}
+            title="Import GPX/KML/KMZ tracks, or restore an Atlas backup (.json/.zip)"
           >
             {importing ? 'Importing…' : 'Import'}
           </button>
@@ -358,12 +383,20 @@ export function Sidebar({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".gpx,.kml,.kmz"
+          accept=".gpx,.kml,.kmz,.json,.zip"
           multiple
           hidden
           onChange={(e) => void onImportFiles(e.target.files)}
         />
       </div>
+      {restored && (
+        <div className="sidebar-notice">
+          <p>{describeRestore(restored)}</p>
+          <button type="button" className="icon-button" onClick={() => setRestored(null)}>
+            ✕
+          </button>
+        </div>
+      )}
       {importErrors.length > 0 && (
         <div className="sidebar-errors">
           {importErrors.map((err) => (

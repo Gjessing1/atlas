@@ -143,3 +143,62 @@ export interface ExportedData {
   tracks: (TrackRecord & { gpx: string })[];
   settings: Record<string, string>;
 }
+
+/** What an import merged in, per entity (see AtlasStorage.importAll). */
+export interface ImportSummary {
+  collections: { imported: number; skipped: number };
+  places: { imported: number; skipped: number };
+  tracks: { imported: number; skipped: number };
+  settings: { imported: number; skipped: number };
+}
+
+/**
+ * Read an untrusted parsed-JSON value as an export dump. Returns null when the
+ * file is not an Atlas export at all; individual records that are unusable
+ * (missing id, non-finite coordinates) are dropped rather than failing the whole
+ * restore — a backup with one bad row should still give the user back the rest.
+ *
+ * Field-level defaults are deliberately absent here: `importAll` feeds these
+ * payloads through the same normalisation the sync-pull path uses, so an export
+ * written by an older version reads exactly like an older peer's change.
+ */
+export function parseExportedData(input: unknown): ExportedData | null {
+  if (typeof input !== 'object' || input === null) return null;
+  const raw = input as Record<string, unknown>;
+  // The one required marker: every dump carries these four keys.
+  const listOf = (key: string): unknown[] | null =>
+    Array.isArray(raw[key]) ? (raw[key] as unknown[]) : null;
+  const collections = listOf('collections');
+  const places = listOf('places');
+  const tracks = listOf('tracks');
+  if (!collections || !places || !tracks) return null;
+
+  const withId = (v: unknown): Record<string, unknown> | null => {
+    if (typeof v !== 'object' || v === null) return null;
+    const r = v as Record<string, unknown>;
+    return typeof r['id'] === 'string' && r['id'] !== '' ? r : null;
+  };
+  const settings: Record<string, string> = {};
+  const rawSettings = raw['settings'];
+  if (typeof rawSettings === 'object' && rawSettings !== null) {
+    for (const [k, v] of Object.entries(rawSettings as Record<string, unknown>)) {
+      if (typeof v === 'string') settings[k] = v;
+    }
+  }
+  return {
+    exportedAt: typeof raw['exportedAt'] === 'number' ? raw['exportedAt'] : Date.now(),
+    collections: collections.map(withId).filter((r) => r !== null) as unknown as CollectionRecord[],
+    // A place with no usable position cannot be put on a map — drop it.
+    places: places
+      .map(withId)
+      .filter(
+        (r) => r !== null && Number.isFinite(r['lat']) && Number.isFinite(r['lng']),
+      ) as unknown as PlaceRecord[],
+    tracks: tracks
+      .map(withId)
+      .filter((r) => r !== null && typeof r['gpx'] === 'string') as unknown as (TrackRecord & {
+      gpx: string;
+    })[],
+    settings,
+  };
+}

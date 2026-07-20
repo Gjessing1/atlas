@@ -53,8 +53,19 @@ export interface SyncState {
   status: SyncStatus;
   email: string | null;
   lastSyncAt: number | null;
-  /** Human-readable auth/sync problem, if any. */
+  /** Human-readable auth/sync problem, if any. Cleared by the next success. */
   error: string | null;
+  /**
+   * Local changes still waiting to be pushed. Surfaced so a stalled sync is
+   * visible as a growing number rather than only as a status colour.
+   */
+  pending: number;
+  /**
+   * The most recent sync failure, kept after a later success (unlike `error`).
+   * A sync that fails and then recovers otherwise leaves no trace at all, which
+   * is how the wedged-push bug stayed invisible.
+   */
+  lastError: { message: string; at: number } | null;
   /** Resolve to an error message, or null on success. */
   signIn: (
     email: string,
@@ -101,6 +112,8 @@ export function useSync(
   const [problem, setProblem] = useState<'offline' | 'authExpired' | 'error' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [pending, setPending] = useState(0);
+  const [lastError, setLastError] = useState<{ message: string; at: number } | null>(null);
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -160,6 +173,22 @@ export function useSync(
   // pull-applied refresh from a genuine local edit — see the debounce effect.
   const pullEcho = useRef(0);
 
+  /** Read the outbox depth; best-effort, never allowed to break a sync. */
+  const refreshPending = useCallback(() => {
+    if (!storage) return;
+    void storage
+      .countOutbox()
+      .then(setPending)
+      .catch(() => undefined);
+  }, [storage]);
+
+  /** Record a failure both as the current problem and in the sticky log. */
+  const reportFailure = useCallback((kind: 'authExpired' | 'error', message: string) => {
+    setProblem(kind);
+    setError(message);
+    setLastError({ message, at: Date.now() });
+  }, []);
+
   const doSync = useCallback(() => {
     if (!engine || !sessionRef.current) return;
     setBusy(true);
@@ -169,8 +198,8 @@ export function useSync(
         if (result.failed.length > 0) {
           // Abandoned rather than retried forever — say so, or the data silently
           // stops syncing while the status light stays green.
-          setProblem('error');
-          setError(
+          reportFailure(
+            'error',
             `${result.failed.length} item(s) could not be synced: ${result.failed[0]!.reason}.`,
           );
         } else {
@@ -185,18 +214,21 @@ export function useSync(
       })
       .catch((err: unknown) => {
         if (err instanceof SyncError && err.kind === 'auth') {
-          setProblem('authExpired');
-          setError('Session expired — sign in again.');
+          reportFailure('authExpired', 'Session expired — sign in again.');
         } else if (err instanceof SyncError && err.kind === 'unavailable') {
+          // Offline is an expected state, not a fault — no sticky entry.
           setProblem('offline');
         } else {
-          setProblem('error');
-          setError(String(err));
+          reportFailure('error', String(err));
           console.error('Sync failed', err);
         }
       })
-      .finally(() => setBusy(false));
-  }, [engine, onPulled]);
+      .finally(() => {
+        setBusy(false);
+        // After a push the outbox has drained; after a failure it has not.
+        refreshPending();
+      });
+  }, [engine, onPulled, reportFailure, refreshPending]);
 
   // Single-flight, like SyncEngine.sync(): a second sign-in while the first is
   // still bootstrapping must not interleave (cursor reset vs in-flight push).
@@ -322,6 +354,10 @@ export function useSync(
     };
   }, [engine, session, doSync, platform]);
 
+  // Local edits change the outbox depth whether or not a sync follows (there
+  // is no account in the anonymous case), so track it off the change token.
+  useEffect(refreshPending, [changeToken, refreshPending]);
+
   // Debounced push after local edits. A pull-applied refresh also bumps the
   // change token; consume the pullEcho marker instead of scheduling a push
   // for it (the push would be a no-op, but it used to churn a whole cycle).
@@ -356,6 +392,8 @@ export function useSync(
     email: session?.email ?? null,
     lastSyncAt,
     error,
+    pending,
+    lastError,
     signIn,
     signOut,
     changePassword,

@@ -3,6 +3,7 @@ export type {
   CollectionRecord,
   DeletedRecord,
   ExportedData,
+  ImportSummary,
   NewPlace,
   NewTrack,
   OutboxEntry,
@@ -14,6 +15,7 @@ export type {
   TrackRecord,
 } from './records.js';
 export type { StorageWorkerRequest, StorageWorkerResponse } from './protocol.js';
+export { parseExportedData } from './records.js';
 export { MIGRATIONS, migrate } from './migrations.js';
 export { AtlasStorage, LOCAL_SETTING_PREFIX } from './storage.js';
 export { createWorkerSqlDriver } from './worker-driver.js';
