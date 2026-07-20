@@ -211,6 +211,12 @@ function AppInner() {
   // Course-up rotates the map to the course, so the chevron points straight
   // up; otherwise the map is north-up (bearing 0), so the chevron shows the course.
   const navPuckRotation = courseUp ? 0 : Math.round(nav.state?.courseDeg ?? 0);
+  // Landscape is short: the camera anchor at 75% leaves only a quarter of a
+  // ~400 dp viewport below the chevron, which the bottom-centred road chip was
+  // sitting in — the chip covered the puck. Portrait has the room, so keep the
+  // centred chip there and move it out of the chevron's column in landscape,
+  // where the extra width is free.
+  const landscape = win.width > win.height;
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
@@ -664,8 +670,15 @@ function AppInner() {
 
       {/* Name of the road being driven, pinned bottom-centre (Google-style). */}
       {following && nav.state?.currentRoad ? (
-        <View style={[styles.roadChipWrap, { bottom: bottomInset + 26 }]} pointerEvents="none">
-          <View style={styles.roadChip}>
+        <View
+          style={[
+            styles.roadChipWrap,
+            landscape && styles.roadChipWrapLandscape,
+            { bottom: bottomInset + 26 },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={[styles.roadChip, landscape && styles.roadChipLandscape]}>
             <Text style={styles.roadChipText} numberOfLines={1}>
               {nav.state.currentRoad}
             </Text>
@@ -885,6 +898,11 @@ const styles = StyleSheet.create({
   orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
   roundButtonActive: { backgroundColor: theme.surfaceActive },
   roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  // Landscape: hug the left edge so the centred nav chevron stays uncovered.
+  roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 16 },
+  // …and keep a long road name from growing back into the chevron's column;
+  // the name ellipsises instead (numberOfLines is already 1).
+  roadChipLandscape: { maxWidth: '40%' },
   roadChip: {
     backgroundColor: theme.surfaceOverlay,
     borderRadius: 16,
