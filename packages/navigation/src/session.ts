@@ -1,6 +1,8 @@
 import type { LatLng } from '@atlas/core';
 import {
   speedLimitKphAt,
+  tunnelAt,
+  tunnelNear,
   type RouteEnrichment,
   type RouteInstruction,
   type RoutePath,
@@ -13,6 +15,7 @@ import {
   type NavState,
   type NavUpdate,
   type Position,
+  type TunnelState,
   type UpcomingManeuver,
   type VoicePrompt,
 } from './model.js';
@@ -127,9 +130,17 @@ export class NavigationSession {
       this.lastState = {
         ...this.lastState,
         speedLimitKph: speedLimitKphAt(enrichment, this.lastState.traveledM),
+        tunnel: this.tunnelState(this.lastState.traveledM),
       };
     }
     return this.lastState;
+  }
+
+  /** What the road data says about being in a tunnel at `alongM`. */
+  private tunnelState(alongM: number): TunnelState | null {
+    const tunnel = tunnelAt(this.enrichment, alongM);
+    if (!tunnel) return null;
+    return { name: tunnel.name, remainingM: Math.max(0, tunnel.endM - alongM) };
   }
 
   /** Feed one position fix; returns the new state and any voice prompts it triggered. */
@@ -286,6 +297,7 @@ export class NavigationSession {
       then,
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
+      tunnel: this.tunnelState(alongM),
       departed: this.departed,
       courseDeg: shownCourse,
       fix: 'live',
@@ -315,6 +327,22 @@ export class NavigationSession {
     // through a long tunnel with a limit change, the route's own pace is
     // better evidence than a minutes-old GPS reading. Anchored at the fix and
     // recomputed each tick, so it never compounds.
+    // Where the signal died inside (or right before) a mapped tunnel, the far
+    // portal is the honest bound on extrapolation: past it the car is back in
+    // daylight and a still-absent fix means something other than a tunnel, so
+    // reckoning should stop rather than run on to the generic 25 km cap. Where
+    // the data says nothing — an unmapped tunnel, a dead receiver, a parking
+    // garage — the generic cap remains the bound, which is why the v0.24.3
+    // coarse-fix heuristic stays in place as the fallback it now is.
+    const tunnel =
+      this.alongAtFixM === null
+        ? null
+        : tunnelNear(this.enrichment, this.alongAtFixM, this.opts.tunnelArmM);
+    const maxReckonM =
+      tunnel === null
+        ? this.opts.deadReckonMaxM
+        : Math.max(0, tunnel.endM + this.opts.tunnelExitMarginM - this.alongAtFixM!);
+
     let reckonedM: number | null = null;
     if (
       this.alongAtFixM !== null &&
@@ -329,8 +357,8 @@ export class NavigationSession {
         expected !== null && Number.isFinite(tauSec) && tauSec > 0
           ? expected * tSec + (speed - expected) * tauSec * (1 - Math.exp(-tSec / tauSec))
           : speed * tSec;
-      // Past the distance cap the extrapolation is fiction, not a tunnel.
-      if (d <= this.opts.deadReckonMaxM) reckonedM = d;
+      // Past the bound the extrapolation is fiction, not a tunnel.
+      if (d <= maxReckonM) reckonedM = d;
     }
     if (reckonedM === null) {
       if (gapMs < this.opts.signalLostMs) return null;
@@ -393,6 +421,7 @@ export class NavigationSession {
       then,
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
+      tunnel: this.tunnelState(alongM),
       departed: this.departed,
       courseDeg: course,
       fix: 'estimated',
@@ -465,6 +494,7 @@ export class NavigationSession {
       then,
       currentRoad: this.roadAt(0),
       speedLimitKph: speedLimitKphAt(this.enrichment, 0),
+      tunnel: this.tunnelState(0),
       departed: this.departed,
       courseDeg: null,
       fix: 'lost',

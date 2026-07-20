@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import { fmtDistanceM, type LatLng } from '@atlas/core';
 import type { RouteInstruction } from '@atlas/routing';
 
 /** A live position fix fed into the navigation session. */
@@ -22,6 +22,25 @@ export type NavStatus = 'navigating' | 'off-route' | 'arrived';
  * should grey the puck.
  */
 export type NavFix = 'live' | 'estimated' | 'lost';
+
+/** The tunnel the vehicle is currently inside, per the route's road attributes. */
+export interface TunnelState {
+  /** Tunnel name where the map data carries one ("Brynstunnelen"), else null. */
+  name: string | null;
+  /** Distance (m) still to drive before the exit portal. */
+  remainingM: number;
+}
+
+/**
+ * The road chip's text while inside a tunnel: the tunnel's name and how much
+ * of it is left ("Brynstunnelen · 1.2 km"). Named because that is what a
+ * driver recognises from the sign at the portal; where the map data carries no
+ * name, the remaining distance alone is still the useful half — "how much
+ * longer is this" — so it degrades to "Tunnel · 1.2 km" rather than vanishing.
+ */
+export function tunnelChipLabel(tunnel: TunnelState): string {
+  return `${tunnel.name ?? 'Tunnel'} · ${fmtDistanceM(tunnel.remainingM)}`;
+}
 
 /** The maneuver the traveller is approaching. */
 export interface UpcomingManeuver {
@@ -71,6 +90,13 @@ export interface NavState {
    * never as the last known limit: a stale roundel is worse than no roundel.
    */
   speedLimitKph: number | null;
+  /**
+   * The tunnel being driven through, from the route enrichment pass — null
+   * both without enrichment and out in the open. Knowing this from data rather
+   * than inferring it from a GPS gap lets the UI dim at the portal instead of
+   * seconds later, and name the tunnel, which is what a driver recognises.
+   */
+  tunnel: TunnelState | null;
   /**
    * False until the vehicle demonstrably starts the drive (moving at
    * driving pace, or having progressed along the route). UIs keep a calmer
@@ -154,8 +180,25 @@ export interface NavigationOptions {
   deadReckonMinSpeedMps?: number;
   /** Longest gap (ms) dead reckoning may bridge before reporting `lost`. */
   deadReckonMaxMs?: number;
-  /** Farthest distance (m) dead reckoning may extrapolate before `lost`. */
+  /**
+   * Farthest distance (m) dead reckoning may extrapolate before `lost` — the
+   * fallback bound, used where the route data doesn't say why the signal went
+   * away. Inside a known tunnel the far portal bounds it instead.
+   */
   deadReckonMaxM?: number;
+  /**
+   * How far past a known tunnel's exit portal (m) dead reckoning may still
+   * run. GPS does not re-lock the instant daylight returns, so a little slack
+   * beyond the portal keeps the puck moving through the re-acquisition rather
+   * than greying it out exactly where the driver looks up.
+   */
+  tunnelExitMarginM?: number;
+  /**
+   * How far before a tunnel's entry portal (m) its data may already arm dead
+   * reckoning. The last usable fix before a tunnel typically lands short of
+   * the entrance, so requiring containment would discard the knowledge.
+   */
+  tunnelArmM?: number;
   /**
    * Time constant (ms) over which the extrapolation speed eases from the last
    * GPS speed toward the leg's expected speed. Non-finite disables the blend
@@ -210,6 +253,8 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   // GPS at crawling speed can't fake progress for hours.
   deadReckonMaxMs: 1_200_000,
   deadReckonMaxM: 25_000,
+  tunnelExitMarginM: 200,
+  tunnelArmM: 150,
   deadReckonBlendTauMs: 45_000,
   wrongBranchDeg: 50, // an in-tunnel fork/roundabout exit turns well past this
   chainManeuverM: 300,

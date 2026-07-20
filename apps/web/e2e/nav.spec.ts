@@ -59,3 +59,40 @@ test('geolocation denied shows an error state, End dismisses it', async ({ page,
   await page.getByRole('button', { name: 'End' }).click();
   await expect(page.locator('.nav-banner')).toHaveCount(0);
 });
+
+test('a mapped tunnel names itself in the road chip and dims the map', async ({ page }) => {
+  await mockRouting(page);
+  // Registered after mockRouting, so this handler wins: the whole drive runs
+  // through one named tunnel. Registering it here rather than in the shared
+  // helper keeps the other nav tests on open road.
+  await page.route('**/api/route/attributes', (route) => {
+    const body = route.request().postDataJSON() as { shape?: unknown[] };
+    const shape = body.shape ?? [];
+    return route.fulfill({
+      json: {
+        edges: [
+          {
+            begin_shape_index: 0,
+            end_shape_index: shape.length - 1,
+            speed_limit: 70,
+            tunnel: true,
+            names: ['Brynstunnelen'],
+          },
+        ],
+      },
+    });
+  });
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+
+  // The chip names the tunnel and counts down to the far portal, instead of
+  // the road underneath — and the map dims at the portal, from the route data
+  // rather than after four seconds of dead reckoning.
+  await expect(page.locator('.nav-road-chip')).toContainText('Brynstunnelen · ');
+  await expect(page.locator('.tunnel-dim-on')).toHaveCount(1);
+});

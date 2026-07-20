@@ -6,6 +6,8 @@ import {
   enrichmentAt,
   parseTraceAttributes,
   speedLimitKphAt,
+  tunnelAt,
+  tunnelNear,
 } from './enrich.js';
 import type { RoutePath } from './model.js';
 
@@ -192,5 +194,65 @@ describe('lookups', () => {
     expect(speedLimitKphAt(enrichment, 900)).toBeNull();
     expect(speedLimitKphAt(null, 10)).toBeNull();
     expect(speedLimitKphAt({ segments: [] }, 10)).toBeNull();
+  });
+});
+
+describe('tunnel lookups', () => {
+  // One physical bore split across three edges, as the tiles really deliver it:
+  // the limit drops at the portal and the name only appears on the middle edge.
+  const enrichment = {
+    segments: [
+      { startM: 0, endM: 100, speedLimitKph: 90, roadClass: 'trunk' },
+      { startM: 100, endM: 180, tunnel: true, speedLimitKph: 70 },
+      { startM: 180, endM: 900, tunnel: true, speedLimitKph: 70, name: 'Brynstunnelen' },
+      { startM: 900, endM: 1000, tunnel: true, speedLimitKph: 80 },
+      { startM: 1000, endM: 1500, speedLimitKph: 90 },
+    ],
+  };
+
+  it('merges the edges of one bore into a single tunnel', () => {
+    const t = tunnelAt(enrichment, 500);
+    expect(t).toEqual({ startM: 100, endM: 1000, name: 'Brynstunnelen' });
+    // The same tunnel is reported from any point inside it, including the
+    // edges either side of the named one.
+    expect(tunnelAt(enrichment, 150)).toEqual(t);
+    expect(tunnelAt(enrichment, 950)).toEqual(t);
+  });
+
+  it('reports open road outside a tunnel', () => {
+    expect(tunnelAt(enrichment, 50)).toBeNull();
+    expect(tunnelAt(enrichment, 1200)).toBeNull();
+    // Past the enriched range, and with no enrichment at all.
+    expect(tunnelAt(enrichment, 9000)).toBeNull();
+    expect(tunnelAt(null, 500)).toBeNull();
+  });
+
+  it('names the tunnel null when the data has none', () => {
+    const unnamed = { segments: [{ startM: 0, endM: 300, tunnel: true }] };
+    expect(tunnelAt(unnamed, 100)).toEqual({ startM: 0, endM: 300, name: null });
+  });
+
+  it('keeps two separate tunnels apart', () => {
+    const two = {
+      segments: [
+        { startM: 0, endM: 200, tunnel: true, name: 'First' },
+        { startM: 200, endM: 400 },
+        { startM: 400, endM: 600, tunnel: true, name: 'Second' },
+      ],
+    };
+    expect(tunnelAt(two, 100)?.name).toBe('First');
+    expect(tunnelAt(two, 300)).toBeNull();
+    expect(tunnelAt(two, 500)?.name).toBe('Second');
+  });
+
+  it('arms a portal the route is about to reach', () => {
+    // The last fix before a tunnel typically lands short of the entrance, so
+    // `tunnelNear` still finds it — but only within the look-ahead.
+    expect(tunnelNear(enrichment, 60, 150)?.startM).toBe(100);
+    expect(tunnelNear(enrichment, 60, 20)).toBeNull();
+    // Inside, it agrees with `tunnelAt`.
+    expect(tunnelNear(enrichment, 500, 150)).toEqual(tunnelAt(enrichment, 500));
+    // A tunnel already behind the position is not armed.
+    expect(tunnelNear(enrichment, 1100, 150)).toBeNull();
   });
 });

@@ -21,9 +21,12 @@ export {
   enrichmentAt,
   parseTraceAttributes,
   speedLimitKphAt,
+  tunnelAt,
+  tunnelNear,
   type EnrichRouteOptions,
   type RouteEnrichment,
   type RouteEnrichmentSegment,
+  type RouteTunnel,
 } from './enrich.js';
 export {
   httpRouteProvider,

@@ -44,6 +44,7 @@ import {
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
 } from './src/map/MapScene';
+import { tunnelChipLabel } from '@atlas/navigation';
 import { getServerOrigin } from './src/serverOrigin';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -170,7 +171,7 @@ function AppInner() {
   // The follow camera: bottom-anchored, course-up, speed/turn-aware zoom; a
   // manual pan pauses it (re-centre pill / locate button / timeout resume it).
   const navCam = useNavCamera(cameraRef, nav, navFollow);
-  const tunnelDim = useTunnelDim(nav.state?.fix);
+  const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
@@ -668,8 +669,11 @@ function AppInner() {
         </View>
       ) : null}
 
-      {/* Name of the road being driven, pinned bottom-centre (Google-style). */}
-      {following && nav.state?.currentRoad ? (
+      {/* Name of the road being driven, pinned bottom-centre (Google-style).
+          Inside a mapped tunnel it names the tunnel and counts it down
+          instead — the road underneath is still E6, but "Brynstunnelen ·
+          1.2 km" is what the driver can check against the world outside. */}
+      {following && (nav.state?.tunnel || nav.state?.currentRoad) ? (
         <View
           style={[
             styles.roadChipWrap,
@@ -680,7 +684,7 @@ function AppInner() {
         >
           <View style={[styles.roadChip, landscape && styles.roadChipLandscape]}>
             <Text style={styles.roadChipText} numberOfLines={1}>
-              {nav.state.currentRoad}
+              {nav.state.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state.currentRoad}
             </Text>
           </View>
         </View>

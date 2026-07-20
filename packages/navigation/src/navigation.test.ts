@@ -955,3 +955,92 @@ describe('NavigationSession speed limits', () => {
     expect(session.setEnrichment({ segments: [] })).toBeNull();
   });
 });
+
+describe('NavigationSession tunnel awareness from route data', () => {
+  /** A ~33 km straight route driven at 30 m/s, with a mapped tunnel in it. */
+  function longRoute() {
+    const points: LatLng[] = Array.from({ length: 21 }, (_, i) => ({
+      lat: 60,
+      lng: 10 + i * 0.03,
+    }));
+    const totalM = cumulativeDistances(points).at(-1)!;
+    return {
+      path: { points, distanceM: totalM, timeMs: (totalM / 30) * 1000, ascentM: 0, descentM: 0 },
+      totalM,
+    };
+  }
+
+  it('reports the tunnel being driven, counting down to the exit portal', () => {
+    const session = new NavigationSession(route());
+    session.setEnrichment({
+      segments: [
+        { startM: 0, endM: 300 },
+        { startM: 300, endM: 900, tunnel: true, name: 'Brynstunnelen' },
+        { startM: 900, endM: routeTotal },
+      ],
+    });
+    const at = (alongM: number) =>
+      session.update({ ...pointAtAlong(alongM), speedMps: 15, accuracyM: 5 }, 1000 + alongM).state
+        .tunnel;
+
+    expect(at(100)).toBeNull();
+    expect(at(400)?.name).toBe('Brynstunnelen');
+    expect(at(400)?.remainingM).toBeCloseTo(500, 0);
+    expect(at(800)?.remainingM).toBeCloseTo(100, 0);
+    expect(at(1000)).toBeNull();
+  });
+
+  it('bounds dead reckoning by the far portal instead of the 25 km cap', () => {
+    const { path } = longRoute();
+    const session = new NavigationSession(path);
+    // A 6 km tunnel starting 1 km in — well inside the generic distance cap,
+    // so only the route data can stop the extrapolation at the right place.
+    session.setEnrichment({
+      segments: [{ startM: 1000, endM: 7000, tunnel: true, name: 'Oslofjordtunnelen' }],
+    });
+    // The last fix lands at the portal, which is where GPS actually dies.
+    session.update({ ...pointAtAlongOf(path.points, 1000), speedMps: 30 }, 0);
+
+    // 150 s on: 4.5 km further, inside the bore and still guiding — and the
+    // state names the tunnel it is guiding through.
+    const inside = session.tick(150_000)!;
+    expect(inside.state.fix).toBe('estimated');
+    expect(inside.state.tunnel?.name).toBe('Oslofjordtunnelen');
+
+    // 250 s = 7.5 km on, past the far portal (7.0 km) plus its margin. Without
+    // this bound the puck would have kept gliding down the motorway for
+    // another 17 km on the generic cap; a still-missing fix past the portal
+    // means something other than a tunnel, so say so.
+    expect(session.tick(250_000)!.state.fix).toBe('lost');
+  });
+
+  it('falls back to the generic cap where the tiles map no tunnel', () => {
+    // The v0.24.3 heuristic is still the mechanism for unmapped gaps: without
+    // enrichment the same drive reckons on to the 25 km cap as before.
+    const { path } = longRoute();
+    const session = new NavigationSession(path);
+    session.update({ ...path.points[0]!, speedMps: 30 }, 0);
+    expect(session.tick(250_000)!.state.fix).toBe('estimated');
+  });
+
+  it('arms at a portal the last fix stopped just short of', () => {
+    const { path } = longRoute();
+    const session = new NavigationSession(path);
+    // The last usable fix lands 80 m *before* the entrance, which is the
+    // normal case — GPS fades on the approach, not exactly at the portal.
+    // Inside `tunnelArmM`, so the tunnel still bounds the reckoning.
+    session.setEnrichment({ segments: [{ startM: 3080, endM: 5000, tunnel: true }] });
+    session.update({ ...pointAtAlongOf(path.points, 3000), speedMps: 30 }, 0);
+
+    // 60 s = 1.8 km on, short of the far portal (5.0 km) plus its margin.
+    expect(session.tick(60_000)!.state.fix).toBe('estimated');
+    // 100 s = 3 km on, past 5.2 km — out the other side, so stop pretending.
+    expect(session.tick(100_000)!.state.fix).toBe('lost');
+  });
+});
+
+/** A LatLng exactly `target` metres along an arbitrary polyline. */
+function pointAtAlongOf(points: LatLng[], target: number): LatLng {
+  const cum = cumulativeDistances(points);
+  return pointAtDistance(points, cum, target);
+}

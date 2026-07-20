@@ -6,7 +6,9 @@ export {
   type NavState,
   type NavStatus,
   type NavUpdate,
+  tunnelChipLabel,
   type Position,
+  type TunnelState,
   type UpcomingManeuver,
   type VoicePrompt,
 } from './model.js';

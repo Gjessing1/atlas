@@ -1,4 +1,5 @@
 import { fmtClock } from '@atlas/core';
+import { tunnelChipLabel } from '@atlas/navigation';
 import { formatExitSign } from '@atlas/routing';
 import { fmtDuration, fmtKm } from '../format.js';
 import { TurnIcon } from './TurnIcon.js';
@@ -47,7 +48,11 @@ export function NavBanner({
     maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
       ? state.then
       : null;
-  const road = moving ? (state?.currentRoad ?? null) : null;
+  // Inside a mapped tunnel the chip names the tunnel and counts it down — the
+  // road underneath is still E6, but "Brynstunnelen · 1.2 km" is what the
+  // driver can check against the world outside the windscreen.
+  const tunnel = moving ? (state?.tunnel ?? null) : null;
+  const road = tunnel ? tunnelChipLabel(tunnel) : moving ? (state?.currentRoad ?? null) : null;
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
 
   return (

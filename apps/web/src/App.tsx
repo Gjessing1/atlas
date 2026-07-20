@@ -134,7 +134,7 @@ export function App() {
   // ---- turn-by-turn navigation ----
 
   const nav = useWebNavigation();
-  const tunnelDim = useTunnelDim(nav.state?.fix);
+  const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   const follow = useNavLayers(map, nav);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;

@@ -236,13 +236,8 @@ export async function enrichRoute(
   return { segments: coalesce(segments) };
 }
 
-/** The stretch of road covering `alongM`, or null outside the enriched range. */
-export function enrichmentAt(
-  enrichment: RouteEnrichment | null | undefined,
-  alongM: number,
-): RouteEnrichmentSegment | null {
-  const segments = enrichment?.segments;
-  if (!segments || segments.length === 0) return null;
+/** Index of the segment covering `alongM`, or -1 outside the enriched range. */
+function indexAt(segments: RouteEnrichmentSegment[], alongM: number): number {
   let lo = 0;
   let hi = segments.length - 1;
   while (lo <= hi) {
@@ -250,9 +245,20 @@ export function enrichmentAt(
     const seg = segments[mid]!;
     if (alongM < seg.startM) hi = mid - 1;
     else if (alongM > seg.endM) lo = mid + 1;
-    else return seg;
+    else return mid;
   }
-  return null;
+  return -1;
+}
+
+/** The stretch of road covering `alongM`, or null outside the enriched range. */
+export function enrichmentAt(
+  enrichment: RouteEnrichment | null | undefined,
+  alongM: number,
+): RouteEnrichmentSegment | null {
+  const segments = enrichment?.segments;
+  if (!segments || segments.length === 0) return null;
+  const i = indexAt(segments, alongM);
+  return i < 0 ? null : segments[i]!;
 }
 
 /**
@@ -265,4 +271,85 @@ export function speedLimitKphAt(
   alongM: number,
 ): number | null {
   return enrichmentAt(enrichment, alongM)?.speedLimitKph ?? null;
+}
+
+/**
+ * One tunnel the route passes through, merged across the edges that make it
+ * up. A single bore is routinely several enrichment segments — the limit
+ * drops at the portal, the road class changes, a name appears — so the
+ * physical tunnel only exists once contiguous tunnel edges are joined.
+ */
+export interface RouteTunnel {
+  /** Distance (m) along the route of the entry portal. */
+  startM: number;
+  /** Distance (m) along the route of the exit portal. */
+  endM: number;
+  /** Tunnel name where the tiles carry one ("Brynstunnelen"), else null. */
+  name: string | null;
+}
+
+/** Segments are contiguous when they touch (sub-metre rounding tolerated). */
+function touches(a: RouteEnrichmentSegment, b: RouteEnrichmentSegment): boolean {
+  return b.startM <= a.endM + 1;
+}
+
+/** Grow the tunnel run around `i` and describe it. */
+function tunnelRun(segments: RouteEnrichmentSegment[], i: number): RouteTunnel {
+  let first = i;
+  let last = i;
+  while (
+    first > 0 &&
+    segments[first - 1]!.tunnel === true &&
+    touches(segments[first - 1]!, segments[first]!)
+  ) {
+    first--;
+  }
+  while (
+    last < segments.length - 1 &&
+    segments[last + 1]!.tunnel === true &&
+    touches(segments[last]!, segments[last + 1]!)
+  ) {
+    last++;
+  }
+  let name: string | null = null;
+  for (let k = first; k <= last && name === null; k++) name = segments[k]!.name ?? null;
+  return { startM: segments[first]!.startM, endM: segments[last]!.endM, name };
+}
+
+/** The tunnel containing `alongM`, or null when the route is in the open there. */
+export function tunnelAt(
+  enrichment: RouteEnrichment | null | undefined,
+  alongM: number,
+): RouteTunnel | null {
+  const segments = enrichment?.segments;
+  if (!segments || segments.length === 0) return null;
+  const i = indexAt(segments, alongM);
+  if (i < 0 || segments[i]!.tunnel !== true) return null;
+  return tunnelRun(segments, i);
+}
+
+/**
+ * The tunnel at `alongM`, or the next one starting within `lookAheadM`.
+ *
+ * The look-ahead exists because fixes die *around* a portal, not exactly at
+ * it: the last usable fix before a tunnel is often a short way short of the
+ * entrance, and treating that as "not a tunnel" would throw away the very
+ * knowledge this data was fetched for. Callers that report what the driver is
+ * inside right now should use `tunnelAt` instead — this one is for arming
+ * behaviour at a portal the route is about to reach.
+ */
+export function tunnelNear(
+  enrichment: RouteEnrichment | null | undefined,
+  alongM: number,
+  lookAheadM: number,
+): RouteTunnel | null {
+  const inside = tunnelAt(enrichment, alongM);
+  if (inside) return inside;
+  const segments = enrichment?.segments;
+  if (!segments) return null;
+  for (const [i, seg] of segments.entries()) {
+    if (seg.startM > alongM + lookAheadM) break;
+    if (seg.tunnel === true && seg.endM > alongM) return tunnelRun(segments, i);
+  }
+  return null;
 }
