@@ -1,9 +1,11 @@
 import {
   markerScaleForZoom,
   POI_LAYER_IDS,
+  poiCategoryLabel,
   resolveStyleTemplate,
   type LatLng,
   type MapViewState,
+  type PlaceTarget,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
 import maplibregl, { type MapMouseEvent, type StyleSpecification } from 'maplibre-gl';
@@ -33,38 +35,6 @@ async function loadStyle(): Promise<string | StyleSpecification> {
     console.warn('Self-hosted style unavailable, using fallback style.', err);
     return FALLBACK_STYLE_URL;
   }
-}
-
-function pinPopupContent(
-  pin: LatLng,
-  onRemove: () => void,
-  onSave: () => void,
-  onNavigate: () => void,
-): HTMLElement {
-  const el = document.createElement('div');
-  el.className = 'pin-popup';
-  const coords = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
-  const coordsEl = document.createElement('code');
-  coordsEl.textContent = coords;
-  el.appendChild(coordsEl);
-
-  const buttons = document.createElement('div');
-  buttons.className = 'pin-popup-buttons';
-  const mkButton = (label: string, action: () => void) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = label;
-    b.addEventListener('click', action);
-    buttons.appendChild(b);
-  };
-  mkButton('Navigate', onNavigate);
-  mkButton('Save', onSave);
-  mkButton('Copy coords', () => void navigator.clipboard.writeText(coords));
-  // The URL hash always reflects camera + pin, so the current URL is the share link.
-  mkButton('Copy link', () => void navigator.clipboard.writeText(window.location.href));
-  mkButton('Remove', onRemove);
-  el.appendChild(buttons);
-  return el;
 }
 
 /**
@@ -103,10 +73,10 @@ interface MapViewProps {
   /** Saved places, drawn as colour-badged emoji markers. */
   places: PlaceRecord[];
   onPinChange: (pin: LatLng | null) => void;
-  /** Save the dropped pin as a place (favorites). */
-  onSavePin: (pin: LatLng) => void;
-  /** Start turn-by-turn navigation to the dropped pin. */
-  onNavigateToPin: (pin: LatLng) => void;
+  /** The user pointed at a spot (pin, saved place or POI) — App opens the place card. */
+  onSelect: (target: PlaceTarget) => void;
+  /** The user's own position, reported by the geolocate control. */
+  onUserLocation: (at: LatLng) => void;
   onMapReady: (map: maplibregl.Map) => void;
   /** While `.current` is true, POI click popups are suppressed (route mode owns clicks). */
   suppressPoiClicks?: { readonly current: boolean };
@@ -117,13 +87,18 @@ export function MapView({
   pin,
   places,
   onPinChange,
-  onSavePin,
-  onNavigateToPin,
+  onSelect,
+  onUserLocation,
   onMapReady,
   suppressPoiClicks,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
+  // The map is built once, so its handlers read the newest callbacks via refs.
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const onUserLocationRef = useRef(onUserLocation);
+  onUserLocationRef.current = onUserLocation;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -139,13 +114,17 @@ export function MapView({
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     // Location puck + accuracy circle with a locate/recenter button; keeps
     // following until the user pans away (web-nav prerequisite, Android parity).
-    map.addControl(
-      new maplibregl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true,
-      }),
-      'top-right',
-    );
+    const geolocate = new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      trackUserLocation: true,
+    });
+    // Reported to App so the place card can say how far away a spot is. Only a
+    // fix the user asked for counts — Atlas never geolocates on its own.
+    geolocate.on('geolocate', (e) => {
+      const { latitude, longitude } = (e as GeolocationPosition).coords;
+      onUserLocationRef.current({ lat: latitude, lng: longitude });
+    });
+    map.addControl(geolocate, 'top-right');
     // `metric` is MapLibre's default too, but pinned deliberately: Atlas never
     // shows feet or miles, and that must not ride on a library default.
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
@@ -183,7 +162,7 @@ export function MapView({
     map.on('touchmove', cancelLongPress);
     map.on('move', cancelLongPress);
 
-    // POI popups from the vector tiles.
+    // POIs from the vector tiles open the same card as pins and saved places.
     for (const layer of POI_LAYER_IDS) {
       map.on('click', layer, (e) => {
         if (suppressPoiClicks?.current) return;
@@ -192,18 +171,17 @@ export function MapView({
         const props = feature.properties as Record<string, unknown>;
         const name = (props['name'] ?? props['name:latin']) as string | undefined;
         if (!name) return;
-        const kind = [props['class'], props['subclass']]
-          .filter((v) => typeof v === 'string' && v !== name)
-          .join(' · ');
-        const el = document.createElement('div');
-        el.className = 'poi-popup';
-        el.innerHTML = `<strong></strong><span></span>`;
-        el.querySelector('strong')!.textContent = name;
-        el.querySelector('span')!.textContent = kind;
-        new maplibregl.Popup({ closeButton: false, offset: 8 })
-          .setLngLat(e.lngLat)
-          .setDOMContent(el)
-          .addTo(map);
+        onSelectRef.current({
+          source: 'poi',
+          // The feature's own geometry, not the click point: the card's
+          // coordinates and its Navigate destination should be the POI.
+          position:
+            feature.geometry.type === 'Point'
+              ? { lat: feature.geometry.coordinates[1]!, lng: feature.geometry.coordinates[0]! }
+              : { lat: e.lngLat.lat, lng: e.lngLat.lng },
+          name,
+          category: poiCategoryLabel(props, name),
+        });
       });
       map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
       map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
@@ -220,21 +198,14 @@ export function MapView({
     // The map is created exactly once; interaction callbacks read refs/props via closures.
   }, []);
 
-  // Render the (single) dropped pin as a draggable marker with a coords popup.
+  // Render the (single) dropped pin as a draggable marker. Clicking it reopens
+  // the place card; the card itself is App-level React, not a MapLibre popup.
   const markerRef = useRef<maplibregl.Marker | null>(null);
   useEffect(() => {
     if (!map) return;
     markerRef.current?.remove();
     markerRef.current = null;
     if (pin) {
-      const popup = new maplibregl.Popup({ closeButton: false, offset: 44 }).setDOMContent(
-        pinPopupContent(
-          pin,
-          () => onPinChange(null),
-          () => onSavePin(pin),
-          () => onNavigateToPin(pin),
-        ),
-      );
       // Same red teardrop as the Android destination pick (#d33939).
       const marker = new maplibregl.Marker({
         element: teardropElement('#d33939'),
@@ -242,15 +213,17 @@ export function MapView({
         draggable: true,
       })
         .setLngLat(pin)
-        .setPopup(popup)
         .addTo(map);
+      marker.getElement().addEventListener('click', () => {
+        onSelectRef.current({ source: 'pin', position: pin });
+      });
       marker.on('dragend', () => {
         const at = marker.getLngLat();
         onPinChange({ lat: at.lat, lng: at.lng });
       });
       markerRef.current = marker;
     }
-  }, [map, pin, onPinChange, onSavePin, onNavigateToPin]);
+  }, [map, pin, onPinChange]);
 
   // Draw saved places as colour-badged emoji markers (favourites are few, so
   // DOM markers render real emoji + colour that vector-tile glyphs can't).
@@ -259,14 +232,22 @@ export function MapView({
     if (!map) return;
     for (const m of placeMarkersRef.current) m.remove();
     placeMarkersRef.current = places.map((place) => {
-      const popup = new maplibregl.Popup({ closeButton: false, offset: 44 }).setText(place.name);
-      return new maplibregl.Marker({
+      const marker = new maplibregl.Marker({
         element: teardropElement(place.color, place.icon),
         anchor: 'bottom',
       })
         .setLngLat({ lat: place.lat, lng: place.lng })
-        .setPopup(popup)
         .addTo(map);
+      marker.getElement().addEventListener('click', () => {
+        onSelectRef.current({
+          source: 'place',
+          position: { lat: place.lat, lng: place.lng },
+          name: place.name,
+          category: place.notes.split('\n')[0] || undefined,
+          placeId: place.id,
+        });
+      });
+      return marker;
     });
     return () => {
       for (const m of placeMarkersRef.current) m.remove();

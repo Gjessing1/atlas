@@ -719,3 +719,113 @@ export function layerInProfile(meta: Pick<LayerMeta, 'profiles'>, profileId: str
 export function layersForProfile(catalog: readonly LayerMeta[], profileId: string): LayerMeta[] {
   return catalog.filter((meta) => layerInProfile(meta, profileId));
 }
+
+// ---- Place card (one card for pins, saved places, POIs and search hits) ----
+
+/** Where the thing the card is describing came from. */
+export type PlaceSource = 'pin' | 'place' | 'poi' | 'search';
+
+/**
+ * The subject of a place card, normalised across the four ways a user can
+ * point at somewhere: a dropped pin, a saved place, a POI tapped on the map,
+ * and a picked search result.
+ *
+ * Everything downstream (title, subtitle, which actions apply) is derived from
+ * this one shape, which is the point — before it, web had three ad-hoc popups
+ * that offered different actions for the same underlying "a spot on the map".
+ */
+export interface PlaceTarget {
+  source: PlaceSource;
+  position: LatLng;
+  /** Display name. Absent only for a bare dropped pin, where coordinates stand in. */
+  name?: string;
+  /** Category or address line shown under the name. */
+  category?: string;
+  /** Set when the target *is* a saved place — the card then offers Edit, not Save. */
+  placeId?: string;
+}
+
+/** Coordinates as a fixed 5-decimal (~1 m) "lat, lng" string. */
+export function fmtCoords(p: LatLng): string {
+  return `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+}
+
+/**
+ * A distance for display: metres below 1 km (rounded to 10 m above 100 m, so a
+ * jittering GPS fix doesn't churn the last digit), kilometres above.
+ */
+export function fmtDistanceM(m: number): string {
+  if (m < 100) return `${Math.round(m)} m`;
+  if (m < 1000) return `${Math.round(m / 10) * 10} m`;
+  if (m < 10_000) return `${(m / 1000).toFixed(1)} km`;
+  return `${Math.round(m / 1000)} km`;
+}
+
+/**
+ * A readable category from OpenMapTiles POI feature properties, e.g.
+ * `{class: 'restaurant', subclass: 'fast_food'}` → "Restaurant · Fast food".
+ *
+ * Underscores become spaces and only the first word is capitalised — these are
+ * OSM tag values, not prose, and title-casing them ("Fast Food") reads like a
+ * brand. A subclass equal to the class or to the name adds nothing and is dropped.
+ */
+export function poiCategoryLabel(
+  props: Record<string, unknown>,
+  name?: string,
+): string | undefined {
+  const humanise = (v: unknown): string | null => {
+    if (typeof v !== 'string' || v.length === 0) return null;
+    if (v === name) return null;
+    const text = v.replaceAll('_', ' ');
+    return text[0]!.toUpperCase() + text.slice(1);
+  };
+  const parts: string[] = [];
+  for (const key of ['class', 'subclass']) {
+    const part = humanise(props[key]);
+    if (part && !parts.includes(part)) parts.push(part);
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+/** What the card shows as its heading: the name, or the coordinates for a bare pin. */
+export function placeTargetTitle(target: PlaceTarget): string {
+  return target.name?.trim() || fmtCoords(target.position);
+}
+
+/**
+ * The line under the heading: category and distance from a reference point
+ * (the user's location, or the map centre), whichever of them exist. Empty
+ * string when neither does — the caller can then skip the element entirely.
+ */
+export function placeTargetSubtitle(target: PlaceTarget, from?: LatLng | null): string {
+  const parts: string[] = [];
+  if (target.category) parts.push(target.category);
+  if (from) parts.push(`${fmtDistanceM(haversineM(from, target.position))} away`);
+  return parts.join(' · ');
+}
+
+/**
+ * The saved place at a position, if there is one — so a POI or pin the user has
+ * already saved offers "Edit" instead of a second, duplicate "Save".
+ *
+ * Matching is by proximity rather than name: the same café is the same café
+ * whether it was saved from a search hit, a POI tap or a dropped pin, and those
+ * three routes rarely agree on a name. 30 m is wide enough to survive that
+ * disagreement in position and narrow enough not to swallow the shop next door.
+ */
+export function savedPlaceAt<T extends { lat: number; lng: number }>(
+  places: readonly T[],
+  position: LatLng,
+  radiusM = 30,
+): T | undefined {
+  let best: T | undefined;
+  let bestM = radiusM;
+  for (const place of places) {
+    const d = haversineM(position, { lat: place.lat, lng: place.lng });
+    if (d <= bestM) {
+      best = place;
+      bestM = d;
+    }
+  }
+  return best;
+}

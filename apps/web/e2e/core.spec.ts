@@ -4,24 +4,43 @@ import { cameraState, mockRouting, mockSearch, project, waitForMap } from './hel
 test('cold load shows the map at the default Oslo view', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);
-  await expect(page.getByPlaceholder('Search places…')).toBeVisible();
+  await expect(page.getByPlaceholder('Search places')).toBeVisible();
   const cam = await cameraState(page);
   expect(cam.zoom).toBeCloseTo(5, 0);
   expect(cam.lat).toBeCloseTo(59.91, 1);
   expect(cam.lng).toBeCloseTo(10.75, 1);
 });
 
-test('right-click drops a pin with a working popup', async ({ page }) => {
+test('right-click drops a pin and opens the place card', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);
   const box = (await page.locator('canvas').first().boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
   await expect(page.locator('.place-marker')).toBeVisible();
-  // The popup opens on marker click; it carries coords + actions.
+  // A bare pin is titled by its own coordinates, and offers the shared actions.
+  const card = page.locator('.place-card');
+  await expect(card.locator('strong')).toHaveText(/^-?\d+\.\d{5}, -?\d+\.\d{5}$/);
+  await expect(card.getByRole('button', { name: 'Navigate' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Save' })).toBeVisible();
+  // Closing the card leaves the pin; removing the pin closes the card.
+  await card.getByRole('button', { name: 'Close' }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('.place-marker')).toBeVisible();
   await page.locator('.place-marker').click();
-  await expect(page.locator('.pin-popup code')).toBeVisible();
-  await page.getByRole('button', { name: 'Remove' }).click();
+  await page.locator('.place-card').getByRole('button', { name: 'Remove pin' }).click();
   await expect(page.locator('.place-marker')).toHaveCount(0);
+  await expect(page.locator('.place-card')).toHaveCount(0);
+});
+
+test('saving from the place card flips the button and lists the place', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+  const box = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+  const card = page.locator('.place-card');
+  await card.getByRole('button', { name: 'Save' }).click();
+  // The saved place is found by proximity, so the card knows it is now saved.
+  await expect(card.getByRole('button', { name: '★ Saved' })).toBeVisible();
 });
 
 test('share link restores camera and pin; garbage hash falls back', async ({ page }) => {
@@ -43,7 +62,7 @@ test('search result flies the camera and drops the pin', async ({ page }) => {
   await mockSearch(page);
   await page.goto('/');
   await waitForMap(page);
-  await page.getByPlaceholder('Search places…').fill('preikestolen');
+  await page.getByPlaceholder('Search places').fill('preikestolen');
   await page.getByText('Preikestolen').click();
   await expect(page.locator('.place-marker')).toBeVisible();
   await expect
@@ -55,7 +74,7 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: '⇄ Route' }).click();
+  await page.getByRole('button', { name: 'Route' }).click();
   const [x1, y1] = await project(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
   await page.mouse.click(x1, y1);

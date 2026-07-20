@@ -1,9 +1,13 @@
 import {
   decodeMapHash,
+  encodeMapHash,
   mapProfile,
   placeIsVisible,
+  placeTargetTitle,
+  savedPlaceAt,
   type LatLng,
   type MapViewState,
+  type PlaceTarget,
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
@@ -29,6 +33,7 @@ import { useWebNavigation } from './nav/useWebNavigation.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useRoute } from './routing/useRoute.js';
 import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
+import { PlaceCard } from './place/PlaceCard.js';
 import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
@@ -65,6 +70,13 @@ const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
 
 export function App() {
   const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
+  // The spot the place card is describing — a pin, saved place, POI or search
+  // hit, all normalised to one PlaceTarget. Null = no card.
+  const [target, setTarget] = useState<PlaceTarget | null>(
+    initialView.pin ? { source: 'pin', position: initialView.pin } : null,
+  );
+  // Only set once the user asks to be located; the card shows distances from it.
+  const [userAt, setUserAt] = useState<LatLng | null>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -126,9 +138,10 @@ export function App() {
   const follow = useNavLayers(map, nav);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
-  const onNavigateToPin = useCallback(
+  const onNavigateToTarget = useCallback(
     (dest: LatLng) => {
       setPin(null);
+      setTarget(null);
       stopRoute(); // navigation owns the map now; a plan would fight it
       void startNav(dest);
     },
@@ -172,12 +185,25 @@ export function App() {
     setWeatherTarget(getBias() ?? DEFAULT_VIEW.center);
   }, [getBias]);
 
+  // A picked search result becomes a pin plus the same card a POI tap opens.
   const onSearchSelect = useCallback((result: SearchResult) => {
     setPin(result.position);
+    setTarget({
+      source: 'search',
+      position: result.position,
+      name: result.name,
+      category: result.label || undefined,
+    });
     const map = mapRef.current;
     if (map) {
       map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
     }
+  }, []);
+
+  // Dropping, dragging or removing the pin keeps the card in step with it.
+  const onPinChange = useCallback((next: LatLng | null) => {
+    setPin(next);
+    setTarget(next ? { source: 'pin', position: next } : null);
   }, []);
 
   // ---- user data on the map ----
@@ -244,17 +270,43 @@ export function App() {
     [showTrack, showPlace],
   );
 
-  const onSavePin = useCallback(
-    (pin: LatLng) => {
-      void savePlace({
-        name: `Pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`,
-        lat: pin.lat,
-        lng: pin.lng,
-      });
-      setSidebarOpen(true);
-    },
-    [savePlace],
+  // ---- place card actions ----
+
+  // The saved place *at* the card's spot, if any — so a POI the user already
+  // saved offers "★ Saved" rather than a second, duplicate entry.
+  const savedAtTarget = useMemo(
+    () => (target ? savedPlaceAt(userData.places, target.position) : undefined),
+    [target, userData.places],
   );
+
+  const onSaveTarget = useCallback(() => {
+    if (!target) return;
+    void savePlace({
+      name: placeTargetTitle(target),
+      lat: target.position.lat,
+      lng: target.position.lng,
+    });
+    // No sidebar pop-open: the button flipping to "★ Saved" is the confirmation,
+    // and the sidebar would slide in over the card the user is still reading.
+  }, [target, savePlace]);
+
+  const onAddStop = useCallback(() => {
+    if (!target) return;
+    route.addWaypoint(target.position, target.name);
+    setTarget(null);
+  }, [target, route]);
+
+  // A link to this exact spot, independent of where the camera happens to sit
+  // (the address bar's hash follows the map, which is not what "share this
+  // place" means).
+  const onShareTarget = useCallback(() => {
+    if (!target) return;
+    const zoom = Math.max(mapRef.current?.getZoom() ?? 14, 14);
+    const hash = encodeMapHash({ center: target.position, zoom, pin: target.position });
+    void navigator.clipboard.writeText(
+      `${window.location.origin}${window.location.pathname}${hash}`,
+    );
+  }, [target]);
 
   // Elevation-profile hover → a small dot marker on the map.
   const hoverMarkerRef = useRef<maplibregl.Marker | null>(null);
@@ -357,9 +409,9 @@ export function App() {
         initialView={initialView}
         pin={pin}
         places={visiblePlaces}
-        onPinChange={setPin}
-        onSavePin={onSavePin}
-        onNavigateToPin={onNavigateToPin}
+        onPinChange={onPinChange}
+        onSelect={setTarget}
+        onUserLocation={setUserAt}
         onMapReady={(m) => {
           mapRef.current = m;
           setMap(m);
@@ -384,14 +436,17 @@ export function App() {
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Saved"
           aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((open) => !open)}
         >
-          ★ Saved
+          <span aria-hidden="true">★</span>
+          <span className="topbar-label">Saved</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Route"
           aria-pressed={route.active}
           onClick={() => {
             // Starting from a dropped pin routes "from here".
@@ -410,23 +465,28 @@ export function App() {
             }
           }}
         >
-          ⇄ Route
+          <span aria-hidden="true">⇄</span>
+          <span className="topbar-label">Route</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Weather"
           aria-pressed={weatherTarget !== null}
           onClick={toggleWeather}
         >
-          ☀ Weather
+          <span aria-hidden="true">☀</span>
+          <span className="topbar-label">Weather</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Settings"
           aria-expanded={settingsOpen}
           onClick={() => setSettingsOpen((open) => !open)}
         >
-          ⚙ Settings
+          <span aria-hidden="true">⚙</span>
+          <span className="topbar-label">Settings</span>
         </button>
       </div>
       {/* Overlay switcher, hidden mid-trip like the other map chrome — the
@@ -435,6 +495,27 @@ export function App() {
         <MapProfileSwitch active={profiles.profile.id} onPick={onPickProfile} />
       )}
       {nav.phase === 'idle' && <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />}
+      {/* One card for pins, saved places, POIs and search hits. Hidden mid-trip
+          along with the rest of the map chrome. */}
+      {target && nav.phase === 'idle' && (
+        <PlaceCard
+          target={target}
+          saved={savedAtTarget}
+          userAt={userAt}
+          routeActive={route.active}
+          shifted={sidebarOpen}
+          onNavigate={() => onNavigateToTarget(target.position)}
+          onSave={onSaveTarget}
+          onShowSaved={(place) => {
+            setSidebarOpen(true);
+            showPlace(place);
+          }}
+          onAddStop={onAddStop}
+          onShare={onShareTarget}
+          onRemovePin={() => onPinChange(null)}
+          onClose={() => setTarget(null)}
+        />
+      )}
       {writeError && (
         <div className="write-error-toast" role="alert">
           <span>{writeError} — the change was not saved.</span>

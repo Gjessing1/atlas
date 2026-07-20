@@ -101,6 +101,18 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
     onSelect(result);
   };
 
+  // Recents are a convenience, not a record — the user can wipe them, and
+  // nothing else in the app depends on them being there.
+  const clearRecent = () => {
+    setRecent([]);
+    setOpen(false);
+    try {
+      localStorage.removeItem(RECENT_KEY);
+    } catch {
+      // Storage unavailable; the in-memory list is cleared either way.
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!open || shown.length === 0) return;
     if (e.key === 'ArrowDown') {
@@ -131,7 +143,20 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
       />
       {open && shown.length > 0 && (
         <ul className="searchbox-results" role="listbox">
-          {showingRecent && <li className="searchbox-tag">Recent</li>}
+          {showingRecent && (
+            <li className="searchbox-tag">
+              <span>Recent</span>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep input focus
+                  clearRecent();
+                }}
+              >
+                Clear
+              </button>
+            </li>
+          )}
           {shown.map((result, i) => (
             <li
               key={`${result.position.lat}/${result.position.lng}/${result.name}`}

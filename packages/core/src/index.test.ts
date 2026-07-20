@@ -21,7 +21,14 @@ import {
   parseCoordinateQuery,
   photonFeatureToSearchResult,
   placeIsVisible,
+  placeTargetSubtitle,
+  placeTargetTitle,
+  poiCategoryLabel,
   resolveStyleTemplate,
+  savedPlaceAt,
+  fmtCoords,
+  fmtDistanceM,
+  type PlaceTarget,
   type BBox,
   type PhotonFeature,
   type VisibilityFolder,
@@ -420,5 +427,54 @@ describe('map profiles', () => {
     for (const p of MAP_PROFILES) {
       if (p.routing !== null) expect(known).toContain(p.routing);
     }
+  });
+});
+
+describe('place card model', () => {
+  const oslo = { lat: 59.91, lng: 10.75 };
+
+  it('formats coordinates and distances for display', () => {
+    expect(fmtCoords({ lat: 59.9139456, lng: 10.7522123 })).toBe('59.91395, 10.75221');
+    expect(fmtDistanceM(42.4)).toBe('42 m');
+    // Above 100 m the last digit would only track GPS jitter.
+    expect(fmtDistanceM(347)).toBe('350 m');
+    expect(fmtDistanceM(1240)).toBe('1.2 km');
+    expect(fmtDistanceM(24_800)).toBe('25 km');
+  });
+
+  it('builds a POI category from class/subclass', () => {
+    expect(poiCategoryLabel({ class: 'restaurant', subclass: 'fast_food' })).toBe(
+      'Restaurant · Fast food',
+    );
+    // A subclass that repeats the class or the name adds nothing.
+    expect(poiCategoryLabel({ class: 'cafe', subclass: 'cafe' })).toBe('Cafe');
+    expect(poiCategoryLabel({ class: 'shop', subclass: 'Rimi' }, 'Rimi')).toBe('Shop');
+    expect(poiCategoryLabel({})).toBeUndefined();
+  });
+
+  it('titles a bare pin with its coordinates and a named target with its name', () => {
+    const pin: PlaceTarget = { source: 'pin', position: oslo };
+    expect(placeTargetTitle(pin)).toBe('59.91000, 10.75000');
+    expect(placeTargetTitle({ ...pin, name: 'Home' })).toBe('Home');
+    // A whitespace-only name is not a name.
+    expect(placeTargetTitle({ ...pin, name: '  ' })).toBe('59.91000, 10.75000');
+  });
+
+  it('joins category and distance into the subtitle, skipping what is missing', () => {
+    const target: PlaceTarget = { source: 'poi', position: oslo, category: 'Cafe' };
+    expect(placeTargetSubtitle(target, { lat: 59.92, lng: 10.75 })).toBe('Cafe · 1.1 km away');
+    expect(placeTargetSubtitle(target, null)).toBe('Cafe');
+    expect(placeTargetSubtitle({ source: 'pin', position: oslo }, null)).toBe('');
+  });
+
+  it('finds the nearest already-saved place within the match radius', () => {
+    const places = [
+      { id: 'far', lat: 59.92, lng: 10.75 },
+      { id: 'near', lat: 59.910_1, lng: 10.75 },
+      { id: 'nearer', lat: 59.910_05, lng: 10.75 },
+    ];
+    expect(savedPlaceAt(places, oslo)?.id).toBe('nearer');
+    // The shop next door is a different place.
+    expect(savedPlaceAt(places, { lat: 59.9105, lng: 10.75 })).toBeUndefined();
   });
 });

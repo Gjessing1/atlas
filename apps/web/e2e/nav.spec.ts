@@ -19,9 +19,13 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
   await waitForMap(page);
 
-  // Start navigation from the pin popup.
+  // Navigate from the pin's place card offers the route choices first; Start
+  // commits to the selected one and guidance begins.
   await page.locator('.place-marker').click();
   await page.getByRole('button', { name: 'Navigate' }).click();
+  await expect(page.locator('.nav-preview')).toBeVisible();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-preview')).toHaveCount(0);
 
   // Banner up, guidance summary showing, route drawn, puck snapped to the line.
   await expect(page.locator('.nav-banner')).toBeVisible();
