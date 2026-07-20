@@ -1,6 +1,7 @@
 export type { SqlDriver, SqlRow, SqlValue } from './driver.js';
 export type {
   CollectionRecord,
+  DeletedRecord,
   ExportedData,
   NewPlace,
   NewTrack,

@@ -20,6 +20,50 @@ interface SidebarProps {
 const fmtKm = (m: number): string =>
   m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 
+/**
+ * Inline name field for creating/renaming a folder — Enter or blur commits,
+ * Escape abandons. Replaces window.prompt, which blocks the page, cannot be
+ * styled, and is outright hostile on mobile.
+ */
+function FolderNameInput({
+  initial,
+  placeholder,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  placeholder: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const commit = () => {
+    const name = value.trim();
+    if (name && name !== initial) onCommit(name);
+    else onCancel();
+  };
+  return (
+    <input
+      className="folder-name-input"
+      autoFocus
+      value={value}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    />
+  );
+}
+
 export function Sidebar({
   data,
   layers,
@@ -33,6 +77,10 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  // Folder id being renamed, and where a new folder is being named
+  // ({ parentId } — null parent means the root level).
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   const { drag, dropKey, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,9 +150,7 @@ export function Sidebar({
             collections={data.collections}
             style={{ icon: place.icon, color: place.color }}
             onPatch={(patch) => void data.updatePlace(place.id, patch)}
-            onDelete={() => {
-              if (confirm(`Delete place "${place.name}"?`)) void data.deletePlace(place.id);
-            }}
+            onDelete={() => void data.deletePlace(place.id)}
           />
         )}
       </li>
@@ -150,9 +196,7 @@ export function Sidebar({
             collectionId={track.collectionId}
             collections={data.collections}
             onPatch={(patch) => void data.updateTrack(track.id, patch)}
-            onDelete={() => {
-              if (confirm(`Delete track "${track.name}"?`)) void data.deleteTrack(track.id);
-            }}
+            onDelete={() => void data.deleteTrack(track.id)}
             actions={
               <>
                 <button type="button" onClick={() => void data.exportTrack(track.id, 'gpx')}>
@@ -174,7 +218,12 @@ export function Sidebar({
     const folders = data.collections.filter((c) => c.parentId === parentId);
     const places = data.places.filter((p) => p.collectionId === parentId);
     const tracks = data.tracks.filter((t) => t.collectionId === parentId);
-    if (parentId === null && folders.length + places.length + tracks.length === 0) {
+    const creatingHere = creating?.parentId === parentId;
+    if (
+      parentId === null &&
+      folders.length + places.length + tracks.length === 0 &&
+      !creatingHere
+    ) {
       return (
         <p className="sidebar-empty">
           Nothing saved yet. Drop a pin and save it, or import a GPX/KML/KMZ file.
@@ -183,6 +232,22 @@ export function Sidebar({
     }
     return (
       <ul className="item-list" style={depth > 0 ? { paddingLeft: 14 } : undefined}>
+        {creatingHere && (
+          <li className="folder-row">
+            <div className="item-line">
+              <span className="item-icon">📁</span>
+              <FolderNameInput
+                initial=""
+                placeholder="New folder name"
+                onCommit={(name) => {
+                  void data.createCollection(name, parentId);
+                  setCreating(null);
+                }}
+                onCancel={() => setCreating(null)}
+              />
+            </div>
+          </li>
+        )}
         {folders.map((folder) => (
           <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
             <div
@@ -203,16 +268,25 @@ export function Sidebar({
                 onChange={(e) => void data.setCollectionVisible(folder.id, e.target.checked)}
               />
               <span className="item-icon">📁</span>
-              <span className="folder-name">{folder.name}</span>
+              {renaming === folder.id ? (
+                <FolderNameInput
+                  initial={folder.name}
+                  placeholder="Folder name"
+                  onCommit={(name) => {
+                    void data.renameCollection(folder.id, name);
+                    setRenaming(null);
+                  }}
+                  onCancel={() => setRenaming(null)}
+                />
+              ) : (
+                <span className="folder-name">{folder.name}</span>
+              )}
               <button
                 type="button"
                 className="icon-button"
                 aria-label={`New folder inside ${folder.name}`}
                 title="New subfolder"
-                onClick={() => {
-                  const name = prompt('Subfolder name');
-                  if (name?.trim()) void data.createCollection(name.trim(), folder.id);
-                }}
+                onClick={() => setCreating({ parentId: folder.id })}
               >
                 +
               </button>
@@ -220,10 +294,7 @@ export function Sidebar({
                 type="button"
                 className="icon-button"
                 aria-label={`Rename ${folder.name}`}
-                onClick={() => {
-                  const name = prompt('Folder name', folder.name);
-                  if (name?.trim()) void data.renameCollection(folder.id, name.trim());
-                }}
+                onClick={() => setRenaming(folder.id)}
               >
                 ✎
               </button>
@@ -231,10 +302,8 @@ export function Sidebar({
                 type="button"
                 className="icon-button"
                 aria-label={`Delete ${folder.name}`}
-                onClick={() => {
-                  if (confirm(`Delete folder "${folder.name}"? Its contents move up a level.`))
-                    void data.deleteCollection(folder.id);
-                }}
+                title="Delete folder (contents move up a level)"
+                onClick={() => void data.deleteCollection(folder.id)}
               >
                 ✕
               </button>
@@ -277,10 +346,7 @@ export function Sidebar({
           </button>
           <button
             type="button"
-            onClick={() => {
-              const name = prompt('Folder name');
-              if (name?.trim()) void data.createCollection(name.trim());
-            }}
+            onClick={() => setCreating({ parentId: null })}
             disabled={data.status !== 'ready'}
           >
             New folder

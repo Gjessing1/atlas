@@ -9,6 +9,7 @@ import {
 import type {
   AtlasStorage,
   CollectionRecord,
+  DeletedRecord,
   NewPlace,
   PlacePatch,
   PlaceRecord,
@@ -44,6 +45,17 @@ export interface ImportResult {
   errors: string[];
 }
 
+/**
+ * The last deletion, offered back to the user as an undo. Deletes are immediate
+ * (no confirmation dialog) — this is what makes that safe, so the UI must
+ * surface it whenever it is non-null.
+ */
+export interface UndoableDelete {
+  /** Ready-to-show message, e.g. `Deleted "Preikestolen"`. */
+  message: string;
+  undo: () => Promise<void>;
+}
+
 export interface UserData<TFile> {
   /** 'error' means persistent storage is unavailable. */
   status: 'loading' | 'ready' | 'error';
@@ -51,6 +63,10 @@ export interface UserData<TFile> {
   /** Latest failed storage write, for a dismissible toast — null when none. */
   writeError: string | null;
   clearWriteError: () => void;
+  /** Latest deletion, for an undo toast — null when none is pending. */
+  undoable: UndoableDelete | null;
+  /** Drop the pending undo (toast dismissed or timed out). */
+  clearUndoable: () => void;
   collections: CollectionRecord[];
   places: PlaceRecord[];
   tracks: TrackRecord[];
@@ -105,6 +121,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
+  const [undoable, setUndoable] = useState<UndoableDelete | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [places, setPlaces] = useState<PlaceRecord[]>([]);
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
@@ -113,12 +130,39 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const trackDataCache = useRef(new Map<string, TrackData>());
 
   const clearWriteError = useCallback(() => setWriteError(null), []);
+  const clearUndoable = useCallback(() => setUndoable(null), []);
   // A rejected write means the change was NOT saved — surface it rather than
   // letting it look like a no-op (never *silently* lose user data).
   const reportWriteFailure = useCallback((action: string, err: unknown) => {
     console.error(`${action} failed`, err);
     setWriteError(`${action} failed — ${err instanceof Error ? err.message : String(err)}`);
   }, []);
+
+  /**
+   * Arm the undo for a delete. Deletions are immediate rather than
+   * confirm()-gated — the snapshot storage hands back can re-create the record
+   * under its original id, which is the friendlier trade (and the only one that
+   * works on touch, where a modal confirm is a tap-through reflex).
+   */
+  const offerUndo = useCallback(
+    (deleted: DeletedRecord | null, refresh: () => Promise<void>) => {
+      if (!deleted) return;
+      const name = typeof deleted.data['name'] === 'string' ? deleted.data['name'] : 'item';
+      setUndoable({
+        message: `Deleted "${name}"`,
+        undo: async () => {
+          try {
+            await storageRef.current?.restore(deleted);
+            await refresh();
+          } catch (err) {
+            reportWriteFailure('Undoing the delete', err);
+          }
+          setUndoable(null);
+        },
+      });
+    },
+    [reportWriteFailure],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -191,13 +235,14 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const deletePlace = useCallback(
     async (id: string) => {
       try {
-        await storageRef.current?.deletePlace(id);
+        const deleted = (await storageRef.current?.deletePlace(id)) ?? null;
         await refreshPlaces();
+        offerUndo(deleted, refreshPlaces);
       } catch (err) {
         reportWriteFailure('Deleting place', err);
       }
     },
-    [refreshPlaces, reportWriteFailure],
+    [refreshPlaces, reportWriteFailure, offerUndo],
   );
 
   const reorderPlaces = useCallback(
@@ -285,14 +330,17 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const deleteTrack = useCallback(
     async (id: string) => {
       try {
-        await storageRef.current?.deleteTrack(id);
+        const deleted = (await storageRef.current?.deleteTrack(id)) ?? null;
         trackDataCache.current.delete(id);
         await refreshTracks();
+        // Undoing re-reads the GPX from storage, so the dropped cache entry
+        // costs one parse, not the track.
+        offerUndo(deleted, refreshTracks);
       } catch (err) {
         reportWriteFailure('Deleting track', err);
       }
     },
-    [refreshTracks, reportWriteFailure],
+    [refreshTracks, reportWriteFailure, offerUndo],
   );
 
   const getTrackData = useCallback(async (id: string): Promise<TrackData | null> => {
@@ -364,13 +412,16 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const deleteCollection = useCallback(
     async (id: string) => {
       try {
-        await storageRef.current?.deleteCollection(id);
-        await Promise.all([refreshCollections(), refreshPlaces(), refreshTracks()]);
+        const deleted = (await storageRef.current?.deleteCollection(id)) ?? null;
+        await refreshAll();
+        // Undo also re-parents the contents the delete moved up a level, so
+        // places and tracks have to be reloaded too.
+        offerUndo(deleted, refreshAll);
       } catch (err) {
         reportWriteFailure('Deleting folder', err);
       }
     },
-    [refreshCollections, refreshPlaces, refreshTracks, reportWriteFailure],
+    [refreshAll, reportWriteFailure, offerUndo],
   );
 
   const setAllVisible = useCallback(
@@ -440,6 +491,8 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     error,
     writeError,
     clearWriteError,
+    undoable,
+    clearUndoable,
     collections,
     places,
     tracks,

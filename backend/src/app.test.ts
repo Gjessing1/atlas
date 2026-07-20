@@ -40,6 +40,25 @@ beforeAll(async () => {
       { geometry: null, properties: { name: 'broken' } },
     ],
   }));
+  // Reverse lookups answer with whatever is nearest; the marker coordinate
+  // 0,0 stands in for "nothing there" (open sea).
+  photonStub.get<{ Querystring: { lat?: string; lon?: string } }>('/reverse', (request) => ({
+    type: 'FeatureCollection',
+    features:
+      request.query.lat === '0' && request.query.lon === '0'
+        ? []
+        : [
+            {
+              geometry: { type: 'Point', coordinates: [10.75, 59.91] },
+              properties: {
+                name: 'Jernbanetorget',
+                city: 'Oslo',
+                osm_key: 'highway',
+                osm_value: 'bus_stop',
+              },
+            },
+          ],
+  }));
   const photonAddress = await photonStub.listen({ port: 0, host: '127.0.0.1' });
 
   valhallaStub = Fastify();
@@ -140,6 +159,46 @@ describe('search proxy', () => {
   it('502s when photon is unreachable', async () => {
     const downApp = await buildApp({ dataDir, photonUrl: 'http://127.0.0.1:1' });
     const res = await downApp.inject({ url: '/api/search?q=oslo' });
+    expect(res.statusCode).toBe(502);
+    await downApp.close();
+  });
+});
+
+describe('reverse geocoding', () => {
+  it('names the place at a coordinate', async () => {
+    const res = await app.inject({ url: '/api/search/reverse?lat=59.91&lon=10.75' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      result: {
+        name: 'Jernbanetorget',
+        label: 'Oslo',
+        position: { lat: 59.91, lng: 10.75 },
+        kind: 'highway/bus_stop',
+      },
+    });
+  });
+
+  it('answers null when nothing is there, rather than erroring', async () => {
+    const res = await app.inject({ url: '/api/search/reverse?lat=0&lon=0' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ result: null });
+  });
+
+  it('400s on missing or out-of-range coordinates', async () => {
+    for (const url of [
+      '/api/search/reverse',
+      '/api/search/reverse?lat=59.91',
+      '/api/search/reverse?lat=abc&lon=10.75',
+      '/api/search/reverse?lat=91&lon=10.75',
+      '/api/search/reverse?lat=59.91&lon=181',
+    ]) {
+      expect((await app.inject({ url })).statusCode, url).toBe(400);
+    }
+  });
+
+  it('502s when photon is unreachable', async () => {
+    const downApp = await buildApp({ dataDir, photonUrl: 'http://127.0.0.1:1' });
+    const res = await downApp.inject({ url: '/api/search/reverse?lat=59.91&lon=10.75' });
     expect(res.statusCode).toBe(502);
     await downApp.close();
   });

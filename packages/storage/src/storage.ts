@@ -5,6 +5,7 @@ import { migrate } from './migrations.js';
 import type {
   CollectionPatch,
   CollectionRecord,
+  DeletedRecord,
   ExportedData,
   NewPlace,
   NewTrack,
@@ -163,12 +164,15 @@ export class AtlasStorage {
   /**
    * Delete a collection. Its contents and child collections move to its
    * parent (or the root) — deleting a folder never deletes user data.
+   * Returns a snapshot for undo (null when the id is unknown).
    */
-  async deleteCollection(id: string): Promise<void> {
+  async deleteCollection(id: string): Promise<DeletedRecord | null> {
+    const snapshot = await this.readSyncRecord('collection', id);
     const rows = await this.driver.query('SELECT parent_id FROM collections WHERE id = ?', [id]);
-    if (rows.length === 0) return;
+    if (rows.length === 0 || snapshot === null) return null;
     const parentId = rows[0]!['parent_id'] ?? null;
     const now = Date.now();
+    const movedChildren: { entity: SyncEntity; id: string }[] = [];
     for (const [table, entity] of [
       ['places', 'place'],
       ['tracks', 'track'],
@@ -180,7 +184,10 @@ export class AtlasStorage {
         `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE collection_id = ?`,
         [parentId, now, id],
       );
-      for (const row of moved) await this.enqueue(entity, String(row['id']), 'upsert', now);
+      for (const row of moved) {
+        await this.enqueue(entity, String(row['id']), 'upsert', now);
+        movedChildren.push({ entity, id: String(row['id']) });
+      }
     }
     const children = await this.driver.query('SELECT id FROM collections WHERE parent_id = ?', [
       id,
@@ -189,9 +196,13 @@ export class AtlasStorage {
       'UPDATE collections SET parent_id = ?, updated_at = ? WHERE parent_id = ?',
       [parentId, now, id],
     );
-    for (const row of children) await this.enqueue('collection', String(row['id']), 'upsert', now);
+    for (const row of children) {
+      await this.enqueue('collection', String(row['id']), 'upsert', now);
+      movedChildren.push({ entity: 'collection', id: String(row['id']) });
+    }
     await this.driver.query('DELETE FROM collections WHERE id = ?', [id]);
     await this.enqueue('collection', id, 'delete', now);
+    return { entity: 'collection', id, data: snapshot.data, movedChildren };
   }
 
   // ---- places ----
@@ -285,9 +296,12 @@ export class AtlasStorage {
     }
   }
 
-  async deletePlace(id: string): Promise<void> {
+  /** Delete a place, returning a snapshot for undo (null when unknown). */
+  async deletePlace(id: string): Promise<DeletedRecord | null> {
+    const snapshot = await this.readSyncRecord('place', id);
     await this.driver.query('DELETE FROM places WHERE id = ?', [id]);
     await this.enqueue('place', id, 'delete', Date.now());
+    return snapshot && { entity: 'place', id, data: snapshot.data };
   }
 
   // ---- tracks ----
@@ -347,9 +361,45 @@ export class AtlasStorage {
     });
   }
 
-  async deleteTrack(id: string): Promise<void> {
+  /** Delete a track, returning a snapshot for undo (null when unknown). */
+  async deleteTrack(id: string): Promise<DeletedRecord | null> {
+    const snapshot = await this.readSyncRecord('track', id);
     await this.driver.query('DELETE FROM tracks WHERE id = ?', [id]);
     await this.enqueue('track', id, 'delete', Date.now());
+    return snapshot && { entity: 'track', id, data: snapshot.data };
+  }
+
+  /**
+   * Put back a record removed by delete*, under its original id, and re-parent
+   * the children a folder deletion moved up. The restore is a normal local
+   * mutation: it stamps a fresh updated_at and enqueues an upsert, so LWW
+   * carries the undo to other devices rather than letting the older delete win.
+   */
+  async restore(deleted: DeletedRecord): Promise<void> {
+    const now = Date.now();
+    await this.upsertFromRemote({
+      entity: deleted.entity,
+      id: deleted.id,
+      updatedAt: now,
+      deleted: false,
+      data: deleted.data,
+    });
+    await this.enqueue(deleted.entity, deleted.id, 'upsert', now);
+    for (const child of deleted.movedChildren ?? []) {
+      if (child.entity === 'collection') {
+        await this.driver.query(
+          'UPDATE collections SET parent_id = ?, updated_at = ? WHERE id = ?',
+          [deleted.id, now, child.id],
+        );
+      } else {
+        const table = child.entity === 'place' ? 'places' : 'tracks';
+        await this.driver.query(
+          `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE id = ?`,
+          [deleted.id, now, child.id],
+        );
+      }
+      await this.enqueue(child.entity, child.id, 'upsert', now);
+    }
   }
 
   // ---- settings ----

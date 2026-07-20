@@ -237,6 +237,45 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     }
   });
 
+  // Reverse geocoding: what is at this coordinate? Used to label map-clicked
+  // route stops with a place name instead of raw decimals.
+  app.get<{ Querystring: { lat?: string; lon?: string } }>(
+    '/api/search/reverse',
+    async (request, reply) => {
+      const lat = Number(request.query.lat);
+      const lon = Number(request.query.lon);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lon) ||
+        Math.abs(lat) > 90 ||
+        Math.abs(lon) > 180
+      ) {
+        return reply.code(400).send({ error: 'lat and lon are required' });
+      }
+      const url = new URL('/reverse', photonUrl);
+      url.searchParams.set('lat', String(lat));
+      url.searchParams.set('lon', String(lon));
+      url.searchParams.set('limit', '1');
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) {
+          request.log.error({ status: res.status }, 'photon reverse error');
+          status.record('photon', false, `HTTP ${res.status}`);
+          return reply.code(502).send({ error: 'search unavailable' });
+        }
+        status.record('photon', true);
+        const geojson = (await res.json()) as { features?: PhotonFeature[] };
+        const result = (geojson.features ?? []).map(photonFeatureToSearchResult).find(Boolean);
+        // No match is a normal answer here (open sea, wilderness), not an error.
+        return { result: result ?? null };
+      } catch (err) {
+        request.log.error({ err }, 'photon unreachable');
+        status.record('photon', false, 'unreachable');
+        return reply.code(502).send({ error: 'search unavailable' });
+      }
+    },
+  );
+
   // Routing: thin proxy over the self-hosted Valhalla service (same rationale
   // as the Photon proxy — single origin, service URL stays private). The
   // request body is a Valhalla /route payload built by @atlas/routing; the

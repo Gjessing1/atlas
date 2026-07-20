@@ -143,4 +143,42 @@ describe('useRoute', () => {
     act(() => result.current.removeWaypoint(wa!.id));
     expect(result.current.waypoints.find((w) => w.id === wa!.id)).toBeUndefined();
   });
+
+  it('labels stops, and refuses labels that no longer describe the stop', async () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+
+    act(() => result.current.start(A));
+    let id = 0;
+    act(() => {
+      id = result.current.addWaypoint(B, 'Oslo S');
+    });
+    expect(result.current.waypoints[1]!.name).toBe('Oslo S');
+    expect(result.current.waypoints[0]!.name).toBeUndefined();
+
+    // A late lookup for an unnamed stop still applies.
+    const wa = result.current.waypoints[0]!;
+    act(() => result.current.nameWaypoint(wa.id, 'Home', A));
+    expect(result.current.waypoints[0]!.name).toBe('Home');
+
+    // …but not over a name the stop already has.
+    act(() => result.current.nameWaypoint(id, 'Somewhere else', B));
+    expect(result.current.waypoints[1]!.name).toBe('Oslo S');
+
+    // Moving a stop drops its label; a lookup for the old spot is stale and
+    // must not be applied to the new one.
+    act(() => result.current.moveWaypointTo(id, C));
+    expect(result.current.waypoints[1]!.name).toBeUndefined();
+    act(() => result.current.nameWaypoint(id, 'Oslo S', B));
+    expect(result.current.waypoints[1]!.name).toBeUndefined();
+
+    // A lookup matching where the stop actually is now does apply.
+    act(() => result.current.nameWaypoint(id, 'Bergen', C));
+    expect(result.current.waypoints[1]!.name).toBe('Bergen');
+
+    // A label for a removed stop is a no-op, not a crash.
+    act(() => result.current.removeWaypoint(id));
+    act(() => result.current.nameWaypoint(id, 'Ghost', C));
+    expect(result.current.waypoints).toHaveLength(1);
+  });
 });

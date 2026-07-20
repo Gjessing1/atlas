@@ -13,6 +13,12 @@ export interface RouteWaypoint {
   /** Stable identity for markers and list rows across reorders. */
   id: number;
   pos: LatLng;
+  /**
+   * Human label for the stop ("Oslo S"), when it came from a search hit, a
+   * saved place, or a reverse geocode. Absent for a bare map click until the
+   * platform resolves one; the UI falls back to coordinates.
+   */
+  name?: string;
 }
 
 /**
@@ -36,13 +42,28 @@ export interface RoutePlanner {
   loading: boolean;
   error: string | null;
 
-  start: (at?: LatLng) => void;
+  /**
+   * Enter route mode, optionally seeding the first stop (e.g. from a dropped
+   * pin). Returns that stop's id when it seeded one, so the caller can label
+   * it — null when route mode already had stops.
+   */
+  start: (at?: LatLng, name?: string) => number | null;
   stop: () => void;
   setProfile: (profile: RoutingProfile) => void;
-  /** Append a stop — or move the start when planning a round trip. */
-  addWaypoint: (pos: LatLng) => void;
-  insertWaypoint: (index: number, pos: LatLng) => void;
+  /**
+   * Append a stop — or move the start when planning a round trip. Returns the
+   * new stop's id, so a caller can label it once a lookup resolves.
+   */
+  addWaypoint: (pos: LatLng, name?: string) => number;
+  insertWaypoint: (index: number, pos: LatLng, name?: string) => number;
+  /** Move a stop; its label is dropped, since it no longer describes the spot. */
   moveWaypointTo: (id: number, pos: LatLng) => void;
+  /**
+   * Attach a label to an existing stop (e.g. an async reverse geocode). `at` is
+   * the position the label was looked up for — a stop that has since moved or
+   * gained a name keeps what it has.
+   */
+  nameWaypoint: (id: number, name: string, at: LatLng) => void;
   removeWaypoint: (id: number) => void;
   reorderWaypoint: (from: number, to: number) => void;
   reverse: () => void;
@@ -70,8 +91,8 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const idRef = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
 
-  const nextWaypoint = useCallback((pos: LatLng): RouteWaypoint => {
-    return { id: idRef.current++, pos };
+  const nextWaypoint = useCallback((pos: LatLng, name?: string): RouteWaypoint => {
+    return name === undefined ? { id: idRef.current++, pos } : { id: idRef.current++, pos, name };
   }, []);
 
   // Re-route (debounced) whenever anything that affects the route changes.
@@ -124,11 +145,15 @@ export function useRoute(route: RouteFn): RoutePlanner {
   }, [active, profile, waypoints, roundTrip, roundTripKm, seed, route]);
 
   const start = useCallback(
-    (at?: LatLng) => {
+    (at?: LatLng, name?: string) => {
       setActive(true);
-      if (at) setWaypoints((wps) => (wps.length === 0 ? [nextWaypoint(at)] : wps));
+      // Only seeds an empty plan; re-opening the panel keeps the existing stops.
+      if (!at || waypoints.length > 0) return null;
+      const wp = nextWaypoint(at, name);
+      setWaypoints([wp]);
+      return wp.id;
     },
-    [nextWaypoint],
+    [waypoints.length, nextWaypoint],
   );
 
   const stop = useCallback(() => {
@@ -139,26 +164,44 @@ export function useRoute(route: RouteFn): RoutePlanner {
     setError(null);
   }, []);
 
+  // The waypoint is built outside the updater: allocating its id inside would
+  // burn two ids per call under StrictMode's double-invoke, and the caller
+  // needs the id back to label the stop once a reverse geocode resolves.
   const addWaypoint = useCallback(
-    (pos: LatLng) => {
-      setWaypoints((wps) => {
-        // A round trip has exactly one anchor: adding again moves it.
-        if (roundTrip) return [nextWaypoint(pos)];
-        return [...wps, nextWaypoint(pos)];
-      });
+    (pos: LatLng, name?: string) => {
+      const wp = nextWaypoint(pos, name);
+      // A round trip has exactly one anchor: adding again moves it.
+      setWaypoints((wps) => (roundTrip ? [wp] : [...wps, wp]));
+      return wp.id;
     },
     [roundTrip, nextWaypoint],
   );
 
   const insertWaypoint = useCallback(
-    (index: number, pos: LatLng) => {
-      setWaypoints((wps) => [...wps.slice(0, index), nextWaypoint(pos), ...wps.slice(index)]);
+    (index: number, pos: LatLng, name?: string) => {
+      const wp = nextWaypoint(pos, name);
+      setWaypoints((wps) => [...wps.slice(0, index), wp, ...wps.slice(index)]);
+      return wp.id;
     },
     [nextWaypoint],
   );
 
   const moveWaypointTo = useCallback((id: number, pos: LatLng) => {
-    setWaypoints((wps) => wps.map((w) => (w.id === id ? { ...w, pos } : w)));
+    // Dragging a stop somewhere else invalidates whatever it was called.
+    setWaypoints((wps) => wps.map((w) => (w.id === id ? { id: w.id, pos } : w)));
+  }, []);
+
+  const nameWaypoint = useCallback((id: number, name: string, at: LatLng) => {
+    setWaypoints((wps) => {
+      const target = wps.find((w) => w.id === id);
+      // A lookup is in flight while the user keeps editing: the stop may have
+      // been removed or dragged elsewhere, and the label would then describe
+      // the wrong spot. Only apply it if the stop is still where it was asked
+      // about, and still unnamed.
+      if (!target || target.name !== undefined) return wps;
+      if (target.pos.lat !== at.lat || target.pos.lng !== at.lng) return wps;
+      return wps.map((w) => (w.id === id ? { ...w, name } : w));
+    });
   }, []);
 
   const removeWaypoint = useCallback((id: number) => {
@@ -216,6 +259,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     addWaypoint,
     insertWaypoint,
     moveWaypointTo,
+    nameWaypoint,
     removeWaypoint,
     reorderWaypoint,
     reverse,

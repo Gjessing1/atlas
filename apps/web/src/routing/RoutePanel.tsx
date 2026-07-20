@@ -54,7 +54,7 @@ function StopSearch({
 }: {
   places: PlaceRecord[];
   getBias: () => LatLng | null;
-  onPick: (position: LatLng) => void;
+  onPick: (position: LatLng, name: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<StopHit[]>([]);
@@ -117,7 +117,7 @@ function StopSearch({
               <button
                 type="button"
                 onClick={() => {
-                  onPick(hit.position);
+                  onPick(hit.position, hit.name);
                   setQuery('');
                   setHits([]);
                 }}
@@ -222,7 +222,7 @@ export function RoutePanel({
       <StopSearch
         places={places}
         getBias={getBias}
-        onPick={(position) => route.addWaypoint(position)}
+        onPick={(position, name) => route.addWaypoint(position, name)}
       />
 
       {route.waypoints.length > 0 ? (
@@ -243,8 +243,10 @@ export function RoutePanel({
               <span className="route-wp-label" aria-hidden="true">
                 {waypointLabel(i, route.roundTrip, route.waypoints.length)}
               </span>
-              <span className="route-wp-coords">
-                {w.pos.lat.toFixed(4)}, {w.pos.lng.toFixed(4)}
+              {/* Named stops read as a plan ("Home → Oslo S"); an unlabelled
+                  map click still shows where it is. */}
+              <span className={w.name ? 'route-wp-name' : 'route-wp-coords'} title={w.name}>
+                {w.name ?? `${w.pos.lat.toFixed(4)}, ${w.pos.lng.toFixed(4)}`}
               </span>
               <button
                 type="button"

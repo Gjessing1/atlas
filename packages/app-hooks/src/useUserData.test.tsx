@@ -125,6 +125,70 @@ describe('useUserData', () => {
     expect(result.current.writeError).toBeNull();
   });
 
+  it('offers an undo for each delete and restores the record on demand', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.createCollection('Hikes');
+    });
+    const folderId = result.current.collections[0]!.id;
+    await act(async () => {
+      await result.current.savePlace({
+        name: 'Preikestolen',
+        lat: 58.9,
+        lng: 6.1,
+        collectionId: folderId,
+      });
+    });
+    const placeId = result.current.places[0]!.id;
+
+    await act(async () => {
+      await result.current.deletePlace(placeId);
+    });
+    expect(result.current.places).toHaveLength(0);
+    expect(result.current.undoable?.message).toBe('Deleted "Preikestolen"');
+
+    await act(async () => {
+      await result.current.undoable!.undo();
+    });
+    expect(result.current.places).toMatchObject([{ id: placeId, name: 'Preikestolen' }]);
+    expect(result.current.undoable).toBeNull();
+
+    // Undoing a folder delete also pulls its contents back out of the root.
+    await act(async () => {
+      await result.current.deleteCollection(folderId);
+    });
+    expect(result.current.collections).toHaveLength(0);
+    expect(result.current.places[0]!.collectionId).toBeNull();
+    expect(result.current.undoable?.message).toBe('Deleted "Hikes"');
+
+    await act(async () => {
+      await result.current.undoable!.undo();
+    });
+    expect(result.current.collections).toMatchObject([{ id: folderId, name: 'Hikes' }]);
+    expect(result.current.places[0]!.collectionId).toBe(folderId);
+  });
+
+  it('clears a pending undo when dismissed', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.savePlace({ name: 'Home', lat: 59.9, lng: 10.7 });
+    });
+    await act(async () => {
+      await result.current.deletePlace(result.current.places[0]!.id);
+    });
+    expect(result.current.undoable).not.toBeNull();
+
+    act(() => result.current.clearUndoable());
+    expect(result.current.undoable).toBeNull();
+    expect(result.current.places).toHaveLength(0);
+  });
+
   it('imports tracks and waypoint-only files, collecting per-file errors', async () => {
     const { platform } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

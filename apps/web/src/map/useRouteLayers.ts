@@ -2,7 +2,8 @@ import type { LatLng } from '@atlas/core';
 import { viaInsertIndex, type RoutePath } from '@atlas/routing';
 import type { Feature, FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { reverseGeocode } from '../routing/reverseGeocode.js';
 import type { RoutePlanner } from '../routing/useRoute.js';
 
 const SOURCE_ID = 'atlas-route';
@@ -38,6 +39,26 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
   // Handlers are registered once per map; latest state flows through a ref.
   const routeRef = useRef(route);
   routeRef.current = route;
+
+  // Label a stop the user placed by hand (click or drag) with whatever is
+  // there. In-flight lookups are aborted when the hook unmounts.
+  const pendingLabels = useRef(new Set<AbortController>());
+  const labelStop = useCallback((id: number, at: LatLng) => {
+    const controller = new AbortController();
+    pendingLabels.current.add(controller);
+    void reverseGeocode(at, controller.signal)
+      .then((name) => {
+        if (name) routeRef.current.nameWaypoint(id, name, at);
+      })
+      .finally(() => pendingLabels.current.delete(controller));
+  }, []);
+  useEffect(() => {
+    const pending = pendingLabels.current;
+    return () => {
+      for (const controller of pending) controller.abort();
+      pending.clear();
+    };
+  }, []);
 
   // ---- route lines (geojson source + 4 layers, style-swap resilient) ----
   useEffect(() => {
@@ -150,18 +171,16 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
         // Clicked the selected line: insert a via point into that section.
         const path = r.paths?.[r.selectedPath];
         if (path && !r.roundTrip && r.waypoints.length >= 2) {
-          r.insertWaypoint(
-            viaInsertIndex(
-              path.points,
-              r.waypoints.map((w) => w.pos),
-              at,
-            ),
+          const insertAt = viaInsertIndex(
+            path.points,
+            r.waypoints.map((w) => w.pos),
             at,
           );
+          labelStop(r.insertWaypoint(insertAt, at), at);
           return;
         }
       }
-      r.addWaypoint(at);
+      labelStop(r.addWaypoint(at), at);
     };
     const setPointer = () => (map.getCanvas().style.cursor = 'pointer');
     const clearPointer = () => (map.getCanvas().style.cursor = '');
@@ -173,7 +192,7 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
       map.off('mouseenter', ALT_LINE, setPointer);
       map.off('mouseleave', ALT_LINE, clearPointer);
     };
-  }, [map]);
+  }, [map, labelStop]);
 
   // ---- waypoint markers (DOM overlays survive style swaps by themselves) ----
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
@@ -204,8 +223,12 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
         marker.setLngLat(waypoint.pos).addTo(map);
         const id = waypoint.id;
         marker.on('dragend', () => {
-          const at = marker!.getLngLat();
-          routeRef.current.moveWaypointTo(id, { lat: at.lat, lng: at.lng });
+          const lngLat = marker!.getLngLat();
+          const at = { lat: lngLat.lat, lng: lngLat.lng };
+          // The move drops the old label (it described the old spot); look up
+          // what is at the new one.
+          routeRef.current.moveWaypointTo(id, at);
+          labelStop(id, at);
         });
         markers.set(id, marker);
       } else {
@@ -213,7 +236,7 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
       }
       marker.getElement().textContent = label;
     });
-  }, [map, route.active, route.waypoints, route.roundTrip]);
+  }, [map, route.active, route.waypoints, route.roundTrip, labelStop]);
 
   // Drop all markers when the map goes away or route mode ends entirely.
   useEffect(() => {

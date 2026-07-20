@@ -122,6 +122,19 @@ export interface SyncChange {
   data: Record<string, unknown> | null;
 }
 
+/**
+ * What a delete removed, in the shape needed to put it back (undo). `data` is
+ * the same payload `readSyncRecord` produces, so restoring reuses the sync
+ * upsert path. Deleting a folder moves its contents up a level rather than
+ * deleting them, so a folder's snapshot also lists the children to re-parent.
+ */
+export interface DeletedRecord {
+  entity: SyncEntity;
+  id: string;
+  data: Record<string, unknown>;
+  movedChildren?: { entity: SyncEntity; id: string }[];
+}
+
 /** Complete dump of user data, for export-all / backup. */
 export interface ExportedData {
   exportedAt: number;

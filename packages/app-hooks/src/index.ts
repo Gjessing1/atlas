@@ -10,6 +10,7 @@ export {
   useUserData,
   sanitizeFileName,
   type ImportResult,
+  type UndoableDelete,
   type UserData,
   type UserDataPlatform,
 } from './useUserData.js';

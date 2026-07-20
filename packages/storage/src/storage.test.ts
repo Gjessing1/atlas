@@ -142,6 +142,105 @@ describe('AtlasStorage', () => {
     expect(await storage.listTracks()).toEqual([]);
   });
 
+  describe('undo (restore a deleted record)', () => {
+    it('puts a place back with its id and contents intact', async () => {
+      const folder = await storage.createCollection('Hikes');
+      const place = await storage.createPlace({
+        name: 'Preikestolen',
+        lat: 58.9864,
+        lng: 6.1904,
+        collectionId: folder.id,
+        notes: 'Steep!',
+        tags: ['hike'],
+        icon: '🏔️',
+        color: '#16a34a',
+      });
+
+      const deleted = await storage.deletePlace(place.id);
+      expect(await storage.listPlaces()).toEqual([]);
+      await storage.restore(deleted!);
+
+      const [restored] = await storage.listPlaces();
+      expect(restored).toMatchObject({
+        id: place.id,
+        name: 'Preikestolen',
+        lat: 58.9864,
+        lng: 6.1904,
+        collectionId: folder.id,
+        notes: 'Steep!',
+        tags: ['hike'],
+        icon: '🏔️',
+        color: '#16a34a',
+        createdAt: place.createdAt,
+      });
+    });
+
+    it('puts a track back with its GPX body', async () => {
+      const gpx = '<gpx version="1.1"><trk><trkseg/></trk></gpx>';
+      const track = await storage.createTrack({ name: 'Run', gpx, stats: { distanceM: 5000 } });
+
+      const deleted = await storage.deleteTrack(track.id);
+      await storage.restore(deleted!);
+
+      expect((await storage.listTracks())[0]).toMatchObject({
+        id: track.id,
+        name: 'Run',
+        stats: { distanceM: 5000 },
+      });
+      expect(await storage.getTrackGpx(track.id)).toBe(gpx);
+    });
+
+    it('puts a folder back and re-parents the children its delete moved up', async () => {
+      const parent = await storage.createCollection('Norway');
+      const folder = await storage.createCollection('Rogaland', parent.id);
+      const child = await storage.createCollection('Lysefjorden', folder.id);
+      const place = await storage.createPlace({
+        name: 'P',
+        lat: 1,
+        lng: 2,
+        collectionId: folder.id,
+      });
+      const trackGpx = '<gpx version="1.1"><trk><trkseg/></trk></gpx>';
+      const track = await storage.createTrack({
+        name: 'T',
+        gpx: trackGpx,
+        collectionId: folder.id,
+      });
+
+      const deleted = await storage.deleteCollection(folder.id);
+      await storage.restore(deleted!);
+
+      const collections = await storage.listCollections();
+      expect(collections.find((c) => c.id === folder.id)).toMatchObject({
+        name: 'Rogaland',
+        parentId: parent.id,
+      });
+      expect(collections.find((c) => c.id === child.id)!.parentId).toBe(folder.id);
+      expect((await storage.listPlaces()).find((p) => p.id === place.id)!.collectionId).toBe(
+        folder.id,
+      );
+      expect((await storage.listTracks()).find((t) => t.id === track.id)!.collectionId).toBe(
+        folder.id,
+      );
+    });
+
+    it('returns null for an unknown id and enqueues the undo for sync', async () => {
+      expect(await storage.deletePlace('nope')).toBeNull();
+      expect(await storage.deleteCollection('nope')).toBeNull();
+
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+      const deleted = await storage.deletePlace(place.id);
+      await storage.clearOutbox(await storage.listOutbox());
+      await storage.restore(deleted!);
+
+      // A restore must push as an upsert newer than the delete it undoes,
+      // or LWW would resurrect the deletion on the next pull.
+      expect(await storage.listOutbox()).toMatchObject([
+        { entity: 'place', id: place.id, op: 'upsert' },
+      ]);
+    });
+  });
+
   it('upserts settings', async () => {
     expect(await storage.getSetting('view')).toBeNull();
     await storage.setSetting('view', 'a');

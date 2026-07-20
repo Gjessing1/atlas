@@ -21,6 +21,7 @@ import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
+import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useRoute } from './routing/useRoute.js';
 import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
@@ -256,6 +257,15 @@ export function App() {
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
 
+  // The undo window for a delete. Long enough to notice a mistake, short enough
+  // that the toast is not permanent chrome; a newer delete replaces the offer.
+  const { undoable, clearUndoable } = userData;
+  useEffect(() => {
+    if (!undoable) return;
+    const t = setTimeout(clearUndoable, 10000);
+    return () => clearTimeout(t);
+  }, [undoable, clearUndoable]);
+
   // Nav preferences survive across trips (device-local — `local.` never syncs).
   const { setMuted } = nav;
   const { setFollowMode } = follow;
@@ -361,8 +371,19 @@ export function App() {
           aria-pressed={route.active}
           onClick={() => {
             // Starting from a dropped pin routes "from here".
-            if (route.active) route.stop();
-            else route.start(pin ?? undefined);
+            if (route.active) {
+              route.stop();
+              return;
+            }
+            const seeded = route.start(pin ?? undefined);
+            // Label that first stop like any other hand-placed one, so the plan
+            // doesn't open with a row of decimals.
+            if (seeded !== null && pin) {
+              const at = pin;
+              void reverseGeocode(at).then((name) => {
+                if (name) route.nameWaypoint(seeded, name, at);
+              });
+            }
           }}
         >
           ⇄ Route
@@ -391,6 +412,17 @@ export function App() {
         <div className="write-error-toast" role="alert">
           <span>{writeError} — the change was not saved.</span>
           <button type="button" onClick={clearWriteError} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+      {undoable && (
+        <div className="undo-toast" role="status">
+          <span>{undoable.message}</span>
+          <button type="button" className="undo-action" onClick={() => void undoable.undo()}>
+            Undo
+          </button>
+          <button type="button" onClick={clearUndoable} aria-label="Dismiss">
             ✕
           </button>
         </div>
