@@ -428,6 +428,27 @@ export function useNavigation(): NavController {
           },
         });
       }
+      // Seed the session from a known position so the app-drawn nav chevron
+      // shows from the first frame. Otherwise `state` stays null — and the map
+      // falls back to the native puck (a dot in a fuzzy accuracy halo, the
+      // "cloud") — until the first *background* fix arrives, which under
+      // BestForNavigation can lag many seconds from a cold GNSS even with
+      // strong reception. A recent cached fix is freshest; the route origin is
+      // the fallback. Real fixes replace it the moment they start flowing.
+      const cached = await Location.getLastKnownPositionAsync({ maxAge: 30_000 }).catch(() => null);
+      const seed: LocationFix | null = cached
+        ? {
+            lat: cached.coords.latitude,
+            lng: cached.coords.longitude,
+            headingDeg: cached.coords.heading ?? undefined,
+            speedMps: cached.coords.speed ?? undefined,
+            accuracyM: cached.coords.accuracy ?? undefined,
+          }
+        : originRef.current
+          ? { lat: originRef.current.lat, lng: originRef.current.lng }
+          : null;
+      if (seed) onFix(seed);
+
       setPhase('navigating');
       // Guidance used to be silent until the first approach threshold —
       // exactly when the driver wonders "which way?".
