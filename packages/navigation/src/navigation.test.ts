@@ -13,6 +13,7 @@ import {
 } from './geometry.js';
 import { maneuverArrowsGeoJSON } from './overlays.js';
 import { headingRateDegPerSec } from './sensors.js';
+import { navOptionsForProfile } from './profiles.js';
 import { NavigationSession } from './session.js';
 
 // A straight eastward route at lat 60: 21 points, lng 10.000 → 10.020.
@@ -1044,3 +1045,77 @@ function pointAtAlongOf(points: LatLng[], target: number): LatLng {
   const cum = cumulativeDistances(points);
   return pointAtDistance(points, cum, target);
 }
+
+describe('navOptionsForProfile', () => {
+  it('leaves driving on the defaults — car is the empty row', () => {
+    expect(navOptionsForProfile('car')).toEqual({});
+  });
+
+  it('lets a caller override a mode value (a mid-trip reroute keeps departed)', () => {
+    const opts = navOptionsForProfile('foot', { startDeparted: true });
+    expect(opts.startDeparted).toBe(true);
+    expect(opts.predictAheadMs).toBe(0); // the rest of the row survives
+  });
+
+  it('never reports wrong-way on foot — walking a path backwards is legal', () => {
+    const s = new NavigationSession(route(), navOptionsForProfile('foot', { startDeparted: true }));
+    // Same fix that trips a driver: on the eastbound line, heading west.
+    const back = { ...pointAtAlong(routeCum[10]!), speedMps: 1.4, headingDeg: 270 };
+    for (let t = 0; t < 6; t++) expect(s.update(back, t * 1000).state.status).toBe('navigating');
+  });
+
+  it('still catches a cyclist riding the route backwards', () => {
+    const s = new NavigationSession(route(), navOptionsForProfile('bike', { startDeparted: true }));
+    const back = { ...pointAtAlong(routeCum[10]!), speedMps: 5, headingDeg: 270 };
+    s.update(back, 0);
+    s.update(back, 1000);
+    expect(s.update(back, 2000).state.status).toBe('off-route');
+  });
+
+  it('warns a walker at walking distances, not motorway ones', () => {
+    const at = pointAtAlong(routeCum[10]! - 90); // 90 m short of the turn
+    const drive = new NavigationSession(route(), { startDeparted: true });
+    expect(drive.update({ ...at, speedMps: 14 }, 0).prompts[0]).toMatchObject({ thresholdM: 200 });
+
+    const walk = new NavigationSession(
+      route(),
+      navOptionsForProfile('foot', { startDeparted: true }),
+    );
+    expect(walk.update({ ...at, speedMps: 1.4 }, 0).prompts[0]).toMatchObject({ thresholdM: 100 });
+  });
+
+  it('never arms the far-out motorway prompt on foot, however fast the fix claims', () => {
+    const s = new NavigationSession(route(), navOptionsForProfile('foot', { startDeparted: true }));
+    // 500 m out at a speed that would arm the driver's 800 m prompt.
+    const { prompts } = s.update({ ...pointAtAlong(routeCum[10]! - 500), speedMps: 25 }, 0);
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('does not dead-reckon a walker through a GPS gap', () => {
+    const s = new NavigationSession(route(), navOptionsForProfile('foot'));
+    s.update({ ...pointAtAlong(200), speedMps: 1.4 }, 0);
+    // A driver would be extrapolated forward here; a stopped walker under a
+    // bridge must not be marched down the route on no evidence.
+    const est = s.tick(6000)!;
+    expect(est.state.fix).toBe('lost');
+    expect(est.state.traveledM).toBeCloseTo(200, 0);
+  });
+
+  it('gives a walker a wider corridor than a driver before declaring off-route', () => {
+    // ~42 m off the line: past the driver's 40 m, inside the walker's 45 m.
+    // On foot that is a detour round a building; in a car it is another road.
+    const beside = { ...pointAtAlong(300), speedMps: 1.4 };
+    beside.lat += 0.00038;
+
+    const walk = new NavigationSession(
+      route(),
+      navOptionsForProfile('foot', { startDeparted: true }),
+    );
+    for (let t = 0; t < 8; t++)
+      expect(walk.update(beside, t * 1000).state.status).toBe('navigating');
+
+    const drive = new NavigationSession(route(), { startDeparted: true });
+    for (let t = 0; t < 2; t++) drive.update(beside, t * 1000);
+    expect(drive.update(beside, 2000).state.status).toBe('off-route');
+  });
+});

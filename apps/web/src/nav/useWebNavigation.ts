@@ -1,5 +1,10 @@
 import type { LatLng } from '@atlas/core';
-import { NavigationSession, type NavState, type Position } from '@atlas/navigation';
+import {
+  navOptionsForProfile,
+  NavigationSession,
+  type NavState,
+  type Position,
+} from '@atlas/navigation';
 import {
   enrichRoute,
   fetchRoute,
@@ -271,9 +276,12 @@ export function useWebNavigation(): WebNavController {
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         // Rerouting happens mid-drive: never regress to the pre-departure
         // framing (calm camera / no snap-lock) the fresh session starts in.
-        sessionRef.current = new NavigationSession(path, {
-          startDeparted: lastStateRef.current?.departed ?? true,
-        });
+        sessionRef.current = new NavigationSession(
+          path,
+          navOptionsForProfile(profileRef.current, {
+            startDeparted: lastStateRef.current?.departed ?? true,
+          }),
+        );
         enrich(sessionRef.current, path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
@@ -422,7 +430,7 @@ export function useWebNavigation(): WebNavController {
   const go = useCallback(() => {
     const path = previewPaths?.[previewIndex];
     if (!path) return;
-    const session = new NavigationSession(path);
+    const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
     sessionRef.current = session;
     enrich(session, path);
     tripStartRef.current = Date.now();

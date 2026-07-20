@@ -632,7 +632,12 @@ export class NavigationSession {
     // At highway speed the standard thresholds give under 20 s of warning, so
     // an extra far-out prompt is armed; skipping it entirely at city speeds
     // keeps dense urban routes from becoming a monologue.
-    const allThresholds = [this.opts.farApproachM, ...this.opts.approachThresholdsM];
+    // A non-positive farApproachM opts the mode out of the far prompt
+    // entirely (walking and cycling have no motorway to need it), rather than
+    // leaving a threshold in the list that nothing can ever cross.
+    const allThresholds = [this.opts.farApproachM, ...this.opts.approachThresholdsM].filter(
+      (t) => t > 0,
+    );
     const activeThresholds =
       speedMps !== null && speedMps >= this.opts.farApproachMinSpeedMps
         ? allThresholds
