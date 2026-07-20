@@ -10,7 +10,7 @@ import {
   type SearchResult,
   type SystemStatus,
 } from '@atlas/core';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerOverlayApi, type OverlayApiOptions } from './overlay-api.js';
 import { registerPacksApi } from './packs-api.js';
@@ -281,9 +281,15 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // request body is a Valhalla /route payload built by @atlas/routing; the
   // same engine runs embedded on Android, so online and offline routes agree.
   const valhallaUrl = opts.valhallaUrl ?? process.env.VALHALLA_URL ?? 'http://127.0.0.1:8002';
-  app.post('/api/route', async (request, reply) => {
+
+  /** Proxy one Valhalla action, mapping its errors onto ours and recording health. */
+  const proxyValhalla = async (
+    path: '/route' | '/trace_attributes',
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     try {
-      const res = await fetch(new URL('/route', valhallaUrl), {
+      const res = await fetch(new URL(path, valhallaUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request.body ?? {}),
@@ -317,7 +323,17 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       status.record('valhalla', false, 'unreachable');
       return reply.code(502).send({ message: 'routing unavailable' });
     }
-  });
+  };
+
+  app.post('/api/route', (request, reply) => proxyValhalla('/route', request, reply));
+
+  // Route enrichment: per-edge speed limits, tunnel flags and road classes for
+  // a chosen route's shape (@atlas/routing's enrichRoute). Same engine, same
+  // tiles as /api/route — the attributes are already there, /route just
+  // doesn't report them.
+  app.post('/api/route/attributes', (request, reply) =>
+    proxyValhalla('/trace_attributes', request, reply),
+  );
 
   // Map tiles, two ways:
   // - /api/tiles/<area>/{z}/{x}/{y}.pbf — merged endpoint the map style uses:

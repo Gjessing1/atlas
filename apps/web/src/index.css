@@ -1521,6 +1521,31 @@ body {
   font-weight: 700;
 }
 
+.nav-speed-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The European posted-limit sign: red ring, white face, black number. Drawn
+   rather than themed so it reads as road signage at a glance, and stays the
+   same in a future dark theme — real signs don't invert at night. */
+.nav-speed-limit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid #d81e05;
+  color: #111;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
 .nav-buttons {
   display: flex;
   align-items: center;

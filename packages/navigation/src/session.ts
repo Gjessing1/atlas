@@ -1,5 +1,10 @@
 import type { LatLng } from '@atlas/core';
-import type { RouteInstruction, RoutePath } from '@atlas/routing';
+import {
+  speedLimitKphAt,
+  type RouteEnrichment,
+  type RouteInstruction,
+  type RoutePath,
+} from '@atlas/routing';
 
 import { bearingDeg, cumulativeDistances, pointAtDistance, snapToRoute } from './geometry.js';
 import {
@@ -76,6 +81,12 @@ export class NavigationSession {
   private yawExpectedDeg = 0;
   /** Route course at the previous reckoned tick, to step yawExpectedDeg. */
   private reckonCourseDeg: number | null = null;
+  /**
+   * Road attributes along this route, attached whenever the enrichment call
+   * resolves — which is after guidance starts, so it must be optional: the
+   * driver is already moving while it is in flight.
+   */
+  private enrichment: RouteEnrichment | null = null;
   private wrongBranch = false;
   private wrongBranchAnnounced = false;
   /** Consecutive reckoned ticks with the divergence above threshold. */
@@ -99,6 +110,26 @@ export class NavigationSession {
     for (let i = this.maneuvers.length - 2; i >= 0; i--) {
       this.suffixTimeMs[i] = this.suffixTimeMs[i + 1]! + this.maneuvers[i + 1]!.timeMs;
     }
+  }
+
+  /**
+   * Attach (or replace) the route's road attributes. Called once the
+   * enrichment request for this route resolves; until then every attribute
+   * simply reads as unknown, so guidance runs unchanged without it.
+   */
+  setEnrichment(enrichment: RouteEnrichment | null): NavState | null {
+    this.enrichment = enrichment;
+    // The state on screen was built before the attributes arrived. Refresh it
+    // in place and hand it back, so the limit appears when it is known rather
+    // than at the next fix — which, stopped at a light or in a tunnel, may be
+    // a long way off.
+    if (this.lastState) {
+      this.lastState = {
+        ...this.lastState,
+        speedLimitKph: speedLimitKphAt(enrichment, this.lastState.traveledM),
+      };
+    }
+    return this.lastState;
   }
 
   /** Feed one position fix; returns the new state and any voice prompts it triggered. */
@@ -254,6 +285,7 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(alongM),
+      speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       departed: this.departed,
       courseDeg: shownCourse,
       fix: 'live',
@@ -360,6 +392,7 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(alongM),
+      speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       departed: this.departed,
       courseDeg: course,
       fix: 'estimated',
@@ -431,6 +464,7 @@ export class NavigationSession {
       upcoming,
       then,
       currentRoad: this.roadAt(0),
+      speedLimitKph: speedLimitKphAt(this.enrichment, 0),
       departed: this.departed,
       courseDeg: null,
       fix: 'lost',

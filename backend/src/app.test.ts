@@ -77,6 +77,12 @@ beforeAll(async () => {
       },
     };
   });
+  valhallaStub.post<{ Body: { shape?: unknown[] } }>('/trace_attributes', (request, reply) => {
+    if (!Array.isArray(request.body.shape) || request.body.shape.length < 2) {
+      return reply.code(400).send({ error_code: 114, error: 'Insufficient shape provided' });
+    }
+    return { edges: [{ begin_shape_index: 0, end_shape_index: 1, speed_limit: 80 }] };
+  });
   const valhallaAddress = await valhallaStub.listen({ port: 0, host: '127.0.0.1' });
 
   app = await buildApp({ dataDir, photonUrl: photonAddress, valhallaUrl: valhallaAddress });
@@ -240,6 +246,36 @@ describe('route proxy', () => {
     expect(res.statusCode).toBe(502);
     expect(res.json()).toEqual({ message: 'routing unavailable' });
     await downApp.close();
+  });
+});
+
+describe('route attributes proxy', () => {
+  it('forwards enrichment requests to valhalla trace_attributes', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/route/attributes',
+      payload: {
+        costing: 'auto',
+        shape_match: 'edge_walk',
+        shape: [
+          { lat: 59.91, lon: 10.75 },
+          { lat: 59.92, lon: 10.76 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { edges: { speed_limit: number }[] };
+    expect(body.edges[0]!.speed_limit).toBe(80);
+  });
+
+  it('maps a bad shape to 400 with valhalla’s message', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/route/attributes',
+      payload: { shape: [] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ message: 'Insufficient shape provided' });
   });
 });
 

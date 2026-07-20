@@ -65,6 +65,13 @@ export interface NavState {
    */
   currentRoad: string | null;
   /**
+   * Posted speed limit (km/h) on the road being driven, from the route
+   * enrichment pass — null both when no enrichment is attached and where the
+   * map data has no limit for this stretch. UIs must render null as *nothing*,
+   * never as the last known limit: a stale roundel is worse than no roundel.
+   */
+  speedLimitKph: number | null;
+  /**
    * False until the vehicle demonstrably starts the drive (moving at
    * driving pace, or having progressed along the route). UIs keep a calmer
    * pre-drive framing until then — no full follow camera, no snap-lock —

@@ -1,4 +1,5 @@
 import type { RouteQuery, RouteResult } from './model.js';
+import type { ValhallaTransport } from './provider.js';
 import { buildValhallaRequest, parseValhallaResponse } from './valhalla.js';
 
 /** A routing failure with a user-presentable message (e.g. "point 1 out of bounds"). */
@@ -10,6 +11,25 @@ export interface FetchRouteOptions {
   signal?: AbortSignal;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
+}
+
+/**
+ * Transport that runs Valhalla `trace_attributes` requests through the Atlas
+ * backend (`/api/route/attributes`). Pair with `enrichRoute`; the Android app
+ * pairs the same function with its embedded engine instead.
+ */
+export function httpTraceTransport(opts: FetchRouteOptions = {}): ValhallaTransport {
+  return async (request, signal) => {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const res = await doFetch(`${opts.baseUrl ?? ''}/api/route/attributes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: signal ?? opts.signal,
+    });
+    if (!res.ok) throw new RoutingError(`route attributes failed (HTTP ${res.status})`);
+    return (await res.json()) as unknown;
+  };
 }
 
 /**

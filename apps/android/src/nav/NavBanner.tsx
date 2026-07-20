@@ -48,6 +48,7 @@ export function NavBanner({
   const maneuver = state?.upcoming;
   const speed = formatSpeed(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — the heads-up that matters for lane choice (Google-style).
   const thenManeuver =
@@ -136,8 +137,17 @@ export function NavBanner({
 
       <View style={styles.actionRow}>
         {moving ? (
-          <View style={styles.speedPill}>
-            <Text style={styles.speedValue}>{speed ?? '0 km/h'}</Text>
+          <View style={styles.speedGroup}>
+            <View style={styles.speedPill}>
+              <Text style={styles.speedValue}>{speed ?? '0 km/h'}</Text>
+            </View>
+            {/* Absent wherever the map data has no limit — an honest gap beats
+                a stale number the driver might trust. */}
+            {speedLimit != null ? (
+              <View style={styles.speedLimitSign}>
+                <Text style={styles.speedLimitValue}>{speedLimit}</Text>
+              </View>
+            ) : null}
           </View>
         ) : (
           <View style={styles.actionSpacer} />
@@ -203,6 +213,20 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   actionSpacer: { flex: 1 },
   actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  speedGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // The European posted-limit sign: red ring, white face, black number —
+  // drawn, not themed, so it reads as road signage at a glance.
+  speedLimitSign: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 4,
+    borderColor: '#d81e05',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedLimitValue: { color: '#111', fontWeight: '800', fontSize: 15 },
   speedPill: {
     backgroundColor: theme.surface,
     borderRadius: 18,

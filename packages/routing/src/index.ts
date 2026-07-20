@@ -14,7 +14,17 @@ export {
   formatExitSign,
 } from './model.js';
 export { buildValhallaRequest, parseValhallaResponse, roundTripLocations } from './valhalla.js';
-export { fetchRoute, RoutingError, type FetchRouteOptions } from './client.js';
+export { fetchRoute, httpTraceTransport, RoutingError, type FetchRouteOptions } from './client.js';
+export {
+  buildTraceAttributesRequest,
+  enrichRoute,
+  enrichmentAt,
+  parseTraceAttributes,
+  speedLimitKphAt,
+  type EnrichRouteOptions,
+  type RouteEnrichment,
+  type RouteEnrichmentSegment,
+} from './enrich.js';
 export {
   httpRouteProvider,
   valhallaRouteProvider,

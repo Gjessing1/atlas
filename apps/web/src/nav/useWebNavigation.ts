@@ -1,7 +1,9 @@
 import type { LatLng } from '@atlas/core';
 import { NavigationSession, type NavState, type Position } from '@atlas/navigation';
 import {
+  enrichRoute,
   fetchRoute,
+  httpTraceTransport,
   RoutingError,
   sortRouteChoices,
   type RoutePath,
@@ -122,6 +124,36 @@ export function useWebNavigation(): WebNavController {
   const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
   const lastStateRef = useRef<NavState | null>(null);
+  /** Cancels an in-flight route-enrichment fetch (End, or a reroute superseding it). */
+  const enrichAbort = useRef<AbortController | null>(null);
+
+  /**
+   * Fetch the road attributes for a route and hand them to its session — speed
+   * limits, in practice. Deliberately fire-and-forget: guidance starts on the
+   * previous line, and a slow or failed enrichment only costs the roundel.
+   */
+  const enrich = useCallback((session: NavigationSession, path: RoutePath): void => {
+    enrichAbort.current?.abort();
+    const controller = new AbortController();
+    enrichAbort.current = controller;
+    void enrichRoute(path, profileRef.current, httpTraceTransport(), {
+      signal: controller.signal,
+    })
+      .then((enrichment) => {
+        // A reroute (or End) may have replaced this session while the request
+        // was out; attributes measured along the old line must not be applied
+        // to the new one, where the same distances mean different roads.
+        if (sessionRef.current !== session) return;
+        const refreshed = session.setEnrichment(enrichment);
+        if (refreshed) {
+          setState(refreshed);
+          lastStateRef.current = refreshed;
+        }
+      })
+      .catch(() => {
+        // Enrichment is optional by design — no limit is shown, nav continues.
+      });
+  }, []);
 
   /** Speak a voice prompt, unless muted; never let speech errors break nav. */
   const speak = useCallback((text: string): void => {
@@ -192,6 +224,8 @@ export function useWebNavigation(): WebNavController {
     (arrived = false) => {
       clearWatch();
       clearPreview();
+      enrichAbort.current?.abort();
+      enrichAbort.current = null;
       sessionRef.current = null;
       destRef.current = null;
       originRef.current = null;
@@ -240,6 +274,7 @@ export function useWebNavigation(): WebNavController {
         sessionRef.current = new NavigationSession(path, {
           startDeparted: lastStateRef.current?.departed ?? true,
         });
+        enrich(sessionRef.current, path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
         rerouteFailCount.current = 0;
@@ -262,7 +297,7 @@ export function useWebNavigation(): WebNavController {
         if (sessionRef.current) setPhase('navigating');
       }
     },
-    [fetchPath, speak],
+    [fetchPath, speak, enrich],
   );
 
   const onFix = useCallback(
@@ -389,6 +424,7 @@ export function useWebNavigation(): WebNavController {
     if (!path) return;
     const session = new NavigationSession(path);
     sessionRef.current = session;
+    enrich(session, path);
     tripStartRef.current = Date.now();
     traveledBaseRef.current = 0;
     lastStateRef.current = null;
@@ -416,7 +452,7 @@ export function useWebNavigation(): WebNavController {
     // choices for a minute has moved, and a stale fix would misplace the puck.
     const origin = originFixRef.current;
     if (origin && Date.now() - origin.timestamp < 30_000) onFix(origin);
-  }, [previewPaths, previewIndex, onFix, clearWatch, clearPreview, speak]);
+  }, [previewPaths, previewIndex, onFix, clearWatch, clearPreview, speak, enrich]);
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.

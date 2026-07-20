@@ -903,3 +903,55 @@ describe('remainingRouteBounds', () => {
     expect(remainingRouteBounds(routePoints, routeTotal)).toBeNull();
   });
 });
+
+describe('NavigationSession speed limits', () => {
+  it('reports the limit for the stretch being driven, and none where data lacks it', () => {
+    const session = new NavigationSession(route());
+    session.setEnrichment({
+      segments: [
+        { startM: 0, endM: 500, speedLimitKph: 50 },
+        // A gap in the data, not a gap in the road: 500–800 m has no limit.
+        { startM: 500, endM: 800 },
+        { startM: 800, endM: routeTotal, speedLimitKph: 90 },
+      ],
+    });
+
+    const at = (alongM: number) =>
+      session.update({ ...pointAtAlong(alongM), speedMps: 15, accuracyM: 5 }, 1000 + alongM).state
+        .speedLimitKph;
+
+    expect(at(100)).toBe(50);
+    expect(at(600)).toBeNull();
+    expect(at(1000)).toBe(90);
+  });
+
+  it('reads null until enrichment arrives — guidance runs without it', () => {
+    const session = new NavigationSession(route());
+    const before = session.update({ ...pointAtAlong(100), speedMps: 15, accuracyM: 5 }, 1000);
+    expect(before.state.speedLimitKph).toBeNull();
+    expect(before.state.upcoming).not.toBeNull();
+
+    session.setEnrichment({ segments: [{ startM: 0, endM: routeTotal, speedLimitKph: 60 }] });
+    const after = session.update({ ...pointAtAlong(150), speedMps: 15, accuracyM: 5 }, 2000);
+    expect(after.state.speedLimitKph).toBe(60);
+  });
+
+  it('refreshes the state on screen instead of waiting for the next fix', () => {
+    const session = new NavigationSession(route());
+    const shown = session.update({ ...pointAtAlong(100), speedMps: 15, accuracyM: 5 }, 1000).state;
+    expect(shown.speedLimitKph).toBeNull();
+
+    // Attributes land between fixes — stopped at a light, or in a tunnel, the
+    // next fix can be minutes away, so the returned state carries the limit.
+    const refreshed = session.setEnrichment({
+      segments: [{ startM: 0, endM: routeTotal, speedLimitKph: 70 }],
+    });
+    expect(refreshed?.speedLimitKph).toBe(70);
+    expect(refreshed?.traveledM).toBeCloseTo(shown.traveledM, 6);
+  });
+
+  it('has no state to refresh before the first fix', () => {
+    const session = new NavigationSession(route());
+    expect(session.setEnrichment({ segments: [] })).toBeNull();
+  });
+});

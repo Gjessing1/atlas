@@ -34,6 +34,10 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-puck')).toBeVisible();
   await expect(page.locator('.nav-dest-marker')).toBeVisible();
 
+  // The posted limit arrives from the enrichment pass a moment after guidance
+  // starts (it is fetched in parallel, never blocking Start).
+  await expect(page.locator('.nav-speed-limit')).toHaveText('60');
+
   // A fix near the destination arrives → the session declares arrival.
   await context.setGeolocation({ latitude: 59.9199, longitude: 10.7599 });
   await expect(page.locator('.nav-maneuver')).toContainText('You have arrived');

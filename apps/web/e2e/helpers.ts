@@ -93,6 +93,28 @@ function encodeShape(coords: [number, number][], precision = 6): string {
  * can be exercised without the routing engine.
  */
 export async function mockRouting(page: Page): Promise<void> {
+  // Route enrichment (speed limits) — a separate endpoint, so it needs its own
+  // mock or it would fall through to whatever Valhalla the host happens to run.
+  // One edge spanning the whole shape, so the limit holds for the entire drive.
+  await page.route('**/api/route/attributes', (route) => {
+    const body = route.request().postDataJSON() as { shape?: unknown[] };
+    const shape = body.shape ?? [];
+    if (shape.length < 2) {
+      return route.fulfill({ status: 400, json: { message: 'need a shape' } });
+    }
+    return route.fulfill({
+      json: {
+        edges: [
+          {
+            begin_shape_index: 0,
+            end_shape_index: shape.length - 1,
+            speed_limit: 60,
+            road_class: 'primary',
+          },
+        ],
+      },
+    });
+  });
   await page.route('**/api/route', (route) => {
     const body = route.request().postDataJSON() as {
       locations?: { lat: number; lon: number }[];

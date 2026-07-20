@@ -48,6 +48,7 @@ export function NavBanner({
       ? state.then
       : null;
   const road = moving ? (state?.currentRoad ?? null) : null;
+  const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
 
   return (
     <>
@@ -110,7 +111,20 @@ export function NavBanner({
           ) : null}
         </div>
         <div className="nav-actions">
-          {moving ? <span className="nav-speed">{speed ?? '0 km/h'}</span> : <span />}
+          {moving ? (
+            <div className="nav-speed-group">
+              <span className="nav-speed">{speed ?? '0 km/h'}</span>
+              {/* Absent wherever the map data has no limit — an honest gap
+                  beats a stale number the driver might trust. */}
+              {speedLimit != null ? (
+                <span className="nav-speed-limit" title="Speed limit">
+                  {speedLimit}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <span />
+          )}
           <div className="nav-buttons">
             {moving && followPaused ? (
               <button type="button" onClick={onResumeFollow}>

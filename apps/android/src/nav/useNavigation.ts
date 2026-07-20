@@ -1,6 +1,12 @@
 import type { LatLng } from '@atlas/core';
 import { headingRateDegPerSec, NavigationSession, type NavState } from '@atlas/navigation';
-import { sortRouteChoices, type RoutePath, type RoutingProfile } from '@atlas/routing';
+import {
+  enrichRoute,
+  httpTraceTransport,
+  sortRouteChoices,
+  type RoutePath,
+  type RoutingProfile,
+} from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -113,6 +119,8 @@ export function useNavigation(): NavController {
   const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
   const lastStateRef = useRef<NavState | null>(null);
+  /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
+  const enrichAbort = useRef<AbortController | null>(null);
   /** Utterances queued or playing — audio focus is held while it's non-zero. */
   const utterancesRef = useRef(0);
 
@@ -186,9 +194,43 @@ export function useNavigation(): NavController {
     });
   }, []);
 
+  /**
+   * Fetch road attributes (speed limits) for a route and hand them to its
+   * session. Server-only for now: the embedded engine has the same data in its
+   * tiles, but the native bridge exposes `/route` alone, so an offline drive
+   * simply shows no limit until a `trace_attributes` bridge method ships in a
+   * new APK. Fire-and-forget either way — guidance never waits on this.
+   */
+  const enrich = useCallback(
+    (session: NavigationSession, path: RoutePath): void => {
+      enrichAbort.current?.abort();
+      const controller = new AbortController();
+      enrichAbort.current = controller;
+      void enrichRoute(path, profileRef.current, httpTraceTransport({ baseUrl: serverOrigin }), {
+        signal: controller.signal,
+      })
+        .then((enrichment) => {
+          // A reroute (or End) may have replaced this session mid-request;
+          // attributes from the old line would mislabel the new one.
+          if (sessionRef.current !== session) return;
+          const refreshed = session.setEnrichment(enrichment);
+          if (refreshed) {
+            setState(refreshed);
+            lastStateRef.current = refreshed;
+          }
+        })
+        .catch(() => {
+          // Optional by design: offline, or the server is unreachable.
+        });
+    },
+    [serverOrigin],
+  );
+
   const stop = useCallback(
     (arrived = false) => {
       stopUpdates();
+      enrichAbort.current?.abort();
+      enrichAbort.current = null;
       sessionRef.current = null;
       destRef.current = null;
       originRef.current = null;
@@ -247,6 +289,7 @@ export function useNavigation(): NavController {
         rerouteBackoffUntil.current = 0;
         setRerouteFailed(false);
         // "Which way now?" is most urgent right after recalculating.
+        enrich(sessionRef.current, path);
         const depart = sessionRef.current.departurePrompt();
         if (depart) speak(depart.text);
       } catch {
@@ -263,7 +306,7 @@ export function useNavigation(): NavController {
         if (sessionRef.current) setPhase('navigating');
       }
     },
-    [fetchPath, speak],
+    [fetchPath, speak, enrich],
   );
 
   const onFix = useCallback(
@@ -399,6 +442,7 @@ export function useNavigation(): NavController {
     try {
       const session = new NavigationSession(path);
       sessionRef.current = session;
+      enrich(session, path);
       tripStartRef.current = Date.now();
       traveledBaseRef.current = 0;
       lastStateRef.current = null;
@@ -442,7 +486,7 @@ export function useNavigation(): NavController {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
-  }, [previewPaths, previewIndex, onFix, speak]);
+  }, [previewPaths, previewIndex, onFix, speak, enrich]);
 
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);
