@@ -7,7 +7,7 @@ import {
   type ConditionsKind,
   type PlannerHour,
 } from '@atlas/conditions';
-import type { LatLng } from '@atlas/core';
+import { fmtClock, fmtDayClock, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { WeatherState } from './useWeather.js';
 
@@ -32,11 +32,9 @@ interface WeatherPanelProps {
   onClose: () => void;
 }
 
-const fmtTime = (ms: number): string =>
-  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtTime = fmtClock;
 
-const fmtStep = (ms: number): string =>
-  new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtStep = fmtDayClock;
 
 const SPECIES = ['trout', 'perch', 'pike', 'char'] as const;
 

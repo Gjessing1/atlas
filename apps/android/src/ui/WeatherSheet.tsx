@@ -8,7 +8,7 @@ import {
   type FactorRating,
   type PlannerHour,
 } from '@atlas/conditions';
-import type { LatLng } from '@atlas/core';
+import { fmtClock, fmtDayClock, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -41,10 +41,8 @@ const FACTOR_COLOR: Record<FactorRating, string> = {
   poor: '#d05a5a',
 };
 
-const fmtTime = (ms: number): string =>
-  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const fmtStep = (ms: number): string =>
-  new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtTime = (ms: number): string => fmtClock(ms);
+const fmtStep = (ms: number): string => fmtDayClock(ms);
 
 /**
  * Weather & conditions sheet — the Android twin of the web WeatherPanel. A

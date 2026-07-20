@@ -2009,3 +2009,57 @@ body {
 .status-unknown {
   background: #c7c6c0;
 }
+
+/* Activity switcher — sits directly above the layer quick switch, sharing its
+   right edge and plate styling so the two read as one stack of map controls. */
+.profile-switch {
+  position: absolute;
+  right: 12px;
+  bottom: 80px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.profile-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: #2b2a27;
+  cursor: pointer;
+}
+
+.profile-switch-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.profile-switch-item-on {
+  background: #1a6fc4;
+  color: #fff;
+}
+
+.profile-switch-item-on:hover {
+  background: #1a6fc4;
+}
+
+/* The label rides along only for the active profile; the rest stay icons, so
+   the control keeps to one short row instead of spanning the map. */
+.profile-switch-label {
+  display: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-switch-item-on .profile-switch-label {
+  display: inline;
+}

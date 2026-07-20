@@ -146,7 +146,9 @@ export function MapView({
       }),
       'top-right',
     );
-    map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+    // `metric` is MapLibre's default too, but pinned deliberately: Atlas never
+    // shows feet or miles, and that must not ride on a library default.
+    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
     // (The shareable URL hash is written by useShareHash, which also knows
     // about the route plan; the map only reports its camera.)

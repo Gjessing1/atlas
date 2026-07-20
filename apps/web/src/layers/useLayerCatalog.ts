@@ -1,4 +1,9 @@
-import type { LayerMeta, LayersResponse, OverlayStateMap } from '@atlas/core';
+import {
+  layersForProfile,
+  type LayerMeta,
+  type LayersResponse,
+  type OverlayStateMap,
+} from '@atlas/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ActiveOverlay } from '../map/useOverlayLayers.js';
 
@@ -6,7 +11,7 @@ import type { ActiveOverlay } from '../map/useOverlayLayers.js';
 const STATE_SETTING = 'local.layers.state';
 
 export interface LayerCatalog {
-  /** The server's curated catalog, in its display order. */
+  /** The catalog for the active profile, in the server's display order. */
   catalog: LayerMeta[];
   /** Per-layer visibility/opacity as persisted. */
   state: OverlayStateMap;
@@ -27,8 +32,8 @@ interface SettingsAccess {
  * persisted per-device panel state. Toggles keep working in-session even when
  * persistent storage is unavailable — they just don't survive a reload.
  */
-export function useLayerCatalog(userData: SettingsAccess): LayerCatalog {
-  const [catalog, setCatalog] = useState<LayerMeta[]>([]);
+export function useLayerCatalog(userData: SettingsAccess, profileId: string): LayerCatalog {
+  const [allLayers, setAllLayers] = useState<LayerMeta[]>([]);
   const [state, setState] = useState<OverlayStateMap>({});
   const { status, getSetting, setSetting } = userData;
 
@@ -37,7 +42,7 @@ export function useLayerCatalog(userData: SettingsAccess): LayerCatalog {
     fetch('/api/layers')
       .then((res) => (res.ok ? (res.json() as Promise<LayersResponse>) : { layers: [] }))
       .then((body) => {
-        if (!cancelled) setCatalog(body.layers ?? []);
+        if (!cancelled) setAllLayers(body.layers ?? []);
       })
       .catch(() => {
         // No catalog (backend down / old server): the panel simply stays empty.
@@ -81,6 +86,12 @@ export function useLayerCatalog(userData: SettingsAccess): LayerCatalog {
       update((cur) => ({ ...cur, [id]: { on: cur[id]?.on ?? false, opacity } })),
     [update],
   );
+
+  // Contextual layers are hidden outside their profile, so they must stop
+  // drawing too — an overlay on the map that the panel doesn't list is an
+  // overlay the user can't switch off. The on-state survives in `state`, so
+  // returning to the profile brings it back.
+  const catalog = useMemo(() => layersForProfile(allLayers, profileId), [allLayers, profileId]);
 
   const overlays = useMemo(
     () =>

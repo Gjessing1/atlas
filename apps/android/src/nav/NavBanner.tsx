@@ -1,3 +1,4 @@
+import { fmtClock } from '@atlas/core';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { theme } from '../ui/theme';
@@ -16,14 +17,7 @@ function formatDuration(ms: number): string {
   return `${h} h ${min % 60} min`;
 }
 
-function formatEta(epochMs: number): string {
-  // 24-hour clock (no AM/PM) regardless of device locale.
-  return new Date(epochMs).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
+const formatEta = fmtClock;
 
 /** Ground speed in km/h, or null when stationary/unknown. */
 function formatSpeed(speedMps: number | null): string | null {

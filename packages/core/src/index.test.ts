@@ -3,6 +3,16 @@ import {
   bboxContains,
   collectionIsVisible,
   coordinateSearchResult,
+  DEFAULT_MAP_PROFILE,
+  fmtClock,
+  isMapProfile,
+  layerInProfile,
+  layersForProfile,
+  MAP_PROFILES,
+  mapProfile,
+  type LayerMeta,
+  metersPerPixel,
+  scaleBarFor,
   decodeMapHash,
   decodeMapLink,
   encodeMapHash,
@@ -302,5 +312,113 @@ describe('parseCoordinateQuery', () => {
       label: 'Coordinates',
       position: { lat: 59.913912345, lng: 10.7522 },
     });
+  });
+});
+
+describe('scale bar', () => {
+  it('halves the ground resolution for each zoom level', () => {
+    // 512 px tiles: z14 at the equator is ~4.78 m/px, not the 256 px table's 9.55.
+    expect(metersPerPixel(0, 14)).toBeCloseTo(4.777, 2);
+    expect(metersPerPixel(0, 15)).toBeCloseTo(metersPerPixel(0, 14) / 2, 6);
+  });
+
+  it('shrinks the ground resolution towards the poles', () => {
+    expect(metersPerPixel(60, 10)).toBeCloseTo(metersPerPixel(0, 10) * Math.cos(Math.PI / 3), 6);
+  });
+
+  it('rounds to 1/2/3/5/10 steps that fit the budget', () => {
+    for (const zoom of [4, 8, 11, 14, 17]) {
+      const bar = scaleBarFor(59.91, zoom, 100);
+      expect(bar.widthPx).toBeLessThanOrEqual(100);
+      const digits = bar.meters / Math.pow(10, Math.floor(Math.log10(bar.meters)));
+      expect([1, 2, 3, 5, 10]).toContain(Math.round(digits));
+    }
+  });
+
+  it('labels in km past 1000 m and never in imperial units', () => {
+    expect(scaleBarFor(59.91, 6, 100).label).toMatch(/ km$/);
+    expect(scaleBarFor(59.91, 18, 100).label).toMatch(/ m$/);
+  });
+
+  it('reports a width consistent with the distance it claims', () => {
+    const bar = scaleBarFor(59.91, 12, 100);
+    expect(bar.widthPx * metersPerPixel(59.91, 12)).toBeCloseTo(bar.meters, 6);
+  });
+});
+
+describe('fmtClock', () => {
+  // Local-time constructor, so these hold whatever timezone the suite runs in.
+  const at = (h: number, m: number) => new Date(2026, 6, 20, h, m).getTime();
+
+  it('formats 24-hour with a zero-padded hour', () => {
+    expect(fmtClock(at(21, 5))).toBe('21:05');
+    expect(fmtClock(at(9, 5))).toBe('09:05');
+  });
+
+  it('renders midnight as 00:xx, never 24:xx or 12 AM', () => {
+    expect(fmtClock(at(0, 5))).toBe('00:05');
+    expect(fmtClock(at(12, 0))).toBe('12:00');
+  });
+
+  it('never emits an AM/PM marker', () => {
+    for (let h = 0; h < 24; h++) {
+      expect(fmtClock(at(h, 30))).toMatch(/^\d{2}:30$/);
+    }
+  });
+});
+
+describe('map profiles', () => {
+  const meta = (id: string, profiles?: string[]): LayerMeta => ({ id, profiles }) as LayerMeta;
+
+  it('narrows unknown ids to the default profile', () => {
+    expect(isMapProfile('hike')).toBe(true);
+    expect(isMapProfile('rocket')).toBe(false);
+    expect(isMapProfile(null)).toBe(false);
+    expect(mapProfile('rocket').id).toBe(DEFAULT_MAP_PROFILE);
+  });
+
+  it('always offers untagged general-purpose layers', () => {
+    for (const p of MAP_PROFILES) {
+      expect(layerInProfile(meta('hillshade'), p.id)).toBe(true);
+      expect(layerInProfile(meta('property', []), p.id)).toBe(true);
+    }
+  });
+
+  it('hides a tagged layer until its own profile is picked', () => {
+    expect(layerInProfile(meta('trails-ski', ['ski']), 'ski')).toBe(true);
+    expect(layerInProfile(meta('trails-ski', ['ski']), 'explore')).toBe(false);
+    expect(layerInProfile(meta('trails-ski', ['ski']), 'hike')).toBe(false);
+  });
+
+  it('matches the hiking tag from the hike profile despite the differing words', () => {
+    expect(layerInProfile(meta('trails-hiking', ['hiking']), 'hike')).toBe(true);
+    expect(layerInProfile(meta('trails-bike', ['bike']), 'bike')).toBe(true);
+  });
+
+  it('filters a catalog while keeping the server order', () => {
+    const catalog = [
+      meta('hillshade'),
+      meta('trails-ski', ['ski']),
+      meta('sea-depth'),
+      meta('trails-hiking', ['hiking']),
+    ];
+    expect(layersForProfile(catalog, 'explore').map((m) => m.id)).toEqual([
+      'hillshade',
+      'sea-depth',
+    ]);
+    expect(layersForProfile(catalog, 'hike').map((m) => m.id)).toEqual([
+      'hillshade',
+      'sea-depth',
+      'trails-hiking',
+    ]);
+  });
+
+  it('only names travel modes the routing package actually knows', () => {
+    // A profile whose `routing` drifts from ROUTING_PROFILES would silently
+    // fail at request time; core can't import routing, so assert the ids here.
+    const known = ['car', 'bike', 'foot', 'hike'];
+    for (const p of MAP_PROFILES) {
+      if (p.routing !== null) expect(known).toContain(p.routing);
+    }
   });
 });

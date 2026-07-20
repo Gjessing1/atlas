@@ -1,9 +1,9 @@
+import { fmtClock } from '@atlas/core';
 import { fmtDuration, fmtKm } from '../format.js';
 import { TurnIcon } from './TurnIcon.js';
 import type { WebNavController } from './useWebNavigation.js';
 
-const fmtEta = (epochMs: number): string =>
-  new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const fmtEta = fmtClock;
 
 /** Ground speed in km/h, or null when stationary/unknown. */
 function fmtSpeed(speedMps: number | null): string | null {

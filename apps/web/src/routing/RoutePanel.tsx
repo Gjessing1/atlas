@@ -1,4 +1,4 @@
-import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
+import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import {
   pathViaLabels,
@@ -20,8 +20,7 @@ function downloadText(fileName: string, text: string, type: string): void {
   URL.revokeObjectURL(url);
 }
 
-const fmtEta = (timeMs: number): string =>
-  new Date(Date.now() + timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
 /** Alternative chip: the fastest shows its duration, others their extra minutes. */
 function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {

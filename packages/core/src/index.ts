@@ -587,3 +587,135 @@ export function placeIsVisible(
 ): boolean {
   return place.visible && collectionIsVisible(place.collectionId, folders);
 }
+
+// ---- Units & clock (Atlas is metric / 24-hour everywhere) ----
+
+/**
+ * Web Mercator ground resolution at a latitude and zoom, in metres per pixel.
+ * Uses 512 px tiles, matching MapLibre's zoom convention on both web and
+ * native — a 256 px assumption would be off by exactly one zoom level.
+ */
+export function metersPerPixel(lat: number, zoom: number): number {
+  const EQUATOR_M = 40075016.686;
+  return (EQUATOR_M * Math.cos((lat * Math.PI) / 180)) / (512 * Math.pow(2, zoom));
+}
+
+/** A scale bar's rounded length: the distance it represents and its pixel width. */
+export interface ScaleBar {
+  meters: number;
+  widthPx: number;
+  label: string;
+}
+
+/**
+ * Pick the largest "nice" round distance that fits within `maxWidthPx`, mirroring
+ * MapLibre's 1/2/3/5/10 × 10^n stepping so the web control and the hand-drawn
+ * native bar agree. Always metric: Atlas never renders feet or miles, whatever
+ * the device locale says (MapLibre Native's own ScaleBarPlugin does, which is
+ * why Android draws its own).
+ */
+export function scaleBarFor(lat: number, zoom: number, maxWidthPx: number): ScaleBar {
+  const mpp = metersPerPixel(lat, zoom);
+  const maxMeters = mpp * maxWidthPx;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(maxMeters)));
+  const rel = maxMeters / magnitude;
+  const step = rel >= 10 ? 10 : rel >= 5 ? 5 : rel >= 3 ? 3 : rel >= 2 ? 2 : 1;
+  const meters = step * magnitude;
+  return {
+    meters,
+    widthPx: meters / mpp,
+    label: meters >= 1000 ? `${meters / 1000} km` : `${meters} m`,
+  };
+}
+
+/**
+ * Clock time as HH:MM, 24-hour, always — in the device's local timezone.
+ *
+ * Hand-formatted rather than via toLocaleTimeString: an en-US device renders
+ * AM/PM in nav banners and ETAs, and `hour12: false` is not a reliable fix —
+ * some ICU builds return "24:05" for midnight, and Hermes ships its own Intl.
+ * Atlas is 24-hour everywhere, so this must not depend on locale or engine.
+ */
+export function fmtClock(epochMs: number): string {
+  const d = new Date(epochMs);
+  const pad = (n: number) => `${n}`.padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Short weekday plus 24-hour clock, e.g. "Sat 18:00" — for forecast steps that
+ * span more than a day. The weekday stays locale-derived (it is a translatable
+ * word, not a number format); only the time is pinned.
+ */
+export function fmtDayClock(epochMs: number): string {
+  const weekday = new Date(epochMs).toLocaleDateString([], { weekday: 'short' });
+  return `${weekday} ${fmtClock(epochMs)}`;
+}
+
+// ---- Map profiles (per-activity map setup) ----
+
+/**
+ * A curated activity profile: what the user is doing on the map right now.
+ *
+ * Deliberately a short fixed list, not a settings tree — the point is a one-tap
+ * switch. A profile chooses the *default* travel mode for new routes and
+ * decides which contextual overlays are offered; the route planner still shows
+ * every travel mode, so a profile never traps the user.
+ *
+ * `routing` stays a plain string for the same reason `RoutePlanState.profile`
+ * does: core knows nothing about the routing engine, and the app narrows it
+ * with `isRoutingProfile` before any request goes out. `null` means the profile
+ * expresses no opinion (Explore) or the engine has no matching costing (Ski).
+ */
+export interface MapProfile {
+  id: string;
+  label: string;
+  icon: string;
+  routing: string | null;
+  /**
+   * `LayerMeta.profiles` tags this profile surfaces. Kept explicit rather than
+   * matching on `id`, because the two vocabularies genuinely differ — the
+   * hiking layers are tagged `hiking` while the travel mode is `hike`, and
+   * `bike` lining up on both sides is a coincidence, not a rule.
+   */
+  layerTags: string[];
+}
+
+export const MAP_PROFILES: readonly MapProfile[] = [
+  { id: 'explore', label: 'Explore', icon: '🧭', routing: null, layerTags: [] },
+  { id: 'drive', label: 'Drive', icon: '🚗', routing: 'car', layerTags: [] },
+  { id: 'bike', label: 'Cycle', icon: '🚲', routing: 'bike', layerTags: ['bike'] },
+  { id: 'hike', label: 'Hike', icon: '🥾', routing: 'hike', layerTags: ['hiking'] },
+  { id: 'ski', label: 'Ski', icon: '⛷️', routing: null, layerTags: ['ski'] },
+];
+
+/** The profile Atlas starts in, and the fallback for an unknown stored id. */
+export const DEFAULT_MAP_PROFILE = 'explore';
+
+/** Narrow an untrusted string (a stored setting, a share link) to a known profile. */
+export function isMapProfile(value: unknown): value is string {
+  return typeof value === 'string' && MAP_PROFILES.some((p) => p.id === value);
+}
+
+/** Look up a profile by id, falling back to the default for anything unknown. */
+export function mapProfile(id: string): MapProfile {
+  return MAP_PROFILES.find((p) => p.id === id) ?? MAP_PROFILES[0]!;
+}
+
+/**
+ * Whether an overlay belongs in the panel for a profile.
+ *
+ * Untagged layers are general purpose and always offered. A tagged layer is
+ * contextual and stays hidden until its profile is picked — that is what keeps
+ * the catalog short, and it is why Wave 2 layers carry tags at all.
+ */
+export function layerInProfile(meta: Pick<LayerMeta, 'profiles'>, profileId: string): boolean {
+  if (!meta.profiles || meta.profiles.length === 0) return true;
+  const tags = mapProfile(profileId).layerTags;
+  return meta.profiles.some((tag) => tags.includes(tag));
+}
+
+/** The catalog narrowed to a profile, keeping the server's display order. */
+export function layersForProfile(catalog: readonly LayerMeta[], profileId: string): LayerMeta[] {
+  return catalog.filter((meta) => layerInProfile(meta, profileId));
+}

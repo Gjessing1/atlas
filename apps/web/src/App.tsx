@@ -1,5 +1,6 @@
 import {
   decodeMapHash,
+  mapProfile,
   placeIsVisible,
   type LatLng,
   type MapViewState,
@@ -7,13 +8,15 @@ import {
   type VisibilityFolder,
 } from '@atlas/core';
 import { trackBounds, type TrackData } from '@atlas/gpx';
-import { routePathToTrackData } from '@atlas/routing';
+import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
+import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
+import { useMapProfile } from './layers/useMapProfile.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -89,7 +92,19 @@ export function App() {
 
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
-  const layers = useLayerCatalog(userData);
+  const profiles = useMapProfile(userData);
+  const layers = useLayerCatalog(userData, profiles.profile.id);
+  // Picking an activity also moves the planner's travel mode, when that
+  // activity has one (Explore and Ski express no routing opinion). The planner
+  // still offers every mode, so this is a default and not a restriction.
+  const onPickProfile = useCallback(
+    (id: string) => {
+      profiles.setProfile(id);
+      const routing = mapProfile(id).routing;
+      if (routing !== null && isRoutingProfile(routing)) route.setProfile(routing);
+    },
+    [profiles, route],
+  );
   useOverlayLayers(map, layers.overlays);
   useOverlayIdentify(map, layers.overlays, routeActiveRef);
   // Rounded zoom for the panel's live "zoom in to z14+" hints.
@@ -416,6 +431,9 @@ export function App() {
       </div>
       {/* Overlay switcher, hidden mid-trip like the other map chrome — the
           driving view stays the banner plus the map. */}
+      {nav.phase === 'idle' && (
+        <MapProfileSwitch active={profiles.profile.id} onPick={onPickProfile} />
+      )}
       {nav.phase === 'idle' && <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />}
       {writeError && (
         <div className="write-error-toast" role="alert">

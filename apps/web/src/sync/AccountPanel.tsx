@@ -1,8 +1,8 @@
+import { fmtClock } from '@atlas/core';
 import { useState } from 'react';
 import type { SyncState } from './useSync.js';
 
-const timeShort = (ts: number): string =>
-  new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const timeShort = fmtClock;
 
 /**
  * Password rotation. Kept collapsed until asked for — it is rare, and the

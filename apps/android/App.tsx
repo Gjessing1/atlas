@@ -574,7 +574,6 @@ function AppInner() {
         mapRef={mapRef}
         cameraRef={cameraRef}
         mapStyle={mapStyle}
-        topInset={topInset}
         bottomInset={bottomInset}
         packs={packs}
         overlays={overlaysCtl.overlays}

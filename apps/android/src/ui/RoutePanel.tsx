@@ -1,4 +1,4 @@
-import { matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
+import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import {
   pathViaLabels,
   ROUTING_PROFILES,
@@ -25,12 +25,7 @@ function fmtDuration(ms: number): string {
   return h > 0 ? `${h} h ${min} min` : `${min} min`;
 }
 
-const fmtEta = (timeMs: number): string =>
-  new Date(Date.now() + timeMs).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
+const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
 /** Alternative chip: the fastest shows its duration, others their extra minutes. */
 function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {

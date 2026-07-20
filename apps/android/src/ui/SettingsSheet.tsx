@@ -1,4 +1,4 @@
-import type { RegionPackManifest } from '@atlas/core';
+import { fmtClock, type RegionPackManifest } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -57,7 +57,7 @@ function AccountSection({ sync }: { sync: SyncState }) {
         <Text style={styles.rowText}>{sync.email}</Text>
         <Text style={styles.muted}>
           {STATUS_LABEL[sync.status]}
-          {sync.lastSyncAt ? ` · ${new Date(sync.lastSyncAt).toLocaleTimeString()}` : ''}
+          {sync.lastSyncAt ? ` · ${fmtClock(sync.lastSyncAt)}` : ''}
         </Text>
         {sync.error ? <Text style={styles.error}>{sync.error}</Text> : null}
         <View style={styles.buttonRow}>

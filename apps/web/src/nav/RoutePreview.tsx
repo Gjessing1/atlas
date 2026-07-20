@@ -1,3 +1,4 @@
+import { fmtClock } from '@atlas/core';
 import { pathViaLabels, ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
 import { useMemo } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
@@ -9,8 +10,7 @@ function fmtExtra(timeMs: number, fastestMs: number): string {
   return min < 1 ? '+<1 min' : `+${min} min`;
 }
 
-const fmtEta = (timeMs: number): string =>
-  new Date(Date.now() + timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
 /**
  * Route-choice card for the nav `preview` phase (Android RoutePreview's twin):
