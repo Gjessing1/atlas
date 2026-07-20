@@ -34,7 +34,8 @@ export function NavBanner({
   overview: boolean;
   onToggleOverview: () => void;
 }) {
-  if (nav.phase === 'idle') return null;
+  // The preview phase has its own bottom card (RoutePreview) — no banner.
+  if (nav.phase === 'idle' || nav.phase === 'preview') return null;
   const { state } = nav;
   const maneuver = state?.upcoming;
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';

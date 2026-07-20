@@ -20,6 +20,7 @@ import { useRouteLayers } from './map/useRouteLayers.js';
 import { useShareHash } from './map/useShareHash.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
+import { RoutePreview } from './nav/RoutePreview.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
@@ -362,6 +363,7 @@ export function App() {
         overview={follow.overview}
         onToggleOverview={follow.toggleOverview}
       />
+      <RoutePreview nav={nav} />
       <div className="topbar">
         <SearchBox onSelect={onSearchSelect} getBias={getBias} />
         <button

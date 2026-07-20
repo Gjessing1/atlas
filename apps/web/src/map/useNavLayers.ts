@@ -15,6 +15,11 @@ const ARROW_LINE = 'atlas-nav-arrows-line';
 const ARROW_HEAD = 'atlas-nav-arrows-head';
 const ARROW_LAYERS = [ARROW_CASING, ARROW_LINE, ARROW_HEAD];
 
+const PREVIEW_SOURCE = 'atlas-nav-preview';
+const PREVIEW_ALT = 'atlas-nav-preview-alt';
+const PREVIEW_SEL = 'atlas-nav-preview-sel';
+const PREVIEW_LAYERS = [PREVIEW_ALT, PREVIEW_SEL];
+
 /** The overview camera returns to the follow by itself after this long. */
 const OVERVIEW_RESUME_MS = 20_000;
 
@@ -212,6 +217,117 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
     }
   }, [map, arrows, traveledM]);
 
+  // ---- route-choice preview (Android MapScene parity) ----
+  // Muted alternatives under the selected line, with the selected drawn last so
+  // it wins overlaps; clicking a grey line switches the choice.
+  const previewing = nav.phase === 'preview';
+  const previewPaths = nav.previewPaths;
+  const previewIndex = nav.previewIndex;
+  const previewData = useMemo(() => {
+    if (!previewing || !previewPaths) return null;
+    return {
+      type: 'FeatureCollection' as const,
+      features: previewPaths
+        .map((path, index) => ({
+          type: 'Feature' as const,
+          properties: { index, selected: index === previewIndex },
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: path.points.map((p) => [p.lng, p.lat]),
+          },
+        }))
+        .sort((a, b) => Number(a.properties.selected) - Number(b.properties.selected)),
+    };
+  }, [previewing, previewPaths, previewIndex]);
+
+  const { selectPreview } = nav;
+  useEffect(() => {
+    if (!map) return;
+    let cancelled = false;
+    const sync = () => {
+      if (cancelled || !map.isStyleLoaded()) return;
+      if (!previewData || previewData.features.length === 0) {
+        for (const id of PREVIEW_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(PREVIEW_SOURCE)) map.removeSource(PREVIEW_SOURCE);
+        return;
+      }
+      const source = map.getSource(PREVIEW_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (source) source.setData(previewData);
+      else map.addSource(PREVIEW_SOURCE, { type: 'geojson', data: previewData });
+      if (!map.getLayer(PREVIEW_ALT)) {
+        const line = { 'line-cap': 'round', 'line-join': 'round' } as const;
+        map.addLayer({
+          id: PREVIEW_ALT,
+          type: 'line',
+          source: PREVIEW_SOURCE,
+          filter: ['!', ['to-boolean', ['get', 'selected']]],
+          layout: line,
+          paint: { 'line-color': '#8f8f9d', 'line-width': 5, 'line-opacity': 0.8 },
+        });
+        map.addLayer({
+          id: PREVIEW_SEL,
+          type: 'line',
+          source: PREVIEW_SOURCE,
+          filter: ['to-boolean', ['get', 'selected']],
+          layout: line,
+          paint: { 'line-color': '#2b6cff', 'line-width': 6, 'line-opacity': 0.9 },
+        });
+      }
+    };
+    sync();
+    map.on('style.load', sync);
+    map.on('idle', sync);
+    return () => {
+      cancelled = true;
+      map.off('style.load', sync);
+      map.off('idle', sync);
+      if (map.getStyle()) {
+        for (const id of PREVIEW_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(PREVIEW_SOURCE)) map.removeSource(PREVIEW_SOURCE);
+      }
+    };
+  }, [map, previewData]);
+
+  // Tap an alternative to make it the choice (the selected line is already it).
+  useEffect(() => {
+    if (!map || !previewing) return;
+    const pick = (e: maplibregl.MapLayerMouseEvent) => {
+      const index = e.features?.[0]?.properties?.['index'];
+      if (typeof index === 'number') selectPreview(index);
+    };
+    const enter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const leave = () => {
+      map.getCanvas().style.cursor = '';
+    };
+    map.on('click', PREVIEW_ALT, pick);
+    map.on('mouseenter', PREVIEW_ALT, enter);
+    map.on('mouseleave', PREVIEW_ALT, leave);
+    return () => {
+      map.off('click', PREVIEW_ALT, pick);
+      map.off('mouseenter', PREVIEW_ALT, enter);
+      map.off('mouseleave', PREVIEW_ALT, leave);
+      leave();
+    };
+  }, [map, previewing, selectPreview]);
+
+  // Entering the preview (or switching choice): fit the whole selected route,
+  // clear of the topbar and the choice card at the bottom.
+  const selectedPreviewPath = previewing ? (previewPaths?.[previewIndex] ?? null) : null;
+  useEffect(() => {
+    if (!map || !selectedPreviewPath) return;
+    const bounds = new maplibregl.LngLatBounds();
+    for (const p of selectedPreviewPath.points) bounds.extend([p.lng, p.lat]);
+    if (bounds.isEmpty()) return;
+    map.fitBounds(bounds, {
+      padding: { top: 80, right: 60, bottom: 260, left: 60 },
+      bearing: 0,
+      pitch: 0,
+      duration: 700,
+    });
+  }, [map, selectedPreviewPath]);
+
   // ---- location puck (snapped position) + destination flag ----
   const puckRef = useRef<maplibregl.Marker | null>(null);
   const destRef = useRef<maplibregl.Marker | null>(null);
@@ -232,7 +348,9 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
       puckRef.current?.remove();
       puckRef.current = null;
     }
-    const dest = active ? nav.destination : null;
+    // The flag shows through the preview too — "where am I being sent" is the
+    // first thing to check before committing to a route.
+    const dest = active || previewing ? nav.destination : null;
     if (dest) {
       if (!destRef.current) {
         const el = document.createElement('div');
@@ -245,7 +363,7 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [map, active, nav.state?.snapped, nav.state?.fix, nav.destination]);
+  }, [map, active, previewing, nav.state?.snapped, nav.state?.fix, nav.destination]);
   useEffect(
     () => () => {
       puckRef.current?.remove();

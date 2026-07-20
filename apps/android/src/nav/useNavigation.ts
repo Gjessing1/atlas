@@ -1,6 +1,6 @@
 import type { LatLng } from '@atlas/core';
 import { headingRateDegPerSec, NavigationSession, type NavState } from '@atlas/navigation';
-import { type RoutePath, type RoutingProfile } from '@atlas/routing';
+import { sortRouteChoices, type RoutePath, type RoutingProfile } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -341,7 +341,7 @@ export function useNavigation(): NavController {
           alternatives: true,
         });
         if (result.paths.length === 0) throw new Error('no route found');
-        setPreviewPaths(result.paths);
+        setPreviewPaths(sortRouteChoices(result.paths));
         setPreviewIndex(0);
         setPhase('preview');
       } catch (err) {
@@ -380,7 +380,7 @@ export function useNavigation(): NavController {
           if (result.paths.length === 0) throw new Error('no route found');
           profileRef.current = prof;
           setProfile(prof);
-          setPreviewPaths(result.paths);
+          setPreviewPaths(sortRouteChoices(result.paths));
           setPreviewIndex(0);
         } catch (err) {
           if (seq !== previewSeq.current) return;

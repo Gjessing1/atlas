@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { viaInsertIndex } from './insert.js';
 import { routePathToTrackData, type RoutePath } from './model.js';
 import { optimizeWaypointOrder } from './optimize.js';
+import { sortRouteChoices } from './choices.js';
 import { pathViaLabels } from './via.js';
 
 const oslo = { lat: 59.9139, lng: 10.7522 };
@@ -149,5 +150,32 @@ describe('pathViaLabels', () => {
       ['E18', 38000],
     ]);
     expect(pathViaLabels([only])).toEqual(['E18']);
+  });
+});
+
+describe('sortRouteChoices', () => {
+  const choice = (timeMs: number): RoutePath => ({
+    points: [oslo, sognsvann],
+    distanceM: 1000,
+    timeMs,
+    ascentM: 0,
+    descentM: 0,
+  });
+
+  it('offers the quickest choice first', () => {
+    const sorted = sortRouteChoices([choice(420_000), choice(600_000), choice(540_000)]);
+    expect(sorted.map((p) => p.timeMs)).toEqual([420_000, 540_000, 600_000]);
+  });
+
+  it('keeps the engine order on ties, so the primary stays first', () => {
+    const primary = choice(300_000);
+    const alt = choice(300_000);
+    expect(sortRouteChoices([primary, alt])[0]).toBe(primary);
+  });
+
+  it('does not mutate the input', () => {
+    const paths = [choice(600_000), choice(300_000)];
+    sortRouteChoices(paths);
+    expect(paths.map((p) => p.timeMs)).toEqual([600_000, 300_000]);
   });
 });

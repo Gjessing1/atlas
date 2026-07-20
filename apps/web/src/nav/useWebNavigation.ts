@@ -1,9 +1,16 @@
 import type { LatLng } from '@atlas/core';
 import { NavigationSession, type NavState, type Position } from '@atlas/navigation';
-import { fetchRoute, RoutingError, type RoutePath, type RoutingProfile } from '@atlas/routing';
+import {
+  fetchRoute,
+  RoutingError,
+  sortRouteChoices,
+  type RoutePath,
+  type RoutingProfile,
+} from '@atlas/routing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export type WebNavPhase = 'idle' | 'starting' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+export type WebNavPhase =
+  'idle' | 'starting' | 'preview' | 'navigating' | 'rerouting' | 'arrived' | 'error';
 
 /** What the arrival card shows once the trip is over. */
 export interface TripSummary {
@@ -30,8 +37,23 @@ export interface WebNavController {
   tripSummary: TripSummary | null;
   /** True while off-route but the reroute keeps failing (routing unreachable). */
   rerouteFailed: boolean;
+  /** Route choices while in the preview phase (fastest first); null otherwise. */
+  previewPaths: RoutePath[] | null;
+  /** Index into previewPaths of the choice guidance will follow. */
+  previewIndex: number;
+  /** True while a profile switch is refetching the preview choices. */
+  previewLoading: boolean;
+  /** Why the last profile switch failed (the old choices stay up); else null. */
+  previewError: string | null;
   error: string | null;
+  /** Look up route choices to a destination and enter the preview phase. */
   start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
+  /** Pick one of the preview route choices (preview phase only). */
+  selectPreview: (index: number) => void;
+  /** Switch profile and refetch the preview choices (preview phase only). */
+  setProfile: (profile: RoutingProfile) => void;
+  /** Begin guidance along the selected preview choice. */
+  go: () => void;
   toggleMute: () => void;
   /** Set mute directly (the persisted preference applies through this). */
   setMuted: (muted: boolean) => void;
@@ -56,8 +78,9 @@ function currentPosition(): Promise<GeolocationPosition> {
  * Turn-by-turn navigation for the web (Android useNavigation's browser twin):
  * drives @atlas/navigation's NavigationSession from the browser geolocation
  * watch, speaks voice prompts through the Web Speech API, and re-routes via
- * the server when the traveller leaves the line. No preview phase here — the
- * planner already offers route choices; navigation starts on the fastest.
+ * the server when the traveller leaves the line. `start` fetches the fastest
+ * route plus up to two alternatives and enters the `preview` phase; `go`
+ * begins guidance along the selected choice.
  */
 export function useWebNavigation(): WebNavController {
   const [phase, setPhase] = useState<WebNavPhase>('idle');
@@ -71,10 +94,20 @@ export function useWebNavigation(): WebNavController {
   const [muted, setMutedState] = useState(false);
   const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
   const [rerouteFailed, setRerouteFailed] = useState(false);
+  const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
   const destRef = useRef<LatLng | null>(null);
+  /** Where the preview was requested from, so a profile switch can refetch. */
+  const originRef = useRef<LatLng | null>(null);
+  /** Guards preview refetches: a late response for an abandoned profile is dropped. */
+  const previewSeq = useRef(0);
+  /** The fix the preview was built from, replayed on Start if still fresh. */
+  const originFixRef = useRef<GeolocationPosition | null>(null);
   const profileRef = useRef<RoutingProfile>('car');
   const watchIdRef = useRef<number | null>(null);
   const rerouteInFlight = useRef(false);
@@ -127,6 +160,27 @@ export function useWebNavigation(): WebNavController {
     [],
   );
 
+  /** The fastest route plus up to two alternatives, for the preview card. */
+  const fetchChoices = useCallback(async (origin: LatLng, dest: LatLng, prof: RoutingProfile) => {
+    const result = await fetchRoute({
+      profile: prof,
+      points: [origin, dest],
+      instructions: true,
+      alternatives: true,
+    });
+    if (result.paths.length === 0) throw new Error('no route found');
+    return sortRouteChoices(result.paths);
+  }, []);
+
+  /** Drop every trace of an offered-but-unstarted preview. */
+  const clearPreview = useCallback(() => {
+    previewSeq.current++;
+    setPreviewPaths(null);
+    setPreviewIndex(0);
+    setPreviewLoading(false);
+    setPreviewError(null);
+  }, []);
+
   const clearWatch = useCallback(() => {
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
@@ -137,8 +191,10 @@ export function useWebNavigation(): WebNavController {
   const stop = useCallback(
     (arrived = false) => {
       clearWatch();
+      clearPreview();
       sessionRef.current = null;
       destRef.current = null;
+      originRef.current = null;
       rerouteInFlight.current = false;
       rerouteBackoffUntil.current = 0;
       rerouteFailCount.current = 0;
@@ -156,7 +212,7 @@ export function useWebNavigation(): WebNavController {
       traveledBaseRef.current = 0;
       setPhase(arrived ? 'arrived' : 'idle');
     },
-    [clearWatch],
+    [clearWatch, clearPreview],
   );
 
   const reroute = useCallback(
@@ -262,50 +318,105 @@ export function useWebNavigation(): WebNavController {
       try {
         const cur = await currentPosition();
         const origin = { lat: cur.coords.latitude, lng: cur.coords.longitude };
+        originFixRef.current = cur;
 
         destRef.current = dest;
+        originRef.current = origin;
         profileRef.current = prof;
         setProfile(prof);
         setDestination(dest);
         setSpeedMps(null);
         setState(null);
         setTripSummary(null);
+        setRouteCoords([]);
+        setActivePath(null);
+        setPreviewError(null);
         lastStateRef.current = null;
         traveledBaseRef.current = 0;
 
-        const path = await fetchPath(origin, dest, prof);
-        const session = new NavigationSession(path);
-        sessionRef.current = session;
-        tripStartRef.current = Date.now();
-        setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-        setActivePath(path);
-
-        clearWatch();
-        watchIdRef.current = navigator.geolocation.watchPosition(
-          onFix,
-          () => {
-            // A transient watch error is not fatal; the next fix resumes.
-          },
-          { enableHighAccuracy: true },
-        );
-        setPhase('navigating');
-        // Guidance used to be silent until the first approach threshold —
-        // exactly when the driver wonders "which way?".
-        const depart = session.departurePrompt();
-        if (depart) speak(depart.text);
-        // Process the first fix immediately rather than waiting for movement.
-        onFix(cur);
+        // Route choices: the fastest plus up to two alternatives, offered
+        // before guidance starts. Selecting nothing keeps the fastest.
+        const paths = await fetchChoices(origin, dest, prof);
+        previewSeq.current++;
+        setPreviewPaths(paths);
+        setPreviewIndex(0);
+        setPhase('preview');
       } catch (err) {
         clearWatch();
         sessionRef.current = null;
         destRef.current = null;
+        originRef.current = null;
         setDestination(null);
         setError(err instanceof RoutingError || err instanceof Error ? err.message : String(err));
         setPhase('error');
       }
     },
-    [fetchPath, onFix, clearWatch, speak],
+    [fetchChoices, clearWatch],
   );
+
+  // Profile switch on the preview card: refetch the choices for the same trip.
+  // On failure the previous profile's choices stay up (with a note) — a dead
+  // end here (no bike route, brief offline) must not kill the whole preview.
+  const setNavProfile = useCallback(
+    (prof: RoutingProfile) => {
+      const origin = originRef.current;
+      const dest = destRef.current;
+      if (!origin || !dest || prof === profileRef.current) return;
+      const seq = ++previewSeq.current;
+      setPreviewLoading(true);
+      setPreviewError(null);
+      void (async () => {
+        try {
+          const paths = await fetchChoices(origin, dest, prof);
+          if (seq !== previewSeq.current) return;
+          profileRef.current = prof;
+          setProfile(prof);
+          setPreviewPaths(paths);
+          setPreviewIndex(0);
+        } catch (err) {
+          if (seq !== previewSeq.current) return;
+          setPreviewError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (seq === previewSeq.current) setPreviewLoading(false);
+        }
+      })();
+    },
+    [fetchChoices],
+  );
+
+  const go = useCallback(() => {
+    const path = previewPaths?.[previewIndex];
+    if (!path) return;
+    const session = new NavigationSession(path);
+    sessionRef.current = session;
+    tripStartRef.current = Date.now();
+    traveledBaseRef.current = 0;
+    lastStateRef.current = null;
+    setTripSummary(null);
+    setState(null);
+    setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+    setActivePath(path);
+    clearPreview();
+
+    clearWatch();
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      onFix,
+      () => {
+        // A transient watch error is not fatal; the next fix resumes.
+      },
+      { enableHighAccuracy: true },
+    );
+    setPhase('navigating');
+    // Guidance used to be silent until the first approach threshold —
+    // exactly when the driver wonders "which way?".
+    const depart = session.departurePrompt();
+    if (depart) speak(depart.text);
+    // Show a state at once rather than waiting for the watch's first fix, but
+    // only if the preview's fix is still recent — a driver who studied the
+    // choices for a minute has moved, and a stale fix would misplace the puck.
+    const origin = originFixRef.current;
+    if (origin && Date.now() - origin.timestamp < 30_000) onFix(origin);
+  }, [previewPaths, previewIndex, onFix, clearWatch, clearPreview, speak]);
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.
@@ -365,8 +476,15 @@ export function useWebNavigation(): WebNavController {
     muted,
     tripSummary,
     rerouteFailed,
+    previewPaths,
+    previewIndex,
+    previewLoading,
+    previewError,
     error,
     start,
+    selectPreview: setPreviewIndex,
+    setProfile: setNavProfile,
+    go,
     toggleMute,
     setMuted,
     stop: () => stop(false),

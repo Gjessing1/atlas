@@ -1157,6 +1157,115 @@ body {
   color: #666;
 }
 
+/* ---- route-choice preview before guidance starts (RoutePreview) ---- */
+
+.nav-preview {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(92vw, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  padding: 12px 14px;
+}
+
+.nav-preview-error {
+  font-size: 12px;
+  color: #b3261e;
+}
+
+.nav-preview-choices {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.nav-preview-choices.loading {
+  opacity: 0.45;
+}
+
+.nav-preview-choice {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 12px;
+  border: 1.5px solid #e3e5ea;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-preview-choice.selected {
+  border-color: #2b6cff;
+  background: #eef3ff;
+}
+
+.nav-preview-time {
+  font-size: 17px;
+  font-weight: 700;
+  color: #20242b;
+}
+
+.nav-preview-choice.selected .nav-preview-time {
+  color: #1d4fd7;
+}
+
+.nav-preview-extra {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a8f99;
+}
+
+.nav-preview-detail {
+  font-size: 12px;
+  color: #5c6270;
+}
+
+.nav-preview-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.nav-preview-actions button {
+  border: none;
+  border-radius: 20px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.nav-preview-cancel {
+  flex: 1;
+  background: #eceef2;
+  color: #3a3f4a;
+}
+
+.nav-preview-go {
+  flex: 2;
+  background: #1a73e8;
+  color: #fff;
+}
+
+.nav-preview-go:disabled {
+  background: #9db9e8;
+  cursor: default;
+}
+
 /* ---- turn-by-turn navigation (NavBanner + useNavLayers markers) ---- */
 
 .nav-banner {

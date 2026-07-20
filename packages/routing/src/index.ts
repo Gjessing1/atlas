@@ -17,4 +17,5 @@ export {
 } from './provider.js';
 export { optimizeWaypointOrder } from './optimize.js';
 export { pathViaLabels } from './via.js';
+export { sortRouteChoices } from './choices.js';
 export { viaInsertIndex } from './insert.js';
