@@ -12,6 +12,7 @@ import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
+import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
@@ -383,6 +384,9 @@ export function App() {
           ⚙ Settings
         </button>
       </div>
+      {/* Overlay switcher, hidden mid-trip like the other map chrome — the
+          driving view stays the banner plus the map. */}
+      {nav.phase === 'idle' && <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />}
       {writeError && (
         <div className="write-error-toast" role="alert">
           <span>{writeError} — the change was not saved.</span>

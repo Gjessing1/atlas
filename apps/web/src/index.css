@@ -886,6 +886,142 @@ body {
   white-space: nowrap;
 }
 
+/* Password change / account deletion: secondary to the sync status above, so
+   they sit below a divider as quiet links until opened. */
+.account-manage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #e1e0d9;
+}
+
+.account-subform {
+  width: 100%;
+}
+
+.link-danger {
+  color: #a4262c;
+}
+
+.account-actions button.button-danger {
+  border-color: #d9a3a5;
+  background: #fdf3f3;
+  color: #a4262c;
+}
+
+.account-actions button.button-danger:hover:enabled {
+  background: #f8e6e6;
+}
+
+/* ---- map-layer quick switcher (bottom-right, above the attribution bar) ---- */
+
+.layer-switch {
+  position: absolute;
+  right: 12px;
+  bottom: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.layer-switch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: #2b2a27;
+  cursor: pointer;
+}
+
+.layer-switch-toggle:hover {
+  background: #fff;
+}
+
+.layer-switch-toggle-on {
+  color: #1a6fc4;
+}
+
+.layer-switch-count {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #1a6fc4;
+  color: #fff;
+}
+
+.layer-switch-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  max-width: min(260px, calc(100vw - 24px));
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.layer-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: #2b2a27;
+  cursor: pointer;
+}
+
+.layer-switch-item:hover {
+  background: #f0efe9;
+}
+
+.layer-switch-item-on {
+  font-weight: 600;
+  color: #1a6fc4;
+}
+
+.layer-switch-check {
+  flex: none;
+  width: 12px;
+  font-size: 12px;
+}
+
+.layer-switch-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-switch-hint {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #f0e2c4;
+  color: #7a5c17;
+}
+
 /* Failed storage write (useUserData.writeError) — the change was NOT saved. */
 .write-error-toast {
   position: absolute;

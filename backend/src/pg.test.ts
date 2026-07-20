@@ -34,6 +34,30 @@ describe.skipIf(!url)('createPgStores', () => {
     data: { name: id, lat: 1, lng: 2 },
   });
 
+  it('reads back a user by id with its token epoch', async () => {
+    const user = await stores.users.findUserById(userId);
+    expect(user).toMatchObject({ id: userId, passwordHash: 'hash' });
+    // Set from now() at insert, in milliseconds — the same unit the JWT carries.
+    expect(user!.tokenEpoch).toBeGreaterThan(Date.now() - 60_000);
+    expect(await stores.users.findUserById('00000000-0000-0000-0000-000000000000')).toBeNull();
+  });
+
+  it('updates the password hash and epoch, and deletes the account with its rows', async () => {
+    const victim = await stores.users.createUser(`gone-${Date.now()}@example.test`, 'hash');
+    await stores.users.updatePassword(victim!.id, 'new-hash', 4242);
+    expect(await stores.users.findUserById(victim!.id)).toMatchObject({
+      passwordHash: 'new-hash',
+      tokenEpoch: 4242,
+    });
+
+    await stores.sync.apply(victim!.id, 'writer', [change('doomed', 1000)]);
+    await stores.users.deleteUser(victim!.id);
+    expect(await stores.users.findUserById(victim!.id)).toBeNull();
+    // sync_records cascades — the deleted account leaves no data behind.
+    const orphans = await stores.sync.changesSince(victim!.id, 0, 'reader', 10);
+    expect(orphans.changes).toEqual([]);
+  });
+
   it('applies changes and returns them to another device', async () => {
     const res = await stores.sync.apply(userId, 'writer', [change('p1', 1000)]);
     expect(res.applied).toBe(1);

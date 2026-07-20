@@ -24,6 +24,9 @@ function createNodeDriver(): SqlDriver {
 class FakeServer {
   syncEnabled = true;
   authorized = true;
+  registration: 'open' | 'invite' | 'closed' | undefined = 'open';
+  password = 'pw';
+  deleted = false;
   pushes = 0;
   pulls = 0;
   private rows = new Map<string, { change: SyncChange; seq: number; deviceId: string }>();
@@ -40,14 +43,51 @@ class FakeServer {
   readonly fetchFn: typeof fetch = (input, init) => {
     const url = new URL(String(input), 'http://server');
     if (url.pathname === '/api/health') {
-      return Promise.resolve(Response.json({ status: 'ok', sync: this.syncEnabled }));
+      return Promise.resolve(
+        Response.json({ status: 'ok', sync: this.syncEnabled, registration: this.registration }),
+      );
     }
     if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/register') {
-      const body = JSON.parse(String(init?.body)) as { email: string; password: string };
+      const body = JSON.parse(String(init?.body)) as {
+        email: string;
+        password: string;
+        invite?: string;
+      };
       if (!this.authorized) {
         return Promise.resolve(Response.json({ error: 'invalid credentials' }, { status: 401 }));
       }
+      if (url.pathname === '/api/auth/register') {
+        if (this.registration === 'closed') {
+          return Promise.resolve(
+            Response.json({ error: 'registration is closed' }, { status: 403 }),
+          );
+        }
+        if (this.registration === 'invite' && body.invite !== 'let-me-in') {
+          return Promise.resolve(Response.json({ error: 'invalid invite code' }, { status: 403 }));
+        }
+      }
       return Promise.resolve(Response.json({ token: 'jwt-token', email: body.email }));
+    }
+    if (url.pathname === '/api/auth/password') {
+      const body = JSON.parse(String(init?.body)) as {
+        currentPassword: string;
+        newPassword: string;
+      };
+      if (body.currentPassword !== this.password) {
+        return Promise.resolve(Response.json({ error: 'wrong password' }, { status: 401 }));
+      }
+      this.password = body.newPassword;
+      // The real server rotates the token epoch and hands back a replacement.
+      return Promise.resolve(Response.json({ token: 'jwt-token-2', email: 'a@b.c' }));
+    }
+    if (url.pathname === '/api/auth/delete') {
+      const body = JSON.parse(String(init?.body)) as { password: string };
+      if (body.password !== this.password) {
+        return Promise.resolve(Response.json({ error: 'wrong password' }, { status: 401 }));
+      }
+      this.deleted = true;
+      this.rows.clear();
+      return Promise.resolve(Response.json({ deleted: true }));
     }
     if (!this.authorized) {
       return Promise.resolve(Response.json({ error: 'nope' }, { status: 401 }));
@@ -175,6 +215,80 @@ describe('useSync', () => {
     h.server.authorized = true;
     act(() => result.current.syncNow());
     await waitFor(() => expect(result.current.status).toBe('idle'));
+  });
+
+  it('reports the server registration mode and passes an invite code through', async () => {
+    const h = await createHarness();
+    h.server.registration = 'invite';
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.registration).toBe('invite'));
+
+    let message: string | null = null;
+    await act(async () => {
+      message = await result.current.signIn('a@b.c', 'pw', 'register');
+    });
+    expect(message).toBe('invalid invite code');
+
+    await act(async () => {
+      message = await result.current.signIn('a@b.c', 'pw', 'register', 'let-me-in');
+    });
+    expect(message).toBeNull();
+  });
+
+  it('treats a server that reports no registration mode as open', async () => {
+    const h = await createHarness();
+    h.server.registration = undefined; // pre-gating backend
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.registration).toBe('open'));
+  });
+
+  it('changePassword adopts the replacement token instead of signing the device out', async () => {
+    const h = await createHarness({ session: SESSION });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+
+    let message: string | null = null;
+    await act(async () => {
+      message = await result.current.changePassword('wrong', 'new-password');
+    });
+    expect(message).toBe('wrong password');
+
+    await act(async () => {
+      message = await result.current.changePassword('pw', 'new-password');
+    });
+    expect(message).toBeNull();
+    // The old token is dead server-side; the persisted session must be the new
+    // one, and this device stays signed in and able to sync.
+    expect(h.persisted()).toEqual({ token: 'jwt-token-2', email: 'a@b.c' });
+    expect(result.current.status).not.toBe('signedOut');
+    act(() => result.current.syncNow());
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+  });
+
+  it('deleteAccount signs out and clears the account marker, keeping local data', async () => {
+    const h = await createHarness({ session: SESSION });
+    await h.storage.createPlace({ name: 'Keep me', lat: 59.9, lng: 10.7 });
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.status).toBe('idle'));
+
+    let message: string | null = null;
+    await act(async () => {
+      message = await result.current.deleteAccount('wrong');
+    });
+    expect(message).toBe('wrong password');
+    expect(result.current.status).toBe('idle');
+
+    await act(async () => {
+      message = await result.current.deleteAccount('pw');
+    });
+    expect(message).toBeNull();
+    expect(h.server.deleted).toBe(true);
+    await waitFor(() => expect(result.current.status).toBe('signedOut'));
+    expect(h.persisted()).toBeNull();
+    // Local data survives — deletion removes the server copy, not this device.
+    expect((await h.storage.listPlaces()).map((p) => p.name)).toContain('Keep me');
+    // A later sign-in must re-bootstrap rather than assume the server has it.
+    expect(await h.storage.getSetting('local.sync.account')).not.toBe('a@b.c');
   });
 
   it('refreshes the UI after a pull and does not re-push in response (pull echo)', async () => {

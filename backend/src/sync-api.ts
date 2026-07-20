@@ -7,9 +7,57 @@ import type { Stores } from './stores.js';
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; email: string };
-    user: { sub: string; email: string };
+    // `epoch` is the token's issue epoch, checked against the user's
+    // tokenEpoch so a password change invalidates every older token.
+    payload: { sub: string; email: string; epoch: number };
+    user: { sub: string; email: string; epoch: number };
   }
+}
+
+/** Who may create an account on this instance (REGISTRATION env). */
+export type RegistrationMode = 'open' | 'invite' | 'closed';
+
+export interface SyncApiOptions {
+  /** Defaults to 'open' — or 'invite' when an invite code is configured. */
+  registration?: RegistrationMode;
+  /** Required in `invite` mode (REGISTRATION_INVITE_CODE). */
+  inviteCode?: string;
+  /** Auth attempts per IP per window. Test seam; false disables limiting. */
+  authRateLimit?: false | { max: number; timeWindow: string | number };
+}
+
+/**
+ * Login/register are scrypt oracles — unlimited attempts mean offline-speed
+ * brute force and registration spam. Deliberately tight: a human signing in
+ * needs a handful of tries, not dozens.
+ *
+ * Note this is a budget *per auth route* per client, not one shared pool
+ * (@fastify/rate-limit keeps a store per route). That's the meaningful control
+ * anyway: password guessing only goes through /login and signup spam only
+ * through /register, so each attack faces the full limit on its own path.
+ */
+const DEFAULT_AUTH_RATE_LIMIT = { max: 20, timeWindow: '5 minutes' };
+
+/**
+ * Registration mode from explicit options or env. An invite code without an
+ * explicit mode implies `invite` — configuring a code and staying open would
+ * be a silent no-op.
+ */
+export function resolveRegistrationMode(opts: SyncApiOptions): RegistrationMode {
+  if (opts.registration) return opts.registration;
+  return opts.inviteCode ? 'invite' : 'open';
+}
+
+/**
+ * Parse the REGISTRATION env var. An unset value means "not configured" (the
+ * invite code then decides); anything unrecognised is a misconfiguration and
+ * fails closed rather than silently leaving registration open.
+ */
+export function parseRegistrationMode(raw: string | undefined): RegistrationMode | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (value === 'open' || value === 'invite' || value === 'closed') return value;
+  throw new Error(`REGISTRATION must be open, invite or closed (got ${JSON.stringify(raw)})`);
 }
 
 const MAX_CHANGES_PER_PUSH = 500;
@@ -25,8 +73,21 @@ const AuthBodySchema = Type.Object({
   // trim-first validation; the handler normalizes to lower case.
   email: Type.String({ pattern: '^\\s*\\S+@\\S+\\.\\S+\\s*$', maxLength: 254 }),
   password: Type.String(),
+  /** Only read in `invite` registration mode; ignored elsewhere. */
+  invite: Type.Optional(Type.String({ maxLength: 256 })),
 });
 type AuthBody = Static<typeof AuthBodySchema>;
+
+const ChangePasswordSchema = Type.Object({
+  currentPassword: Type.String(),
+  newPassword: Type.String(),
+});
+type ChangePasswordBody = Static<typeof ChangePasswordSchema>;
+
+const DeleteAccountSchema = Type.Object({
+  password: Type.String(),
+});
+type DeleteAccountBody = Static<typeof DeleteAccountSchema>;
 
 const SyncChangeSchema = Type.Object({
   entity: Type.Union([
@@ -65,23 +126,53 @@ export async function registerSyncApi(
   app: FastifyInstance,
   stores: Stores,
   jwtSecret: string,
+  opts: SyncApiOptions = {},
 ): Promise<void> {
   await app.register(fastifyJwt, { secret: jwtSecret, sign: { expiresIn: '90d' } });
 
+  const registration = resolveRegistrationMode(opts);
+  if (registration === 'invite' && !opts.inviteCode) {
+    throw new Error('REGISTRATION=invite requires REGISTRATION_INVITE_CODE');
+  }
+  const authLimit =
+    opts.authRateLimit === false
+      ? undefined
+      : { rateLimit: opts.authRateLimit ?? DEFAULT_AUTH_RATE_LIMIT };
+
+  const signFor = (user: { id: string; email: string; tokenEpoch: number }) =>
+    app.jwt.sign({ sub: user.id, email: user.email, epoch: user.tokenEpoch });
+
+  /**
+   * Verify the JWT, then confirm it still corresponds to a live account whose
+   * token epoch has not moved past it. The extra lookup is what makes password
+   * change and account deletion actually revoke sessions on other devices.
+   */
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
     } catch {
       return reply.code(401).send({ error: 'unauthorized' });
     }
+    const user = await stores.users.findUserById(request.user.sub);
+    // Tokens minted before `epoch` existed carry undefined; those pre-date any
+    // password change (epoch 0 for migrated rows), so they stay valid.
+    if (!user || user.tokenEpoch > (request.user.epoch ?? 0)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
   };
 
   app.post<{ Body: AuthBody }>(
     '/api/auth/register',
-    { schema: { body: AuthBodySchema }, attachValidation: true },
+    { schema: { body: AuthBodySchema }, attachValidation: true, config: authLimit },
     async (request, reply) => {
+      if (registration === 'closed') {
+        return reply.code(403).send({ error: 'registration is closed on this server' });
+      }
       if (request.validationError) {
         return reply.code(400).send({ error: 'invalid email or password' });
+      }
+      if (registration === 'invite' && request.body.invite !== opts.inviteCode) {
+        return reply.code(403).send({ error: 'invalid invite code' });
       }
       if (request.body.password.length < 8) {
         return reply.code(400).send({ error: 'password must be at least 8 characters' });
@@ -89,13 +180,13 @@ export async function registerSyncApi(
       const email = request.body.email.trim().toLowerCase();
       const user = await stores.users.createUser(email, await hashPassword(request.body.password));
       if (!user) return reply.code(409).send({ error: 'account already exists' });
-      return { token: app.jwt.sign({ sub: user.id, email: user.email }), email: user.email };
+      return { token: signFor(user), email: user.email };
     },
   );
 
   app.post<{ Body: AuthBody }>(
     '/api/auth/login',
-    { schema: { body: AuthBodySchema }, attachValidation: true },
+    { schema: { body: AuthBodySchema }, attachValidation: true, config: authLimit },
     async (request, reply) => {
       const user = request.validationError
         ? null
@@ -103,13 +194,75 @@ export async function registerSyncApi(
       if (!user || !(await verifyPassword(request.body.password, user.passwordHash))) {
         return reply.code(401).send({ error: 'wrong email or password' });
       }
-      return { token: app.jwt.sign({ sub: user.id, email: user.email }), email: user.email };
+      return { token: signFor(user), email: user.email };
     },
   );
 
   app.get('/api/auth/me', { preHandler: requireAuth }, (request) => ({
     email: request.user.email,
   }));
+
+  /**
+   * Change password. Returns a fresh token for *this* device: bumping the
+   * epoch invalidates the caller's own token too, so without the swap the user
+   * would be signed out by their own password change.
+   */
+  app.post<{ Body: ChangePasswordBody }>(
+    '/api/auth/password',
+    {
+      preHandler: requireAuth,
+      schema: { body: ChangePasswordSchema },
+      attachValidation: true,
+      config: authLimit,
+    },
+    async (request, reply) => {
+      if (request.validationError) {
+        return reply.code(400).send({ error: 'invalid request' });
+      }
+      if (request.body.newPassword.length < 8) {
+        return reply.code(400).send({ error: 'password must be at least 8 characters' });
+      }
+      const user = await stores.users.findUserById(request.user.sub);
+      if (!user || !(await verifyPassword(request.body.currentPassword, user.passwordHash))) {
+        return reply.code(401).send({ error: 'wrong password' });
+      }
+      // Strictly greater than the current epoch, never merely "now": two
+      // changes inside one clock tick (or a clock that stepped backwards) must
+      // still invalidate the previous token.
+      const tokenEpoch = Math.max(Date.now(), user.tokenEpoch + 1);
+      await stores.users.updatePassword(
+        user.id,
+        await hashPassword(request.body.newPassword),
+        tokenEpoch,
+      );
+      return { token: signFor({ ...user, tokenEpoch }), email: user.email };
+    },
+  );
+
+  /**
+   * Delete the account and every synced record with it (password-confirmed).
+   * Local data on each device is untouched — signing out is the client's job.
+   */
+  app.post<{ Body: DeleteAccountBody }>(
+    '/api/auth/delete',
+    {
+      preHandler: requireAuth,
+      schema: { body: DeleteAccountSchema },
+      attachValidation: true,
+      config: authLimit,
+    },
+    async (request, reply) => {
+      if (request.validationError) {
+        return reply.code(400).send({ error: 'invalid request' });
+      }
+      const user = await stores.users.findUserById(request.user.sub);
+      if (!user || !(await verifyPassword(request.body.password, user.passwordHash))) {
+        return reply.code(401).send({ error: 'wrong password' });
+      }
+      await stores.users.deleteUser(user.id);
+      return { deleted: true };
+    },
+  );
 
   app.post<{ Body: PushBody }>(
     '/api/sync/push',

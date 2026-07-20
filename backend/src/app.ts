@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import {
   APP_NAME,
@@ -18,7 +19,12 @@ import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
-import { registerSyncApi } from './sync-api.js';
+import {
+  parseRegistrationMode,
+  registerSyncApi,
+  resolveRegistrationMode,
+  type SyncApiOptions,
+} from './sync-api.js';
 import { createMemoryStores, type Stores } from './stores.js';
 
 export interface AppOptions {
@@ -38,6 +44,13 @@ export interface AppOptions {
   databaseUrl?: string;
   /** Secret for signing JWTs (JWT_SECRET); required when databaseUrl is set. */
   jwtSecret?: string;
+  /** Account creation policy + auth rate-limit seam (REGISTRATION, REGISTRATION_INVITE_CODE). */
+  syncApi?: SyncApiOptions;
+  /**
+   * Requests per IP per minute for the generous global limit. Tiles, assets and
+   * packs are exempt (a single map pan is dozens of tile requests). 0 disables.
+   */
+  globalRateLimit?: number;
   /**
    * Upstream world tile source for /api/tiles (WORLD_TILES_URL): a
    * `{z}/{x}/{y}` URL template or a TileJSON URL. Defaults to OpenFreeMap's
@@ -92,6 +105,29 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   status.register('photon', 'Photon (search)', 'Search');
   status.register('valhalla', 'Valhalla (routing)', 'Routing');
 
+  // Rate limiting, registered before any route so per-route `config.rateLimit`
+  // (see sync-api.ts) is honoured. The global ceiling is deliberately loose —
+  // it exists to bound a runaway client, not to shape normal traffic — and the
+  // high-volume map paths are exempt entirely.
+  const globalRateLimit = opts.globalRateLimit ?? Number(process.env.RATE_LIMIT_PER_MINUTE || 600);
+  if (globalRateLimit > 0) {
+    await app.register(fastifyRateLimit, {
+      global: true,
+      max: globalRateLimit,
+      timeWindow: '1 minute',
+      allowList: (request) =>
+        request.url.startsWith('/api/tiles/') ||
+        request.url.startsWith('/api/overlay/') ||
+        request.url.startsWith('/tiles/') ||
+        request.url.startsWith('/assets/') ||
+        request.url.startsWith('/packs/'),
+    });
+  } else {
+    // Still register (unlimited) so per-route limits keep working when the
+    // global ceiling is switched off.
+    await app.register(fastifyRateLimit, { global: false });
+  }
+
   // Accounts + sync are optional: only live when a database is configured.
   let stores = opts.stores ?? null;
   if (!stores && opts.databaseUrl) {
@@ -103,9 +139,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       stores = pgStores;
     }
   }
+  const syncApiOptions: SyncApiOptions = {
+    registration: parseRegistrationMode(process.env.REGISTRATION),
+    inviteCode: process.env.REGISTRATION_INVITE_CODE,
+    ...opts.syncApi,
+  };
   if (stores) {
     if (!opts.jwtSecret) throw new Error('JWT_SECRET is required when the sync database is set');
-    await registerSyncApi(app, stores, opts.jwtSecret);
+    await registerSyncApi(app, stores, opts.jwtSecret, syncApiOptions);
     status.register('postgres', 'PostgreSQL (sync)', 'Sync');
   }
   const syncStores = stores;
@@ -115,6 +156,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     app: APP_NAME,
     gitSha: process.env.GIT_SHA || 'dev',
     sync: stores !== null,
+    // Lets the client show the right sign-up affordance (invite field, or none
+    // at all) instead of offering a button the server will always refuse.
+    registration: stores === null ? 'closed' : resolveRegistrationMode(syncApiOptions),
   }));
 
   // Basemap freshness is read from the PMTiles archives on disk, not probed.

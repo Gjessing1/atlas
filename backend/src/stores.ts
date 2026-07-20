@@ -5,12 +5,24 @@ export interface UserRecord {
   id: string;
   email: string;
   passwordHash: string;
+  /**
+   * Unix milliseconds; tokens carrying a lower epoch are rejected. Bumped on
+   * password change, which is the only revocation mechanism we have (JWTs are
+   * stateless and long-lived) — see requireAuth in sync-api.ts.
+   */
+  tokenEpoch: number;
 }
 
 export interface UserStore {
   /** Returns null when the email is already registered. */
   createUser(email: string, passwordHash: string): Promise<UserRecord | null>;
   findUserByEmail(email: string): Promise<UserRecord | null>;
+  /** Used per authed request to check the token epoch; null when deleted. */
+  findUserById(id: string): Promise<UserRecord | null>;
+  /** Sets a new hash and bumps `tokenEpoch`, logging out every other device. */
+  updatePassword(id: string, passwordHash: string, tokenEpoch: number): Promise<void>;
+  /** Removes the account; sync rows go with it. */
+  deleteUser(id: string): Promise<void>;
 }
 
 export interface SyncStore {
@@ -37,7 +49,7 @@ export interface Stores {
  * Everything is lost on restart — never for production.
  */
 export function createMemoryStores(): Stores {
-  const users = new Map<string, UserRecord>();
+  const users = new Map<string, UserRecord>(); // keyed by email
   const rows = new Map<
     string,
     Map<string, { change: SyncChange; seq: number; deviceId: string }>
@@ -55,12 +67,39 @@ export function createMemoryStores(): Stores {
     users: {
       createUser(email, passwordHash) {
         if (users.has(email)) return Promise.resolve(null);
-        const user: UserRecord = { id: crypto.randomUUID(), email, passwordHash };
+        const user: UserRecord = {
+          id: crypto.randomUUID(),
+          email,
+          passwordHash,
+          tokenEpoch: Date.now(),
+        };
         users.set(email, user);
         return Promise.resolve(user);
       },
       findUserByEmail(email) {
         return Promise.resolve(users.get(email) ?? null);
+      },
+      findUserById(id) {
+        return Promise.resolve([...users.values()].find((u) => u.id === id) ?? null);
+      },
+      updatePassword(id, passwordHash, tokenEpoch) {
+        for (const user of users.values()) {
+          if (user.id === id) {
+            users.set(user.email, { ...user, passwordHash, tokenEpoch });
+            break;
+          }
+        }
+        return Promise.resolve();
+      },
+      deleteUser(id) {
+        for (const user of users.values()) {
+          if (user.id === id) {
+            users.delete(user.email);
+            break;
+          }
+        }
+        rows.delete(id);
+        return Promise.resolve();
       },
     },
     sync: {

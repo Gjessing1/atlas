@@ -6,6 +6,7 @@ import type { AuthResponse, SyncPullResponse, SyncPushResponse } from '@atlas/sy
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app.js';
+import { parseRegistrationMode } from './sync-api.js';
 
 let dataDir: string;
 let app: FastifyInstance;
@@ -31,7 +32,14 @@ async function register(email: string): Promise<string> {
 
 beforeAll(async () => {
   dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-sync-test-'));
-  app = await buildApp({ dataDir, databaseUrl: 'memory', jwtSecret: 'test-secret' });
+  // Auth limiting is exercised in its own test with its own app; leaving it on
+  // here would make unrelated tests fail as the suite grows past the quota.
+  app = await buildApp({
+    dataDir,
+    databaseUrl: 'memory',
+    jwtSecret: 'test-secret',
+    syncApi: { authRateLimit: false },
+  });
 });
 
 afterAll(async () => {
@@ -91,6 +99,178 @@ describe('auth', () => {
   it('requires a token on sync routes', async () => {
     const res = await app.inject({ url: '/api/sync/pull?since=0' });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('account lifecycle', () => {
+  const changePassword = (token: string, currentPassword: string, newPassword: string) =>
+    app.inject({
+      method: 'POST',
+      url: '/api/auth/password',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { currentPassword, newPassword },
+    });
+
+  it('changes the password, revoking tokens issued before the change', async () => {
+    const token = await register('rotate@example.com');
+
+    expect((await changePassword(token, 'wrong password', 'new correct horse')).statusCode).toBe(
+      401,
+    );
+    expect((await changePassword(token, 'correct horse', 'short')).statusCode).toBe(400);
+
+    const res = await changePassword(token, 'correct horse', 'new correct horse');
+    expect(res.statusCode).toBe(200);
+    const fresh = (res.json() as AuthResponse).token;
+
+    // The old token dies with the epoch bump; the returned one keeps this
+    // device signed in, and only the new password logs in.
+    const old = await app.inject({
+      url: '/api/auth/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(old.statusCode).toBe(401);
+    const still = await app.inject({
+      url: '/api/auth/me',
+      headers: { authorization: `Bearer ${fresh}` },
+    });
+    expect(still.statusCode).toBe(200);
+
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'rotate@example.com', password: 'correct horse' },
+    });
+    expect(stale.statusCode).toBe(401);
+    const relogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'rotate@example.com', password: 'new correct horse' },
+    });
+    expect(relogin.statusCode).toBe(200);
+  });
+
+  it('deletes the account with its synced data and invalidates the token', async () => {
+    const token = await register('bye@example.com');
+    const auth = { authorization: `Bearer ${token}` };
+    await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: { deviceId: 'dev-a', changes: [change()] },
+    });
+
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/api/auth/delete',
+      headers: auth,
+      payload: { password: 'wrong password' },
+    });
+    expect(wrong.statusCode).toBe(401);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/delete',
+      headers: auth,
+      payload: { password: 'correct horse' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Token no longer resolves to an account, and the email is free again —
+    // re-registering must not inherit the deleted account's synced rows.
+    expect((await app.inject({ url: '/api/auth/me', headers: auth })).statusCode).toBe(401);
+    const reborn = await register('bye@example.com');
+    const pull = await app.inject({
+      url: '/api/sync/pull?since=0&device=dev-b',
+      headers: { authorization: `Bearer ${reborn}` },
+    });
+    expect((pull.json() as SyncPullResponse).changes).toEqual([]);
+  });
+});
+
+describe('registration gating', () => {
+  it('refuses account creation when registration is closed', async () => {
+    const closed = await buildApp({
+      dataDir,
+      databaseUrl: 'memory',
+      jwtSecret: 'test-secret',
+      syncApi: { registration: 'closed', authRateLimit: false },
+    });
+    const res = await closed.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { email: 'nope@example.com', password: 'correct horse' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect((await closed.inject({ url: '/api/health' })).json()).toMatchObject({
+      registration: 'closed',
+    });
+    await closed.close();
+  });
+
+  it('requires the invite code when one is configured', async () => {
+    const invite = await buildApp({
+      dataDir,
+      databaseUrl: 'memory',
+      jwtSecret: 'test-secret',
+      syncApi: { inviteCode: 'let-me-in', authRateLimit: false },
+    });
+    // An invite code with no explicit mode implies invite-only.
+    expect((await invite.inject({ url: '/api/health' })).json()).toMatchObject({
+      registration: 'invite',
+    });
+
+    const missing = await invite.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { email: 'guest@example.com', password: 'correct horse' },
+    });
+    expect(missing.statusCode).toBe(403);
+
+    const ok = await invite.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { email: 'guest@example.com', password: 'correct horse', invite: 'let-me-in' },
+    });
+    expect(ok.statusCode).toBe(200);
+    await invite.close();
+  });
+
+  it('rejects an unrecognised REGISTRATION value instead of failing open', () => {
+    expect(() => parseRegistrationMode('yes-please')).toThrow(/open, invite or closed/);
+    expect(parseRegistrationMode(undefined)).toBeUndefined();
+    expect(parseRegistrationMode(' Closed ')).toBe('closed');
+  });
+});
+
+describe('auth rate limiting', () => {
+  it('starts refusing auth attempts once the quota is spent', async () => {
+    const limited = await buildApp({
+      dataDir,
+      databaseUrl: 'memory',
+      jwtSecret: 'test-secret',
+      syncApi: { authRateLimit: { max: 2, timeWindow: '1 minute' } },
+    });
+    const attempt = () =>
+      limited.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { email: 'brute@example.com', password: 'guessing' },
+      });
+
+    expect((await attempt()).statusCode).toBe(401);
+    expect((await attempt()).statusCode).toBe(401);
+    expect((await attempt()).statusCode).toBe(429);
+
+    // Budgets are per route, so /register still answers — documented in
+    // sync-api.ts: each attack path faces the full limit on its own route.
+    const other = await limited.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { email: 'brute@example.com', password: 'correct horse' },
+    });
+    expect(other.statusCode).toBe(200);
+    await limited.close();
   });
 });
 

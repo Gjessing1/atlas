@@ -18,6 +18,10 @@ const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 
+  -- Added after the initial release; existing rows get epoch 0 (no revocation
+  -- until their owner changes a password, which is the pre-existing behaviour).
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS token_epoch BIGINT NOT NULL DEFAULT 0;
+
   CREATE SEQUENCE IF NOT EXISTS sync_records_seq;
 
   CREATE TABLE IF NOT EXISTS sync_records (
@@ -76,7 +80,10 @@ export async function createPgStores(
     id: String(r['id']),
     email: String(r['email']),
     passwordHash: String(r['password_hash']),
+    tokenEpoch: Number(r['token_epoch']),
   });
+
+  const USER_COLUMNS = 'id, email, password_hash, token_epoch';
 
   return {
     close: () => pool.end(),
@@ -88,19 +95,32 @@ export async function createPgStores(
     users: {
       async createUser(email, passwordHash) {
         const res = await pool.query(
-          `INSERT INTO users (email, password_hash) VALUES ($1, $2)
+          `INSERT INTO users (email, password_hash, token_epoch)
+           VALUES ($1, $2, (EXTRACT(EPOCH FROM now()) * 1000)::bigint)
            ON CONFLICT (email) DO NOTHING
-           RETURNING id, email, password_hash`,
+           RETURNING ${USER_COLUMNS}`,
           [email, passwordHash],
         );
         return res.rows.length > 0 ? rowToUser(res.rows[0] as Record<string, unknown>) : null;
       },
       async findUserByEmail(email) {
-        const res = await pool.query(
-          'SELECT id, email, password_hash FROM users WHERE email = $1',
-          [email],
-        );
+        const res = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE email = $1`, [email]);
         return res.rows.length > 0 ? rowToUser(res.rows[0] as Record<string, unknown>) : null;
+      },
+      async findUserById(id) {
+        const res = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [id]);
+        return res.rows.length > 0 ? rowToUser(res.rows[0] as Record<string, unknown>) : null;
+      },
+      async updatePassword(id, passwordHash, tokenEpoch) {
+        await pool.query('UPDATE users SET password_hash = $2, token_epoch = $3 WHERE id = $1', [
+          id,
+          passwordHash,
+          tokenEpoch,
+        ]);
+      },
+      async deleteUser(id) {
+        // sync_records has ON DELETE CASCADE, so the user's data goes too.
+        await pool.query('DELETE FROM users WHERE id = $1', [id]);
       },
     },
 

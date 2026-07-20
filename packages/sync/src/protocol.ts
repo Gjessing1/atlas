@@ -9,11 +9,31 @@ import type { SyncChange } from '@atlas/storage';
 export interface AuthCredentials {
   email: string;
   password: string;
+  /** Required by servers running in `invite` registration mode. */
+  invite?: string;
 }
 
 export interface AuthResponse {
   token: string;
   email: string;
+}
+
+/**
+ * Who may create an account on this server, reported by GET /api/health so the
+ * client shows the right sign-up affordance instead of a button that will be
+ * refused. Servers with no sync configured report `closed`.
+ */
+export type RegistrationMode = 'open' | 'invite' | 'closed';
+
+/** POST /api/auth/password — returns a fresh AuthResponse for this device. */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** POST /api/auth/delete — password-confirmed account removal. */
+export interface DeleteAccountRequest {
+  password: string;
 }
 
 /** POST /api/sync/push */

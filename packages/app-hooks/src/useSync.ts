@@ -1,5 +1,5 @@
 import type { AtlasStorage } from '@atlas/storage';
-import type { AuthResponse } from '@atlas/sync';
+import type { AuthResponse, RegistrationMode } from '@atlas/sync';
 import { SyncEngine, SyncError } from '@atlas/sync';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -48,14 +48,25 @@ export type SyncStatus =
 export interface SyncState {
   /** Null while the server capability is still being probed. */
   available: boolean | null;
+  /** Whether this server accepts new accounts; null while probing. */
+  registration: RegistrationMode | null;
   status: SyncStatus;
   email: string | null;
   lastSyncAt: number | null;
   /** Human-readable auth/sync problem, if any. */
   error: string | null;
   /** Resolve to an error message, or null on success. */
-  signIn: (email: string, password: string, mode: 'login' | 'register') => Promise<string | null>;
+  signIn: (
+    email: string,
+    password: string,
+    mode: 'login' | 'register',
+    invite?: string,
+  ) => Promise<string | null>;
   signOut: () => void;
+  /** Rotates the password; keeps this device signed in with a fresh token. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
+  /** Deletes the server account (local data stays); signs out on success. */
+  deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => void;
 }
 
@@ -83,6 +94,7 @@ export function useSync(
     [platform.fetchImpl],
   );
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [registration, setRegistration] = useState<RegistrationMode | null>(null);
   const [session, setSession] = useState<SyncSession | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -98,12 +110,19 @@ export function useSync(
     let cancelled = false;
     setAvailable(null);
     fetchImpl(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
-      .then((res) => res.json() as Promise<{ sync?: boolean }>)
+      .then((res) => res.json() as Promise<{ sync?: boolean; registration?: RegistrationMode }>)
       .then((health) => {
-        if (!cancelled) setAvailable(health.sync === true);
+        if (cancelled) return;
+        setAvailable(health.sync === true);
+        // Older servers don't report the mode; they predate gating, so they
+        // are open by definition.
+        setRegistration(health.sync === true ? (health.registration ?? 'open') : 'closed');
       })
       .catch(() => {
-        if (!cancelled) setAvailable(false);
+        if (!cancelled) {
+          setAvailable(false);
+          setRegistration('closed');
+        }
       });
     return () => {
       cancelled = true;
@@ -183,7 +202,7 @@ export function useSync(
   // still bootstrapping must not interleave (cursor reset vs in-flight push).
   const signInFlight = useRef(false);
   const signIn = useCallback(
-    async (email: string, password: string, mode: 'login' | 'register') => {
+    async (email: string, password: string, mode: 'login' | 'register', invite?: string) => {
       if (!storage || !engine) return 'Storage is not ready.';
       if (signInFlight.current) return 'Sign-in already in progress.';
       signInFlight.current = true;
@@ -195,7 +214,7 @@ export function useSync(
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email, password }),
+              body: JSON.stringify({ email, password, ...(invite ? { invite } : {}) }),
             },
           );
         } catch {
@@ -233,6 +252,63 @@ export function useSync(
     setProblem(null);
     setError(null);
   }, [storage, platform]);
+
+  /** POST to an authenticated auth route, normalizing the error shapes. */
+  const authedPost = useCallback(
+    async (path: string, body: unknown): Promise<{ error: string } | { body: unknown }> => {
+      const token = sessionRef.current?.token;
+      if (!token) return { error: 'Not signed in.' };
+      let res: Response;
+      try {
+        res = await fetchImpl(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+      } catch {
+        return { error: 'Server unreachable.' };
+      }
+      const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) return { error: parsed.error ?? `Request failed (${res.status}).` };
+      return { body: parsed };
+    },
+    [baseUrl, fetchImpl],
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      if (!storage) return 'Storage is not ready.';
+      const result = await authedPost('/api/auth/password', { currentPassword, newPassword });
+      if ('error' in result) return result.error;
+      // The server rotated the token epoch, so the token we hold is now dead —
+      // adopt the replacement it handed back or this device signs itself out.
+      const fresh = result.body as Partial<AuthResponse>;
+      if (typeof fresh.token !== 'string' || typeof fresh.email !== 'string') {
+        return 'Password changed, but the server sent no new session — sign in again.';
+      }
+      const next: SyncSession = { token: fresh.token, email: fresh.email };
+      await platform.saveSession(storage, next);
+      sessionRef.current = next;
+      setSession(next);
+      setProblem(null);
+      setError(null);
+      return null;
+    },
+    [storage, authedPost, platform],
+  );
+
+  const deleteAccount = useCallback(
+    async (password: string) => {
+      const result = await authedPost('/api/auth/delete', { password });
+      if ('error' in result) return result.error;
+      // Server-side data is gone; local data deliberately stays, so the app
+      // falls back to anonymous local-only exactly as before sign-in.
+      if (storage) await storage.setSetting(ACCOUNT_SETTING, '');
+      signOut();
+      return null;
+    },
+    [authedPost, storage, signOut],
+  );
 
   // Sync on session restore/sign-in, on reconnect, and on a timer.
   useEffect(() => {
@@ -275,12 +351,15 @@ export function useSync(
 
   return {
     available,
+    registration,
     status,
     email: session?.email ?? null,
     lastSyncAt,
     error,
     signIn,
     signOut,
+    changePassword,
+    deleteAccount,
     syncNow: doSync,
   };
 }

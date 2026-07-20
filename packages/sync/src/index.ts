@@ -1,6 +1,9 @@
 export type {
   AuthCredentials,
   AuthResponse,
+  ChangePasswordRequest,
+  DeleteAccountRequest,
+  RegistrationMode,
   SyncPullResponse,
   SyncPushRequest,
   SyncPushResponse,
