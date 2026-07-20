@@ -1,6 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
 import type {
+  ExitSign,
   RouteInstruction,
   RoutePath,
   RouteQuery,
@@ -213,6 +214,19 @@ const KIND_BY_TYPE: Readonly<Record<number, 'ramp' | 'exit' | 'keep' | 'merge' |
   38: 'merge',
 };
 
+/** One element of a Valhalla maneuver `sign` array (`{text, consecutive_count}`). */
+interface ValhallaSignElement {
+  text?: string;
+  consecutive_count?: number;
+}
+
+interface ValhallaSign {
+  exit_number_elements?: ValhallaSignElement[];
+  exit_branch_elements?: ValhallaSignElement[];
+  exit_toward_elements?: ValhallaSignElement[];
+  exit_name_elements?: ValhallaSignElement[];
+}
+
 interface ValhallaManeuver {
   type?: number;
   instruction?: string;
@@ -222,6 +236,30 @@ interface ValhallaManeuver {
   begin_shape_index?: number;
   end_shape_index?: number;
   roundabout_exit_count?: number;
+  sign?: ValhallaSign;
+}
+
+/** Non-empty `.text` values of a sign element array, in the order given. */
+function signTexts(elements?: ValhallaSignElement[]): string[] | undefined {
+  if (!Array.isArray(elements)) return undefined;
+  const texts = elements
+    .map((e) => e.text)
+    .filter((t): t is string => typeof t === 'string' && t.length > 0);
+  return texts.length > 0 ? texts : undefined;
+}
+
+/** A Valhalla `sign` object as an `ExitSign`, or undefined when it carries nothing. */
+function parseSign(sign?: ValhallaSign): ExitSign | undefined {
+  if (!sign) return undefined;
+  const numbers = signTexts(sign.exit_number_elements);
+  const branches = signTexts(sign.exit_branch_elements);
+  const toward = signTexts(sign.exit_toward_elements);
+  if (!numbers && !branches && !toward) return undefined;
+  const out: ExitSign = {};
+  if (numbers) out.numbers = numbers;
+  if (branches) out.branches = branches;
+  if (toward) out.toward = toward;
+  return out;
 }
 
 interface ValhallaLeg {
@@ -286,6 +324,8 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       if (street) instruction.streetName = street;
       const kind = KIND_BY_TYPE[m.type ?? 0];
       if (kind) instruction.kind = kind;
+      const exitSign = parseSign(m.sign);
+      if (exitSign) instruction.exitSign = exitSign;
       if (m.type === 26 && typeof m.roundabout_exit_count === 'number') {
         instruction.exitNumber = m.roundabout_exit_count;
       }

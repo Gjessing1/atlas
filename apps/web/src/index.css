@@ -1447,9 +1447,31 @@ body {
   min-width: 64px;
 }
 
+.nav-maneuver-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .nav-maneuver {
   font-size: 16px;
   font-weight: 600;
+}
+
+/* Motorway exit signage ("Exit 43 · E6 · Oslo") — the green road-sign chip. */
+.nav-exit-sign {
+  align-self: flex-start;
+  background: #1f7a3f;
+  color: #fff;
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 13px;
+  font-weight: 700;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-error {

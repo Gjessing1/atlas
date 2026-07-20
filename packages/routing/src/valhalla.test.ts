@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fetchRoute, RoutingError } from './client.js';
 import { httpRouteProvider, valhallaRouteProvider } from './provider.js';
 import { buildValhallaRequest, parseValhallaResponse, roundTripLocations } from './valhalla.js';
+import { formatExitSign } from './model.js';
 
 const oslo = { lat: 59.9139, lng: 10.7522 };
 const sognsvann = { lat: 59.9706, lng: 10.7305 };
@@ -235,6 +236,64 @@ describe('parseValhallaResponse', () => {
     expect(path.instructions![1]).toMatchObject({ sign: 2, interval: [1, 2] });
     expect(path.instructions![1]!.streetName).toBeUndefined();
     expect(path.instructions![2]!.sign).toBe(4);
+    // No sign object on these maneuvers → no exitSign is invented.
+    expect(path.instructions![0]!.exitSign).toBeUndefined();
+  });
+
+  it('parses motorway exit signage (number / branch / toward) into exitSign', () => {
+    const withSign = {
+      trip: {
+        units: 'kilometers',
+        summary: { length: 1, time: 60 },
+        legs: [
+          {
+            shape: encodeShape(legShape),
+            maneuvers: [
+              {
+                type: 20, // take exit
+                instruction: 'Take the exit.',
+                length: 1,
+                time: 60,
+                begin_shape_index: 0,
+                end_shape_index: 2,
+                sign: {
+                  exit_number_elements: [{ text: '43', consecutive_count: 0 }],
+                  exit_branch_elements: [
+                    { text: 'E6', consecutive_count: 0 },
+                    { text: 'Rv4', consecutive_count: 1 },
+                  ],
+                  exit_toward_elements: [{ text: 'Oslo' }, { text: '' }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const { paths } = parseValhallaResponse(withSign);
+    const exit = paths[0]!.instructions![0]!;
+    expect(exit.kind).toBe('exit');
+    expect(exit.exitSign).toEqual({
+      numbers: ['43'],
+      branches: ['E6', 'Rv4'],
+      toward: ['Oslo'], // the empty-text element is dropped
+    });
+  });
+});
+
+describe('formatExitSign', () => {
+  it('renders the parts present, road-sign order, joined with ·', () => {
+    expect(formatExitSign({ numbers: ['43'], branches: ['E6'], toward: ['Oslo'] })).toBe(
+      'Exit 43 · E6 · Oslo',
+    );
+  });
+
+  it('drops absent parts and combines multiples', () => {
+    expect(formatExitSign({ branches: ['E6', 'Rv4'], toward: ['Oslo', 'Gardermoen'] })).toBe(
+      'E6 / Rv4 · Oslo, Gardermoen',
+    );
+    expect(formatExitSign({ numbers: ['23A', '23B'] })).toBe('Exit 23A/23B');
+    expect(formatExitSign({})).toBe('');
   });
 
   it('concatenates multi-leg trips, dropping the shared join vertex and offsetting intervals', () => {

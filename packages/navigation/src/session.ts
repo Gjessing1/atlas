@@ -108,12 +108,20 @@ export class NavigationSession {
     if (accuracyM !== null && accuracyM > this.opts.discardAccuracyM) {
       // A hopeless fix (urban-canyon multipath) would teleport the puck and
       // corrupt the matcher's continuity hint; coast on the last state instead.
-      // With no state yet there is nothing to coast on — but a cold-start
-      // garbage fix must not become the origin of guidance either, so show a
-      // provisional (greyed) puck at the raw point and wait for a usable fix.
-      if (this.lastState !== null)
+      // Exception: once the signal is already `lost`, there is no good position
+      // left to protect — a coarse fix is real evidence of where the car is and
+      // beats a frozen, greyed puck that lingers long after the phone has
+      // re-locked (the first fixes out of a tunnel are routinely > 100 m). So
+      // when lost, fall through and let the coarse fix re-anchor guidance;
+      // off-route/arrival stay gated on accuracy below, so it still can't fire
+      // a spurious reroute or a false arrival.
+      const recovering = this.lastState !== null && this.lastState.fix === 'lost';
+      if (this.lastState !== null && !recovering)
         return this.tick(nowMs) ?? { state: this.lastState, prompts: [] };
-      return { state: this.provisionalState(position, nowMs), prompts: [] };
+      // With no state yet a cold-start garbage fix must not become the origin
+      // of guidance either — show a provisional (greyed) puck and wait.
+      if (this.lastState === null)
+        return { state: this.provisionalState(position, nowMs), prompts: [] };
     }
     const speedMps =
       typeof position.speedMps === 'number' && position.speedMps >= 0 ? position.speedMps : null;

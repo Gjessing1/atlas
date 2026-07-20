@@ -1,4 +1,5 @@
 import { fmtClock } from '@atlas/core';
+import { formatExitSign } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { theme } from '../ui/theme';
@@ -85,9 +86,16 @@ export function NavBanner({
               <TurnIcon instruction={maneuver.instruction} size={40} />
             </View>
             <Text style={styles.distanceTo}>{formatDistance(maneuver.distanceToM)}</Text>
-            <Text style={styles.maneuver} numberOfLines={2}>
-              {maneuver.instruction.text}
-            </Text>
+            <View style={styles.maneuverText}>
+              <Text style={styles.maneuver} numberOfLines={2}>
+                {maneuver.instruction.text}
+              </Text>
+              {maneuver.instruction.exitSign ? (
+                <Text style={styles.exitSign} numberOfLines={1}>
+                  {formatExitSign(maneuver.instruction.exitSign)}
+                </Text>
+              ) : null}
+            </View>
           </View>
         ) : (
           <Text style={styles.maneuver}>Continue on route</Text>
@@ -168,7 +176,19 @@ const styles = StyleSheet.create({
   thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   thenLabel: { color: theme.textMuted, fontSize: 14, fontWeight: '600' },
   distanceTo: { color: theme.accent, fontSize: 22, fontWeight: '700', minWidth: 68 },
-  maneuver: { color: theme.text, fontSize: 17, fontWeight: '600', flexShrink: 1 },
+  maneuverText: { flexShrink: 1, gap: 3 },
+  maneuver: { color: theme.text, fontSize: 17, fontWeight: '600' },
+  exitSign: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1f7a3f',
+    color: '#fff',
+    borderRadius: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    overflow: 'hidden',
+  },
   progressTrack: {
     height: 4,
     borderRadius: 2,

@@ -1,4 +1,5 @@
 import { fmtClock } from '@atlas/core';
+import { formatExitSign } from '@atlas/routing';
 import { fmtDuration, fmtKm } from '../format.js';
 import { TurnIcon } from './TurnIcon.js';
 import type { WebNavController } from './useWebNavigation.js';
@@ -69,7 +70,14 @@ export function NavBanner({
             <div className="nav-maneuver-row">
               <TurnIcon instruction={maneuver.instruction} />
               <span className="nav-distance-to">{fmtKm(maneuver.distanceToM)}</span>
-              <span className="nav-maneuver">{maneuver.instruction.text}</span>
+              <div className="nav-maneuver-text">
+                <span className="nav-maneuver">{maneuver.instruction.text}</span>
+                {maneuver.instruction.exitSign ? (
+                  <span className="nav-exit-sign">
+                    {formatExitSign(maneuver.instruction.exitSign)}
+                  </span>
+                ) : null}
+              </div>
             </div>
           ) : (
             <span className="nav-maneuver">Continue on route</span>

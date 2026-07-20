@@ -74,6 +74,36 @@ export interface RouteInstruction {
    * these with distinct icons; absent for plain turns.
    */
   kind?: 'ramp' | 'exit' | 'keep' | 'merge' | 'ferry';
+  /**
+   * Motorway junction signage for a ramp/exit/keep, straight off the road
+   * signs: exit number(s), the route branches the ramp carries, and the places
+   * it is signed toward. Present only when the router supplies it; render with
+   * `formatExitSign`.
+   */
+  exitSign?: ExitSign;
+}
+
+/** The parts of a motorway exit sign — any subset may be present. */
+export interface ExitSign {
+  /** Exit number(s), e.g. `["43"]` or `["23A", "23B"]`. */
+  numbers?: string[];
+  /** Route branches the exit carries, e.g. `["E6", "Rv4"]`. */
+  branches?: string[];
+  /** Destinations the exit is signed toward, e.g. `["Oslo", "Gardermoen"]`. */
+  toward?: string[];
+}
+
+/**
+ * A one-line exit label from an `ExitSign`, road-sign order:
+ * `"Exit 43 · E6 · Oslo"`. Each segment is dropped when absent; returns `""`
+ * for an empty sign so callers can treat it as "nothing to show".
+ */
+export function formatExitSign(sign: ExitSign): string {
+  const parts: string[] = [];
+  if (sign.numbers?.length) parts.push(`Exit ${sign.numbers.join('/')}`);
+  if (sign.branches?.length) parts.push(sign.branches.join(' / '));
+  if (sign.toward?.length) parts.push(sign.toward.join(', '));
+  return parts.join(' · ');
 }
 
 /** One routable path (the primary route or an alternative). */

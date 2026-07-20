@@ -444,6 +444,28 @@ describe('NavigationSession GPS accuracy', () => {
     expect(junk.traveledM).toBeCloseTo(good.traveledM, 5);
   });
 
+  it('recovers on a coarse fix once the signal is lost, rather than staying greyed', () => {
+    const s = new NavigationSession(route());
+    // Drive, lose signal (no speed to reckon with), go `lost`.
+    s.update({ ...pointAtAlong(100), speedMps: 0, accuracyM: 10 }, 0);
+    expect(s.tick(6000)!.state.fix).toBe('lost');
+    // Emerging from the tunnel the phone re-locks but its first fix is coarse
+    // (> discardAccuracyM). It must un-grey the puck instead of being ignored
+    // until a sub-100 m fix finally lands seconds later.
+    const back = s.update({ ...pointAtAlong(140), accuracyM: 150 }, 7000).state;
+    expect(back.fix).toBe('live');
+    expect(back.traveledM).toBeCloseTo(140, 0);
+  });
+
+  it('still holds the last state for a coarse fix while the signal is good', () => {
+    const s = new NavigationSession(route());
+    const good = s.update({ ...pointAtAlong(500), accuracyM: 10 }, 0).state;
+    // Not lost — a lone coarse fix is still noise to coast through, not recover on.
+    const held = s.update({ ...pointAtAlong(900), accuracyM: 150 }, 1000).state;
+    expect(held.fix).toBe('live');
+    expect(held.traveledM).toBeCloseTo(good.traveledM, 5);
+  });
+
   it('does not anchor guidance to a garbage cold-start fix', () => {
     const s = new NavigationSession(route());
     // A hopeless first fix must not become the origin of guidance; show a
