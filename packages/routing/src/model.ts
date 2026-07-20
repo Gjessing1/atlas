@@ -19,6 +19,14 @@ export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
   { id: 'hike', label: 'Hike', icon: '🥾' },
 ];
 
+/**
+ * Narrow an untrusted string (a share link's hash, a restored setting) to a
+ * profile this build knows — anything else must not reach the routing API.
+ */
+export function isRoutingProfile(value: unknown): value is RoutingProfile {
+  return typeof value === 'string' && ROUTING_PROFILES.some((p) => p.id === value);
+}
+
 /** A route request in app terms, decoupled from the Valhalla wire format. */
 export interface RouteQuery {
   profile: RoutingProfile;

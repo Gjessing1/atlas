@@ -149,6 +149,7 @@ export function RoutePanel({
   getBias: () => LatLng | null;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
   const path = route.paths?.[route.selectedPath];
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
@@ -163,6 +164,17 @@ export function RoutePanel({
       'application/gpx+xml',
     );
   };
+
+  // The URL hash already carries the plan (useShareHash), so the current URL
+  // is the share link — same contract as the pin popup's "Copy link".
+  const copyLink = () => {
+    void navigator.clipboard.writeText(window.location.href).then(
+      () => setCopied(true),
+      () => setCopied(false), // clipboard denied: leave the button as-is
+    );
+  };
+  // Any edit to the plan invalidates the "copied" confirmation.
+  useEffect(() => setCopied(false), [route.waypoints, route.profile, route.roundTripKm]);
 
   return (
     <div className="route-panel">
@@ -296,6 +308,14 @@ export function RoutePanel({
         </button>
         <button type="button" onClick={exportGpx} disabled={!path}>
           Export GPX
+        </button>
+        <button
+          type="button"
+          onClick={copyLink}
+          disabled={route.waypoints.length === 0}
+          title="Copy a link that reopens this plan"
+        >
+          {copied ? 'Link copied' : 'Share'}
         </button>
       </div>
 

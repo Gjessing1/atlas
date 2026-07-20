@@ -7,7 +7,7 @@ import {
   type RouteResult,
   type RoutingProfile,
 } from '@atlas/routing';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface RouteWaypoint {
   /** Stable identity for markers and list rows across reorders. */
@@ -19,6 +19,17 @@ export interface RouteWaypoint {
    * platform resolves one; the UI falls back to coordinates.
    */
   name?: string;
+}
+
+/**
+ * A plan in storable form: the stops and the settings that shaped them, with
+ * no routed geometry and no waypoint ids (both are re-derived on restore).
+ * Used for the shareable URL hash and for the device-local saved plan.
+ */
+export interface StoredRoutePlan {
+  profile: RoutingProfile;
+  waypoints: { pos: LatLng; name?: string }[];
+  roundTripKm?: number;
 }
 
 /**
@@ -48,6 +59,17 @@ export interface RoutePlanner {
    * it — null when route mode already had stops.
    */
   start: (at?: LatLng, name?: string) => number | null;
+  /**
+   * Enter route mode with a whole plan (a shared link, or the plan this device
+   * had open before a reload), replacing whatever is there. Ignored when the
+   * plan has no stops.
+   */
+  restore: (plan: StoredRoutePlan) => void;
+  /**
+   * The current plan in storable form, or null when route mode is closed or
+   * empty — the caller persists/shares this.
+   */
+  plan: StoredRoutePlan | null;
   stop: () => void;
   setProfile: (profile: RoutingProfile) => void;
   /**
@@ -156,6 +178,29 @@ export function useRoute(route: RouteFn): RoutePlanner {
     [waypoints.length, nextWaypoint],
   );
 
+  const restore = useCallback(
+    (plan: StoredRoutePlan) => {
+      if (plan.waypoints.length === 0) return;
+      const loop = plan.roundTripKm !== undefined;
+      setActive(true);
+      setProfile(plan.profile);
+      setRoundTripState(loop);
+      if (loop) setRoundTripKm(plan.roundTripKm!);
+      // A loop has one anchor no matter how many stops the caller handed over.
+      const stops = loop ? plan.waypoints.slice(0, 1) : plan.waypoints;
+      setWaypoints(stops.map((w) => nextWaypoint(w.pos, w.name)));
+    },
+    [nextWaypoint],
+  );
+
+  const plan = useMemo<StoredRoutePlan | null>(() => {
+    if (!active || waypoints.length === 0) return null;
+    const stops = waypoints.map((w) =>
+      w.name === undefined ? { pos: w.pos } : { pos: w.pos, name: w.name },
+    );
+    return roundTrip ? { profile, waypoints: stops, roundTripKm } : { profile, waypoints: stops };
+  }, [active, profile, waypoints, roundTrip, roundTripKm]);
+
   const stop = useCallback(() => {
     setActive(false);
     setWaypoints([]);
@@ -254,6 +299,8 @@ export function useRoute(route: RouteFn): RoutePlanner {
     loading,
     error,
     start,
+    restore,
+    plan,
     stop,
     setProfile,
     addWaypoint,

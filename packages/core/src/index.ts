@@ -12,11 +12,27 @@ export interface BBox {
   ne: LatLng;
 }
 
-/** Shareable map view: camera position plus an optional dropped pin. */
+/**
+ * A route plan in shareable form: the stops the user placed, not the routed
+ * geometry — the recipient re-routes them. Stop labels are deliberately left
+ * out; they would dominate the URL and the coordinates are the plan.
+ *
+ * `profile` stays a plain string here because core knows nothing about the
+ * routing engine; the app validates it against its own profile list.
+ */
+export interface RoutePlanState {
+  profile: string;
+  points: LatLng[];
+  /** Round-trip loop length in km — set only for a one-anchor loop plan. */
+  roundTripKm?: number;
+}
+
+/** Shareable map view: camera position, an optional dropped pin, an optional route plan. */
 export interface MapViewState {
   center: LatLng;
   zoom: number;
   pin?: LatLng;
+  route?: RoutePlanState;
 }
 
 const round = (n: number, decimals: number): number => {
@@ -26,13 +42,44 @@ const round = (n: number, decimals: number): number => {
 
 /**
  * Encode a map view as a URL hash, e.g. `#map=12.3/59.91384/10.75234` with an
- * optional `&pin=<lat>/<lng>`. Coordinates keep 5 decimals (~1 m).
+ * optional `&pin=<lat>/<lng>` and an optional
+ * `&route=<profile>/<lat>,<lng>/<lat>,<lng>…` (plus `&loop=<km>` for a round
+ * trip). Coordinates keep 5 decimals (~1 m).
  */
 export function encodeMapHash(state: MapViewState): string {
   const c = state.center;
   let hash = `#map=${round(state.zoom, 2)}/${round(c.lat, 5)}/${round(c.lng, 5)}`;
   if (state.pin) hash += `&pin=${round(state.pin.lat, 5)}/${round(state.pin.lng, 5)}`;
+  const plan = state.route;
+  if (plan && plan.points.length > 0 && /^[a-z_-]+$/.test(plan.profile)) {
+    const points = plan.points.map((p) => `${round(p.lat, 5)},${round(p.lng, 5)}`).join('/');
+    hash += `&route=${plan.profile}/${points}`;
+    if (plan.roundTripKm !== undefined) hash += `&loop=${round(plan.roundTripKm, 2)}`;
+  }
   return hash;
+}
+
+/** Parse the `&route=…`/`&loop=…` part of a hash; null when absent/malformed. */
+function decodeRoutePlan(hash: string): RoutePlanState | null {
+  const match = /[#&]route=([a-z_-]+)((?:\/-?[0-9.]+,-?[0-9.]+)+)/.exec(hash);
+  if (!match) return null;
+  const points: LatLng[] = [];
+  for (const pair of match[2]!.split('/').filter(Boolean)) {
+    const [lat, lng] = pair.split(',').map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    points.push({ lat: lat!, lng: lng! });
+  }
+  if (points.length === 0) return null;
+
+  const plan: RoutePlanState = { profile: match[1]!, points };
+  const loopMatch = /[#&]loop=([0-9.]+)/.exec(hash);
+  if (loopMatch) {
+    const km = Number(loopMatch[1]);
+    // A loop has exactly one anchor; more points mean the link is inconsistent,
+    // and the ordinary A→B→C reading of them is the safer one.
+    if (Number.isFinite(km) && km > 0 && points.length === 1) plan.roundTripKm = km;
+  }
+  return plan;
 }
 
 /** Parse a `#map=…` hash produced by {@link encodeMapHash}; null when absent/malformed. */
@@ -50,6 +97,8 @@ export function decodeMapHash(hash: string): MapViewState | null {
       state.pin = { lat: pinLat!, lng: pinLng! };
     }
   }
+  const plan = decodeRoutePlan(hash);
+  if (plan) state.route = plan;
   return state;
 }
 

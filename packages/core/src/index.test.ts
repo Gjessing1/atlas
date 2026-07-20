@@ -44,6 +44,57 @@ describe('map hash', () => {
     expect(decodeMapHash('#pin=1/2')).toBeNull();
     expect(decodeMapHash('#map=abc/1/2')).toBeNull();
   });
+
+  it('round-trips a route plan', () => {
+    const state = {
+      center: { lat: 59.91384, lng: 10.75234 },
+      zoom: 12.3,
+      route: {
+        profile: 'bike',
+        points: [
+          { lat: 59.91, lng: 10.75 },
+          { lat: 60.79, lng: 10.69 },
+          { lat: -1.5, lng: -33.25 },
+        ],
+      },
+    };
+    expect(encodeMapHash(state)).toBe(
+      '#map=12.3/59.91384/10.75234&route=bike/59.91,10.75/60.79,10.69/-1.5,-33.25',
+    );
+    expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
+  });
+
+  it('round-trips a round-trip plan', () => {
+    const state = {
+      center: { lat: 59.91, lng: 10.75 },
+      zoom: 10,
+      route: { profile: 'foot', points: [{ lat: 59.91, lng: 10.75 }], roundTripKm: 12.5 },
+    };
+    expect(encodeMapHash(state)).toBe('#map=10/59.91/10.75&route=foot/59.91,10.75&loop=12.5');
+    expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
+  });
+
+  it('drops a loop length that contradicts a multi-stop plan', () => {
+    const plan = decodeMapHash(
+      '#map=10/59.91/10.75&route=car/59.91,10.75/60.1,10.9&loop=12',
+    )?.route;
+    expect(plan?.points).toHaveLength(2);
+    expect(plan?.roundTripKm).toBeUndefined();
+  });
+
+  it('ignores a malformed or empty route segment', () => {
+    expect(decodeMapHash('#map=10/59.91/10.75&route=car')?.route).toBeUndefined();
+    expect(decodeMapHash('#map=10/59.91/10.75&route=car/abc,def')?.route).toBeUndefined();
+    expect(decodeMapHash('#map=10/59.91/10.75')?.route).toBeUndefined();
+  });
+
+  it('omits a plan with no stops or an unusable profile', () => {
+    const view = { center: { lat: 1, lng: 2 }, zoom: 5 };
+    expect(encodeMapHash({ ...view, route: { profile: 'car', points: [] } })).toBe('#map=5/1/2');
+    expect(
+      encodeMapHash({ ...view, route: { profile: 'car&pin=9/9', points: [{ lat: 3, lng: 4 }] } }),
+    ).toBe('#map=5/1/2');
+  });
 });
 
 describe('decodeMapLink', () => {

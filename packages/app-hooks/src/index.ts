@@ -5,7 +5,13 @@ export {
   type SyncState,
   type SyncStatus,
 } from './useSync.js';
-export { useRoute, type RouteFn, type RoutePlanner, type RouteWaypoint } from './useRoute.js';
+export {
+  useRoute,
+  type RouteFn,
+  type RoutePlanner,
+  type RouteWaypoint,
+  type StoredRoutePlan,
+} from './useRoute.js';
 export {
   useUserData,
   sanitizeFileName,

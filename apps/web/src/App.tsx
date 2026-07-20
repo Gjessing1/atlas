@@ -17,12 +17,14 @@ import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
+import { useShareHash } from './map/useShareHash.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useRoute } from './routing/useRoute.js';
+import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
 import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
@@ -54,6 +56,8 @@ const NAV_FOLLOW_SETTING = 'local.nav.follow';
 // link (hash) always wins over the persisted last view.
 const hashView = decodeMapHash(window.location.hash);
 const initialView = hashView ?? DEFAULT_VIEW;
+// A plan carried by the link the user opened; restored once storage is ready.
+const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
 
 export function App() {
   const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
@@ -74,6 +78,9 @@ export function App() {
 
   const route = useRoute();
   useRouteLayers(map, route);
+  // The plan survives a reload, and rides along in the shareable URL hash.
+  useRoutePlanPersistence(route, userData, linkedPlan);
+  useShareHash(map, pin, route.plan);
 
   // Route mode owns map clicks; identify + POI popups read this ref to yield.
   const routeActiveRef = useRef(route.active);

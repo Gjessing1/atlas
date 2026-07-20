@@ -181,4 +181,66 @@ describe('useRoute', () => {
     act(() => result.current.nameWaypoint(id, 'Ghost', C));
     expect(result.current.waypoints).toHaveLength(1);
   });
+  it('exposes the plan for storage and restores it verbatim', () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+
+    expect(result.current.plan).toBeNull(); // route mode closed
+
+    act(() => result.current.start(A, 'Home'));
+    act(() => void result.current.addWaypoint(B));
+    act(() => result.current.setProfile('bike'));
+
+    expect(result.current.plan).toEqual({
+      profile: 'bike',
+      waypoints: [{ pos: A, name: 'Home' }, { pos: B }],
+    });
+
+    // A fresh planner (the reload) comes back to the same stops and profile.
+    const reloaded = renderHook(() => useRoute(route));
+    act(() => reloaded.result.current.restore(result.current.plan!));
+    expect(reloaded.result.current.active).toBe(true);
+    expect(reloaded.result.current.profile).toBe('bike');
+    expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
+    expect(reloaded.result.current.waypoints[0]!.name).toBe('Home');
+    // Restored stops still get distinct ids, so markers and rows stay keyed.
+    expect(reloaded.result.current.waypoints[0]!.id).not.toBe(
+      reloaded.result.current.waypoints[1]!.id,
+    );
+  });
+
+  it('round-trips a loop plan, and keeps only its anchor', () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+
+    act(() => result.current.start(A));
+    act(() => result.current.setRoundTrip(true));
+    act(() => result.current.setRoundTripKm(25));
+    expect(result.current.plan).toEqual({
+      profile: 'car',
+      waypoints: [{ pos: A }],
+      roundTripKm: 25,
+    });
+
+    const reloaded = renderHook(() => useRoute(route));
+    // Extra stops in a loop plan are inconsistent; the anchor wins.
+    act(() =>
+      reloaded.result.current.restore({
+        profile: 'foot',
+        waypoints: [{ pos: A }, { pos: B }],
+        roundTripKm: 8,
+      }),
+    );
+    expect(reloaded.result.current.roundTrip).toBe(true);
+    expect(reloaded.result.current.roundTripKm).toBe(8);
+    expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A]);
+  });
+
+  it('ignores a restore with no stops', () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+    act(() => result.current.restore({ profile: 'car', waypoints: [] }));
+    expect(result.current.active).toBe(false);
+    expect(result.current.waypoints).toEqual([]);
+  });
 });

@@ -1,5 +1,4 @@
 import {
-  encodeMapHash,
   markerScaleForZoom,
   POI_LAYER_IDS,
   resolveStyleTemplate,
@@ -125,8 +124,6 @@ export function MapView({
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
-  const pinRef = useRef(pin);
-  pinRef.current = pin;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -151,17 +148,8 @@ export function MapView({
     );
     map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
-    // Keep the URL hash shareable: it always encodes camera + pin.
-    const syncHash = () => {
-      const center = map.getCenter();
-      const state: MapViewState = {
-        center: { lat: center.lat, lng: center.lng },
-        zoom: map.getZoom(),
-        pin: pinRef.current ?? undefined,
-      };
-      history.replaceState(null, '', encodeMapHash(state));
-    };
-    map.on('moveend', syncHash);
+    // (The shareable URL hash is written by useShareHash, which also knows
+    // about the route plan; the map only reports its camera.)
 
     // Keep pin markers zoom-proportional: full size in close, half size zoomed
     // out (see markerScaleForZoom). Markers are DOM elements, so the scale is a
@@ -260,17 +248,6 @@ export function MapView({
       });
       markerRef.current = marker;
     }
-    // Reflect the pin in the shareable URL immediately (not only on camera moves).
-    const center = map.getCenter();
-    history.replaceState(
-      null,
-      '',
-      encodeMapHash({
-        center: { lat: center.lat, lng: center.lng },
-        zoom: map.getZoom(),
-        pin: pin ?? undefined,
-      }),
-    );
   }, [map, pin, onPinChange, onSavePin, onNavigateToPin]);
 
   // Draw saved places as colour-badged emoji markers (favourites are few, so
