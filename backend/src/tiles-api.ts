@@ -1,4 +1,4 @@
-import { open, stat } from 'node:fs/promises';
+import { open, stat, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
@@ -46,8 +46,20 @@ export interface TilesApiOptions {
   fetchImpl?: typeof fetch;
 }
 
-/** pmtiles Source over a plain file path (the lib's FileSource wants a browser File). */
-class NodeFileSource implements Source {
+/**
+ * pmtiles Source over a plain file path (the lib's FileSource wants a browser File).
+ *
+ * The handle is opened once and held for the source's lifetime — serving one
+ * tile costs several range reads (header, directory, then the tile itself), and
+ * open/close per read was the dominant syscall cost. Sources are discarded when
+ * the archive is rebuilt, so `dispose()` closes the handle once any reads that
+ * were already in flight have finished.
+ */
+export class NodeFileSource implements Source {
+  private handle: Promise<FileHandle> | null = null;
+  private inFlight = 0;
+  private disposed = false;
+
   constructor(
     private filePath: string,
     private cacheKey: string,
@@ -58,15 +70,30 @@ class NodeFileSource implements Source {
   }
 
   async getBytes(offset: number, length: number): Promise<RangeResponse> {
-    const handle = await open(this.filePath, 'r');
+    // A failed open must not be cached — the next request should retry.
+    this.handle ??= open(this.filePath, 'r').catch((err: unknown) => {
+      this.handle = null;
+      throw err;
+    });
+    const handle = await this.handle;
+    this.inFlight++;
     try {
       const buf = Buffer.alloc(length);
       const { bytesRead } = await handle.read(buf, 0, length, offset);
       const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + bytesRead);
       return { data };
     } finally {
-      await handle.close();
+      this.inFlight--;
+      if (this.disposed && this.inFlight === 0) await handle.close().catch(() => {});
     }
+  }
+
+  /** Release the handle. Safe to call while reads are outstanding. */
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    if (this.inFlight > 0 || !this.handle) return;
+    const handle = await this.handle.catch(() => null);
+    await handle?.close().catch(() => {});
   }
 }
 
@@ -76,7 +103,7 @@ class NodeFileSource implements Source {
  * (fresh directory cache and all) when the file changes.
  */
 function createPmtilesReader(tilesDir: string): LocalTileReader {
-  const readers = new Map<string, { key: string; pmtiles: PMTiles }>();
+  const readers = new Map<string, { key: string; pmtiles: PMTiles; source: NodeFileSource }>();
   return async (area, z, x, y) => {
     const filePath = path.join(tilesDir, `${area}.pmtiles`);
     let fileStat;
@@ -88,7 +115,10 @@ function createPmtilesReader(tilesDir: string): LocalTileReader {
     const key = `${filePath}:${fileStat.mtimeMs}:${fileStat.size}`;
     let reader = readers.get(area);
     if (!reader || reader.key !== key) {
-      reader = { key, pmtiles: new PMTiles(new NodeFileSource(filePath, key)) };
+      // Hand the superseded source back its handle before dropping it.
+      void reader?.source.dispose();
+      const source = new NodeFileSource(filePath, key);
+      reader = { key, pmtiles: new PMTiles(source), source };
       readers.set(area, reader);
     }
     const tile = await reader.pmtiles.getZxy(z, x, y);

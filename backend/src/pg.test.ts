@@ -77,6 +77,39 @@ describe.skipIf(!url)('createPgStores', () => {
     expect(stale.skipped).toBe(1);
   });
 
+  it('applies a whole batch in one statement, including deletes and null data', async () => {
+    const batch: SyncChange[] = [
+      change('b1', 6000),
+      change('b2', 6000),
+      { entity: 'track', id: 'b3', updatedAt: 6000, deleted: true, data: null },
+    ];
+    const res = await stores.sync.apply(userId, 'batcher', batch);
+    expect(res).toEqual({ applied: 3, skipped: 0 });
+
+    const pull = await stores.sync.changesSince(userId, 0, 'reader', 100);
+    const byId = new Map(pull.changes.map((c) => [c.id, c]));
+    expect(byId.get('b1')).toMatchObject({ data: { name: 'b1' }, deleted: false });
+    expect(byId.get('b3')).toMatchObject({ entity: 'track', deleted: true, data: null });
+  });
+
+  /**
+   * ON CONFLICT DO UPDATE cannot touch the same row twice in one statement, so
+   * `apply` collapses same-key changes before the upsert. The surviving row must
+   * be the newest one, and the dropped duplicates must count as skipped.
+   */
+  it('collapses duplicate keys within one batch, keeping the newest', async () => {
+    const res = await stores.sync.apply(userId, 'dupes', [
+      { ...change('dup', 7000), data: { name: 'old', lat: 1, lng: 2 } },
+      { ...change('dup', 9000), data: { name: 'new', lat: 1, lng: 2 } },
+      { ...change('dup', 8000), data: { name: 'middle', lat: 1, lng: 2 } },
+    ]);
+    expect(res).toEqual({ applied: 1, skipped: 2 });
+
+    const pull = await stores.sync.changesSince(userId, 0, 'reader', 100);
+    const row = pull.changes.find((c) => c.id === 'dup');
+    expect(row).toMatchObject({ updatedAt: 9000, data: { name: 'new' } });
+  });
+
   /**
    * The pull-cursor skip race: `seq` is assigned by nextval at write time but
    * only becomes visible at commit, so without per-user serialization a pull can

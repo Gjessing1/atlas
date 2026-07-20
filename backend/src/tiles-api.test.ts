@@ -1,7 +1,16 @@
+import { readdirSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { registerTilesApi, type LocalTileReader, type TilesApiOptions } from './tiles-api.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  NodeFileSource,
+  registerTilesApi,
+  type LocalTileReader,
+  type TilesApiOptions,
+} from './tiles-api.js';
 
 const LOCAL_TILE = Buffer.from('local-mvt-bytes');
 const WORLD_TILE = Buffer.from('world-mvt-bytes');
@@ -158,5 +167,67 @@ describe('/api/tiles', () => {
     expect((await get('/api/tiles/norway/25/0/0.pbf')).statusCode).toBe(400);
     expect((await get('/api/tiles/norway/3/9/0.pbf')).statusCode).toBe(400); // x >= 2^z
     expect((await get('/api/tiles/no%2Fway/3/1/1.pbf')).statusCode).toBe(400);
+  });
+});
+
+describe('NodeFileSource', () => {
+  const openFdCount = (): number => readdirSync('/proc/self/fd').length;
+
+  let file: string;
+  const body = Buffer.from('0123456789abcdef');
+
+  beforeEach(async () => {
+    file = path.join(await mkdtemp(path.join(tmpdir(), 'atlas-tiles-')), 'archive.pmtiles');
+    await writeFile(file, body);
+  });
+
+  it('returns the requested byte range, truncated at EOF', async () => {
+    const source = new NodeFileSource(file, 'k');
+    try {
+      expect(Buffer.from(await source.getBytes(4, 6).then((r) => r.data)).toString()).toBe(
+        '456789',
+      );
+      // A range running past the end yields only the bytes that exist.
+      expect(Buffer.from(await source.getBytes(12, 99).then((r) => r.data)).toString()).toBe(
+        'cdef',
+      );
+    } finally {
+      await source.dispose();
+    }
+  });
+
+  /**
+   * The point of holding the handle: one tile request costs several range reads
+   * (header, directory, tile), and each used to open and close the archive.
+   */
+  it('opens the archive once across many reads and closes it on dispose', async () => {
+    const before = openFdCount();
+    const source = new NodeFileSource(file, 'k');
+    for (let i = 0; i < 20; i++) await source.getBytes(i % 8, 4);
+    expect(openFdCount()).toBe(before + 1);
+
+    await source.dispose();
+    expect(openFdCount()).toBe(before);
+  });
+
+  it('lets an in-flight read finish when disposed mid-read, then closes', async () => {
+    const before = openFdCount();
+    const source = new NodeFileSource(file, 'k');
+    await source.getBytes(0, 1); // force the open
+
+    const pending = source.getBytes(4, 6);
+    await source.dispose();
+    expect(Buffer.from((await pending).data).toString()).toBe('456789');
+
+    // The read, not dispose, released the handle — but it is released.
+    expect(openFdCount()).toBe(before);
+  });
+
+  it('does not cache a failed open', async () => {
+    const source = new NodeFileSource(path.join(path.dirname(file), 'missing.pmtiles'), 'k');
+    await expect(source.getBytes(0, 4)).rejects.toThrow();
+    // A second attempt must retry rather than reuse the rejected promise.
+    await expect(source.getBytes(0, 4)).rejects.toThrow();
+    await source.dispose();
   });
 });
