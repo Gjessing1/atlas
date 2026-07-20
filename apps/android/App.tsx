@@ -182,24 +182,26 @@ function AppInner() {
   // none of the native puck's raw-GPS wobble. Falls back to the native puck
   // when paused/off-route (the map moves freely under the true position then).
   const win = useWindowDimensions();
-  // Also requires `departed`: before the drive begins the camera holds a calm
-  // north-up frame (see useNavCamera), so the native compass puck is the
-  // honest marker. The 25 m bound matches the session's snapDisplayMaxM —
-  // beyond it `snapped` is the raw fix, no longer glued to the route line.
+  // Show the chevron on exactly the condition useNavCamera eases the camera to
+  // `state.snapped` (following, not paused, not in overview, a fix in hand) —
+  // no tighter. Gating it additionally on `departed`, a 25 m snap band, or
+  // off-route meant the camera kept tracking the live position while the
+  // chevron vanished, so the native puck's fuzzy accuracy blob showed for the
+  // whole drive instead — even on a perfect fix a lane's width off the route
+  // centreline. The chevron sits at the camera's centre, so wherever the
+  // camera points (glued to the line or the raw fix, on-route or off) it is
+  // the honest marker; it simply greys when the fix is genuinely lost.
+  const courseUp = navFollow === 'course' && (nav.state?.departed ?? false);
   const navPuckVisible =
-    following &&
-    !navCam.followPaused &&
-    !navCam.overview &&
-    nav.state !== null &&
-    nav.state.status !== 'off-route' &&
-    nav.state.departed &&
-    nav.state.offRouteM <= 25;
+    following && !navCam.followPaused && !navCam.overview && nav.state !== null;
   // Anchor point of the follow camera (see useNavCamera): course-up pads the
-  // centre down to 75% of the screen; north-up keeps it at the middle.
-  const navPuckTop = navFollow === 'course' ? win.height * 0.75 : win.height * 0.5;
+  // centre down to 75% of the screen; otherwise (north-up, or before the drive
+  // has begun) it keeps the centre at the middle. Track the same `courseUp` the
+  // camera frames with, so the chevron lands where the camera actually centres.
+  const navPuckTop = courseUp ? win.height * 0.75 : win.height * 0.5;
   // Course-up rotates the map to the course, so the chevron points straight
-  // up; north-up leaves the map at bearing 0, so the chevron shows the course.
-  const navPuckRotation = navFollow === 'course' ? 0 : Math.round(nav.state?.courseDeg ?? 0);
+  // up; otherwise the map is north-up (bearing 0), so the chevron shows the course.
+  const navPuckRotation = courseUp ? 0 : Math.round(nav.state?.courseDeg ?? 0);
 
   const flyTo = useCallback((p: LatLng) => {
     cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
