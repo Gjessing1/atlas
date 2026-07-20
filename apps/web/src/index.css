@@ -726,6 +726,11 @@ body {
   border-color: #2a78d6;
 }
 
+/* `hidden` has to beat the flex display, or the row stays on screen. */
+.route-roundtrip[hidden] {
+  display: none;
+}
+
 .route-roundtrip {
   display: flex;
   align-items: center;
@@ -856,6 +861,16 @@ body {
   font-size: 13px;
 }
 
+/* A ferry crossing is timetabled — a route stat that needs words, not a number. */
+.route-ferry-note {
+  margin-top: 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: #eef3fb;
+  color: #23415f;
+  font-size: 12px;
+}
+
 .route-alternatives {
   display: flex;
   flex-direction: column;
@@ -876,6 +891,269 @@ body {
 .route-alternatives button[aria-pressed='true'] {
   background: #f2edfc;
   border-color: #7048c9;
+}
+
+/* Public transport results: a departure board of timed legs. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.transit-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transit-when {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.transit-when select,
+.transit-when input,
+.transit-when button {
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.transit-when input[type='datetime-local'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.transit-when button {
+  background: #f7f7f7;
+  cursor: pointer;
+}
+
+.transit-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  padding: 7px 9px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 12px;
+}
+
+.transit-modes label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.transit-modes .route-hint {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+}
+
+/* An inline "way out" of an over-filtered result — a link, not a button bar. */
+.transit-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: #7048c9;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.transit-page {
+  align-self: stretch;
+  padding: 3px 8px;
+  border: 1px dashed #ccc;
+  border-radius: 6px;
+  background: #fafafa;
+  font: inherit;
+  font-size: 11px;
+  color: #55534f;
+  cursor: pointer;
+}
+
+.transit-trips,
+.transit-legs,
+.transit-stops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.transit-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.transit-trip {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.transit-trip-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.transit-trip-head:hover {
+  background: #f7f5fc;
+}
+
+.transit-trip-head[aria-expanded='true'] {
+  background: #f2edfc;
+}
+
+/* The two numbers a traveller scans for: when to leave, when they arrive. */
+.transit-trip-times {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.transit-trip-lines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  justify-content: flex-end;
+}
+
+.transit-trip-meta {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #898781;
+}
+
+.transit-line-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid #b9b6ae;
+  border-radius: 4px;
+  background: #efedea;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.transit-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 9px 10px;
+  border-top: 1px solid #eee;
+}
+
+.transit-leg {
+  display: flex;
+  gap: 7px;
+  font-size: 12px;
+}
+
+/* The rail down the left edge — the visual thread through a journey. */
+.transit-leg-icon {
+  flex: none;
+  width: 18px;
+  text-align: center;
+}
+
+.transit-leg.walk {
+  color: #6f6d68;
+}
+
+.transit-leg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.transit-leg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.transit-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.transit-time s {
+  color: #898781;
+  font-weight: 400;
+}
+
+.transit-time.late .transit-delay {
+  color: #a4262c;
+}
+
+.transit-time.early .transit-delay {
+  color: #1a7f4b;
+}
+
+.transit-delay {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #a4262c;
+}
+
+.transit-headsign,
+.transit-leg-detail {
+  color: #55534f;
+}
+
+/* What the platform sign says — the part travellers actually walk towards. */
+.transit-quay {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #efedea;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.transit-stops-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: #7048c9;
+  cursor: pointer;
+}
+
+.transit-stops {
+  margin: 0 0 0 4px;
+  padding-left: 8px;
+  border-left: 2px solid #ddd;
+  font-size: 11px;
+  color: #898781;
 }
 
 /* Draggable numbered waypoint markers on the map. */

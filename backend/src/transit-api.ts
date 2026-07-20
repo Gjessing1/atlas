@@ -1,5 +1,5 @@
-import { buildEnturRequest, parseEnturResponse, transitCoverage } from '@atlas/transit';
-import type { TransitQuery } from '@atlas/transit';
+import { buildEnturRequest, parseEnturResponse, transitCoverage, RIDE_MODES } from '@atlas/transit';
+import type { TransitMode, TransitQuery } from '@atlas/transit';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from './status.js';
 
@@ -68,6 +68,14 @@ function parseQuery(body: unknown): { query: TransitQuery } | { error: string } 
   if (typeof raw.limit === 'number' && Number.isFinite(raw.limit)) query.limit = raw.limit;
   if (typeof raw.walkSpeedMps === 'number' && raw.walkSpeedMps > 0 && raw.walkSpeedMps <= 5) {
     query.walkSpeedMps = raw.walkSpeedMps;
+  }
+  // Unknown mode names are dropped rather than rejected: a newer client asking
+  // for a mode this build hasn't heard of should get a journey, not a 400.
+  if (Array.isArray(raw.modes)) {
+    const modes = raw.modes.filter((mode): mode is TransitMode =>
+      RIDE_MODES.includes(mode as TransitMode),
+    );
+    if (modes.length > 0) query.modes = modes;
   }
   return { query };
 }

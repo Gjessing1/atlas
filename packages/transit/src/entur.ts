@@ -29,8 +29,8 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float){
- trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes){
+ trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes){
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance
    legs{ mode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
@@ -46,6 +46,42 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateT
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
 const DEFAULT_WALK_SPEED_MPS = 1.3;
+
+/**
+ * Atlas ride modes as Entur's `TransportMode` enum values. `coach` and `bus`
+ * are distinct upstream, so a traveller excluding buses keeps long-distance
+ * coaches unless they exclude those too — which is how the operators sell them.
+ */
+const WIRE_MODE: Partial<Record<TransitMode, string>> = {
+  bus: 'bus',
+  coach: 'coach',
+  tram: 'tram',
+  metro: 'metro',
+  rail: 'rail',
+  water: 'water',
+  air: 'air',
+  funicular: 'funicular',
+  cableway: 'cableway',
+};
+
+/**
+ * The `modes` argument for a ride-mode selection, or null to let Entur use all
+ * of them. Access, egress and direct modes stay `foot`: choosing transit means
+ * "walking *and* vehicles", and the walk to the stop is not negotiable.
+ *
+ * An empty selection is treated as no filter rather than as "no transport at
+ * all" — a filter that can silently return nothing is a trap, and the UI
+ * prevents it too by refusing to unselect the last mode.
+ */
+function modesArgument(modes: readonly TransitMode[] | undefined): Record<string, unknown> | null {
+  if (!modes || modes.length === 0) return null;
+  const transportModes = modes.flatMap((mode) => {
+    const wire = WIRE_MODE[mode];
+    return wire ? [{ transportMode: wire }] : [];
+  });
+  if (transportModes.length === 0) return null;
+  return { accessMode: 'foot', egressMode: 'foot', directMode: 'foot', transportModes };
+}
 
 /** Build the GraphQL request body for a journey query. */
 export function buildEnturRequest(query: TransitQuery): {
@@ -63,6 +99,7 @@ export function buildEnturRequest(query: TransitQuery): {
       arriveBy: query.arriveBy ?? false,
       num: limit,
       walkSpeed: query.walkSpeedMps ?? DEFAULT_WALK_SPEED_MPS,
+      modes: modesArgument(query.modes),
     },
   };
 }

@@ -114,9 +114,31 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   if (!query.instructions) {
     body['directions_type'] = 'none';
   }
+  // Ferries are a *ride*, not a walk or a pedal: by default Valhalla will route
+  // a hiker onto a fjord crossing, drawing a line over water that the traveller
+  // cannot walk. Choosing Walk should mean walking, so non-car profiles ask for
+  // `use_ferry: 0`.
+  //
+  // Measured against our own tiles: this is a strong preference, not a
+  // prohibition. Oslo → Nesoddtangen by bike drops the ferry and takes the
+  // 50 km land route; Horten → Moss keeps it, because there is no crossing for
+  // ~100 km and Valhalla would rather sail than fail. Routes that keep a ferry
+  // are therefore flagged (`RoutePath.hasFerry`) and said out loud in the UI.
+  //
+  // Driving keeps ferries at Valhalla's default: in Norway they are part of the
+  // road network, sign-posted as such, and E39 is unusable without them.
+  const ferryless = query.profile !== 'car';
+  const costingOptions: Record<string, Record<string, unknown>> = {};
+  if (ferryless) {
+    const key = query.profile === 'bike' ? 'bicycle' : 'pedestrian';
+    costingOptions[key] = { use_ferry: 0 };
+  }
   // `hike` is pedestrian costing that also allows mountain hiking paths (sac_scale).
   if (query.profile === 'hike') {
-    body['costing_options'] = { pedestrian: { max_hiking_difficulty: 6 } };
+    costingOptions['pedestrian'] = { ...costingOptions['pedestrian'], max_hiking_difficulty: 6 };
+  }
+  if (Object.keys(costingOptions).length > 0) {
+    body['costing_options'] = costingOptions;
   }
   // Valhalla returns alternates for point-to-point queries only.
   if (!query.roundTrip && query.alternatives && query.points.length === 2) {
@@ -327,6 +349,11 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
     };
   }
   if (instructions.length > 0) path.instructions = instructions;
+  // A ferry is the one part of a route the traveller cannot simply follow: it
+  // has a timetable, and on foot or by bike it is the difference between a
+  // walkable line and a line drawn across water. Flag it so the panel can say
+  // so even when the shape alone looks like an ordinary crossing.
+  if (instructions.some((i) => i.kind === 'ferry')) path.hasFerry = true;
   return path;
 }
 

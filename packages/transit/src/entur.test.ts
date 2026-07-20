@@ -31,6 +31,40 @@ describe('buildEnturRequest', () => {
     expect(variables.walkSpeed).toBe(1.1);
   });
 
+  it('sends no mode filter unless the traveller picked modes', () => {
+    // An unfiltered query must not pin `modes`: Entur then uses every mode,
+    // and an empty selection means "all", never "none".
+    expect(buildEnturRequest({ from: asker, to: nationaltheatret }).variables.modes).toBeNull();
+    expect(
+      buildEnturRequest({ from: asker, to: nationaltheatret, modes: [] }).variables.modes,
+    ).toBeNull();
+  });
+
+  it('maps picked ride modes onto transportModes, keeping foot access', () => {
+    const { variables } = buildEnturRequest({
+      from: asker,
+      to: nationaltheatret,
+      modes: ['bus', 'tram'],
+    });
+    expect(variables.modes).toEqual({
+      // Walking to and between stops is never negotiable — that is what makes
+      // this a travel mode rather than the `foot` routing profile.
+      accessMode: 'foot',
+      egressMode: 'foot',
+      directMode: 'foot',
+      transportModes: [{ transportMode: 'bus' }, { transportMode: 'tram' }],
+    });
+  });
+
+  it('drops modes with no wire equivalent rather than filtering to nothing', () => {
+    const { variables } = buildEnturRequest({
+      from: asker,
+      to: nationaltheatret,
+      modes: ['foot', 'unknown'],
+    });
+    expect(variables.modes).toBeNull();
+  });
+
   it('defaults the time to the planner (null) and clamps the trip count', () => {
     const wide = buildEnturRequest({ from: asker, to: nationaltheatret, limit: 99 });
     expect(wide.variables.dateTime).toBeNull();

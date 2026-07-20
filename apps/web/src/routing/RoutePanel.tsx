@@ -9,7 +9,9 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
+import { TransitResults } from './TransitResults.js';
 import type { RoutePlanner } from './useRoute.js';
+import type { TransitPlan } from './useTransit.js';
 
 function downloadText(fileName: string, text: string, type: string): void {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -138,10 +140,13 @@ function StopSearch({
 /** Route-planning panel: profile, stops, round trip, result stats, GPX export. */
 export function RoutePanel({
   route,
+  transit,
   places,
   getBias,
 }: {
   route: RoutePlanner;
+  /** Public transport for the same plan — a travel mode beside the road profiles. */
+  transit: TransitPlan;
   /** Saved places, offered in the stop search alongside geocoder results. */
   places: PlaceRecord[];
   /** Current map center, biasing the geocoder towards the viewport. */
@@ -150,6 +155,7 @@ export function RoutePanel({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const path = route.paths?.[route.selectedPath];
+  const transitMode = transit.enabled;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
 
@@ -195,15 +201,28 @@ export function RoutePanel({
           <button
             key={p.id}
             type="button"
-            aria-pressed={p.id === route.profile}
-            onClick={() => route.setProfile(p.id)}
+            aria-pressed={!transitMode && p.id === route.profile}
+            onClick={() => {
+              transit.setEnabled(false);
+              route.setProfile(p.id);
+            }}
           >
             <span aria-hidden="true">{p.icon}</span> {p.label}
           </button>
         ))}
+        {transit.offered && (
+          <button
+            type="button"
+            aria-pressed={transitMode}
+            onClick={() => transit.setEnabled(true)}
+            title="Public transport departures (Norway, live from Entur)"
+          >
+            <span aria-hidden="true">🚆</span> Transit
+          </button>
+        )}
       </div>
 
-      <div className="route-roundtrip">
+      <div className="route-roundtrip" hidden={transitMode}>
         <label>
           <input
             type="checkbox"
@@ -280,7 +299,9 @@ export function RoutePanel({
       {!route.roundTrip && route.waypoints.length === 1 && (
         <p className="route-hint">Click the map to add the destination.</p>
       )}
-      {!route.roundTrip && route.waypoints.length >= 2 && (
+      {/* Via points and route-line clicks belong to the road profiles: a
+          timetable cannot honour either, so the advice would be a lie here. */}
+      {!route.roundTrip && !transitMode && route.waypoints.length >= 2 && (
         <p className="route-hint">
           Drag rows to reorder · drag markers to move · click the route line to add a via point.
         </p>
@@ -305,7 +326,8 @@ export function RoutePanel({
         <button type="button" onClick={route.clear} disabled={route.waypoints.length === 0}>
           Clear
         </button>
-        <button type="button" onClick={exportGpx} disabled={!path}>
+        {/* A journey is a timetable, not a track: there is nothing to export. */}
+        <button type="button" onClick={exportGpx} disabled={!path || transitMode}>
           Export GPX
         </button>
         <button
@@ -318,8 +340,15 @@ export function RoutePanel({
         </button>
       </div>
 
-      {route.error && <div className="route-error">{route.error}</div>}
-      {path && (
+      {transitMode && route.waypoints.length > 2 && (
+        <p className="route-hint">
+          Public transport plans between the first and last stop; via points are ignored.
+        </p>
+      )}
+      {transitMode && <TransitResults transit={transit} />}
+
+      {!transitMode && route.error && <div className="route-error">{route.error}</div>}
+      {!transitMode && path && (
         <div className="route-stats">
           <strong>{fmtKm(path.distanceM)}</strong> · {fmtDuration(path.timeMs)} · ETA{' '}
           {fmtEta(path.timeMs)}
@@ -327,9 +356,21 @@ export function RoutePanel({
           {path.ascentM > 0 || path.descentM > 0
             ? ` · ↗ ${Math.round(path.ascentM)} m ↘ ${Math.round(path.descentM)} m`
             : null}
+          {/* A ferry is timetabled and, on foot or by bike, the one stretch you
+              cannot simply set off along. Non-car routes avoid ferries where a
+              land route exists, so if one survived, it is the only way across
+              and the traveller needs to know before setting out. */}
+          {path.hasFerry && (
+            <div className="route-ferry-note">
+              ⛴️ This route crosses by ferry
+              {route.profile === 'car'
+                ? '.'
+                : ' — there is no land route. Check sailing times, or try public transport.'}
+            </div>
+          )}
         </div>
       )}
-      {route.paths && route.paths.length > 1 && (
+      {!transitMode && route.paths && route.paths.length > 1 && (
         <div className="route-alternatives" role="group" aria-label="Route alternatives">
           {route.paths.map((p, i) => (
             <button

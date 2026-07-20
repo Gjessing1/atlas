@@ -109,7 +109,25 @@ describe('buildValhallaRequest', () => {
     const hike = buildValhallaRequest({ profile: 'hike', points: [oslo, sognsvann] });
     expect(hike['costing']).toBe('pedestrian');
     // Hiking allows mountain paths that plain pedestrian costing rejects.
-    expect(hike['costing_options']).toEqual({ pedestrian: { max_hiking_difficulty: 6 } });
+    expect(hike['costing_options']).toEqual({
+      pedestrian: { use_ferry: 0, max_hiking_difficulty: 6 },
+    });
+  });
+
+  it('keeps ferries off walking and cycling routes, but not driving ones', () => {
+    // Choosing Walk means walking: a boat leg belongs to public transport.
+    // (A preference, not a prohibition — Valhalla still sails when a crossing
+    // is the only link, which is why RoutePath.hasFerry exists.)
+    expect(
+      buildValhallaRequest({ profile: 'foot', points: [oslo, sognsvann] })['costing_options'],
+    ).toEqual({ pedestrian: { use_ferry: 0 } });
+    expect(
+      buildValhallaRequest({ profile: 'bike', points: [oslo, sognsvann] })['costing_options'],
+    ).toEqual({ bicycle: { use_ferry: 0 } });
+    // Norwegian ferries are part of the road network; driving keeps them.
+    expect(
+      buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann] })['costing_options'],
+    ).toBeUndefined();
   });
 
   it('requests alternates only for 2-point queries', () => {
@@ -398,6 +416,11 @@ describe('formatExitSign', () => {
       expect(ins.sign, `type ${type}`).toBe(sign);
       expect(ins.kind, `type ${type}`).toBe(kind);
     }
+
+    // A ferry leg is timetabled and, on foot, unwalkable — the path says so at
+    // the top level so the panel can warn without scanning every maneuver.
+    expect(parseValhallaResponse(trip(28)).paths[0]!.hasFerry).toBe(true);
+    expect(parseValhallaResponse(trip(10)).paths[0]!.hasFerry).toBeUndefined();
   });
 
   it('reads alternates as extra paths', () => {

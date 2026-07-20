@@ -118,6 +118,20 @@ describe('POST /api/transit', () => {
     });
   });
 
+  it('forwards a mode selection, ignoring names it does not know', async () => {
+    await plan({ from: asker, to: nationaltheatret, modes: ['bus', 'hovercraft', 'rail'] });
+    expect(captured?.body.variables.modes).toMatchObject({
+      transportModes: [{ transportMode: 'bus' }, { transportMode: 'rail' }],
+    });
+  });
+
+  it('treats a selection of only unknown modes as no filter at all', async () => {
+    // Dropping the filter beats 400ing a newer client, and beats a query that
+    // can only ever answer "nothing runs".
+    await plan({ from: asker, to: nationaltheatret, modes: ['hovercraft'] });
+    expect(captured?.body.variables.modes).toBeNull();
+  });
+
   it('passes an empty result through as a 200 — no service is an answer', async () => {
     respond = () =>
       new Response(JSON.stringify({ data: { trip: { tripPatterns: [] } } }), { status: 200 });

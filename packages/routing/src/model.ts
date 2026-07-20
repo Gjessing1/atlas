@@ -118,6 +118,13 @@ export interface RoutePath {
   bbox?: BBox;
   /** Turn-by-turn maneuvers, present only when the query asked for instructions. */
   instructions?: RouteInstruction[];
+  /**
+   * The path boards a ferry. Only knowable when instructions were requested —
+   * absent does not prove a route is ferry-free. Worth a flag of its own
+   * because a ferry leg is timetabled: it is the one part of a road route the
+   * traveller cannot start whenever they like.
+   */
+  hasFerry?: boolean;
 }
 
 /** A successful routing response: the primary path first, then alternatives. */

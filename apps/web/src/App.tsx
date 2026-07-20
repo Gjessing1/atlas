@@ -24,6 +24,7 @@ import { useMapProfile } from './layers/useMapProfile.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
+import { useTransitLayers } from './map/useTransitLayers.js';
 import { useShareHash } from './map/useShareHash.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
 import { NavBanner } from './nav/NavBanner.js';
@@ -32,6 +33,7 @@ import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useRoute } from './routing/useRoute.js';
+import { useTransitPlan } from './routing/useTransit.js';
 import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { SearchBox } from './SearchBox.js';
@@ -93,7 +95,12 @@ export function App() {
   // ---- route planning ----
 
   const route = useRoute();
-  useRouteLayers(map, route);
+  // Public transport for the same two endpoints — a travel mode beside the road
+  // profiles. The panel lists the journeys; the map draws the selected one, and
+  // the road line stands down while it does.
+  const transit = useTransitPlan(route);
+  useRouteLayers(map, route, transit.enabled);
+  useTransitLayers(map, transit.enabled ? transit.trip : null);
   // The plan survives a reload, and rides along in the shareable URL hash.
   useRoutePlanPersistence(route, userData, linkedPlan);
   useShareHash(map, pin, route.plan);
@@ -546,7 +553,9 @@ export function App() {
             onClose={() => setWeatherTarget(null)}
           />
         )}
-        {route.active && <RoutePanel route={route} places={userData.places} getBias={getBias} />}
+        {route.active && (
+          <RoutePanel route={route} transit={transit} places={userData.places} getBias={getBias} />
+        )}
         {sidebarOpen && (
           <Sidebar
             data={userData}

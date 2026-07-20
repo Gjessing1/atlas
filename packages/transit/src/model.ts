@@ -156,7 +156,27 @@ export interface TransitQuery {
    * 1.0 and 1.5 changes which connections are reachable at all.
    */
   walkSpeedMps?: number;
+  /**
+   * Ride modes the traveller will accept, e.g. `['bus', 'tram']` — omitted or
+   * empty means all of them. `foot` is not listed: walking to and between stops
+   * is part of every journey and cannot be excluded, which is exactly what
+   * separates this mode from the `foot` routing profile.
+   */
+  modes?: readonly TransitMode[];
 }
+
+/** Every ride mode, in the order a mode filter should present them. */
+export const RIDE_MODES: readonly TransitMode[] = [
+  'bus',
+  'coach',
+  'tram',
+  'metro',
+  'rail',
+  'water',
+  'air',
+  'funicular',
+  'cableway',
+];
 
 /**
  * A journey answer. `trips` is empty when the planner found nothing — a normal

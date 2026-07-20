@@ -35,7 +35,17 @@ function routeCollection(paths: RoutePath[], selected: number): FeatureCollectio
  * owns route-mode click handling — click to append a stop, click on the
  * selected line to insert a via point into that section.
  */
-export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner): void {
+export function useRouteLayers(
+  map: maplibregl.Map | null,
+  route: RoutePlanner,
+  /**
+   * Hide the routed line while another travel mode owns the map — public
+   * transport draws its own journey, and two lines answering "how do I get
+   * there" at once is one too many. The waypoint markers stay: they are the
+   * plan's endpoints whichever mode is answering.
+   */
+  hideLine = false,
+): void {
   // Handlers are registered once per map; latest state flows through a ref.
   const routeRef = useRef(route);
   routeRef.current = route;
@@ -63,7 +73,7 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
   // ---- route lines (geojson source + 4 layers, style-swap resilient) ----
   useEffect(() => {
     if (!map) return;
-    const paths = route.active ? (route.paths ?? []) : [];
+    const paths = route.active && !hideLine ? (route.paths ?? []) : [];
     const data = routeCollection(paths, route.selectedPath);
     let cancelled = false;
 
@@ -149,7 +159,7 @@ export function useRouteLayers(map: maplibregl.Map | null, route: RoutePlanner):
       map.off('style.load', sync);
       map.off('idle', sync);
     };
-  }, [map, route.active, route.paths, route.selectedPath]);
+  }, [map, route.active, route.paths, route.selectedPath, hideLine]);
 
   // ---- route-mode clicks: select an alternative / insert via / add stop ----
   useEffect(() => {

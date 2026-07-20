@@ -142,8 +142,11 @@ export function useRoute(route: RouteFn): RoutePlanner {
             points: waypoints.map((w) => w.pos),
             alternatives: waypoints.length === 2,
             // Street names ride on instructions — needed for "via …" labels
-            // that tell the alternatives apart in the panel.
-            instructions: waypoints.length === 2,
+            // that tell the alternatives apart in the panel. Walk, hike and
+            // cycle routes ask for them however many stops there are: a ferry
+            // is only detectable from maneuvers, and an unannounced boat leg
+            // is worse on foot than a slightly larger response.
+            instructions: waypoints.length === 2 || profile !== 'car',
           };
       try {
         const result = await route(query, controller.signal);
