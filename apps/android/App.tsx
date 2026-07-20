@@ -194,6 +194,15 @@ function AppInner() {
   const courseUp = navFollow === 'course' && (nav.state?.departed ?? false);
   const navPuckVisible =
     following && !navCam.followPaused && !navCam.overview && nav.state !== null;
+  // Once a trip has a position, the native puck is never the right marker: the
+  // fuzzy accuracy blob ("the cloud") looks like a bug next to our own puck, and
+  // any flip between the two — a stray gesture, an overview toggle, a device
+  // rotation that resizes the map — reads as the marker vanishing mid-drive.
+  // So suppress it for the whole trip and always draw one of ours: the
+  // screen-fixed chevron while the follow camera frames the position, a
+  // map-anchored dot whenever it doesn't.
+  const navDot = following && nav.state !== null && !navPuckVisible ? nav.state.snapped : null;
+  const suppressNativePuck = following && nav.state !== null;
   // Anchor point of the follow camera (see useNavCamera): course-up pads the
   // centre down to 75% of the screen; otherwise (north-up, or before the drive
   // has begun) it keeps the centre at the middle. Track the same `courseUp` the
@@ -585,7 +594,8 @@ function AppInner() {
         destination={destination}
         visiblePlaces={visiblePlaces}
         showPuck={showPuck}
-        suppressPuck={navPuckVisible}
+        suppressPuck={suppressNativePuck}
+        navDot={navDot}
         initialView={initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
@@ -701,8 +711,11 @@ function AppInner() {
         />
       ) : null}
 
-      {useOffline && !planning && !previewing ? (
+      {useOffline && !planning && !previewing && !following ? (
         // Above the scalebar strip (bottom-centre) so the two never overlap.
+        // Hidden mid-trip: in landscape the bottom offsets put it across the
+        // middle of the map, and which tile source is in use is not something
+        // a driver needs told while the banner and road chip own the screen.
         <View style={[styles.offlineBadge, { bottom: bottomInset + 116 }]}>
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>

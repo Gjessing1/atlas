@@ -80,8 +80,15 @@ interface MapSceneProps {
   destination: DestinationTarget | null;
   visiblePlaces: PlaceRecord[];
   showPuck: boolean;
-  /** App is drawing its own screen-fixed nav puck — hide the native one. */
+  /** App is drawing its own nav puck — hide the native one. */
   suppressPuck: boolean;
+  /**
+   * Snapped position to draw the map-anchored nav dot at, for the stretches of
+   * a trip when the follow camera isn't framing it (paused pan, overview) and
+   * the screen-fixed chevron would therefore point at the wrong place. Null
+   * whenever App is drawing the chevron instead.
+   */
+  navDot: LatLng | null;
   /** Boot camera (persisted last view, falling back to DEFAULT_VIEW). */
   initialView: { center: LatLng; zoom: number };
   /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
@@ -115,6 +122,7 @@ export function MapScene({
   visiblePlaces,
   showPuck,
   suppressPuck,
+  navDot,
   initialView,
   onMapPress,
   onPickPoint,
@@ -425,6 +433,15 @@ export function MapScene({
         {!suppressPuck && (following || showPuck) ? (
           <UserLocation heading={following} animated />
         ) : null}
+        {/* Map-anchored nav dot: the honest marker while the follow camera is
+            paused or in overview. Directionless on purpose — the map carries
+            whatever bearing the user left it at, so an arrow drawn here would
+            be rotated twice and point at a road we aren't on. */}
+        {navDot ? (
+          <Marker lngLat={[navDot.lng, navDot.lat]} anchor="center">
+            <View style={styles.navDot} />
+          </Marker>
+        ) : null}
         {nav.destination ? (
           <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
             <View style={pinScaleStyle}>
@@ -484,4 +501,13 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   wpMarkerText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  navDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#1a73e8',
+    borderWidth: 3,
+    borderColor: '#fff',
+    elevation: 4,
+  },
 });

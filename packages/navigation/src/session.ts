@@ -125,6 +125,28 @@ export class NavigationSession {
     }
     const speedMps =
       typeof position.speedMps === 'number' && position.speedMps >= 0 ? position.speedMps : null;
+    // A phone in a tunnel usually doesn't go silent — it falls back to the
+    // fused/network provider and keeps delivering fixes that claim the car is
+    // standing still, at accuracies too coarse to mean anything. Those are the
+    // ones that killed dead reckoning: accepting one re-anchors `lastFixMs` and
+    // zeroes `lastSpeedMps`, so `tick()` sees no gap and no speed to reckon
+    // with, and the puck parks mid-tunnel while still claiming a live fix.
+    // Refuse to anchor on a coarse fix that reports a stop we were nowhere near
+    // making, and let the extrapolation keep running instead — its own distance
+    // and time caps still bound it. A real stop (traffic, a queue) comes with an
+    // accurate fix and is honoured normally; once the signal is genuinely lost
+    // there is nothing left to protect, so any fix may re-anchor.
+    if (
+      this.lastState !== null &&
+      this.lastState.fix !== 'lost' &&
+      this.lastSpeedMps !== null &&
+      this.lastSpeedMps >= this.opts.deadReckonMinSpeedMps &&
+      (speedMps === null || speedMps < this.opts.deadReckonMinSpeedMps) &&
+      accuracyM !== null &&
+      accuracyM > this.opts.offRouteMaxAccuracyM
+    ) {
+      return this.tick(nowMs) ?? { state: this.lastState, prompts: [] };
+    }
     // The GPS course only disambiguates direction when actually moving —
     // stationary headings are compass noise.
     const moving = speedMps !== null && speedMps >= 2;

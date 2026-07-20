@@ -584,6 +584,42 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     expect(lost!.state.traveledM).toBeCloseTo(100, 0);
   });
 
+  it('keeps reckoning through coarse stationary fixes from a tunnel fallback', () => {
+    const s = new NavigationSession(route());
+    const legMps = routeCum[10]! / 60;
+    s.update({ ...pointAtAlong(200), speedMps: legMps, accuracyM: 5 }, 0);
+    // Into the tunnel: the fused provider keeps emitting "parked here, ±60 m"
+    // once a second. Accepting one used to re-anchor the session and freeze the
+    // puck; now they are refused and the extrapolation carries on.
+    let last = s.update({ ...pointAtAlong(200), speedMps: 0, accuracyM: 60 }, 5000);
+    expect(last.state.fix).toBe('estimated');
+    expect(last.state.traveledM).toBeCloseTo(200 + legMps * 5, 0);
+    last = s.update({ ...pointAtAlong(200), speedMps: 0, accuracyM: 60 }, 60_000);
+    expect(last.state.fix).toBe('estimated');
+    expect(last.state.traveledM).toBeCloseTo(200 + legMps * 60, 0);
+    // Out the far end: an accurate fix re-anchors immediately.
+    const out = s.update({ ...pointAtAlong(900), speedMps: legMps, accuracyM: 6 }, 70_000);
+    expect(out.state.fix).toBe('live');
+    expect(out.state.traveledM).toBeCloseTo(900, 0);
+  });
+
+  it('honours an accurate stop — a queue is not a tunnel', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(200), speedMps: 20, accuracyM: 5 }, 0);
+    const stopped = s.update({ ...pointAtAlong(210), speedMps: 0, accuracyM: 8 }, 5000);
+    expect(stopped.state.fix).toBe('live');
+    expect(stopped.state.traveledM).toBeCloseTo(210, 0);
+  });
+
+  it('lets a coarse fix re-anchor once the signal is genuinely lost', () => {
+    const s = new NavigationSession(route());
+    s.update({ ...pointAtAlong(100), speedMps: 20, accuracyM: 5 }, 0);
+    expect(s.tick(1_250_000)!.state.fix).toBe('lost'); // past the time backstop
+    const back = s.update({ ...pointAtAlong(400), speedMps: 0, accuracyM: 60 }, 1_251_000);
+    expect(back.state.fix).toBe('live');
+    expect(back.state.traveledM).toBeCloseTo(400, 0);
+  });
+
   it('gives up dead reckoning after the time backstop', () => {
     const s = new NavigationSession(route());
     s.update({ ...pointAtAlong(100), speedMps: 20 }, 0);
