@@ -829,3 +829,40 @@ export function savedPlaceAt<T extends { lat: number; lng: number }>(
   }
   return best;
 }
+
+/**
+ * Decode a Google/Valhalla-encoded polyline to `[lat, lng]` pairs.
+ *
+ * One codec, two precisions in Atlas: Valhalla emits precision 6, while the
+ * classic Google encoding used by Entur's journey planner is precision 5.
+ * Passing the wrong one silently lands the geometry off the coast of Africa,
+ * so callers state it rather than relying on a default.
+ */
+export function decodePolyline(encoded: string, precision = 6): [number, number][] {
+  const factor = 10 ** precision;
+  const coords: [number, number][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte: number;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+    result = 0;
+    shift = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+    coords.push([lat / factor, lng / factor]);
+  }
+  return coords;
+}

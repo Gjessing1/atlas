@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import { decodePolyline, type LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
 import type {
   ExitSign,
@@ -123,36 +123,6 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
     body['alternates'] = 2;
   }
   return body;
-}
-
-/** Decode a Valhalla-encoded polyline (default precision 6) to `[lat, lng]` pairs. */
-function decodeShape(encoded: string, precision = 6): [number, number][] {
-  const factor = 10 ** precision;
-  const coords: [number, number][] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-  while (index < encoded.length) {
-    let result = 0;
-    let shift = 0;
-    let byte: number;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-    result = 0;
-    shift = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-    coords.push([lat / factor, lng / factor]);
-  }
-  return coords;
 }
 
 /**
@@ -300,7 +270,7 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
 
   for (const leg of legs) {
     if (typeof leg.shape !== 'string') continue;
-    const shape = decodeShape(leg.shape);
+    const shape = decodePolyline(leg.shape);
     if (shape.length === 0) continue;
     // Global index of this leg's local index 0: for the first leg it's 0; for
     // later legs it's the shared vertex already present as the last point.

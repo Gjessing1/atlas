@@ -17,6 +17,7 @@ import { registerPacksApi } from './packs-api.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
+import { registerTransitApi, type TransitApiOptions } from './transit-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
 import {
@@ -63,6 +64,8 @@ export interface AppOptions {
   overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
   /** Test seams for the met.no weather proxy. */
   weatherApi?: WeatherApiOptions;
+  /** Test seams for the Entur public-transport proxy. */
+  transitApi?: TransitApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam: inject stores directly instead of via databaseUrl. */
@@ -371,6 +374,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Weather: met.no Locationforecast proxy (ToS discipline lives in
   // weather-api.ts — identifying UA, Expires caching, stale-on-failure).
   registerWeatherApi(app, { status, ...opts.weatherApi });
+
+  // Public transport: Entur journey planner proxy (transit-api.ts — mandatory
+  // ET-Client-Name header, Norway-only coverage check, Atlas trip model out).
+  registerTransitApi(app, { status, ...opts.transitApi });
 
   // Point elevation: Kartverket Høydedata proxy (enriches tapped points /
   // saved places with a terrain height — no raster pipeline).

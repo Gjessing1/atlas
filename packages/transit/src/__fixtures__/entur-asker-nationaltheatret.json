@@ -1,0 +1,324 @@
+{
+  "data": {
+    "trip": {
+      "tripPatterns": [
+        {
+          "expectedStartTime": "2026-07-21T07:32:26+02:00",
+          "expectedEndTime": "2026-07-21T07:56:44+02:00",
+          "duration": 1458,
+          "walkDistance": 410.37,
+          "legs": [
+            {
+              "mode": "foot",
+              "distance": 43.55,
+              "duration": 34,
+              "realtime": false,
+              "aimedStartTime": "2026-07-21T07:32:26+02:00",
+              "expectedStartTime": "2026-07-21T07:32:26+02:00",
+              "aimedEndTime": "2026-07-21T07:33:00+02:00",
+              "expectedEndTime": "2026-07-21T07:33:00+02:00",
+              "pointsOnLink": {
+                "points": "sgelJm`u~@|@`B??"
+              },
+              "line": null,
+              "authority": null,
+              "fromEstimatedCall": null,
+              "fromPlace": {
+                "name": "Origin",
+                "latitude": 59.8337,
+                "longitude": 10.4348,
+                "quay": null
+              },
+              "toPlace": {
+                "name": "Asker stasjon",
+                "latitude": 59.833399,
+                "longitude": 10.434301,
+                "quay": {
+                  "id": "NSR:Quay:700",
+                  "publicCode": "2",
+                  "name": "Asker stasjon"
+                }
+              },
+              "intermediateEstimatedCalls": []
+            },
+            {
+              "mode": "rail",
+              "distance": 21562.0,
+              "duration": 1080,
+              "realtime": true,
+              "aimedStartTime": "2026-07-21T07:33:00+02:00",
+              "expectedStartTime": "2026-07-21T07:33:00+02:00",
+              "aimedEndTime": "2026-07-21T07:51:00+02:00",
+              "expectedEndTime": "2026-07-21T07:51:00+02:00",
+              "pointsOnLink": {
+                "points": "{eelJa}t~@o@_A??MSMSWc@Sa@e@_AQ_@Q]MWMU"
+              },
+              "line": {
+                "publicCode": "R14",
+                "name": "Asker-Oslo S-Kongsvinger",
+                "presentation": {
+                  "colour": "DF2027",
+                  "textColour": "FFFFFF"
+                }
+              },
+              "authority": {
+                "name": "Vy"
+              },
+              "fromEstimatedCall": {
+                "destinationDisplay": {
+                  "frontText": "Kongsvinger"
+                }
+              },
+              "fromPlace": {
+                "name": "Asker stasjon",
+                "latitude": 59.833399,
+                "longitude": 10.434301,
+                "quay": {
+                  "id": "NSR:Quay:700",
+                  "publicCode": "2",
+                  "name": "Asker stasjon"
+                }
+              },
+              "toPlace": {
+                "name": "Nationaltheatret stasjon",
+                "latitude": 59.915362,
+                "longitude": 10.727551,
+                "quay": {
+                  "id": "NSR:Quay:477",
+                  "publicCode": "3",
+                  "name": "Nationaltheatret stasjon"
+                }
+              },
+              "intermediateEstimatedCalls": [
+                {
+                  "aimedDepartureTime": "2026-07-21T07:39:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:39:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:993",
+                    "publicCode": "4",
+                    "name": "Sandvika stasjon",
+                    "latitude": 59.892799,
+                    "longitude": 10.525884
+                  }
+                },
+                {
+                  "aimedDepartureTime": "2026-07-21T07:45:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:45:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:247",
+                    "publicCode": "3",
+                    "name": "Lysaker stasjon",
+                    "latitude": 59.913404,
+                    "longitude": 10.637244
+                  }
+                },
+                {
+                  "aimedDepartureTime": "2026-07-21T07:48:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:48:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:236",
+                    "publicCode": "4",
+                    "name": "Sk\u00f8yen stasjon",
+                    "latitude": 59.922268,
+                    "longitude": 10.67863
+                  }
+                }
+              ]
+            },
+            {
+              "mode": "foot",
+              "distance": 366.82,
+              "duration": 344,
+              "realtime": false,
+              "aimedStartTime": "2026-07-21T07:51:00+02:00",
+              "expectedStartTime": "2026-07-21T07:51:00+02:00",
+              "aimedEndTime": "2026-07-21T07:56:44+02:00",
+              "expectedEndTime": "2026-07-21T07:56:44+02:00",
+              "pointsOnLink": {
+                "points": "_fulJefn`A??l@yJB[JuC@OCSAOAGWeCCQKcA"
+              },
+              "line": null,
+              "authority": null,
+              "fromEstimatedCall": null,
+              "fromPlace": {
+                "name": "Nationaltheatret stasjon",
+                "latitude": 59.915362,
+                "longitude": 10.727551,
+                "quay": {
+                  "id": "NSR:Quay:477",
+                  "publicCode": "3",
+                  "name": "Nationaltheatret stasjon"
+                }
+              },
+              "toPlace": {
+                "name": "Destination",
+                "latitude": 59.9147,
+                "longitude": 10.7333,
+                "quay": null
+              },
+              "intermediateEstimatedCalls": []
+            }
+          ]
+        },
+        {
+          "expectedStartTime": "2026-07-21T07:42:27+02:00",
+          "expectedEndTime": "2026-07-21T08:06:44+02:00",
+          "duration": 1457,
+          "walkDistance": 409.42,
+          "legs": [
+            {
+              "mode": "foot",
+              "distance": 42.6,
+              "duration": 33,
+              "realtime": false,
+              "aimedStartTime": "2026-07-21T07:42:27+02:00",
+              "expectedStartTime": "2026-07-21T07:42:27+02:00",
+              "aimedEndTime": "2026-07-21T07:43:00+02:00",
+              "expectedEndTime": "2026-07-21T07:43:00+02:00",
+              "pointsOnLink": {
+                "points": "sgelJm`u~@bAhA?@"
+              },
+              "line": null,
+              "authority": null,
+              "fromEstimatedCall": null,
+              "fromPlace": {
+                "name": "Origin",
+                "latitude": 59.8337,
+                "longitude": 10.4348,
+                "quay": null
+              },
+              "toPlace": {
+                "name": "Asker stasjon",
+                "latitude": 59.833368,
+                "longitude": 10.43442,
+                "quay": {
+                  "id": "NSR:Quay:697",
+                  "publicCode": "3",
+                  "name": "Asker stasjon"
+                }
+              },
+              "intermediateEstimatedCalls": []
+            },
+            {
+              "mode": "rail",
+              "distance": 21561.0,
+              "duration": 1080,
+              "realtime": true,
+              "aimedStartTime": "2026-07-21T07:43:00+02:00",
+              "expectedStartTime": "2026-07-21T07:43:00+02:00",
+              "aimedEndTime": "2026-07-21T08:01:00+02:00",
+              "expectedEndTime": "2026-07-21T08:01:00+02:00",
+              "pointsOnLink": {
+                "points": "oeelJg~t~@{@mAk@y@??q@oA??_@_@IOGGEIw@gA??"
+              },
+              "line": {
+                "publicCode": "R13",
+                "name": "Drammen-Oslo S-Dal",
+                "presentation": {
+                  "colour": "DF2027",
+                  "textColour": "FFFFFF"
+                }
+              },
+              "authority": {
+                "name": "Vy"
+              },
+              "fromEstimatedCall": {
+                "destinationDisplay": {
+                  "frontText": "Dal"
+                }
+              },
+              "fromPlace": {
+                "name": "Asker stasjon",
+                "latitude": 59.833368,
+                "longitude": 10.43442,
+                "quay": {
+                  "id": "NSR:Quay:697",
+                  "publicCode": "3",
+                  "name": "Asker stasjon"
+                }
+              },
+              "toPlace": {
+                "name": "Nationaltheatret stasjon",
+                "latitude": 59.915362,
+                "longitude": 10.727551,
+                "quay": {
+                  "id": "NSR:Quay:477",
+                  "publicCode": "3",
+                  "name": "Nationaltheatret stasjon"
+                }
+              },
+              "intermediateEstimatedCalls": [
+                {
+                  "aimedDepartureTime": "2026-07-21T07:49:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:49:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:993",
+                    "publicCode": "4",
+                    "name": "Sandvika stasjon",
+                    "latitude": 59.892799,
+                    "longitude": 10.525884
+                  }
+                },
+                {
+                  "aimedDepartureTime": "2026-07-21T07:55:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:55:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:247",
+                    "publicCode": "3",
+                    "name": "Lysaker stasjon",
+                    "latitude": 59.913404,
+                    "longitude": 10.637244
+                  }
+                },
+                {
+                  "aimedDepartureTime": "2026-07-21T07:58:00+02:00",
+                  "expectedDepartureTime": "2026-07-21T07:58:00+02:00",
+                  "quay": {
+                    "id": "NSR:Quay:236",
+                    "publicCode": "4",
+                    "name": "Sk\u00f8yen stasjon",
+                    "latitude": 59.922268,
+                    "longitude": 10.67863
+                  }
+                }
+              ]
+            },
+            {
+              "mode": "foot",
+              "distance": 366.82,
+              "duration": 344,
+              "realtime": false,
+              "aimedStartTime": "2026-07-21T08:01:00+02:00",
+              "expectedStartTime": "2026-07-21T08:01:00+02:00",
+              "aimedEndTime": "2026-07-21T08:06:44+02:00",
+              "expectedEndTime": "2026-07-21T08:06:44+02:00",
+              "pointsOnLink": {
+                "points": "_fulJefn`A??l@yJB[JuC@OCSAOAGWeCCQKcA"
+              },
+              "line": null,
+              "authority": null,
+              "fromEstimatedCall": null,
+              "fromPlace": {
+                "name": "Nationaltheatret stasjon",
+                "latitude": 59.915362,
+                "longitude": 10.727551,
+                "quay": {
+                  "id": "NSR:Quay:477",
+                  "publicCode": "3",
+                  "name": "Nationaltheatret stasjon"
+                }
+              },
+              "toPlace": {
+                "name": "Destination",
+                "latitude": 59.9147,
+                "longitude": 10.7333,
+                "quay": null
+              },
+              "intermediateEstimatedCalls": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
