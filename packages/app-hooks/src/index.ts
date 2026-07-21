@@ -8,6 +8,7 @@ export {
 export {
   useRoute,
   type RouteFn,
+  type RouteDetourEstimate,
   type RoutePlanner,
   type RouteWaypoint,
   type StoredRoutePlan,

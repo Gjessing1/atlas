@@ -99,6 +99,9 @@ export function SearchBar({
           value={query}
           onChangeText={setQuery}
           autoCorrect={false}
+          // Android otherwise opens its fullscreen "extract" editor in
+          // landscape, making this look like two separate search fields.
+          disableFullscreenUI
           autoFocus
           testID="search-input"
         />

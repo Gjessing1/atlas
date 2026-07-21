@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MenuIcon, SearchIcon } from './icons';
+import { DirectionsIcon } from './modeIcons';
 
 interface MenuClusterProps {
   bottomInset: number;
@@ -70,8 +71,7 @@ export function MenuCluster({
         ) : null}
         {!following ? (
           <Pressable style={styles.roundButton} onPress={onPlanRoute} testID="plan-route">
-            {/* Up-then-right arrow — the conventional "directions" glyph (OSM). */}
-            <Text style={styles.routeArrow}>{'↱'}</Text>
+            <DirectionsIcon color="#1a73e8" />
           </Pressable>
         ) : null}
       </View>
@@ -100,5 +100,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 4,
   },
-  routeArrow: { fontSize: 24, fontWeight: '800', color: '#1a73e8' },
 });

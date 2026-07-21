@@ -1,8 +1,12 @@
 import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import {
+  distanceToRouteM,
   pathViaLabels,
+  photonBbox,
   ROUTING_PROFILES,
+  routeSearchBounds,
   routePathToTrackData,
+  ROUTE_SEARCH_CORRIDOR_M,
   type RoutePath,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
@@ -78,6 +82,20 @@ interface StopHit {
   position: LatLng;
   /** True for the user's saved places — listed first, marked with a star. */
   saved: boolean;
+}
+
+interface AlongRouteHit extends StopHit {
+  insertIndex: number;
+  extraTimeMs: number;
+  extraDistanceM: number;
+}
+
+const stopHitKey = (hit: StopHit): string =>
+  `${hit.position.lat.toFixed(5)}/${hit.position.lng.toFixed(5)}`;
+
+function detourLabel(timeMs: number): string {
+  if (timeMs < 60_000) return '+<1 min';
+  return `+${Math.round(timeMs / 60_000)} min`;
 }
 
 /** Search box that adds a stop by name: saved places first, then addresses. */
@@ -193,6 +211,159 @@ function StopSearch({
             </Pressable>
           ))}
         </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Offline-capable POI/saved-place search constrained to the selected route. */
+function AlongRouteSearch({
+  route,
+  path,
+  packs,
+  places,
+}: {
+  route: RoutePlanner;
+  path: RoutePath;
+  packs: LocalPack[];
+  places: PlaceRecord[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<AlongRouteHit[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 2) {
+      setHits([]);
+      setLoading(false);
+      return;
+    }
+    const bounds = routeSearchBounds(path.points);
+    if (!bounds) return;
+    const controller = new AbortController();
+    let current = true;
+    setHits([]);
+    setLoading(true);
+
+    const mergeEstimated = async (candidates: StopHit[]) => {
+      if (candidates.length === 0) return;
+      const estimates = await route.estimateDetours(
+        candidates.map((hit) => hit.position),
+        controller.signal,
+      );
+      if (!current || controller.signal.aborted) return;
+      const next: AlongRouteHit[] = [];
+      for (let i = 0; i < candidates.length; i++) {
+        const estimate = estimates[i];
+        if (estimate) next.push({ ...candidates[i]!, ...estimate });
+      }
+      setHits((previous) => {
+        const merged = new Map(previous.map((hit) => [stopHitKey(hit), hit]));
+        for (const hit of next) merged.set(stopHitKey(hit), hit);
+        return [...merged.values()]
+          .sort((a, b) => a.extraTimeMs - b.extraTimeMs || a.extraDistanceM - b.extraDistanceM)
+          .slice(0, 6);
+      });
+    };
+
+    const saved: StopHit[] = matchPlacesByName(places, q, 8)
+      .map((place) => ({
+        name: place.name,
+        label: 'Saved place',
+        position: { lat: place.lat, lng: place.lng },
+        saved: true,
+      }))
+      .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
+      .slice(0, 4);
+    void mergeEstimated(saved);
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const { results } = await geoSearch(packs, q, undefined, {
+            bbox: photonBbox(bounds),
+            limit: 20,
+          });
+          if (!current) return;
+          const savedKeys = new Set(saved.map(stopHitKey));
+          const searched = results
+            .map<StopHit>((result) => ({
+              name: result.name,
+              label: result.label,
+              position: result.position,
+              saved: false,
+            }))
+            .filter((hit) => !savedKeys.has(stopHitKey(hit)))
+            .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
+            .slice(0, Math.max(6 - saved.length, 0));
+          await mergeEstimated(searched);
+        } finally {
+          if (current) setLoading(false);
+        }
+      })();
+    }, 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, query, path, packs, places, route.estimateDetours]);
+
+  return (
+    <View style={styles.alongSearch}>
+      <Pressable
+        style={[styles.alongToggle, open && styles.alongToggleSelected]}
+        onPress={() => setOpen((value) => !value)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        testID="route-along-toggle"
+      >
+        <Text style={styles.alongToggleText}>Search along route</Text>
+      </Pressable>
+      {open ? (
+        <>
+          <TextInput
+            style={styles.stopInput}
+            placeholder="Fuel, food, or a saved place…"
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            autoFocus
+            testID="route-along-search"
+          />
+          {loading ? <Text style={styles.hint}>Finding the smallest detours…</Text> : null}
+          {!loading && query.trim().length >= 2 && hits.length === 0 ? (
+            <Text style={styles.hint}>No matches near this route.</Text>
+          ) : null}
+          {hits.length > 0 ? (
+            <View style={styles.stopResults}>
+              {hits.map((hit, index) => (
+                <Pressable
+                  key={stopHitKey(hit)}
+                  style={styles.stopResult}
+                  testID={`route-along-result-${index}`}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
+                    setOpen(false);
+                    setQuery('');
+                  }}
+                >
+                  <Text style={styles.stopResultName} numberOfLines={1}>
+                    {hit.saved ? '★ ' : ''}
+                    {hit.name}
+                  </Text>
+                  <Text style={styles.stopResultLabel} numberOfLines={1}>
+                    {hit.label ? `${hit.label} · ` : ''}
+                    {detourLabel(hit.extraTimeMs)} detour
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </>
       ) : null}
     </View>
   );
@@ -419,6 +590,10 @@ export function RoutePanel({
             }
             onPick={(position, name) => route.addWaypoint(position, name)}
           />
+        ) : null}
+
+        {!route.roundTrip && !transitMode && path && stops.length >= 2 ? (
+          <AlongRouteSearch route={route} path={path} packs={packs} places={places} />
         ) : null}
 
         <View style={styles.sourceRow}>
@@ -782,4 +957,16 @@ const styles = StyleSheet.create({
   stopResult: { paddingHorizontal: 10, paddingVertical: 6 },
   stopResultName: { fontSize: 14, color: '#111', fontWeight: '600' },
   stopResultLabel: { fontSize: 11, color: '#778' },
+  alongSearch: { alignItems: 'stretch', gap: 4 },
+  alongToggle: {
+    alignSelf: 'flex-start',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#eef3fb',
+    borderWidth: 1,
+    borderColor: '#b7c9df',
+  },
+  alongToggleSelected: { borderColor: '#1a73e8' },
+  alongToggleText: { fontSize: 13, color: '#23415f', fontWeight: '600' },
 });

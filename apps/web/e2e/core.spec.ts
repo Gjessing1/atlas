@@ -95,3 +95,40 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   );
   expect(hasRouteSource).toBe(true);
 });
+
+test('search along a route shows detour cost and inserts the stop in order', async ({ page }) => {
+  await mockRouting(page);
+  await page.route('**/api/search**', (route) =>
+    route.fulfill({
+      json: {
+        results: [
+          {
+            name: 'Corridor café',
+            label: 'Oslo, Norway',
+            position: { lat: 59.91, lng: 10.75 },
+            kind: 'amenity/cafe',
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto('/#map=12/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Route' }).click();
+  const [x1, y1] = await project(page, 59.905, 10.74);
+  const [x2, y2] = await project(page, 59.915, 10.76);
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+  await expect(page.locator('.route-stats')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Search along route' }).click();
+  await page.getByPlaceholder('Fuel, food, or a saved place…').fill('cafe');
+  const hit = page.locator('.route-along-search').getByRole('button', {
+    name: /Corridor café.*detour/,
+  });
+  await expect(hit).toContainText('+<1 min detour');
+  await hit.click();
+
+  await expect(page.locator('.route-waypoints li')).toHaveCount(3);
+  await expect(page.locator('.route-waypoints')).toContainText('Corridor café');
+});

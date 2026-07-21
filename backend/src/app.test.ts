@@ -10,6 +10,7 @@ let dataDir: string;
 let app: FastifyInstance;
 let photonStub: FastifyInstance;
 let valhallaStub: FastifyInstance;
+let lastPhotonQuery: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
   dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-test-'));
@@ -20,26 +21,31 @@ beforeAll(async () => {
   await writeFile(path.join(dataDir, 'assets', 'styles', 'test.json'), '{"version":8}');
 
   photonStub = Fastify();
-  photonStub.get('/api', () => ({
-    type: 'FeatureCollection',
-    features: [
-      {
-        geometry: { type: 'Point', coordinates: [10.75, 59.91] },
-        properties: { name: 'Oslo', country: 'Norway', osm_key: 'place', osm_value: 'city' },
-      },
-      // Same name+label at a slightly different position: must be deduplicated.
-      {
-        geometry: { type: 'Point', coordinates: [10.76, 59.92] },
-        properties: {
-          name: 'Oslo',
-          country: 'Norway',
-          osm_key: 'place',
-          osm_value: 'municipality',
+  photonStub.get<{
+    Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };
+  }>('/api', (request) => {
+    lastPhotonQuery = { ...request.query };
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          geometry: { type: 'Point', coordinates: [10.75, 59.91] },
+          properties: { name: 'Oslo', country: 'Norway', osm_key: 'place', osm_value: 'city' },
         },
-      },
-      { geometry: null, properties: { name: 'broken' } },
-    ],
-  }));
+        // Same name+label at a slightly different position: must be deduplicated.
+        {
+          geometry: { type: 'Point', coordinates: [10.76, 59.92] },
+          properties: {
+            name: 'Oslo',
+            country: 'Norway',
+            osm_key: 'place',
+            osm_value: 'municipality',
+          },
+        },
+        { geometry: null, properties: { name: 'broken' } },
+      ],
+    };
+  });
   // Reverse lookups answer with whatever is nearest; the marker coordinate
   // 0,0 stands in for "nothing there" (open sea).
   photonStub.get<{ Querystring: { lat?: string; lon?: string } }>('/reverse', (request) => ({
@@ -160,6 +166,20 @@ describe('search proxy', () => {
   it('400s without a query', async () => {
     const res = await app.inject({ url: '/api/search' });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('forwards a validated route bounding box and caps the result count', async () => {
+    const res = await app.inject({
+      url: '/api/search?q=fuel&limit=99&bbox=10,59,11,60',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(lastPhotonQuery.bbox).toBe('10,59,11,60');
+    expect(lastPhotonQuery.limit).toBe('20');
+  });
+
+  it('rejects malformed route bounding boxes', async () => {
+    expect((await app.inject({ url: '/api/search?q=fuel&bbox=10,59,9,60' })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/api/search?q=fuel&bbox=10,91,11,92' })).statusCode).toBe(400);
   });
 
   it('502s when photon is unreachable', async () => {

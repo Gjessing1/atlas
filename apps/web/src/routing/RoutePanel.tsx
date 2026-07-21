@@ -1,9 +1,13 @@
 import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import {
+  distanceToRouteM,
   pathViaLabels,
+  photonBbox,
   ROUTING_PROFILES,
+  routeSearchBounds,
   routePathToTrackData,
+  ROUTE_SEARCH_CORRIDOR_M,
   type RoutePath,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
@@ -56,6 +60,20 @@ interface StopHit {
   position: LatLng;
   /** True for the user's saved places — listed first, marked with a star. */
   saved: boolean;
+}
+
+interface AlongRouteHit extends StopHit {
+  insertIndex: number;
+  extraTimeMs: number;
+  extraDistanceM: number;
+}
+
+const stopHitKey = (hit: StopHit): string =>
+  `${hit.position.lat.toFixed(5)}/${hit.position.lng.toFixed(5)}`;
+
+function detourLabel(timeMs: number): string {
+  if (timeMs < 60_000) return '+<1 min';
+  return `+${Math.round(timeMs / 60_000)} min`;
 }
 
 /** Search box that adds a stop by name: saved places first, then addresses (Photon). */
@@ -143,6 +161,155 @@ function StopSearch({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** POI/saved-place search constrained to the selected route, ranked by detour. */
+function AlongRouteSearch({
+  route,
+  path,
+  places,
+}: {
+  route: RoutePlanner;
+  path: RoutePath;
+  places: PlaceRecord[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<AlongRouteHit[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 2) {
+      setHits([]);
+      setLoading(false);
+      return;
+    }
+    const bounds = routeSearchBounds(path.points);
+    if (!bounds) return;
+    const controller = new AbortController();
+    setHits([]);
+    setLoading(true);
+
+    const mergeEstimated = async (candidates: StopHit[]) => {
+      if (candidates.length === 0) return;
+      const estimates = await route.estimateDetours(
+        candidates.map((hit) => hit.position),
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      const next: AlongRouteHit[] = [];
+      for (let i = 0; i < candidates.length; i++) {
+        const estimate = estimates[i];
+        if (estimate) next.push({ ...candidates[i]!, ...estimate });
+      }
+      setHits((previous) => {
+        const merged = new Map(previous.map((hit) => [stopHitKey(hit), hit]));
+        for (const hit of next) merged.set(stopHitKey(hit), hit);
+        return [...merged.values()]
+          .sort((a, b) => a.extraTimeMs - b.extraTimeMs || a.extraDistanceM - b.extraDistanceM)
+          .slice(0, 6);
+      });
+    };
+
+    // Saved places do not wait for the network: match and cost them now.
+    const saved: StopHit[] = matchPlacesByName(places, q, 8)
+      .map((place) => ({
+        name: place.name,
+        label: 'Saved place',
+        position: { lat: place.lat, lng: place.lng },
+        saved: true,
+      }))
+      .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
+      .slice(0, 4);
+    void mergeEstimated(saved);
+
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({
+          q,
+          limit: '20',
+          bbox: photonBbox(bounds),
+        });
+        const response = await fetch(`/api/search?${params}`, { signal: controller.signal });
+        if (!response.ok) return;
+        const savedKeys = new Set(saved.map(stopHitKey));
+        const remote = ((await response.json()) as { results: SearchResult[] }).results
+          .map<StopHit>((result) => ({
+            name: result.name,
+            label: result.label,
+            position: result.position,
+            saved: false,
+          }))
+          .filter((hit) => !savedKeys.has(stopHitKey(hit)))
+          .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
+          .slice(0, Math.max(6 - saved.length, 0));
+        await mergeEstimated(remote);
+      } catch {
+        // Offline or superseded: already-matched saved places remain useful.
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, query, path, places, route.estimateDetours]);
+
+  return (
+    <div className="route-along-search">
+      <button
+        type="button"
+        className="route-along-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        Search along route
+      </button>
+      {open && (
+        <>
+          <input
+            type="search"
+            autoFocus
+            placeholder="Fuel, food, or a saved place…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search along route"
+          />
+          {loading && <p className="route-hint">Finding the smallest detours…</p>}
+          {!loading && query.trim().length >= 2 && hits.length === 0 && (
+            <p className="route-hint">No matches near this route.</p>
+          )}
+          {hits.length > 0 && (
+            <ul>
+              {hits.map((hit) => (
+                <li key={stopHitKey(hit)}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
+                      setOpen(false);
+                      setQuery('');
+                    }}
+                  >
+                    <span className="result-name">
+                      {hit.saved ? '★ ' : ''}
+                      {hit.name}
+                    </span>
+                    <span className="result-label">
+                      {hit.label ? `${hit.label} · ` : ''}
+                      <strong>{detourLabel(hit.extraTimeMs)}</strong> detour
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );
@@ -284,6 +451,10 @@ export function RoutePanel({
         getBias={getBias}
         onPick={(position, name) => route.addWaypoint(position, name)}
       />
+
+      {!route.roundTrip && !transitMode && path && route.waypoints.length >= 2 && (
+        <AlongRouteSearch route={route} path={path} places={places} />
+      )}
 
       {route.waypoints.length > 0 ? (
         <ol className="route-waypoints">

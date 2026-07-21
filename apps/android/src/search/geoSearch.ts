@@ -16,6 +16,12 @@ import { searchOffline } from './offlineSearch';
  */
 export type SearchBias = () => Promise<LatLng | null>;
 
+export interface GeoSearchOptions {
+  /** Photon-formatted minLon,minLat,maxLon,maxLat route bounds. */
+  bbox?: string;
+  limit?: number;
+}
+
 /**
  * Geocode a query: the server's Photon proxy (/api/search) when online, the
  * downloaded packs' FTS5 databases when it can't be reached. Shared by the
@@ -25,6 +31,7 @@ export async function geoSearch(
   packs: LocalPack[],
   text: string,
   getBias?: SearchBias,
+  options: GeoSearchOptions = {},
 ): Promise<{ results: SearchResult[]; offline: boolean }> {
   // A typed-in coordinate pair is its own result — no geocoder involved, so
   // it also works offline (and in the route planner's stop search).
@@ -32,6 +39,8 @@ export async function geoSearch(
   if (coord) return { results: [coordinateSearchResult(coord)], offline: false };
   try {
     const params = new URLSearchParams({ q: text });
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    if (options.bbox) params.set('bbox', options.bbox);
     const bias = await getBias?.().catch(() => null);
     if (bias) {
       params.set('lat', String(bias.lat));
@@ -44,6 +53,6 @@ export async function geoSearch(
     const { results } = (await res.json()) as { results: SearchResult[] };
     return { results, offline: false };
   } catch {
-    return { results: await searchOffline(packs, text), offline: true };
+    return { results: await searchOffline(packs, text, options.limit), offline: true };
   }
 }

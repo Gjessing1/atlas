@@ -14,6 +14,7 @@ export function ReorderableList<T>({
   renderRow,
   onReorder,
   onDragActive,
+  onDropAt,
 }: {
   items: T[];
   keyOf: (item: T) => string;
@@ -22,6 +23,12 @@ export function ReorderableList<T>({
   onReorder: (orderedIds: string[]) => void;
   /** Fires on drag start/end — disable the outer ScrollView (and close editors). */
   onDragActive: (active: boolean) => void;
+  /**
+   * Optional cross-list drop target. Receives the dragged item and absolute
+   * screen Y; return true when the parent handled it (for example place →
+   * folder), suppressing the ordinary within-list reorder.
+   */
+  onDropAt?: (item: T, pageY: number) => boolean;
 }) {
   // Measured row heights by index (rows include any expanded editor below them).
   const heightsRef = useRef<number[]>([]);
@@ -36,6 +43,8 @@ export function ReorderableList<T>({
   onReorderRef.current = onReorder;
   const onDragActiveRef = useRef(onDragActive);
   onDragActiveRef.current = onDragActive;
+  const onDropAtRef = useRef(onDropAt);
+  onDropAtRef.current = onDropAt;
 
   /** The slot the dragged row should take: each midpoint its centre crosses is one step. */
   const targetIndex = (from: number, dy: number): number => {
@@ -75,10 +84,12 @@ export function ReorderableList<T>({
           if (!cur) return;
           setDrag({ from: cur.from, to: targetIndex(cur.from, g.dy), dy: g.dy });
         },
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (_event, gesture) => {
           const cur = dragRef.current;
           setDrag(null);
           onDragActiveRef.current(false);
+          const item = itemsRef.current.find((candidate) => keyOf(candidate) === key);
+          if (item && onDropAtRef.current?.(item, gesture.moveY)) return;
           if (!cur || cur.to === cur.from) return;
           const ids = itemsRef.current.map(keyOf);
           const [moved] = ids.splice(cur.from, 1);

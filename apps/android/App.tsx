@@ -24,6 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  BackHandler,
   Linking,
   Pressable,
   Share,
@@ -169,6 +170,18 @@ function AppInner() {
   const viewRef = useRef<MapView | null>(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The system consumes the first Back press while the keyboard is visible.
+  // Once it is hidden, keep the next press inside Atlas by closing the search
+  // overlay instead of letting Android background the whole activity.
+  useEffect(() => {
+    if (!searchOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSearchOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [searchOpen]);
 
   // While a trip is active the nav banner owns the top of the screen, so drop
   // the search bar + button column below its measured height (issue: the banner
@@ -337,11 +350,18 @@ function AppInner() {
   // one exists. Explore and Ski intentionally leave its last mode alone.
   const onPickMapProfile = useCallback(
     (id: string) => {
+      const next = mapProfile(id);
+      // Selecting an activity applies its signature layers. In particular,
+      // Hike must immediately show Hiking trails, matching the web profile's
+      // default instead of requiring a second trip through Layers.
+      if (id !== profiles.profile.id) {
+        for (const layerId of next.defaultLayers ?? []) overlaysCtl.setOn(layerId, true);
+      }
       profiles.setProfile(id);
-      const routing = mapProfile(id).routing;
+      const routing = next.routing;
       if (routing !== null && isRoutingProfile(routing)) route.setProfile(routing);
     },
-    [profiles, route],
+    [profiles, overlaysCtl, route],
   );
 
   // Share the destination as a web #map= link (opens in any browser; the
@@ -804,9 +824,9 @@ function AppInner() {
           profile={profiles}
           overlays={overlaysCtl}
           mapZoom={mapZoom}
-          // Clear the system navigation bar, locate button, and optional
-          // offline toggle. The inset also keeps this safe in landscape.
-          bottom={bottomInset + (packs.length > 0 ? 134 : 84)}
+          // Bottom-edge row, immediately left of the locate button. Menus
+          // expand upward, so profile switching no longer floats mid-map.
+          bottom={bottomInset + 24}
           onPickProfile={onPickMapProfile}
         />
       ) : null}

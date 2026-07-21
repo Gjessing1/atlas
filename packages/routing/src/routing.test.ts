@@ -3,10 +3,45 @@ import { viaInsertIndex } from './insert.js';
 import { routePathToTrackData, type RoutePath } from './model.js';
 import { optimizeWaypointOrder } from './optimize.js';
 import { sortRouteChoices } from './choices.js';
+import {
+  distanceToRouteM,
+  photonBbox,
+  routeSearchBounds,
+  ROUTE_SEARCH_CORRIDOR_M,
+} from './corridor.js';
 import { pathViaLabels } from './via.js';
 
 const oslo = { lat: 59.9139, lng: 10.7522 };
 const sognsvann = { lat: 59.9706, lng: 10.7305 };
+
+describe('route search corridor', () => {
+  const route = [
+    { lat: 60, lng: 10 },
+    { lat: 60, lng: 11 },
+  ];
+
+  it('measures to the segment rather than only its vertices', () => {
+    expect(distanceToRouteM({ lat: 60, lng: 10.5 }, route)).toBeLessThan(1);
+    expect(distanceToRouteM({ lat: 60.02, lng: 10.5 }, route)).toBeCloseTo(2_224, -1);
+    expect(distanceToRouteM({ lat: 60.1, lng: 12 }, route)).toBeGreaterThan(50_000);
+  });
+
+  it('pads a route for Photon while leaving precise filtering to the client', () => {
+    const bounds = routeSearchBounds(route)!;
+    expect(bounds.sw.lat).toBeLessThan(60);
+    expect(bounds.ne.lat).toBeGreaterThan(60);
+    expect(bounds.sw.lng).toBeLessThan(10);
+    expect(bounds.ne.lng).toBeGreaterThan(11);
+    expect(photonBbox(bounds).split(',').map(Number)).toEqual([
+      bounds.sw.lng,
+      bounds.sw.lat,
+      bounds.ne.lng,
+      bounds.ne.lat,
+    ]);
+    expect(routeSearchBounds([])).toBeNull();
+    expect(ROUTE_SEARCH_CORRIDOR_M).toBe(5_000);
+  });
+});
 
 describe('routePathToTrackData', () => {
   it('wraps the path as a single-segment track', () => {

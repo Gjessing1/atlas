@@ -30,6 +30,7 @@ export interface OverlaysController {
   overlays: ActiveOverlay[];
   /** Resolve an explicit choice against the active profile's default. */
   isOn: (id: string) => boolean;
+  setOn: (id: string, on: boolean) => void;
   toggle: (id: string) => void;
   setOpacity: (id: string, opacity: number) => void;
 }
@@ -110,6 +111,15 @@ export function useOverlays(data: UserData, profileId: string): OverlaysControll
     [update, profileId],
   );
 
+  const setOn = useCallback(
+    (id: string, on: boolean) =>
+      update((cur) => ({
+        ...cur,
+        [id]: { ...cur[id], on },
+      })),
+    [update],
+  );
+
   const isOn = useCallback(
     (id: string) => state[id]?.on ?? layerDefaultsOn(id, profileId),
     [state, profileId],
@@ -140,5 +150,5 @@ export function useOverlays(data: UserData, profileId: string): OverlaysControll
     [catalog, state, origin, isOn],
   );
 
-  return { catalog, state, overlays, isOn, toggle, setOpacity };
+  return { catalog, state, overlays, isOn, setOn, toggle, setOpacity };
 }

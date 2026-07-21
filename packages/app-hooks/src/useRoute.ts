@@ -3,6 +3,7 @@ import {
   optimizeWaypointOrder,
   ROUTING_PROFILES,
   RoutingError,
+  viaInsertIndex,
   type RoutePath,
   type RouteQuery,
   type RouteResult,
@@ -50,6 +51,14 @@ export type RouteFn = (query: RouteQuery, signal: AbortSignal) => Promise<RouteR
  */
 export type ModeTime = number | 'none';
 
+/** Cost and insertion point for adding one searched place to the current route. */
+export interface RouteDetourEstimate {
+  /** Insert before this waypoint, preserving the route's visiting order. */
+  insertIndex: number;
+  extraTimeMs: number;
+  extraDistanceM: number;
+}
+
 /** Route-planning state: waypoints in, routed paths out, auto-refreshed. */
 export interface RoutePlanner {
   active: boolean;
@@ -70,6 +79,16 @@ export interface RoutePlanner {
    * — it comes from the journey board, not a costing.
    */
   modeTimes: Partial<Record<RoutingProfile, ModeTime>>;
+
+  /**
+   * Route candidate stops through the same provider as the plan (server on web,
+   * offline-first on Android). Unroutable candidates return null in their
+   * original slot so a search result can simply be omitted.
+   */
+  estimateDetours: (
+    positions: LatLng[],
+    signal: AbortSignal,
+  ) => Promise<(RouteDetourEstimate | null)[]>;
 
   /**
    * Enter route mode, optionally seeding the first stop (e.g. from a dropped
@@ -371,6 +390,53 @@ export function useRoute(route: RouteFn): RoutePlanner {
     setSeed((s) => s + 1);
   }, []);
 
+  const estimateDetours = useCallback(
+    async (positions: LatLng[], signal: AbortSignal): Promise<(RouteDetourEstimate | null)[]> => {
+      const current = paths?.[selectedPath];
+      if (roundTrip || waypoints.length < 2 || !current) return positions.map(() => null);
+      const points = waypoints.map((w) => w.pos);
+
+      const estimates: (RouteDetourEstimate | null)[] = positions.map(() => null);
+      let nextIndex = 0;
+      const worker = async () => {
+        while (!signal.aborted) {
+          const index = nextIndex++;
+          if (index >= positions.length) return;
+          const position = positions[index]!;
+          const insertIndex = viaInsertIndex(current.points, points, position);
+          const detourPoints = [
+            ...points.slice(0, insertIndex),
+            position,
+            ...points.slice(insertIndex),
+          ];
+          try {
+            const result = await routeRef.current(
+              { profile, points: detourPoints, alternatives: false, instructions: false },
+              signal,
+            );
+            const detour = result.paths[0];
+            if (!detour || signal.aborted) continue;
+            estimates[index] = {
+              insertIndex,
+              // An extra waypoint can make the router choose a different base
+              // line. A negative "detour" is noise, not a useful promise.
+              extraTimeMs: Math.max(0, detour.timeMs - current.timeMs),
+              extraDistanceM: Math.max(0, detour.distanceM - current.distanceM),
+            };
+          } catch {
+            // One unroutable POI must not discard the other search results.
+            estimates[index] = null;
+          }
+        }
+      };
+      // Embedded Valhalla is CPU-heavy and may serve this seam on Android;
+      // keep a short queue rather than starting six native routes at once.
+      await Promise.all(Array.from({ length: Math.min(2, positions.length) }, () => worker()));
+      return estimates;
+    },
+    [paths, selectedPath, roundTrip, waypoints, profile],
+  );
+
   return {
     active,
     profile,
@@ -382,6 +448,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     loading,
     error,
     modeTimes,
+    estimateDetours,
     start,
     restore,
     plan,

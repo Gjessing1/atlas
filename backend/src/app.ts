@@ -197,9 +197,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // never talks to it directly (single origin, no CORS, URL stays private).
   const photonUrl = opts.photonUrl ?? process.env.PHOTON_URL ?? 'http://127.0.0.1:2322';
   app.get<{
-    Querystring: { q?: string; limit?: string; lat?: string; lon?: string };
+    Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };
   }>('/api/search', async (request, reply) => {
-    const { q, limit, lat, lon } = request.query;
+    const { q, limit, lat, lon, bbox } = request.query;
     if (!q?.trim()) {
       return reply.code(400).send({ error: 'missing query parameter: q' });
     }
@@ -210,6 +210,26 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (lat && lon) {
       url.searchParams.set('lat', lat);
       url.searchParams.set('lon', lon);
+    }
+    // Search-along-route first narrows Photon to the padded route bounds, then
+    // applies the precise polyline corridor in the client. Canonicalise the
+    // box here rather than forwarding arbitrary query syntax upstream.
+    if (bbox !== undefined) {
+      const values = bbox.split(',').map(Number);
+      const [minLng, minLat, maxLng, maxLat] = values;
+      if (
+        values.length !== 4 ||
+        values.some((value) => !Number.isFinite(value)) ||
+        minLng! < -180 ||
+        maxLng! > 180 ||
+        minLat! < -90 ||
+        maxLat! > 90 ||
+        minLng! >= maxLng! ||
+        minLat! >= maxLat!
+      ) {
+        return reply.code(400).send({ error: 'invalid query parameter: bbox' });
+      }
+      url.searchParams.set('bbox', values.join(','));
     }
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) });

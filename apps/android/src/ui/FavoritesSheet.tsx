@@ -1,7 +1,16 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Keyboard,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { ReorderableList } from './ReorderableList';
 
@@ -29,6 +38,148 @@ function flattenFolders(
     if (!out.some((f) => f.folder.id === c.id)) out.push({ folder: c, depth: 0 });
   }
   return out;
+}
+
+type EditablePlacePatch = Pick<
+  PlacePatch,
+  'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
+>;
+
+/** Controlled place editor: changes land together when Save is tapped. */
+function PlaceEditor({
+  place,
+  folders,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  place: PlaceRecord;
+  folders: { folder: CollectionRecord; depth: number }[];
+  onSave: (patch: EditablePlacePatch) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(place.name);
+  const [icon, setIcon] = useState(place.icon);
+  const [color, setColor] = useState(place.color);
+  const [collectionId, setCollectionId] = useState(place.collectionId);
+  const [notes, setNotes] = useState(place.notes);
+  const [tags, setTags] = useState(place.tags.join(', '));
+
+  const save = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    Keyboard.dismiss();
+    onSave({
+      name: trimmedName,
+      icon,
+      color,
+      collectionId,
+      notes,
+      tags: tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    });
+    onClose();
+  };
+
+  return (
+    <View style={styles.picker}>
+      <TextInput
+        style={styles.nameInput}
+        value={name}
+        onChangeText={setName}
+        placeholder="Name"
+        returnKeyType="done"
+        testID={`favorite-name-${place.id}`}
+      />
+      <View style={styles.choiceRow}>
+        {PLACE_ICONS.map((candidate) => (
+          <Pressable
+            key={candidate}
+            style={[styles.iconChoice, candidate === icon && styles.choiceSelected]}
+            onPress={() => setIcon(candidate)}
+            testID={`favorite-icon-${place.id}-${candidate}`}
+          >
+            <Text style={styles.iconChoiceText}>{candidate}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.choiceRow}>
+        {PLACE_COLORS.map((candidate) => (
+          <Pressable
+            key={candidate}
+            style={[
+              styles.colorChoice,
+              { backgroundColor: candidate },
+              candidate === color && styles.colorChoiceSelected,
+            ]}
+            onPress={() => setColor(candidate)}
+            testID={`favorite-color-${place.id}-${candidate}`}
+          />
+        ))}
+      </View>
+      <View style={styles.choiceRow}>
+        <Pressable
+          style={[styles.folderChip, collectionId === null && styles.folderChipSelected]}
+          onPress={() => setCollectionId(null)}
+          testID={`favorite-folder-${place.id}-none`}
+        >
+          <Text style={styles.folderChipText}>No folder</Text>
+        </Pressable>
+        {folders.map(({ folder, depth }) => (
+          <Pressable
+            key={folder.id}
+            style={[styles.folderChip, collectionId === folder.id && styles.folderChipSelected]}
+            onPress={() => setCollectionId(folder.id)}
+            testID={`favorite-folder-${place.id}-${folder.id}`}
+          >
+            <Text style={styles.folderChipText}>
+              {depth > 0 ? '└ ' : ''}📁 {folder.name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        style={[styles.nameInput, styles.notesInput]}
+        value={notes}
+        onChangeText={setNotes}
+        placeholder="Notes"
+        multiline
+        testID={`favorite-notes-${place.id}`}
+      />
+      <TextInput
+        style={styles.nameInput}
+        value={tags}
+        onChangeText={setTags}
+        placeholder="Tags: hike, family, todo"
+        returnKeyType="done"
+        testID={`favorite-tags-${place.id}`}
+      />
+      <View style={styles.editorActions}>
+        <Pressable
+          style={[styles.button, !name.trim() && styles.buttonDisabled]}
+          disabled={!name.trim()}
+          onPress={save}
+          testID={`favorite-save-${place.id}`}
+        >
+          <Text style={styles.buttonText}>Save</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonDanger]}
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+            onDelete();
+          }}
+          testID={`favorite-delete-${place.id}`}
+        >
+          <Text style={styles.buttonText}>Delete place</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -103,14 +254,8 @@ export function FavoritesSheet({
   collections: CollectionRecord[];
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
-  /** Patch a place (name/icon/colour/notes/tags/visibility/folder) — auto-saved + synced, same as web. */
-  onPatch: (
-    id: string,
-    patch: Pick<
-      PlacePatch,
-      'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
-    >,
-  ) => void;
+  /** Patch a place (the editor batches its fields behind an explicit Save). */
+  onPatch: (id: string, patch: EditablePlacePatch) => void;
   onDelete: (id: string) => void;
   /** Create a folder — at the root, or nested under `parentId` (subfolder). */
   onCreateFolder: (name: string, parentId: string | null) => void;
@@ -137,9 +282,19 @@ export function FavoritesSheet({
   // A row is being dragged: freeze the sheet's scroll and close any editor so
   // row heights are uniform while the drag measures its way through the list.
   const [dragActive, setDragActive] = useState(false);
+  const folderRefs = useRef(new Map<string, View>());
+  const folderFrames = useRef(new Map<string, { top: number; bottom: number }>());
+  const measureFolder = (id: string) => {
+    folderRefs.current.get(id)?.measureInWindow((_x, y, _width, height) => {
+      folderFrames.current.set(id, { top: y, bottom: y + height });
+    });
+  };
   const onDragActive = (active: boolean) => {
     setDragActive(active);
-    if (active) setEditingId(null);
+    if (active) {
+      setEditingId(null);
+      for (const id of folderRefs.current.keys()) measureFolder(id);
+    }
   };
 
   // Jump straight to a place's edit panel when the sheet is opened for it.
@@ -157,6 +312,10 @@ export function FavoritesSheet({
 
   // Folder tree (folders nest via parentId; dangling parents count as roots).
   const flatFolders = useMemo(() => flattenFolders(collections), [collections]);
+  const collectionIds = useMemo(
+    () => new Set(collections.map((folder) => folder.id)),
+    [collections],
+  );
   const childrenOf = useMemo(() => {
     const map = new Map<string | null, CollectionRecord[]>();
     for (const { folder, depth } of flatFolders) {
@@ -178,6 +337,100 @@ export function FavoritesSheet({
     setNewFolderParent(null);
   };
 
+  const dropPlaceAtFolder = (place: PlaceRecord, pageY: number): boolean => {
+    for (const [folderId, frame] of folderFrames.current) {
+      if (pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
+        if (place.collectionId !== folderId) onPatch(place.id, { collectionId: folderId });
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const placeRow = (place: PlaceRecord, handle: ReactNode): ReactNode => (
+    <View>
+      <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
+        {handle}
+        <Pressable
+          style={[styles.badge, { backgroundColor: place.color }]}
+          onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
+          testID={`favorite-style-${place.id}`}
+        >
+          <Text style={styles.badgeIcon}>{place.icon}</Text>
+        </Pressable>
+        <Pressable
+          style={styles.rowMain}
+          onPress={() => {
+            onFlyTo(place);
+            onClose();
+          }}
+          testID={`favorite-${place.id}`}
+        >
+          <Text style={styles.rowText} numberOfLines={1}>
+            {place.name}
+          </Text>
+          <Text style={styles.muted}>
+            {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={styles.eyeButton}
+          onPress={() => onPatch(place.id, { visible: !place.visible })}
+          testID={`favorite-visible-${place.id}`}
+        >
+          <EyeIcon off={!place.visible} />
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
+          testID={`favorite-edit-${place.id}`}
+        >
+          <Text style={styles.buttonQuietText}>✎</Text>
+        </Pressable>
+        <Pressable
+          style={styles.button}
+          onPress={() => {
+            onNavigate(place);
+            onClose();
+          }}
+          testID={`favorite-nav-${place.id}`}
+        >
+          <Text style={styles.buttonText}>Go</Text>
+        </Pressable>
+      </View>
+      {editingId === place.id ? (
+        <PlaceEditor
+          place={place}
+          folders={flatFolders}
+          onSave={(patch) => onPatch(place.id, patch)}
+          onDelete={() => onDelete(place.id)}
+          onClose={() => setEditingId(null)}
+        />
+      ) : null}
+    </View>
+  );
+
+  const renderPlaces = (collectionId: string | null, nested = false): ReactNode => {
+    const level = places.filter((place) =>
+      collectionId === null
+        ? place.collectionId === null || !collectionIds.has(place.collectionId)
+        : place.collectionId === collectionId,
+    );
+    if (level.length === 0) return null;
+    return (
+      <View style={nested ? styles.subLevel : undefined}>
+        <ReorderableList
+          items={level}
+          keyOf={(place) => place.id}
+          onReorder={onReorderPlaces}
+          onDragActive={onDragActive}
+          onDropAt={dropPlaceAtFolder}
+          renderRow={placeRow}
+        />
+      </View>
+    );
+  };
+
   /** One nesting level of the folder tree: siblings reorder among themselves,
       each row followed by its (indented) subtree so a drag carries it along. */
   const renderFolderLevel = (parentId: string | null, depth: number): ReactNode => {
@@ -192,7 +445,15 @@ export function FavoritesSheet({
           onDragActive={onDragActive}
           renderRow={(folder, handle) => (
             <View>
-              <View style={[styles.row, folder.visible ? null : styles.rowHidden]}>
+              <View
+                ref={(node) => {
+                  if (node) folderRefs.current.set(folder.id, node);
+                  else folderRefs.current.delete(folder.id);
+                }}
+                onLayout={() => measureFolder(folder.id)}
+                style={[styles.row, folder.visible ? null : styles.rowHidden]}
+                testID={`folder-row-${folder.id}`}
+              >
                 {handle}
                 <Text style={styles.folderIcon}>📁</Text>
                 <TextInput
@@ -242,6 +503,7 @@ export function FavoritesSheet({
                   <Text style={styles.buttonQuietText}>Delete</Text>
                 </Pressable>
               </View>
+              {renderPlaces(folder.id, true)}
               {renderFolderLevel(folder.id, depth + 1)}
             </View>
           )}
@@ -304,185 +566,16 @@ export function FavoritesSheet({
               </Pressable>
             </View>
 
-            {/* Places */}
-            <Text style={styles.sectionLabel}>Places</Text>
+            {/* Root places stay at the root; foldered places are rendered
+                immediately below their respective folder rows above. */}
+            <Text style={styles.sectionLabel}>Places without a folder</Text>
             {places.length === 0 ? (
               <Text style={styles.muted}>
                 No saved places yet. Long-press the map to save a pin — or sign in to sync the
                 favorites from your other devices.
               </Text>
             ) : (
-              <ReorderableList
-                items={places}
-                keyOf={(place) => place.id}
-                onReorder={onReorderPlaces}
-                onDragActive={onDragActive}
-                renderRow={(place, handle) => (
-                  <View>
-                    <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
-                      {handle}
-                      <Pressable
-                        style={[styles.badge, { backgroundColor: place.color }]}
-                        onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
-                        testID={`favorite-style-${place.id}`}
-                      >
-                        <Text style={styles.badgeIcon}>{place.icon}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.rowMain}
-                        onPress={() => {
-                          onFlyTo(place);
-                          onClose();
-                        }}
-                        testID={`favorite-${place.id}`}
-                      >
-                        <Text style={styles.rowText} numberOfLines={1}>
-                          {place.name}
-                        </Text>
-                        <Text style={styles.muted}>
-                          {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.eyeButton}
-                        onPress={() => onPatch(place.id, { visible: !place.visible })}
-                        testID={`favorite-visible-${place.id}`}
-                      >
-                        <EyeIcon off={!place.visible} />
-                      </Pressable>
-                      <Pressable
-                        style={[styles.button, styles.buttonQuiet]}
-                        onPress={() => setEditingId((id) => (id === place.id ? null : place.id))}
-                        testID={`favorite-edit-${place.id}`}
-                      >
-                        <Text style={styles.buttonQuietText}>✎</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.button}
-                        onPress={() => {
-                          onNavigate(place);
-                          onClose();
-                        }}
-                        testID={`favorite-nav-${place.id}`}
-                      >
-                        <Text style={styles.buttonText}>Go</Text>
-                      </Pressable>
-                    </View>
-                    {editingId === place.id ? (
-                      <View style={styles.picker}>
-                        <TextInput
-                          style={styles.nameInput}
-                          defaultValue={place.name}
-                          placeholder="Name"
-                          // Commit when editing ends (like the web name field's
-                          // blur): rename only when non-empty and actually changed.
-                          onEndEditing={(e) => {
-                            const value = e.nativeEvent.text.trim();
-                            if (value && value !== place.name) onPatch(place.id, { name: value });
-                          }}
-                          returnKeyType="done"
-                          testID={`favorite-name-${place.id}`}
-                        />
-                        <View style={styles.choiceRow}>
-                          {PLACE_ICONS.map((ic) => (
-                            <Pressable
-                              key={ic}
-                              style={[
-                                styles.iconChoice,
-                                ic === place.icon && styles.choiceSelected,
-                              ]}
-                              onPress={() => onPatch(place.id, { icon: ic })}
-                              testID={`favorite-icon-${place.id}-${ic}`}
-                            >
-                              <Text style={styles.iconChoiceText}>{ic}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                        <View style={styles.choiceRow}>
-                          {PLACE_COLORS.map((c) => (
-                            <Pressable
-                              key={c}
-                              style={[
-                                styles.colorChoice,
-                                { backgroundColor: c },
-                                c === place.color && styles.colorChoiceSelected,
-                              ]}
-                              onPress={() => onPatch(place.id, { color: c })}
-                              testID={`favorite-color-${place.id}-${c}`}
-                            />
-                          ))}
-                        </View>
-                        {/* Folder assignment — parity with the web place folder picker
-                            (depth-first order, subfolders marked with └). */}
-                        <View style={styles.choiceRow}>
-                          <Pressable
-                            style={[
-                              styles.folderChip,
-                              place.collectionId === null && styles.folderChipSelected,
-                            ]}
-                            onPress={() => onPatch(place.id, { collectionId: null })}
-                            testID={`favorite-folder-${place.id}-none`}
-                          >
-                            <Text style={styles.folderChipText}>No folder</Text>
-                          </Pressable>
-                          {flatFolders.map(({ folder, depth }) => (
-                            <Pressable
-                              key={folder.id}
-                              style={[
-                                styles.folderChip,
-                                place.collectionId === folder.id && styles.folderChipSelected,
-                              ]}
-                              onPress={() => onPatch(place.id, { collectionId: folder.id })}
-                              testID={`favorite-folder-${place.id}-${folder.id}`}
-                            >
-                              <Text style={styles.folderChipText}>
-                                {depth > 0 ? '└ ' : ''}📁 {folder.name}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                        {/* Notes + tags — storage and sync carry both (web parity). */}
-                        <TextInput
-                          style={[styles.nameInput, styles.notesInput]}
-                          defaultValue={place.notes}
-                          placeholder="Notes"
-                          multiline
-                          onEndEditing={(e) => {
-                            const value = e.nativeEvent.text;
-                            if (value !== place.notes) onPatch(place.id, { notes: value });
-                          }}
-                          testID={`favorite-notes-${place.id}`}
-                        />
-                        <TextInput
-                          style={styles.nameInput}
-                          defaultValue={place.tags.join(', ')}
-                          placeholder="Tags: hike, family, todo"
-                          onEndEditing={(e) => {
-                            const next = e.nativeEvent.text
-                              .split(',')
-                              .map((t) => t.trim())
-                              .filter(Boolean);
-                            if (next.join('\n') !== place.tags.join('\n'))
-                              onPatch(place.id, { tags: next });
-                          }}
-                          returnKeyType="done"
-                          testID={`favorite-tags-${place.id}`}
-                        />
-                        <Pressable
-                          style={[styles.button, styles.buttonDanger]}
-                          onPress={() => {
-                            setEditingId(null);
-                            onDelete(place.id);
-                          }}
-                          testID={`favorite-delete-${place.id}`}
-                        >
-                          <Text style={styles.buttonText}>Delete place</Text>
-                        </Pressable>
-                      </View>
-                    ) : null}
-                  </View>
-                )}
-              />
+              renderPlaces(null)
             )}
           </ScrollView>
           <Pressable
@@ -603,5 +696,6 @@ const styles = StyleSheet.create({
   },
   folderChipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
   folderChipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  editorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });

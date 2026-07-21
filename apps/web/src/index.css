@@ -1604,7 +1604,8 @@ button.transit-notice-summary {
 }
 
 /* Stop search inside the route panel: saved places first, then addresses. */
-.route-stop-search input {
+.route-stop-search input,
+.route-along-search input {
   width: 100%;
   padding: 6px 10px;
   border: 1px solid #ccc;
@@ -1613,7 +1614,8 @@ button.transit-notice-summary {
   font-size: 13px;
 }
 
-.route-stop-search ul {
+.route-stop-search ul,
+.route-along-search ul {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
@@ -1623,7 +1625,8 @@ button.transit-notice-summary {
   overflow-y: auto;
 }
 
-.route-stop-search li button {
+.route-stop-search li button,
+.route-along-search li button {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1636,18 +1639,48 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
-.route-stop-search li button:hover {
+.route-stop-search li button:hover,
+.route-along-search li button:hover {
   background: #eef3fb;
 }
 
-.route-stop-search .result-name {
+.route-stop-search .result-name,
+.route-along-search .result-name {
   font-weight: 600;
   font-size: 13px;
 }
 
-.route-stop-search .result-label {
+.route-stop-search .result-label,
+.route-along-search .result-label {
   font-size: 11px;
   color: #666;
+}
+
+.route-along-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.route-along-toggle {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid #b7c9df;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #23415f;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.route-along-toggle[aria-expanded='true'] {
+  border-color: #2a78d6;
+}
+
+.route-along-search .route-hint {
+  margin: 1px 2px;
 }
 
 /* ---- route-choice preview before guidance starts (RoutePreview) ---- */

@@ -155,6 +155,29 @@ export function LayersIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) 
   );
 }
 
+/** Directions sign: a turn arrow inside the diamond used by map apps. */
+export function DirectionsIcon({ color = DEFAULT_COLOR, size = 23 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 2.8L21.2 12 12 21.2 2.8 12z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M8.2 14.8v-2.2c0-1.5 1.2-2.7 2.7-2.7h4.2M12.8 7.6l2.4 2.3-2.4 2.3"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Bus: windscreen, body, wheels — the shape used for coaches too. */
 export function BusIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   return (

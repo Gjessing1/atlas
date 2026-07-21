@@ -38,3 +38,9 @@ export { optimizeWaypointOrder } from './optimize.js';
 export { pathViaLabels } from './via.js';
 export { sortRouteChoices } from './choices.js';
 export { viaInsertIndex } from './insert.js';
+export {
+  distanceToRouteM,
+  photonBbox,
+  routeSearchBounds,
+  ROUTE_SEARCH_CORRIDOR_M,
+} from './corridor.js';
