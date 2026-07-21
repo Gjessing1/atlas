@@ -12,6 +12,7 @@ import {
   subPolyline,
 } from './geometry.js';
 import { maneuverArrowsGeoJSON } from './overlays.js';
+import { laneGlyphs, laneLabel } from './lanes.js';
 import { headingRateDegPerSec } from './sensors.js';
 import { navOptionsForProfile } from './profiles.js';
 import { NavigationSession } from './session.js';
@@ -1142,6 +1143,31 @@ describe('NavState course and then-maneuver', () => {
     expect(late.then).toBeNull();
   });
 
+  it('shows lane guidance only inside the time-scaled approach band', () => {
+    const laneRoute = route();
+    laneRoute.instructions = instructions.map((instruction, index) =>
+      index === 1
+        ? {
+            ...instruction,
+            lanes: [
+              { directions: ['straight'], state: 'invalid' },
+              {
+                directions: ['straight', 'right'],
+                state: 'active',
+                recommendedDirection: 'right',
+              },
+            ],
+          }
+        : instruction,
+    );
+    const s = new NavigationSession(laneRoute);
+    expect(s.update(pointAtAlong(0), 0).state.laneGuidance).toBeNull();
+    expect(s.update(pointAtAlong(routeCum[10]! - 350), 1000).state.laneGuidance).toEqual(
+      laneRoute.instructions[1]!.lanes,
+    );
+    expect(s.update(pointAtAlong(routeCum[10]! + 5), 2000).state.laneGuidance).toBeNull();
+  });
+
   it('sustains a named long road until the time-based far approach band', () => {
     const s = new NavigationSession(longRoute);
     const early = s.update({ ...longRoutePoints[0]!, speedMps: 30 }, 0).state;
@@ -1186,6 +1212,21 @@ describe('NavState course and then-maneuver', () => {
         expect.objectContaining({ kind: 'post' }),
       );
     }
+  });
+});
+
+describe('lane glyphs', () => {
+  it('uses one shared vector path per marked direction and highlights the carrying branch', () => {
+    const lane = {
+      directions: ['straight', 'right'] as const,
+      state: 'active' as const,
+      recommendedDirection: 'right' as const,
+    };
+    const glyphs = laneGlyphs(lane);
+    expect(glyphs.map((glyph) => glyph.direction)).toEqual(['straight', 'right']);
+    expect(glyphs.every((glyph) => glyph.path.length > 0)).toBe(true);
+    expect(glyphs.map((glyph) => glyph.recommended)).toEqual([false, true]);
+    expect(laneLabel(lane)).toBe('straight or right, use this lane');
   });
 });
 

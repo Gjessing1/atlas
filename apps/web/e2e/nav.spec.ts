@@ -120,6 +120,88 @@ test('a long motorway leg leads with the road, keeping the distant turn secondar
   await expect(page.locator('.nav-then-row')).toContainText('You have arrived');
 });
 
+test('lane guidance requests Valhalla lanes and highlights the carrying lane on approach', async ({
+  page,
+}) => {
+  await mockRouting(page);
+  let requestedTurnLanes = false;
+  await page.route('**/api/route', (route) => {
+    const body = route.request().postDataJSON() as {
+      locations?: { lat: number; lon: number }[];
+      turn_lanes?: boolean;
+    };
+    requestedTurnLanes ||= body.turn_lanes === true;
+    const coords = (body.locations ?? []).map((l) => [l.lat, l.lon] as [number, number]);
+    if (coords.length < 2) {
+      return route.fulfill({ status: 400, json: { message: 'need two locations' } });
+    }
+    return route.fulfill({
+      json: {
+        trip: {
+          units: 'kilometers',
+          legs: [
+            {
+              shape: encodeShape(coords),
+              maneuvers: [
+                {
+                  type: 1,
+                  instruction: 'Drive east on Kirkeveien.',
+                  length: 0.25,
+                  time: 30,
+                  begin_shape_index: 0,
+                  end_shape_index: 0,
+                },
+                {
+                  type: 10,
+                  instruction: 'Turn right onto Geitmyrsveien.',
+                  length: 0,
+                  time: 0,
+                  begin_shape_index: 1,
+                  end_shape_index: 1,
+                  lanes: [
+                    { directions: 8 },
+                    { directions: 2 },
+                    { directions: 66, active: 64 },
+                    { directions: 2 },
+                  ],
+                },
+                {
+                  type: 4,
+                  instruction: 'You have arrived.',
+                  length: 0,
+                  time: 0,
+                  begin_shape_index: 1,
+                  end_shape_index: 1,
+                },
+              ],
+            },
+          ],
+          summary: {
+            length: 0.25,
+            time: 30,
+            min_lat: Math.min(...coords.map((c) => c[0])),
+            min_lon: Math.min(...coords.map((c) => c[1])),
+            max_lat: Math.max(...coords.map((c) => c[0])),
+            max_lon: Math.max(...coords.map((c) => c[1])),
+          },
+        },
+      },
+    });
+  });
+
+  await page.goto('/#map=15/59.91/10.75&pin=59.912/10.752');
+  await waitForMap(page);
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+
+  await expect(page.locator('.nav-lanes')).toBeVisible();
+  await expect(page.locator('.nav-lane')).toHaveCount(4);
+  await expect(page.locator('.nav-lane-active')).toHaveCount(1);
+  await expect(page.getByLabel('Lane 3: straight or right, use this lane')).toBeVisible();
+  expect(requestedTurnLanes).toBe(true);
+});
+
 test('a fix too poor to arrive on still lets the driver finish the trip', async ({
   page,
   context,

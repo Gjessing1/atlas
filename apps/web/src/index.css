@@ -1859,6 +1859,71 @@ button.transit-notice-summary {
   color: #465568;
 }
 
+/* Lane guidance uses vector paths shared with Android. The carriageway stays
+   left-to-right; valid lanes read brightly and non-carrying lanes recede. */
+.nav-lanes {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  margin: 10px 0 0 74px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nav-lanes::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-lane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 0 34px;
+  max-width: 48px;
+  height: 44px;
+  border: 1px solid #ccd5df;
+  border-radius: 10px;
+  background: #f4f6f8;
+  color: #8995a3;
+}
+
+.nav-lane svg {
+  width: 25px;
+  height: 34px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.1px;
+}
+
+.nav-lane-valid,
+.nav-lane-active {
+  border-color: rgba(26, 115, 232, 0.45);
+  background: #eaf2ff;
+  color: #1a73e8;
+}
+
+.nav-lane-active {
+  border-width: 2px;
+  background: #dbe9ff;
+}
+
+.nav-lane-invalid path {
+  opacity: 0.62;
+}
+
+.nav-lane-valid path:not(.nav-lane-recommended),
+.nav-lane-active path:not(.nav-lane-recommended) {
+  opacity: 0.38;
+}
+
+.nav-lane .nav-lane-recommended {
+  stroke-width: 2.8px;
+  opacity: 1;
+}
+
 .nav-then-label {
   color: #657487;
   font-size: 11px;

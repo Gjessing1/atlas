@@ -183,6 +183,16 @@ describe('buildValhallaRequest', () => {
       instructions: true,
     });
     expect(nav['directions_type']).toBeUndefined();
+    expect(nav['turn_lanes']).toBe(true);
+    // Lane markings describe a motor carriageway; non-driving navigation
+    // keeps the smaller response even when it asks for maneuvers.
+    expect(
+      buildValhallaRequest({
+        profile: 'bike',
+        points: [oslo, sognsvann],
+        instructions: true,
+      })['turn_lanes'],
+    ).toBeUndefined();
   });
 
   it('synthesizes round trips as a loop of through-locations', () => {
@@ -325,6 +335,35 @@ describe('parseValhallaResponse', () => {
       alert: 'Take exit 43 toward Oslo.',
       pre: 'Take exit 43 toward Oslo on E6.',
     });
+  });
+
+  it('decodes Valhalla turn-lane masks and carrying state', () => {
+    const withLanes = structuredClone(valhallaResponse);
+    withLanes.trip.legs[0]!.maneuvers[1]!.lanes = [
+      { directions: 8 }, // left
+      { directions: 2 }, // straight
+      { directions: 66, active: 64 }, // straight or right; right carries this turn
+      { directions: 64, valid: 64 }, // another valid right lane
+    ];
+    expect(parseValhallaResponse(withLanes).paths[0]!.instructions![1]!.lanes).toEqual([
+      { directions: ['left'], state: 'invalid' },
+      { directions: ['straight'], state: 'invalid' },
+      {
+        directions: ['straight', 'right'],
+        state: 'active',
+        recommendedDirection: 'right',
+      },
+      { directions: ['right'], state: 'valid', recommendedDirection: 'right' },
+    ]);
+  });
+
+  it('drops incomplete or non-actionable lane rows', () => {
+    const withLanes = structuredClone(valhallaResponse);
+    const maneuver = withLanes.trip.legs[0]!.maneuvers[1]!;
+    maneuver.lanes = [{ directions: 2 }, { directions: 64 }];
+    expect(parseValhallaResponse(withLanes).paths[0]!.instructions![1]!.lanes).toBeUndefined();
+    maneuver.lanes = [{ directions: 2 }, { directions: 0, active: 64 }];
+    expect(parseValhallaResponse(withLanes).paths[0]!.instructions![1]!.lanes).toBeUndefined();
   });
 });
 

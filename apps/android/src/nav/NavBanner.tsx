@@ -1,6 +1,7 @@
 import { fmtClock } from '@atlas/core';
-import { formatExitSign } from '@atlas/routing';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { laneGlyphs, laneLabel } from '@atlas/navigation';
+import { formatExitSign, type RouteLane } from '@atlas/routing';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { theme } from '../ui/theme';
@@ -25,6 +26,49 @@ const formatEta = fmtClock;
 function speedKph(speedMps: number | null): number | null {
   if (speedMps == null || speedMps < 0.5) return null;
   return Math.round(speedMps * 3.6);
+}
+
+function LaneRow({ lanes }: { lanes: RouteLane[] }) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.lanesScroll}
+      contentContainerStyle={styles.lanes}
+      accessibilityLabel="Lane guidance"
+    >
+      {lanes.map((lane, index) => {
+        const carrying = lane.state !== 'invalid';
+        return (
+          <View
+            key={index}
+            style={[
+              styles.lane,
+              carrying && styles.laneCarrying,
+              lane.state === 'active' && styles.laneActive,
+            ]}
+            accessible
+            accessibilityLabel={`Lane ${index + 1}: ${laneLabel(lane)}`}
+          >
+            <Svg width={25} height={34} viewBox="0 0 24 32">
+              {laneGlyphs(lane).map((glyph) => (
+                <Path
+                  key={glyph.direction}
+                  d={glyph.path}
+                  fill="none"
+                  stroke={carrying ? theme.accent : '#8995a3'}
+                  strokeWidth={glyph.recommended ? 2.8 : 2.1}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={glyph.recommended ? 1 : carrying ? 0.38 : 0.62}
+                />
+              ))}
+            </Svg>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
 }
 
 function AudioIcon({ muted }: { muted: boolean }) {
@@ -156,6 +200,7 @@ export function NavBanner({
                 ) : null}
               </View>
             </View>
+            {state?.laneGuidance ? <LaneRow lanes={state.laneGuidance} /> : null}
             {thenManeuver ? (
               <View style={styles.thenRow}>
                 <Text style={styles.thenLabel}>Then</Text>
@@ -304,6 +349,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     overflow: 'hidden',
   },
+  lanesScroll: { marginTop: 10, marginLeft: 74 },
+  lanes: { flexGrow: 1, gap: 5 },
+  lane: {
+    minWidth: 34,
+    maxWidth: 48,
+    height: 44,
+    flexGrow: 1,
+    borderWidth: 1,
+    borderColor: '#ccd5df',
+    borderRadius: 10,
+    backgroundColor: '#f4f6f8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  laneCarrying: { borderColor: 'rgba(26, 115, 232, 0.45)', backgroundColor: '#eaf2ff' },
+  laneActive: { borderWidth: 2, backgroundColor: '#dbe9ff' },
   thenRow: {
     flexDirection: 'row',
     alignItems: 'center',

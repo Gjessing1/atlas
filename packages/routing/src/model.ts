@@ -87,6 +87,39 @@ export interface RouteInstruction {
    * speech from the display instruction.
    */
   verbal?: VerbalInstruction;
+  /**
+   * Left-to-right lane guidance for the approach to this maneuver. Valhalla
+   * only includes it when the route request opts in and the source road has
+   * `turn:lanes`; absent is the normal international/coverage fallback.
+   */
+  lanes?: RouteLane[];
+}
+
+/** One direction painted in a turn lane, normalised from Valhalla's bit mask. */
+export type LaneDirection =
+  | 'none'
+  | 'straight'
+  | 'sharp-left'
+  | 'left'
+  | 'slight-left'
+  | 'slight-right'
+  | 'right'
+  | 'sharp-right'
+  | 'u-turn'
+  | 'merge-left'
+  | 'merge-right';
+
+/** One physical lane, ordered left-to-right across the carriageway. */
+export interface RouteLane {
+  /** Every direction the lane permits (a lane can allow both straight and right). */
+  directions: LaneDirection[];
+  /**
+   * `active` is Valhalla's preferred carrying lane, `valid` is another lane
+   * that safely carries the maneuver, and `invalid` must be visually dimmed.
+   */
+  state: 'active' | 'valid' | 'invalid';
+  /** The direction within a multi-direction lane that carries this maneuver. */
+  recommendedDirection?: LaneDirection;
 }
 
 /** Purpose-built spoken variants attached to one Valhalla maneuver. */

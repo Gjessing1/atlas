@@ -1,6 +1,8 @@
 import { decodePolyline, type LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
 import type {
+  LaneDirection,
+  RouteLane,
   ExitSign,
   RouteInstruction,
   RoutePath,
@@ -114,6 +116,11 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   // (navigation asks, plain route planning doesn't) to keep responses lean.
   if (!query.instructions) {
     body['directions_type'] = 'none';
+  } else if (query.profile === 'car') {
+    // Valhalla imports OSM turn:lanes into its graph, but deliberately omits
+    // them from its native JSON serializer unless this top-level option is
+    // set. This is route guidance data, so only navigation requests pay for it.
+    body['turn_lanes'] = true;
   }
   // Ferries are a *ride*, not a walk or a pedal: by default Valhalla will route
   // a hiker onto a fjord crossing, drawing a line over water that the traveller
@@ -235,6 +242,59 @@ interface ValhallaManeuver {
   end_shape_index?: number;
   roundabout_exit_count?: number;
   sign?: ValhallaSign;
+  lanes?: ValhallaLane[];
+}
+
+interface ValhallaLane {
+  /** Bit mask from baldr/turnlanes.h. */
+  directions?: number;
+  /** Preferred direction bit when this is the active lane. */
+  active?: number;
+  /** Carrying direction bit when this is another valid lane. */
+  valid?: number;
+}
+
+const LANE_DIRECTION_BITS: readonly [number, LaneDirection][] = [
+  [1, 'none'],
+  [2, 'straight'],
+  [4, 'sharp-left'],
+  [8, 'left'],
+  [16, 'slight-left'],
+  [32, 'slight-right'],
+  [64, 'right'],
+  [128, 'sharp-right'],
+  [256, 'u-turn'],
+  [512, 'merge-left'],
+  [1024, 'merge-right'],
+];
+
+/** Decode Valhalla's stable TurnLanes bit mask into app-domain directions. */
+function laneDirections(mask: unknown): LaneDirection[] {
+  if (typeof mask !== 'number' || !Number.isInteger(mask) || mask <= 0) return [];
+  return LANE_DIRECTION_BITS.filter(([bit]) => (mask & bit) !== 0).map(
+    ([, direction]) => direction,
+  );
+}
+
+/** Keep only complete, useful lane rows; malformed optional guidance is dropped. */
+function parseLanes(lanes: unknown): RouteLane[] | undefined {
+  if (!Array.isArray(lanes) || lanes.length < 2) return undefined;
+  const parsed: RouteLane[] = [];
+  for (const raw of lanes as ValhallaLane[]) {
+    const directions = laneDirections(raw?.directions);
+    if (directions.length === 0) return undefined;
+    const active = laneDirections(raw?.active)[0];
+    const valid = laneDirections(raw?.valid)[0];
+    const lane: RouteLane = {
+      directions,
+      state: active ? 'active' : valid ? 'valid' : 'invalid',
+    };
+    if (active ?? valid) lane.recommendedDirection = active ?? valid;
+    parsed.push(lane);
+  }
+  // A row with no carrying lane is not guidance; do not encourage the driver
+  // to infer meaning from arrows the engine could not activate.
+  return parsed.some((lane) => lane.state !== 'invalid') ? parsed : undefined;
 }
 
 /** Preserve the non-empty spoken variants Valhalla authored for a maneuver. */
@@ -342,6 +402,8 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       if (exitSign) instruction.exitSign = exitSign;
       const verbal = parseVerbal(m);
       if (verbal) instruction.verbal = verbal;
+      const lanes = parseLanes(m.lanes);
+      if (lanes) instruction.lanes = lanes;
       if (m.type === 26 && typeof m.roundabout_exit_count === 'number') {
         instruction.exitNumber = m.roundabout_exit_count;
       }

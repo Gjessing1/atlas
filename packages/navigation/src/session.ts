@@ -5,6 +5,7 @@ import {
   tunnelNear,
   type RouteEnrichment,
   type RouteInstruction,
+  type RouteLane,
   type RoutePath,
 } from '@atlas/routing';
 
@@ -181,6 +182,7 @@ export class NavigationSession {
         upcoming: null,
         then: null,
         sustain: null,
+        laneGuidance: null,
       };
     }
     return this.lastState;
@@ -377,6 +379,7 @@ export class NavigationSession {
       upcoming,
       then,
       sustain: this.arrived ? null : this.sustainAt(alongM, speedMps),
+      laneGuidance: this.arrived ? null : this.laneGuidanceAt(upcoming, speedMps),
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
@@ -502,6 +505,7 @@ export class NavigationSession {
       upcoming,
       then,
       sustain: this.sustainAt(alongM, speed),
+      laneGuidance: this.laneGuidanceAt(upcoming, speed),
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
@@ -576,6 +580,7 @@ export class NavigationSession {
       upcoming,
       then,
       sustain: this.sustainAt(0, null),
+      laneGuidance: this.laneGuidanceAt(upcoming, null),
       currentRoad: this.roadAt(0),
       speedLimitKph: speedLimitKphAt(this.enrichment, 0),
       tunnel: this.tunnelState(0),
@@ -599,6 +604,26 @@ export class NavigationSession {
       }
     }
     return [null, null];
+  }
+
+  /** Lane arrows become useful at the same moment ordinary approach guidance does. */
+  private laneGuidanceAt(
+    upcoming: UpcomingManeuver | null,
+    speedMps: number | null,
+  ): RouteLane[] | null {
+    const lanes = upcoming?.instruction.lanes;
+    const distanceToM = upcoming?.distanceToM;
+    if (!lanes?.length || distanceToM === undefined) return null;
+    const speed =
+      speedMps === null || !Number.isFinite(speedMps)
+        ? null
+        : Math.min(speedMps, this.opts.promptSpeedMaxMps);
+    const approachM = leadDistanceM(
+      this.opts.approachThresholdsM[0] ?? 0,
+      this.opts.approachLeadTimesS[0] ?? 0,
+      speed,
+    );
+    return distanceToM <= approachM ? lanes : null;
   }
 
   /**

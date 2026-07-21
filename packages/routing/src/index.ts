@@ -5,6 +5,8 @@ export type {
   RoutePath,
   RouteResult,
   RouteInstruction,
+  RouteLane,
+  LaneDirection,
   VerbalInstruction,
   ExitSign,
 } from './model.js';

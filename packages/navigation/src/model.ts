@@ -1,5 +1,5 @@
 import { fmtDistanceM, type LatLng } from '@atlas/core';
-import type { RouteInstruction } from '@atlas/routing';
+import type { RouteInstruction, RouteLane } from '@atlas/routing';
 
 /** A live position fix fed into the navigation session. */
 export interface Position {
@@ -92,6 +92,12 @@ export interface NavState {
    * distant turn as a secondary "then" hint.
    */
   sustain: SustainGuidance | null;
+  /**
+   * Left-to-right lane guidance for `upcoming`, shown only inside the ordinary
+   * time-scaled approach band. Null when the source road has no lane data or
+   * while the maneuver is still too distant.
+   */
+  laneGuidance: RouteLane[] | null;
   /**
    * Name of the road currently being driven ("E6"), from the street name of
    * the maneuver leg containing the position; null when the data has none.

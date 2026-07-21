@@ -1,6 +1,6 @@
 import { fmtClock } from '@atlas/core';
-import { tunnelChipLabel } from '@atlas/navigation';
-import { formatExitSign } from '@atlas/routing';
+import { laneGlyphs, laneLabel, tunnelChipLabel } from '@atlas/navigation';
+import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { fmtDuration, fmtKm } from '../format.js';
 import { TurnIcon } from './TurnIcon.js';
 import type { WebNavController } from './useWebNavigation.js';
@@ -11,6 +11,30 @@ const fmtEta = fmtClock;
 function speedKph(speedMps: number | null): number | null {
   if (speedMps == null || speedMps < 0.5) return null;
   return Math.round(speedMps * 3.6);
+}
+
+function LaneRow({ lanes }: { lanes: RouteLane[] }) {
+  return (
+    <div className="nav-lanes" aria-label="Lane guidance">
+      {lanes.map((lane, index) => (
+        <span
+          className={`nav-lane nav-lane-${lane.state}`}
+          aria-label={`Lane ${index + 1}: ${laneLabel(lane)}`}
+          key={index}
+        >
+          <svg viewBox="0 0 24 32" aria-hidden="true">
+            {laneGlyphs(lane).map((glyph) => (
+              <path
+                d={glyph.path}
+                className={glyph.recommended ? 'nav-lane-recommended' : undefined}
+                key={glyph.direction}
+              />
+            ))}
+          </svg>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function NavActionIcon({ kind }: { kind: 'recenter' | 'overview' | 'follow' | 'sound' | 'mute' }) {
@@ -145,6 +169,7 @@ export function NavBanner({
                   ) : null}
                 </div>
               </div>
+              {state?.laneGuidance ? <LaneRow lanes={state.laneGuidance} /> : null}
               {thenManeuver ? (
                 <div className="nav-then-row">
                   <span className="nav-then-label">Then</span>
