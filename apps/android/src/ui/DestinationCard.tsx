@@ -1,12 +1,4 @@
-import { ROUTING_PROFILES, type RoutingProfile } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-
-/**
- * What the card can be asked for. Transit is not a `RoutingProfile` — it has no
- * costing and no turn-by-turn — but it *is* a travel mode, so it belongs beside
- * the others rather than hidden behind the route planner.
- */
-export type TravelChoice = RoutingProfile | 'transit';
 
 export interface DestinationTarget {
   lat: number;
@@ -22,17 +14,20 @@ export interface DestinationTarget {
 }
 
 /**
- * Bottom card shown after a destination is picked (search result, long-press,
- * place or favorite) but before navigation starts. Lets the user choose a travel
- * mode (car/bike/foot/hike → routing profile), then Navigate, optionally Save the
- * point as a pin, or Cancel.
+ * Bottom card shown after a *place* is picked (search result, long-press, saved
+ * place or favorite): what is here, and what can be done with it.
+ *
+ * It deliberately does **not** choose a travel mode. It used to, which meant
+ * the app had two mode pickers with different visual languages — tiles here,
+ * chips in the RoutePanel — and which one you got depended on whether you had
+ * arrived from a map pin or from the menu button. Worse, the transit hand-off
+ * threw the place's name away and the planner opened showing bare coordinates.
+ * Now "Directions" opens the RoutePanel with this point already set as the
+ * destination, and every mode decision lives there, in one place.
  */
 export function DestinationCard({
   target,
-  mode,
-  onModeChange,
-  onNavigate,
-  transitOffered = false,
+  onDirections,
   onSave,
   onEdit,
   onShare,
@@ -41,12 +36,8 @@ export function DestinationCard({
   bottomInset = 0,
 }: {
   target: DestinationTarget;
-  mode: TravelChoice;
-  onModeChange: (mode: TravelChoice) => void;
-  /** Start guidance — or, for transit, open the journey board. */
-  onNavigate: () => void;
-  /** Transit can answer here (endpoints in Norway); hides the chip when not. */
-  transitOffered?: boolean;
+  /** Open the route planner with this point as the destination. */
+  onDirections: () => void;
   onSave?: () => void;
   /** Open the saved place's edit panel (only for targets with a placeId). */
   onEdit?: () => void;
@@ -75,41 +66,9 @@ export function DestinationCard({
         </Pressable>
       </View>
 
-      <View style={styles.modes}>
-        {ROUTING_PROFILES.map((p) => (
-          <Pressable
-            key={p.id}
-            style={[styles.mode, mode === p.id ? styles.modeActive : null]}
-            onPress={() => onModeChange(p.id)}
-            testID={`mode-${p.id}`}
-          >
-            <Text style={styles.modeIcon}>{p.icon}</Text>
-            <Text style={[styles.modeLabel, mode === p.id ? styles.modeLabelActive : null]}>
-              {p.label}
-            </Text>
-          </Pressable>
-        ))}
-        {transitOffered ? (
-          <Pressable
-            style={[styles.mode, mode === 'transit' ? styles.modeActive : null]}
-            onPress={() => onModeChange('transit')}
-            testID="mode-transit"
-          >
-            <Text style={styles.modeIcon}>🚌</Text>
-            <Text style={[styles.modeLabel, mode === 'transit' ? styles.modeLabelActive : null]}>
-              Transit
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
-
       <View style={styles.actions}>
-        {/* Transit has no turn-by-turn yet, so the button says what it does:
-            it opens the departure board rather than starting guidance. */}
-        <Pressable style={styles.navigate} onPress={onNavigate} testID="destination-navigate">
-          <Text style={styles.navigateText}>
-            {mode === 'transit' ? 'Show journeys' : 'Navigate'}
-          </Text>
+        <Pressable style={styles.navigate} onPress={onDirections} testID="destination-navigate">
+          <Text style={styles.navigateText}>Directions</Text>
         </Pressable>
         {target.canSave && onSave ? (
           <Pressable style={styles.save} onPress={onSave} testID="destination-save">
@@ -150,18 +109,6 @@ const styles = StyleSheet.create({
   name: { fontSize: 17, fontWeight: '700', color: '#111' },
   detail: { fontSize: 13, color: '#778', marginTop: 1 },
   close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
-  modes: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  mode: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#eef1f6',
-  },
-  modeActive: { backgroundColor: '#1a73e8' },
-  modeIcon: { fontSize: 20 },
-  modeLabel: { fontSize: 12, color: '#334', marginTop: 2, fontWeight: '600' },
-  modeLabelActive: { color: '#fff' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {
     flexGrow: 1,

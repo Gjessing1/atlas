@@ -57,15 +57,10 @@ import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { useRoute } from './src/routing/useRoute';
-import { transitCoversPoint } from '@atlas/transit';
 import { useTransitPlan } from './src/routing/useTransit';
 import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
-import {
-  DestinationCard,
-  type TravelChoice,
-  type DestinationTarget,
-} from './src/ui/DestinationCard';
+import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
@@ -145,10 +140,10 @@ function AppInner() {
   const [navHeight, setNavHeight] = useState(0);
   // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
   const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
-  // A picked destination awaiting a travel-mode choice + "Navigate" (search
-  // result, long-press, place or favorite). Cleared once navigation starts.
+  // A picked place awaiting an action (search result, long-press, place or
+  // favorite). Cleared once the route planner takes it over. The travel mode is
+  // not decided here — the RoutePanel is the app's single mode picker.
   const [destination, setDestination] = useState<DestinationTarget | null>(null);
-  const [travelMode, setTravelMode] = useState<TravelChoice>('car');
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
@@ -493,38 +488,62 @@ function AppInner() {
     [pickDestination],
   );
 
-  const startNavigation = useCallback(() => {
+  /**
+   * A GPS fix for the route planner's "My location" shortcut, or null when the
+   * permission is refused or no fix is available — the panel then just says so
+   * rather than silently doing nothing.
+   */
+  const getMyLocation = useCallback(async (): Promise<LatLng | null> => {
+    try {
+      const fg = await Location.requestForegroundPermissionsAsync();
+      if (!fg.granted) return null;
+      const cur = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      return { lat: cur.coords.latitude, lng: cur.coords.longitude };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * "Directions" on the place card: hand the point to the route planner, which
+   * is where every travel-mode decision now happens. The place's *name* goes
+   * with it — the old transit hand-off dropped it and the planner opened
+   * showing bare coordinates for somewhere the user had just picked by name.
+   * Seeding the current position as the start is a convenience, not a
+   * requirement: with no fix the panel opens asking for a start.
+   */
+  const planTo = useCallback(() => {
     if (!destination) return;
     const dest = { lat: destination.lat, lng: destination.lng };
-    if (travelMode === 'transit') {
-      // Transit has no guidance yet, so this opens the journey board instead.
-      // The card only knows where you are going, and a timetable needs both
-      // ends — so take the current fix as the origin. Without a fix the board
-      // still opens and asks for a starting point, rather than failing.
-      void (async () => {
-        let origin: LatLng | null = null;
-        try {
-          const fg = await Location.requestForegroundPermissionsAsync();
-          if (fg.granted) {
-            const cur = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            origin = { lat: cur.coords.latitude, lng: cur.coords.longitude };
-          }
-        } catch {
-          // No fix available — fall through with the destination alone.
-        }
-        setDestination(null);
-        route.start(origin ?? dest);
-        if (origin) route.addWaypoint(dest);
-        transit.setEnabled(true);
-      })();
-      return;
-    }
-    setNavFollow('course');
-    void nav.start(dest, travelMode);
-    setDestination(null);
-  }, [destination, travelMode, nav, route, transit]);
+    const name = destination.name;
+    const hadPlan = route.waypoints.length > 0;
+    void (async () => {
+      const origin = await getMyLocation();
+      setDestination(null);
+      // Open the panel first, then fill it. The destination is added
+      // unconditionally — seeding the origin is the optional half, so a missing
+      // fix costs you the start row, never the place you actually asked for.
+      route.start();
+      // A loop has one anchor, so asking for directions to a place has to leave
+      // loop mode. Coming from a loop the origin is still dropped (the
+      // addWaypoint closure below predates this state change) — the
+      // destination survives, which is the half the user asked for.
+      route.setRoundTrip(false);
+      if (!hadPlan && origin) route.addWaypoint(origin, 'My location');
+      route.addWaypoint(dest, name);
+    })();
+  }, [destination, route, getMyLocation]);
+
+  /** Start guidance to the planner's destination in the chosen road profile. */
+  const startNavigation = useCallback(
+    (dest: LatLng) => {
+      setNavFollow('course');
+      void nav.start(dest, route.profile);
+    },
+    [nav, route.profile],
+  );
 
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
@@ -798,10 +817,7 @@ function AppInner() {
       {destination && !planning ? (
         <DestinationCard
           target={destination}
-          mode={travelMode}
-          onModeChange={setTravelMode}
-          onNavigate={startNavigation}
-          transitOffered={transitCoversPoint({ lat: destination.lat, lng: destination.lng })}
+          onDirections={planTo}
           onSave={
             destination.canSave
               ? () => {
@@ -874,6 +890,8 @@ function AppInner() {
           places={data.places}
           getBias={getBias}
           onExport={exportRoute}
+          onNavigate={startNavigation}
+          getMyLocation={getMyLocation}
           bottomInset={bottomInset}
         />
       ) : null}

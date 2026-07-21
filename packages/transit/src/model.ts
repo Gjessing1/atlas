@@ -172,7 +172,22 @@ export interface TransitQuery {
   searchWindowMinutes?: number;
 }
 
-/** Every ride mode, in the order a mode filter should present them. */
+/**
+ * The ride modes a filter should offer, in presentation order.
+ *
+ * Deliberately *not* every value of `TransitMode`: a filter chip is a promise
+ * that unticking it changes the answer, so a mode with no Norwegian services
+ * behind it is a dead control. Measured against Entur's `lines(transportModes:)`
+ * on 2026-07-21 — bus 4160, water 257, air 104 (all Avinor), rail 50, coach 47,
+ * tram 9, metro 5, cableway 1, **funicular 0**. So `funicular` is absent here
+ * while remaining in `TransitMode` and the wire parser: Fløibanen and its kin
+ * are registered under other modes today, and a leg that ever does arrive as
+ * one must still render rather than fall through to `unknown`.
+ *
+ * `taxi`, `trolleybus` and `monorail` exist in Entur's enum but are likewise
+ * not offered — the first is demand-responsive rather than timetabled, the
+ * other two have no Norwegian services at all.
+ */
 export const RIDE_MODES: readonly TransitMode[] = [
   'bus',
   'coach',
@@ -181,7 +196,6 @@ export const RIDE_MODES: readonly TransitMode[] = [
   'rail',
   'water',
   'air',
-  'funicular',
   'cableway',
 ];
 

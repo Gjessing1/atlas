@@ -153,6 +153,13 @@ function LegRow({ leg }: { leg: TransitLeg }) {
               {leg.from.name}
               {quayNote(leg, 'from')}
             </Text>
+            {/* Who runs it decides which ticket app you need, and the query
+                already asks for it — it was fetched and then thrown away. */}
+            {leg.line.operator ? (
+              <Text style={styles.operator} numberOfLines={1}>
+                {leg.line.operator}
+              </Text>
+            ) : null}
             {stops > 0 ? (
               <Pressable onPress={() => setShowStops((v) => !v)} testID="transit-stops-toggle">
                 <Text style={styles.link}>
@@ -452,6 +459,7 @@ const styles = StyleSheet.create({
   legDetail: { fontSize: 13, color: '#223', flexShrink: 1 },
   headsign: { fontSize: 12, color: '#667', flexShrink: 1 },
   stopName: { fontSize: 12, color: '#778', paddingLeft: 10 },
+  operator: { fontSize: 11, color: '#889' },
   time: { fontSize: 13, fontWeight: '700', color: '#111' },
   timeAimed: { textDecorationLine: 'line-through', color: '#889', fontWeight: '400' },
   late: { color: '#b3261e', fontWeight: '700', fontSize: 13 },
