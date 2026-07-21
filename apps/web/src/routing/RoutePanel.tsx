@@ -337,8 +337,9 @@ export function RoutePanel({
   // Trip times sit under the mode icons only for a point-to-point plan, where
   // comparing modes makes sense; a loop or a single stop has nothing to compare.
   const showModeTimes = !route.roundTrip && route.waypoints.length >= 2;
-  // Transit's chip time comes from its own board, not a costing — and only once
-  // that board has been asked (the planner runs only while transit is selected).
+  // Transit's chip time comes from its own board, not a costing; the board is
+  // asked as soon as the plan has two ends, so this fills in alongside the
+  // other modes rather than only after transit is picked.
   const transitTimeMs = transit.trips?.[0]?.durationMs;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);

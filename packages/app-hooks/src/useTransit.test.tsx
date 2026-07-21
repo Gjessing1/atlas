@@ -76,14 +76,17 @@ describe('useTransitPlan', () => {
     const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
 
     expect(r.current.transit.offered).toBe(true);
-    // Offered is not chosen: nothing is asked until the traveller picks transit.
-    expect(transit).not.toHaveBeenCalled();
-
-    act(() => r.current.transit.setEnabled(true));
+    // Asked as soon as it is offered, not once it is chosen: the mode picker
+    // shows a trip time per mode, and transit's has to arrive with the others.
     await settle();
-
     expect(transit).toHaveBeenCalledTimes(1);
     expect(transit.mock.calls[0]![0]).toMatchObject({ from: OSLO, to: BERGEN });
+    expect(r.current.transit.trips).toHaveLength(1);
+
+    // Picking the mode then paints what is already in hand — no second ask.
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+    expect(transit).toHaveBeenCalledTimes(1);
     expect(r.current.transit.trips).toHaveLength(1);
   });
 

@@ -249,7 +249,6 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
 
   const from = route.waypoints[0]?.pos ?? null;
   const to = route.waypoints.length >= 2 ? route.waypoints[route.waypoints.length - 1]!.pos : null;
-  const planner = useTransit(transit, from, to, enabled && route.active);
   // Offer the mode unless we positively *know* it cannot answer. Gating on
   // `covered` instead would hide the chip until both endpoints exist — which
   // is exactly when someone is looking for the travel mode, and reads as the
@@ -259,6 +258,14 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   const outsideCoverage =
     (from !== null && !transitCoversPoint(from)) || (to !== null && !transitCoversPoint(to));
   const offered = !outsideCoverage && !route.roundTrip;
+  // Ask the board as soon as the plan has two ends, rather than waiting for
+  // transit to be picked: the mode picker compares trip times, and a chip that
+  // stays blank until you commit to it is the one mode you cannot compare. The
+  // query is the same one the board would send anyway, so selecting transit
+  // then paints departures already in hand instead of re-asking. `useTransit`
+  // itself declines to fetch without both endpoints and coverage, so this
+  // costs nothing on a half-built plan.
+  const planner = useTransit(transit, from, to, offered && route.active);
 
   useEffect(() => {
     if (!offered) setEnabled(false);

@@ -134,9 +134,7 @@ export function MapActivityControls({
           accessibilityState={{ expanded: profilesOpen }}
           testID="map-profile-toggle"
         >
-          <ActiveIcon color={theme.accent} size={21} />
-          <Text style={styles.controlLabel}>{activeProfile.label}</Text>
-          <Text style={styles.disclosure}>{profilesOpen ? '▾' : '▴'}</Text>
+          <ActiveIcon color={theme.accent} size={22} />
         </Pressable>
 
         {overlays.catalog.length > 0 ? (
@@ -151,8 +149,7 @@ export function MapActivityControls({
             accessibilityState={{ expanded: layersOpen }}
             testID="layer-quick-toggle"
           >
-            <LayersIcon color={activeCount > 0 ? theme.accent : theme.text} size={21} />
-            <Text style={styles.controlLabel}>Layers</Text>
+            <LayersIcon color={activeCount > 0 ? theme.accent : theme.text} size={22} />
             {activeCount > 0 ? (
               <View style={styles.countBadge}>
                 <Text style={styles.countText}>{activeCount}</Text>
@@ -181,27 +178,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  // Both triggers are the same 44pt circle: the glyph alone says which map
+  // you're on, and two labelled pills were eating the width a map is for.
+  // The words live on in the accessibility labels and in the menus they open.
   profileTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    width: 44,
     height: 44,
-    paddingHorizontal: 11,
     borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: 'transparent',
     elevation: 4,
   },
   controlSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
-  controlLabel: { color: theme.text, fontSize: 12, fontWeight: '700' },
-  disclosure: { color: theme.textMuted, fontSize: 11 },
   layerButton: {
+    width: 44,
     height: 44,
     borderRadius: 22,
-    paddingHorizontal: 11,
-    flexDirection: 'row',
-    gap: 5,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.surface,
