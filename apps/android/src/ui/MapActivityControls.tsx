@@ -139,7 +139,7 @@ export function MapActivityControls({
 
         {overlays.catalog.length > 0 ? (
           <Pressable
-            style={[styles.layerButton, activeCount > 0 && styles.layerButtonOn]}
+            style={styles.layerButton}
             onPress={() => {
               setProfilesOpen(false);
               setLayersOpen((open) => !open);
@@ -202,7 +202,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface,
     elevation: 4,
   },
-  layerButtonOn: { backgroundColor: theme.surfaceActive },
   countBadge: {
     position: 'absolute',
     right: -2,

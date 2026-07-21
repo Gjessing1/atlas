@@ -53,12 +53,15 @@ export function DestinationCard({
   bottomInset?: number;
 }) {
   return (
+    // The action row can wrap on narrower phones. Reserve three rows so
+    // Weather, Save/Edit and Share stay inside the sheet and above Android's
+    // gesture or three-button navigation area.
     <BottomSheet
       visible
       mode="map"
       onClose={onCancel}
       initialSnap="peek"
-      peekHeight={146}
+      peekHeight={218}
       bottomInset={bottomInset}
       testID="destination-sheet"
     >

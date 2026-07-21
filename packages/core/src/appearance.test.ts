@@ -21,6 +21,14 @@ const style = JSON.stringify({
       type: 'line',
       paint: { 'line-color': '#fff', 'line-width': 2 },
     },
+    {
+      id: 'road_secondary_tertiary',
+      type: 'line',
+      paint: {
+        'line-color': '#fea',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 20, 13],
+      },
+    },
     { id: 'label_city', type: 'symbol', paint: { 'text-color': '#000' } },
   ],
 });
@@ -63,7 +71,20 @@ describe('map appearance', () => {
     );
     expect(result.find((layer) => layer.id === 'water')?.paint['fill-color']).toBe('#1d4358');
     expect(result.find((layer) => layer.id === 'road_path_pedestrian')?.minzoom).toBe(12);
+    expect(
+      result.find((layer) => layer.id === 'road_path_pedestrian')?.paint['line-width'],
+    ).toEqual(['interpolate', ['linear'], ['zoom'], 14, 1.22, 20, 9.76]);
+    expect(result.find((layer) => layer.id === 'road_service_track')?.paint['line-width']).toBe(
+      2.24,
+    );
     expect(result.find((layer) => layer.id === 'label_city')?.paint['text-color']).toBe('#eef2f5');
+  });
+
+  it('widens driving roads without wrapping native-incompatible width expressions', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'drive' }));
+    expect(
+      result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-width'],
+    ).toEqual(['interpolate', ['linear'], ['zoom'], 8, 0.56, 20, 14.560000000000002]);
   });
 });
 

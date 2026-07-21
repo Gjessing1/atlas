@@ -61,6 +61,20 @@ body {
   background: var(--surface);
 }
 
+/* MapLibre's bundled scale-control colors are not theme-aware. Keep the light
+   ruler decisively black over pale roads/land, with an inverse dark variant. */
+.maplibregl-ctrl-scale {
+  color: #111;
+  border-color: #111;
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+:root[data-theme='dark'] .maplibregl-ctrl-scale {
+  color: #fff;
+  border-color: #fff;
+  background-color: rgba(22, 28, 33, 0.8);
+}
+
 input,
 textarea,
 select,
@@ -1504,6 +1518,7 @@ button.transit-notice-summary {
 
 .layer-switch-toggle-on {
   color: var(--accent);
+  background: var(--surface-overlay);
 }
 
 .layer-switch-count {

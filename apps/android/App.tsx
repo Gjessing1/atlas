@@ -135,6 +135,10 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const directionsSeq = useRef(0);
+  const [directionsLocating, setDirectionsLocating] = useState(false);
   const transit = useTransitPlan(route);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
@@ -572,10 +576,15 @@ function AppInner() {
     try {
       const fg = await Location.requestForegroundPermissionsAsync();
       if (!fg.granted) return null;
-      const cur = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      return { lat: cur.coords.latitude, lng: cur.coords.longitude };
+      // Indoors Android can leave a current-position request pending forever.
+      // The planner is already visible, but it must also stop saying "Getting
+      // location…" and remain editable when no new fix arrives.
+      const fresh = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      const pos = fresh ?? (await Location.getLastKnownPositionAsync({ maxAge: 120_000 }));
+      return pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null;
     } catch {
       return null;
     }
@@ -594,22 +603,50 @@ function AppInner() {
     const dest = { lat: destination.lat, lng: destination.lng };
     const name = destination.name;
     const hadPlan = route.waypoints.length > 0;
-    void (async () => {
-      const origin = await getMyLocation();
-      setDestination(null);
-      // Open the panel first, then fill it. The destination is added
-      // unconditionally — seeding the origin is the optional half, so a missing
-      // fix costs you the start row, never the place you actually asked for.
-      route.start();
-      // A loop has one anchor, so asking for directions to a place has to leave
-      // loop mode. Coming from a loop the origin is still dropped (the
-      // addWaypoint closure below predates this state change) — the
-      // destination survives, which is the half the user asked for.
-      route.setRoundTrip(false);
-      if (!hadPlan && origin) route.addWaypoint(origin, 'My location');
-      route.addWaypoint(dest, name);
-    })();
+    const seq = ++directionsSeq.current;
+
+    // Transition immediately. GPS and routing happen behind the visible panel
+    // instead of making the Directions button appear frozen for several
+    // seconds. The destination is useful even when location is unavailable.
+    setDestination(null);
+    route.start();
+    route.setRoundTrip(false);
+    const destinationId = route.addWaypoint(dest, name);
+
+    if (hadPlan) {
+      setDirectionsLocating(false);
+      return;
+    }
+    setDirectionsLocating(true);
+    void getMyLocation()
+      .then((origin) => {
+        if (!origin || seq !== directionsSeq.current) return;
+        const current = routeRef.current;
+        const onlyStop = current.waypoints[0];
+        // A user edit wins over the late GPS result. Only fill the untouched
+        // destination-only plan that this exact Directions tap created.
+        if (
+          current.active &&
+          current.waypoints.length === 1 &&
+          onlyStop?.id === destinationId &&
+          onlyStop.pos.lat === dest.lat &&
+          onlyStop.pos.lng === dest.lng
+        ) {
+          current.insertWaypoint(0, origin, 'My location');
+        }
+      })
+      .finally(() => {
+        if (seq === directionsSeq.current) setDirectionsLocating(false);
+      });
   }, [destination, route, getMyLocation]);
+
+  // Closing the planner while a fix is pending prevents that fix from
+  // resurrecting or editing a route the user has dismissed.
+  useEffect(() => {
+    if (route.active) return;
+    directionsSeq.current++;
+    setDirectionsLocating(false);
+  }, [route.active]);
 
   /** Start guidance to the planner's destination in the chosen road profile. */
   const startNavigation = useCallback(
@@ -997,6 +1034,7 @@ function AppInner() {
           onNavigate={startNavigation}
           onShowTransitTrip={showTransitTrip}
           getMyLocation={getMyLocation}
+          locatingOrigin={directionsLocating}
           bottomInset={bottomInset}
         />
       ) : null}

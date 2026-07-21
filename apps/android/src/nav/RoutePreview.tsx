@@ -40,6 +40,9 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
   // Landscape: a left-anchored card instead of a full-width sheet, so the
   // drawn route choices stay visible beside it.
   const landscape = win.width > win.height;
+  // One route stays compact. With alternatives, reserve exactly enough room
+  // for two complete choices; a third remains available by scrolling.
+  const peekHeight = paths.length === 1 ? 236 : 312;
 
   return (
     <BottomSheet
@@ -47,7 +50,7 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
       mode="map"
       onClose={nav.stop}
       initialSnap="peek"
-      peekHeight={236}
+      peekHeight={peekHeight}
       bottomInset={bottomInset}
       sheetStyle={
         landscape

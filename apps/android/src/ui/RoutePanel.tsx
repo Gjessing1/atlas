@@ -392,6 +392,7 @@ export function RoutePanel({
   onNavigate,
   onShowTransitTrip,
   getMyLocation,
+  locatingOrigin = false,
   bottomInset = 0,
 }: {
   route: RoutePlanner;
@@ -415,6 +416,8 @@ export function RoutePanel({
   onShowTransitTrip: (trip: TransitTrip) => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
   getMyLocation: () => Promise<LatLng | null>;
+  /** Directions opened before its automatic current-position lookup finished. */
+  locatingOrigin?: boolean;
   bottomInset?: number;
 }) {
   const sheetRef = useRef<BottomSheetHandle>(null);
@@ -492,7 +495,11 @@ export function RoutePanel({
           reachable, however long the journey board below it grows. */}
       <View style={styles.headerRow}>
         <Text style={styles.heading}>{transitMode ? 'Public transport' : 'Route'}</Text>
-        {route.loading ? <Text style={styles.muted}>Routing…</Text> : null}
+        {locatingOrigin ? (
+          <Text style={styles.muted}>Getting location…</Text>
+        ) : route.loading ? (
+          <Text style={styles.muted}>Routing…</Text>
+        ) : null}
         <Pressable style={styles.closeX} onPress={route.stop} testID="route-close">
           <Text style={styles.closeXText}>✕</Text>
         </Pressable>

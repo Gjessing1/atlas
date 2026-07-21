@@ -1,8 +1,6 @@
 import { scaleBarFor } from '@atlas/core';
 import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-
-import { theme } from '../ui/theme';
+import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 interface Props {
   /** Map centre latitude — ground resolution shrinks towards the poles. */
@@ -24,10 +22,18 @@ interface Props {
  */
 export function ScaleBar({ lat, zoom, bottom, maxWidth = 110 }: Props) {
   const bar = useMemo(() => scaleBarFor(lat, zoom, maxWidth), [lat, zoom, maxWidth]);
+  const dark = useColorScheme() === 'dark';
+  const ink = dark ? '#fff' : '#111';
+  const halo = dark ? 'rgba(22,28,33,0.92)' : 'rgba(255,255,255,0.92)';
   return (
     <View pointerEvents="none" style={[styles.wrap, { bottom }]}>
-      <Text style={styles.label}>{bar.label}</Text>
-      <View style={[styles.bar, { width: Math.round(bar.widthPx) }]} />
+      <Text style={[styles.label, { color: ink, textShadowColor: halo }]}>{bar.label}</Text>
+      <View
+        style={[
+          styles.bar,
+          { width: Math.round(bar.widthPx), borderColor: ink, backgroundColor: halo },
+        ]}
+      />
     </View>
   );
 }
@@ -38,8 +44,6 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     fontWeight: '600',
-    color: theme.text,
-    textShadowColor: theme.surface,
     textShadowRadius: 2,
     marginBottom: 2,
   },
@@ -48,7 +52,5 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2,
     borderRightWidth: 2,
     borderBottomWidth: 2,
-    borderColor: theme.text,
-    backgroundColor: theme.surfaceOverlay,
   },
 });

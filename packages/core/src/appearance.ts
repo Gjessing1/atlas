@@ -38,8 +38,28 @@ function multiplyPaint(layer: StyleLayer, property: string, factor: number): voi
   const current = layer.paint?.[property];
   if (typeof current === 'number') {
     paint(layer, property, current * factor);
-  } else if (current !== undefined) {
-    paint(layer, property, ['*', current, factor]);
+  } else if (Array.isArray(current) && current[0] === 'interpolate') {
+    // MapLibre Native accepts the source style's camera interpolation here,
+    // but some Android builds reject arithmetic wrapped around it for a
+    // line-width. Scale its output stops directly so emphasis can never make
+    // the affected roads disappear.
+    paint(
+      layer,
+      property,
+      current.map((part, index) =>
+        index >= 4 && index % 2 === 0 && typeof part === 'number' ? part * factor : part,
+      ),
+    );
+  } else if (Array.isArray(current) && current[0] === 'step') {
+    paint(
+      layer,
+      property,
+      current.map((part, index) =>
+        (index === 2 || (index >= 4 && index % 2 === 0)) && typeof part === 'number'
+          ? part * factor
+          : part,
+      ),
+    );
   }
 }
 
