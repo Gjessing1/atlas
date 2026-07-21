@@ -113,6 +113,7 @@ interface MapSceneProps {
   mapRef: RefObject<MapRef | null>;
   cameraRef: RefObject<CameraRef | null>;
   mapStyle: string;
+  topInset: number;
   bottomInset: number;
   packs: LocalPack[];
   /** Enabled catalog overlays (WMS rasters proxied by the backend). */
@@ -159,6 +160,7 @@ export function MapScene({
   mapRef,
   cameraRef,
   mapStyle,
+  topInset,
   bottomInset,
   packs,
   overlays,
@@ -228,11 +230,11 @@ export function MapScene({
         ref={mapRef}
         style={styles.map}
         mapStyle={mapStyle}
-        // Edge-to-edge: the map draws behind the system nav bar, so lift the
-        // MapLibre attribution ornament clear of it, left of the bottom-right
-        // locate button. The MapLibre logo watermark is off (attribution stays).
+        // Keep the attribution control in the quiet top-left map corner. At
+        // the bottom it competed with Atlas's menu, scale and locate controls.
+        // The MapLibre logo watermark is off (attribution remains available).
         logo={false}
-        attributionPosition={{ bottom: bottomInset + 8, right: 64 }}
+        attributionPosition={{ top: topInset + 8, left: 8 }}
         // Track the zoom for zoom-proportional pin sizes; a user-driven move
         // additionally pauses the nav follow camera (free look-around).
         onRegionIsChanging={(e) => {

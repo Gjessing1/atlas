@@ -5,13 +5,14 @@ import {
   placeIsVisible,
   placeTargetTitle,
   savedPlaceAt,
+  type ColorScheme,
   type LatLng,
   type MapViewState,
   type PlaceTarget,
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
-import { useMapProfile } from '@atlas/app-hooks';
+import { useMapProfile, useThemeMode } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -71,6 +72,21 @@ const initialView = hashView ?? DEFAULT_VIEW;
 // A plan carried by the link the user opened; restored once storage is ready.
 const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
 
+function useSystemColorScheme(): ColorScheme {
+  const query = '(prefers-color-scheme: dark)';
+  const [scheme, setScheme] = useState<ColorScheme>(() =>
+    window.matchMedia(query).matches ? 'dark' : 'light',
+  );
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setScheme(media.matches ? 'dark' : 'light');
+    media.addEventListener('change', update);
+    update();
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return scheme;
+}
+
 export function App() {
   const [pin, setPin] = useState<LatLng | null>(initialView.pin ?? null);
   // The spot the place card is describing — a pin, saved place, POI or search
@@ -92,6 +108,11 @@ export function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userData = useUserData();
   const sync = useSync(userData);
+  const appearance = useThemeMode(userData, useSystemColorScheme());
+  useEffect(() => {
+    document.documentElement.dataset['theme'] = appearance.colorScheme;
+    document.documentElement.style.colorScheme = appearance.colorScheme;
+  }, [appearance.colorScheme]);
 
   // ---- route planning ----
 
@@ -425,6 +446,8 @@ export function App() {
           setMap(m);
         }}
         suppressPoiClicks={routeActiveRef}
+        colorScheme={appearance.colorScheme}
+        profile={profiles.profile.id}
       />
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
           top stays bright) until live GPS returns. */}
@@ -572,7 +595,13 @@ export function App() {
             onClose={() => setSidebarOpen(false)}
           />
         )}
-        {settingsOpen && <SettingsPanel sync={sync} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && (
+          <SettingsPanel
+            sync={sync}
+            appearance={appearance}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
         {/* Valhalla routes carry no elevation data — skip the profile rather
             than draw an empty chart. */}
         {routePath &&

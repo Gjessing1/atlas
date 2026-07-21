@@ -1,3 +1,45 @@
+/* One semantic palette for every map surface. The resolved mode is written by
+   App from the persisted System/Light/Dark preference. */
+:root {
+  --surface: #fff;
+  --surface-overlay: rgba(255, 255, 255, 0.95);
+  --surface-muted: #f5f5f3;
+  --surface-selected: #eaf1fd;
+  --text: #262b31;
+  --text-muted: #686d73;
+  --border: #d8d8d4;
+  --accent: #1a73e8;
+  --accent-hover: #1765cc;
+  --danger: #a4262c;
+  --danger-bg: #fdecea;
+  --success-bg: #eaf5ec;
+  --warning-bg: #fff5e6;
+  --warning: #8a5300;
+  --success: #1e6b34;
+  --info: #1a4d8f;
+  --route: #7048c9;
+}
+
+:root[data-theme='dark'] {
+  --surface: #242b30;
+  --surface-overlay: rgba(36, 43, 48, 0.96);
+  --surface-muted: #30383e;
+  --surface-selected: #263f5c;
+  --text: #eef2f5;
+  --text-muted: #aeb7bf;
+  --border: #485159;
+  --accent: #67a8ff;
+  --accent-hover: #89bbff;
+  --danger: #ff9da2;
+  --danger-bg: #4b292d;
+  --success-bg: #233d2d;
+  --warning-bg: #493a22;
+  --warning: #ffc46b;
+  --success: #7fd49a;
+  --info: #83b8ff;
+  --route: #b69aff;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -15,6 +57,15 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
+  color: var(--text);
+  background: var(--surface);
+}
+
+input,
+textarea,
+select,
+button {
+  color: inherit;
 }
 
 .topbar {
@@ -36,7 +87,7 @@ body {
   padding: 8px 12px;
   border: none;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   font: inherit;
   font-size: 15px;
@@ -49,7 +100,7 @@ body {
   left: 0;
   right: 0;
   list-style: none;
-  background: #fff;
+  background: var(--surface);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   overflow: hidden;
@@ -65,7 +116,7 @@ body {
 }
 
 .searchbox-results li.highlighted {
-  background: #eef3fb;
+  background: var(--surface-selected);
 }
 
 .searchbox-results .result-name {
@@ -75,7 +126,7 @@ body {
 
 .searchbox-results .result-label {
   font-size: 12px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 /* Non-interactive "Recent" header above the recent-picks list. */
@@ -87,7 +138,7 @@ body {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #888;
+  color: var(--text-muted);
   cursor: default;
 }
 
@@ -96,7 +147,7 @@ body {
   background: none;
   padding: 0;
   font: inherit;
-  color: #1a73e8;
+  color: var(--accent);
   cursor: pointer;
 }
 
@@ -112,7 +163,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   padding: 10px 12px;
@@ -144,12 +195,12 @@ body {
 
 .place-card-sub {
   font-size: 12px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .place-card-coords {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted);
 }
 
 /* Facts about the spot itself, between the heading and the action row. Label
@@ -161,7 +212,7 @@ body {
   gap: 3px;
   margin: 0;
   font-size: 12px;
-  color: #555;
+  color: var(--text-muted);
 }
 
 .place-card-facts > div {
@@ -171,7 +222,7 @@ body {
 
 .place-card-facts dt {
   flex: 0 0 62px;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .place-card-facts dd {
@@ -187,26 +238,26 @@ body {
 
 .place-card-actions button {
   padding: 5px 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
 
 .place-card-actions button:hover {
-  background: #ececec;
+  background: var(--surface-muted);
 }
 
 .place-card-actions button.primary {
-  border-color: #1a73e8;
-  background: #1a73e8;
+  border-color: var(--accent);
+  background: var(--accent);
   color: #fff;
 }
 
 .place-card-actions button.primary:hover {
-  background: #1765cc;
+  background: var(--accent-hover);
 }
 
 /* Colour-badged teardrop map marker (saved places, dropped pin) — the twin of
@@ -258,7 +309,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface);
 }
 
 /* ---- sidebar (collections of places & tracks) ---- */
@@ -267,7 +318,7 @@ body {
   padding: 6px 14px;
   border: none;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   font: inherit;
   font-size: 14px;
@@ -283,7 +334,7 @@ body {
   width: min(340px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   overflow: hidden;
@@ -296,7 +347,7 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid #e1e0d9;
+  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-actions {
@@ -310,16 +361,16 @@ body {
 
 .sidebar-actions button:not(.icon-button) {
   padding: 4px 9px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .sidebar-actions button:not(.icon-button):hover:enabled {
-  background: #ececec;
+  background: var(--surface-muted);
 }
 
 .sidebar-actions button:disabled {
@@ -336,13 +387,13 @@ body {
 .sidebar-empty {
   padding: 12px 4px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .sidebar-errors {
   padding: 8px 12px;
-  background: #fdecea;
-  color: #a4262c;
+  background: var(--danger-bg);
+  color: var(--danger);
   font-size: 12px;
 }
 
@@ -352,8 +403,8 @@ body {
   align-items: flex-start;
   gap: 8px;
   padding: 8px 12px;
-  background: #eaf5ec;
-  color: #1e6b34;
+  background: var(--success-bg);
+  color: var(--success);
   font-size: 12px;
 }
 
@@ -371,7 +422,7 @@ body {
 }
 
 .item-row.selected > .item-line {
-  background: #eef3fb;
+  background: var(--surface-selected);
   border-radius: 6px;
 }
 
@@ -398,17 +449,17 @@ body {
 }
 
 .visibility-toggle {
-  color: #4a5568;
+  color: var(--text-muted);
 }
 
 .hidden > .item-line > .visibility-toggle {
-  color: #a5adba;
+  color: var(--text-muted);
 }
 
 /* Row currently hovered by a drag: insert-above line plus a soft highlight
    (the highlight alone covers "drop into folder"). */
 .item-line.drop-target {
-  background: #eef3fb;
+  background: var(--surface-selected);
   box-shadow: inset 0 2px 0 #7aa2e0;
 }
 
@@ -439,13 +490,13 @@ body {
   flex: 1;
   font-size: 13px;
   font-weight: 600;
-  color: #52514e;
+  color: var(--text-muted);
 }
 
 .item-tags {
   padding-left: 26px;
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .icon-button {
@@ -453,7 +504,7 @@ body {
   background: none;
   font: inherit;
   font-size: 13px;
-  color: #898781;
+  color: var(--text-muted);
   cursor: pointer;
   padding: 2px 5px;
   border-radius: 5px;
@@ -461,8 +512,8 @@ body {
 }
 
 .icon-button:hover {
-  background: #f0efec;
-  color: #0b0b0b;
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .item-editor {
@@ -471,7 +522,7 @@ body {
   gap: 6px;
   margin: 4px 0 8px 26px;
   padding: 8px;
-  background: #f9f9f7;
+  background: var(--surface-muted);
   border-radius: 8px;
 }
 
@@ -480,7 +531,7 @@ body {
   flex-direction: column;
   gap: 2px;
   font-size: 11px;
-  color: #52514e;
+  color: var(--text-muted);
 }
 
 .item-editor input,
@@ -489,9 +540,9 @@ body {
   font: inherit;
   font-size: 13px;
   padding: 4px 6px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .item-editor textarea {
@@ -523,9 +574,9 @@ body {
   font-size: 15px;
   line-height: 1;
   padding: 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -539,29 +590,29 @@ body {
 }
 
 .icon-choice.selected {
-  border-color: #1a73e8;
-  background: #eaf1fd;
+  border-color: var(--accent);
+  background: var(--surface-selected);
 }
 
 .color-choice.selected {
-  border-color: #1a1a1a;
+  border-color: var(--text);
   box-shadow: 0 0 0 1px #fff inset;
 }
 
 .item-editor button.danger {
   align-self: flex-start;
   padding: 4px 9px;
-  border: 1px solid #e0b4b4;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fdf3f3;
-  color: #a4262c;
+  background: var(--danger-bg);
+  color: var(--danger);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .item-editor button.danger:hover {
-  background: #fbe4e4;
+  background: var(--danger-bg);
 }
 
 /* ---- elevation profile panel ---- */
@@ -572,7 +623,7 @@ body {
   transform: translateX(-50%);
   bottom: 12px;
   width: min(720px, calc(100vw - 24px));
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   padding: 8px 12px 4px;
@@ -594,7 +645,7 @@ body {
 .elevation-stats {
   flex: 1;
   font-size: 12px;
-  color: #52514e;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -612,11 +663,11 @@ body {
 .elevation-empty {
   padding: 10px 0;
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .grid-line {
-  stroke: #e1e0d9;
+  stroke: var(--border);
   stroke-width: 1;
 }
 
@@ -626,13 +677,13 @@ body {
 }
 
 .profile-area {
-  fill: #2a78d6;
+  fill: var(--accent);
   fill-opacity: 0.1;
 }
 
 .profile-line {
   fill: none;
-  stroke: #2a78d6;
+  stroke: var(--accent);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -644,7 +695,7 @@ body {
 }
 
 .profile-dot {
-  fill: #2a78d6;
+  fill: var(--accent);
   stroke: #fff;
   stroke-width: 2;
 }
@@ -655,8 +706,8 @@ body {
   display: flex;
   flex-direction: column;
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #e1e0d9;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
   border-radius: 6px;
   pointer-events: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
@@ -668,7 +719,7 @@ body {
 
 .elevation-tooltip span {
   font-size: 11px;
-  color: #52514e;
+  color: var(--text-muted);
 }
 
 /* Dot shown on the track while hovering the elevation profile. */
@@ -676,7 +727,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #2a78d6;
+  background: var(--accent);
   border: 2px solid #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
@@ -694,7 +745,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   padding: 10px 12px;
@@ -713,7 +764,7 @@ body {
 
 .route-loading {
   font-size: 12px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .route-profiles {
@@ -728,9 +779,9 @@ body {
   align-items: center;
   gap: 1px;
   padding: 4px 2px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -738,8 +789,8 @@ body {
 }
 
 .route-profiles button[aria-pressed='true'] {
-  background: #eef3fb;
-  border-color: #2a78d6;
+  background: var(--surface-selected);
+  border-color: var(--accent);
 }
 
 .route-profiles .mode-label {
@@ -753,13 +804,13 @@ body {
    mode is chosen. Muted so the label leads. */
 .route-profiles .mode-time {
   font-size: 10px;
-  color: #667;
+  color: var(--text-muted);
   line-height: 1.1;
   min-height: 12px;
 }
 
 .route-profiles button[aria-pressed='true'] .mode-time {
-  color: #2a78d6;
+  color: var(--accent);
 }
 
 /* `hidden` has to beat the flex display, or the row stays on screen. */
@@ -783,7 +834,7 @@ body {
 .route-roundtrip input[type='number'] {
   width: 60px;
   padding: 3px 6px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
@@ -791,9 +842,9 @@ body {
 
 .route-roundtrip button {
   padding: 3px 8px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -816,7 +867,7 @@ body {
 }
 
 .route-waypoints li:hover {
-  background: #f7f7f5;
+  background: var(--surface-muted);
 }
 
 .route-waypoints li.dragging {
@@ -827,7 +878,7 @@ body {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #7048c9;
+  background: var(--route);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -855,7 +906,7 @@ body {
 
 .route-hint {
   font-size: 12px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .route-actions {
@@ -866,9 +917,9 @@ body {
 
 .route-actions button {
   padding: 4px 9px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -876,7 +927,7 @@ body {
 
 .route-actions button:hover:enabled,
 .route-roundtrip button:hover:enabled {
-  background: #ececec;
+  background: var(--surface-muted);
 }
 
 .route-actions button:disabled,
@@ -887,8 +938,8 @@ body {
 
 .route-error {
   padding: 6px 8px;
-  background: #fdecea;
-  color: #a4262c;
+  background: var(--danger-bg);
+  color: var(--danger);
   border-radius: 6px;
   font-size: 12px;
 }
@@ -902,8 +953,8 @@ body {
   margin-top: 4px;
   padding: 5px 7px;
   border-radius: 6px;
-  background: #eef3fb;
-  color: #23415f;
+  background: var(--surface-selected);
+  color: var(--text);
   font-size: 12px;
 }
 
@@ -915,9 +966,9 @@ body {
 
 .route-alternatives button {
   padding: 4px 8px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -925,8 +976,8 @@ body {
 }
 
 .route-alternatives button[aria-pressed='true'] {
-  background: #f2edfc;
-  border-color: #7048c9;
+  background: var(--surface-selected);
+  border-color: var(--route);
 }
 
 /* Public transport results: a departure board of timed legs. */
@@ -958,9 +1009,9 @@ body {
 .transit-when input,
 .transit-when button {
   padding: 3px 6px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
   font-size: 12px;
 }
@@ -971,7 +1022,7 @@ body {
 }
 
 .transit-when button {
-  background: #f7f7f7;
+  background: var(--surface-muted);
   cursor: pointer;
 }
 
@@ -980,9 +1031,9 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 2px 8px;
   padding: 7px 9px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fafafa;
+  background: var(--surface-muted);
   font-size: 12px;
 }
 
@@ -1003,7 +1054,7 @@ body {
   border: 0;
   background: none;
   font: inherit;
-  color: #7048c9;
+  color: var(--route);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1011,12 +1062,12 @@ body {
 .transit-page {
   align-self: stretch;
   padding: 3px 8px;
-  border: 1px dashed #ccc;
+  border: 1px dashed var(--border);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 11px;
-  color: #55534f;
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -1035,9 +1086,9 @@ body {
 }
 
 .transit-trip {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -1055,11 +1106,11 @@ body {
 }
 
 .transit-trip-head:hover {
-  background: #f7f5fc;
+  background: var(--surface-selected);
 }
 
 .transit-trip-head[aria-expanded='true'] {
-  background: #f2edfc;
+  background: var(--surface-selected);
 }
 
 /* The two numbers a traveller scans for: when to leave, when they arrive. */
@@ -1079,7 +1130,7 @@ body {
 .transit-trip-meta {
   grid-column: 1 / -1;
   font-size: 12px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 /* A disruption flag on the collapsed summary row: the card must not look clean
@@ -1092,15 +1143,15 @@ body {
 }
 
 .transit-trip-flag.info {
-  color: #1a4d8f;
+  color: var(--info);
 }
 
 .transit-trip-flag.warning {
-  color: #8a5300;
+  color: var(--warning);
 }
 
 .transit-trip-flag.severe {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 /* Notices sit in a tinted well rather than as coloured text: a cancellation has
@@ -1115,21 +1166,21 @@ body {
 }
 
 .transit-notice.info {
-  border-color: #cfdcf2;
-  background: #eef3fb;
-  color: #1a4d8f;
+  border-color: var(--border);
+  background: var(--surface-selected);
+  color: var(--info);
 }
 
 .transit-notice.warning {
-  border-color: #f2ddb8;
-  background: #fff5e6;
-  color: #8a5300;
+  border-color: var(--border);
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 .transit-notice.severe {
-  border-color: #f3c4bf;
-  background: #fdecea;
-  color: #b3261e;
+  border-color: var(--border);
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .transit-notice-mark {
@@ -1164,16 +1215,16 @@ button.transit-notice-summary {
 
 .transit-notice-detail {
   margin: 0;
-  color: #4a4740;
+  color: var(--text);
   font-size: 12px;
 }
 
 .transit-line-chip {
   display: inline-block;
   padding: 1px 6px;
-  border: 1px solid #b9b6ae;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: #efedea;
+  background: var(--surface-muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 16px;
@@ -1185,7 +1236,7 @@ button.transit-notice-summary {
   flex-direction: column;
   gap: 8px;
   padding: 8px 9px 10px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border);
 }
 
 .transit-leg {
@@ -1202,7 +1253,7 @@ button.transit-notice-summary {
 }
 
 .transit-leg.walk {
-  color: #6f6d68;
+  color: var(--text-muted);
 }
 
 .transit-leg-body {
@@ -1225,28 +1276,28 @@ button.transit-notice-summary {
 }
 
 .transit-time s {
-  color: #898781;
+  color: var(--text-muted);
   font-weight: 400;
 }
 
 .transit-time.late .transit-delay {
-  color: #a4262c;
+  color: var(--danger);
 }
 
 .transit-time.early .transit-delay {
-  color: #1a7f4b;
+  color: var(--success);
 }
 
 .transit-delay {
   margin-left: 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #a4262c;
+  color: var(--danger);
 }
 
 .transit-headsign,
 .transit-leg-detail {
-  color: #55534f;
+  color: var(--text-muted);
 }
 
 /* What the platform sign says — the part travellers actually walk towards. */
@@ -1254,7 +1305,7 @@ button.transit-notice-summary {
   margin-left: 5px;
   padding: 0 5px;
   border-radius: 4px;
-  background: #efedea;
+  background: var(--surface-muted);
   font-size: 11px;
   font-weight: 600;
 }
@@ -1266,16 +1317,16 @@ button.transit-notice-summary {
   background: none;
   font: inherit;
   font-size: 11px;
-  color: #7048c9;
+  color: var(--route);
   cursor: pointer;
 }
 
 .transit-stops {
   margin: 0 0 0 4px;
   padding-left: 8px;
-  border-left: 2px solid #ddd;
+  border-left: 2px solid var(--border);
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 /* Draggable numbered waypoint markers on the map. */
@@ -1283,7 +1334,7 @@ button.transit-notice-summary {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #7048c9;
+  background: var(--route);
   color: #fff;
   border: 2px solid #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
@@ -1302,23 +1353,23 @@ button.transit-notice-summary {
 
 .editor-actions button:not(.danger) {
   padding: 4px 9px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .editor-actions button:not(.danger):hover {
-  background: #ececec;
+  background: var(--surface-muted);
 }
 
 /* ---- account & sync panel (sidebar footer) ---- */
 
 .account-panel {
   padding: 10px 12px;
-  border-top: 1px solid #e1e0d9;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1335,9 +1386,9 @@ button.transit-notice-summary {
   font: inherit;
   font-size: 13px;
   padding: 4px 6px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .account-actions {
@@ -1347,16 +1398,16 @@ button.transit-notice-summary {
 
 .account-actions button {
   padding: 4px 9px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .account-actions button:hover:enabled {
-  background: #ececec;
+  background: var(--surface-muted);
 }
 
 .account-actions button:disabled {
@@ -1366,13 +1417,13 @@ button.transit-notice-summary {
 
 .account-note {
   margin: 0;
-  color: #52514e;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .account-error {
   margin: 0;
-  color: #a4262c;
+  color: var(--danger);
   font-size: 12px;
 }
 
@@ -1398,7 +1449,7 @@ button.transit-notice-summary {
   gap: 6px;
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px solid #e1e0d9;
+  border-top: 1px solid var(--border);
 }
 
 .account-subform {
@@ -1406,17 +1457,17 @@ button.transit-notice-summary {
 }
 
 .link-danger {
-  color: #a4262c;
+  color: var(--danger);
 }
 
 .account-actions button.button-danger {
-  border-color: #d9a3a5;
-  background: #fdf3f3;
-  color: #a4262c;
+  border-color: var(--border);
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .account-actions button.button-danger:hover:enabled {
-  background: #f8e6e6;
+  background: var(--danger-bg);
 }
 
 /* ---- map-layer quick switcher (bottom-right, above the attribution bar) ---- */
@@ -1438,21 +1489,21 @@ button.transit-notice-summary {
   padding: 7px 10px;
   border: none;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   font: inherit;
   font-size: 15px;
   line-height: 1;
-  color: #2b2a27;
+  color: var(--text);
   cursor: pointer;
 }
 
 .layer-switch-toggle:hover {
-  background: #fff;
+  background: var(--surface);
 }
 
 .layer-switch-toggle-on {
-  color: #1a6fc4;
+  color: var(--accent);
 }
 
 .layer-switch-count {
@@ -1460,7 +1511,7 @@ button.transit-notice-summary {
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 999px;
-  background: #1a6fc4;
+  background: var(--accent);
   color: #fff;
 }
 
@@ -1473,7 +1524,7 @@ button.transit-notice-summary {
   overflow-y: auto;
   padding: 4px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--surface-overlay);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
 }
 
@@ -1489,17 +1540,17 @@ button.transit-notice-summary {
   font: inherit;
   font-size: 13px;
   text-align: left;
-  color: #2b2a27;
+  color: var(--text);
   cursor: pointer;
 }
 
 .layer-switch-item:hover {
-  background: #f0efe9;
+  background: var(--surface-muted);
 }
 
 .layer-switch-item-on {
   font-weight: 600;
-  color: #1a6fc4;
+  color: var(--accent);
 }
 
 .layer-switch-check {
@@ -1521,8 +1572,8 @@ button.transit-notice-summary {
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 999px;
-  background: #f0e2c4;
-  color: #7a5c17;
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 /* Failed storage write (useUserData.writeError) — the change was NOT saved. */
@@ -1536,7 +1587,7 @@ button.transit-notice-summary {
   gap: 10px;
   max-width: min(90vw, 480px);
   padding: 10px 14px;
-  background: #a4262c;
+  background: var(--danger);
   color: #fff;
   border-radius: 8px;
   font-size: 13px;
@@ -1608,7 +1659,7 @@ button.transit-notice-summary {
 .route-along-search input {
   width: 100%;
   padding: 6px 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
@@ -1619,7 +1670,7 @@ button.transit-notice-summary {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 6px;
   max-height: 180px;
   overflow-y: auto;
@@ -1641,7 +1692,7 @@ button.transit-notice-summary {
 
 .route-stop-search li button:hover,
 .route-along-search li button:hover {
-  background: #eef3fb;
+  background: var(--surface-selected);
 }
 
 .route-stop-search .result-name,
@@ -1653,7 +1704,7 @@ button.transit-notice-summary {
 .route-stop-search .result-label,
 .route-along-search .result-label {
   font-size: 11px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .route-along-search {
@@ -1665,10 +1716,10 @@ button.transit-notice-summary {
 .route-along-toggle {
   align-self: flex-start;
   padding: 3px 8px;
-  border: 1px solid #b7c9df;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #eef3fb;
-  color: #23415f;
+  background: var(--surface-selected);
+  color: var(--text);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -1676,7 +1727,7 @@ button.transit-notice-summary {
 }
 
 .route-along-toggle[aria-expanded='true'] {
-  border-color: #2a78d6;
+  border-color: var(--accent);
 }
 
 .route-along-search .route-hint {
@@ -1695,7 +1746,7 @@ button.transit-notice-summary {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 14px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
   padding: 12px 14px;
@@ -1703,7 +1754,7 @@ button.transit-notice-summary {
 
 .nav-preview-error {
   font-size: 12px;
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .nav-preview-choices {
@@ -1726,38 +1777,38 @@ button.transit-notice-summary {
   align-items: flex-start;
   gap: 2px;
   padding: 9px 12px;
-  border: 1.5px solid #e3e5ea;
+  border: 1.5px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .nav-preview-choice.selected {
-  border-color: #2b6cff;
-  background: #eef3ff;
+  border-color: var(--accent);
+  background: var(--surface-selected);
 }
 
 .nav-preview-time {
   font-size: 17px;
   font-weight: 700;
-  color: #20242b;
+  color: var(--text);
 }
 
 .nav-preview-choice.selected .nav-preview-time {
-  color: #1d4fd7;
+  color: var(--accent);
 }
 
 .nav-preview-extra {
   font-size: 13px;
   font-weight: 600;
-  color: #8a8f99;
+  color: var(--text-muted);
 }
 
 .nav-preview-detail {
   font-size: 12px;
-  color: #5c6270;
+  color: var(--text-muted);
 }
 
 .nav-preview-actions {
@@ -1777,13 +1828,13 @@ button.transit-notice-summary {
 
 .nav-preview-cancel {
   flex: 1;
-  background: #eceef2;
-  color: #3a3f4a;
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .nav-preview-go {
   flex: 2;
-  background: #1a73e8;
+  background: var(--accent);
   color: #fff;
 }
 
@@ -1811,8 +1862,8 @@ button.transit-notice-summary {
   display: flex;
   flex-direction: column;
   width: 100%;
-  background: rgba(255, 255, 255, 0.97);
-  color: #1c2733;
+  background: var(--surface-overlay);
+  color: var(--text);
   border: 1px solid rgba(52, 64, 79, 0.1);
   border-radius: 20px;
   padding: 14px 16px 12px;
@@ -1834,7 +1885,7 @@ button.transit-notice-summary {
   width: 60px;
   height: 60px;
   border-radius: 17px;
-  background: #1a73e8;
+  background: var(--accent);
   color: #fff;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
@@ -1855,8 +1906,8 @@ button.transit-notice-summary {
   margin: 10px 0 0 74px;
   padding: 6px 10px;
   border-radius: 10px;
-  background: #f1f5f9;
-  color: #465568;
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 /* Lane guidance uses vector paths shared with Android. The carriageway stays
@@ -1881,10 +1932,10 @@ button.transit-notice-summary {
   flex: 1 0 34px;
   max-width: 48px;
   height: 44px;
-  border: 1px solid #ccd5df;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f4f6f8;
-  color: #8995a3;
+  background: var(--surface-muted);
+  color: var(--text-muted);
 }
 
 .nav-lane svg {
@@ -1901,13 +1952,13 @@ button.transit-notice-summary {
 .nav-lane-valid,
 .nav-lane-active {
   border-color: rgba(26, 115, 232, 0.45);
-  background: #eaf2ff;
-  color: #1a73e8;
+  background: var(--surface-selected);
+  color: var(--accent);
 }
 
 .nav-lane-active {
   border-width: 2px;
-  background: #dbe9ff;
+  background: var(--surface-selected);
 }
 
 .nav-lane-invalid path {
@@ -1925,7 +1976,7 @@ button.transit-notice-summary {
 }
 
 .nav-then-label {
-  color: #657487;
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
@@ -1935,7 +1986,7 @@ button.transit-notice-summary {
 .nav-then-text {
   min-width: 0;
   overflow: hidden;
-  color: #344255;
+  color: var(--text);
   font-size: 13px;
   font-weight: 650;
   line-height: 1.25;
@@ -1950,8 +2001,8 @@ button.transit-notice-summary {
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
-  background: rgba(255, 255, 255, 0.94);
-  color: #1c2733;
+  background: var(--surface-overlay);
+  color: var(--text);
   border: 1px solid rgba(52, 64, 79, 0.1);
   border-radius: 16px;
   padding: 6px 16px;
@@ -1976,7 +2027,7 @@ button.transit-notice-summary {
 }
 
 .nav-distance-to {
-  color: #1a73e8;
+  color: var(--accent);
   font-size: 17px;
   font-weight: 800;
   line-height: 1.15;
@@ -2013,13 +2064,13 @@ button.transit-notice-summary {
 }
 
 .nav-error {
-  color: #b3261e;
+  color: var(--danger);
   font-size: 15px;
   font-weight: 650;
 }
 
 .nav-reroute {
-  color: #8a5200;
+  color: var(--warning);
   font-size: 13px;
   font-weight: 650;
   margin: 8px 0 0 74px;
@@ -2033,7 +2084,7 @@ button.transit-notice-summary {
 }
 
 .nav-state-eyebrow {
-  color: #1a73e8;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -2041,7 +2092,7 @@ button.transit-notice-summary {
 }
 
 .nav-arrival-summary {
-  color: #5f6c7b;
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 600;
   margin-top: 3px;
@@ -2053,7 +2104,7 @@ button.transit-notice-summary {
   gap: 14px;
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid #e3e8ef;
+  border-top: 1px solid var(--border);
 }
 
 .nav-eta {
@@ -2063,14 +2114,14 @@ button.transit-notice-summary {
 }
 
 .nav-eta strong {
-  color: #1c2733;
+  color: var(--text);
   font-size: 19px;
   font-weight: 780;
   line-height: 1;
 }
 
 .nav-eta small {
-  color: #718096;
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.06em;
@@ -2089,12 +2140,12 @@ button.transit-notice-summary {
 .nav-progress-fill {
   height: 3px;
   border-radius: 999px;
-  background: #1a73e8;
+  background: var(--accent);
 }
 
 .nav-summary {
   min-width: 0;
-  color: #5f6c7b;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
 }
@@ -2107,7 +2158,7 @@ button.transit-notice-summary {
   max-width: 100%;
   min-height: 50px;
   padding: 5px 6px 5px 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface-overlay);
   border: 1px solid rgba(52, 64, 79, 0.1);
   border-radius: 27px;
   box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
@@ -2119,7 +2170,7 @@ button.transit-notice-summary {
   flex-direction: column;
   align-items: center;
   min-width: 48px;
-  color: #1c2733;
+  color: var(--text);
   line-height: 1;
 }
 
@@ -2129,7 +2180,7 @@ button.transit-notice-summary {
 }
 
 .nav-speed small {
-  color: #718096;
+  color: var(--text-muted);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.03em;
@@ -2177,7 +2228,7 @@ button.transit-notice-summary {
   min-height: 40px;
   padding: 7px 14px;
   background: transparent;
-  color: #344255;
+  color: var(--text);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -2185,11 +2236,11 @@ button.transit-notice-summary {
 }
 
 .nav-buttons button:hover {
-  background: #edf3fa;
+  background: var(--surface-muted);
 }
 
 .nav-buttons button:focus-visible {
-  outline: 2px solid #1a73e8;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -2212,13 +2263,13 @@ button.transit-notice-summary {
 }
 
 .nav-orientation-button {
-  color: #1a73e8 !important;
+  color: var(--accent) !important;
   font-size: 17px !important;
   font-weight: 850 !important;
 }
 
 .nav-buttons .nav-stop {
-  background: #b3261e;
+  background: var(--danger);
   color: #fff;
   padding-inline: 17px;
 }
@@ -2248,7 +2299,7 @@ button.transit-notice-summary {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #1a73e8;
+  background: var(--accent);
   border: 3px solid #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
 }
@@ -2285,13 +2336,13 @@ button.transit-notice-summary {
 .layers-section {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid #e1e0d9;
+  border-top: 1px solid var(--border);
 }
 
 .layers-title {
   font-size: 13px;
   font-weight: 700;
-  color: #52514e;
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
@@ -2301,7 +2352,7 @@ button.transit-notice-summary {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .layer-row {
@@ -2328,17 +2379,17 @@ button.transit-notice-summary {
 .layer-desc {
   margin-left: 22px;
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .layer-desc a {
-  color: #4a6da7;
+  color: var(--info);
 }
 
 .layer-hint {
   margin-left: 22px;
   font-size: 11px;
-  color: #9a5b00;
+  color: var(--warning);
 }
 
 /* ---- Overlay identify popup (tap lake → depth, tap parcel → gnr/bnr) ---- */
@@ -2359,7 +2410,7 @@ button.transit-notice-summary {
 }
 
 .identify-row {
-  color: #444;
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 
@@ -2375,7 +2426,7 @@ button.transit-notice-summary {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   padding: 10px 12px;
@@ -2394,7 +2445,7 @@ button.transit-notice-summary {
 .weather-coords {
   flex: 1;
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2406,17 +2457,17 @@ button.transit-notice-summary {
 .weather-modes button {
   flex: 1;
   padding: 5px 2px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .weather-modes button[aria-selected='true'] {
-  background: #eef3fb;
-  border-color: #2a78d6;
+  background: var(--surface-selected);
+  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -2428,9 +2479,9 @@ button.transit-notice-summary {
 .weather-species button {
   flex: 1;
   padding: 3px 2px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f7f7f7;
+  background: var(--surface-muted);
   font: inherit;
   font-size: 11px;
   text-transform: capitalize;
@@ -2438,13 +2489,13 @@ button.transit-notice-summary {
 }
 
 .weather-species button[aria-pressed='true'] {
-  background: #eef3fb;
-  border-color: #2a78d6;
+  background: var(--surface-selected);
+  border-color: var(--accent);
 }
 
 .weather-note {
   font-size: 12px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .weather-time {
@@ -2461,14 +2512,14 @@ button.transit-notice-summary {
 
 .weather-sun {
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .weather-scrub {
   width: 100%;
   margin: 0;
-  accent-color: #2a78d6;
+  accent-color: var(--accent);
 }
 
 /* Conditions timeline: one tick per forecast step, coloured by rating. */
@@ -2484,7 +2535,7 @@ button.transit-notice-summary {
   padding: 0;
   border: none;
   border-radius: 2px;
-  background: #e1e0d9;
+  background: var(--border);
   cursor: pointer;
 }
 
@@ -2501,7 +2552,7 @@ button.transit-notice-summary {
   background: #d99a9a;
 }
 .weather-tick.rating-none {
-  background: #e1e0d9;
+  background: var(--border);
 }
 
 .weather-tick.tick-selected {
@@ -2514,8 +2565,8 @@ button.transit-notice-summary {
   flex-direction: column;
   gap: 3px;
   padding: 6px 0;
-  border-top: 1px solid #eee;
-  border-bottom: 1px solid #eee;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .weather-headline {
@@ -2539,7 +2590,7 @@ button.transit-notice-summary {
   flex-wrap: wrap;
   gap: 10px;
   font-size: 12px;
-  color: #555;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2585,7 +2636,7 @@ button.transit-notice-summary {
 .weather-summary {
   font-size: 12px;
   line-height: 1.35;
-  color: #333;
+  color: var(--text);
 }
 
 .weather-windows {
@@ -2597,14 +2648,14 @@ button.transit-notice-summary {
 }
 
 .weather-windows-label {
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .weather-windows button {
   padding: 3px 8px;
-  border: 1px solid #cbdca9;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #f1f7e6;
+  background: var(--success-bg);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -2631,7 +2682,7 @@ button.transit-notice-summary {
   height: 9px;
   margin-top: 4px;
   border-radius: 50%;
-  background: #ccc;
+  background: var(--border);
 }
 
 .factor-dot.factor-good {
@@ -2654,12 +2705,12 @@ button.transit-notice-summary {
   display: block;
   font-size: 12px;
   line-height: 1.35;
-  color: #555;
+  color: var(--text-muted);
 }
 
 .weather-attribution {
   font-size: 10px;
-  color: #a3a29c;
+  color: var(--text-muted);
 }
 
 /* --- Settings panel (account, server status, build info) --- */
@@ -2673,7 +2724,7 @@ button.transit-notice-summary {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   overflow-y: auto;
@@ -2689,14 +2740,14 @@ button.transit-notice-summary {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: #fff;
-  border-bottom: 1px solid #e1e0d9;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   z-index: 1;
 }
 
 .settings-section {
   padding: 10px 12px;
-  border-bottom: 1px solid #f0efe9;
+  border-bottom: 1px solid var(--border);
 }
 
 .settings-section:last-child {
@@ -2708,7 +2759,7 @@ button.transit-notice-summary {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .settings-section-head {
@@ -2717,14 +2768,41 @@ button.transit-notice-summary {
   justify-content: space-between;
 }
 
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+
+.theme-option {
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.theme-option-on {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .settings-note {
   margin: 6px 0 0;
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
 }
 
 .settings-error {
-  color: #c0392b;
+  color: var(--danger);
 }
 
 .link-button {
@@ -2733,12 +2811,12 @@ button.transit-notice-summary {
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: #2a78d6;
+  color: var(--accent);
   cursor: pointer;
 }
 
 .link-button:disabled {
-  color: #a3a29c;
+  color: var(--text-muted);
   cursor: default;
 }
 
@@ -2755,7 +2833,7 @@ button.transit-notice-summary {
   margin-left: auto;
   font-size: 11px;
   font-weight: 400;
-  color: #a3a29c;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2766,7 +2844,7 @@ button.transit-notice-summary {
 .status-group-name {
   font-size: 11px;
   font-weight: 600;
-  color: #6b6a64;
+  color: var(--text-muted);
   margin-bottom: 2px;
 }
 
@@ -2786,14 +2864,14 @@ button.transit-notice-summary {
 
 .status-name {
   flex: 0 0 auto;
-  color: #2b2a26;
+  color: var(--text);
 }
 
 .status-detail {
   flex: 1;
   text-align: right;
   font-size: 11px;
-  color: #898781;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2833,7 +2911,7 @@ button.transit-notice-summary {
   gap: 2px;
   padding: 3px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
@@ -2848,21 +2926,21 @@ button.transit-notice-summary {
   font: inherit;
   font-size: 15px;
   line-height: 1;
-  color: #2b2a27;
+  color: var(--text);
   cursor: pointer;
 }
 
 .profile-switch-item:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--surface-muted);
 }
 
 .profile-switch-item-on {
-  background: #1a6fc4;
+  background: var(--accent);
   color: #fff;
 }
 
 .profile-switch-item-on:hover {
-  background: #1a6fc4;
+  background: var(--accent);
 }
 
 /* The label rides along only for the active profile; the rest stay icons, so

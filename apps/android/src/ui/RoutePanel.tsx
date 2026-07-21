@@ -21,6 +21,7 @@ import { geoSearch, type SearchBias } from '../search/geoSearch';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { PROFILE_ICON, TramIcon } from './modeIcons';
+import { theme } from './theme';
 import { TransitResults } from './TransitResults';
 
 function fmtKm(m: number): string {
@@ -528,7 +529,7 @@ export function RoutePanel({
                 accessibilityState={{ selected: on }}
                 testID={`route-profile-${p.id}`}
               >
-                <Icon color={on ? '#1a73e8' : '#5a6478'} />
+                <Icon color={on ? theme.accent : theme.icon} />
                 {showModeTimes ? (
                   <Text style={[styles.modeTime, on && styles.modeTimeSelected]}>
                     {modeTimeLabel(route.modeTimes[p.id])}
@@ -548,7 +549,7 @@ export function RoutePanel({
               accessibilityState={{ selected: transitMode }}
               testID="route-profile-transit"
             >
-              <TramIcon color={transitMode ? '#1a73e8' : '#5a6478'} />
+              <TramIcon color={transitMode ? theme.accent : theme.icon} />
               {showModeTimes && transitTimeMs !== undefined ? (
                 <Text style={[styles.modeTime, transitMode && styles.modeTimeSelected]}>
                   {fmtDuration(transitTimeMs)}
@@ -840,28 +841,28 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   bodyContent: { gap: 8, paddingTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334', flexGrow: 1 },
-  muted: { fontSize: 13, color: '#778' },
+  heading: { fontSize: 15, fontWeight: '700', color: theme.text, flexGrow: 1 },
+  muted: { fontSize: 13, color: theme.textMuted },
   closeX: { paddingHorizontal: 6, paddingVertical: 2 },
-  closeXText: { fontSize: 18, color: '#556' },
+  closeXText: { fontSize: 18, color: theme.text },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f1f3f7',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  chipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
-  chipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  chipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   // Icon-only mode picker: equal-width tabs under a shared rule, with the
   // selected one underlined rather than filled — a filled pill at this size
   // fights the line badges further down the panel for attention.
   modeRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#e6e9f0',
+    borderBottomColor: theme.border,
     marginBottom: 4,
   },
   modeTab: {
@@ -873,21 +874,21 @@ const styles = StyleSheet.create({
     // Pulls the tab's own underline over the row's hairline rule.
     marginBottom: -1,
   },
-  modeTabSelected: { borderBottomColor: '#1a73e8' },
+  modeTabSelected: { borderBottomColor: theme.accent },
   // Trip time under each mode icon, so the picker reads "24 min / 1 h 10"
   // before a mode is chosen. Muted so the icon leads.
-  modeTime: { marginTop: 2, fontSize: 10, color: '#667' },
-  modeTimeSelected: { color: '#1a73e8' },
+  modeTime: { marginTop: 2, fontSize: 10, color: theme.textMuted },
+  modeTimeSelected: { color: theme.accent },
   roundRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   kmInput: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
     minWidth: 60,
     fontSize: 15,
-    color: '#111',
+    color: theme.text,
   },
   // No maxHeight any more: the panel's own scroller owns the overflow, and a
   // nested one here would fight it for the gesture.
@@ -897,8 +898,8 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#1a73e8',
-    color: '#fff',
+    backgroundColor: theme.accent,
+    color: theme.onAccent,
     textAlign: 'center',
     lineHeight: 26,
     fontWeight: '700',
@@ -908,8 +909,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#1a73e8',
-    color: '#fff',
+    backgroundColor: theme.accent,
+    color: theme.onAccent,
     textAlign: 'center',
     lineHeight: 26,
     fontSize: 12,
@@ -918,67 +919,67 @@ const styles = StyleSheet.create({
   // The tap target is the row-wide box, not just the glyph-width text: a stop
   // called "5" was otherwise a two-character target.
   wpNameTap: { flexGrow: 1, flexShrink: 1, paddingVertical: 4 },
-  wpName: { fontSize: 14, color: '#223' },
+  wpName: { fontSize: 14, color: theme.text },
   wpEdit: { flexGrow: 1, flexShrink: 1 },
   sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   chipBusy: { opacity: 0.6 },
-  hint: { fontSize: 12, color: '#889' },
+  hint: { fontSize: 12, color: theme.textMuted },
   navigate: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  navigateText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 15 },
   iconButton: { paddingHorizontal: 6, paddingVertical: 2 },
-  iconText: { fontSize: 16, color: '#556' },
-  iconDisabled: { color: '#ccd' },
+  iconText: { fontSize: 16, color: theme.text },
+  iconDisabled: { color: theme.textMuted },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
   buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  buttonQuiet: { backgroundColor: '#eef1f6' },
-  buttonQuietText: { color: '#334', fontWeight: '600' },
-  error: { fontSize: 13, color: '#b3261e' },
+  buttonText: { color: theme.onAccent, fontWeight: '600' },
+  buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  buttonQuietText: { color: theme.text, fontWeight: '600' },
+  error: { fontSize: 13, color: theme.danger },
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  stats: { fontSize: 14, color: '#111', fontWeight: '600', flexShrink: 1 },
+  stats: { fontSize: 14, color: theme.text, fontWeight: '600', flexShrink: 1 },
   stopSearch: { flexGrow: 1 },
   stopInputRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   stopInputGrow: { flexGrow: 1, flexShrink: 1 },
   stopInput: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
     fontSize: 14,
-    color: '#111',
+    color: theme.text,
   },
   stopResults: {
     borderWidth: 1,
-    borderColor: '#e2e6ee',
+    borderColor: theme.border,
     borderRadius: 8,
     marginTop: 4,
     paddingVertical: 2,
   },
   stopResult: { paddingHorizontal: 10, paddingVertical: 6 },
-  stopResultName: { fontSize: 14, color: '#111', fontWeight: '600' },
-  stopResultLabel: { fontSize: 11, color: '#778' },
+  stopResultName: { fontSize: 14, color: theme.text, fontWeight: '600' },
+  stopResultLabel: { fontSize: 11, color: theme.textMuted },
   alongSearch: { alignItems: 'stretch', gap: 4 },
   alongToggle: {
     alignSelf: 'flex-start',
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#eef3fb',
+    backgroundColor: theme.surfaceActive,
     borderWidth: 1,
-    borderColor: '#b7c9df',
+    borderColor: theme.border,
   },
-  alongToggleSelected: { borderColor: '#1a73e8' },
-  alongToggleText: { fontSize: 13, color: '#23415f', fontWeight: '600' },
+  alongToggleSelected: { borderColor: theme.accent },
+  alongToggleText: { fontSize: 13, color: theme.text, fontWeight: '600' },
 });

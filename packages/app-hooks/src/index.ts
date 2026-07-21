@@ -18,6 +18,7 @@ export {
   type MapProfileController,
   type MapProfileSettings,
 } from './useMapProfile.js';
+export { useThemeMode, type ThemeModeController, type ThemeModeSettings } from './useThemeMode.js';
 export {
   useTransit,
   useTransitPlan,

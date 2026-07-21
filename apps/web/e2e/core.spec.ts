@@ -11,6 +11,84 @@ test('cold load shows the map at the default Oslo view', async ({ page }) => {
   expect(cam.lng).toBeCloseTo(10.75, 1);
 });
 
+test('dark mode themes the UI and basemap, persists, and profiles change map emphasis', async ({
+  page,
+}) => {
+  // The Playwright container deliberately mounts only the checkout, not the
+  // host's /mnt/data style assets. Supply the smallest Liberty-shaped style
+  // that exercises Atlas's client-side variants.
+  await page.route('**/assets/styles/liberty.json', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: 8,
+        name: 'Theme fixture',
+        sources: {
+          roads: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+        },
+        layers: [
+          { id: 'background', type: 'background', paint: { 'background-color': '#fff' } },
+          {
+            id: 'road_path_pedestrian',
+            type: 'line',
+            source: 'roads',
+            minzoom: 14,
+            paint: { 'line-color': '#fff', 'line-width': 2 },
+          },
+          {
+            id: 'road_service_track',
+            type: 'line',
+            source: 'roads',
+            paint: { 'line-color': '#fff', 'line-width': 2 },
+          },
+        ],
+      }),
+    }),
+  );
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('radio', { name: 'Dark' }).click();
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect
+    .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
+    .toBe('Atlas Dark · explore');
+  expect(
+    await page
+      .locator('.settings-panel')
+      .evaluate((node) => getComputedStyle(node).backgroundColor),
+  ).toBe('rgb(36, 43, 48)');
+
+  // The cartographic pass is part of every variant: paths are reddish dashed,
+  // and a separately-filtered brown dashed track overlay survives style swaps.
+  const contrast = await page.evaluate(() => {
+    const style = window.__atlasMap!.getStyle();
+    const path = style.layers?.find((layer) => layer.id === 'road_path_pedestrian');
+    const track = style.layers?.find(
+      (layer) => layer.id === 'atlas-road_service_track-track-contrast',
+    );
+    return { path: path?.paint?.['line-dasharray'], track: track?.paint?.['line-dasharray'] };
+  });
+  expect(contrast.path).toEqual([2, 1.35]);
+  expect(contrast.track).toEqual([2.4, 1.4]);
+
+  await page.reload();
+  await waitForMap(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('radio', { name: 'Hike' }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
+    .toBe('Atlas Dark · hike');
+  expect(
+    await page.evaluate(
+      () =>
+        window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'road_path_pedestrian')
+          ?.minzoom,
+    ),
+  ).toBe(12);
+});
+
 test('right-click drops a pin and opens the place card', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);

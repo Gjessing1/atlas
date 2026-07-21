@@ -1,5 +1,5 @@
 import type { LatLng } from '@atlas/core';
-import type { SyncState } from '@atlas/app-hooks';
+import type { SyncState, ThemeModeController } from '@atlas/app-hooks';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import type { LocalPack } from '../regions/packs';
@@ -31,6 +31,7 @@ interface AppSheetsProps {
   overlays: OverlaysController;
   settingsOpen: boolean;
   onCloseSettings: () => void;
+  appearance: ThemeModeController;
 
   /** Coords awaiting a name before they're saved as a pin (name-on-save prompt). */
   pendingPin: LatLng | null;
@@ -64,6 +65,7 @@ export function AppSheets({
   overlays,
   settingsOpen,
   onCloseSettings,
+  appearance,
   pendingPin,
   onDismissPendingPin,
   onFlyTo,
@@ -130,6 +132,7 @@ export function AppSheets({
         onPacksChanged={onPacksChanged}
         storage={data.storage}
         onExportAll={() => void data.exportAll()}
+        appearance={appearance}
         bottomInset={bottomInset}
       />
       <PromptModal

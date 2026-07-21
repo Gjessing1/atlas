@@ -4,6 +4,7 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import type { LocalPack } from '../regions/packs';
 import { BottomSheet } from '../ui/BottomSheet';
+import { theme } from '../ui/theme';
 import { geoSearch, type SearchBias } from './geoSearch';
 import { parseRecentSearches, pushRecentSearch, RECENT_SEARCHES_SETTING } from './recentSearches';
 
@@ -147,7 +148,7 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 10,
     elevation: 4,
   },
@@ -158,17 +159,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   closeButton: { paddingHorizontal: 12, paddingVertical: 10 },
-  closeText: { fontSize: 16, color: '#778' },
+  closeText: { fontSize: 16, color: theme.textMuted },
   results: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 10,
     marginTop: 6,
     paddingVertical: 4,
     elevation: 4,
   },
-  listTag: { fontSize: 11, color: '#886', paddingHorizontal: 14, paddingTop: 4 },
+  listTag: { fontSize: 11, color: theme.textMuted, paddingHorizontal: 14, paddingTop: 4 },
   result: { paddingHorizontal: 14, paddingVertical: 8 },
-  resultName: { fontSize: 15, color: '#111' },
-  resultLabel: { fontSize: 12, color: '#778' },
+  resultName: { fontSize: 15, color: theme.text },
+  resultLabel: { fontSize: 12, color: theme.textMuted },
 });

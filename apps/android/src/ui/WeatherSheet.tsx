@@ -324,9 +324,9 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334' },
+  heading: { fontSize: 15, fontWeight: '700', color: theme.text },
   coords: { flex: 1, fontSize: 12, color: theme.textMuted, fontVariant: ['tabular-nums'] },
-  close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
+  close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
 
   modes: { flexDirection: 'row', gap: 6, marginTop: 12 },
   mode: {
@@ -334,11 +334,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#eef1f6',
+    backgroundColor: theme.surfaceMuted,
   },
   modeActive: { backgroundColor: theme.accent },
-  modeLabel: { fontSize: 13, color: '#334', fontWeight: '600' },
-  modeLabelActive: { color: '#fff' },
+  modeLabel: { fontSize: 13, color: theme.text, fontWeight: '600' },
+  modeLabelActive: { color: theme.onAccent },
 
   speciesRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
   chip: {
@@ -346,10 +346,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 6,
     borderRadius: 12,
-    backgroundColor: '#eef1f6',
+    backgroundColor: theme.surfaceMuted,
   },
   chipActive: { backgroundColor: theme.surfaceActive },
-  chipText: { fontSize: 12, color: '#334', textTransform: 'capitalize' },
+  chipText: { fontSize: 12, color: theme.text, textTransform: 'capitalize' },
   chipTextActive: { color: theme.accent, fontWeight: '700' },
 
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 8 },
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
   strip: { marginTop: 10, maxHeight: 24 },
   stripContent: { gap: 2, alignItems: 'center' },
   tick: { width: 6, height: 20, borderRadius: 2 },
-  tickSelected: { borderWidth: 2, borderColor: '#1b1b1b' },
+  tickSelected: { borderWidth: 2, borderColor: theme.text },
 
   stepButtons: { flexDirection: 'row', gap: 8, marginTop: 10 },
   stepButton: {
@@ -375,16 +375,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#eef1f6',
+    backgroundColor: theme.surfaceMuted,
   },
-  stepButtonText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  stepButtonText: { fontSize: 13, color: theme.text, fontWeight: '600' },
 
   facts: {
     marginTop: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#eee',
+    borderColor: theme.border,
     gap: 6,
   },
   headline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scoreText: { color: '#fff', fontWeight: '800', fontSize: 18 },
+  scoreText: { color: theme.onAccent, fontWeight: '800', fontSize: 18 },
   summary: { flex: 1, fontSize: 13, lineHeight: 18, color: theme.text },
 
   windowsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
@@ -423,5 +423,5 @@ const styles = StyleSheet.create({
   factorLabel: { fontSize: 13, fontWeight: '700', color: theme.text },
   factorDetail: { fontSize: 13, lineHeight: 18, color: theme.textMuted, marginTop: 1 },
 
-  attribution: { fontSize: 11, color: '#a3a29c', marginTop: 14 },
+  attribution: { fontSize: 11, color: theme.textMuted, marginTop: 14 },
 });

@@ -1,6 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { theme } from './theme';
+
 /**
  * Colour-badged teardrop pin — the mobile twin of the web's `.place-marker`
  * CSS marker (a rounded square with one sharp corner as the tail, rotated so
@@ -84,7 +86,7 @@ const aStyles = StyleSheet.create({
 });
 
 /** The standard GPS crosshair (ring + four ticks + centre dot) for the locate button. */
-export function CrosshairIcon({ color = '#3a4455' }: { color?: string }) {
+export function CrosshairIcon({ color = theme.icon }: { color?: string }) {
   return (
     <View style={xStyles.box}>
       <View style={[xStyles.ring, { borderColor: color }]} />
@@ -114,7 +116,7 @@ export function MapOverviewIcon({ color = '#1a73e8' }: { color?: string }) {
 }
 
 /** Sun behind a cloud: a stable, tintable weather action glyph. */
-export function WeatherIcon({ color = '#3a4455' }: { color?: string }) {
+export function WeatherIcon({ color = theme.icon }: { color?: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Circle cx={8} cy={8} r={3.2} stroke={color} strokeWidth={1.7} fill="none" />
@@ -136,7 +138,7 @@ export function WeatherIcon({ color = '#3a4455' }: { color?: string }) {
 }
 
 /** Magnifier (ring + diagonal handle) for the collapsed search button. */
-export function SearchIcon({ color = '#3a4455' }: { color?: string }) {
+export function SearchIcon({ color = theme.icon }: { color?: string }) {
   return (
     <View style={sStyles.box}>
       <View style={[sStyles.ring, { borderColor: color }]} />
@@ -168,7 +170,7 @@ const sStyles = StyleSheet.create({
 });
 
 /** Three-bar hamburger for the bottom-left menu button. */
-export function MenuIcon({ color = '#3a4455' }: { color?: string }) {
+export function MenuIcon({ color = theme.icon }: { color?: string }) {
   return (
     <View style={mStyles.box}>
       <View style={[mStyles.bar, { top: 4, backgroundColor: color }]} />

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { theme } from './theme';
+
 /**
  * A single-line text-input dialog. React Native's `Alert.prompt` is iOS-only, so
  * Android needs this for name-on-save and rename (the mobile counterpart of the
@@ -76,29 +78,29 @@ const styles = StyleSheet.create({
   },
   card: {
     alignSelf: 'stretch',
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 14,
     padding: 18,
     gap: 12,
   },
-  title: { fontSize: 16, fontWeight: '700', color: '#223' },
+  title: { fontSize: 16, fontWeight: '700', color: theme.text },
   input: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
-    color: '#111',
+    color: theme.text,
   },
   buttonRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: 18,
     paddingVertical: 10,
   },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  buttonQuiet: { backgroundColor: '#eef1f6' },
-  buttonQuietText: { color: '#334', fontWeight: '600' },
+  buttonText: { color: theme.onAccent, fontWeight: '600' },
+  buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  buttonQuietText: { color: theme.text, fontWeight: '600' },
 });

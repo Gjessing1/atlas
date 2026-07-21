@@ -3,6 +3,8 @@ import type { TransitMode } from '@atlas/transit';
 import { filterModeOf } from '@atlas/transit';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { theme } from './theme';
+
 /**
  * Travel-mode glyphs as real vector icons rather than emoji.
  *
@@ -23,7 +25,7 @@ export interface ModeIconProps {
   size?: number;
 }
 
-const DEFAULT_COLOR = '#3a4455';
+const DEFAULT_COLOR = theme.icon;
 
 /** Car: cabin over a body, two wheels. */
 export function CarIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {

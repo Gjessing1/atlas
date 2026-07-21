@@ -121,7 +121,7 @@ export function LayersSheet({
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334', marginBottom: 4 },
+  heading: { fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 4 },
   groupHeading: {
     marginTop: 10,
     fontSize: 12,
@@ -137,12 +137,12 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxOn: { backgroundColor: theme.accent, borderColor: theme.accent },
-  checkmark: { color: '#fff', fontWeight: '800', fontSize: 14, lineHeight: 16 },
+  checkmark: { color: theme.onAccent, fontWeight: '800', fontSize: 14, lineHeight: 16 },
   layerTitle: { fontSize: 15, color: theme.text },
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   sourceLink: { color: theme.accent, textDecorationLine: 'underline' },
@@ -152,11 +152,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: '#eef1f6',
+    backgroundColor: theme.surfaceMuted,
   },
   opacityChipOn: { backgroundColor: theme.accent },
-  opacityChipText: { fontSize: 13, fontWeight: '600', color: '#334' },
-  opacityChipTextOn: { color: '#fff' },
+  opacityChipText: { fontSize: 13, fontWeight: '600', color: theme.text },
+  opacityChipTextOn: { color: theme.onAccent },
   closeButton: {
     marginTop: 12,
     alignSelf: 'stretch',
@@ -165,5 +165,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 9,
   },
-  closeButtonText: { color: '#fff', fontWeight: '600' },
+  closeButtonText: { color: theme.onAccent, fontWeight: '600' },
 });

@@ -20,6 +20,7 @@ import { useState } from 'react';
 
 import type { TransitPlan } from '../routing/useTransit';
 import { transitIcon } from './modeIcons';
+import { theme } from './theme';
 
 /** Mode names as a traveller would tick them in a filter. */
 const MODE_LABEL: Record<TransitMode, string> = {
@@ -47,7 +48,7 @@ function ModeIcon({
   color?: string;
 }) {
   const Icon = transitIcon(mode);
-  return <Icon size={size} color={color ?? '#5a6478'} />;
+  return <Icon size={size} color={color ?? theme.icon} />;
 }
 
 /**
@@ -370,7 +371,7 @@ function TripCard({
             {transfers === 0 ? 'direct' : `${transfers} ${transfers === 1 ? 'change' : 'changes'}`}{' '}
             ·{' '}
           </Text>
-          <ModeIcon mode="foot" size={13} color="#667" />
+          <ModeIcon mode="foot" size={13} color={theme.icon} />
           <Text style={styles.tripMeta}> {fmtKm(trip.walkDistanceM)}</Text>
         </View>
       </Pressable>
@@ -511,7 +512,7 @@ export function TransitResults({
               {/* Labelled here, unlike the travel-mode picker: a filter is a
                   list of promises about what will be excluded, and "no ferries"
                   has to be unambiguous in a way a glyph alone is not. */}
-              <ModeIcon mode={mode} size={15} color={accepts(mode) ? '#1a73e8' : '#5a6478'} />
+              <ModeIcon mode={mode} size={15} color={accepts(mode) ? theme.accent : theme.icon} />
               <Text style={styles.chipText}> {MODE_LABEL[mode]}</Text>
             </Pressable>
           ))}
@@ -591,39 +592,45 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f1f3f7',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  chipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
-  chipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  chipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   modeChip: { flexDirection: 'row', alignItems: 'center' },
   stepChip: { paddingHorizontal: 10 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  timeValue: { fontSize: 15, fontWeight: '700', color: '#111', flexGrow: 1, textAlign: 'center' },
-  muted: { fontSize: 13, color: '#778' },
-  link: { fontSize: 13, color: '#1a73e8', fontWeight: '600', paddingVertical: 4 },
-  error: { fontSize: 13, color: '#b3261e' },
+  timeValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.text,
+    flexGrow: 1,
+    textAlign: 'center',
+  },
+  muted: { fontSize: 13, color: theme.textMuted },
+  link: { fontSize: 13, color: theme.accent, fontWeight: '600', paddingVertical: 4 },
+  error: { fontSize: 13, color: theme.danger },
   trip: {
     borderWidth: 1,
-    borderColor: '#e2e6ee',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 10,
     gap: 4,
   },
-  tripSelected: { borderColor: '#1a73e8', backgroundColor: '#f7faff' },
+  tripSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceMuted },
   showMapButton: {
     alignSelf: 'flex-start',
     borderRadius: 16,
-    backgroundColor: '#e7effd',
+    backgroundColor: theme.surfaceActive,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  showMapText: { fontSize: 13, fontWeight: '700', color: '#1a73e8' },
+  showMapText: { fontSize: 13, fontWeight: '700', color: theme.accent },
   tripHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tripTimes: { fontSize: 15, fontWeight: '700', color: '#111' },
+  tripTimes: { fontSize: 15, fontWeight: '700', color: theme.text },
   tripLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
-  tripMeta: { fontSize: 12, color: '#667' },
+  tripMeta: { fontSize: 12, color: theme.textMuted },
   tripMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   tripFlag: { fontSize: 11, fontWeight: '700' },
   // Notices sit in a tinted well rather than as coloured text: a cancellation
@@ -640,26 +647,26 @@ const styles = StyleSheet.create({
   noticeBody: { flexShrink: 1, flexGrow: 1, gap: 2 },
   noticeMark: { fontSize: 13, fontWeight: '800', width: 12, textAlign: 'center' },
   noticeText: { fontSize: 12, fontWeight: '700', flexShrink: 1 },
-  noticeDetail: { fontSize: 12, color: '#445' },
-  noticeMore: { fontSize: 11, color: '#889' },
-  noticeInfo: { backgroundColor: '#eef3fb', borderColor: '#cfdcf2' },
+  noticeDetail: { fontSize: 12, color: theme.text },
+  noticeMore: { fontSize: 11, color: theme.textMuted },
+  noticeInfo: { backgroundColor: theme.surfaceActive, borderColor: theme.border },
   noticeInfoText: { color: '#1a4d8f' },
-  noticeWarn: { backgroundColor: '#fff5e6', borderColor: '#f2ddb8' },
-  noticeWarnText: { color: '#8a5300' },
-  noticeSevere: { backgroundColor: '#fdecea', borderColor: '#f3c4bf' },
-  noticeSevereText: { color: '#b3261e' },
-  legs: { marginTop: 6, gap: 8, borderTopWidth: 1, borderTopColor: '#eef1f6', paddingTop: 8 },
+  noticeWarn: { backgroundColor: theme.surfaceMuted, borderColor: theme.border },
+  noticeWarnText: { color: theme.warning },
+  noticeSevere: { backgroundColor: theme.surfaceMuted, borderColor: theme.border },
+  noticeSevereText: { color: theme.danger },
+  legs: { marginTop: 6, gap: 8, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 8 },
   leg: { flexDirection: 'row', gap: 8 },
   legIcon: { alignItems: 'center', justifyContent: 'center' },
   legBody: { flexShrink: 1, flexGrow: 1, gap: 2 },
   legHead: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  legDetail: { fontSize: 13, color: '#223', flexShrink: 1 },
-  headsign: { fontSize: 12, color: '#667', flexShrink: 1 },
-  stopName: { fontSize: 12, color: '#778', paddingLeft: 10 },
-  operator: { fontSize: 11, color: '#889' },
-  time: { fontSize: 13, fontWeight: '700', color: '#111' },
-  timeAimed: { textDecorationLine: 'line-through', color: '#889', fontWeight: '400' },
-  late: { color: '#b3261e', fontWeight: '700', fontSize: 13 },
+  legDetail: { fontSize: 13, color: theme.text, flexShrink: 1 },
+  headsign: { fontSize: 12, color: theme.textMuted, flexShrink: 1 },
+  stopName: { fontSize: 12, color: theme.textMuted, paddingLeft: 10 },
+  operator: { fontSize: 11, color: theme.textMuted },
+  time: { fontSize: 13, fontWeight: '700', color: theme.text },
+  timeAimed: { textDecorationLine: 'line-through', color: theme.textMuted, fontWeight: '400' },
+  late: { color: theme.danger, fontWeight: '700', fontSize: 13 },
   early: { color: '#1e7d32', fontWeight: '700', fontSize: 13 },
   lineChip: {
     borderRadius: 4,
@@ -667,7 +674,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderWidth: 1,
   },
-  lineChipPlain: { backgroundColor: '#eef1f6', borderColor: '#cdd3dd' },
+  lineChipPlain: { backgroundColor: theme.surfaceMuted, borderColor: theme.border },
   lineChipText: { fontSize: 12, fontWeight: '700' },
-  lineChipPlainText: { color: '#334' },
+  lineChipPlainText: { color: theme.text },
 });

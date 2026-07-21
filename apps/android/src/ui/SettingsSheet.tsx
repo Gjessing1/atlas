@@ -1,5 +1,6 @@
 import { fmtClock, type RegionPackManifest } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
+import type { ThemeModeController } from '@atlas/app-hooks';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,6 +20,7 @@ import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
+import { theme } from './theme';
 
 const STATUS_LABEL: Record<SyncState['status'], string> = {
   unavailable: 'Server has no accounts configured',
@@ -366,6 +368,7 @@ export function SettingsSheet({
   onPacksChanged,
   storage,
   onExportAll,
+  appearance,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -376,6 +379,7 @@ export function SettingsSheet({
   storage: AtlasStorage | null;
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
   onExportAll: () => void;
+  appearance: ThemeModeController;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -388,6 +392,29 @@ export function SettingsSheet({
       testID="settings-sheet"
     >
       <ScrollView style={styles.scroll}>
+        <Text style={styles.heading}>Appearance</Text>
+        <View style={styles.themeRow} accessibilityRole="radiogroup">
+          {(['system', 'light', 'dark'] as const).map((mode) => (
+            <Pressable
+              key={mode}
+              style={[styles.themeOption, appearance.mode === mode && styles.themeOptionOn]}
+              onPress={() => appearance.setMode(mode)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: appearance.mode === mode }}
+              testID={`theme-${mode}`}
+            >
+              <Text
+                style={[
+                  styles.themeOptionText,
+                  appearance.mode === mode && styles.themeOptionTextOn,
+                ]}
+              >
+                {mode[0].toUpperCase() + mode.slice(1)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
         <Text style={styles.heading}>Account</Text>
         <AccountSection sync={sync} />
         <Text style={styles.heading}>Offline regions</Text>
@@ -417,13 +444,20 @@ export function SettingsSheet({
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  heading: { fontSize: 13, fontWeight: '700', color: '#667', marginTop: 18, marginBottom: 8 },
-  rowText: { fontSize: 16, color: '#111' },
-  muted: { fontSize: 13, color: '#778', marginTop: 2 },
-  error: { fontSize: 13, color: '#b3261e', marginTop: 6 },
+  heading: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.textMuted,
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  rowText: { fontSize: 16, color: theme.text },
+  muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
+  error: { fontSize: 13, color: theme.danger, marginTop: 6 },
   input: {
     borderWidth: 1,
-    borderColor: '#ccd',
+    borderColor: theme.border,
+    color: theme.text,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -432,15 +466,28 @@ const styles = StyleSheet.create({
   },
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 8, alignItems: 'center' },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
-  buttonText: { color: '#fff', fontWeight: '600' },
+  buttonText: { color: theme.onAccent, fontWeight: '600' },
   buttonDisabled: { opacity: 0.5 },
-  buttonQuiet: { backgroundColor: '#eef1f6' },
-  buttonQuietText: { color: '#334', fontWeight: '600' },
+  buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  buttonQuietText: { color: theme.text, fontWeight: '600' },
+  themeRow: { flexDirection: 'row', gap: 6 },
+  themeOption: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  themeOptionOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  themeOptionText: { color: theme.text, fontSize: 13, fontWeight: '600' },
+  themeOptionTextOn: { color: theme.accent },
   regionRow: {
     flexDirection: 'row',
     alignItems: 'center',

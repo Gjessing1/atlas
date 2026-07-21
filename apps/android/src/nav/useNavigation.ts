@@ -116,6 +116,8 @@ export function useNavigation(): NavController {
   const originRef = useRef<LatLng | null>(null);
   /** Guards against an older profile fetch landing after a newer one. */
   const previewSeq = useRef(0);
+  /** Prevents a quick double tap from starting two location/route requests. */
+  const startInFlight = useRef(false);
   const profileRef = useRef<RoutingProfile>('car');
   const rerouteInFlight = useRef(false);
   /** Earliest time (epoch ms) a failed reroute may be retried (backoff). */
@@ -246,6 +248,7 @@ export function useNavigation(): NavController {
       destRef.current = null;
       originRef.current = null;
       previewSeq.current++;
+      startInFlight.current = false;
       rerouteInFlight.current = false;
       rerouteBackoffUntil.current = 0;
       rerouteFailCount.current = 0;
@@ -382,6 +385,9 @@ export function useNavigation(): NavController {
 
   const start = useCallback(
     async (destination: LatLng, prof: RoutingProfile = 'car') => {
+      if (startInFlight.current) return;
+      startInFlight.current = true;
+      const seq = ++previewSeq.current;
       setError(null);
       setPhase('starting');
       try {
@@ -402,6 +408,7 @@ export function useNavigation(): NavController {
         ]);
         const pos = cur ?? (await Location.getLastKnownPositionAsync({ maxAge: 120_000 }));
         if (!pos) throw new Error('Could not get a GPS fix — is location on?');
+        if (seq !== previewSeq.current) return;
         const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
 
         destRef.current = destination;
@@ -422,11 +429,13 @@ export function useNavigation(): NavController {
           instructions: true,
           alternatives: true,
         });
+        if (seq !== previewSeq.current) return;
         if (result.paths.length === 0) throw new Error('no route found');
         setPreviewPaths(sortRouteChoices(result.paths));
         setPreviewIndex(0);
         setPhase('preview');
       } catch (err) {
+        if (seq !== previewSeq.current) return;
         setLocationHandler(null);
         sessionRef.current = null;
         destRef.current = null;
@@ -434,6 +443,8 @@ export function useNavigation(): NavController {
         setDestination(null);
         setError(err instanceof Error ? err.message : String(err));
         setPhase('error');
+      } finally {
+        if (seq === previewSeq.current) startInFlight.current = false;
       }
     },
     [provider],
@@ -481,45 +492,8 @@ export function useNavigation(): NavController {
     const seq = ++previewSeq.current;
     setPreviewLoading(true);
     try {
-      let path = previewPath;
-      let freshPosition: Location.LocationObject | null = null;
-      const destination = destRef.current;
-
-      // The preview may have been open while the traveller was already
-      // moving. Route once more from a Start-time fix so guidance does not
-      // begin on a stale line and immediately announce a reroute. Preserve
-      // the chosen alternative index where the refreshed result still has it.
-      if (destination) {
-        try {
-          const current = await Promise.race([
-            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
-          ]);
-          freshPosition = current ?? (await Location.getLastKnownPositionAsync({ maxAge: 30_000 }));
-          if (freshPosition) {
-            const origin = {
-              lat: freshPosition.coords.latitude,
-              lng: freshPosition.coords.longitude,
-            };
-            const result = await provider.route({
-              profile: profileRef.current,
-              points: [origin, destination],
-              instructions: true,
-              alternatives: true,
-            });
-            if (result.paths.length > 0) {
-              const choices = sortRouteChoices(result.paths);
-              path = choices[previewIndex] ?? choices[0] ?? previewPath;
-              originRef.current = origin;
-            }
-          }
-        } catch {
-          // The previewed path remains a usable fallback if a fresh fix or
-          // route cannot be obtained at the exact moment Start is pressed.
-        }
-      }
-
-      // Cancel/profile-switch while the refresh was in flight invalidates it.
+      const path = previewPath;
+      // Cancel/profile-switch between the tap and this task invalidates it.
       if (seq !== previewSeq.current || !destRef.current) return;
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
@@ -558,14 +532,14 @@ export function useNavigation(): NavController {
       // exactly when the driver wonders "which way?".
       const depart = session.departurePrompt();
       if (depart) speak(depart.text);
-      if (freshPosition) {
-        const coords = freshPosition.coords;
+      // Seed guidance with the same fresh fix that produced the preview.
+      // Subsequent one-second fixes drive the session and trigger the normal
+      // reroute path if the traveller moved away while choosing a route.
+      if (originRef.current) {
+        const origin = originRef.current;
         onFix({
-          lat: coords.latitude,
-          lng: coords.longitude,
-          headingDeg: coords.heading ?? undefined,
-          speedMps: coords.speed ?? undefined,
-          accuracyM: coords.accuracy ?? undefined,
+          lat: origin.lat,
+          lng: origin.lng,
         });
       }
     } catch (err) {
@@ -577,7 +551,7 @@ export function useNavigation(): NavController {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
-  }, [previewPaths, previewIndex, provider, onFix, speak, enrich]);
+  }, [previewPaths, previewIndex, onFix, speak, enrich]);
 
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);

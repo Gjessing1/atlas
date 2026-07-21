@@ -1,3 +1,4 @@
+import type { ThemeModeController } from '@atlas/app-hooks';
 import type { SystemStatus, UpstreamHealth, UpstreamStatus } from '@atlas/core';
 import { AccountPanel } from '../sync/AccountPanel.js';
 import type { SyncState } from '../sync/useSync.js';
@@ -5,6 +6,7 @@ import { useStatus } from './useStatus.js';
 
 interface SettingsPanelProps {
   sync: SyncState;
+  appearance: ThemeModeController;
   onClose: () => void;
 }
 
@@ -83,7 +85,7 @@ function StatusSection({ data }: { data: SystemStatus }) {
  * panel (moved out of the Collections sidebar footer), and build info. The status
  * answers "why is this overlay blank?" without leaving the app.
  */
-export function SettingsPanel({ sync, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ sync, appearance, onClose }: SettingsPanelProps) {
   const status = useStatus(true);
 
   return (
@@ -93,6 +95,25 @@ export function SettingsPanel({ sync, onClose }: SettingsPanelProps) {
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close panel">
           ✕
         </button>
+      </div>
+
+      <div className="settings-section">
+        <h3>Appearance</h3>
+        <div className="theme-options" role="radiogroup" aria-label="Theme">
+          {(['system', 'light', 'dark'] as const).map((mode) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={appearance.mode === mode}
+              className={appearance.mode === mode ? 'theme-option theme-option-on' : 'theme-option'}
+              onClick={() => appearance.setMode(mode)}
+              key={mode}
+            >
+              {mode[0]!.toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
+        </div>
+        <p className="settings-note">System follows this device’s light or dark setting.</p>
       </div>
 
       <div className="settings-section">

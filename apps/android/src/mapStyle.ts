@@ -1,4 +1,4 @@
-import { resolveStyleTemplate } from '@atlas/core';
+import { applyMapAppearance, resolveStyleTemplate, type MapAppearance } from '@atlas/core';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { getServerOrigin } from './serverOrigin';
@@ -39,8 +39,8 @@ export async function loadStyleTemplate(): Promise<string | null> {
 }
 
 /** Online style: template with {origin} pointed at the Atlas server. */
-export function buildOnlineStyle(template: string): string {
-  return resolveStyleTemplate(template, getServerOrigin());
+export function buildOnlineStyle(template: string, appearance: MapAppearance): string {
+  return applyMapAppearance(resolveStyleTemplate(template, getServerOrigin()), appearance);
 }
 
 /**
@@ -49,7 +49,11 @@ export function buildOnlineStyle(template: string): string {
  * support — `pmtiles://file://…` needs no local HTTP server), and glyphs +
  * sprites come from the pack's unzipped assets.
  */
-export function buildOfflineStyle(template: string, packDir: string): string {
+export function buildOfflineStyle(
+  template: string,
+  packDir: string,
+  appearance: MapAppearance,
+): string {
   // packDir is a file:// URI (expo-file-system documentDirectory-based).
   const dir = packDir.replace(/\/+$/, '');
   const style = JSON.parse(template) as {
@@ -70,5 +74,5 @@ export function buildOfflineStyle(template: string, packDir: string): string {
   // the server's /assets layout so the template paths keep working.
   style.glyphs = `${dir}/assets/fonts/{fontstack}/{range}.pbf`;
   style.sprite = `${dir}/assets/sprites/ofm`;
-  return JSON.stringify(style);
+  return applyMapAppearance(JSON.stringify(style), appearance);
 }

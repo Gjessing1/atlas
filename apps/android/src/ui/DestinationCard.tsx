@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
 import { WeatherIcon } from './icons';
+import { theme } from './theme';
 
 export interface DestinationTarget {
   lat: number;
@@ -106,27 +107,27 @@ export function DestinationCard({
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titles: { flexShrink: 1, paddingRight: 12 },
-  name: { fontSize: 17, fontWeight: '700', color: '#111' },
-  detail: { fontSize: 13, color: '#778', marginTop: 1 },
-  close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
+  name: { fontSize: 17, fontWeight: '700', color: theme.text },
+  detail: { fontSize: 13, color: theme.textMuted, marginTop: 1 },
+  close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {
     flexGrow: 1,
     flexBasis: '100%',
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  navigateText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 15 },
   save: {
     flexDirection: 'row',
     gap: 7,
-    backgroundColor: '#eef1f6',
+    backgroundColor: theme.surfaceMuted,
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 18,
     alignItems: 'center',
   },
-  saveText: { color: '#334', fontWeight: '700', fontSize: 15 },
+  saveText: { color: theme.text, fontWeight: '700', fontSize: 15 },
 });

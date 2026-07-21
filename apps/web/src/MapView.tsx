@@ -1,9 +1,11 @@
 import {
+  applyMapAppearance,
   markerScaleForZoom,
   POI_LAYER_IDS,
   poiCategoryLabel,
   resolveStyleTemplate,
   type LatLng,
+  type ColorScheme,
   type MapViewState,
   type PlaceTarget,
 } from '@atlas/core';
@@ -25,13 +27,22 @@ const FALLBACK_STYLE_URL = 'https://demotiles.maplibre.org/style.json';
 
 const LONG_PRESS_MS = 600;
 
-async function loadStyle(): Promise<string | StyleSpecification> {
+let templatePromise: Promise<string> | null = null;
+
+async function loadStyle(
+  colorScheme: ColorScheme,
+  profile: string,
+): Promise<string | StyleSpecification> {
   try {
-    const res = await fetch(STYLE_TEMPLATE_URL);
-    if (!res.ok) throw new Error(`style template: HTTP ${res.status}`);
-    const template = await res.text();
-    return JSON.parse(resolveStyleTemplate(template, window.location.origin)) as StyleSpecification;
+    templatePromise ??= fetch(STYLE_TEMPLATE_URL).then(async (res) => {
+      if (!res.ok) throw new Error(`style template: HTTP ${res.status}`);
+      return res.text();
+    });
+    const template = await templatePromise;
+    const resolved = resolveStyleTemplate(template, window.location.origin);
+    return JSON.parse(applyMapAppearance(resolved, { colorScheme, profile })) as StyleSpecification;
   } catch (err) {
+    templatePromise = null;
     console.warn('Self-hosted style unavailable, using fallback style.', err);
     return FALLBACK_STYLE_URL;
   }
@@ -80,6 +91,10 @@ interface MapViewProps {
   onMapReady: (map: maplibregl.Map) => void;
   /** While `.current` is true, POI click popups are suppressed (route mode owns clicks). */
   suppressPoiClicks?: { readonly current: boolean };
+  /** UI-resolved light/dark palette; applies to the basemap too. */
+  colorScheme: ColorScheme;
+  /** Curated activity profile; changes map emphasis without changing data. */
+  profile: string;
 }
 
 export function MapView({
@@ -91,6 +106,8 @@ export function MapView({
   onUserLocation,
   onMapReady,
   suppressPoiClicks,
+  colorScheme,
+  profile,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
@@ -110,7 +127,6 @@ export function MapView({
       center: initialView.center,
       zoom: initialView.zoom,
     });
-    void loadStyle().then((style) => map.setStyle(style));
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     // Location puck + accuracy circle with a locate/recenter button; keeps
     // following until the user pans away (web-nav prerequisite, Android parity).
@@ -197,6 +213,20 @@ export function MapView({
     };
     // The map is created exactly once; interaction callbacks read refs/props via closures.
   }, []);
+
+  // Style swaps are deliberately independent of map construction: choosing a
+  // theme or activity keeps the camera and controls in place. Atlas overlay,
+  // route and navigation hooks already re-ensure their layers on style.load.
+  useEffect(() => {
+    if (!map) return;
+    let cancelled = false;
+    void loadStyle(colorScheme, profile).then((style) => {
+      if (!cancelled) map.setStyle(style);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [map, colorScheme, profile]);
 
   // Render the (single) dropped pin as a draggable marker. Clicking it reopens
   // the place card; the card itself is App-level React, not a MapLibre popup.

@@ -2,6 +2,8 @@ import { scaleBarFor } from '@atlas/core';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { theme } from '../ui/theme';
+
 interface Props {
   /** Map centre latitude — ground resolution shrinks towards the poles. */
   lat: number;
@@ -31,13 +33,13 @@ export function ScaleBar({ lat, zoom, bottom, maxWidth = 110 }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: '30%', alignItems: 'flex-start' },
+  wrap: { position: 'absolute', left: 20, alignItems: 'flex-start' },
   // Text is drawn over the map, so it carries its own halo rather than a plate.
   label: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#1f2933',
-    textShadowColor: 'rgba(255,255,255,0.9)',
+    color: theme.text,
+    textShadowColor: theme.surface,
     textShadowRadius: 2,
     marginBottom: 2,
   },
@@ -46,7 +48,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2,
     borderRightWidth: 2,
     borderBottomWidth: 2,
-    borderColor: '#1f2933',
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderColor: theme.text,
+    backgroundColor: theme.surfaceOverlay,
   },
 });

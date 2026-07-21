@@ -38,7 +38,7 @@ export interface BottomSheetProps {
   /** Modal sheets dim and block the map; map sheets leave it interactive. */
   mode?: 'modal' | 'map';
   initialSnap?: SheetSnap;
-  /** Content height at peek, before the device navigation-bar inset is added. */
+  /** Visible content height when the sheet is at its lowest snap. */
   peekHeight?: number;
   /** App-level fallback for Android builds that report a zero bottom inset. */
   bottomInset?: number;
@@ -99,16 +99,19 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
       hidden.remove();
     };
   }, []);
-  const availableHeight = Math.max(240, window.height - keyboardHeight);
-  const contentBottom = keyboardHeight > 0 ? 0 : safeBottom;
+  // Keep the entire sheet physically above three-button/gesture navigation.
+  // Padding alone was not sufficient on devices whose translucent nav window
+  // clips the composited modal after React Native has laid its children out.
+  const sheetBottom = keyboardHeight > 0 ? keyboardHeight : safeBottom;
+  const availableHeight = Math.max(240, window.height - sheetBottom);
   const snaps = useMemo<SnapHeights>(() => {
     // Leave a narrow strip above a fully-expanded sheet so it still reads as a
     // sheet, not a replacement screen. The top inset keeps it below cut-outs.
     const full = Math.max(240, availableHeight - Math.max(insets.top, 24) - 12);
-    const peek = Math.min(full, Math.max(112, peekHeight + contentBottom));
+    const peek = Math.min(full, Math.max(112, peekHeight));
     const half = Math.min(full, Math.max(peek, Math.round(availableHeight * 0.56)));
     return { peek, half, full };
-  }, [availableHeight, contentBottom, insets.top, peekHeight]);
+  }, [availableHeight, insets.top, peekHeight]);
 
   const animatedHeight = useRef(new Animated.Value(snaps[initialSnap])).current;
   const currentHeight = useRef(snaps[initialSnap]);
@@ -208,7 +211,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
 
   const surface = (
     <Animated.View
-      style={[styles.sheet, { bottom: keyboardHeight, height: animatedHeight }, sheetStyle]}
+      style={[styles.sheet, { bottom: sheetBottom, height: animatedHeight }, sheetStyle]}
       testID={testID}
     >
       <View style={styles.handleTouch} {...panResponder.panHandlers}>
@@ -223,9 +226,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
           <View style={styles.handle} />
         </Pressable>
       </View>
-      <View style={[styles.content, { paddingBottom: contentBottom + 12 }, contentStyle]}>
-        {children}
-      </View>
+      <View style={[styles.content, { paddingBottom: 12 }, contentStyle]}>{children}</View>
     </Animated.View>
   );
 
@@ -263,7 +264,7 @@ const styles = StyleSheet.create({
   mapLayer: { position: 'absolute', inset: 0 },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(13, 20, 28, 0.38)',
+    backgroundColor: theme.backdrop,
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  handle: { width: 36, height: 5, borderRadius: 3, backgroundColor: '#c2c7d0' },
+  handle: { width: 36, height: 5, borderRadius: 3, backgroundColor: theme.handle },
   content: {
     flex: 1,
     overflow: 'hidden',

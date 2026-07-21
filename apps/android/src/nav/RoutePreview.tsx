@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } fr
 import type { NavController } from './useNavigation';
 import { BottomSheet } from '../ui/BottomSheet';
 import { PROFILE_ICON } from '../ui/modeIcons';
+import { theme } from '../ui/theme';
 
 function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;
@@ -74,7 +75,7 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
               disabled={nav.previewLoading}
               testID={`nav-profile-${p.id}`}
             >
-              <Icon color={active ? '#1d4fd7' : '#5c6270'} size={18} />
+              <Icon color={active ? theme.accent : theme.icon} size={18} />
               <Text style={[styles.profileLabel, active && styles.profileLabelActive]}>
                 {p.label}
               </Text>
@@ -143,12 +144,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#eceef2',
+    backgroundColor: theme.surfaceMuted,
   },
-  profileChipActive: { backgroundColor: '#d7e4ff' },
-  profileLabel: { fontSize: 13, fontWeight: '600', color: '#5c6270' },
-  profileLabelActive: { color: '#1d4fd7' },
-  previewError: { fontSize: 13, color: '#b3261e' },
+  profileChipActive: { backgroundColor: theme.surfaceActive },
+  profileLabel: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
+  profileLabelActive: { color: theme.accent },
+  previewError: { fontSize: 13, color: theme.danger },
   choices: { flex: 1 },
   choicesLoading: { opacity: 0.45 },
   choice: {
@@ -159,38 +160,38 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 6,
     borderWidth: 1.5,
-    borderColor: '#e3e5ea',
+    borderColor: theme.border,
   },
-  choiceSelected: { borderColor: '#2b6cff', backgroundColor: '#eef3ff' },
+  choiceSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   choiceMain: { flex: 1, gap: 2 },
-  choiceTime: { fontSize: 18, fontWeight: '700', color: '#20242b' },
-  choiceTimeSelected: { color: '#1d4fd7' },
-  choiceExtra: { fontSize: 14, fontWeight: '600', color: '#8a8f99' },
-  choiceDetail: { fontSize: 13, color: '#5c6270' },
+  choiceTime: { fontSize: 18, fontWeight: '700', color: theme.text },
+  choiceTimeSelected: { color: theme.accent },
+  choiceExtra: { fontSize: 14, fontWeight: '600', color: theme.textMuted },
+  choiceDetail: { fontSize: 13, color: theme.textMuted },
   radio: {
     width: 18,
     height: 18,
     borderRadius: 9,
     borderWidth: 2,
-    borderColor: '#c3c8d1',
+    borderColor: theme.border,
   },
-  radioSelected: { borderWidth: 6, borderColor: '#2b6cff' },
+  radioSelected: { borderWidth: 6, borderColor: theme.accent },
   actions: { flexDirection: 'row', gap: 10 },
   cancel: {
     flex: 1,
     borderRadius: 22,
     paddingVertical: 11,
     alignItems: 'center',
-    backgroundColor: '#eceef2',
+    backgroundColor: theme.surfaceMuted,
   },
-  cancelText: { fontSize: 15, fontWeight: '700', color: '#3a3f4a' },
+  cancelText: { fontSize: 15, fontWeight: '700', color: theme.text },
   go: {
     flex: 2,
     borderRadius: 22,
     paddingVertical: 11,
     alignItems: 'center',
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
   },
   goDisabled: { backgroundColor: '#9db9e8' },
-  goText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  goText: { fontSize: 15, fontWeight: '700', color: theme.onAccent },
 });

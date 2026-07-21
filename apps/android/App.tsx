@@ -1,4 +1,4 @@
-import { useMapProfile } from '@atlas/app-hooks';
+import { useMapProfile, useThemeMode } from '@atlas/app-hooks';
 import {
   decodeMapLink,
   encodeMapHash,
@@ -7,6 +7,7 @@ import {
   placeIsVisible,
   POI_LAYER_IDS,
   type SearchResult,
+  type MapAppearance,
   type VisibilityFolder,
 } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
@@ -25,6 +26,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Appearance,
   BackHandler,
   Linking,
   Pressable,
@@ -32,6 +34,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  useColorScheme,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -116,6 +119,11 @@ function AppInner() {
   const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
   const topInset = insets.top || STATUS_BAR_FALLBACK;
   const data = useUserData();
+  const systemColorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const appearance = useThemeMode(data, systemColorScheme);
+  useEffect(() => {
+    Appearance.setColorScheme(appearance.mode === 'system' ? 'unspecified' : appearance.mode);
+  }, [appearance.mode]);
   // Draw only effectively-visible places (own toggle on, no hiding folder). The
   // Favorites sheet still lists hidden ones so they can be shown again.
   const visiblePlaces = useMemo(() => {
@@ -133,6 +141,10 @@ function AppInner() {
   // Activity profile + overlay state are device-local and shared by the
   // one-tap map controls, the route default, and the full Layers sheet.
   const profiles = useMapProfile(data);
+  const mapAppearance = useMemo<MapAppearance>(
+    () => ({ colorScheme: appearance.colorScheme, profile: profiles.profile.id }),
+    [appearance.colorScheme, profiles.profile.id],
+  );
   const overlaysCtl = useOverlays(data, profiles.profile.id);
 
   const [packs, setPacks] = useState<LocalPack[]>([]);
@@ -603,9 +615,14 @@ function AppInner() {
   const startNavigation = useCallback(
     (dest: LatLng) => {
       setNavFollow('course');
+      // Route selection moves from the planner to Navigation's route-choice
+      // preview. Close the planner immediately so it cannot cover that sheet,
+      // and so its background route/mode requests are cancelled while
+      // Navigation obtains a current-position route exactly once.
+      route.stop();
       void nav.start(dest, route.profile);
     },
-    [nav, route.profile],
+    [nav, route],
   );
 
   // Route planning owns the bottom of the screen and repurposes map taps to add
@@ -677,6 +694,7 @@ function AppInner() {
     data.storage,
     offlinePack,
     forceOffline,
+    mapAppearance,
     refreshPacks,
   );
 
@@ -695,17 +713,18 @@ function AppInner() {
   if (data.status === 'loading' || !originReady || mapStyle === null || initialView === null) {
     return (
       <View style={styles.loading}>
-        <Text>Loading map…</Text>
+        <Text style={styles.loadingText}>Loading map…</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View key={appearance.colorScheme} style={styles.container}>
       <MapScene
         mapRef={mapRef}
         cameraRef={cameraRef}
         mapStyle={mapStyle}
+        topInset={topInset}
         bottomInset={bottomInset}
         packs={packs}
         overlays={overlaysCtl.overlays}
@@ -741,7 +760,7 @@ function AppInner() {
           <View style={{ transform: [{ rotate: `${navPuckRotation}deg` }] }}>
             {/* Grey when the GPS signal is lost, so a frozen puck reads as
                 "no signal", not "we're still here". */}
-            <NavArrowIcon color={nav.state?.fix === 'lost' ? '#9aa0a6' : '#1a73e8'} />
+            <NavArrowIcon color={nav.state?.fix === 'lost' ? theme.icon : theme.accent} />
           </View>
         </View>
       ) : null}
@@ -960,6 +979,7 @@ function AppInner() {
         overlays={overlaysCtl}
         settingsOpen={settingsOpen}
         onCloseSettings={() => setSettingsOpen(false)}
+        appearance={appearance}
         pendingPin={pendingPin}
         onDismissPendingPin={() => setPendingPin(null)}
         onFlyTo={flyTo}
@@ -995,7 +1015,13 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surface,
+  },
+  loadingText: { color: theme.text },
   tunnelDim: {
     position: 'absolute',
     top: 0,
@@ -1088,5 +1114,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
   },
-  bannerText: { color: '#fff' },
+  bannerText: { color: theme.onAccent },
 });

@@ -94,7 +94,7 @@ function specFor(instruction: Pick<RouteInstruction, 'sign' | 'kind'>): {
 export function TurnIcon({
   instruction,
   size = 34,
-  color = theme.text,
+  color = theme.icon,
 }: {
   instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
   size?: number;

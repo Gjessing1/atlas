@@ -888,3 +888,10 @@ export function decodePolyline(encoded: string, precision = 6): [number, number]
   }
   return coords;
 }
+export {
+  applyMapAppearance,
+  isThemeMode,
+  type ColorScheme,
+  type MapAppearance,
+  type ThemeMode,
+} from './appearance.js';

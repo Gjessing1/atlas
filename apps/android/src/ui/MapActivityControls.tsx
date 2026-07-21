@@ -70,7 +70,7 @@ export function MapActivityControls({
                 accessibilityLabel={item.label}
                 testID={`map-profile-${item.id}`}
               >
-                <Icon color={active ? theme.accent : theme.text} size={21} />
+                <Icon color={active ? theme.accent : theme.icon} size={21} />
                 <Text style={[styles.profileLabel, active && styles.profileLabelOn]}>
                   {item.label}
                 </Text>
@@ -149,7 +149,7 @@ export function MapActivityControls({
             accessibilityState={{ expanded: layersOpen }}
             testID="layer-quick-toggle"
           >
-            <LayersIcon color={activeCount > 0 ? theme.accent : theme.text} size={22} />
+            <LayersIcon color={activeCount > 0 ? theme.accent : theme.icon} size={22} />
             {activeCount > 0 ? (
               <View style={styles.countBadge}>
                 <Text style={styles.countText}>{activeCount}</Text>
@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.surface,
   },
-  countText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  countText: { color: theme.onAccent, fontSize: 10, fontWeight: '800' },
   layerMenu: {
     position: 'absolute',
     right: 64,
@@ -263,12 +263,12 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkOn: { borderColor: theme.accent, backgroundColor: theme.accent },
-  checkText: { color: '#fff', fontWeight: '800', fontSize: 12, lineHeight: 14 },
+  checkText: { color: theme.onAccent, fontWeight: '800', fontSize: 12, lineHeight: 14 },
   layerLabel: { flex: 1, color: theme.text, fontSize: 14 },
   layerLabelOn: { color: theme.accent, fontWeight: '700' },
   zoomHint: {

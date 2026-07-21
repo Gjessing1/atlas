@@ -2,6 +2,8 @@ import { buildElevationProfile, type TrackData } from '@atlas/gpx';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
+import { theme } from './theme';
+
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
@@ -110,7 +112,7 @@ const styles = StyleSheet.create({
     height: CHART_HEIGHT,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: '#f4f7fb',
+    backgroundColor: theme.surfaceMuted,
     borderRadius: 8,
     overflow: 'hidden',
   },
@@ -128,8 +130,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 2,
   },
-  axisLabel: { fontSize: 11, color: '#889' },
-  readout: { fontSize: 12, color: '#16324f', fontWeight: '700' },
-  readoutHint: { fontSize: 11, color: '#aab' },
-  empty: { fontSize: 13, color: '#778' },
+  axisLabel: { fontSize: 11, color: theme.textMuted },
+  readout: { fontSize: 12, color: theme.text, fontWeight: '700' },
+  readoutHint: { fontSize: 11, color: theme.textMuted },
+  empty: { fontSize: 13, color: theme.textMuted },
 });

@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View } from 'react-native';
 
+import { theme } from './theme';
+
 /**
  * Long-lists drag-to-arrange without native gesture libs (keeps the feature
  * OTA-updatable): each row gets a ≡ handle wired to a PanResponder; while a
@@ -147,7 +149,7 @@ const styles = StyleSheet.create({
   dragged: {
     zIndex: 10,
     elevation: 4,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     shadowColor: '#000',
     shadowOpacity: 0.15,
@@ -160,5 +162,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  handleText: { fontSize: 18, color: '#a5adba', fontWeight: '700' },
+  handleText: { fontSize: 18, color: theme.textMuted, fontWeight: '700' },
 });

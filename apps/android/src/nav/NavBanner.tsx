@@ -56,7 +56,7 @@ function LaneRow({ lanes }: { lanes: RouteLane[] }) {
                   key={glyph.direction}
                   d={glyph.path}
                   fill="none"
-                  stroke={carrying ? theme.accent : '#8995a3'}
+                  stroke={carrying ? theme.accent : theme.icon}
                   strokeWidth={glyph.recommended ? 2.8 : 2.1}
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -204,11 +204,7 @@ export function NavBanner({
             {thenManeuver ? (
               <View style={styles.thenRow}>
                 <Text style={styles.thenLabel}>Then</Text>
-                <TurnIcon
-                  instruction={thenManeuver.instruction}
-                  size={20}
-                  color={theme.textMuted}
-                />
+                <TurnIcon instruction={thenManeuver.instruction} size={20} color={theme.icon} />
                 <Text style={styles.thenText} numberOfLines={1}>
                   {thenManeuver.instruction.text}
                 </Text>
@@ -357,14 +353,14 @@ const styles = StyleSheet.create({
     height: 44,
     flexGrow: 1,
     borderWidth: 1,
-    borderColor: '#ccd5df',
+    borderColor: theme.border,
     borderRadius: 10,
-    backgroundColor: '#f4f6f8',
+    backgroundColor: theme.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  laneCarrying: { borderColor: 'rgba(26, 115, 232, 0.45)', backgroundColor: '#eaf2ff' },
-  laneActive: { borderWidth: 2, backgroundColor: '#dbe9ff' },
+  laneCarrying: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  laneActive: { borderWidth: 2, backgroundColor: theme.surfaceActive },
   thenRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -375,7 +371,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: theme.surfaceMuted,
   },
   thenLabel: {
     color: theme.textMuted,
@@ -384,7 +380,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
     textTransform: 'uppercase',
   },
-  thenText: { flex: 1, color: '#344255', fontSize: 13, fontWeight: '600' },
+  thenText: { flex: 1, color: theme.text, fontSize: 13, fontWeight: '600' },
   stateBlock: { gap: 3, paddingHorizontal: 2, paddingVertical: 4 },
   eyebrow: {
     color: theme.accent,
@@ -401,12 +397,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#d7dee7',
+    borderTopColor: theme.border,
   },
   etaBlock: { flexShrink: 0 },
   eta: { color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 20 },
   etaLabel: {
-    color: '#718096',
+    color: theme.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.6,
@@ -444,7 +440,7 @@ const styles = StyleSheet.create({
   speedReadout: { minWidth: 48, alignItems: 'center' },
   speedValue: { color: theme.text, fontWeight: '800', fontSize: 18, lineHeight: 19 },
   speedUnit: {
-    color: '#718096',
+    color: theme.textMuted,
     fontWeight: '700',
     fontSize: 9,
     letterSpacing: 0.3,

@@ -1,4 +1,5 @@
 import type { AtlasStorage } from '@atlas/storage';
+import type { MapAppearance } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
@@ -22,6 +23,7 @@ export function useMapStyle(
   storage: AtlasStorage | null,
   offlinePack: LocalPack | undefined,
   forceOffline: boolean,
+  appearance: MapAppearance,
   /** Called once the server origin is ready and on origin changes (pack refresh). */
   onOriginLive: () => void,
 ) {
@@ -47,10 +49,11 @@ export function useMapStyle(
 
   const useOffline = Boolean((forceOffline || serverUp === false) && offlinePack && template);
   const mapStyle = useMemo(() => {
-    if (useOffline && offlinePack && template) return buildOfflineStyle(template, offlinePack.dir);
-    if (template) return buildOnlineStyle(template);
+    if (useOffline && offlinePack && template)
+      return buildOfflineStyle(template, offlinePack.dir, appearance);
+    if (template) return buildOnlineStyle(template, appearance);
     return serverUp === null ? null : FALLBACK_STYLE_URL;
-  }, [useOffline, offlinePack, template, serverUp]);
+  }, [useOffline, offlinePack, template, serverUp, appearance]);
 
   return { mapStyle, originReady, useOffline };
 }

@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { MenuIcon, SearchIcon } from './icons';
 import { DirectionsIcon } from './modeIcons';
+import { theme } from './theme';
 
 interface MenuClusterProps {
   bottomInset: number;
@@ -36,7 +37,7 @@ export function MenuCluster({
         ) : null}
         {!following ? (
           <Pressable style={styles.roundButton} onPress={onPlanRoute} testID="plan-route">
-            <DirectionsIcon color="#1a73e8" />
+            <DirectionsIcon color={theme.accent} />
           </Pressable>
         ) : null}
       </View>
@@ -51,7 +52,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,

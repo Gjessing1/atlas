@@ -15,6 +15,7 @@ import {
 import type { ImportResult } from '../useUserData';
 import { BottomSheet } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
+import { theme } from './theme';
 
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -232,8 +233,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334' },
-  muted: { fontSize: 13, color: '#778', marginTop: 4 },
+  heading: { fontSize: 15, fontWeight: '700', color: theme.text },
+  muted: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 10 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
@@ -241,24 +242,24 @@ const styles = StyleSheet.create({
   rowMain: { flexShrink: 1, flexGrow: 1, gap: 6 },
   nameInput: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 15,
-    color: '#111',
+    color: theme.text,
   },
   actionRow: { flexDirection: 'row', gap: 8 },
   profileLoading: { marginVertical: 12 },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
   buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  buttonQuiet: { backgroundColor: '#eef1f6' },
-  buttonQuietText: { color: '#334', fontWeight: '600' },
+  buttonText: { color: theme.onAccent, fontWeight: '600' },
+  buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  buttonQuietText: { color: theme.text, fontWeight: '600' },
   closeButton: { marginTop: 12, alignSelf: 'stretch', alignItems: 'center' },
 });

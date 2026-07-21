@@ -5,6 +5,7 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import { BottomSheet } from './BottomSheet';
 import { ReorderableList } from './ReorderableList';
+import { theme } from './theme';
 
 /** Folders flattened depth-first, with their nesting depth (for indented lists). */
 function flattenFolders(
@@ -244,7 +245,7 @@ export function PlaceEditSheet({
  * as alarming and renders inconsistently across Android skins).
  */
 export function EyeIcon({ off = false }: { off?: boolean }) {
-  const color = off ? '#a5adba' : '#4a5568';
+  const color = off ? '#b0bac4' : theme.icon;
   return (
     <View style={eyeStyles.box}>
       <View style={[eyeStyles.outline, { borderColor: color }]}>
@@ -271,7 +272,7 @@ const eyeStyles = StyleSheet.create({
     width: 24,
     height: 2,
     borderRadius: 1,
-    backgroundColor: '#a5adba',
+    backgroundColor: theme.handle,
     transform: [{ rotate: '45deg' }],
   },
 });
@@ -651,26 +652,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  heading: { fontSize: 15, fontWeight: '700', color: '#334' },
-  close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#889', marginTop: 14, marginBottom: 4 },
-  muted: { fontSize: 13, color: '#778', marginTop: 2 },
+  heading: { fontSize: 15, fontWeight: '700', color: theme.text },
+  close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.textMuted,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
-  subButtonText: { fontSize: 16, color: '#4a5568', fontWeight: '700' },
+  subButtonText: { fontSize: 16, color: theme.textMuted, fontWeight: '700' },
   subLevel: { paddingLeft: 18 },
   folderIcon: { fontSize: 18 },
   folderName: {
     flexGrow: 1,
     flexShrink: 1,
     fontSize: 16,
-    color: '#111',
+    color: theme.text,
     paddingVertical: 4,
   },
   newFolderInput: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -684,33 +691,33 @@ const styles = StyleSheet.create({
   },
   badgeIcon: { fontSize: 17 },
   rowMain: { flexShrink: 1, flexGrow: 1 },
-  rowText: { fontSize: 16, color: '#111' },
+  rowText: { fontSize: 16, color: theme.text },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
   buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  buttonQuiet: { backgroundColor: '#eef1f6' },
-  buttonQuietText: { color: '#334', fontWeight: '600' },
-  buttonDanger: { backgroundColor: '#b3261e', alignSelf: 'flex-start' },
+  buttonText: { color: theme.onAccent, fontWeight: '600' },
+  buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  buttonQuietText: { color: theme.text, fontWeight: '600' },
+  buttonDanger: { backgroundColor: theme.danger, alignSelf: 'flex-start' },
   picker: {
     paddingBottom: 10,
     gap: 8,
   },
   pickerInset: { paddingLeft: 42 },
   field: { gap: 5 },
-  fieldLabel: { fontSize: 12, fontWeight: '700', color: '#667' },
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: theme.textMuted },
   nameInput: {
     borderWidth: 1,
-    borderColor: '#cdd3dd',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 15,
-    color: '#111',
+    color: theme.text,
   },
   notesInput: { minHeight: 60, textAlignVertical: 'top' },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -720,7 +727,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f1f3f7',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -732,18 +739,18 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'transparent',
   },
-  colorChoiceSelected: { borderColor: '#111' },
-  choiceSelected: { borderColor: '#1a73e8' },
+  colorChoiceSelected: { borderColor: theme.text },
+  choiceSelected: { borderColor: theme.accent },
   folderChip: {
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f1f3f7',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  folderChipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
-  folderChipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  folderChipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  folderChipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   editorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });
