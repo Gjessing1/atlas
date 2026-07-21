@@ -1,65 +1,30 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { MenuIcon, SearchIcon } from './icons';
 import { DirectionsIcon } from './modeIcons';
 
 interface MenuClusterProps {
   bottomInset: number;
-  menuOpen: boolean;
   onToggleMenu: () => void;
   /** Hides search + route planning (they make no sense mid-trip). */
   following: boolean;
-  onOpenFavorites: () => void;
-  onOpenTracks: () => void;
-  onOpenLayers: () => void;
-  onOpenSettings: () => void;
   onOpenSearch: () => void;
   onPlanRoute: () => void;
 }
 
 /**
- * Bottom-left cluster: hamburger menu (places, tracks, settings live in sheets
- * it opens) + search + route planning. The app hides the whole cluster while
- * planning — the RoutePanel owns the bottom of the screen then.
+ * Bottom-left primary actions: menu, search and route planning. The menu's
+ * destinations live in MainMenuSheet; this component is only the map launcher.
  */
 export function MenuCluster({
   bottomInset,
-  menuOpen,
   onToggleMenu,
   following,
-  onOpenFavorites,
-  onOpenTracks,
-  onOpenLayers,
-  onOpenSettings,
   onOpenSearch,
   onPlanRoute,
 }: MenuClusterProps) {
   return (
     <View style={[styles.menuWrap, { bottom: bottomInset + 24 }]} pointerEvents="box-none">
-      {menuOpen ? (
-        <View style={styles.menuCard}>
-          {(
-            [
-              ['Collections', 'open-favorites', onOpenFavorites],
-              ['Tracks', 'open-tracks', onOpenTracks],
-              ['Layers', 'open-layers', onOpenLayers],
-              ['Settings', 'open-settings', onOpenSettings],
-            ] as const
-          ).map(([label, testID, openSheet]) => (
-            <Pressable
-              key={testID}
-              style={styles.menuItem}
-              testID={testID}
-              onPress={() => {
-                onToggleMenu();
-                openSheet();
-              }}
-            >
-              <Text style={styles.menuItemText}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
       <View style={styles.bottomRow}>
         <Pressable style={styles.roundButton} onPress={onToggleMenu} testID="open-menu">
           <MenuIcon />
@@ -80,17 +45,8 @@ export function MenuCluster({
 }
 
 const styles = StyleSheet.create({
-  menuWrap: { position: 'absolute', left: 12, alignItems: 'flex-start', gap: 8 },
+  menuWrap: { position: 'absolute', left: 12 },
   bottomRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  menuCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 4,
-    minWidth: 180,
-    elevation: 6,
-  },
-  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
-  menuItemText: { fontSize: 15, color: '#1c2733' },
   roundButton: {
     width: 44,
     height: 44,

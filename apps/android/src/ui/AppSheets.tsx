@@ -5,7 +5,7 @@ import type { OverlaysController } from '../layers/useOverlays';
 import type { LocalPack } from '../regions/packs';
 import type { ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
-import { FavoritesSheet } from './FavoritesSheet';
+import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
 import { LayersSheet } from './LayersSheet';
 import { PromptModal } from './PromptModal';
 import { SettingsSheet } from './SettingsSheet';
@@ -20,8 +20,9 @@ interface AppSheetsProps {
 
   favoritesOpen: boolean;
   onCloseFavorites: () => void;
-  /** Place whose edit panel the Favorites sheet should open with (map pin → Edit). */
+  /** Place whose focused editor should open (map pin → Edit). */
   editPlaceId: string | null;
+  onCloseEditPlace: () => void;
   tracksOpen: boolean;
   onCloseTracks: () => void;
   layersOpen: boolean;
@@ -55,6 +56,7 @@ export function AppSheets({
   favoritesOpen,
   onCloseFavorites,
   editPlaceId,
+  onCloseEditPlace,
   tracksOpen,
   onCloseTracks,
   layersOpen,
@@ -68,12 +70,12 @@ export function AppSheets({
   onPickDestination,
   onImportTracks,
 }: AppSheetsProps) {
+  const editPlace = data.places.find((place) => place.id === editPlaceId) ?? null;
   return (
     <>
       <FavoritesSheet
         visible={favoritesOpen}
         onClose={onCloseFavorites}
-        editId={editPlaceId}
         places={data.places}
         collections={data.collections}
         onFlyTo={onFlyTo}
@@ -91,6 +93,15 @@ export function AppSheets({
         onSetAllVisible={(v) => void data.setAllVisible(v)}
         onReorderPlaces={(ids) => void data.reorderPlaces(ids)}
         onReorderCollections={(ids) => void data.reorderCollections(ids)}
+        bottomInset={bottomInset}
+      />
+      <PlaceEditSheet
+        visible={editPlaceId !== null}
+        place={editPlace}
+        collections={data.collections}
+        onPatch={(id, patch) => void data.updatePlace(id, patch)}
+        onDelete={(id) => void data.deletePlace(id)}
+        onClose={onCloseEditPlace}
         bottomInset={bottomInset}
       />
       <TracksSheet

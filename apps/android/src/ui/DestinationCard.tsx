@@ -1,5 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { BottomSheet } from './BottomSheet';
+import { WeatherIcon } from './icons';
+
 export interface DestinationTarget {
   lat: number;
   lng: number;
@@ -49,7 +52,15 @@ export function DestinationCard({
   bottomInset?: number;
 }) {
   return (
-    <View style={[styles.wrap, { paddingBottom: bottomInset + 14 }]}>
+    <BottomSheet
+      visible
+      mode="map"
+      onClose={onCancel}
+      initialSnap="peek"
+      peekHeight={146}
+      bottomInset={bottomInset}
+      testID="destination-sheet"
+    >
       <View style={styles.header}>
         <View style={styles.titles}>
           <Text style={styles.name} numberOfLines={1}>
@@ -81,29 +92,18 @@ export function DestinationCard({
           </Pressable>
         ) : null}
         <Pressable style={styles.save} onPress={onWeather} testID="destination-weather">
-          <Text style={styles.saveText}>☀ Weather</Text>
+          <WeatherIcon />
+          <Text style={styles.saveText}>Weather</Text>
         </Pressable>
         <Pressable style={styles.save} onPress={onShare} testID="destination-share">
           <Text style={styles.saveText}>Share</Text>
         </Pressable>
       </View>
-    </View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    elevation: 12,
-  },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titles: { flexShrink: 1, paddingRight: 12 },
   name: { fontSize: 17, fontWeight: '700', color: '#111' },
@@ -120,6 +120,8 @@ const styles = StyleSheet.create({
   },
   navigateText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   save: {
+    flexDirection: 'row',
+    gap: 7,
     backgroundColor: '#eef1f6',
     borderRadius: 10,
     paddingVertical: 12,

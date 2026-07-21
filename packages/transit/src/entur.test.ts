@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import fixture from './__fixtures__/entur-asker-nationaltheatret.json' with { type: 'json' };
 import { buildEnturRequest, parseEnturResponse, TransitError } from './entur.js';
 import { fetchTransitTrips } from './client.js';
-import { isRideMode, legDelayMs, transferCount, transitCoverage, tripLineCodes } from './model.js';
+import {
+  isRideMode,
+  legDelayMs,
+  transferCount,
+  transitCoverage,
+  transitTripBounds,
+  tripLineCodes,
+} from './model.js';
 
 /**
  * The fixture is a real Entur v3 response, recorded 2026-07-20 for an
@@ -135,6 +142,22 @@ describe('parseEnturResponse', () => {
     // Precision 6 would divide these by ten and land the train in the Atlantic.
     expect(ride.points[0]!.lat).toBeCloseTo(59.83, 1);
     expect(ride.points[0]!.lng).toBeCloseTo(10.43, 1);
+  });
+
+  it('frames every decoded leg for the map hand-off', () => {
+    const bounds = transitTripBounds(result.trips[0]!);
+    expect(bounds).not.toBeNull();
+    const [west, south, east, north] = bounds!;
+    expect(west).toBeLessThan(east);
+    expect(south).toBeLessThan(north);
+    for (const leg of result.trips[0]!.legs) {
+      for (const point of leg.points) {
+        expect(point.lng).toBeGreaterThanOrEqual(west);
+        expect(point.lng).toBeLessThanOrEqual(east);
+        expect(point.lat).toBeGreaterThanOrEqual(south);
+        expect(point.lat).toBeLessThanOrEqual(north);
+      }
+    }
   });
 
   it('lists intermediate stops with their quays', () => {

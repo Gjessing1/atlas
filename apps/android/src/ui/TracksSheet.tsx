@@ -4,7 +4,6 @@ import type { TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 
 import type { ImportResult } from '../useUserData';
+import { BottomSheet } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 
 function fmtKm(m: number): string {
@@ -117,119 +117,115 @@ export function TracksSheet({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
-          <View style={styles.headerRow}>
-            <Text style={styles.heading}>Tracks</Text>
-            <Pressable
-              style={[styles.button, importing ? styles.buttonDisabled : null]}
-              disabled={importing}
-              onPress={() => void runImport()}
-              testID="tracks-import"
-            >
-              {importing ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Import file</Text>
-              )}
-            </Pressable>
-          </View>
-          {message ? <Text style={styles.muted}>{message}</Text> : null}
-
-          {tracks.length === 0 ? (
-            <Text style={styles.muted}>
-              No tracks yet. Import a GPX/KML/KMZ file to see it on the map.
-            </Text>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      initialSnap="half"
+      bottomInset={bottomInset}
+      testID="tracks-sheet"
+    >
+      <View style={styles.headerRow}>
+        <Text style={styles.heading}>Tracks</Text>
+        <Pressable
+          style={[styles.button, importing ? styles.buttonDisabled : null]}
+          disabled={importing}
+          onPress={() => void runImport()}
+          testID="tracks-import"
+        >
+          {importing ? (
+            <ActivityIndicator color="#fff" />
           ) : (
-            <ScrollView>
-              {tracks.map((track) => (
-                <View key={track.id} style={[styles.row, track.visible ? null : styles.rowHidden]}>
-                  <Pressable
-                    style={styles.eyeButton}
-                    onPress={() => onSetVisible(track.id, !track.visible)}
-                    testID={`track-visible-${track.id}`}
-                  >
-                    <Text style={styles.eyeText}>{track.visible ? '👁' : '🚫'}</Text>
-                  </Pressable>
-                  <View style={styles.rowMain}>
-                    <TextInput
-                      style={styles.nameInput}
-                      defaultValue={track.name}
-                      onEndEditing={(e) => {
-                        const value = e.nativeEvent.text.trim();
-                        if (value && value !== track.name) onRename(track.id, value);
-                      }}
-                      returnKeyType="done"
-                      testID={`track-name-${track.id}`}
-                    />
-                    <Text style={styles.muted}>{trackSummary(track.stats)}</Text>
-                    <View style={styles.actionRow}>
-                      <Pressable
-                        style={[styles.button, styles.buttonQuiet]}
-                        onPress={() => toggleProfile(track.id)}
-                        testID={`track-profile-${track.id}`}
-                      >
-                        <Text style={styles.buttonQuietText}>Profile</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.button, styles.buttonQuiet]}
-                        onPress={() => onExport(track.id, 'gpx')}
-                        testID={`track-export-gpx-${track.id}`}
-                      >
-                        <Text style={styles.buttonQuietText}>GPX</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.button, styles.buttonQuiet]}
-                        onPress={() => onExport(track.id, 'kml')}
-                        testID={`track-export-kml-${track.id}`}
-                      >
-                        <Text style={styles.buttonQuietText}>KML</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.button, styles.buttonQuiet]}
-                        onPress={() => onDelete(track.id)}
-                        testID={`track-delete-${track.id}`}
-                      >
-                        <Text style={styles.buttonQuietText}>Delete</Text>
-                      </Pressable>
-                    </View>
-                    {profileId === track.id ? (
-                      profile === null ? (
-                        <ActivityIndicator style={styles.profileLoading} />
-                      ) : profile.data ? (
-                        <ElevationChart data={profile.data} />
-                      ) : (
-                        <Text style={styles.muted}>Track data unavailable.</Text>
-                      )
-                    ) : null}
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
+            <Text style={styles.buttonText}>Import file</Text>
           )}
-          <Pressable
-            style={[styles.button, styles.closeButton]}
-            onPress={onClose}
-            testID="tracks-close"
-          >
-            <Text style={styles.buttonText}>Close</Text>
-          </Pressable>
-        </View>
+        </Pressable>
       </View>
-    </Modal>
+      {message ? <Text style={styles.muted}>{message}</Text> : null}
+
+      {tracks.length === 0 ? (
+        <Text style={[styles.muted, styles.empty]}>
+          No tracks yet. Import a GPX/KML/KMZ file to see it on the map.
+        </Text>
+      ) : (
+        <ScrollView style={styles.scroll}>
+          {tracks.map((track) => (
+            <View key={track.id} style={[styles.row, track.visible ? null : styles.rowHidden]}>
+              <Pressable
+                style={styles.eyeButton}
+                onPress={() => onSetVisible(track.id, !track.visible)}
+                testID={`track-visible-${track.id}`}
+              >
+                <Text style={styles.eyeText}>{track.visible ? '👁' : '🚫'}</Text>
+              </Pressable>
+              <View style={styles.rowMain}>
+                <TextInput
+                  style={styles.nameInput}
+                  defaultValue={track.name}
+                  onEndEditing={(e) => {
+                    const value = e.nativeEvent.text.trim();
+                    if (value && value !== track.name) onRename(track.id, value);
+                  }}
+                  returnKeyType="done"
+                  testID={`track-name-${track.id}`}
+                />
+                <Text style={styles.muted}>{trackSummary(track.stats)}</Text>
+                <View style={styles.actionRow}>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => toggleProfile(track.id)}
+                    testID={`track-profile-${track.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>Profile</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => onExport(track.id, 'gpx')}
+                    testID={`track-export-gpx-${track.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>GPX</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => onExport(track.id, 'kml')}
+                    testID={`track-export-kml-${track.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>KML</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => onDelete(track.id)}
+                    testID={`track-delete-${track.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>Delete</Text>
+                  </Pressable>
+                </View>
+                {profileId === track.id ? (
+                  profile === null ? (
+                    <ActivityIndicator style={styles.profileLoading} />
+                  ) : profile.data ? (
+                    <ElevationChart data={profile.data} />
+                  ) : (
+                    <Text style={styles.muted}>Track data unavailable.</Text>
+                  )
+                ) : null}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+      <Pressable
+        style={[styles.button, styles.closeButton]}
+        onPress={onClose}
+        testID="tracks-close"
+      >
+        <Text style={styles.buttonText}>Close</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    maxHeight: '85%',
-  },
+  scroll: { flex: 1 },
+  empty: { flex: 1 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

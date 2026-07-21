@@ -1,17 +1,9 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  Keyboard,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { BottomSheet } from './BottomSheet';
 import { ReorderableList } from './ReorderableList';
 
 /** Folders flattened depth-first, with their nesting depth (for indented lists). */
@@ -40,7 +32,7 @@ function flattenFolders(
   return out;
 }
 
-type EditablePlacePatch = Pick<
+export type EditablePlacePatch = Pick<
   PlacePatch,
   'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
 >;
@@ -52,12 +44,14 @@ function PlaceEditor({
   onSave,
   onDelete,
   onClose,
+  inset = false,
 }: {
   place: PlaceRecord;
   folders: { folder: CollectionRecord; depth: number }[];
   onSave: (patch: EditablePlacePatch) => void;
   onDelete: () => void;
   onClose: () => void;
+  inset?: boolean;
 }) {
   const [name, setName] = useState(place.name);
   const [icon, setIcon] = useState(place.icon);
@@ -85,15 +79,20 @@ function PlaceEditor({
   };
 
   return (
-    <View style={styles.picker}>
-      <TextInput
-        style={styles.nameInput}
-        value={name}
-        onChangeText={setName}
-        placeholder="Name"
-        returnKeyType="done"
-        testID={`favorite-name-${place.id}`}
-      />
+    <View style={[styles.picker, inset && styles.pickerInset]}>
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Name</Text>
+        <TextInput
+          style={styles.nameInput}
+          value={name}
+          onChangeText={setName}
+          placeholder="Place name"
+          returnKeyType="done"
+          accessibilityLabel="Name"
+          testID={`favorite-name-${place.id}`}
+        />
+      </View>
+      <Text style={styles.fieldLabel}>Icon</Text>
       <View style={styles.choiceRow}>
         {PLACE_ICONS.map((candidate) => (
           <Pressable
@@ -106,6 +105,7 @@ function PlaceEditor({
           </Pressable>
         ))}
       </View>
+      <Text style={styles.fieldLabel}>Colour</Text>
       <View style={styles.choiceRow}>
         {PLACE_COLORS.map((candidate) => (
           <Pressable
@@ -120,6 +120,7 @@ function PlaceEditor({
           />
         ))}
       </View>
+      <Text style={styles.fieldLabel}>Folder</Text>
       <View style={styles.choiceRow}>
         <Pressable
           style={[styles.folderChip, collectionId === null && styles.folderChipSelected]}
@@ -141,22 +142,30 @@ function PlaceEditor({
           </Pressable>
         ))}
       </View>
-      <TextInput
-        style={[styles.nameInput, styles.notesInput]}
-        value={notes}
-        onChangeText={setNotes}
-        placeholder="Notes"
-        multiline
-        testID={`favorite-notes-${place.id}`}
-      />
-      <TextInput
-        style={styles.nameInput}
-        value={tags}
-        onChangeText={setTags}
-        placeholder="Tags: hike, family, todo"
-        returnKeyType="done"
-        testID={`favorite-tags-${place.id}`}
-      />
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Notes</Text>
+        <TextInput
+          style={[styles.nameInput, styles.notesInput]}
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Add details about this place"
+          multiline
+          accessibilityLabel="Notes"
+          testID={`favorite-notes-${place.id}`}
+        />
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Tags</Text>
+        <TextInput
+          style={styles.nameInput}
+          value={tags}
+          onChangeText={setTags}
+          placeholder="hike, family, todo"
+          returnKeyType="done"
+          accessibilityLabel="Tags"
+          testID={`favorite-tags-${place.id}`}
+        />
+      </View>
       <View style={styles.editorActions}>
         <Pressable
           style={[styles.button, !name.trim() && styles.buttonDisabled]}
@@ -179,6 +188,54 @@ function PlaceEditor({
         </Pressable>
       </View>
     </View>
+  );
+}
+
+/** Focused editor opened from a map pin; the collections browser stays closed. */
+export function PlaceEditSheet({
+  visible,
+  place,
+  collections,
+  onPatch,
+  onDelete,
+  onClose,
+  bottomInset = 0,
+}: {
+  visible: boolean;
+  place: PlaceRecord | null;
+  collections: CollectionRecord[];
+  onPatch: (id: string, patch: EditablePlacePatch) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+  bottomInset?: number;
+}) {
+  const folders = useMemo(() => flattenFolders(collections), [collections]);
+  if (!place) return null;
+  return (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      initialSnap="half"
+      bottomInset={bottomInset}
+      testID="place-edit-sheet"
+    >
+      <View style={styles.headerRow}>
+        <Text style={styles.heading}>Edit place</Text>
+        <Pressable onPress={onClose} hitSlop={10} testID="place-edit-close">
+          <Text style={styles.close}>✕</Text>
+        </Pressable>
+      </View>
+      <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
+        <PlaceEditor
+          key={place.id}
+          place={place}
+          folders={folders}
+          onSave={(patch) => onPatch(place.id, patch)}
+          onDelete={() => onDelete(place.id)}
+          onClose={onClose}
+        />
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
@@ -245,7 +302,6 @@ export function FavoritesSheet({
   onSetAllVisible,
   onReorderPlaces,
   onReorderCollections,
-  editId = null,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -269,8 +325,6 @@ export function FavoritesSheet({
   /** Persist a drag arrangement (row ≡ handles) — ids in their new order. */
   onReorderPlaces: (orderedIds: string[]) => void;
   onReorderCollections: (orderedIds: string[]) => void;
-  /** Open with this place's edit panel expanded (map pin → "Edit"). */
-  editId?: string | null;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -296,11 +350,6 @@ export function FavoritesSheet({
       for (const id of folderRefs.current.keys()) measureFolder(id);
     }
   };
-
-  // Jump straight to a place's edit panel when the sheet is opened for it.
-  useEffect(() => {
-    if (visible && editId) setEditingId(editId);
-  }, [visible, editId]);
 
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -405,6 +454,7 @@ export function FavoritesSheet({
           onSave={(patch) => onPatch(place.id, patch)}
           onDelete={() => onDelete(place.id)}
           onClose={() => setEditingId(null)}
+          inset
         />
       ) : null}
     </View>
@@ -513,93 +563,88 @@ export function FavoritesSheet({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
-          <View style={styles.headerRow}>
-            <Text style={styles.heading}>Collections</Text>
-            {places.length > 0 || collections.length > 0 ? (
-              <Pressable
-                style={[styles.button, styles.buttonQuiet]}
-                onPress={() => onSetAllVisible(!allShown)}
-                testID="toggle-all-visible"
-              >
-                <Text style={styles.buttonQuietText}>{allShown ? 'Hide all' : 'Show all'}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          <ScrollView scrollEnabled={!dragActive}>
-            {/* Folders (nested — a folder row's ＋ targets the new-folder input at it) */}
-            <Text style={styles.sectionLabel}>Folders</Text>
-            {renderFolderLevel(null, 0)}
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.folderName, styles.newFolderInput]}
-                value={newFolder}
-                onChangeText={setNewFolder}
-                placeholder={
-                  newFolderParent
-                    ? `New subfolder in ${collections.find((c) => c.id === newFolderParent)?.name ?? 'folder'}…`
-                    : 'New folder…'
-                }
-                returnKeyType="done"
-                onSubmitEditing={addFolder}
-                testID="folder-new-name"
-              />
-              {newFolderParent ? (
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => setNewFolderParent(null)}
-                  testID="folder-new-parent-clear"
-                >
-                  <Text style={styles.buttonQuietText}>Root</Text>
-                </Pressable>
-              ) : null}
-              <Pressable
-                style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
-                disabled={!newFolder.trim()}
-                onPress={addFolder}
-                testID="folder-add"
-              >
-                <Text style={styles.buttonText}>Add</Text>
-              </Pressable>
-            </View>
-
-            {/* Root places stay at the root; foldered places are rendered
-                immediately below their respective folder rows above. */}
-            <Text style={styles.sectionLabel}>Places without a folder</Text>
-            {places.length === 0 ? (
-              <Text style={styles.muted}>
-                No saved places yet. Long-press the map to save a pin — or sign in to sync the
-                favorites from your other devices.
-              </Text>
-            ) : (
-              renderPlaces(null)
-            )}
-          </ScrollView>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      initialSnap="half"
+      bottomInset={bottomInset}
+      testID="favorites-sheet"
+    >
+      <View style={styles.headerRow}>
+        <Text style={styles.heading}>Collections</Text>
+        {places.length > 0 || collections.length > 0 ? (
           <Pressable
-            style={[styles.button, styles.closeButton]}
-            onPress={onClose}
-            testID="favorites-close"
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() => onSetAllVisible(!allShown)}
+            testID="toggle-all-visible"
           >
-            <Text style={styles.buttonText}>Close</Text>
+            <Text style={styles.buttonQuietText}>{allShown ? 'Hide all' : 'Show all'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <ScrollView style={styles.scroll} scrollEnabled={!dragActive}>
+        {/* Folders (nested — a folder row's ＋ targets the new-folder input at it) */}
+        <Text style={styles.sectionLabel}>Folders</Text>
+        {renderFolderLevel(null, 0)}
+        <View style={styles.row}>
+          <TextInput
+            style={[styles.folderName, styles.newFolderInput]}
+            value={newFolder}
+            onChangeText={setNewFolder}
+            placeholder={
+              newFolderParent
+                ? `New subfolder in ${collections.find((c) => c.id === newFolderParent)?.name ?? 'folder'}…`
+                : 'New folder…'
+            }
+            returnKeyType="done"
+            onSubmitEditing={addFolder}
+            testID="folder-new-name"
+          />
+          {newFolderParent ? (
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={() => setNewFolderParent(null)}
+              testID="folder-new-parent-clear"
+            >
+              <Text style={styles.buttonQuietText}>Root</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
+            disabled={!newFolder.trim()}
+            onPress={addFolder}
+            testID="folder-add"
+          >
+            <Text style={styles.buttonText}>Add</Text>
           </Pressable>
         </View>
-      </View>
-    </Modal>
+
+        {/* Root places stay at the root; foldered places are rendered
+            immediately below their respective folder rows above. */}
+        <Text style={styles.sectionLabel}>Places without a folder</Text>
+        {places.length === 0 ? (
+          <Text style={styles.muted}>
+            No saved places yet. Long-press the map to save a pin — or sign in to sync the favorites
+            from your other devices.
+          </Text>
+        ) : (
+          renderPlaces(null)
+        )}
+      </ScrollView>
+      <Pressable
+        style={[styles.button, styles.closeButton]}
+        onPress={onClose}
+        testID="favorites-close"
+      >
+        <Text style={styles.buttonText}>Close</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    maxHeight: '85%',
-  },
+  scroll: { flex: 1 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -607,6 +652,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   heading: { fontSize: 15, fontWeight: '700', color: '#334' },
+  close: { fontSize: 18, color: '#889', paddingHorizontal: 4 },
   sectionLabel: { fontSize: 12, fontWeight: '700', color: '#889', marginTop: 14, marginBottom: 4 },
   muted: { fontSize: 13, color: '#778', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
@@ -652,9 +698,11 @@ const styles = StyleSheet.create({
   buttonDanger: { backgroundColor: '#b3261e', alignSelf: 'flex-start' },
   picker: {
     paddingBottom: 10,
-    paddingLeft: 42,
     gap: 8,
   },
+  pickerInset: { paddingLeft: 42 },
+  field: { gap: 5 },
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: '#667' },
   nameInput: {
     borderWidth: 1,
     borderColor: '#cdd3dd',

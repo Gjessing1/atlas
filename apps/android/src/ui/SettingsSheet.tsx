@@ -3,7 +3,6 @@ import type { AtlasStorage } from '@atlas/storage';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +18,7 @@ import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../server
 import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
+import { BottomSheet } from './BottomSheet';
 
 const STATUS_LABEL: Record<SyncState['status'], string> = {
   unavailable: 'Server has no accounts configured',
@@ -380,48 +380,43 @@ export function SettingsSheet({
   bottomInset?: number;
 }) {
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
-          <ScrollView>
-            <Text style={styles.heading}>Account</Text>
-            <AccountSection sync={sync} />
-            <Text style={styles.heading}>Offline regions</Text>
-            <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
-            <Text style={styles.heading}>Server</Text>
-            <ServerSection storage={storage} />
-            <Text style={styles.heading}>App</Text>
-            <UpdateSection />
-            <Text style={styles.heading}>Your data</Text>
-            <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
-            <View style={styles.buttonRow}>
-              <Pressable style={styles.button} onPress={onExportAll} testID="export-all">
-                <Text style={styles.buttonText}>Export all data</Text>
-              </Pressable>
-            </View>
-          </ScrollView>
-          <Pressable
-            style={[styles.button, styles.closeButton]}
-            onPress={onClose}
-            testID="settings-close"
-          >
-            <Text style={styles.buttonText}>Close</Text>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      initialSnap="half"
+      bottomInset={bottomInset}
+      testID="settings-sheet"
+    >
+      <ScrollView style={styles.scroll}>
+        <Text style={styles.heading}>Account</Text>
+        <AccountSection sync={sync} />
+        <Text style={styles.heading}>Offline regions</Text>
+        <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
+        <Text style={styles.heading}>Server</Text>
+        <ServerSection storage={storage} />
+        <Text style={styles.heading}>App</Text>
+        <UpdateSection />
+        <Text style={styles.heading}>Your data</Text>
+        <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
+        <View style={styles.buttonRow}>
+          <Pressable style={styles.button} onPress={onExportAll} testID="export-all">
+            <Text style={styles.buttonText}>Export all data</Text>
           </Pressable>
         </View>
-      </View>
-    </Modal>
+      </ScrollView>
+      <Pressable
+        style={[styles.button, styles.closeButton]}
+        onPress={onClose}
+        testID="settings-close"
+      >
+        <Text style={styles.buttonText}>Close</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    maxHeight: '85%',
-  },
+  scroll: { flex: 1 },
   heading: { fontSize: 13, fontWeight: '700', color: '#667', marginTop: 18, marginBottom: 8 },
   rowText: { fontSize: 16, color: '#111' },
   muted: { fontSize: 13, color: '#778', marginTop: 2 },

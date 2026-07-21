@@ -187,6 +187,33 @@ export interface TransitTrip {
   legs: TransitLeg[];
 }
 
+/** West/south/east/north extent used to frame a journey on either map. */
+export type TransitTripBounds = [west: number, south: number, east: number, north: number];
+
+/**
+ * Bounds of every leg geometry, falling back to the named leg endpoints when
+ * a planner omits a shape. The fallback keeps “Show on map” useful for sparse
+ * timetable answers without inventing a route line that was never supplied.
+ */
+export function transitTripBounds(trip: TransitTrip): TransitTripBounds | null {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const leg of trip.legs) {
+    const points = leg.points.length > 0 ? leg.points : [leg.from.position, leg.to.position];
+    for (const point of points) {
+      west = Math.min(west, point.lng);
+      south = Math.min(south, point.lat);
+      east = Math.max(east, point.lng);
+      north = Math.max(north, point.lat);
+    }
+  }
+  return Number.isFinite(west) && west !== east && south !== north
+    ? [west, south, east, north]
+    : null;
+}
+
 /** Departure delay against the timetable, in ms. Negative means running early. */
 export function legDelayMs(leg: TransitLeg): number {
   return leg.expectedStartMs - leg.aimedStartMs;

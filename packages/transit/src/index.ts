@@ -13,6 +13,7 @@ export type {
   TransitBookingMethod,
   TransitProblem,
   TransitProblemCode,
+  TransitTripBounds,
 } from './model.js';
 export {
   isRideMode,
@@ -26,6 +27,7 @@ export {
   transitProblemMessage,
   expandModeFilter,
   filterModeOf,
+  transitTripBounds,
   WIDE_SEARCH_WINDOW_MINUTES,
   RIDE_MODES,
 } from './model.js';

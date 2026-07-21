@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { NavController } from './useNavigation';
+import { BottomSheet } from '../ui/BottomSheet';
 import { PROFILE_ICON } from '../ui/modeIcons';
 
 function formatDistance(m: number): string {
@@ -40,16 +41,24 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
   const landscape = win.width > win.height;
 
   return (
-    <View
-      style={[
-        styles.wrap,
-        { paddingBottom: bottomInset + 12 },
-        landscape && {
-          right: undefined,
-          width: Math.min(420, Math.round(win.width * 0.45)),
-          borderTopRightRadius: 18,
-        },
-      ]}
+    <BottomSheet
+      visible
+      mode="map"
+      onClose={nav.stop}
+      initialSnap="peek"
+      peekHeight={236}
+      bottomInset={bottomInset}
+      sheetStyle={
+        landscape
+          ? {
+              right: undefined,
+              width: Math.min(420, Math.round(win.width * 0.45)),
+              borderTopRightRadius: 18,
+            }
+          : undefined
+      }
+      contentStyle={styles.content}
+      testID="route-preview-sheet"
     >
       {/* A walk to the car ferry is a different trip: switch the profile here
           and the choices refetch for the same origin/destination. */}
@@ -120,24 +129,12 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
           <Text style={styles.goText}>{nav.previewLoading ? 'Finding routes…' : 'Start'}</Text>
         </Pressable>
       </View>
-    </View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingTop: 10,
-    paddingHorizontal: 14,
-    elevation: 12,
-    gap: 10,
-  },
+  content: { gap: 10 },
   profileRow: { flexDirection: 'row', gap: 8 },
   profileChip: {
     flexDirection: 'row',
@@ -152,7 +149,7 @@ const styles = StyleSheet.create({
   profileLabel: { fontSize: 13, fontWeight: '600', color: '#5c6270' },
   profileLabelActive: { color: '#1d4fd7' },
   previewError: { fontSize: 13, color: '#b3261e' },
-  choices: { maxHeight: 220 },
+  choices: { flex: 1 },
   choicesLoading: { opacity: 0.45 },
   choice: {
     flexDirection: 'row',

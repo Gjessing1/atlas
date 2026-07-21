@@ -314,11 +314,13 @@ function TripCard({
   trip,
   expanded,
   onToggle,
+  onShowMap,
   index,
 }: {
   trip: TransitTrip;
   expanded: boolean;
   onToggle: () => void;
+  onShowMap: () => void;
   index: number;
 }) {
   const transfers = transferCount(trip);
@@ -374,6 +376,13 @@ function TripCard({
       </Pressable>
       {expanded ? (
         <View style={styles.legs}>
+          <Pressable
+            style={styles.showMapButton}
+            onPress={onShowMap}
+            testID={`transit-show-map-${index}`}
+          >
+            <Text style={styles.showMapText}>Show on map</Text>
+          </Pressable>
           {trip.legs.map((leg, i) => (
             <LegRow key={i} leg={leg} />
           ))}
@@ -393,7 +402,13 @@ function TripCard({
  * APK rather than an OTA update), so an exact time is reached by stepping in
  * half hours, and the Earlier/Later paging below walks real departures.
  */
-export function TransitResults({ transit }: { transit: TransitPlan }) {
+export function TransitResults({
+  transit,
+  onShowMap,
+}: {
+  transit: TransitPlan;
+  onShowMap: (trip: TransitTrip, index: number) => void;
+}) {
   const [showFilters, setShowFilters] = useState(false);
   const trips = transit.trips;
   const first = trips?.[0];
@@ -555,6 +570,7 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
               index={i}
               expanded={transit.selected === i}
               onToggle={() => transit.select(transit.selected === i ? null : i)}
+              onShowMap={() => onShowMap(trip, i)}
             />
           ))}
           {showLater ? (
@@ -596,6 +612,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   tripSelected: { borderColor: '#1a73e8', backgroundColor: '#f7faff' },
+  showMapButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 16,
+    backgroundColor: '#e7effd',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  showMapText: { fontSize: 13, fontWeight: '700', color: '#1a73e8' },
   tripHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tripTimes: { fontSize: 15, fontWeight: '700', color: '#111' },
   tripLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },

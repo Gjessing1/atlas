@@ -1,16 +1,18 @@
 import type { SearchResult } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
+import { BottomSheet } from '../ui/BottomSheet';
 import { geoSearch, type SearchBias } from './geoSearch';
 import { parseRecentSearches, pushRecentSearch, RECENT_SEARCHES_SETTING } from './recentSearches';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
  * downloaded packs' FTS5 databases when it can't be reached. The expanded
- * overlay only — App owns the round 🔍 button (bottom-left cluster) and the
- * open state; the input stays at the top so the keyboard never covers it.
+ * bottom sheet only — App owns the round search button and the open state.
+ * Android's adjustResize keeps the sheet above the keyboard while the common
+ * snap model keeps the input and results in the thumb-reachable lower screen.
  * While the input is empty it lists the recent picks (device-local setting).
  */
 export function SearchBar({
@@ -18,7 +20,7 @@ export function SearchBar({
   getBias,
   onPick,
   onClose,
-  top = 0,
+  bottomInset = 0,
   getSetting,
   setSetting,
 }: {
@@ -27,8 +29,8 @@ export function SearchBar({
   getBias: SearchBias;
   onPick: (result: SearchResult) => void;
   onClose: () => void;
-  /** Absolute top offset (px) for the expanded input. */
-  top?: number;
+  /** System nav-bar inset — supplied with Atlas's zero-inset fallback. */
+  bottomInset?: number;
   /** Settings accessors, for the persisted recent-searches list. */
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => void;
@@ -91,7 +93,15 @@ export function SearchBar({
   const shown = showingRecent ? recent : results;
 
   return (
-    <View style={[styles.wrap, { top }]}>
+    <BottomSheet
+      visible
+      mode="map"
+      onClose={close}
+      initialSnap="half"
+      peekHeight={116}
+      bottomInset={bottomInset}
+      testID="search-sheet"
+    >
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -110,7 +120,7 @@ export function SearchBar({
         </Pressable>
       </View>
       {shown.length > 0 ? (
-        <View style={styles.results}>
+        <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
           {showingRecent ? (
             <Text style={styles.listTag}>recent</Text>
           ) : offline ? (
@@ -127,14 +137,13 @@ export function SearchBar({
               {r.label ? <Text style={styles.resultLabel}>{r.label}</Text> : null}
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
-    </View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 12, right: 12 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -151,6 +160,7 @@ const styles = StyleSheet.create({
   closeButton: { paddingHorizontal: 12, paddingVertical: 10 },
   closeText: { fontSize: 16, color: '#778' },
   results: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 10,
     marginTop: 6,

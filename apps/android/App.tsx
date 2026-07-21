@@ -18,6 +18,7 @@ import {
   viaInsertIndex,
   type RoutePath,
 } from '@atlas/routing';
+import { transitTripBounds, type TransitTrip } from '@atlas/transit';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
@@ -67,6 +68,7 @@ import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { CrosshairIcon, MapOverviewIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
+import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
 import { RoutePanel } from './src/ui/RoutePanel';
@@ -140,7 +142,7 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
-  // Place whose edit panel the Favorites sheet should open with (map pin → Edit).
+  // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
@@ -197,6 +199,9 @@ function AppInner() {
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
   const controlsTop = topInset + 8 + (navActive && !previewing ? navHeight + 8 : 0);
+  // A bottom sheet owns the lower screen while open. Hide the idle map chrome
+  // below it instead of letting later-rendered buttons float over its content.
+  const idleSheetOpen = searchOpen || menuOpen || destination !== null;
 
   // While the follow camera is actively tracking, the puck is drawn as a
   // screen-fixed chevron at the camera's anchor point — the camera eases to
@@ -514,6 +519,25 @@ function AppInner() {
     });
   }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset, win.width, win.height]);
 
+  // A journey card can collapse the planner and ask to see its actual shape.
+  // Frame every walk/ride leg, leaving room for the peek sheet that remains.
+  const showTransitTrip = useCallback(
+    (trip: TransitTrip) => {
+      const bounds = transitTripBounds(trip);
+      if (!bounds) return;
+      cameraRef.current?.fitBounds(bounds, {
+        padding: {
+          top: topInset + 40,
+          right: 40,
+          bottom: bottomInset + (landscape ? 220 : 300),
+          left: 40,
+        },
+        duration: 700,
+      });
+    },
+    [bottomInset, landscape, topInset],
+  );
+
   // Long-press outside route planning: pick any point as a destination.
   const onPickPoint = useCallback(
     ({ lat, lng }: LatLng) => {
@@ -724,15 +748,15 @@ function AppInner() {
 
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
 
-      {/* Expanded search overlay (input at the top, clear of the keyboard);
-          hidden while navigating — the banner owns the top then. */}
+      {/* Search shares the bottom-sheet model and stays above the keyboard;
+          hidden while navigating because the guidance UI owns the screen. */}
       {searchOpen && !following && !planning && !previewing ? (
         <SearchBar
           packs={packs}
           getBias={getBias}
           onPick={onPickResult}
           onClose={() => setSearchOpen(false)}
-          top={controlsTop}
+          bottomInset={bottomInset}
           getSetting={getSetting}
           setSetting={setSetting}
         />
@@ -802,7 +826,7 @@ function AppInner() {
       {/* Bottom-right: recentre on the current position (RoutePanel owns the
           bottom while planning, so hide it then; while navigating the follow
           camera + Re-centre pill cover it, so it's hidden too). */}
-      {!planning && !previewing && !following ? (
+      {!planning && !previewing && !following && !idleSheetOpen ? (
         <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
           <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
             <CrosshairIcon />
@@ -811,22 +835,17 @@ function AppInner() {
       ) : null}
 
       {/* Hidden while planning/previewing — a panel owns the bottom then. */}
-      {!planning && !previewing ? (
+      {!planning && !previewing && !idleSheetOpen ? (
         <MenuCluster
           bottomInset={bottomInset}
-          menuOpen={menuOpen}
           onToggleMenu={() => setMenuOpen((o) => !o)}
           following={following}
-          onOpenFavorites={() => setFavoritesOpen(true)}
-          onOpenTracks={() => setTracksOpen(true)}
-          onOpenLayers={() => setLayersOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
           onPlanRoute={() => route.start()}
         />
       ) : null}
 
-      {!planning && !previewing && !following ? (
+      {!planning && !previewing && !following && !idleSheetOpen ? (
         <MapActivityControls
           profile={profiles}
           overlays={overlaysCtl}
@@ -838,7 +857,7 @@ function AppInner() {
         />
       ) : null}
 
-      {useOffline && !planning && !previewing && !following ? (
+      {useOffline && !planning && !previewing && !following && !idleSheetOpen ? (
         // Above the scalebar strip (bottom-centre) so the two never overlap.
         // Hidden mid-trip: in landscape the bottom offsets put it across the
         // middle of the map, and which tile source is in use is not something
@@ -847,7 +866,7 @@ function AppInner() {
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && !planning && !previewing && !following ? (
+      {packs.length > 0 && !planning && !previewing && !following && !idleSheetOpen ? (
         // Stacked above the bottom-right locate button. Hidden mid-trip: the
         // offline fallback is automatic (useMapStyle), the switch only forces it.
         <View style={[styles.offlineToggle, { bottom: bottomInset + 84 }]}>
@@ -872,6 +891,16 @@ function AppInner() {
       ) : null}
       <UpdateNotices storage={data.storage} topInset={topInset} />
 
+      <MainMenuSheet
+        visible={menuOpen && !planning && !previewing}
+        onClose={() => setMenuOpen(false)}
+        onOpenFavorites={() => setFavoritesOpen(true)}
+        onOpenTracks={() => setTracksOpen(true)}
+        onOpenLayers={() => setLayersOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        bottomInset={bottomInset}
+      />
+
       {destination && !planning ? (
         <DestinationCard
           target={destination}
@@ -892,7 +921,6 @@ function AppInner() {
             destination.placeId
               ? () => {
                   setEditPlaceId(destination.placeId!);
-                  setFavoritesOpen(true);
                   setDestination(null);
                 }
               : undefined
@@ -922,11 +950,9 @@ function AppInner() {
         onPacksChanged={refreshPacks}
         bottomInset={bottomInset}
         favoritesOpen={favoritesOpen}
-        onCloseFavorites={() => {
-          setFavoritesOpen(false);
-          setEditPlaceId(null);
-        }}
+        onCloseFavorites={() => setFavoritesOpen(false)}
         editPlaceId={editPlaceId}
+        onCloseEditPlace={() => setEditPlaceId(null)}
         tracksOpen={tracksOpen}
         onCloseTracks={() => setTracksOpen(false)}
         layersOpen={layersOpen}
@@ -949,6 +975,7 @@ function AppInner() {
           getBias={getBias}
           onExport={exportRoute}
           onNavigate={startNavigation}
+          onShowTransitTrip={showTransitTrip}
           getMyLocation={getMyLocation}
           bottomInset={bottomInset}
         />

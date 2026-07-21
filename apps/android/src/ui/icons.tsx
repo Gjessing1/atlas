@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 /**
  * Colour-badged teardrop pin — the mobile twin of the web's `.place-marker`
@@ -107,6 +107,28 @@ export function MapOverviewIcon({ color = '#1a73e8' }: { color?: string }) {
         stroke={color}
         strokeWidth={1.9}
         strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Sun behind a cloud: a stable, tintable weather action glyph. */
+export function WeatherIcon({ color = '#3a4455' }: { color?: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Circle cx={8} cy={8} r={3.2} stroke={color} strokeWidth={1.7} fill="none" />
+      <Path
+        d="M8 2.3v1.4M8 12.3v1.4M2.3 8h1.4M12.3 8h1.4M4 4l1 1M11 11l1 1M12 4l-1 1M4 12l1-1"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M7.2 18.7h10.6a3.2 3.2 0 0 0 .2-6.4 4.7 4.7 0 0 0-8.8-1.4 3.9 3.9 0 0 0-2 .6 3.7 3.7 0 0 0 0 7.2z"
+        fill="#fff"
+        stroke={color}
+        strokeWidth={1.7}
         strokeLinejoin="round"
       />
     </Svg>

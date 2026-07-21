@@ -10,6 +10,7 @@ import {
   type RoutePath,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
+import type { TransitTrip } from '@atlas/transit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -17,6 +18,7 @@ import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { TransitPlan } from '../routing/useTransit';
 import { geoSearch, type SearchBias } from '../search/geoSearch';
+import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { PROFILE_ICON, TramIcon } from './modeIcons';
 import { TransitResults } from './TransitResults';
@@ -168,6 +170,7 @@ function StopSearch({
           value={query}
           onChangeText={setQuery}
           autoCorrect={false}
+          disableFullscreenUI
           autoFocus={autoFocus}
           selectTextOnFocus
           testID="route-stop-search"
@@ -330,6 +333,7 @@ function AlongRouteSearch({
             value={query}
             onChangeText={setQuery}
             autoCorrect={false}
+            disableFullscreenUI
             autoFocus
             testID="route-along-search"
           />
@@ -385,6 +389,7 @@ export function RoutePanel({
   getBias,
   onExport,
   onNavigate,
+  onShowTransitTrip,
   getMyLocation,
   bottomInset = 0,
 }: {
@@ -405,10 +410,13 @@ export function RoutePanel({
    * guidance starts from — the place card just points here.
    */
   onNavigate: (destination: LatLng) => void;
+  /** Collapse the planner and frame this selected journey on the map. */
+  onShowTransitTrip: (trip: TransitTrip) => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
   getMyLocation: () => Promise<LatLng | null>;
   bottomInset?: number;
 }) {
+  const sheetRef = useRef<BottomSheetHandle>(null);
   const transitMode = transit.enabled;
   const path = route.paths?.[route.selectedPath] ?? null;
   // Trip times sit under the mode icons only for a point-to-point plan, where
@@ -469,7 +477,16 @@ export function RoutePanel({
   const destination = stops.length > 0 ? stops[stops.length - 1]!.pos : null;
 
   return (
-    <View style={styles.panel}>
+    <BottomSheet
+      ref={sheetRef}
+      visible
+      mode="map"
+      onClose={route.stop}
+      initialSnap="half"
+      peekHeight={188}
+      bottomInset={bottomInset}
+      testID="route-sheet"
+    >
       {/* The header stays out of the scroller so the close button is always
           reachable, however long the journey board below it grows. */}
       <View style={styles.headerRow}>
@@ -486,7 +503,7 @@ export function RoutePanel({
           a search result working while the keyboard is still up. */}
       <ScrollView
         style={styles.body}
-        contentContainerStyle={[styles.bodyContent, { paddingBottom: bottomInset + 12 }]}
+        contentContainerStyle={styles.bodyContent}
         keyboardShouldPersistTaps="handled"
         testID="route-scroll"
       >
@@ -767,7 +784,17 @@ export function RoutePanel({
           </View>
         ) : null}
 
-        {transitMode ? <TransitResults transit={transit} /> : null}
+        {transitMode ? (
+          <TransitResults
+            transit={transit}
+            onShowMap={(trip, index) => {
+              transit.select(index);
+              Keyboard.dismiss();
+              sheetRef.current?.snapTo('peek');
+              onShowTransitTrip(trip);
+            }}
+          />
+        ) : null}
 
         {!transitMode && route.error ? <Text style={styles.error}>{route.error}</Text> : null}
         {!transitMode && path ? (
@@ -805,28 +832,12 @@ export function RoutePanel({
           </View>
         ) : null}
       </ScrollView>
-    </View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    elevation: 12,
-    // Taller than the old 60 %: a journey board carries five options with legs
-    // expanded under them. It scrolls either way, but at 60 % it scrolled
-    // almost immediately, which reads as a broken panel rather than a full one.
-    maxHeight: '85%',
-  },
-  body: { flexShrink: 1 },
+  body: { flex: 1 },
   bodyContent: { gap: 8, paddingTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heading: { fontSize: 15, fontWeight: '700', color: '#334', flexGrow: 1 },

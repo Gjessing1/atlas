@@ -10,10 +10,11 @@ import {
 } from '@atlas/conditions';
 import { fmtClock, fmtDayClock, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { UserData } from '../useUserData';
 import type { WeatherState } from '../weather/useWeather';
+import { BottomSheet } from './BottomSheet';
 import { theme } from './theme';
 
 // Sheet prefs are device-local (`local.` keys never sync) — same keys as the web panel.
@@ -109,179 +110,179 @@ export function WeatherSheet({
   );
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
-          <View style={styles.headerRow}>
-            <Text style={styles.heading}>Weather</Text>
-            {target ? (
-              <Text style={styles.coords}>
-                {target.lat.toFixed(3)}, {target.lng.toFixed(3)}
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      initialSnap="half"
+      bottomInset={bottomInset}
+      testID="weather-sheet"
+    >
+      <View style={styles.headerRow}>
+        <Text style={styles.heading}>Weather</Text>
+        {target ? (
+          <Text style={styles.coords}>
+            {target.lat.toFixed(3)}, {target.lng.toFixed(3)}
+          </Text>
+        ) : null}
+        <Pressable onPress={onClose} hitSlop={10} testID="weather-close">
+          <Text style={styles.close}>✕</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.modes}>
+        {MODES.map((m) => (
+          <Pressable
+            key={m.id}
+            style={[styles.mode, mode === m.id ? styles.modeActive : null]}
+            onPress={() => pickMode(m.id)}
+            testID={`weather-mode-${m.id}`}
+          >
+            <Text style={[styles.modeLabel, mode === m.id ? styles.modeLabelActive : null]}>
+              {m.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {mode === 'fishing' ? (
+        <View style={styles.speciesRow}>
+          {SPECIES.map((s) => (
+            <Pressable
+              key={s}
+              style={[styles.chip, species === s ? styles.chipActive : null]}
+              onPress={() => pickSpecies(s)}
+            >
+              <Text style={[styles.chipText, species === s ? styles.chipTextActive : null]}>
+                {s}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {weather.status === 'error' ? (
+        <Text style={styles.muted}>Forecast unavailable right now — try again in a bit.</Text>
+      ) : null}
+      {weather.status === 'loading' && rows.length === 0 ? (
+        <Text style={styles.muted}>Loading forecast…</Text>
+      ) : null}
+
+      {row ? (
+        <ScrollView style={styles.scroll}>
+          <View style={styles.timeRow}>
+            <Text style={styles.stepLabel}>{fmtStep(row.timeMs)}</Text>
+            {sun ? (
+              <Text style={styles.sun}>
+                {sun.sunrise && sun.sunset
+                  ? `☀ ${fmtTime(sun.sunrise.getTime())}–${fmtTime(sun.sunset.getTime())}`
+                  : sun.noonAltitude > 0
+                    ? '☀ midnight sun'
+                    : '☀ polar night'}
               </Text>
             ) : null}
-            <Pressable onPress={onClose} hitSlop={10} testID="weather-close">
-              <Text style={styles.close}>✕</Text>
+          </View>
+
+          {/* Tappable hour strip — the scrubber. Coloured by rating when scoring. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.strip}
+            contentContainerStyle={styles.stripContent}
+          >
+            {rows.map((r, i) => {
+              const color =
+                mode === 'weather'
+                  ? '#d7dae0'
+                  : (RATING_COLOR[r.assessment?.rating ?? ''] ?? '#d7dae0');
+              return (
+                <Pressable
+                  key={r.point.time}
+                  onPress={() => setSelected(i)}
+                  style={[
+                    styles.tick,
+                    { backgroundColor: color },
+                    i === idx ? styles.tickSelected : null,
+                  ]}
+                />
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.stepButtons}>
+            <Pressable
+              style={styles.stepButton}
+              onPress={() => setSelected(Math.max(0, idx - 1))}
+              disabled={idx <= 0}
+            >
+              <Text style={styles.stepButtonText}>◀ Earlier</Text>
+            </Pressable>
+            <Pressable
+              style={styles.stepButton}
+              onPress={() => setSelected(Math.min(rows.length - 1, idx + 1))}
+              disabled={idx >= rows.length - 1}
+            >
+              <Text style={styles.stepButtonText}>Later ▶</Text>
             </Pressable>
           </View>
 
-          <View style={styles.modes}>
-            {MODES.map((m) => (
-              <Pressable
-                key={m.id}
-                style={[styles.mode, mode === m.id ? styles.modeActive : null]}
-                onPress={() => pickMode(m.id)}
-                testID={`weather-mode-${m.id}`}
-              >
-                <Text style={[styles.modeLabel, mode === m.id ? styles.modeLabelActive : null]}>
-                  {m.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          <WeatherFacts row={row} />
 
-          {mode === 'fishing' ? (
-            <View style={styles.speciesRow}>
-              {SPECIES.map((s) => (
-                <Pressable
-                  key={s}
-                  style={[styles.chip, species === s ? styles.chipActive : null]}
-                  onPress={() => pickSpecies(s)}
+          {mode !== 'weather' && row.assessment ? (
+            <View style={styles.assessment}>
+              <View style={styles.scoreRow}>
+                <View
+                  style={[
+                    styles.scoreBox,
+                    { backgroundColor: RATING_COLOR[row.assessment.rating] ?? '#888' },
+                  ]}
                 >
-                  <Text style={[styles.chipText, species === s ? styles.chipTextActive : null]}>
-                    {s}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          {weather.status === 'error' ? (
-            <Text style={styles.muted}>Forecast unavailable right now — try again in a bit.</Text>
-          ) : null}
-          {weather.status === 'loading' && rows.length === 0 ? (
-            <Text style={styles.muted}>Loading forecast…</Text>
-          ) : null}
-
-          {row ? (
-            <ScrollView>
-              <View style={styles.timeRow}>
-                <Text style={styles.stepLabel}>{fmtStep(row.timeMs)}</Text>
-                {sun ? (
-                  <Text style={styles.sun}>
-                    {sun.sunrise && sun.sunset
-                      ? `☀ ${fmtTime(sun.sunrise.getTime())}–${fmtTime(sun.sunset.getTime())}`
-                      : sun.noonAltitude > 0
-                        ? '☀ midnight sun'
-                        : '☀ polar night'}
-                  </Text>
-                ) : null}
+                  <Text style={styles.scoreText}>{row.assessment.score}</Text>
+                </View>
+                <Text style={styles.summary}>{row.assessment.summary}</Text>
               </View>
 
-              {/* Tappable hour strip — the scrubber. Coloured by rating when scoring. */}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.strip}
-                contentContainerStyle={styles.stripContent}
-              >
-                {rows.map((r, i) => {
-                  const color =
-                    mode === 'weather'
-                      ? '#d7dae0'
-                      : (RATING_COLOR[r.assessment?.rating ?? ''] ?? '#d7dae0');
-                  return (
+              {windows.length > 0 ? (
+                <View style={styles.windowsRow}>
+                  <Text style={styles.muted}>Best windows:</Text>
+                  {windows.map((w) => (
                     <Pressable
-                      key={r.point.time}
-                      onPress={() => setSelected(i)}
-                      style={[
-                        styles.tick,
-                        { backgroundColor: color },
-                        i === idx ? styles.tickSelected : null,
-                      ]}
-                    />
-                  );
-                })}
-              </ScrollView>
-
-              <View style={styles.stepButtons}>
-                <Pressable
-                  style={styles.stepButton}
-                  onPress={() => setSelected(Math.max(0, idx - 1))}
-                  disabled={idx <= 0}
-                >
-                  <Text style={styles.stepButtonText}>◀ Earlier</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.stepButton}
-                  onPress={() => setSelected(Math.min(rows.length - 1, idx + 1))}
-                  disabled={idx >= rows.length - 1}
-                >
-                  <Text style={styles.stepButtonText}>Later ▶</Text>
-                </Pressable>
-              </View>
-
-              <WeatherFacts row={row} />
-
-              {mode !== 'weather' && row.assessment ? (
-                <View style={styles.assessment}>
-                  <View style={styles.scoreRow}>
-                    <View
-                      style={[
-                        styles.scoreBox,
-                        { backgroundColor: RATING_COLOR[row.assessment.rating] ?? '#888' },
-                      ]}
+                      key={w.startIdx}
+                      style={styles.windowChip}
+                      onPress={() => setSelected(w.peakIdx)}
                     >
-                      <Text style={styles.scoreText}>{row.assessment.score}</Text>
-                    </View>
-                    <Text style={styles.summary}>{row.assessment.summary}</Text>
-                  </View>
-
-                  {windows.length > 0 ? (
-                    <View style={styles.windowsRow}>
-                      <Text style={styles.muted}>Best windows:</Text>
-                      {windows.map((w) => (
-                        <Pressable
-                          key={w.startIdx}
-                          style={styles.windowChip}
-                          onPress={() => setSelected(w.peakIdx)}
-                        >
-                          <Text style={styles.windowChipText}>
-                            {fmtStep(rows[w.startIdx]!.timeMs)}–
-                            {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  ) : null}
-
-                  {row.assessment.factors.map((f) => (
-                    <View key={f.key} style={styles.factor}>
-                      <View
-                        style={[styles.factorDot, { backgroundColor: FACTOR_COLOR[f.rating] }]}
-                      />
-                      <View style={styles.factorBody}>
-                        <Text style={styles.factorLabel}>{f.label}</Text>
-                        <Text style={styles.factorDetail}>{f.detail}</Text>
-                      </View>
-                    </View>
+                      <Text style={styles.windowChipText}>
+                        {fmtStep(rows[w.startIdx]!.timeMs)}–
+                        {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)}
+                      </Text>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
 
-              {weather.forecast ? (
-                <Text
-                  style={styles.attribution}
-                  onPress={() => void Linking.openURL('https://www.met.no/en')}
-                >
-                  Forecast: MET Norway (met.no), updated{' '}
-                  {fmtTime(new Date(weather.forecast.updatedAt).getTime())}
-                </Text>
-              ) : null}
-            </ScrollView>
+              {row.assessment.factors.map((f) => (
+                <View key={f.key} style={styles.factor}>
+                  <View style={[styles.factorDot, { backgroundColor: FACTOR_COLOR[f.rating] }]} />
+                  <View style={styles.factorBody}>
+                    <Text style={styles.factorLabel}>{f.label}</Text>
+                    <Text style={styles.factorDetail}>{f.detail}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
           ) : null}
-        </View>
-      </View>
-    </Modal>
+
+          {weather.forecast ? (
+            <Text
+              style={styles.attribution}
+              onPress={() => void Linking.openURL('https://www.met.no/en')}
+            >
+              Forecast: MET Norway (met.no), updated{' '}
+              {fmtTime(new Date(weather.forecast.updatedAt).getTime())}
+            </Text>
+          ) : null}
+        </ScrollView>
+      ) : null}
+    </BottomSheet>
   );
 }
 
@@ -321,14 +322,7 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: theme.surface,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    maxHeight: '85%',
-  },
+  scroll: { flex: 1 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   heading: { fontSize: 15, fontWeight: '700', color: '#334' },
   coords: { flex: 1, fontSize: 12, color: theme.textMuted, fontVariant: ['tabular-nums'] },
