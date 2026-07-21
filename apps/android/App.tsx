@@ -65,7 +65,7 @@ import { useTransitPlan } from './src/routing/useTransit';
 import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
-import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
+import { CrosshairIcon, MapOverviewIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
@@ -745,6 +745,10 @@ function AppInner() {
             style={styles.roundButton}
             onPress={toggleNavFollow}
             testID="toggle-orientation"
+            accessibilityRole="button"
+            accessibilityLabel={
+              navFollow === 'course' ? 'Switch to north-up' : 'Switch to course-up'
+            }
           >
             {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
             {navFollow === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
@@ -754,8 +758,11 @@ function AppInner() {
             style={[styles.roundButton, navCam.overview && styles.roundButtonActive]}
             onPress={navCam.toggleOverview}
             testID="toggle-overview"
+            accessibilityRole="button"
+            accessibilityLabel={navCam.overview ? 'Back to follow view' : 'Show route overview'}
+            accessibilityState={{ selected: navCam.overview }}
           >
-            <Text style={styles.orientText}>{'🗺'}</Text>
+            <MapOverviewIcon />
           </Pressable>
         </View>
       ) : null}
@@ -1007,7 +1014,7 @@ const styles = StyleSheet.create({
   roundButtonActive: { backgroundColor: theme.surfaceActive },
   roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   // Landscape: hug the left edge so the centred nav chevron stays uncovered.
-  roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 16 },
+  roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 76 },
   // …and keep a long road name from growing back into the chevron's column;
   // the name ellipsises instead (numberOfLines is already 1).
   roadChipLandscape: { maxWidth: '40%' },

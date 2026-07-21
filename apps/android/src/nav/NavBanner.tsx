@@ -1,6 +1,7 @@
 import { fmtClock } from '@atlas/core';
 import { formatExitSign } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { theme } from '../ui/theme';
 import { TurnIcon } from './TurnIcon';
@@ -21,9 +22,41 @@ function formatDuration(ms: number): string {
 const formatEta = fmtClock;
 
 /** Ground speed in km/h, or null when stationary/unknown. */
-function formatSpeed(speedMps: number | null): string | null {
+function speedKph(speedMps: number | null): number | null {
   if (speedMps == null || speedMps < 0.5) return null;
-  return `${Math.round(speedMps * 3.6)} km/h`;
+  return Math.round(speedMps * 3.6);
+}
+
+function AudioIcon({ muted }: { muted: boolean }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Path
+        d="M4 10v4h4l5 4V6l-5 4H4z"
+        fill="none"
+        stroke={theme.text}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {muted ? (
+        <Path
+          d="m17 9 5 5m0-5-5 5"
+          fill="none"
+          stroke={theme.text}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+        />
+      ) : (
+        <Path
+          d="M16.5 9.2a4 4 0 0 1 0 5.6M19 6.8a7.3 7.3 0 0 1 0 10.4"
+          fill="none"
+          stroke={theme.text}
+          strokeWidth={1.9}
+          strokeLinecap="round"
+        />
+      )}
+    </Svg>
+  );
 }
 
 /** Turn-by-turn banner: the next maneuver up top, trip summary + stop below. */
@@ -46,7 +79,7 @@ export function NavBanner({
 
   const { state } = nav;
   const maneuver = state?.upcoming;
-  const speed = formatSpeed(nav.speedMps);
+  const speed = speedKph(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
   // The manual way out, offered only near the destination — where the automatic
@@ -67,53 +100,71 @@ export function NavBanner({
       style={[
         styles.wrap,
         { top: topInset + 8 },
-        landscape && { right: undefined, width: Math.min(400, Math.round(win.width * 0.42)) },
+        landscape && { right: undefined, width: Math.min(420, Math.round(win.width * 0.46)) },
       ]}
       pointerEvents="box-none"
       onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
     >
       <View style={styles.card}>
         {nav.phase === 'starting' ? (
-          <Text style={styles.maneuver}>Finding route…</Text>
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>Navigation</Text>
+            <Text style={styles.maneuver}>Finding the best route…</Text>
+          </View>
         ) : nav.phase === 'error' ? (
-          <Text style={styles.error}>{nav.error ?? 'Navigation error'}</Text>
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>Navigation unavailable</Text>
+            <Text style={styles.error}>{nav.error ?? 'Navigation error'}</Text>
+          </View>
         ) : nav.phase === 'arrived' ? (
-          <>
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>Trip complete</Text>
             <Text style={styles.maneuver}>You have arrived</Text>
             {nav.tripSummary ? (
-              <Text style={styles.summary}>
+              <Text style={styles.arrivalSummary}>
                 {formatDistance(nav.tripSummary.distanceM)} ·{' '}
                 {formatDuration(nav.tripSummary.durationMs)}
               </Text>
             ) : null}
-          </>
+          </View>
         ) : maneuver ? (
-          <View style={styles.maneuverRow}>
-            <View style={styles.turnBox}>
-              <TurnIcon instruction={maneuver.instruction} size={40} />
-            </View>
-            <Text style={styles.distanceTo}>{formatDistance(maneuver.distanceToM)}</Text>
-            <View style={styles.maneuverText}>
-              <Text style={styles.maneuver} numberOfLines={2}>
-                {maneuver.instruction.text}
-              </Text>
-              {maneuver.instruction.exitSign ? (
-                <Text style={styles.exitSign} numberOfLines={1}>
-                  {formatExitSign(maneuver.instruction.exitSign)}
+          <>
+            <View style={styles.guidanceRow}>
+              <View style={styles.turnPanel}>
+                <TurnIcon instruction={maneuver.instruction} size={44} color="#fff" />
+              </View>
+              <View style={styles.maneuverText}>
+                <Text style={styles.distanceTo}>In {formatDistance(maneuver.distanceToM)}</Text>
+                <Text style={styles.maneuver} numberOfLines={2}>
+                  {maneuver.instruction.text}
                 </Text>
-              ) : null}
+                {maneuver.instruction.exitSign ? (
+                  <Text style={styles.exitSign} numberOfLines={1}>
+                    {formatExitSign(maneuver.instruction.exitSign)}
+                  </Text>
+                ) : null}
+              </View>
             </View>
-          </View>
+            {thenManeuver ? (
+              <View style={styles.thenRow}>
+                <Text style={styles.thenLabel}>Then</Text>
+                <TurnIcon
+                  instruction={thenManeuver.instruction}
+                  size={20}
+                  color={theme.textMuted}
+                />
+                <Text style={styles.thenText} numberOfLines={1}>
+                  {thenManeuver.instruction.text}
+                </Text>
+              </View>
+            ) : null}
+          </>
         ) : (
-          <Text style={styles.maneuver}>Continue on route</Text>
-        )}
-
-        {thenManeuver ? (
-          <View style={styles.thenRow}>
-            <Text style={styles.thenLabel}>then</Text>
-            <TurnIcon instruction={thenManeuver.instruction} size={22} color={theme.textMuted} />
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>On route</Text>
+            <Text style={styles.maneuver}>Continue straight ahead</Text>
           </View>
-        ) : null}
+        )}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
         {nav.rerouteFailed && nav.phase === 'navigating' ? (
@@ -125,6 +176,16 @@ export function NavBanner({
 
         {state && nav.phase !== 'arrived' ? (
           <>
+            <View style={styles.tripRow}>
+              <View style={styles.etaBlock}>
+                <Text style={styles.eta}>{formatEta(state.etaEpochMs)}</Text>
+                <Text style={styles.etaLabel}>Arrival</Text>
+              </View>
+              <Text style={styles.summary} numberOfLines={1}>
+                {formatDuration(state.timeRemainingMs)} · {formatDistance(state.distanceRemainingM)}{' '}
+                remaining
+              </Text>
+            </View>
             <View style={styles.progressTrack}>
               <View
                 style={[
@@ -133,19 +194,19 @@ export function NavBanner({
                 ]}
               />
             </View>
-            <Text style={styles.summary}>
-              {formatDistance(state.distanceRemainingM)} · {formatDuration(state.timeRemainingMs)} ·
-              arrive {formatEta(state.etaEpochMs)}
-            </Text>
           </>
         ) : null}
       </View>
 
       <View style={styles.actionRow}>
-        {moving ? (
-          <View style={styles.speedGroup}>
-            <View style={styles.speedPill}>
-              <Text style={styles.speedValue}>{speed ?? '0 km/h'}</Text>
+        {moving && !canDeclareArrival ? (
+          <View
+            style={styles.speedGroup}
+            accessibilityLabel={`Current speed ${speed ?? 0} kilometers per hour`}
+          >
+            <View style={styles.speedReadout}>
+              <Text style={styles.speedValue}>{speed ?? 0}</Text>
+              <Text style={styles.speedUnit}>km/h</Text>
             </View>
             {/* Absent wherever the map data has no limit — an honest gap beats
                 a stale number the driver might trust. */}
@@ -165,16 +226,31 @@ export function NavBanner({
               onPress={nav.toggleMute}
               testID="toggle-mute"
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={nav.muted ? 'Unmute guidance' : 'Mute guidance'}
+              accessibilityState={{ selected: nav.muted }}
             >
-              <Text style={styles.muteIcon}>{nav.muted ? '🔇' : '🔊'}</Text>
+              <AudioIcon muted={nav.muted} />
             </Pressable>
           ) : null}
           {canDeclareArrival ? (
-            <Pressable style={styles.arrived} onPress={nav.arriveNow} testID="declare-arrived">
+            <Pressable
+              style={styles.arrived}
+              onPress={nav.arriveNow}
+              testID="declare-arrived"
+              accessibilityRole="button"
+              accessibilityLabel="I am here"
+            >
               <Text style={styles.stopText}>I&apos;ve arrived</Text>
             </Pressable>
           ) : null}
-          <Pressable style={styles.stop} onPress={nav.stop} testID="stop-nav">
+          <Pressable
+            style={styles.stop}
+            onPress={nav.stop}
+            testID="stop-nav"
+            accessibilityRole="button"
+            accessibilityLabel={nav.phase === 'arrived' ? 'Done' : 'End navigation'}
+          >
             <Text style={styles.stopText}>{nav.phase === 'arrived' ? 'Done' : 'End'}</Text>
           </Pressable>
         </View>
@@ -184,21 +260,28 @@ export function NavBanner({
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 12, right: 12, gap: 8 },
+  wrap: { position: 'absolute', left: 12, right: 12, gap: 10, alignItems: 'center' },
   card: {
-    backgroundColor: theme.surface,
-    borderRadius: 14,
+    width: '100%',
+    backgroundColor: theme.surfaceOverlay,
+    borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    elevation: 6,
+    paddingTop: 14,
+    paddingBottom: 12,
+    elevation: 7,
   },
-  maneuverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  turnBox: { width: 44, alignItems: 'center', justifyContent: 'center' },
-  thenRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  thenLabel: { color: theme.textMuted, fontSize: 14, fontWeight: '600' },
-  distanceTo: { color: theme.accent, fontSize: 22, fontWeight: '700', minWidth: 68 },
-  maneuverText: { flexShrink: 1, gap: 3 },
-  maneuver: { color: theme.text, fontSize: 17, fontWeight: '600' },
+  guidanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  turnPanel: {
+    width: 60,
+    height: 60,
+    borderRadius: 17,
+    backgroundColor: theme.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  maneuverText: { flex: 1, minWidth: 0, gap: 4, paddingTop: 1 },
+  distanceTo: { color: theme.accent, fontSize: 17, fontWeight: '800', lineHeight: 20 },
+  maneuver: { color: theme.text, fontSize: 20, fontWeight: '700', lineHeight: 24 },
   exitSign: {
     alignSelf: 'flex-start',
     backgroundColor: '#1f7a3f',
@@ -210,27 +293,98 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     overflow: 'hidden',
   },
+  thenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 34,
+    marginTop: 10,
+    marginLeft: 74,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+  },
+  thenLabel: {
+    color: theme.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  thenText: { flex: 1, color: '#344255', fontSize: 13, fontWeight: '600' },
+  stateBlock: { gap: 3, paddingHorizontal: 2, paddingVertical: 4 },
+  eyebrow: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  arrivalSummary: { color: theme.textMuted, fontSize: 14, fontWeight: '600', marginTop: 3 },
+  tripRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#d7dee7',
+  },
+  etaBlock: { flexShrink: 0 },
+  eta: { color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 20 },
+  etaLabel: {
+    color: '#718096',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 3,
+    textTransform: 'uppercase',
+  },
+  summary: { flexShrink: 1, color: theme.textMuted, fontSize: 13, fontWeight: '600' },
   progressTrack: {
-    height: 4,
+    height: 3,
     borderRadius: 2,
     backgroundColor: theme.accentFaint,
-    marginTop: 10,
+    marginTop: 9,
     overflow: 'hidden',
   },
-  progressFill: { height: 4, borderRadius: 2, backgroundColor: theme.accent },
-  summary: { color: theme.textMuted, fontSize: 13, marginTop: 6 },
-  reroute: { color: theme.warning, fontSize: 13, marginTop: 6 },
+  progressFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
+  reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
-  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  actionRow: {
+    maxWidth: '100%',
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: theme.surfaceOverlay,
+    borderRadius: 27,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 5,
+    elevation: 5,
+  },
   actionSpacer: { flex: 1 },
-  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   speedGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  speedReadout: { minWidth: 48, alignItems: 'center' },
+  speedValue: { color: theme.text, fontWeight: '800', fontSize: 18, lineHeight: 19 },
+  speedUnit: {
+    color: '#718096',
+    fontWeight: '700',
+    fontSize: 9,
+    letterSpacing: 0.3,
+    lineHeight: 12,
+    textTransform: 'uppercase',
+  },
   // The European posted-limit sign: red ring, white face, black number —
   // drawn, not themed, so it reads as road signage at a glance.
   speedLimitSign: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 4,
     borderColor: '#d81e05',
     backgroundColor: '#fff',
@@ -238,41 +392,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   speedLimitValue: { color: '#111', fontWeight: '800', fontSize: 15 },
-  speedPill: {
-    backgroundColor: theme.surface,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    minWidth: 78,
-    alignItems: 'center',
-    elevation: 4,
-  },
-  speedValue: { color: theme.text, fontWeight: '700', fontSize: 16 },
   muteButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
   },
-  muteIcon: { fontSize: 18 },
   stop: {
+    minHeight: 40,
+    justifyContent: 'center',
     backgroundColor: theme.danger,
     borderRadius: 20,
-    paddingHorizontal: 22,
-    paddingVertical: 8,
-    elevation: 4,
+    paddingHorizontal: 18,
   },
   // Completing the trip, not abandoning it — green against the red End beside it.
   arrived: {
+    minHeight: 40,
+    justifyContent: 'center',
     backgroundColor: '#1e8e3e',
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    elevation: 4,
-    marginRight: 8,
   },
   stopText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

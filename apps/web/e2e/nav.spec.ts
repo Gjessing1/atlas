@@ -29,7 +29,9 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
 
   // Banner up, guidance summary showing, route drawn, puck snapped to the line.
   await expect(page.locator('.nav-banner')).toBeVisible();
-  await expect(page.locator('.nav-summary')).toContainText('arrive');
+  await expect(page.locator('.nav-eta')).toContainText('arrival');
+  await expect(page.locator('.nav-summary')).toContainText('remaining');
+  await expect(page.locator('.topbar')).toBeHidden();
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav')));
   await expect(page.locator('.nav-puck')).toBeVisible();
   await expect(page.locator('.nav-dest-marker')).toBeVisible();
@@ -76,7 +78,7 @@ test('a fix too poor to arrive on still lets the driver finish the trip', async 
   // card and its trip summary, exactly as a detected arrival produces.
   await page.getByRole('button', { name: "I've arrived" }).click();
   await expect(page.locator('.nav-maneuver')).toContainText('You have arrived');
-  await expect(page.locator('.nav-summary')).toBeVisible();
+  await expect(page.locator('.nav-arrival-summary')).toBeVisible();
 
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.nav-banner')).toHaveCount(0);

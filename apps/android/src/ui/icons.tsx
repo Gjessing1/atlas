@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 /**
  * Colour-badged teardrop pin — the mobile twin of the web's `.place-marker`
@@ -93,6 +94,22 @@ export function CrosshairIcon({ color = '#3a4455' }: { color?: string }) {
       <View style={[xStyles.tickH, xStyles.tickW, { backgroundColor: color }]} />
       <View style={[xStyles.tickH, xStyles.tickE, { backgroundColor: color }]} />
     </View>
+  );
+}
+
+/** Folded-map outline for the navigation route-overview control. */
+export function MapOverviewIcon({ color = '#1a73e8' }: { color?: string }) {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24">
+      <Path
+        d="m3.5 6 5-2.5 7 3 5-2.5v14l-5 2.5-7-3-5 2.5zM8.5 3.5v14M15.5 6.5v14"
+        fill="none"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 

@@ -439,7 +439,9 @@ export function App() {
         onToggleOverview={follow.toggleOverview}
       />
       <RoutePreview nav={nav} />
-      <div className="topbar">
+      <div
+        className={`topbar${nav.phase !== 'idle' && nav.phase !== 'preview' ? ' topbar-nav-hidden' : ''}`}
+      >
         <SearchBox onSelect={onSearchSelect} getBias={getBias} />
         <button
           type="button"

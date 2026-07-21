@@ -1802,24 +1802,41 @@ button.transit-notice-summary {
   z-index: 6;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: min(92vw, 440px);
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100vw - 24px), 520px);
 }
 
 .nav-card {
   display: flex;
   flex-direction: column;
-  background: rgba(17, 17, 17, 0.9);
-  color: #fff;
-  border-radius: 14px;
-  padding: 12px 16px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  background: rgba(255, 255, 255, 0.97);
+  color: #1c2733;
+  border: 1px solid rgba(52, 64, 79, 0.1);
+  border-radius: 20px;
+  padding: 14px 16px 12px;
+  box-shadow: 0 8px 28px rgba(28, 39, 51, 0.24);
+  backdrop-filter: blur(10px);
 }
 
-.nav-maneuver-row {
+.nav-guidance-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.nav-turn-panel {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  flex: 0 0 60px;
+  width: 60px;
+  height: 60px;
+  border-radius: 17px;
+  background: #1a73e8;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .nav-turn {
@@ -1833,14 +1850,32 @@ button.transit-notice-summary {
 .nav-then-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
+  min-height: 34px;
+  margin: 10px 0 0 74px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #465568;
 }
 
 .nav-then-label {
-  color: #cdd6e0;
-  font-size: 14px;
-  font-weight: 600;
+  color: #657487;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.nav-then-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #344255;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Name of the road being driven ("E6"), pinned at the bottom of the screen. */
@@ -1850,8 +1885,9 @@ button.transit-notice-summary {
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
-  background: rgba(17, 17, 17, 0.85);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1c2733;
+  border: 1px solid rgba(52, 64, 79, 0.1);
   border-radius: 16px;
   padding: 6px 16px;
   font-size: 14px;
@@ -1860,7 +1896,8 @@ button.transit-notice-summary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 3px 12px rgba(28, 39, 51, 0.22);
+  backdrop-filter: blur(8px);
   pointer-events: none;
 }
 
@@ -1868,28 +1905,31 @@ button.transit-notice-summary {
   position: absolute;
   bottom: -4px;
   right: -2px;
-  color: #7ec8ff;
+  color: currentColor;
   font-size: 13px;
   font-weight: 800;
 }
 
 .nav-distance-to {
-  color: #7ec8ff;
-  font-size: 21px;
-  font-weight: 700;
-  min-width: 64px;
+  color: #1a73e8;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.15;
 }
 
 .nav-maneuver-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  flex: 1;
+  gap: 4px;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .nav-maneuver {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 720;
+  line-height: 1.2;
 }
 
 /* Motorway exit signage ("Exit 43 · E6 · Oslo") — the green road-sign chip. */
@@ -1908,56 +1948,138 @@ button.transit-notice-summary {
 }
 
 .nav-error {
-  color: #ff9a8f;
+  color: #b3261e;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .nav-reroute {
-  color: #ffcf7e;
+  color: #8a5200;
   font-size: 13px;
-  margin-top: 6px;
+  font-weight: 650;
+  margin: 8px 0 0 74px;
+}
+
+.nav-state-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 2px;
+}
+
+.nav-state-eyebrow {
+  color: #1a73e8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-arrival-summary {
+  color: #5f6c7b;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.nav-trip-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e3e8ef;
+}
+
+.nav-eta {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.nav-eta strong {
+  color: #1c2733;
+  font-size: 19px;
+  font-weight: 780;
+  line-height: 1;
+}
+
+.nav-eta small {
+  color: #718096;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+  text-transform: uppercase;
 }
 
 .nav-progress-track {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.18);
-  margin-top: 10px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(26, 115, 232, 0.14);
+  margin-top: 9px;
   overflow: hidden;
 }
 
 .nav-progress-fill {
-  height: 4px;
-  border-radius: 2px;
-  background: #7ec8ff;
+  height: 3px;
+  border-radius: 999px;
+  background: #1a73e8;
 }
 
 .nav-summary {
-  color: #cdd6e0;
+  min-width: 0;
+  color: #5f6c7b;
   font-size: 13px;
-  margin-top: 6px;
+  font-weight: 600;
 }
 
 .nav-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  max-width: 100%;
+  min-height: 50px;
+  padding: 5px 6px 5px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(52, 64, 79, 0.1);
+  border-radius: 27px;
+  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
+  backdrop-filter: blur(8px);
 }
 
 .nav-speed {
-  background: rgba(17, 17, 17, 0.9);
-  color: #fff;
-  border-radius: 16px;
-  padding: 6px 14px;
-  font-size: 14px;
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 48px;
+  color: #1c2733;
+  line-height: 1;
+}
+
+.nav-speed strong {
+  font-size: 18px;
+  font-weight: 780;
+}
+
+.nav-speed small {
+  color: #718096;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  margin-top: 3px;
+  text-transform: uppercase;
 }
 
 .nav-speed-group {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.nav-actions-arrival .nav-speed-group {
+  display: none;
 }
 
 /* The European posted-limit sign: red ring, white face, black number. Drawn
@@ -1976,36 +2098,83 @@ button.transit-notice-summary {
   font-size: 15px;
   font-weight: 800;
   line-height: 1;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .nav-buttons {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .nav-buttons button {
   border: none;
-  border-radius: 16px;
+  border-radius: 20px;
+  min-height: 40px;
   padding: 7px 14px;
-  background: rgba(17, 17, 17, 0.9);
-  color: #fff;
+  background: transparent;
+  color: #344255;
   font: inherit;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.nav-buttons button:hover {
+  background: #edf3fa;
+}
+
+.nav-buttons button:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.nav-buttons .nav-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+}
+
+.nav-action-icon {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-orientation-button {
+  color: #1a73e8 !important;
+  font-size: 17px !important;
+  font-weight: 850 !important;
 }
 
 .nav-buttons .nav-stop {
   background: #b3261e;
+  color: #fff;
+  padding-inline: 17px;
+}
+
+.nav-buttons .nav-stop:hover {
+  background: #982018;
 }
 
 /* Completing the trip, not abandoning it — green reads as "done", against the
    red End beside it. */
 .nav-buttons .nav-arrived {
   background: #1e8e3e;
+  color: #fff;
+}
+
+.nav-buttons .nav-arrived:hover {
+  background: #187533;
+}
+
+.topbar-nav-hidden {
+  display: none;
 }
 
 /* Snapped-position puck: blue dot with a white ring (nav only — the idle
