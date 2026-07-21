@@ -152,6 +152,32 @@ describe('useRoute', () => {
     expect(result.current.modeTimes).toEqual({});
   });
 
+  it('does not churn when handed a fresh route callback on every render', async () => {
+    const impl = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    // A brand-new closure each render — the identity the hook must not react to.
+    // Before the ref hardening this drove the background mode-times pass into a
+    // render/request loop that exhausted the heap.
+    const { result, rerender } = renderHook(() => useRoute((q, s) => impl(q, s)));
+
+    act(() => result.current.start(A));
+    act(() => result.current.addWaypoint(B));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    for (let i = 0; i < 5; i++) {
+      rerender();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+
+    // One main query plus a single four-mode background pass. Re-renders with a
+    // new callback add nothing — a loop would put this in the hundreds.
+    expect(impl.mock.calls.length).toBeLessThan(12);
+    expect(result.current.modeTimes.car).toBe(60_000);
+  });
+
   it('surfaces RoutingError messages and a generic fallback', async () => {
     let fail: Error = new RoutingError('No route between these points');
     const route = vi.fn<RouteFn>(() => Promise.reject(fail));

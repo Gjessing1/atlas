@@ -2,6 +2,7 @@
 CLAUDE.md
 .claude/
 docs/
+AGENTS.md
 
 # --- Dependencies ---
 node_modules/

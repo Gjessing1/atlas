@@ -36,8 +36,10 @@ export interface StoredRoutePlan {
 /**
  * Executes a routing query — the platform seam: plain server `fetchRoute` on
  * web, the offline-first provider (embedded Valhalla when a downloaded pack
- * covers the query, else the server) on Android. Must be referentially
- * stable across renders; a new identity aborts and reruns the active query.
+ * covers the query, else the server) on Android. Its identity may change
+ * between renders (a provider that closes over changing state, a test harness):
+ * the hook reads it through a ref, so what triggers a re-route is the stops and
+ * settings, never the function fetching them.
  */
 export type RouteFn = (query: RouteQuery, signal: AbortSignal) => Promise<RouteResult>;
 
@@ -136,6 +138,12 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const [modeTimes, setModeTimes] = useState<Partial<Record<RoutingProfile, ModeTime>>>({});
   const idRef = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
+  // The route fn may be a fresh closure every render; keep the latest in a ref
+  // so the re-routing effects can call it without listing it as a dependency.
+  // Depending on its identity would restart every query on each render — and,
+  // with the background mode-times pass, spin into a render/request loop.
+  const routeRef = useRef(route);
+  routeRef.current = route;
 
   const nextWaypoint = useCallback((pos: LatLng, name?: string): RouteWaypoint => {
     return name === undefined ? { id: idRef.current++, pos } : { id: idRef.current++, pos, name };
@@ -173,7 +181,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
             instructions: waypoints.length === 2 || profile !== 'car',
           };
       try {
-        const result = await route(query, controller.signal);
+        const result = await routeRef.current(query, controller.signal);
         // A superseded request can resolve after its abort — don't paint it.
         if (controller.signal.aborted) return;
         setPaths(result.paths);
@@ -191,7 +199,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [active, profile, waypoints, roundTrip, roundTripKm, seed, route]);
+  }, [active, profile, waypoints, roundTrip, roundTripKm, seed]);
 
   // Trip time for *every* mode, for the picker's "🚗 24 min · 🚲 1 h 10" row.
   // The main effect above only routes the selected profile; this fills in the
@@ -210,7 +218,11 @@ export function useRoute(route: RouteFn): RoutePlanner {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       for (const { id } of ROUTING_PROFILES) {
-        route({ profile: id, points, alternatives: false, instructions: false }, controller.signal)
+        routeRef
+          .current(
+            { profile: id, points, alternatives: false, instructions: false },
+            controller.signal,
+          )
           .then((result) => {
             if (controller.signal.aborted) return;
             const best = result.paths[0];
@@ -227,7 +239,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [active, roundTrip, waypoints, route]);
+  }, [active, roundTrip, waypoints]);
 
   const start = useCallback(
     (at?: LatLng, name?: string) => {

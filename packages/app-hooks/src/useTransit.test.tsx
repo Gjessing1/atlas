@@ -3,7 +3,7 @@ import type { LatLng } from '@atlas/core';
 import type { TransitResult, TransitTrip } from '@atlas/transit';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useRoute } from './useRoute.js';
+import { useRoute, type RouteFn } from './useRoute.js';
 import { useTransitPlan, type TransitFn } from './useTransit.js';
 
 /** Both inside the Norwegian coverage box. */
@@ -49,9 +49,14 @@ async function settle(): Promise<void> {
  * A plan with the given endpoints, driven through the real `useRoute` so the
  * transit hook sees the waypoint shape it will see in the apps.
  */
+// Stable across renders, like the real apps' fetcher — an inline arrow here
+// would hand `useRoute` a fresh identity every render, which the hook tolerates
+// but a test should not depend on.
+const emptyRoute: RouteFn = () => Promise.resolve({ paths: [] });
+
 function renderPlan(transit: TransitFn, points: LatLng[]) {
   const view = renderHook(() => {
-    const route = useRoute(() => Promise.resolve({ paths: [] }));
+    const route = useRoute(emptyRoute);
     return { route, transit: useTransitPlan(route, transit) };
   });
   act(() => {
