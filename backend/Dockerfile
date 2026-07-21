@@ -11,6 +11,7 @@ COPY packages/routing/package.json ./packages/routing/
 COPY packages/navigation/package.json ./packages/navigation/
 COPY packages/app-hooks/package.json ./packages/app-hooks/
 COPY packages/sync/package.json ./packages/sync/
+COPY packages/transit/package.json ./packages/transit/
 COPY apps/web/package.json ./apps/web/
 COPY backend/package.json ./backend/
 # Single deterministic install for every workspace. The npm download cache persists
@@ -44,6 +45,12 @@ COPY --from=build /app/packages/conditions/dist ./packages/conditions/dist
 # @atlas/sync is a runtime import of the backend (LWW + protocol helpers).
 COPY --from=build /app/packages/sync/package.json ./packages/sync/
 COPY --from=build /app/packages/sync/dist ./packages/sync/dist
+# @atlas/transit is a runtime import of the backend (Entur request/response
+# mapping behind /api/transit). Omitting it does not fail the build: the root
+# node_modules copy still carries the @atlas/transit *symlink*, which then
+# dangles because its target was never copied, and the server dies on import.
+COPY --from=build /app/packages/transit/package.json ./packages/transit/
+COPY --from=build /app/packages/transit/dist ./packages/transit/dist
 COPY --from=build /app/backend/package.json ./backend/
 # Workspace-nested deps (npm nests a package here when the root already holds a
 # different version — e.g. @sinclair/typebox 0.34 vs a transitive 0.27): the
