@@ -444,12 +444,12 @@ export function App() {
         <button
           type="button"
           className="sidebar-toggle"
-          aria-label="Saved"
+          aria-label="Collections"
           aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((open) => !open)}
         >
           <StarIcon size={18} />
-          <span className="topbar-label">Saved</span>
+          <span className="topbar-label">Collections</span>
         </button>
         <button
           type="button"
@@ -509,6 +509,7 @@ export function App() {
         <PlaceCard
           target={target}
           saved={savedAtTarget}
+          saveEnabled={userData.status === 'ready'}
           userAt={userAt}
           routeActive={route.active}
           shifted={sidebarOpen}

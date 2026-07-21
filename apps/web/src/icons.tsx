@@ -208,6 +208,21 @@ export function LayersIcon(props: IconProps) {
   );
 }
 
+export function EyeIcon({ off = false, ...props }: IconProps & { off?: boolean }) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.8" stroke="currentColor" strokeWidth="1.7" />
+      {off && <path d="M4 4l16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
+    </IconFrame>
+  );
+}
+
 export const ROUTING_ICON: Record<RoutingProfile, IconComponent> = {
   car: CarIcon,
   bike: BicycleIcon,

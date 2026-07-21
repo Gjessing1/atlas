@@ -102,6 +102,26 @@ describe('AtlasStorage', () => {
     expect((await storage.listPlaces())[0]!.collectionId).toBeNull();
   });
 
+  it('moves a nested collection up to its grandparent and rejects cycles', async () => {
+    const root = await storage.createCollection('Norway');
+    const parent = await storage.createCollection('Rogaland', root.id);
+    const child = await storage.createCollection('Lysefjorden', parent.id);
+
+    await storage.moveCollection(child.id, root.id);
+    expect((await storage.listCollections()).find((c) => c.id === child.id)!.parentId).toBe(
+      root.id,
+    );
+
+    await storage.moveCollection(child.id, null);
+    expect((await storage.listCollections()).find((c) => c.id === child.id)!.parentId).toBeNull();
+
+    await expect(storage.moveCollection(root.id, parent.id)).rejects.toThrow('own subtree');
+    await expect(storage.moveCollection(root.id, root.id)).rejects.toThrow('own subtree');
+    await expect(storage.moveCollection(root.id, 'missing')).rejects.toThrow(
+      'Parent collection not found',
+    );
+  });
+
   it('nests collections and re-parents contents on delete', async () => {
     const parent = await storage.createCollection('Norway');
     const child = await storage.createCollection('Rogaland', parent.id);

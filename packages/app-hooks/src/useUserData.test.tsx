@@ -171,6 +171,26 @@ describe('useUserData', () => {
     expect(result.current.places[0]!.collectionId).toBe(folderId);
   });
 
+  it('moves a nested collection back up the tree', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.createCollection('Parent');
+    });
+    const parentId = result.current.collections[0]!.id;
+    await act(async () => {
+      await result.current.createCollection('Child', parentId);
+    });
+    const childId = result.current.collections.find((c) => c.name === 'Child')!.id;
+
+    await act(async () => {
+      await result.current.moveCollection(childId, null);
+    });
+    expect(result.current.collections.find((c) => c.id === childId)!.parentId).toBeNull();
+  });
+
   it('clears a pending undo when dismissed', async () => {
     const { platform } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

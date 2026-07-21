@@ -15,11 +15,13 @@ interface PlaceCardProps {
   target: PlaceTarget;
   /** The saved place at this position, if the user already has one. */
   saved: PlaceRecord | undefined;
+  /** Saving is unavailable until persistent user storage has finished opening. */
+  saveEnabled: boolean;
   /** User's own position, for the "… away" line; null when unknown. */
   userAt: LatLng | null;
   /** A route is being planned, so "Add stop" is meaningful. */
   routeActive: boolean;
-  /** The Saved sidebar is open and occupies the card's usual corner. */
+  /** The Collections sidebar is open and occupies the card's usual corner. */
   shifted: boolean;
   onNavigate: () => void;
   onSave: () => void;
@@ -68,6 +70,7 @@ function describeLight(sun: SunDay): string {
 export function PlaceCard({
   target,
   saved,
+  saveEnabled,
   userAt,
   routeActive,
   shifted,
@@ -152,7 +155,12 @@ export function PlaceCard({
             ★ Saved
           </button>
         ) : (
-          <button type="button" onClick={onSave}>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!saveEnabled}
+            title={saveEnabled ? undefined : 'Opening your collections…'}
+          >
             Save
           </button>
         )}

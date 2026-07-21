@@ -1,5 +1,6 @@
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useRef, useState } from 'react';
+import { EyeIcon } from './icons.js';
 import { LayersPanel } from './layers/LayersPanel.js';
 import type { LayerCatalog } from './layers/useLayerCatalog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
@@ -108,6 +109,13 @@ export function Sidebar({
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
 
+  /** Move a nested collection to its parent's parent (root from depth one). */
+  const moveCollectionUp = (folder: (typeof data.collections)[number]) => {
+    if (folder.parentId === null) return;
+    const parent = data.collections.find((candidate) => candidate.id === folder.parentId);
+    void data.moveCollection(folder.id, parent?.parentId ?? null);
+  };
+
   // "Show all" appears once anything is hidden; otherwise the button hides all.
   const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);
   const hasItems = data.places.length + data.collections.length > 0;
@@ -140,13 +148,16 @@ export function Sidebar({
             () => dropOnPlace(place),
           )}
         >
-          <input
-            type="checkbox"
-            checked={place.visible}
-            title="Show on map"
-            aria-label={`Show ${place.name} on map`}
-            onChange={(e) => void data.updatePlace(place.id, { visible: e.target.checked })}
-          />
+          <button
+            type="button"
+            className="icon-button visibility-toggle"
+            title={place.visible ? 'Hide from map' : 'Show on map'}
+            aria-label={`${place.visible ? 'Hide' : 'Show'} ${place.name} ${place.visible ? 'from' : 'on'} map`}
+            aria-pressed={place.visible}
+            onClick={() => void data.updatePlace(place.id, { visible: !place.visible })}
+          >
+            <EyeIcon off={!place.visible} size={18} />
+          </button>
           <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
             {place.icon}
           </span>
@@ -190,13 +201,16 @@ export function Sidebar({
     return (
       <li key={key} className={`item-row${selectedTrackId === track.id ? ' selected' : ''}`}>
         <div className="item-line">
-          <input
-            type="checkbox"
-            checked={track.visible}
-            title="Show on map"
-            aria-label={`Show ${track.name} on map`}
-            onChange={(e) => void data.updateTrack(track.id, { visible: e.target.checked })}
-          />
+          <button
+            type="button"
+            className="icon-button visibility-toggle"
+            title={track.visible ? 'Hide from map' : 'Show on map'}
+            aria-label={`${track.visible ? 'Hide' : 'Show'} ${track.name} ${track.visible ? 'from' : 'on'} map`}
+            aria-pressed={track.visible}
+            onClick={() => void data.updateTrack(track.id, { visible: !track.visible })}
+          >
+            <EyeIcon off={!track.visible} size={18} />
+          </button>
           <button type="button" className="item-name" onClick={() => onShowTrack(track)}>
             {track.name}
           </button>
@@ -284,13 +298,16 @@ export function Sidebar({
                 () => dropOnFolder(folder),
               )}
             >
-              <input
-                type="checkbox"
-                checked={folder.visible}
-                title="Show folder on map"
-                aria-label={`Show folder ${folder.name} on map`}
-                onChange={(e) => void data.setCollectionVisible(folder.id, e.target.checked)}
-              />
+              <button
+                type="button"
+                className="icon-button visibility-toggle"
+                title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
+                aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
+                aria-pressed={folder.visible}
+                onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
+              >
+                <EyeIcon off={!folder.visible} size={18} />
+              </button>
               <span className="item-icon">📁</span>
               {renaming === folder.id ? (
                 <FolderNameInput
@@ -304,6 +321,17 @@ export function Sidebar({
                 />
               ) : (
                 <span className="folder-name">{folder.name}</span>
+              )}
+              {folder.parentId !== null && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Move ${folder.name} up one level`}
+                  title="Move up one level"
+                  onClick={() => moveCollectionUp(folder)}
+                >
+                  ↑
+                </button>
               )}
               <button
                 type="button"
@@ -342,9 +370,9 @@ export function Sidebar({
   };
 
   return (
-    <aside className="sidebar" aria-label="Saved places and tracks">
+    <aside className="sidebar" aria-label="Collections">
       <div className="sidebar-header">
-        <strong>Saved</strong>
+        <strong>Collections</strong>
         <div className="sidebar-actions">
           <button
             type="button"

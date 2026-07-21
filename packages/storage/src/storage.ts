@@ -169,9 +169,38 @@ export class AtlasStorage {
 
   async updateCollection(id: string, patch: CollectionPatch): Promise<void> {
     await this.applyPatch('collections', 'collection', id, {
+      parent_id: patch.parentId,
       visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
       sort_index: patch.sortIndex,
     });
+  }
+
+  /**
+   * Move a collection under another collection, or back to the root. The
+   * explicit hierarchy check keeps malformed UI/sync input from creating a
+   * parent cycle that would strand the whole subtree.
+   */
+  async moveCollection(id: string, parentId: string | null): Promise<void> {
+    const rows = await this.driver.query('SELECT id, parent_id FROM collections');
+    const parents = new Map(
+      rows.map((row) => [
+        String(row['id']),
+        row['parent_id'] === null ? null : String(row['parent_id']),
+      ]),
+    );
+    if (!parents.has(id)) throw new Error('Collection not found');
+    if (parentId !== null && !parents.has(parentId)) throw new Error('Parent collection not found');
+
+    const visited = new Set<string>();
+    let ancestor = parentId;
+    while (ancestor !== null && !visited.has(ancestor)) {
+      if (ancestor === id) throw new Error('A collection cannot be moved into its own subtree');
+      visited.add(ancestor);
+      ancestor = parents.get(ancestor) ?? null;
+    }
+
+    if (parents.get(id) === parentId) return;
+    await this.updateCollection(id, { parentId });
   }
 
   /**

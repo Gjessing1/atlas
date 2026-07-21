@@ -39,7 +39,7 @@ export function MenuCluster({
         <View style={styles.menuCard}>
           {(
             [
-              ['Saved', 'open-favorites', onOpenFavorites],
+              ['Collections', 'open-favorites', onOpenFavorites],
               ['Tracks', 'open-tracks', onOpenTracks],
               ['Layers', 'open-layers', onOpenLayers],
               ['Settings', 'open-settings', onOpenSettings],

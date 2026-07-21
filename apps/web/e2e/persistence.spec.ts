@@ -14,14 +14,14 @@ test('a saved pin survives closing the tab and reopening', async ({ page, contex
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   // The card confirms in place; the sidebar has to be opened to see the row.
   await expect(page.getByRole('button', { name: '★ Saved' })).toBeVisible();
-  await page.getByRole('button', { name: 'Saved', exact: true }).click();
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
   await expect(page.locator('.item-name')).toContainText(COORDS);
   await page.close();
 
   const page2 = await context.newPage();
   await page2.goto('/');
   await waitForMap(page2);
-  await page2.getByRole('button', { name: 'Saved' }).click();
+  await page2.getByRole('button', { name: 'Collections' }).click();
   await expect(page2.locator('.item-name')).toContainText(COORDS);
   // The saved place is also drawn as a marker.
   await expect(page2.locator('.place-marker')).toBeVisible();

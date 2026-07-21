@@ -261,7 +261,7 @@ body {
   background: #fff;
 }
 
-/* ---- sidebar (saved places & tracks) ---- */
+/* ---- sidebar (collections of places & tracks) ---- */
 
 .sidebar-toggle {
   padding: 6px 14px;
@@ -293,6 +293,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid #e1e0d9;
@@ -301,6 +302,9 @@ body {
 .sidebar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -391,6 +395,14 @@ body {
 
 .item-line.dragging {
   opacity: 0.5;
+}
+
+.visibility-toggle {
+  color: #4a5568;
+}
+
+.hidden > .item-line > .visibility-toggle {
+  color: #a5adba;
 }
 
 /* Row currently hovered by a drag: insert-above line plus a soft highlight

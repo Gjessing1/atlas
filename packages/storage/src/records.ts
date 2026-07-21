@@ -83,6 +83,7 @@ export interface PlacePatch {
 
 /** Editable fields of a folder (name via renameCollection; the rest here). */
 export interface CollectionPatch {
+  parentId?: string | null;
   visible?: boolean;
   sortIndex?: number;
 }

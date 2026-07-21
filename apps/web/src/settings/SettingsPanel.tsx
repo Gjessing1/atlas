@@ -80,7 +80,7 @@ function StatusSection({ data }: { data: SystemStatus }) {
 
 /**
  * Dedicated Settings home: server/upstream status (§N7), the account/sync
- * panel (moved out of the Saved sidebar footer), and build info. The status
+ * panel (moved out of the Collections sidebar footer), and build info. The status
  * answers "why is this overlay blank?" without leaving the app.
  */
 export function SettingsPanel({ sync, onClose }: SettingsPanelProps) {

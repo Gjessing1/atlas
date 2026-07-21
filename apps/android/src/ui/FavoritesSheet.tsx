@@ -88,6 +88,7 @@ export function FavoritesSheet({
   onDelete,
   onCreateFolder,
   onRenameFolder,
+  onMoveFolder,
   onSetFolderVisible,
   onDeleteFolder,
   onSetAllVisible,
@@ -114,6 +115,8 @@ export function FavoritesSheet({
   /** Create a folder — at the root, or nested under `parentId` (subfolder). */
   onCreateFolder: (name: string, parentId: string | null) => void;
   onRenameFolder: (id: string, name: string) => void;
+  /** Re-parent a collection; the row action moves it up exactly one level. */
+  onMoveFolder: (id: string, parentId: string | null) => void;
   onSetFolderVisible: (id: string, visible: boolean) => void;
   onDeleteFolder: (id: string) => void;
   /** Show or hide every place and folder at once (header toggle). */
@@ -203,6 +206,19 @@ export function FavoritesSheet({
                   testID={`folder-name-${folder.id}`}
                 />
                 <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
+                {folder.parentId !== null ? (
+                  <Pressable
+                    style={styles.eyeButton}
+                    onPress={() => {
+                      const parent = collections.find((c) => c.id === folder.parentId);
+                      onMoveFolder(folder.id, parent?.parentId ?? null);
+                    }}
+                    accessibilityLabel={`Move ${folder.name} up one level`}
+                    testID={`folder-up-${folder.id}`}
+                  >
+                    <Text style={styles.subButtonText}>↑</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   style={styles.eyeButton}
                   onPress={() => setNewFolderParent((id) => (id === folder.id ? null : folder.id))}
@@ -239,7 +255,7 @@ export function FavoritesSheet({
       <View style={styles.backdrop}>
         <View style={[styles.sheet, { paddingBottom: bottomInset + 20 }]}>
           <View style={styles.headerRow}>
-            <Text style={styles.heading}>Saved</Text>
+            <Text style={styles.heading}>Collections</Text>
             {places.length > 0 || collections.length > 0 ? (
               <Pressable
                 style={[styles.button, styles.buttonQuiet]}

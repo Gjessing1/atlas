@@ -150,6 +150,7 @@ export interface UserData<TFile> {
 
   createCollection: (name: string, parentId?: string | null) => Promise<void>;
   renameCollection: (id: string, name: string) => Promise<void>;
+  moveCollection: (id: string, parentId: string | null) => Promise<void>;
   setCollectionVisible: (id: string, visible: boolean) => Promise<void>;
   deleteCollection: (id: string) => Promise<void>;
 
@@ -466,6 +467,18 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [refreshCollections, reportWriteFailure],
   );
 
+  const moveCollection = useCallback(
+    async (id: string, parentId: string | null) => {
+      try {
+        await storageRef.current?.moveCollection(id, parentId);
+        await refreshCollections();
+      } catch (err) {
+        reportWriteFailure('Moving collection', err);
+      }
+    },
+    [refreshCollections, reportWriteFailure],
+  );
+
   const setCollectionVisible = useCallback(
     async (id: string, visible: boolean) => {
       try {
@@ -579,6 +592,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     exportTrack,
     createCollection,
     renameCollection,
+    moveCollection,
     setCollectionVisible,
     deleteCollection,
     setAllVisible,

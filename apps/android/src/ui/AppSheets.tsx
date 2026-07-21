@@ -85,6 +85,7 @@ export function AppSheets({
         onDelete={(id) => void data.deletePlace(id)}
         onCreateFolder={(name, parentId) => void data.createCollection(name, parentId)}
         onRenameFolder={(id, name) => void data.renameCollection(id, name)}
+        onMoveFolder={(id, parentId) => void data.moveCollection(id, parentId)}
         onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}

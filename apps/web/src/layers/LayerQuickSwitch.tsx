@@ -10,7 +10,7 @@ interface LayerQuickSwitchProps {
 
 /**
  * Map-corner overlay switcher: one tap to turn a layer on or off without
- * opening the Saved sidebar. Deliberately a *switcher*, not a second panel —
+ * opening the Collections sidebar. Deliberately a *switcher*, not a second panel —
  * opacity, descriptions and source links stay in LayersPanel, which this
  * points at. Shares the same catalog state, so the two never disagree.
  */
