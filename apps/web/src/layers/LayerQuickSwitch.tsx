@@ -43,7 +43,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
       {open && (
         <div className="layer-switch-menu" role="group" aria-label="Map layers">
           {layers.catalog.map((meta) => {
-            const on = layers.state[meta.id]?.on ?? false;
+            const on = layers.isOn(meta.id);
             // "Blank ≠ broken": say so before the user turns it on and sees nothing.
             const tooLowZoom = meta.minzoom !== undefined && mapZoom < meta.minzoom;
             return (

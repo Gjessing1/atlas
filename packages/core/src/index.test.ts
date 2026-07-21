@@ -6,6 +6,7 @@ import {
   DEFAULT_MAP_PROFILE,
   fmtClock,
   isMapProfile,
+  layerDefaultsOn,
   layerInProfile,
   layersForProfile,
   MAP_PROFILES,
@@ -418,6 +419,20 @@ describe('map profiles', () => {
       'sea-depth',
       'trails-hiking',
     ]);
+  });
+
+  it('turns a profile default layer on only within that profile', () => {
+    // Hike surfaces the trail network by default; nobody else does, and no
+    // profile defaults a layer it does not even offer.
+    expect(layerDefaultsOn('trails-hiking', 'hike')).toBe(true);
+    expect(layerDefaultsOn('trails-hiking', 'explore')).toBe(false);
+    expect(layerDefaultsOn('trails-hiking', 'bike')).toBe(false);
+    expect(layerDefaultsOn('hillshade', 'hike')).toBe(false);
+    for (const p of MAP_PROFILES) {
+      for (const id of p.defaultLayers ?? []) {
+        expect(layerInProfile(meta(id, [p.layerTags[0]!]), p.id)).toBe(true);
+      }
+    }
   });
 
   it('only names travel modes the routing package actually knows', () => {

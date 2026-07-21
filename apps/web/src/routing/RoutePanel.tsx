@@ -307,38 +307,40 @@ export function RoutePanel({
         </p>
       )}
 
-      <div className="route-actions">
-        <button
-          type="button"
-          onClick={route.reverse}
-          disabled={route.roundTrip || route.waypoints.length < 2}
-        >
-          Reverse
-        </button>
-        <button
-          type="button"
-          onClick={route.optimize}
-          disabled={route.roundTrip || route.waypoints.length < 4}
-          title="Reorder intermediate stops for a shorter tour"
-        >
-          Optimize
-        </button>
-        <button type="button" onClick={route.clear} disabled={route.waypoints.length === 0}>
-          Clear
-        </button>
-        {/* A journey is a timetable, not a track: there is nothing to export. */}
-        <button type="button" onClick={exportGpx} disabled={!path || transitMode}>
-          Export GPX
-        </button>
-        <button
-          type="button"
-          onClick={copyLink}
-          disabled={route.waypoints.length === 0}
-          title="Copy a link that reopens this plan"
-        >
-          {copied ? 'Link copied' : 'Share'}
-        </button>
-      </div>
+      {/* Each action appears only once it can do something, rather than sitting
+          there greyed out: Reverse needs two ends, Optimize a tour to shorten,
+          Export a computed track, and Clear/Share something to act on. With no
+          stops the whole row is gone rather than a strip of dead buttons. */}
+      {route.waypoints.length > 0 && (
+        <div className="route-actions">
+          {!route.roundTrip && route.waypoints.length >= 2 && (
+            <button type="button" onClick={route.reverse}>
+              Reverse
+            </button>
+          )}
+          {!route.roundTrip && route.waypoints.length >= 4 && (
+            <button
+              type="button"
+              onClick={route.optimize}
+              title="Reorder intermediate stops for a shorter tour"
+            >
+              Optimize
+            </button>
+          )}
+          <button type="button" onClick={route.clear}>
+            Clear
+          </button>
+          {/* A journey is a timetable, not a track: there is nothing to export. */}
+          {path && !transitMode && (
+            <button type="button" onClick={exportGpx}>
+              Export GPX
+            </button>
+          )}
+          <button type="button" onClick={copyLink} title="Copy a link that reopens this plan">
+            {copied ? 'Link copied' : 'Share'}
+          </button>
+        </div>
+      )}
 
       {transitMode && route.waypoints.length > 2 && (
         <p className="route-hint">

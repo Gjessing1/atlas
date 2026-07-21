@@ -679,13 +679,28 @@ export interface MapProfile {
    * `bike` lining up on both sides is a coincidence, not a rule.
    */
   layerTags: string[];
+  /**
+   * Layer ids that start **on** when this profile is picked, until the user
+   * says otherwise. A hiker who switches to Hike wants the trail network there
+   * without a second tap through the panel — the whole point of the profile.
+   * It is only a *default*: an explicit toggle (which records `{on:false}`) is
+   * always respected, so this never fights the user's own choice.
+   */
+  defaultLayers?: string[];
 }
 
 export const MAP_PROFILES: readonly MapProfile[] = [
   { id: 'explore', label: 'Explore', icon: '🧭', routing: null, layerTags: [] },
   { id: 'drive', label: 'Drive', icon: '🚗', routing: 'car', layerTags: [] },
   { id: 'bike', label: 'Cycle', icon: '🚲', routing: 'bike', layerTags: ['bike'] },
-  { id: 'hike', label: 'Hike', icon: '🥾', routing: 'hike', layerTags: ['hiking'] },
+  {
+    id: 'hike',
+    label: 'Hike',
+    icon: '🥾',
+    routing: 'hike',
+    layerTags: ['hiking'],
+    defaultLayers: ['trails-hiking'],
+  },
   { id: 'ski', label: 'Ski', icon: '⛷️', routing: null, layerTags: ['ski'] },
 ];
 
@@ -718,6 +733,15 @@ export function layerInProfile(meta: Pick<LayerMeta, 'profiles'>, profileId: str
 /** The catalog narrowed to a profile, keeping the server's display order. */
 export function layersForProfile(catalog: readonly LayerMeta[], profileId: string): LayerMeta[] {
   return catalog.filter((meta) => layerInProfile(meta, profileId));
+}
+
+/**
+ * Whether a layer is on by default in this profile (see `defaultLayers`). Used
+ * as the fallback when the device has no stored on/off choice for the layer, so
+ * a profile can surface its signature overlay without a persisted setting.
+ */
+export function layerDefaultsOn(layerId: string, profileId: string): boolean {
+  return mapProfile(profileId).defaultLayers?.includes(layerId) ?? false;
 }
 
 // ---- Place card (one card for pins, saved places, POIs and search hits) ----

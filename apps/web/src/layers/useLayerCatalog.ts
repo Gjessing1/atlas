@@ -1,4 +1,5 @@
 import {
+  layerDefaultsOn,
   layersForProfile,
   type LayerMeta,
   type LayersResponse,
@@ -17,6 +18,13 @@ export interface LayerCatalog {
   state: OverlayStateMap;
   /** The enabled overlays, ready for useOverlayLayers. */
   overlays: ActiveOverlay[];
+  /**
+   * Whether a layer is currently on, resolving the device's stored choice
+   * against the active profile's default (a hike-profile trail layer reads as
+   * on before it has ever been touched). Panels/switchers must use this rather
+   * than `state[id]?.on` so what they draw matches what the map draws.
+   */
+  isOn: (id: string) => boolean;
   toggle: (id: string) => void;
   setOpacity: (id: string, opacity: number) => void;
 }
@@ -75,10 +83,20 @@ export function useLayerCatalog(userData: SettingsAccess, profileId: string): La
     [setSetting],
   );
 
+  // The stored choice, or the profile default when the device has never had an
+  // opinion — the single source of truth for "is this layer on".
+  const isOn = useCallback(
+    (id: string) => state[id]?.on ?? layerDefaultsOn(id, profileId),
+    [state, profileId],
+  );
+
   const toggle = useCallback(
     (id: string) =>
-      update((cur) => ({ ...cur, [id]: { ...cur[id], on: !(cur[id]?.on ?? false) } })),
-    [update],
+      update((cur) => ({
+        ...cur,
+        [id]: { ...cur[id], on: !(cur[id]?.on ?? layerDefaultsOn(id, profileId)) },
+      })),
+    [update, profileId],
   );
 
   const setOpacity = useCallback(
@@ -96,10 +114,10 @@ export function useLayerCatalog(userData: SettingsAccess, profileId: string): La
   const overlays = useMemo(
     () =>
       catalog
-        .filter((meta) => state[meta.id]?.on)
+        .filter((meta) => isOn(meta.id))
         .map((meta) => ({ meta, opacity: state[meta.id]?.opacity ?? meta.defaultOpacity })),
-    [catalog, state],
+    [catalog, state, isOn],
   );
 
-  return { catalog, state, overlays, toggle, setOpacity };
+  return { catalog, state, overlays, isOn, toggle, setOpacity };
 }

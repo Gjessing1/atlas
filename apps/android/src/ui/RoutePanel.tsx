@@ -529,46 +529,41 @@ export function RoutePanel({
           </Pressable>
         ) : null}
 
-        <View style={styles.actionRow}>
-          {/* Reverse works in transit mode too — swapping the ends is the
-            commonest thing anyone does to a journey ("now get me home"), and
-            unlike Optimize it means something to a timetable. */}
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            disabled={route.roundTrip || route.waypoints.length < 2}
-            onPress={route.reverse}
-          >
-            <Text style={styles.buttonQuietText}>Reverse</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            disabled={transitMode || route.roundTrip || route.waypoints.length < 4}
-            onPress={route.optimize}
-          >
-            <Text style={styles.buttonQuietText}>Optimize</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            disabled={route.waypoints.length === 0}
-            onPress={route.clear}
-          >
-            <Text style={styles.buttonQuietText}>Clear</Text>
-          </Pressable>
-          {/* A journey is legs and times, not a track — there is nothing to export
-            as GPX, so the button goes dead rather than writing a lie. */}
-          <Pressable
-            style={[
-              styles.button,
-              styles.buttonQuiet,
-              (!path || transitMode) && styles.buttonDisabled,
-            ]}
-            disabled={!path || transitMode}
-            onPress={() => path && onExport(path)}
-            testID="route-export"
-          >
-            <Text style={styles.buttonQuietText}>Export GPX</Text>
-          </Pressable>
-        </View>
+        {/* Each action appears only once it can do something, rather than sitting
+          there greyed out: Reverse needs two ends, Optimize a tour to shorten,
+          Export a computed track, and Clear something to act on. With no stops
+          the whole row is gone rather than a strip of dead buttons. */}
+        {route.waypoints.length > 0 ? (
+          <View style={styles.actionRow}>
+            {/* Reverse works in transit mode too — swapping the ends is the
+              commonest thing anyone does to a journey ("now get me home"), and
+              unlike Optimize it means something to a timetable. */}
+            {!route.roundTrip && route.waypoints.length >= 2 ? (
+              <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.reverse}>
+                <Text style={styles.buttonQuietText}>Reverse</Text>
+              </Pressable>
+            ) : null}
+            {!transitMode && !route.roundTrip && route.waypoints.length >= 4 ? (
+              <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.optimize}>
+                <Text style={styles.buttonQuietText}>Optimize</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.clear}>
+              <Text style={styles.buttonQuietText}>Clear</Text>
+            </Pressable>
+            {/* A journey is legs and times, not a track — nothing to export as
+              GPX, so the button is simply absent rather than dead. */}
+            {path && !transitMode ? (
+              <Pressable
+                style={[styles.button, styles.buttonQuiet]}
+                onPress={() => onExport(path)}
+                testID="route-export"
+              >
+                <Text style={styles.buttonQuietText}>Export GPX</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {transitMode ? <TransitResults transit={transit} /> : null}
 
