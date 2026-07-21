@@ -1847,6 +1847,12 @@ body {
   background: #b3261e;
 }
 
+/* Completing the trip, not abandoning it — green reads as "done", against the
+   red End beside it. */
+.nav-buttons .nav-arrived {
+  background: #1e8e3e;
+}
+
 /* Snapped-position puck: blue dot with a white ring (nav only — the idle
    locate puck is MapLibre's GeolocateControl). */
 .nav-puck {

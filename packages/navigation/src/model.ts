@@ -160,6 +160,20 @@ export interface NavigationOptions {
   wrongWayDeg?: number;
   /** Distance (m) to the destination within which arrival is declared. */
   arrivalRadiusM?: number;
+  /**
+   * Loose radius (m) around the destination inside which simply *stopping* for
+   * `arrivalLoiterMs` also counts as arrival. The primary rule needs a fix both
+   * inside `arrivalRadiusM` and accurate to `offRouteMaxAccuracyM`, which is
+   * right — a drifting fix must not tear a trip down — but the destination is
+   * exactly where cars end up: multi-storey car parks, courtyards, urban
+   * canyons. Without this a trip in poor reception can never finish, and
+   * guidance keeps announcing a destination the driver is standing on.
+   */
+  arrivalLoiterRadiusM?: number;
+  /** How long (ms) to sit still inside `arrivalLoiterRadiusM` before arriving. */
+  arrivalLoiterMs?: number;
+  /** Ground speed (m/s) below which the vehicle counts as stopped for loiter arrival. */
+  arrivalLoiterMaxSpeedMps?: number;
   /** Descending distances (m) at which to emit "in N meters…" prompts. */
   approachThresholdsM?: number[];
   /** Distance (m) to the maneuver at which to emit the "now" prompt. */
@@ -239,6 +253,11 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   wrongWayDeg: 120, // near-opposite heading; a wrong turn trips cross-track first
 
   arrivalRadiusM: 25,
+  // Wide enough to cover the car park entrance a poor fix lands you at, tight
+  // enough that a red light one street short of the destination is outside it.
+  arrivalLoiterRadiusM: 80,
+  arrivalLoiterMs: 20_000,
+  arrivalLoiterMaxSpeedMps: 1.4, // walking pace: the car has stopped being driven
   approachThresholdsM: [400, 200],
   nowThresholdM: 40,
   farApproachM: 800,

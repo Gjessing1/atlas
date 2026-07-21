@@ -492,6 +492,49 @@ describe('NavigationSession arrival gating', () => {
     const good = s.update({ ...pointAtAlong(routeTotal), accuracyM: 10 }, 1000).state;
     expect(good.status).toBe('arrived');
   });
+
+  // The gate above is right but had no escape hatch, and the destination is
+  // exactly where fixes go bad — car parks, courtyards, urban canyons.
+  it('arrives on stopping near the destination even with a fix that never gets accurate', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    // 50 m out: inside the loiter radius, far outside `arrivalRadiusM`, and
+    // every fix too poor for the primary rule.
+    const parked = { ...pointAtAlong(routeTotal - 50), speedMps: 0, accuracyM: 70 };
+    expect(s.update(parked, 0).state.status).toBe('navigating');
+    expect(s.update(parked, 10_000).state.status).toBe('navigating');
+    expect(s.update(parked, 19_000).state.status).toBe('navigating');
+    expect(s.update(parked, 20_000).state.status).toBe('arrived');
+  });
+
+  it('a drifting fix cannot fake it — still moving restarts the clock', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const drifting = { ...pointAtAlong(routeTotal - 50), speedMps: 5, accuracyM: 70 };
+    for (let t = 0; t <= 60_000; t += 5000) {
+      expect(s.update(drifting, t).state.status).toBe('navigating');
+    }
+  });
+
+  it('does not loiter-arrive while stopped short of the destination', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    // A red light 300 m out — well outside the loose radius.
+    const light = { ...pointAtAlong(routeTotal - 300), speedMps: 0, accuracyM: 10 };
+    for (let t = 0; t <= 60_000; t += 5000) {
+      expect(s.update(light, t).state.status).toBe('navigating');
+    }
+  });
+
+  it('lets the traveller declare arrival by hand', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    s.update({ ...pointAtAlong(routeTotal - 200), speedMps: 0, accuracyM: 80 }, 0);
+    const state = s.declareArrived();
+    expect(state?.status).toBe('arrived');
+    expect(state?.routeProgress).toBe(1);
+    expect(state?.upcoming).toBeNull();
+    // It sticks: the next fix does not resurrect the trip.
+    const next = s.update({ ...pointAtAlong(routeTotal - 200), speedMps: 0, accuracyM: 10 }, 1000);
+    expect(next.state.status).toBe('arrived');
+    expect(next.prompts).toEqual([]);
+  });
 });
 
 describe('NavigationSession wrong-way detection', () => {
@@ -521,6 +564,127 @@ describe('NavigationSession wrong-way detection', () => {
       accuracyM: 80,
     };
     for (let t = 0; t < 5; t++) expect(s.update(back, t * 1000).state.status).toBe('navigating');
+  });
+});
+
+// A mini-roundabout: 100 m approach east → a full ring of radius `RA_R` taken
+// counter-clockwise → 100 m exit. `courseAt` reads the route direction from a
+// straight chord 25..60 m ahead, which on a ring this tight cuts clean across
+// the island — so the chord and the kerb the driver is actually following can
+// oppose each other by more than `wrongWayDeg` for several fixes running.
+const RA_R = 5;
+const RA_APPROACH_M = 100;
+const RA_ARC = 2 * Math.PI;
+const RA_RING_M = RA_R * RA_ARC;
+const M_PER_DEG_LAT = 111_320;
+const M_PER_DEG_LNG = 111_320 * Math.cos((60 * Math.PI) / 180);
+
+function raPoint(x: number, y: number): LatLng {
+  return { lat: 60 + y / M_PER_DEG_LAT, lng: 10 + x / M_PER_DEG_LNG };
+}
+
+/** Position and true kerb heading `s` metres into the roundabout route. */
+function raAt(s: number): { pos: LatLng; headingDeg: number } {
+  if (s <= RA_APPROACH_M) {
+    return { pos: raPoint(-RA_R - (RA_APPROACH_M - s), 0), headingDeg: 90 };
+  }
+  const ring = Math.min(s - RA_APPROACH_M, RA_RING_M);
+  const a = Math.PI + ring / RA_R;
+  // CCW tangent of (cos a, sin a) is (−sin a, cos a); bearing measures from north.
+  const heading = ((Math.atan2(-Math.sin(a), Math.cos(a)) * 180) / Math.PI + 360) % 360;
+  if (s - RA_APPROACH_M <= RA_RING_M) {
+    return { pos: raPoint(RA_R * Math.cos(a), RA_R * Math.sin(a)), headingDeg: heading };
+  }
+  const past = s - RA_APPROACH_M - RA_RING_M;
+  const tx = -Math.sin(a);
+  const ty = Math.cos(a);
+  return {
+    pos: raPoint(RA_R * Math.cos(a) + tx * past, RA_R * Math.sin(a) + ty * past),
+    headingDeg: heading,
+  };
+}
+
+/** The roundabout route, with the ring leg optionally signed as a roundabout. */
+function roundaboutRoute(ringSign: number): RoutePath {
+  const pts: LatLng[] = [];
+  for (let d = 0; d < RA_APPROACH_M; d += 5) pts.push(raAt(d).pos);
+  const ringFirst = pts.length;
+  for (let s = 0; s <= RA_RING_M; s += 1) pts.push(raAt(RA_APPROACH_M + s).pos);
+  const exitFirst = pts.length;
+  for (let d = 1; d <= 100; d += 5) pts.push(raAt(RA_APPROACH_M + RA_RING_M + d).pos);
+  return {
+    points: pts,
+    distanceM: 0,
+    timeMs: 60_000,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [
+      {
+        text: 'Head east',
+        distanceM: RA_APPROACH_M,
+        timeMs: 20_000,
+        sign: 0,
+        interval: [0, ringFirst],
+      },
+      {
+        text: 'Take the third exit',
+        distanceM: RA_RING_M,
+        timeMs: 20_000,
+        sign: ringSign,
+        interval: [ringFirst, exitFirst],
+      },
+      {
+        text: 'Continue',
+        distanceM: 100,
+        timeMs: 20_000,
+        sign: 0,
+        interval: [exitFirst, pts.length - 1],
+      },
+    ],
+  };
+}
+
+describe('NavigationSession wrong-way in a roundabout', () => {
+  /** Drive from `fromM` to `toM` at `speed`, returning every status seen. */
+  function drive(path: RoutePath, fromM: number, toM: number, speed: number, backwards = false) {
+    const s = new NavigationSession(path, { startDeparted: true });
+    const seen: string[] = [];
+    for (let t = 0; ; t++) {
+      const along = fromM + speed * t;
+      if (along > toM) break;
+      const { pos, headingDeg } = raAt(along);
+      seen.push(
+        s.update(
+          {
+            ...pos,
+            speedMps: speed,
+            headingDeg: backwards ? (headingDeg + 180) % 360 : headingDeg,
+            accuracyM: 5,
+          },
+          t * 1000,
+        ).state.status,
+      );
+    }
+    return seen;
+  }
+
+  it('does not reroute a driver going correctly round a mini-roundabout', () => {
+    // Without the roundabout sign this exact drive trips off-route (below), so
+    // the ring geometry really does provoke it — the sign is what saves it.
+    const seen = drive(roundaboutRoute(6), RA_APPROACH_M, RA_APPROACH_M + RA_RING_M, 4);
+    expect(seen).not.toContain('off-route');
+  });
+
+  it('the same ring without a roundabout sign is what the fix suppresses', () => {
+    const seen = drive(roundaboutRoute(0), RA_APPROACH_M, RA_APPROACH_M + RA_RING_M, 4);
+    expect(seen).toContain('off-route');
+  });
+
+  it('still catches a genuine wrong-way drive on the road after the ring', () => {
+    const path = roundaboutRoute(6);
+    const exitM = RA_APPROACH_M + RA_RING_M;
+    const seen = drive(path, exitM + 20, exitM + 90, 8, true);
+    expect(seen).toContain('off-route');
   });
 });
 
@@ -1062,6 +1226,20 @@ describe('navOptionsForProfile', () => {
     // Same fix that trips a driver: on the eastbound line, heading west.
     const back = { ...pointAtAlong(routeCum[10]!), speedMps: 1.4, headingDeg: 270 };
     for (let t = 0; t < 6; t++) expect(s.update(back, t * 1000).state.status).toBe('navigating');
+  });
+
+  it('does not loiter-arrive a walker who is still walking', () => {
+    const s = new NavigationSession(route(), navOptionsForProfile('foot', { startDeparted: true }));
+    // 20 m out at 1.4 m/s — under the *car's* "stopped" threshold, so on the
+    // driving row this walker would arrive without having stopped at all.
+    const walking = { ...pointAtAlong(routeTotal - 20), speedMps: 1.4, accuracyM: 40 };
+    for (let t = 0; t <= 40_000; t += 5000) {
+      expect(s.update(walking, t).state.status).toBe('navigating');
+    }
+    // Actually stopping there does finish the trip.
+    const stopped = { ...pointAtAlong(routeTotal - 20), speedMps: 0, accuracyM: 40 };
+    s.update(stopped, 45_000);
+    expect(s.update(stopped, 66_000).state.status).toBe('arrived');
   });
 
   it('still catches a cyclist riding the route backwards', () => {

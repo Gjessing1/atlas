@@ -41,6 +41,8 @@ const PACE_MIN = 0.4;
 const PACE_MAX = 2;
 /** Reckoned ticks (~s) the yaw divergence must persist before `wrongBranch`. */
 const WRONG_BRANCH_GRACE_TICKS = 5;
+/** Atlas turn code for a roundabout leg — both entering (26) and exiting (27). */
+const ROUNDABOUT_SIGN = 6;
 
 /**
  * Follows a single planned route against a stream of position fixes, producing
@@ -64,6 +66,8 @@ export class NavigationSession {
   /** Consecutive moving fixes whose heading opposes the route direction. */
   private wrongWayCount = 0;
   private arrived = false;
+  /** When the vehicle first stopped inside `arrivalLoiterRadiusM`, else null. */
+  private loiterSinceMs: number | null = null;
   /** True once the vehicle has demonstrably started driving (see NavState.departed). */
   private departed: boolean;
   /** alongM of the first fix, so progress can also prove departure. */
@@ -131,6 +135,29 @@ export class NavigationSession {
         ...this.lastState,
         speedLimitKph: speedLimitKphAt(enrichment, this.lastState.traveledM),
         tunnel: this.tunnelState(this.lastState.traveledM),
+      };
+    }
+    return this.lastState;
+  }
+
+  /**
+   * End the trip because the traveller says so — the banner's "I've arrived".
+   * Both automatic rules can miss (a fix that never gets accurate enough, a
+   * destination the road data puts across a wall), and the driver standing at
+   * the door must always have a way out that isn't "cancel", which reads as
+   * abandoning the trip rather than completing it. Returns the refreshed state
+   * so the UI flips immediately instead of waiting for a fix that may be
+   * minutes away — parked in a garage, the next one may never come.
+   */
+  declareArrived(): NavState | null {
+    this.arrived = true;
+    if (this.lastState) {
+      this.lastState = {
+        ...this.lastState,
+        status: 'arrived',
+        routeProgress: 1,
+        upcoming: null,
+        then: null,
       };
     }
     return this.lastState;
@@ -212,16 +239,47 @@ export class NavigationSession {
     // arrival radius must not fire it; only an accurate fix may declare arrival.
     if (distanceRemainingM <= this.opts.arrivalRadiusM && accurate) this.arrived = true;
 
+    // Secondary arrival, deliberately *not* accuracy-gated: having stopped for
+    // `arrivalLoiterMs` this close to the destination, the trip is over whatever
+    // the fix quality says. Drifting cannot fake it — a drifting fix is moving,
+    // and any speed above walking pace (or leaving the loose radius) restarts
+    // the clock. This is the escape hatch for the car park / courtyard / urban
+    // canyon case, where an accurate fix may simply never come.
+    if (this.departed && !this.arrived) {
+      const still =
+        distanceRemainingM <= this.opts.arrivalLoiterRadiusM &&
+        speedMps !== null &&
+        speedMps <= this.opts.arrivalLoiterMaxSpeedMps;
+      if (!still) this.loiterSinceMs = null;
+      else if (this.loiterSinceMs === null) this.loiterSinceMs = nowMs;
+      else if (nowMs - this.loiterSinceMs >= this.opts.arrivalLoiterMs) this.arrived = true;
+    } else {
+      this.loiterSinceMs = null;
+    }
+
     if (accurate) {
       if (snap.crossTrackM > this.opts.offRouteM) this.offRouteCount++;
       else this.offRouteCount = 0;
       // Wrong-way: heading opposes the route tangent while moving. Cross-track
       // stays ≈ 0 driving the line backwards (the matcher even pins the puck
       // via its backtrack penalty), so this is the only signal that catches it.
-      const tangent = headingDeg !== null ? this.courseAt(alongM, speedMps) : null;
+      //
+      // Not inside a roundabout, though: `courseAt` reads the route direction
+      // from a straight chord 25..60 m ahead, and on a tight ring that chord
+      // cuts across the island while the driver's heading follows the kerb.
+      // Measured on a synthetic ring, the divergence passes `wrongWayDeg` and
+      // *sustains* past `offRouteGraceUpdates` on a 5 m-radius mini-roundabout
+      // taken at 11–18 km/h — which would reroute the driver mid-ring, the most
+      // disorienting possible moment. Suppressed here rather than by widening
+      // the angle globally, which would blunt genuine wrong-way detection on
+      // the straight roads where it actually earns its keep. Cross-track still
+      // guards the ring, and the tally resets so a pre-roundabout streak cannot
+      // fire on the way out.
+      const inRoundabout = this.currentInstruction(alongM)?.sign === ROUNDABOUT_SIGN;
+      const tangent = headingDeg !== null && !inRoundabout ? this.courseAt(alongM, speedMps) : null;
       if (tangent !== null && Math.abs(wrapDeg(headingDeg! - tangent)) > this.opts.wrongWayDeg) {
         this.wrongWayCount++;
-      } else if (headingDeg !== null) {
+      } else if (headingDeg !== null || inRoundabout) {
         this.wrongWayCount = 0;
       }
     }
@@ -563,6 +621,11 @@ export class NavigationSession {
   private roadAt(alongM: number): string | null {
     if (this.maneuvers.length === 0) return null;
     return this.maneuvers[this.currentManeuverIndex(alongM)]!.instruction.streetName ?? null;
+  }
+
+  /** The instruction whose leg contains `alongM`, or null for a route without any. */
+  private currentInstruction(alongM: number): RouteInstruction | null {
+    return this.maneuvers[this.currentManeuverIndex(alongM)]?.instruction ?? null;
   }
 
   /** Index of the maneuver whose leg contains `alongM` (last one started). */

@@ -49,6 +49,12 @@ export function NavBanner({
   const speed = formatSpeed(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
+  // The manual way out, offered only near the destination — where the automatic
+  // rules can fail (a fix that never gets accurate enough in a car park) and
+  // where "I've arrived" is the one thing the traveller knows better than we do.
+  // Deliberately distinct from End: this completes the trip rather than
+  // abandoning it, so it banks the summary.
+  const canDeclareArrival = moving && state != null && state.distanceRemainingM <= 150;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — the heads-up that matters for lane choice (Google-style).
   const thenManeuver =
@@ -163,6 +169,11 @@ export function NavBanner({
               <Text style={styles.muteIcon}>{nav.muted ? '🔇' : '🔊'}</Text>
             </Pressable>
           ) : null}
+          {canDeclareArrival ? (
+            <Pressable style={styles.arrived} onPress={nav.arriveNow} testID="declare-arrived">
+              <Text style={styles.stopText}>I&apos;ve arrived</Text>
+            </Pressable>
+          ) : null}
           <Pressable style={styles.stop} onPress={nav.stop} testID="stop-nav">
             <Text style={styles.stopText}>{nav.phase === 'arrived' ? 'Done' : 'End'}</Text>
           </Pressable>
@@ -253,6 +264,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 8,
     elevation: 4,
+  },
+  // Completing the trip, not abandoning it — green against the red End beside it.
+  arrived: {
+    backgroundColor: '#1e8e3e',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    elevation: 4,
+    marginRight: 8,
   },
   stopText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

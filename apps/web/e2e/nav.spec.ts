@@ -46,6 +46,56 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-banner')).toHaveCount(0);
 });
 
+test('a fix too poor to arrive on still lets the driver finish the trip', async ({
+  page,
+  context,
+}) => {
+  await mockRouting(page);
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+
+  // 100 m short of the destination on the route line, with an 80 m error
+  // radius — the multi-storey-car-park case. Too imprecise for the accuracy
+  // gate (30 m) and outside the loiter radius (80 m), so neither automatic
+  // rule can fire and guidance would otherwise announce a destination the
+  // driver is standing on, forever.
+  await context.setGeolocation({
+    latitude: 59.919196,
+    longitude: 10.759196,
+    accuracy: 80,
+  });
+  await expect(page.getByRole('button', { name: "I've arrived" })).toBeVisible();
+  await expect(page.locator('.nav-maneuver')).not.toContainText('You have arrived');
+
+  // The manual hatch completes the trip rather than abandoning it: the arrival
+  // card and its trip summary, exactly as a detected arrival produces.
+  await page.getByRole('button', { name: "I've arrived" }).click();
+  await expect(page.locator('.nav-maneuver')).toContainText('You have arrived');
+  await expect(page.locator('.nav-summary')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.locator('.nav-banner')).toHaveCount(0);
+});
+
+test('the arrival hatch stays hidden far from the destination', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+  // Still ~1.2 km out at the start fix — offering "I've arrived" here would be
+  // an invitation to end the trip by accident.
+  await expect(page.getByRole('button', { name: "I've arrived" })).toHaveCount(0);
+});
+
 test('geolocation denied shows an error state, End dismisses it', async ({ page, context }) => {
   await mockRouting(page);
   await context.clearPermissions();

@@ -54,6 +54,12 @@ export function NavBanner({
   const tunnel = moving ? (state?.tunnel ?? null) : null;
   const road = tunnel ? tunnelChipLabel(tunnel) : moving ? (state?.currentRoad ?? null) : null;
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
+  // The manual way out, offered only near the destination — where the automatic
+  // rules can fail (a fix that never gets accurate enough in a car park) and
+  // where "I've arrived" is the one thing the traveller knows better than we do.
+  // Deliberately distinct from End: this completes the trip rather than
+  // abandoning it, so it banks the summary.
+  const canDeclareArrival = moving && state != null && state.distanceRemainingM <= 150;
 
   return (
     <>
@@ -158,6 +164,16 @@ export function NavBanner({
             {moving ? (
               <button type="button" onClick={nav.toggleMute} aria-pressed={nav.muted}>
                 {nav.muted ? '🔇' : '🔊'}
+              </button>
+            ) : null}
+            {canDeclareArrival ? (
+              <button
+                type="button"
+                className="nav-arrived"
+                onClick={nav.arriveNow}
+                title="Finish the trip here"
+              >
+                I've arrived
               </button>
             ) : null}
             <button type="button" className="nav-stop" onClick={nav.stop}>

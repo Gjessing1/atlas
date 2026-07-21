@@ -69,6 +69,12 @@ export interface NavController {
   toggleMute: () => void;
   /** Set mute directly (the persisted preference applies through this). */
   setMuted: (muted: boolean) => void;
+  /**
+   * End the trip as *arrived* on the traveller's say-so. Offered because both
+   * automatic rules can miss at the destination — a fix that never gets
+   * accurate enough, or a destination the road data puts across a wall.
+   */
+  arriveNow: () => void;
   stop: () => void;
 }
 
@@ -262,6 +268,28 @@ export function useNavigation(): NavController {
     },
     [stopUpdates],
   );
+
+  /**
+   * "I've arrived" — the driver's own escape hatch, for when neither automatic
+   * rule can fire. Ends the trip exactly as a detected arrival does (summary,
+   * spoken confirmation, `arrived` phase) rather than as a cancellation, which
+   * is the difference the button exists to express.
+   */
+  const arriveNow = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session) return;
+    const next = session.declareArrived();
+    if (next) {
+      setState(next);
+      lastStateRef.current = next;
+    }
+    speak(session.arrivalText());
+    setTripSummary({
+      distanceM: traveledBaseRef.current + (next?.traveledM ?? 0),
+      durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
+    });
+    stop(true);
+  }, [speak, stop]);
 
   const reroute = useCallback(
     async (from: LocationFix) => {
@@ -581,6 +609,7 @@ export function useNavigation(): NavController {
     go,
     toggleMute,
     setMuted,
+    arriveNow,
     stop: () => stop(false),
   };
 }

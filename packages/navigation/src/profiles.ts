@@ -33,6 +33,8 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // wrong-way is still worth catching.
     wrongWayDeg: 150,
     arrivalRadiusM: 20,
+    arrivalLoiterRadiusM: 40,
+    arrivalLoiterMaxSpeedMps: 0.7,
     approachThresholdsM: [200, 60],
     nowThresholdM: 20,
     farApproachM: 0, // no motorways to need 800 m of warning
@@ -60,6 +62,12 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // needs is either absent or meaningless on foot.
     wrongWayDeg: Infinity,
     arrivalRadiusM: 15,
+    // The car's loiter escape hatch inverts on foot: its "stopped" threshold is
+    // *walking pace*, so a pedestrian would satisfy it while still walking, and
+    // its 80 m radius is a minute away on foot. Both tighten to something only a
+    // walker who has actually stopped at the door can meet.
+    arrivalLoiterRadiusM: 25,
+    arrivalLoiterMaxSpeedMps: 0.3,
     // 800/400/200/40 m is ten minutes of walking. These are the distances a
     // pedestrian can actually see the turn from.
     approachThresholdsM: [100, 30],
@@ -92,6 +100,9 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     discardAccuracyM: 150,
     wrongWayDeg: Infinity,
     arrivalRadiusM: 25,
+    // Same reasoning as foot, one notch looser for the fixes terrain gives.
+    arrivalLoiterRadiusM: 35,
+    arrivalLoiterMaxSpeedMps: 0.3,
     approachThresholdsM: [100, 30],
     nowThresholdM: 10,
     farApproachM: 0,
