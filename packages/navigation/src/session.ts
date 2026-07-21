@@ -143,6 +143,17 @@ export class NavigationSession {
   }
 
   /**
+   * Carry the trip's learned traffic pace into a replacement route session.
+   * A reroute changes the expected road-by-road timing, but the observed ratio
+   * between that timing and the driver's real progress is still evidence about
+   * the same trip. Keeping the value here avoids exposing mutable ETA state to
+   * platform controllers.
+   */
+  inheritPaceFrom(previous: NavigationSession): void {
+    this.paceFactor = previous.paceFactor;
+  }
+
+  /**
    * Attach (or replace) the route's road attributes. Called once the
    * enrichment request for this route resolves; until then every attribute
    * simply reads as unknown, so guidance runs unchanged without it.

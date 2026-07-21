@@ -60,7 +60,7 @@ export interface WebNavController {
   /** Switch profile and refetch the preview choices (preview phase only). */
   setProfile: (profile: RoutingProfile) => void;
   /** Begin guidance along the selected preview choice. */
-  go: () => void;
+  go: () => Promise<void>;
   toggleMute: () => void;
   /** Set mute directly (the persisted preference applies through this). */
   setMuted: (muted: boolean) => void;
@@ -74,7 +74,7 @@ export interface WebNavController {
 }
 
 /** Promisified single geolocation fix. */
-function currentPosition(): Promise<GeolocationPosition> {
+function currentPosition(timeout = 20_000): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!('geolocation' in navigator)) {
       reject(new Error('This browser has no geolocation'));
@@ -82,7 +82,7 @@ function currentPosition(): Promise<GeolocationPosition> {
     }
     navigator.geolocation.getCurrentPosition(resolve, (err) => reject(new Error(err.message)), {
       enableHighAccuracy: true,
-      timeout: 20_000,
+      timeout,
     });
   });
 }
@@ -304,12 +304,15 @@ export function useWebNavigation(): WebNavController {
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         // Rerouting happens mid-drive: never regress to the pre-departure
         // framing (calm camera / no snap-lock) the fresh session starts in.
-        sessionRef.current = new NavigationSession(
+        const previousSession = sessionRef.current;
+        const nextSession = new NavigationSession(
           path,
           navOptionsForProfile(profileRef.current, {
             startDeparted: lastStateRef.current?.departed ?? true,
           }),
         );
+        if (previousSession) nextSession.inheritPaceFrom(previousSession);
+        sessionRef.current = nextSession;
         enrich(sessionRef.current, path);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
@@ -455,9 +458,31 @@ export function useWebNavigation(): WebNavController {
     [fetchChoices],
   );
 
-  const go = useCallback(() => {
-    const path = previewPaths?.[previewIndex];
-    if (!path) return;
+  const go = useCallback(async () => {
+    const previewPath = previewPaths?.[previewIndex];
+    if (!previewPath) return;
+    const seq = ++previewSeq.current;
+    setPreviewLoading(true);
+
+    let path = previewPath;
+    let freshFix: GeolocationPosition | null = null;
+    const dest = destRef.current;
+    if (dest) {
+      try {
+        freshFix = await currentPosition(8_000);
+        const origin = { lat: freshFix.coords.latitude, lng: freshFix.coords.longitude };
+        const choices = await fetchChoices(origin, dest, profileRef.current);
+        path = choices[previewIndex] ?? choices[0] ?? previewPath;
+        originRef.current = origin;
+        originFixRef.current = freshFix;
+      } catch {
+        // Starting on the previewed path is still better than refusing to
+        // navigate when the Start-time refresh is briefly unavailable.
+      }
+    }
+
+    // Cancel/profile-switch while the refresh was in flight invalidates it.
+    if (seq !== previewSeq.current || !destRef.current) return;
     const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
     sessionRef.current = session;
     enrich(session, path);
@@ -486,9 +511,9 @@ export function useWebNavigation(): WebNavController {
     // Show a state at once rather than waiting for the watch's first fix, but
     // only if the preview's fix is still recent — a driver who studied the
     // choices for a minute has moved, and a stale fix would misplace the puck.
-    const origin = originFixRef.current;
+    const origin = freshFix ?? originFixRef.current;
     if (origin && Date.now() - origin.timestamp < 30_000) onFix(origin);
-  }, [previewPaths, previewIndex, onFix, clearWatch, clearPreview, speak, enrich]);
+  }, [previewPaths, previewIndex, fetchChoices, onFix, clearWatch, clearPreview, speak, enrich]);
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.

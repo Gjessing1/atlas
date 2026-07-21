@@ -48,6 +48,35 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-banner')).toHaveCount(0);
 });
 
+test('Start refreshes a preview route from the latest position', async ({ page, context }) => {
+  const routeOrigins: Array<{ lat: number; lon: number }> = [];
+  await mockRouting(page);
+  await page.route('**/api/route', async (route) => {
+    const body = route.request().postDataJSON() as {
+      locations?: { lat: number; lon: number }[];
+    };
+    const origin = body.locations?.[0];
+    if (origin) routeOrigins.push(origin);
+    await route.fallback();
+  });
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await expect(page.locator('.nav-preview')).toBeVisible();
+
+  // Move while considering the preview. The second route request made by
+  // Start must use this position, not the fix that opened the preview.
+  await context.setGeolocation({ latitude: 59.915, longitude: 10.755 });
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+
+  expect(routeOrigins).toHaveLength(2);
+  expect(routeOrigins[0]).toEqual({ lat: 59.91, lon: 10.75 });
+  expect(routeOrigins[1]).toEqual({ lat: 59.915, lon: 10.755 });
+});
+
 test('a long motorway leg leads with the road, keeping the distant turn secondary', async ({
   page,
 }) => {

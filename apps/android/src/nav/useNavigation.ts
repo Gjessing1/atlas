@@ -313,12 +313,15 @@ export function useNavigation(): NavController {
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         // Rerouting happens mid-drive: never regress to the pre-departure
         // framing (calm camera / no snap-lock) the fresh session starts in.
-        sessionRef.current = new NavigationSession(
+        const previousSession = sessionRef.current;
+        const nextSession = new NavigationSession(
           path,
           navOptionsForProfile(profileRef.current, {
             startDeparted: lastStateRef.current?.departed ?? true,
           }),
         );
+        if (previousSession) nextSession.inheritPaceFrom(previousSession);
+        sessionRef.current = nextSession;
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
         rerouteFailCount.current = 0;
@@ -473,9 +476,51 @@ export function useNavigation(): NavController {
   );
 
   const go = useCallback(async () => {
-    const path = previewPaths?.[previewIndex];
-    if (!path) return;
+    const previewPath = previewPaths?.[previewIndex];
+    if (!previewPath) return;
+    const seq = ++previewSeq.current;
+    setPreviewLoading(true);
     try {
+      let path = previewPath;
+      let freshPosition: Location.LocationObject | null = null;
+      const destination = destRef.current;
+
+      // The preview may have been open while the traveller was already
+      // moving. Route once more from a Start-time fix so guidance does not
+      // begin on a stale line and immediately announce a reroute. Preserve
+      // the chosen alternative index where the refreshed result still has it.
+      if (destination) {
+        try {
+          const current = await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+          ]);
+          freshPosition = current ?? (await Location.getLastKnownPositionAsync({ maxAge: 30_000 }));
+          if (freshPosition) {
+            const origin = {
+              lat: freshPosition.coords.latitude,
+              lng: freshPosition.coords.longitude,
+            };
+            const result = await provider.route({
+              profile: profileRef.current,
+              points: [origin, destination],
+              instructions: true,
+              alternatives: true,
+            });
+            if (result.paths.length > 0) {
+              const choices = sortRouteChoices(result.paths);
+              path = choices[previewIndex] ?? choices[0] ?? previewPath;
+              originRef.current = origin;
+            }
+          }
+        } catch {
+          // The previewed path remains a usable fallback if a fresh fix or
+          // route cannot be obtained at the exact moment Start is pressed.
+        }
+      }
+
+      // Cancel/profile-switch while the refresh was in flight invalidates it.
+      if (seq !== previewSeq.current || !destRef.current) return;
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
       enrich(session, path);
@@ -513,6 +558,16 @@ export function useNavigation(): NavController {
       // exactly when the driver wonders "which way?".
       const depart = session.departurePrompt();
       if (depart) speak(depart.text);
+      if (freshPosition) {
+        const coords = freshPosition.coords;
+        onFix({
+          lat: coords.latitude,
+          lng: coords.longitude,
+          headingDeg: coords.heading ?? undefined,
+          speedMps: coords.speed ?? undefined,
+          accuracyM: coords.accuracy ?? undefined,
+        });
+      }
     } catch (err) {
       setLocationHandler(null);
       sessionRef.current = null;
@@ -522,7 +577,7 @@ export function useNavigation(): NavController {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
-  }, [previewPaths, previewIndex, onFix, speak, enrich]);
+  }, [previewPaths, previewIndex, provider, onFix, speak, enrich]);
 
   // Tear down the foreground service if the app unmounts mid-trip.
   useEffect(() => () => stopUpdates(), [stopUpdates]);

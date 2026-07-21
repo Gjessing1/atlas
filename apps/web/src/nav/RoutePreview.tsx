@@ -85,7 +85,7 @@ export function RoutePreview({ nav }: { nav: WebNavController }) {
           type="button"
           className="nav-preview-go"
           disabled={nav.previewLoading}
-          onClick={nav.go}
+          onClick={() => void nav.go()}
         >
           {nav.previewLoading ? 'Finding routes…' : 'Start'}
         </button>

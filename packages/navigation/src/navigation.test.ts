@@ -1004,6 +1004,21 @@ describe('NavigationSession adaptive ETA', () => {
     const unadapted = new NavigationSession(route()).update(pointAtAlong(along), 0).state;
     expect(state.timeRemainingMs).toBeLessThan(unadapted.timeRemainingMs * 0.9);
   });
+
+  it('carries the learned pace into a replacement route session', () => {
+    const previous = new NavigationSession(route());
+    const still = { ...pointAtAlong(300), speedMps: 0 };
+    previous.update(still, 0);
+    for (let t = 10_000; t <= 180_000; t += 10_000) previous.update(still, t);
+
+    const replacement = new NavigationSession(route());
+    replacement.inheritPaceFrom(previous);
+    const carried = replacement.update(pointAtAlong(300), 200_000).state.timeRemainingMs;
+    const reset = new NavigationSession(route()).update(pointAtAlong(300), 200_000).state
+      .timeRemainingMs;
+
+    expect(carried).toBeGreaterThan(reset * 1.8);
+  });
 });
 
 describe('NavigationSession voice extras', () => {
