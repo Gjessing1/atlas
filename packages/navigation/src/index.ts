@@ -8,6 +8,7 @@ export {
   type NavUpdate,
   tunnelChipLabel,
   type Position,
+  type SustainGuidance,
   type TunnelState,
   type UpcomingManeuver,
   type VoicePrompt,

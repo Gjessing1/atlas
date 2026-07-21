@@ -49,6 +49,14 @@ export interface UpcomingManeuver {
   distanceToM: number;
 }
 
+/** Long, stable leg shown as "continue on E18" before turn guidance takes over. */
+export interface SustainGuidance {
+  /** The named road being followed for this leg. */
+  road: string;
+  /** Distance (m) left on this road before the upcoming maneuver. */
+  distanceRemainingM: number;
+}
+
 /** The full navigation state after processing a position fix. */
 export interface NavState {
   status: NavStatus;
@@ -78,6 +86,12 @@ export interface NavState {
   upcoming: UpcomingManeuver | null;
   /** The maneuver after `upcoming` (for "then …" hints), or null. */
   then: UpcomingManeuver | null;
+  /**
+   * Present on a named long leg while its next maneuver is still outside the
+   * far-approach band. Banners lead with this road and distance, keeping the
+   * distant turn as a secondary "then" hint.
+   */
+  sustain: SustainGuidance | null;
   /**
    * Name of the road currently being driven ("E6"), from the street name of
    * the maneuver leg containing the position; null when the data has none.
@@ -126,12 +140,13 @@ export interface VoicePrompt {
   /** Ready-to-speak text, e.g. "In 200 meters, turn right onto Main Street". */
   text: string;
   /**
-   * `approach` fires at a distance threshold; `now` fires at the maneuver;
+   * `approach` fires before a maneuver; `now` fires at the maneuver;
+   * `post` confirms the road to continue on after a completed maneuver;
    * `depart` is the first instruction, offered by `departurePrompt()` at
    * guidance start (it is behind the traveller, so it never fires otherwise);
    * `alert` is a warning outside the maneuver sequence (wrong-branch hint).
    */
-  kind: 'approach' | 'now' | 'depart' | 'alert';
+  kind: 'approach' | 'now' | 'post' | 'depart' | 'alert';
   /** Index of the maneuver instruction this prompt refers to. */
   maneuverIndex: number;
   /** The distance threshold (m) that triggered an `approach` prompt (0 for `now`). */
@@ -174,14 +189,29 @@ export interface NavigationOptions {
   arrivalLoiterMs?: number;
   /** Ground speed (m/s) below which the vehicle counts as stopped for loiter arrival. */
   arrivalLoiterMaxSpeedMps?: number;
-  /** Descending distances (m) at which to emit "in N meters…" prompts. */
+  /**
+   * Minimum/fallback distances (m) for the early and pre-turn approach cues.
+   * At speed, `approachLeadTimesS` expands them so warning time stays useful.
+   */
   approachThresholdsM?: number[];
-  /** Distance (m) to the maneuver at which to emit the "now" prompt. */
+  /** Lead times corresponding to `approachThresholdsM` (seconds). */
+  approachLeadTimesS?: number[];
+  /** Minimum/fallback distance (m) for the immediate maneuver cue. */
   nowThresholdM?: number;
-  /** Extra far-out approach distance (m) used only at highway speeds. */
+  /** Desired lead time (seconds) for the immediate maneuver cue. */
+  nowLeadTimeS?: number;
+  /** Minimum/fallback far-out approach distance (m), used only at highway speeds. */
   farApproachM?: number;
+  /** Desired lead time (seconds) for the highway-speed far alert. */
+  farApproachLeadTimeS?: number;
   /** Ground speed (m/s) above which the far approach prompt is armed. */
   farApproachMinSpeedMps?: number;
+  /** Cap applied only to warning-distance timing (guards bad fixes and mode mismatch). */
+  promptSpeedMaxMps?: number;
+  /** Minimum total leg distance (m) that earns the long-road sustain layout. */
+  sustainMinLegM?: number;
+  /** Whether to speak Valhalla's post-turn continuation confirmation. */
+  postTransitionPrompts?: boolean;
   /** Fix accuracy (m) beyond which a fix may not count toward off-route. */
   offRouteMaxAccuracyM?: number;
   /** Fix accuracy (m) beyond which a fix is ignored entirely (pure noise). */
@@ -259,9 +289,15 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   arrivalLoiterMs: 20_000,
   arrivalLoiterMaxSpeedMps: 1.4, // walking pace: the car has stopped being driven
   approachThresholdsM: [400, 200],
+  approachLeadTimesS: [45, 15],
   nowThresholdM: 40,
+  nowLeadTimeS: 4,
   farApproachM: 800,
+  farApproachLeadTimeS: 100,
   farApproachMinSpeedMps: 19, // ~70 km/h: 400 m is under 20 s of warning
+  promptSpeedMaxMps: 45, // ~160 km/h: above this a fix is noise, not useful timing input
+  sustainMinLegM: 10_000,
+  postTransitionPrompts: true,
   offRouteMaxAccuracyM: 30, // urban-canyon fixes must not trigger reroutes
   discardAccuracyM: 100,
   fixGapMs: 3000,

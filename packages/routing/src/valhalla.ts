@@ -7,6 +7,7 @@ import type {
   RouteQuery,
   RouteResult,
   RoutingProfile,
+  VerbalInstruction,
 } from './model.js';
 
 /**
@@ -222,6 +223,11 @@ interface ValhallaSign {
 interface ValhallaManeuver {
   type?: number;
   instruction?: string;
+  verbal_succinct_transition_instruction?: string;
+  verbal_transition_alert_instruction?: string;
+  verbal_pre_transition_instruction?: string;
+  verbal_post_transition_instruction?: string;
+  verbal_multi_cue?: boolean;
   street_names?: string[];
   length?: number;
   time?: number;
@@ -229,6 +235,22 @@ interface ValhallaManeuver {
   end_shape_index?: number;
   roundabout_exit_count?: number;
   sign?: ValhallaSign;
+}
+
+/** Preserve the non-empty spoken variants Valhalla authored for a maneuver. */
+function parseVerbal(maneuver: ValhallaManeuver): VerbalInstruction | undefined {
+  const verbal: VerbalInstruction = {};
+  const add = (key: 'succinct' | 'alert' | 'pre' | 'post', value: unknown): void => {
+    if (typeof value === 'string' && value.trim().length > 0) verbal[key] = value;
+  };
+  add('succinct', maneuver.verbal_succinct_transition_instruction);
+  add('alert', maneuver.verbal_transition_alert_instruction);
+  add('pre', maneuver.verbal_pre_transition_instruction);
+  add('post', maneuver.verbal_post_transition_instruction);
+  if (typeof maneuver.verbal_multi_cue === 'boolean') {
+    verbal.multiCue = maneuver.verbal_multi_cue;
+  }
+  return Object.keys(verbal).length > 0 ? verbal : undefined;
 }
 
 /** Non-empty `.text` values of a sign element array, in the order given. */
@@ -318,6 +340,8 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       if (kind) instruction.kind = kind;
       const exitSign = parseSign(m.sign);
       if (exitSign) instruction.exitSign = exitSign;
+      const verbal = parseVerbal(m);
+      if (verbal) instruction.verbal = verbal;
       if (m.type === 26 && typeof m.roundabout_exit_count === 'number') {
         instruction.exitNumber = m.roundabout_exit_count;
       }

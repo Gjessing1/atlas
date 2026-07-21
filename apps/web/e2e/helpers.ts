@@ -63,7 +63,7 @@ export async function mockSearch(page: Page): Promise<void> {
 }
 
 /** Polyline6 encoder (inverse of @atlas/routing's decodeShape) for fixtures. */
-function encodeShape(coords: [number, number][], precision = 6): string {
+export function encodeShape(coords: [number, number][], precision = 6): string {
   const factor = 10 ** precision;
   let out = '';
   let prevLat = 0;

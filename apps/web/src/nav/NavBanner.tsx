@@ -77,12 +77,15 @@ export function NavBanner({
   const maneuver = state?.upcoming;
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const speed = speedKph(nav.speedMps);
+  const sustain = moving ? (state?.sustain ?? null) : null;
   // "then …" hint when the maneuver after the current one follows hot on its
-  // heels — the heads-up that matters for lane choice (Google-style).
+  // heels — or the distant maneuver demoted below a long-road sustain cue.
   const thenManeuver =
-    maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
-      ? state.then
-      : null;
+    sustain && maneuver
+      ? maneuver
+      : maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
+        ? state.then
+        : null;
   // Inside a mapped tunnel the chip names the tunnel and counts it down — the
   // road underneath is still E6, but "Brynstunnelen · 1.2 km" is what the
   // driver can check against the world outside the windscreen.
@@ -124,12 +127,18 @@ export function NavBanner({
             <>
               <div className="nav-guidance-row">
                 <div className="nav-turn-panel">
-                  <TurnIcon instruction={maneuver.instruction} size={44} />
+                  <TurnIcon instruction={sustain ? { sign: 0 } : maneuver.instruction} size={44} />
                 </div>
                 <div className="nav-maneuver-text">
-                  <span className="nav-distance-to">In {fmtKm(maneuver.distanceToM)}</span>
-                  <span className="nav-maneuver">{maneuver.instruction.text}</span>
-                  {maneuver.instruction.exitSign ? (
+                  <span className="nav-distance-to">
+                    {sustain
+                      ? `Continue for ${fmtKm(sustain.distanceRemainingM)}`
+                      : `In ${fmtKm(maneuver.distanceToM)}`}
+                  </span>
+                  <span className="nav-maneuver">
+                    {sustain ? sustain.road : maneuver.instruction.text}
+                  </span>
+                  {!sustain && maneuver.instruction.exitSign ? (
                     <span className="nav-exit-sign">
                       {formatExitSign(maneuver.instruction.exitSign)}
                     </span>

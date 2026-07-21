@@ -55,6 +55,47 @@ function route(withInstructions = true): RoutePath {
   };
 }
 
+// A ~22 km eastbound leg on E18 followed by a short final turn. Long enough
+// to exercise highway warning timing and the sustain banner state.
+const longRoutePoints: LatLng[] = Array.from({ length: 21 }, (_, i) => ({
+  lat: 60,
+  lng: 10 + i * 0.02,
+}));
+const longRouteCum = cumulativeDistances(longRoutePoints);
+const longTurnAlong = longRouteCum[18]!;
+const longRoute: RoutePath = {
+  points: longRoutePoints,
+  distanceM: longRouteCum[20]!,
+  timeMs: 900_000,
+  ascentM: 0,
+  descentM: 0,
+  instructions: [
+    {
+      text: 'Head east on E18',
+      distanceM: longTurnAlong,
+      timeMs: 720_000,
+      sign: 0,
+      streetName: 'E18',
+      interval: [0, 18],
+    },
+    {
+      text: 'Take exit 43 toward Oslo',
+      distanceM: longRouteCum[20]! - longTurnAlong,
+      timeMs: 180_000,
+      sign: 7,
+      kind: 'exit',
+      interval: [18, 20],
+    },
+    {
+      text: 'Arrive at destination',
+      distanceM: 0,
+      timeMs: 0,
+      sign: 4,
+      interval: [20, 20],
+    },
+  ],
+};
+
 /** A LatLng exactly `target` metres along the route polyline. */
 function pointAtAlong(target: number): LatLng {
   const clamped = Math.min(Math.max(target, 0), routeTotal);
@@ -230,7 +271,7 @@ describe('NavigationSession voice prompts', () => {
     const p400 = s.update(pointAtAlong(maneuverAlong - 350), 0).prompts;
     expect(p400).toHaveLength(1);
     expect(p400[0]).toMatchObject({ kind: 'approach', thresholdM: 400 });
-    expect(p400[0]!.text).toBe('In 400 meters, Turn right onto Elm Street');
+    expect(p400[0]!.text).toBe('In 350 meters, Turn right onto Elm Street');
 
     // Still between 400 and 200 — no repeat.
     expect(s.update(pointAtAlong(maneuverAlong - 250), 0).prompts).toEqual([]);
@@ -265,21 +306,50 @@ describe('NavigationSession voice prompts', () => {
     expect(prompts[0]!.kind).toBe('now');
   });
 
-  it('arms the far 800 m prompt only at highway speed', () => {
-    const fast = new NavigationSession(route());
-    const p800 = fast.update({ ...pointAtAlong(maneuverAlong - 700), speedMps: 25 }, 0).prompts;
-    expect(p800).toHaveLength(1);
-    expect(p800[0]).toMatchObject({ kind: 'approach', thresholdM: 800 });
-    expect(p800[0]!.text).toBe('In 800 meters, Turn right onto Elm Street');
-    // The 400 m prompt still follows normally afterwards.
-    const p400 = fast.update({ ...pointAtAlong(maneuverAlong - 350), speedMps: 25 }, 0).prompts;
-    expect(p400[0]).toMatchObject({ thresholdM: 400 });
+  it('expands the far warning and immediate cue by time at highway speed', () => {
+    const fast = new NavigationSession(longRoute);
+    const far = fast.update(
+      {
+        ...pointAtDistance(longRoutePoints, longRouteCum, longTurnAlong - 2900),
+        speedMps: 30,
+      },
+      0,
+    ).prompts;
+    expect(far).toHaveLength(1);
+    expect(far[0]).toMatchObject({ kind: 'approach', thresholdM: 3000 });
+    expect(far[0]!.text).toBe('In 2.9 kilometers, Take exit 43 toward Oslo');
 
-    // City speed: silence until the standard 400 m threshold.
-    const slow = new NavigationSession(route());
-    expect(slow.update({ ...pointAtAlong(maneuverAlong - 700), speedMps: 12 }, 0).prompts).toEqual(
-      [],
-    );
+    // The early alert is not repeated at the ordinary approach band; the
+    // pre-turn cue follows around 15 seconds out instead.
+    expect(
+      fast.update(
+        {
+          ...pointAtDistance(longRoutePoints, longRouteCum, longTurnAlong - 1000),
+          speedMps: 30,
+        },
+        1000,
+      ).prompts,
+    ).toEqual([]);
+    expect(
+      fast.update(
+        {
+          ...pointAtDistance(longRoutePoints, longRouteCum, longTurnAlong - 430),
+          speedMps: 30,
+        },
+        2000,
+      ).prompts[0],
+    ).toMatchObject({ kind: 'approach', thresholdM: 450 });
+
+    // Four seconds at 30 m/s is 120 m: safely earlier than the old fixed 40 m.
+    expect(
+      fast.update(
+        {
+          ...pointAtDistance(longRoutePoints, longRouteCum, longTurnAlong - 110),
+          speedMps: 30,
+        },
+        3000,
+      ).prompts[0],
+    ).toMatchObject({ kind: 'now' });
   });
 });
 
@@ -724,9 +794,9 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
   it('keeps firing voice prompts from extrapolated positions', () => {
     const s = new NavigationSession(route());
     const maneuverAlong = routeCum[10]!;
-    s.update({ ...pointAtAlong(maneuverAlong - 513), speedMps: 20 }, 0);
-    // 10 s later the estimated position is ~324 m out: the 400 m prompt fires.
-    const est = s.tick(10_000)!;
+    expect(s.update({ ...pointAtAlong(maneuverAlong - 513), speedMps: 8 }, 0).prompts).toEqual([]);
+    // 15 s later the estimated position is inside the 400 m alert band.
+    const est = s.tick(15_000)!;
     expect(est.prompts).toHaveLength(1);
     expect(est.prompts[0]).toMatchObject({ kind: 'approach', thresholdM: 400 });
   });
@@ -972,7 +1042,7 @@ describe('NavigationSession voice extras', () => {
     const s = new NavigationSession({ ...route(), instructions: chained });
     const approach = s.update(pointAtAlong(routeCum[10]! - 350), 0).prompts;
     expect(approach[0]!.text).toBe(
-      'In 400 meters, Turn right onto Elm Street, then keep left at the fork.',
+      'In 350 meters, Turn right onto Elm Street, then keep left at the fork.',
     );
     const now = s.update(pointAtAlong(routeCum[10]! - 20), 0).prompts;
     expect(now[0]!.text).toBe('Turn right onto Elm Street, then keep left at the fork.');
@@ -981,13 +1051,73 @@ describe('NavigationSession voice extras', () => {
   it('does not chain maneuvers that are far apart', () => {
     const s = new NavigationSession(route());
     const prompts = s.update(pointAtAlong(routeCum[10]! - 350), 0).prompts;
-    expect(prompts[0]!.text).toBe('In 400 meters, Turn right onto Elm Street');
+    expect(prompts[0]!.text).toBe('In 350 meters, Turn right onto Elm Street');
   });
 
   it('speaks the destination side on arrival when the route carries it', () => {
     const withSide = new NavigationSession({ ...route(), instructions: chained });
     expect(withSide.arrivalText()).toBe('You have arrived. It is on the right.');
     expect(new NavigationSession(route(false)).arrivalText()).toBe('You have arrived');
+  });
+
+  it('uses Valhalla wording for alert, pre-turn, immediate, post-turn, and arrival cues', () => {
+    const verbal: RouteInstruction[] = [
+      {
+        ...instructions[0]!,
+        verbal: { pre: 'Drive east on Main Street.', post: 'Continue for 600 meters.' },
+      },
+      {
+        ...instructions[1]!,
+        kind: 'exit',
+        exitSign: { numbers: ['43'], toward: ['Oslo'] },
+        verbal: {
+          alert: 'Take exit 43 toward Oslo.',
+          pre: 'Take exit 43 toward Oslo on E6.',
+          succinct: 'Take exit 43.',
+          post: 'Continue on E6 for 600 meters.',
+        },
+      },
+      {
+        ...instructions[2]!,
+        verbal: { pre: 'Your destination is on the right.' },
+      },
+    ];
+    const s = new NavigationSession({ ...route(), instructions: verbal });
+
+    expect(s.departurePrompt()?.text).toBe('Drive east on Main Street.');
+    expect(s.update(pointAtAlong(routeCum[10]! - 350), 0).prompts[0]!.text).toBe(
+      'In 350 meters, Take exit 43 toward Oslo.',
+    );
+    expect(s.update(pointAtAlong(routeCum[10]! - 150), 1000).prompts[0]!.text).toBe(
+      'In 150 meters, Take exit 43 toward Oslo on E6.',
+    );
+    expect(s.update(pointAtAlong(routeCum[10]! - 20), 2000).prompts[0]).toMatchObject({
+      kind: 'now',
+      text: 'Take exit 43.',
+    });
+    expect(s.update(pointAtAlong(routeCum[10]! + 10), 3000).prompts[0]).toMatchObject({
+      kind: 'post',
+      text: 'Continue on E6 for 600 meters.',
+    });
+    expect(s.arrivalText()).toBe('Your destination is on the right.');
+  });
+
+  it('trusts Valhalla multi-cues instead of appending the next turn again', () => {
+    const verbal = chained.map((instruction, index) =>
+      index === 1
+        ? {
+            ...instruction,
+            verbal: {
+              pre: 'Turn right onto Elm Street. Then keep left at the fork.',
+              multiCue: true,
+            },
+          }
+        : instruction,
+    );
+    const s = new NavigationSession({ ...route(), instructions: verbal });
+    expect(s.update(pointAtAlong(routeCum[10]! - 150), 0).prompts[0]!.text).toBe(
+      'In 150 meters, Turn right onto Elm Street. Then keep left at the fork.',
+    );
   });
 });
 
@@ -1010,6 +1140,52 @@ describe('NavState course and then-maneuver', () => {
     const late = s.update(pointAtAlong(routeCum[10]! + 5), 0).state;
     expect(late.upcoming?.instruction.text).toBe('Arrive at destination');
     expect(late.then).toBeNull();
+  });
+
+  it('sustains a named long road until the time-based far approach band', () => {
+    const s = new NavigationSession(longRoute);
+    const early = s.update({ ...longRoutePoints[0]!, speedMps: 30 }, 0).state;
+    expect(early.sustain).toMatchObject({ road: 'E18' });
+    expect(early.sustain!.distanceRemainingM).toBeCloseTo(longTurnAlong, 0);
+    expect(early.upcoming?.instruction.text).toBe('Take exit 43 toward Oslo');
+
+    const approaching = s.update(
+      {
+        ...pointAtDistance(longRoutePoints, longRouteCum, longTurnAlong - 2900),
+        speedMps: 30,
+      },
+      1000,
+    ).state;
+    expect(approaching.sustain).toBeNull();
+  });
+
+  it('does not use the driving sustain layout for walking or cycling', () => {
+    for (const profile of ['bike', 'foot', 'hike'] as const) {
+      const s = new NavigationSession(longRoute, navOptionsForProfile(profile));
+      expect(s.update({ ...longRoutePoints[0]!, speedMps: 2 }, 0).state.sustain).toBeNull();
+    }
+  });
+
+  it('keeps motorway-style post-turn confirmations out of non-driving profiles', () => {
+    const verbalRoute: RoutePath = {
+      ...route(false),
+      instructions: instructions.map((instruction, index) =>
+        index === 1
+          ? {
+              ...instruction,
+              verbal: { post: 'Continue for 3 kilometers.' },
+            }
+          : instruction,
+      ),
+    };
+
+    for (const profile of ['bike', 'foot', 'hike'] as const) {
+      const s = new NavigationSession(verbalRoute, navOptionsForProfile(profile));
+      s.update({ ...routePoints[0]!, speedMps: 2 }, 0);
+      expect(s.update({ ...routePoints[11]!, speedMps: 2 }, 1000).prompts).not.toContainEqual(
+        expect.objectContaining({ kind: 'post' }),
+      );
+    }
   });
 });
 
@@ -1253,7 +1429,7 @@ describe('navOptionsForProfile', () => {
   it('warns a walker at walking distances, not motorway ones', () => {
     const at = pointAtAlong(routeCum[10]! - 90); // 90 m short of the turn
     const drive = new NavigationSession(route(), { startDeparted: true });
-    expect(drive.update({ ...at, speedMps: 14 }, 0).prompts[0]).toMatchObject({ thresholdM: 200 });
+    expect(drive.update({ ...at, speedMps: 14 }, 0).prompts[0]).toMatchObject({ thresholdM: 210 });
 
     const walk = new NavigationSession(
       route(),

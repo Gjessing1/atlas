@@ -79,6 +79,28 @@ export interface RouteInstruction {
    * `formatExitSign`.
    */
   exitSign?: ExitSign;
+  /**
+   * Router-authored text for spoken guidance. These phrases are deliberately
+   * separate from `text`: Valhalla shortens the immediate cue, includes road
+   * references and exit numbers in the pre-turn cue, and may append a close
+   * following maneuver itself. Navigation should prefer these over rebuilding
+   * speech from the display instruction.
+   */
+  verbal?: VerbalInstruction;
+}
+
+/** Purpose-built spoken variants attached to one Valhalla maneuver. */
+export interface VerbalInstruction {
+  /** Short cue for the instant of the maneuver (for example, "Turn right"). */
+  succinct?: string;
+  /** Early warning that prepares the traveller for the maneuver. */
+  alert?: string;
+  /** Full cue intended immediately before the maneuver. */
+  pre?: string;
+  /** Confirmation intended immediately after completing the maneuver. */
+  post?: string;
+  /** Valhalla already appended the next maneuver to `pre` (and often `succinct`). */
+  multiCue?: boolean;
 }
 
 /** The parts of a motorway exit sign — any subset may be present. */

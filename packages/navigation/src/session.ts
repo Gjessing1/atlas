@@ -15,6 +15,7 @@ import {
   type NavState,
   type NavUpdate,
   type Position,
+  type SustainGuidance,
   type TunnelState,
   type UpcomingManeuver,
   type VoicePrompt,
@@ -43,6 +44,25 @@ const PACE_MAX = 2;
 const WRONG_BRANCH_GRACE_TICKS = 5;
 /** Atlas turn code for a roundabout leg — both entering (26) and exiting (27). */
 const ROUNDABOUT_SIGN = 6;
+
+/** A time-derived warning distance, never tighter than the tuned fallback. */
+function leadDistanceM(fallbackM: number, leadTimeS: number, speedMps: number | null): number {
+  if (speedMps === null || !Number.isFinite(speedMps) || speedMps <= 0) return fallbackM;
+  return Math.max(fallbackM, Math.round(speedMps * leadTimeS));
+}
+
+/** Human speech for the live distance at which a cue actually fired. */
+function voiceDistance(distanceM: number): string {
+  const d = Math.max(0, distanceM);
+  if (d < 100) return `${Math.max(10, Math.round(d / 10) * 10)} meters`;
+  if (d < 1000) return `${Math.round(d / 50) * 50} meters`;
+  if (d < 10_000) {
+    const km = Math.round(d / 100) / 10;
+    return `${km} ${km === 1 ? 'kilometer' : 'kilometers'}`;
+  }
+  const km = Math.round(d / 1000);
+  return `${km} ${km === 1 ? 'kilometer' : 'kilometers'}`;
+}
 
 /**
  * Follows a single planned route against a stream of position fixes, producing
@@ -73,6 +93,8 @@ export class NavigationSession {
   /** alongM of the first fix, so progress can also prove departure. */
   private firstFixAlongM: number | null = null;
   private readonly firedPrompts = new Set<string>();
+  /** Maneuver whose leg was current at the previous prompt collection. */
+  private lastPromptManeuverIndex: number | null = null;
   /** alongM of the previous snap — continuity hint for the map matcher. */
   private lastAlongM: number | null = null;
   /** Timestamp / along-route anchor / speed of the last accepted fix. */
@@ -158,6 +180,7 @@ export class NavigationSession {
         routeProgress: 1,
         upcoming: null,
         then: null,
+        sustain: null,
       };
     }
     return this.lastState;
@@ -314,7 +337,7 @@ export class NavigationSession {
     this.wrongBranchTicks = 0;
 
     const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
-    const prompts = this.arrived || offRoute ? [] : this.collectPrompts(upcoming, speedMps);
+    const prompts = this.arrived || offRoute ? [] : this.collectPrompts(alongM, upcoming, speedMps);
 
     // Display position: glue to the route only while the fix is genuinely
     // near it (tighter still before departure) — a puck pinned to a road the
@@ -353,6 +376,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + remainMs,
       upcoming,
       then,
+      sustain: this.arrived ? null : this.sustainAt(alongM, speedMps),
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
@@ -432,7 +456,7 @@ export class NavigationSession {
     this.lastAlongM = alongM; // keep the matcher's continuity hint moving too
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
     const [upcoming, then] = this.findUpcoming(alongM);
-    const prompts = this.collectPrompts(upcoming, speed);
+    const prompts = this.collectPrompts(alongM, upcoming, speed);
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);
     const point = pointAtDistance(this.points, this.cum, alongM);
     const course = this.courseAt(alongM, speed);
@@ -477,6 +501,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + remainMs,
       upcoming,
       then,
+      sustain: this.sustainAt(alongM, speed),
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
@@ -511,7 +536,7 @@ export class NavigationSession {
     const first = this.maneuvers[0];
     if (!first || !first.instruction.text) return null;
     return {
-      text: this.withChainedNext(0, first.instruction.text),
+      text: first.instruction.verbal?.pre ?? this.withChainedNext(0, first.instruction.text),
       kind: 'depart',
       maneuverIndex: first.index,
       thresholdM: 0,
@@ -526,7 +551,7 @@ export class NavigationSession {
   arrivalText(): string {
     const last = this.maneuvers[this.maneuvers.length - 1];
     return last && last.instruction.sign === 4 && last.instruction.text
-      ? last.instruction.text
+      ? (last.instruction.verbal?.pre ?? last.instruction.text)
       : 'You have arrived';
   }
 
@@ -550,6 +575,7 @@ export class NavigationSession {
       etaEpochMs: nowMs + this.totalTimeMs,
       upcoming,
       then,
+      sustain: this.sustainAt(0, null),
       currentRoad: this.roadAt(0),
       speedLimitKph: speedLimitKphAt(this.enrichment, 0),
       tunnel: this.tunnelState(0),
@@ -623,6 +649,29 @@ export class NavigationSession {
     return this.maneuvers[this.currentManeuverIndex(alongM)]!.instruction.streetName ?? null;
   }
 
+  /** Long-road display state until the next maneuver enters its far approach band. */
+  private sustainAt(alongM: number, speedMps: number | null): SustainGuidance | null {
+    if (!Number.isFinite(this.opts.sustainMinLegM)) return null;
+    const current = this.maneuvers[this.currentManeuverIndex(alongM)];
+    const next = this.maneuvers[this.currentManeuverIndex(alongM) + 1];
+    const road = current?.instruction.streetName;
+    if (!current || !next || !road) return null;
+    const legM = next.alongStartM - current.alongStartM;
+    const remainingM = next.alongStartM - alongM;
+    if (legM < this.opts.sustainMinLegM || remainingM <= 0) return null;
+    const handoverM = leadDistanceM(
+      this.opts.farApproachM,
+      this.opts.farApproachLeadTimeS,
+      this.promptSpeed(speedMps),
+    );
+    return remainingM > handoverM ? { road, distanceRemainingM: remainingM } : null;
+  }
+
+  /** Clamp only prompt timing; map matching and speed display keep the real fix. */
+  private promptSpeed(speedMps: number | null): number | null {
+    return speedMps === null ? null : Math.min(speedMps, this.opts.promptSpeedMaxMps);
+  }
+
   /** The instruction whose leg contains `alongM`, or null for a route without any. */
   private currentInstruction(alongM: number): RouteInstruction | null {
     return this.maneuvers[this.currentManeuverIndex(alongM)]?.instruction ?? null;
@@ -682,56 +731,112 @@ export class NavigationSession {
     return `${text.replace(/\.\s*$/, '')}, then ${n.charAt(0).toLowerCase()}${n.slice(1)}`;
   }
 
+  /** Router-authored wording for one cue, with the old display-text synthesis as fallback. */
+  private cueText(idx: number, phase: 'alert' | 'pre' | 'now'): string {
+    const instruction = this.maneuvers[idx]!.instruction;
+    const verbal = instruction.verbal;
+    const authored =
+      phase === 'alert'
+        ? (verbal?.alert ?? verbal?.pre)
+        : phase === 'pre'
+          ? (verbal?.pre ?? verbal?.alert)
+          : (verbal?.succinct ?? verbal?.pre ?? verbal?.alert);
+    return authored ?? this.withChainedNext(idx, instruction.text);
+  }
+
   private collectPrompts(
+    alongM: number,
     upcoming: UpcomingManeuver | null,
     speedMps: number | null,
   ): VoicePrompt[] {
+    // Crossing a maneuver starts its new leg. Valhalla's post-transition cue
+    // is the authoritative confirmation for that moment ("Continue on E18
+    // for 154 kilometers"). Do not stack an approach cue behind it on the
+    // same GPS update; a close following turn is already carried by
+    // `verbal_multi_cue` in the pre-turn phrase.
+    const currentIdx = this.currentManeuverIndex(alongM);
+    if (this.lastPromptManeuverIndex === null) {
+      this.lastPromptManeuverIndex = currentIdx;
+    } else if (currentIdx > this.lastPromptManeuverIndex) {
+      this.lastPromptManeuverIndex = currentIdx;
+      const post = this.opts.postTransitionPrompts
+        ? this.maneuvers[currentIdx]?.instruction.verbal?.post
+        : undefined;
+      if (post) {
+        const key = `${currentIdx}:post`;
+        if (!this.firedPrompts.has(key)) {
+          this.firedPrompts.add(key);
+          return [{ text: post, kind: 'post', maneuverIndex: currentIdx, thresholdM: 0 }];
+        }
+      }
+    }
     if (!upcoming) return [];
     // Locate the maneuver's index in our list to key fired prompts stably.
     const idx = this.maneuvers.find((m) => m.instruction === upcoming.instruction)?.index ?? -1;
     if (idx < 0) return [];
     const d = upcoming.distanceToM;
-    const text = this.withChainedNext(idx, upcoming.instruction.text);
-    // At highway speed the standard thresholds give under 20 s of warning, so
-    // an extra far-out prompt is armed; skipping it entirely at city speeds
-    // keeps dense urban routes from becoming a monologue.
-    // A non-positive farApproachM opts the mode out of the far prompt
-    // entirely (walking and cycling have no motorway to need it), rather than
-    // leaving a threshold in the list that nothing can ever cross.
-    const allThresholds = [this.opts.farApproachM, ...this.opts.approachThresholdsM].filter(
-      (t) => t > 0,
+    const promptSpeedMps = this.promptSpeed(speedMps);
+    const alertFallbackM = this.opts.approachThresholdsM[0] ?? 0;
+    const preFallbackM = this.opts.approachThresholdsM[1] ?? alertFallbackM;
+    const alertLeadS = this.opts.approachLeadTimesS[0] ?? 0;
+    const preLeadS = this.opts.approachLeadTimesS[1] ?? alertLeadS;
+    // Highway guidance gets an early alert around 100 seconds out. At other
+    // speeds the same alert slot uses the normal ~45-second band, so the same
+    // wording is never repeated merely because the car crossed 800 and 400 m.
+    const farActive =
+      this.opts.farApproachM > 0 &&
+      promptSpeedMps !== null &&
+      promptSpeedMps >= this.opts.farApproachMinSpeedMps;
+    const alertThresholdM = farActive
+      ? leadDistanceM(this.opts.farApproachM, this.opts.farApproachLeadTimeS, promptSpeedMps)
+      : leadDistanceM(alertFallbackM, alertLeadS, promptSpeedMps);
+    const preThresholdM = leadDistanceM(preFallbackM, preLeadS, promptSpeedMps);
+    const nowThresholdM = leadDistanceM(
+      this.opts.nowThresholdM,
+      this.opts.nowLeadTimeS,
+      promptSpeedMps,
     );
-    const activeThresholds =
-      speedMps !== null && speedMps >= this.opts.farApproachMinSpeedMps
-        ? allThresholds
-        : this.opts.approachThresholdsM;
 
-    if (d <= this.opts.nowThresholdM) {
+    if (d <= nowThresholdM) {
       const key = `${idx}:now`;
       if (this.firedPrompts.has(key)) return [];
-      // A jump straight to the maneuver skips its approach prompts for good.
-      for (const t of allThresholds) this.firedPrompts.add(`${idx}:${t}`);
+      // A jump straight to the maneuver skips its earlier phases for good.
+      this.firedPrompts.add(`${idx}:alert`);
+      this.firedPrompts.add(`${idx}:pre`);
       this.firedPrompts.add(key);
-      return [{ text, kind: 'now', maneuverIndex: idx, thresholdM: 0 }];
+      return [{ text: this.cueText(idx, 'now'), kind: 'now', maneuverIndex: idx, thresholdM: 0 }];
     }
 
-    // Fire the tightest not-yet-fired threshold we've crossed; mark looser ones
-    // fired too so a large GPS jump doesn't replay them later.
-    const crossed = activeThresholds
-      .filter((t) => d <= t && !this.firedPrompts.has(`${idx}:${t}`))
-      .sort((a, b) => a - b);
-    const t = crossed[0];
-    if (t === undefined) return [];
-    for (const larger of allThresholds) {
-      if (larger >= t) this.firedPrompts.add(`${idx}:${larger}`);
+    if (d <= preThresholdM) {
+      const key = `${idx}:pre`;
+      if (this.firedPrompts.has(key)) return [];
+      // A coarse fix can jump over the alert band; do not replay it later.
+      this.firedPrompts.add(`${idx}:alert`);
+      this.firedPrompts.add(key);
+      return [
+        {
+          text: `In ${voiceDistance(d)}, ${this.cueText(idx, 'pre')}`,
+          kind: 'approach',
+          maneuverIndex: idx,
+          thresholdM: preThresholdM,
+        },
+      ];
     }
-    return [
-      {
-        text: `In ${t} meters, ${text}`,
-        kind: 'approach',
-        maneuverIndex: idx,
-        thresholdM: t,
-      },
-    ];
+
+    if (d <= alertThresholdM) {
+      const key = `${idx}:alert`;
+      if (this.firedPrompts.has(key)) return [];
+      this.firedPrompts.add(key);
+      return [
+        {
+          text: `In ${voiceDistance(d)}, ${this.cueText(idx, 'alert')}`,
+          kind: 'approach',
+          maneuverIndex: idx,
+          thresholdM: alertThresholdM,
+        },
+      ];
+    }
+
+    return [];
   }
 }

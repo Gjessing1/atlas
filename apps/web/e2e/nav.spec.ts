@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mockRouting, waitForMap } from './helpers';
+import { encodeShape, mockRouting, waitForMap } from './helpers';
 
 /**
  * Turn-by-turn web navigation: geolocation is mocked at the browser level and
@@ -46,6 +46,78 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
 
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.nav-banner')).toHaveCount(0);
+});
+
+test('a long motorway leg leads with the road, keeping the distant turn secondary', async ({
+  page,
+}) => {
+  await mockRouting(page);
+  // Override the ordinary instruction-less route fixture with a ~21 km E18
+  // leg. Registered last, so it owns /api/route while the shared enrichment
+  // mock continues to provide the speed limit.
+  await page.route('**/api/route', (route) => {
+    const body = route.request().postDataJSON() as {
+      locations?: { lat: number; lon: number }[];
+    };
+    const locs = body.locations ?? [];
+    const coords = locs.map((l) => [l.lat, l.lon] as [number, number]);
+    if (coords.length < 2) {
+      return route.fulfill({ status: 400, json: { message: 'need two locations' } });
+    }
+    return route.fulfill({
+      json: {
+        trip: {
+          units: 'kilometers',
+          legs: [
+            {
+              shape: encodeShape(coords),
+              maneuvers: [
+                {
+                  type: 1,
+                  instruction: 'Drive north on E18.',
+                  street_names: ['E18'],
+                  length: 21,
+                  time: 900,
+                  begin_shape_index: 0,
+                  end_shape_index: 1,
+                  verbal_pre_transition_instruction: 'Drive north on E18.',
+                  verbal_post_transition_instruction: 'Continue on E18 for 21 kilometers.',
+                },
+                {
+                  type: 4,
+                  instruction: 'You have arrived.',
+                  length: 0,
+                  time: 0,
+                  begin_shape_index: 1,
+                  end_shape_index: 1,
+                  verbal_pre_transition_instruction: 'You have arrived.',
+                },
+              ],
+            },
+          ],
+          summary: {
+            length: 21,
+            time: 900,
+            min_lat: Math.min(...coords.map((c) => c[0])),
+            min_lon: Math.min(...coords.map((c) => c[1])),
+            max_lat: Math.max(...coords.map((c) => c[0])),
+            max_lon: Math.max(...coords.map((c) => c[1])),
+          },
+        },
+      },
+    });
+  });
+  await page.goto('/#map=9/60.01/10.75&pin=60.10/10.75');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+
+  await expect(page.locator('.nav-distance-to')).toContainText('Continue for');
+  await expect(page.locator('.nav-maneuver')).toHaveText('E18');
+  await expect(page.locator('.nav-then-row')).toContainText('Then');
+  await expect(page.locator('.nav-then-row')).toContainText('You have arrived');
 });
 
 test('a fix too poor to arrive on still lets the driver finish the trip', async ({

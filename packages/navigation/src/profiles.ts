@@ -36,8 +36,14 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     arrivalLoiterRadiusM: 40,
     arrivalLoiterMaxSpeedMps: 0.7,
     approachThresholdsM: [200, 60],
+    approachLeadTimesS: [30, 10],
     nowThresholdM: 20,
+    nowLeadTimeS: 3,
     farApproachM: 0, // no motorways to need 800 m of warning
+    farApproachLeadTimeS: 0,
+    promptSpeedMaxMps: 15, // fast road cycling; higher readings should not make kilometer cues
+    sustainMinLegM: Infinity,
+    postTransitionPrompts: false,
     chainManeuverM: 120,
     snapDisplayMaxM: 20,
     departMinSpeedMps: 1.5, // ~5 km/h: pushing off counts
@@ -71,8 +77,14 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // 800/400/200/40 m is ten minutes of walking. These are the distances a
     // pedestrian can actually see the turn from.
     approachThresholdsM: [100, 30],
+    approachLeadTimesS: [60, 20],
     nowThresholdM: 10,
+    nowLeadTimeS: 7,
     farApproachM: 0,
+    farApproachLeadTimeS: 0,
+    promptSpeedMaxMps: 3, // a running pace, and a guard against bogus vehicle-speed fixes
+    sustainMinLegM: Infinity,
+    postTransitionPrompts: false,
     chainManeuverM: 60,
     snapDisplayMaxM: 20,
     startSnapDisplayMaxM: 15,
@@ -104,8 +116,14 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     arrivalLoiterRadiusM: 35,
     arrivalLoiterMaxSpeedMps: 0.3,
     approachThresholdsM: [100, 30],
+    approachLeadTimesS: [60, 20],
     nowThresholdM: 10,
+    nowLeadTimeS: 7,
     farApproachM: 0,
+    farApproachLeadTimeS: 0,
+    promptSpeedMaxMps: 3,
+    sustainMinLegM: Infinity,
+    postTransitionPrompts: false,
     chainManeuverM: 60,
     snapDisplayMaxM: 30,
     startSnapDisplayMaxM: 20,

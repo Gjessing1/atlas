@@ -57,6 +57,9 @@ const valhallaResponse = {
           {
             type: 1, // start → continue (0)
             instruction: 'Drive northeast on Karl Johans gate.',
+            verbal_succinct_transition_instruction: 'Drive northeast.',
+            verbal_pre_transition_instruction: 'Drive northeast on Karl Johans gate.',
+            verbal_post_transition_instruction: 'Continue for 2.5 kilometers.',
             street_names: ['Karl Johans gate'],
             length: 2.5,
             time: 200,
@@ -66,6 +69,11 @@ const valhallaResponse = {
           {
             type: 10, // right (2)
             instruction: 'Turn right.',
+            verbal_succinct_transition_instruction: 'Turn right.',
+            verbal_transition_alert_instruction: 'Turn right onto Dronningens gate.',
+            verbal_pre_transition_instruction: 'Turn right onto Dronningens gate.',
+            verbal_post_transition_instruction: 'Continue for 1.8 kilometers.',
+            verbal_multi_cue: true,
             length: 1.8,
             time: 221,
             begin_shape_index: 1,
@@ -250,8 +258,23 @@ describe('parseValhallaResponse', () => {
       interval: [0, 1],
       distanceM: 2500,
       timeMs: 200_000,
+      verbal: {
+        succinct: 'Drive northeast.',
+        pre: 'Drive northeast on Karl Johans gate.',
+        post: 'Continue for 2.5 kilometers.',
+      },
     });
-    expect(path.instructions![1]).toMatchObject({ sign: 2, interval: [1, 2] });
+    expect(path.instructions![1]).toMatchObject({
+      sign: 2,
+      interval: [1, 2],
+      verbal: {
+        succinct: 'Turn right.',
+        alert: 'Turn right onto Dronningens gate.',
+        pre: 'Turn right onto Dronningens gate.',
+        post: 'Continue for 1.8 kilometers.',
+        multiCue: true,
+      },
+    });
     expect(path.instructions![1]!.streetName).toBeUndefined();
     expect(path.instructions![2]!.sign).toBe(4);
     // No sign object on these maneuvers → no exitSign is invented.
@@ -270,6 +293,8 @@ describe('parseValhallaResponse', () => {
               {
                 type: 20, // take exit
                 instruction: 'Take the exit.',
+                verbal_transition_alert_instruction: 'Take exit 43 toward Oslo.',
+                verbal_pre_transition_instruction: 'Take exit 43 toward Oslo on E6.',
                 length: 1,
                 time: 60,
                 begin_shape_index: 0,
@@ -295,6 +320,10 @@ describe('parseValhallaResponse', () => {
       numbers: ['43'],
       branches: ['E6', 'Rv4'],
       toward: ['Oslo'], // the empty-text element is dropped
+    });
+    expect(exit.verbal).toEqual({
+      alert: 'Take exit 43 toward Oslo.',
+      pre: 'Take exit 43 toward Oslo on E6.',
     });
   });
 });

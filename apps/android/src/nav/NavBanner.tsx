@@ -81,6 +81,7 @@ export function NavBanner({
   const maneuver = state?.upcoming;
   const speed = speedKph(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const sustain = moving ? (state?.sustain ?? null) : null;
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
   // The manual way out, offered only near the destination — where the automatic
   // rules can fail (a fix that never gets accurate enough in a car park) and
@@ -89,11 +90,13 @@ export function NavBanner({
   // abandoning it, so it banks the summary.
   const canDeclareArrival = moving && state != null && state.distanceRemainingM <= 150;
   // "then …" hint when the maneuver after the current one follows hot on its
-  // heels — the heads-up that matters for lane choice (Google-style).
+  // heels — or the distant maneuver demoted below a long-road sustain cue.
   const thenManeuver =
-    maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
-      ? state.then
-      : null;
+    sustain && maneuver
+      ? maneuver
+      : maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
+        ? state.then
+        : null;
 
   return (
     <View
@@ -131,14 +134,22 @@ export function NavBanner({
           <>
             <View style={styles.guidanceRow}>
               <View style={styles.turnPanel}>
-                <TurnIcon instruction={maneuver.instruction} size={44} color="#fff" />
+                <TurnIcon
+                  instruction={sustain ? { sign: 0 } : maneuver.instruction}
+                  size={44}
+                  color="#fff"
+                />
               </View>
               <View style={styles.maneuverText}>
-                <Text style={styles.distanceTo}>In {formatDistance(maneuver.distanceToM)}</Text>
-                <Text style={styles.maneuver} numberOfLines={2}>
-                  {maneuver.instruction.text}
+                <Text style={styles.distanceTo}>
+                  {sustain
+                    ? `Continue for ${formatDistance(sustain.distanceRemainingM)}`
+                    : `In ${formatDistance(maneuver.distanceToM)}`}
                 </Text>
-                {maneuver.instruction.exitSign ? (
+                <Text style={styles.maneuver} numberOfLines={2}>
+                  {sustain ? sustain.road : maneuver.instruction.text}
+                </Text>
+                {!sustain && maneuver.instruction.exitSign ? (
                   <Text style={styles.exitSign} numberOfLines={1}>
                     {formatExitSign(maneuver.instruction.exitSign)}
                   </Text>
