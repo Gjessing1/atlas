@@ -14,6 +14,8 @@ export {
   transferCount,
   tripLineCodes,
   transitCoverage,
+  transitCoversPoint,
+  WIDE_SEARCH_WINDOW_MINUTES,
   RIDE_MODES,
 } from './model.js';
 export { ENTUR_TRIP_QUERY, TransitError, buildEnturRequest, parseEnturResponse } from './entur.js';

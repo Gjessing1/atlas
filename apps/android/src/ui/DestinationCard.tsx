@@ -1,6 +1,13 @@
 import { ROUTING_PROFILES, type RoutingProfile } from '@atlas/routing';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+/**
+ * What the card can be asked for. Transit is not a `RoutingProfile` — it has no
+ * costing and no turn-by-turn — but it *is* a travel mode, so it belongs beside
+ * the others rather than hidden behind the route planner.
+ */
+export type TravelChoice = RoutingProfile | 'transit';
+
 export interface DestinationTarget {
   lat: number;
   lng: number;
@@ -25,6 +32,7 @@ export function DestinationCard({
   mode,
   onModeChange,
   onNavigate,
+  transitOffered = false,
   onSave,
   onEdit,
   onShare,
@@ -33,9 +41,12 @@ export function DestinationCard({
   bottomInset = 0,
 }: {
   target: DestinationTarget;
-  mode: RoutingProfile;
-  onModeChange: (mode: RoutingProfile) => void;
+  mode: TravelChoice;
+  onModeChange: (mode: TravelChoice) => void;
+  /** Start guidance — or, for transit, open the journey board. */
   onNavigate: () => void;
+  /** Transit can answer here (endpoints in Norway); hides the chip when not. */
+  transitOffered?: boolean;
   onSave?: () => void;
   /** Open the saved place's edit panel (only for targets with a placeId). */
   onEdit?: () => void;
@@ -78,11 +89,27 @@ export function DestinationCard({
             </Text>
           </Pressable>
         ))}
+        {transitOffered ? (
+          <Pressable
+            style={[styles.mode, mode === 'transit' ? styles.modeActive : null]}
+            onPress={() => onModeChange('transit')}
+            testID="mode-transit"
+          >
+            <Text style={styles.modeIcon}>🚌</Text>
+            <Text style={[styles.modeLabel, mode === 'transit' ? styles.modeLabelActive : null]}>
+              Transit
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.actions}>
+        {/* Transit has no turn-by-turn yet, so the button says what it does:
+            it opens the departure board rather than starting guidance. */}
         <Pressable style={styles.navigate} onPress={onNavigate} testID="destination-navigate">
-          <Text style={styles.navigateText}>Navigate</Text>
+          <Text style={styles.navigateText}>
+            {mode === 'transit' ? 'Show journeys' : 'Navigate'}
+          </Text>
         </Pressable>
         {target.canSave && onSave ? (
           <Pressable style={styles.save} onPress={onSave} testID="destination-save">

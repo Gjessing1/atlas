@@ -29,8 +29,8 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes){
- trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int){
+ trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow){
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance
    legs{ mode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
@@ -100,6 +100,9 @@ export function buildEnturRequest(query: TransitQuery): {
       num: limit,
       walkSpeed: query.walkSpeedMps ?? DEFAULT_WALK_SPEED_MPS,
       modes: modesArgument(query.modes),
+      // Null lets Entur pick its own (dynamic, a few hours). Widened only on a
+      // retry — see WIDE_SEARCH_WINDOW_MINUTES.
+      searchWindow: query.searchWindowMinutes ?? null,
     },
   };
 }

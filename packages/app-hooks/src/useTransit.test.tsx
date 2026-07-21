@@ -88,6 +88,17 @@ describe('useTransitPlan', () => {
     expect(transit.mock.calls[0]![0]).toMatchObject({ from: OSLO, to: BERGEN });
   });
 
+  it('offers the mode before a destination exists, so it is findable at all', () => {
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result()));
+    const { result: r } = renderPlan(transit, [OSLO]);
+
+    // Not yet answerable — but "we don't know your destination" must not be
+    // rendered as "this app has no public transport".
+    expect(r.current.transit.covered).toBe(false);
+    expect(r.current.transit.offered).toBe(true);
+    expect(transit).not.toHaveBeenCalled();
+  });
+
   it('does not offer the mode outside coverage', () => {
     const transit = vi.fn<TransitFn>(() => Promise.resolve(result()));
     const { result: r } = renderPlan(transit, [OSLO, BERLIN]);

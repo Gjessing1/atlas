@@ -364,6 +364,12 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
         </View>
       ) : null}
 
+      {/* The chip is offered before both ends are known (that is what makes the
+          mode discoverable), so the board has to say what it is still missing
+          rather than sitting blank. */}
+      {!transit.covered ? (
+        <Text style={styles.muted}>Add a start and a destination to see journeys.</Text>
+      ) : null}
       {transit.loading ? <Text style={styles.muted}>Looking up departures…</Text> : null}
       {transit.error ? <Text style={styles.error}>{transit.error}</Text> : null}
       {!transit.loading && !transit.error && trips?.length === 0 ? (

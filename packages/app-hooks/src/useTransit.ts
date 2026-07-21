@@ -1,5 +1,5 @@
 import type { LatLng } from '@atlas/core';
-import { RIDE_MODES, TransitError, transitCoverage } from '@atlas/transit';
+import { RIDE_MODES, TransitError, transitCoverage, transitCoversPoint } from '@atlas/transit';
 import type { TransitMode, TransitQuery, TransitResult, TransitTrip } from '@atlas/transit';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -185,9 +185,15 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   const from = route.waypoints[0]?.pos ?? null;
   const to = route.waypoints.length >= 2 ? route.waypoints[route.waypoints.length - 1]!.pos : null;
   const planner = useTransit(transit, from, to, enabled && route.active);
-  // Offered only where the national planner can answer, and never for a loop:
-  // shown-and-failing is worse than absent (see @atlas/transit's model).
-  const offered = planner.covered && !route.roundTrip;
+  // Offer the mode unless we positively *know* it cannot answer. Gating on
+  // `covered` instead would hide the chip until both endpoints exist — which
+  // is exactly when someone is looking for the travel mode, and reads as the
+  // app having no public transport at all. An endpoint outside Norway is a
+  // real answer and still hides it (see @atlas/transit's model); a missing
+  // endpoint is not. Never offered for a loop: a timetable has no notion of one.
+  const outsideCoverage =
+    (from !== null && !transitCoversPoint(from)) || (to !== null && !transitCoversPoint(to));
+  const offered = !outsideCoverage && !route.roundTrip;
 
   useEffect(() => {
     if (!offered) setEnabled(false);

@@ -163,6 +163,13 @@ export interface TransitQuery {
    * separates this mode from the `foot` routing profile.
    */
   modes?: readonly TransitMode[];
+  /**
+   * How far past `dateTimeMs` to look for departures, in minutes. Omitted means
+   * "let the planner decide", which is a dynamic window of a few hours — fine
+   * on a busy corridor, but on a sparse route it reports *no service* when the
+   * next bus is simply tomorrow morning. See `WIDE_SEARCH_WINDOW_MINUTES`.
+   */
+  searchWindowMinutes?: number;
 }
 
 /** Every ride mode, in the order a mode filter should present them. */
@@ -195,7 +202,14 @@ export interface TransitResult {
  */
 const NORWAY_BBOX = { minLat: 57.5, maxLat: 71.4, minLng: 4.0, maxLng: 31.6 } as const;
 
-function inNorway(point: LatLng): boolean {
+/**
+ * Whether one point is somewhere the planner can answer for. Exported because
+ * a UI must decide whether to *offer* the mode before both endpoints exist:
+ * "we don't know your destination yet" and "this is outside Norway" are
+ * different answers, and hiding the mode for the first reads as the app having
+ * no public transport at all.
+ */
+export function transitCoversPoint(point: LatLng): boolean {
   return (
     point.lat >= NORWAY_BBOX.minLat &&
     point.lat <= NORWAY_BBOX.maxLat &&
@@ -203,6 +217,16 @@ function inNorway(point: LatLng): boolean {
     point.lng <= NORWAY_BBOX.maxLng
   );
 }
+
+const inNorway = transitCoversPoint;
+
+/**
+ * The look-ahead used when the planner's own window came back empty: a full day,
+ * so "nothing runs then" only ever means nothing runs in the next 24 hours.
+ * Not used on the first attempt — a wide window costs the planner real work,
+ * and on a busy corridor the default already answers.
+ */
+export const WIDE_SEARCH_WINDOW_MINUTES = 24 * 60;
 
 /**
  * Whether a transit answer is possible for these endpoints — the defined

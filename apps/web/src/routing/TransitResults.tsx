@@ -341,6 +341,12 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
         </div>
       )}
 
+      {/* The chip is offered before both ends are known (that is what makes the
+          mode discoverable), so the board has to say what it is still missing
+          rather than sitting blank. */}
+      {!transit.covered && (
+        <p className="route-hint">Add a start and a destination to see journeys.</p>
+      )}
       {transit.loading && <p className="route-hint">Looking up departures…</p>}
       {transit.error && <div className="route-error">{transit.error}</div>}
       {!transit.loading && !transit.error && trips?.length === 0 && (

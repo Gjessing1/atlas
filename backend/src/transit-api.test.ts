@@ -91,6 +91,54 @@ const plan = (payload: unknown) =>
   app.inject({ method: 'POST', url: '/api/transit', payload: payload as object });
 
 describe('POST /api/transit', () => {
+  it('asks again with a full-day window when the planner returned nothing', async () => {
+    // Measured against live Entur: Å i Lofoten → Svolvær at 23:30 comes back
+    // empty although a 04:24 bus exists, because Entur's own look-ahead is a
+    // dynamic few hours. An empty answer is therefore not believed first time.
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      const body = calls === 1 ? { data: { trip: { tripPatterns: [] } } } : enturReply;
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+
+    const res = await plan({ from: asker, to: nationaltheatret });
+
+    expect(calls).toBe(2);
+    expect(captured!.body.variables.searchWindow).toBe(24 * 60);
+    expect(res.json().trips).toHaveLength(1);
+  });
+
+  it('does not widen the window when the first answer already has departures', async () => {
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+
+    await plan({ from: asker, to: nationaltheatret });
+
+    // A wide window costs the planner real work; the default already answered.
+    expect(calls).toBe(1);
+    expect(captured!.body.variables.searchWindow).toBeNull();
+  });
+
+  it('respects a window the caller chose, rather than overriding it on empty', async () => {
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      return new Response(JSON.stringify({ data: { trip: { tripPatterns: [] } } }), {
+        status: 200,
+      });
+    };
+
+    const res = await plan({ from: asker, to: nationaltheatret, searchWindowMinutes: 60 });
+
+    expect(calls).toBe(1);
+    expect(captured!.body.variables.searchWindow).toBe(60);
+    expect(res.json().trips).toEqual([]);
+  });
+
   it('returns the journey in the Atlas trip model, not Entur GraphQL', async () => {
     const res = await plan({ from: asker, to: nationaltheatret });
     expect(res.statusCode).toBe(200);

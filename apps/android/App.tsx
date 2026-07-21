@@ -14,7 +14,6 @@ import {
   routePathToTrackData,
   viaInsertIndex,
   type RoutePath,
-  type RoutingProfile,
 } from '@atlas/routing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
@@ -58,10 +57,15 @@ import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { useRoute } from './src/routing/useRoute';
+import { transitCoversPoint } from '@atlas/transit';
 import { useTransitPlan } from './src/routing/useTransit';
 import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
-import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
+import {
+  DestinationCard,
+  type TravelChoice,
+  type DestinationTarget,
+} from './src/ui/DestinationCard';
 import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
@@ -144,7 +148,7 @@ function AppInner() {
   // A picked destination awaiting a travel-mode choice + "Navigate" (search
   // result, long-press, place or favorite). Cleared once navigation starts.
   const [destination, setDestination] = useState<DestinationTarget | null>(null);
-  const [travelMode, setTravelMode] = useState<RoutingProfile>('car');
+  const [travelMode, setTravelMode] = useState<TravelChoice>('car');
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
@@ -491,10 +495,36 @@ function AppInner() {
 
   const startNavigation = useCallback(() => {
     if (!destination) return;
+    const dest = { lat: destination.lat, lng: destination.lng };
+    if (travelMode === 'transit') {
+      // Transit has no guidance yet, so this opens the journey board instead.
+      // The card only knows where you are going, and a timetable needs both
+      // ends — so take the current fix as the origin. Without a fix the board
+      // still opens and asks for a starting point, rather than failing.
+      void (async () => {
+        let origin: LatLng | null = null;
+        try {
+          const fg = await Location.requestForegroundPermissionsAsync();
+          if (fg.granted) {
+            const cur = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            origin = { lat: cur.coords.latitude, lng: cur.coords.longitude };
+          }
+        } catch {
+          // No fix available — fall through with the destination alone.
+        }
+        setDestination(null);
+        route.start(origin ?? dest);
+        if (origin) route.addWaypoint(dest);
+        transit.setEnabled(true);
+      })();
+      return;
+    }
     setNavFollow('course');
-    void nav.start({ lat: destination.lat, lng: destination.lng }, travelMode);
+    void nav.start(dest, travelMode);
     setDestination(null);
-  }, [destination, travelMode, nav]);
+  }, [destination, travelMode, nav, route, transit]);
 
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
@@ -771,6 +801,7 @@ function AppInner() {
           mode={travelMode}
           onModeChange={setTravelMode}
           onNavigate={startNavigation}
+          transitOffered={transitCoversPoint({ lat: destination.lat, lng: destination.lng })}
           onSave={
             destination.canSave
               ? () => {
