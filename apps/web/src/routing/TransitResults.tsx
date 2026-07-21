@@ -4,10 +4,16 @@ import {
   legDelayMs,
   RIDE_MODES,
   transferCount,
+  transitProblemMessage,
   tripLineCodes,
+  tripNeedsBooking,
+  tripSeverity,
+  type TransitBooking,
   type TransitLeg,
   type TransitLine,
   type TransitMode,
+  type TransitSeverity,
+  type TransitSituation,
   type TransitTrip,
 } from '@atlas/transit';
 import { useState } from 'react';
@@ -96,6 +102,95 @@ function QuayNote({ leg, which }: { leg: TransitLeg; which: 'from' | 'to' }) {
   return code ? <span className="transit-quay"> plat. {code}</span> : null;
 }
 
+/** Severity → the class that paints the well, and the mark that leads it. */
+const SEVERITY_MARK: Record<TransitSeverity, string> = { info: 'i', warning: '!', severe: '!' };
+
+/**
+ * A disruption notice. Collapsed to its headline (an operator's full text runs
+ * to paragraphs) but expandable, because the advice is usually the only part
+ * that changes what the traveller does. Rendered above the times deliberately:
+ * a cancelled service with a confident departure time is the one thing a
+ * journey planner must never show calmly.
+ */
+function SituationNotice({ situation }: { situation: TransitSituation }) {
+  const [open, setOpen] = useState(false);
+  const detail = situation.advice ?? situation.description;
+  return (
+    <div className={`transit-notice ${situation.severity}`}>
+      <span className="transit-notice-mark" aria-hidden="true">
+        {SEVERITY_MARK[situation.severity]}
+      </span>
+      <div className="transit-notice-body">
+        {detail ? (
+          <button
+            type="button"
+            className="transit-notice-summary"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {situation.summary}
+          </button>
+        ) : (
+          <span className="transit-notice-summary">{situation.summary}</span>
+        )}
+        {open && detail && <p className="transit-notice-detail">{detail}</p>}
+        {open && situation.url && (
+          <a href={situation.url} target="_blank" rel="noreferrer noopener">
+            Operator&rsquo;s notice ↗
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** How to book a flexible service, in the order a traveller would try them. */
+function bookingHow(booking: TransitBooking): string {
+  if (booking.phone) return `Book by phone: ${booking.phone}`;
+  if (booking.methods.includes('online') && booking.url) return 'Book online before travelling';
+  if (booking.methods.includes('callDriver')) return 'Call the driver to book';
+  if (booking.methods.includes('callOffice')) return 'Call the operator to book';
+  if (booking.methods.includes('text')) return 'Book by text message';
+  return 'This service must be booked in advance';
+}
+
+/** By when, phrased the way the operator means it rather than as a raw offset. */
+function bookingWhen(booking: TransitBooking): string | null {
+  if (!booking.latestTime) return null;
+  const days = booking.latestDayOffset ?? 0;
+  if (days <= 0) return `by ${booking.latestTime} the same day`;
+  if (days === 1) return `by ${booking.latestTime} the day before`;
+  return `by ${booking.latestTime}, ${days} days ahead`;
+}
+
+/**
+ * Booking requirements for flexible transport. Not a nicety: an unbooked
+ * `bestillingstransport` bus does not turn up at all, so a leg shown as an
+ * ordinary departure would strand someone at a rural stop.
+ */
+function BookingNotice({ booking }: { booking: TransitBooking }) {
+  const when = bookingWhen(booking);
+  return (
+    <div className="transit-notice warning">
+      <span className="transit-notice-mark" aria-hidden="true">
+        ☎
+      </span>
+      <div className="transit-notice-body">
+        <span className="transit-notice-summary">
+          Must be booked ahead{when ? ` — ${when}` : ''}
+        </span>
+        <p className="transit-notice-detail">{bookingHow(booking)}</p>
+        {booking.note && <p className="transit-notice-detail">{booking.note}</p>}
+        {booking.url && (
+          <a href={booking.url} target="_blank" rel="noreferrer noopener">
+            Booking page ↗
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** One row of the expanded journey: a walk, or a ride on one vehicle. */
 function LegRow({ leg }: { leg: TransitLeg }) {
   const [showStops, setShowStops] = useState(false);
@@ -108,6 +203,10 @@ function LegRow({ leg }: { leg: TransitLeg }) {
         {MODE_ICON[leg.mode]}
       </span>
       <div className="transit-leg-body">
+        {leg.situations.map((situation, i) => (
+          <SituationNotice key={situation.id ?? i} situation={situation} />
+        ))}
+        {leg.booking && <BookingNotice booking={leg.booking} />}
         {ride && leg.line ? (
           <>
             <div className="transit-leg-head">
@@ -183,6 +282,10 @@ function TripCard({
   const firstRide = trip.legs.find((leg) => isRideMode(leg.mode));
   const delay = firstRide ? legDelayMs(firstRide) : 0;
   const late = firstRide?.realtime === true && delay >= DELAY_THRESHOLD_MS;
+  // A collapsed card must not look clean when a leg inside it is cancelled —
+  // the whole point of the summary row is deciding without expanding.
+  const severity = tripSeverity(trip);
+  const needsBooking = tripNeedsBooking(trip);
 
   return (
     <li className="transit-trip">
@@ -195,6 +298,12 @@ function TripCard({
         <span className="transit-trip-times">
           {fmtClock(trip.startMs)} – {fmtClock(trip.endMs)}
           {late && <span className="transit-delay">+{Math.round(delay / 60_000)} min</span>}
+          {severity && (
+            <span className={`transit-trip-flag ${severity}`}>
+              ! {severity === 'severe' ? 'Disruption' : 'Notice'}
+            </span>
+          )}
+          {needsBooking && <span className="transit-trip-flag warning">☎ Book ahead</span>}
         </span>
         <span className="transit-trip-lines">
           {trip.legs.map((leg, i) =>
@@ -252,19 +361,27 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
   const filtered = transit.modes.length > 0;
   const accepts = (mode: TransitMode) => !filtered || transit.modes.includes(mode);
 
-  // Paging a timetable is done in *departures*, not in fixed time steps: the
-  // next page starts just after the earliest option already shown, so nothing
-  // is skipped however sparse or dense the service is.
-  const showEarlier = () => {
-    if (!first) return;
-    transit.setArriveBy(true);
-    transit.setTimeMs(first.startMs - 60_000);
-  };
-  const showLater = () => {
-    if (!last) return;
-    transit.setArriveBy(false);
-    transit.setTimeMs((trips!.length > 1 ? first!.startMs : last.startMs) + 60_000);
-  };
+  // Paging uses Entur's own page cursors, which know exactly where the last
+  // page ended — the old arithmetic (re-query at "one minute after the first
+  // departure shown") both skipped and repeated departures at the seam when
+  // several left in the same minute. Falls back to that arithmetic only if the
+  // planner sent no cursor, which it does at the very ends of the timetable.
+  const showEarlier =
+    transit.pageEarlier ??
+    (first
+      ? () => {
+          transit.setArriveBy(true);
+          transit.setTimeMs(first.startMs - 60_000);
+        }
+      : null);
+  const showLater =
+    transit.pageLater ??
+    (last
+      ? () => {
+          transit.setArriveBy(false);
+          transit.setTimeMs((trips!.length > 1 ? first!.startMs : last.startMs) + 60_000);
+        }
+      : null);
 
   return (
     <div className="transit-results">
@@ -362,15 +479,23 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
               </button>
             </>
           ) : (
-            'No departures found for this time. Try a different time or a nearer stop.'
+            // The planner usually says *which* nothing this is — no stops in
+            // range, outside the timetable's date range, nothing in this search
+            // window. Its reason beats our guess; ours is the fallback.
+            (transitProblemMessage(transit.problems) ??
+            'No departures found for this time. Try a different time or a nearer stop.')
           )}
         </p>
       )}
       {trips && trips.length > 0 && (
         <>
-          <button type="button" className="transit-page" onClick={showEarlier}>
-            ↑ Earlier
-          </button>
+          {/* Absent, not disabled, when the planner has no earlier page: at the
+              first departure of the service day there genuinely is no earlier. */}
+          {showEarlier && (
+            <button type="button" className="transit-page" onClick={showEarlier}>
+              ↑ Earlier
+            </button>
+          )}
           <ol className="transit-trips">
             {trips.map((trip, i) => (
               <TripCard
@@ -381,9 +506,11 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
               />
             ))}
           </ol>
-          <button type="button" className="transit-page" onClick={showLater}>
-            ↓ Later
-          </button>
+          {showLater && (
+            <button type="button" className="transit-page" onClick={showLater}>
+              ↓ Later
+            </button>
+          )}
         </>
       )}
     </div>

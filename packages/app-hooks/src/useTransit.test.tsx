@@ -23,7 +23,12 @@ function tripAt(startMs: number): TransitTrip {
 }
 
 function result(...starts: number[]): TransitResult {
-  return { trips: starts.map(tripAt) };
+  return { trips: starts.map(tripAt), problems: [] };
+}
+
+/** An answer that also offers pages either side of it. */
+function paged(next: string, previous: string, ...starts: number[]): TransitResult {
+  return { ...result(...starts), nextCursor: next, previousCursor: previous };
 }
 
 beforeEach(() => {
@@ -140,6 +145,77 @@ describe('useTransitPlan', () => {
     await settle();
     expect(r.current.transit.selected).toBe(0);
     expect(r.current.transit.trip?.startMs).toBe(9_000);
+  });
+
+  it('pages with the planner’s own cursor rather than nudging the clock', async () => {
+    const transit = vi
+      .fn<TransitFn>()
+      .mockResolvedValueOnce(paged('next-1', 'prev-1', 1_000, 2_000))
+      .mockResolvedValueOnce(paged('next-2', 'prev-2', 3_000, 4_000));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+    expect(r.current.transit.pageLater).not.toBeNull();
+
+    act(() => r.current.transit.pageLater!());
+    await settle();
+
+    const asked = transit.mock.calls[1]![0];
+    expect(asked.pageCursor).toBe('next-1');
+    // A cursor already carries the window it came from; sending a time too
+    // would be two competing instructions.
+    expect(asked.dateTimeMs).toBeUndefined();
+    expect(r.current.transit.trips?.[0]?.startMs).toBe(3_000);
+  });
+
+  it('offers no page control where the planner has none', async () => {
+    // At the last departure of the service day there is genuinely no "later" —
+    // a dead button would claim otherwise.
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+
+    expect(r.current.transit.pageLater).toBeNull();
+    expect(r.current.transit.pageEarlier).toBeNull();
+  });
+
+  it('drops the cursor when the question changes', async () => {
+    const transit = vi
+      .fn<TransitFn>()
+      .mockResolvedValueOnce(paged('next-1', 'prev-1', 1_000))
+      .mockResolvedValueOnce(paged('next-2', 'prev-2', 3_000))
+      .mockResolvedValue(result(9_000));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+    act(() => r.current.transit.pageLater!());
+    await settle();
+
+    // Changing the departure time asks a different question; carrying the old
+    // page cursor into it would page through the answer to the previous one.
+    act(() => r.current.transit.setTimeMs(5_000_000));
+    await settle();
+    const asked = transit.mock.calls[2]![0];
+    expect(asked.pageCursor).toBeUndefined();
+    expect(asked.dateTimeMs).toBe(5_000_000);
+  });
+
+  it('carries the planner’s reason for an empty answer', async () => {
+    const transit = vi.fn<TransitFn>(() =>
+      Promise.resolve({ trips: [], problems: [{ code: 'noStopsInRange' as const }] }),
+    );
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+
+    // An answer, not a failure — the board must not use error language for it.
+    expect(r.current.transit.error).toBeNull();
+    expect(r.current.transit.problems).toEqual([{ code: 'noStopsInRange' }]);
   });
 
   it('reports a planner failure as an error rather than an empty timetable', async () => {

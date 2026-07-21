@@ -81,6 +81,54 @@ export interface TransitLine {
   textColour?: string;
 }
 
+/**
+ * How badly a disruption bites. Entur's `Severity` enum has eight values, most
+ * of which no operator distinguishes in practice; they are folded into the
+ * three a traveller acts on differently — read later, read now, this journey
+ * may not happen.
+ */
+export type TransitSeverity = 'info' | 'warning' | 'severe';
+
+/**
+ * A disruption notice attached to a leg: cancelled trains, replacement buses,
+ * a closed platform. Entur carries these on every ride leg and Atlas ignored
+ * them until now, which is the worst failure mode a journey planner has — a
+ * confident departure time for a service that has been cancelled since
+ * midnight. `summary` is the headline; `advice` is what the operator wants you
+ * to *do*, and is usually the only actionable sentence.
+ */
+export interface TransitSituation {
+  /** Entur's situation number, stable enough to dedupe repeats across legs. */
+  id?: string;
+  summary: string;
+  description?: string;
+  advice?: string;
+  severity: TransitSeverity;
+  /** Operator's own page about the disruption, when they published one. */
+  url?: string;
+}
+
+/** How a bookable service is booked, in the words a traveller needs. */
+export type TransitBookingMethod = 'callDriver' | 'callOffice' | 'online' | 'phoneAtStop' | 'text';
+
+/**
+ * Booking requirements for flexible transport — Norway's `bestillingstransport`,
+ * where the bus only runs if someone rings ahead. Rendering such a leg as an
+ * ordinary departure is a promise the timetable cannot keep: turn up at the
+ * stop without booking and nothing comes. Present only on legs that need it.
+ */
+export interface TransitBooking {
+  methods: TransitBookingMethod[];
+  /** Free-text instructions from the operator. */
+  note?: string;
+  phone?: string;
+  url?: string;
+  /** Latest clock time a booking is accepted, e.g. `"14:00"`. */
+  latestTime?: string;
+  /** How many days before departure `latestTime` refers to; 0 means same day. */
+  latestDayOffset?: number;
+}
+
 /** One leg of a journey: a walk, or a ride on one vehicle. */
 export interface TransitLeg {
   mode: TransitMode;
@@ -105,6 +153,27 @@ export interface TransitLeg {
   intermediateStops: TransitPlace[];
   /** Leg geometry, for drawing the journey on the map. */
   points: LatLng[];
+  /** Live disruption notices for this leg; empty when the service is running normally. */
+  situations: TransitSituation[];
+  /** Present only when the leg must be booked in advance to run at all. */
+  booking?: TransitBooking;
+}
+
+/** The worst severity anywhere in a journey — what a summary row should warn at. */
+export function tripSeverity(trip: TransitTrip): TransitSeverity | null {
+  const rank: Record<TransitSeverity, number> = { info: 0, warning: 1, severe: 2 };
+  let worst: TransitSeverity | null = null;
+  for (const leg of trip.legs) {
+    for (const situation of leg.situations) {
+      if (!worst || rank[situation.severity] > rank[worst]) worst = situation.severity;
+    }
+  }
+  return worst;
+}
+
+/** Whether any leg has to be booked ahead — a journey-level caveat, not a leg detail. */
+export function tripNeedsBooking(trip: TransitTrip): boolean {
+  return trip.legs.some((leg) => leg.booking !== undefined);
 }
 
 /** One complete door-to-door journey option. */
@@ -170,6 +239,39 @@ export interface TransitQuery {
    * next bus is simply tomorrow morning. See `WIDE_SEARCH_WINDOW_MINUTES`.
    */
   searchWindowMinutes?: number;
+  /**
+   * An opaque cursor from a previous answer's `nextCursor`/`previousCursor`,
+   * for paging to later or earlier departures. Strictly better than re-querying
+   * at a nudged time, which is what Atlas used to do: the planner knows where
+   * its own page ended, so nothing is skipped or shown twice at the seam. When
+   * set, the planner ignores `dateTimeMs`, `arriveBy` and `searchWindowMinutes`.
+   */
+  pageCursor?: string;
+}
+
+/**
+ * Ride modes that one filter chip stands for. Entur separates `bus` from
+ * `coach` because the operators sell them separately, but nobody plans a
+ * journey wanting local buses and refusing the long-distance coach that runs
+ * the same corridor — as a *control* it is one button, so the chip labelled
+ * Bus sends both. The distinction survives in `TransitMode` and on the wire,
+ * so a coach leg still says which it was.
+ */
+const FILTER_MEMBERS: Partial<Record<TransitMode, readonly TransitMode[]>> = {
+  bus: ['bus', 'coach'],
+};
+
+/** The wire modes a chip selection means, expanding grouped chips like Bus. */
+export function expandModeFilter(modes: readonly TransitMode[]): TransitMode[] {
+  return modes.flatMap((mode) => FILTER_MEMBERS[mode] ?? [mode]);
+}
+
+/** The chip a leg's mode belongs under, so a coach leg lights up the Bus chip. */
+export function filterModeOf(mode: TransitMode): TransitMode {
+  for (const [chip, members] of Object.entries(FILTER_MEMBERS)) {
+    if (members.includes(mode)) return chip as TransitMode;
+  }
+  return mode;
 }
 
 /**
@@ -187,10 +289,14 @@ export interface TransitQuery {
  * `taxi`, `trolleybus` and `monorail` exist in Entur's enum but are likewise
  * not offered — the first is demand-responsive rather than timetabled, the
  * other two have no Norwegian services at all.
+ *
+ * `coach` is absent as a *chip* but present in the filter: see `FILTER_MEMBERS`.
+ * `air` stays despite looking exotic on a map app — those 104 lines are real
+ * scheduled Avinor-served flights, and on a Bodø–Tromsø query the planner
+ * genuinely answers with one.
  */
 export const RIDE_MODES: readonly TransitMode[] = [
   'bus',
-  'coach',
   'tram',
   'metro',
   'rail',
@@ -200,12 +306,67 @@ export const RIDE_MODES: readonly TransitMode[] = [
 ];
 
 /**
+ * Why the planner returned nothing. Entur distinguishes nine cases and they
+ * call for different reactions from the traveller — "no service in this search
+ * window" means try another time, "no stops in range" means walk somewhere
+ * else, "outside service period" means the timetable does not reach that date
+ * yet. Folding them all into "no departures found" sends people hunting for a
+ * departure that was never going to exist.
+ */
+export type TransitProblemCode =
+  | 'locationNotFound'
+  | 'noStopsInRange'
+  | 'noTransitConnection'
+  | 'noTransitConnectionInSearchWindow'
+  | 'outsideBounds'
+  | 'outsideServicePeriod'
+  | 'walkingBetterThanTransit'
+  | 'unknown';
+
+export interface TransitProblem {
+  code: TransitProblemCode;
+  /** Which end of the query it concerns, when the planner says. */
+  inputField?: 'from' | 'to' | 'dateTime';
+}
+
+/**
  * A journey answer. `trips` is empty when the planner found nothing — a normal
  * outcome at 01:00, not an error, and the UI must say "no departures" rather
- * than "something went wrong".
+ * than "something went wrong". `problems` says *which* nothing it was.
  */
 export interface TransitResult {
   trips: TransitTrip[];
+  problems: TransitProblem[];
+  /** Cursors for the Later / Earlier controls; absent when the planner has no more pages. */
+  nextCursor?: string;
+  previousCursor?: string;
+}
+
+/**
+ * A traveller-facing sentence for an empty answer. Returns null when the
+ * planner gave no reason, leaving the caller's own generic wording in place.
+ */
+export function transitProblemMessage(problems: readonly TransitProblem[]): string | null {
+  const codes = new Set(problems.map((p) => p.code));
+  if (codes.has('outsideBounds') || codes.has('locationNotFound')) {
+    return 'One of the stops is outside the area the Norwegian journey planner covers.';
+  }
+  if (codes.has('noStopsInRange')) {
+    return 'No stops within walking distance of one of the ends. Try a nearby street or town.';
+  }
+  if (codes.has('outsideServicePeriod')) {
+    return 'The timetable does not reach that date yet. Try a date closer to today.';
+  }
+  if (codes.has('noTransitConnectionInSearchWindow')) {
+    return 'Nothing runs at that time, though the route is served at others. Try another time.';
+  }
+  if (codes.has('noTransitConnection')) {
+    return 'No public transport connects these two places.';
+  }
+  if (codes.has('walkingBetterThanTransit')) {
+    return 'Walking is faster than any departure here.';
+  }
+  return null;
 }
 
 /**

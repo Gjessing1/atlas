@@ -87,11 +87,21 @@ function parseQuery(body: unknown): { query: TransitQuery } | { error: string } 
   }
   // Unknown mode names are dropped rather than rejected: a newer client asking
   // for a mode this build hasn't heard of should get a journey, not a 400.
+  // `coach` is accepted although it is not a chip — it is a real wire mode, and
+  // an older client that still sends it explicitly must keep working.
   if (Array.isArray(raw.modes)) {
+    const allowed = [...RIDE_MODES, 'coach' as TransitMode];
     const modes = raw.modes.filter((mode): mode is TransitMode =>
-      RIDE_MODES.includes(mode as TransitMode),
+      allowed.includes(mode as TransitMode),
     );
     if (modes.length > 0) query.modes = modes;
+  }
+  // An opaque cursor from a previous answer. Length-capped rather than parsed:
+  // it is Entur's own token, and the only thing this proxy must guarantee is
+  // that an absurd string never reaches them on our client name.
+  if (typeof raw.pageCursor === 'string' && raw.pageCursor.length > 0) {
+    if (raw.pageCursor.length > 512) return { error: 'pageCursor is not a cursor we issued' };
+    query.pageCursor = raw.pageCursor;
   }
   return { query };
 }
@@ -134,7 +144,14 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       // full-day window, and only then believed. The retry is deliberately not
       // the first attempt: a wide window costs the planner real work, and on a
       // busy corridor the default already answers.
-      if (result.trips.length === 0 && parsed.query.searchWindowMinutes === undefined) {
+      // Not when paging: a cursor already carries the planner's own window, and
+      // widening it would re-answer a different question than the one the
+      // Later button asked.
+      if (
+        result.trips.length === 0 &&
+        parsed.query.searchWindowMinutes === undefined &&
+        parsed.query.pageCursor === undefined
+      ) {
         const retry = await ask({
           ...parsed.query,
           searchWindowMinutes: WIDE_SEARCH_WINDOW_MINUTES,

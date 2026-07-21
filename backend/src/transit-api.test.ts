@@ -169,7 +169,12 @@ describe('POST /api/transit', () => {
   it('forwards a mode selection, ignoring names it does not know', async () => {
     await plan({ from: asker, to: nationaltheatret, modes: ['bus', 'hovercraft', 'rail'] });
     expect(captured?.body.variables.modes).toMatchObject({
-      transportModes: [{ transportMode: 'bus' }, { transportMode: 'rail' }],
+      // Bus brings coach: one control upstream, two modes on the wire.
+      transportModes: [
+        { transportMode: 'bus' },
+        { transportMode: 'coach' },
+        { transportMode: 'rail' },
+      ],
     });
   });
 
@@ -185,7 +190,7 @@ describe('POST /api/transit', () => {
       new Response(JSON.stringify({ data: { trip: { tripPatterns: [] } } }), { status: 200 });
     const res = await plan({ from: asker, to: nationaltheatret });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ trips: [] });
+    expect(res.json()).toEqual({ trips: [], problems: [] });
   });
 
   it('rejects a journey outside Norway without calling Entur', async () => {

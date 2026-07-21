@@ -52,7 +52,13 @@ describe('buildEnturRequest', () => {
       accessMode: 'foot',
       egressMode: 'foot',
       directMode: 'foot',
-      transportModes: [{ transportMode: 'bus' }, { transportMode: 'tram' }],
+      // The Bus chip carries coach with it: they are one control, even though
+      // the wire (and a leg's own label) keeps them apart.
+      transportModes: [
+        { transportMode: 'bus' },
+        { transportMode: 'coach' },
+        { transportMode: 'tram' },
+      ],
     });
   });
 
@@ -147,9 +153,145 @@ describe('parseEnturResponse', () => {
 describe('parseEnturResponse — degenerate payloads', () => {
   it('treats no departures as an empty answer, not a failure', () => {
     // 01:00 on a Tuesday is a real query with a real, empty answer.
-    expect(parseEnturResponse({ data: { trip: { tripPatterns: [] } } })).toEqual({ trips: [] });
-    expect(parseEnturResponse({ data: { trip: null } })).toEqual({ trips: [] });
-    expect(parseEnturResponse(null)).toEqual({ trips: [] });
+    expect(parseEnturResponse({ data: { trip: { tripPatterns: [] } } })).toEqual({
+      trips: [],
+      problems: [],
+    });
+    expect(parseEnturResponse({ data: { trip: null } })).toEqual({ trips: [], problems: [] });
+    expect(parseEnturResponse(null)).toEqual({ trips: [], problems: [] });
+  });
+
+  it('keeps the planner’s own reason for an empty answer', () => {
+    // "Nothing runs at that hour" and "there are no stops near you" send a
+    // traveller in opposite directions; collapsing them into one message sends
+    // half of them the wrong way.
+    const result = parseEnturResponse({
+      data: {
+        trip: {
+          tripPatterns: [],
+          routingErrors: [
+            { code: 'noStopsInRange', inputField: 'to' },
+            { code: 'somethingEnturAddedLater' },
+          ],
+        },
+      },
+    });
+    expect(result.problems).toEqual([
+      { code: 'noStopsInRange', inputField: 'to' },
+      // An unknown code still counts as *a* reason, so the board does not fall
+      // back to inventing one.
+      { code: 'unknown' },
+    ]);
+  });
+
+  it('carries the page cursors so Earlier/Later can page departures', () => {
+    const result = parseEnturResponse({
+      data: {
+        trip: { tripPatterns: [], nextPageCursor: 'next-abc', previousPageCursor: 'prev-xyz' },
+      },
+    });
+    expect(result.nextCursor).toBe('next-abc');
+    expect(result.previousCursor).toBe('prev-xyz');
+    // Absent rather than empty-string at the ends of the timetable, so a UI can
+    // hide the control instead of paging to nowhere.
+    expect(parseEnturResponse({ data: { trip: { tripPatterns: [] } } }).nextCursor).toBeUndefined();
+  });
+
+  it('sends a page cursor instead of a time window when paging', () => {
+    const { variables } = buildEnturRequest({
+      from: asker,
+      to: nationaltheatret,
+      pageCursor: 'next-abc',
+    });
+    expect(variables.pageCursor).toBe('next-abc');
+  });
+
+  /** One trip with one ride leg carrying the given extra wire fields. */
+  function legWith(extra: Record<string, unknown>) {
+    const [trip] = parseEnturResponse({
+      data: {
+        trip: {
+          tripPatterns: [
+            { duration: 600, walkDistance: 0, legs: [{ mode: 'rail', duration: 600, ...extra }] },
+          ],
+        },
+      },
+    }).trips;
+    return trip!.legs[0]!;
+  }
+
+  it('surfaces disruption notices, preferring Norwegian and dropping empty ones', () => {
+    const leg = legWith({
+      situations: [
+        {
+          situationNumber: 'RUT:SituationNumber:1',
+          severity: 'severe',
+          summary: [
+            { value: 'Cancelled', language: 'en' },
+            { value: 'Innstilt', language: 'no' },
+          ],
+          description: [{ value: 'Signalfeil ved Lysaker', language: 'no' }],
+          advice: [{ value: 'Bruk buss for tog', language: 'no' }],
+          infoLinks: [{ uri: 'https://vy.no/avvik' }],
+        },
+        // Nothing to read — an alarm icon with no message is worse than silence.
+        { situationNumber: 'x', severity: 'normal', summary: [] },
+      ],
+    });
+    expect(leg.situations).toHaveLength(1);
+    expect(leg.situations[0]).toMatchObject({
+      id: 'RUT:SituationNumber:1',
+      summary: 'Innstilt',
+      description: 'Signalfeil ved Lysaker',
+      advice: 'Bruk buss for tog',
+      severity: 'severe',
+      url: 'https://vy.no/avvik',
+    });
+  });
+
+  it('treats an unclassified notice as a warning, not as a footnote', () => {
+    // Under-warning is the costlier mistake: operators leave `severity` unset
+    // on cancellations more often than on trivia.
+    expect(
+      legWith({ situations: [{ summary: [{ value: 'Noe skjer' }] }] }).situations[0],
+    ).toMatchObject({ severity: 'warning' });
+    expect(
+      legWith({ situations: [{ severity: 'slight', summary: [{ value: 'Litt' }] }] }).situations[0],
+    ).toMatchObject({ severity: 'info' });
+  });
+
+  it('drops a description that only repeats the summary', () => {
+    const leg = legWith({
+      situations: [{ summary: [{ value: 'Innstilt' }], description: [{ value: 'Innstilt' }] }],
+    });
+    expect(leg.situations[0]!.description).toBeUndefined();
+  });
+
+  it('flags a leg that must be booked ahead, and only such a leg', () => {
+    // Turning up unbooked at a `bestillingstransport` stop means nothing comes.
+    const flexible = legWith({
+      bookingArrangements: {
+        bookingMethods: ['callOffice'],
+        latestBookingTime: '14:00',
+        latestBookingDay: 1,
+        bookingContact: { phone: '77 00 00 00' },
+      },
+    });
+    expect(flexible.booking).toMatchObject({
+      methods: ['callOffice'],
+      latestTime: '14:00',
+      latestDayOffset: 1,
+      phone: '77 00 00 00',
+    });
+
+    // Entur attaches an empty arrangement to ordinary scheduled legs too;
+    // warning on those would make the warning meaningless.
+    expect(legWith({ bookingArrangements: { bookingMethods: [] } }).booking).toBeUndefined();
+    expect(legWith({}).booking).toBeUndefined();
+  });
+
+  it('leaves an undisrupted leg with no notices at all', () => {
+    expect(legWith({}).situations).toEqual([]);
   });
 
   it('throws on a GraphQL error', () => {

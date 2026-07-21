@@ -81,6 +81,13 @@ export interface RoutePlanner {
   /** Move a stop; its label is dropped, since it no longer describes the spot. */
   moveWaypointTo: (id: number, pos: LatLng) => void;
   /**
+   * Point an existing stop somewhere else entirely, keeping its place in the
+   * order. This is what "tap From and pick another address" means: appending
+   * and then deleting would briefly route through both and shuffle the letters
+   * on the map, so the swap has to be one operation.
+   */
+  replaceWaypoint: (id: number, pos: LatLng, name?: string) => void;
+  /**
    * Attach a label to an existing stop (e.g. an async reverse geocode). `at` is
    * the position the label was looked up for — a stop that has since moved or
    * gained a name keeps what it has.
@@ -239,6 +246,14 @@ export function useRoute(route: RouteFn): RoutePlanner {
     setWaypoints((wps) => wps.map((w) => (w.id === id ? { id: w.id, pos } : w)));
   }, []);
 
+  const replaceWaypoint = useCallback((id: number, pos: LatLng, name?: string) => {
+    setWaypoints((wps) =>
+      wps.map((w) =>
+        w.id === id ? (name === undefined ? { id: w.id, pos } : { id: w.id, pos, name }) : w,
+      ),
+    );
+  }, []);
+
   const nameWaypoint = useCallback((id: number, name: string, at: LatLng) => {
     setWaypoints((wps) => {
       const target = wps.find((w) => w.id === id);
@@ -309,6 +324,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     addWaypoint,
     insertWaypoint,
     moveWaypointTo,
+    replaceWaypoint,
     nameWaypoint,
     removeWaypoint,
     reorderWaypoint,

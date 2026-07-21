@@ -1,11 +1,18 @@
 import { decodePolyline, type LatLng } from '@atlas/core';
+import { expandModeFilter } from './model.js';
 import type {
+  TransitBooking,
+  TransitBookingMethod,
   TransitLeg,
   TransitLine,
   TransitMode,
   TransitPlace,
+  TransitProblem,
+  TransitProblemCode,
   TransitQuery,
   TransitResult,
+  TransitSeverity,
+  TransitSituation,
   TransitTrip,
 } from './model.js';
 
@@ -29,8 +36,10 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int){
- trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int,$pageCursor:String){
+ trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow,pageCursor:$pageCursor){
+  nextPageCursor previousPageCursor
+  routingErrors{ code inputField }
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance
    legs{ mode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
@@ -41,6 +50,8 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateT
     fromPlace{ name latitude longitude quay{id publicCode name} }
     toPlace{ name latitude longitude quay{id publicCode name} }
     intermediateEstimatedCalls{ aimedDepartureTime expectedDepartureTime quay{id publicCode name latitude longitude} }
+    situations{ situationNumber severity reportType summary{value language} description{value language} advice{value language} infoLinks{uri} }
+    bookingArrangements{ bookingMethods latestBookingTime latestBookingDay bookingNote bookingContact{phone url} }
    }}}}`;
 
 const DEFAULT_LIMIT = 5;
@@ -49,8 +60,8 @@ const DEFAULT_WALK_SPEED_MPS = 1.3;
 
 /**
  * Atlas ride modes as Entur's `TransportMode` enum values. `coach` and `bus`
- * are distinct upstream, so a traveller excluding buses keeps long-distance
- * coaches unless they exclude those too — which is how the operators sell them.
+ * stay distinct here because the wire keeps them distinct; they are merged into
+ * one *control* by `expandModeFilter`, not by flattening the vocabulary.
  */
 const WIRE_MODE: Partial<Record<TransitMode, string>> = {
   bus: 'bus',
@@ -75,7 +86,7 @@ const WIRE_MODE: Partial<Record<TransitMode, string>> = {
  */
 function modesArgument(modes: readonly TransitMode[] | undefined): Record<string, unknown> | null {
   if (!modes || modes.length === 0) return null;
-  const transportModes = modes.flatMap((mode) => {
+  const transportModes = expandModeFilter(modes).flatMap((mode) => {
     const wire = WIRE_MODE[mode];
     return wire ? [{ transportMode: wire }] : [];
   });
@@ -103,6 +114,7 @@ export function buildEnturRequest(query: TransitQuery): {
       // Null lets Entur pick its own (dynamic, a few hours). Widened only on a
       // retry — see WIDE_SEARCH_WINDOW_MINUTES.
       searchWindow: query.searchWindowMinutes ?? null,
+      pageCursor: query.pageCursor ?? null,
     },
   };
 }
@@ -195,6 +207,136 @@ function toLine(wire: unknown, authority: unknown): TransitLine | undefined {
   };
 }
 
+/**
+ * Pick a language out of Entur's `MultilingualString` list. Norwegian first,
+ * English next, then whatever exists: operators publish `no` reliably and `en`
+ * only sometimes, and an untranslated Norwegian warning beats no warning.
+ */
+function toText(wire: unknown): string | undefined {
+  // Not everything Entur calls text is multilingual — `bookingNote` is a bare
+  // String while `summary` is a list of translations.
+  if (typeof wire === 'string') return wire.trim() ? wire : undefined;
+  if (!Array.isArray(wire)) {
+    const single = (wire as { value?: unknown } | null)?.value;
+    return typeof single === 'string' && single.trim() ? single : undefined;
+  }
+  const strings = wire.filter(
+    (item): item is { value: string; language?: string } =>
+      typeof (item as { value?: unknown })?.value === 'string' &&
+      (item as { value: string }).value.trim().length > 0,
+  );
+  const pick =
+    strings.find((s) => s.language === 'no' || s.language === 'nb' || s.language === 'nn') ??
+    strings.find((s) => s.language === 'en') ??
+    strings[0];
+  return pick?.value;
+}
+
+/**
+ * Entur's eight-value `Severity` folded onto the three Atlas paints. `noImpact`
+ * and the two "slight" grades are information; `normal` and below are a warning;
+ * only `severe`/`verySevere` earn red. `unknown`/`undefined` land on `warning`
+ * rather than `info`: an unclassified notice from an operator is more often a
+ * cancellation than a footnote, and under-warning is the costlier mistake.
+ */
+function toSeverity(value: unknown): TransitSeverity {
+  switch (value) {
+    case 'noImpact':
+    case 'verySlight':
+    case 'slight':
+      return 'info';
+    case 'severe':
+    case 'verySevere':
+      return 'severe';
+    default:
+      return 'warning';
+  }
+}
+
+function toSituations(wire: unknown): TransitSituation[] {
+  if (!Array.isArray(wire)) return [];
+  return wire.flatMap((item) => {
+    const s = item as Record<string, unknown>;
+    const summary = toText(s.summary) ?? toText(s.description);
+    // A notice with nothing to read is not worth an alarm icon.
+    if (!summary) return [];
+    const description = toText(s.description);
+    const advice = toText(s.advice);
+    const uri = Array.isArray(s.infoLinks)
+      ? (s.infoLinks as { uri?: unknown }[]).map((l) => l?.uri).find((u) => typeof u === 'string')
+      : undefined;
+    return [
+      {
+        ...(typeof s.situationNumber === 'string' ? { id: s.situationNumber } : {}),
+        summary,
+        // The description often just repeats the summary; drop it when it does,
+        // so an expanded notice does not read as a stutter.
+        ...(description && description !== summary ? { description } : {}),
+        ...(advice ? { advice } : {}),
+        severity: toSeverity(s.severity),
+        ...(typeof uri === 'string' ? { url: uri } : {}),
+      },
+    ];
+  });
+}
+
+const BOOKING_METHODS: readonly TransitBookingMethod[] = [
+  'callDriver',
+  'callOffice',
+  'online',
+  'phoneAtStop',
+  'text',
+];
+
+function toBooking(wire: unknown): TransitBooking | undefined {
+  if (!wire || typeof wire !== 'object') return undefined;
+  const b = wire as Record<string, unknown>;
+  const methods = (Array.isArray(b.bookingMethods) ? b.bookingMethods : []).filter(
+    (m): m is TransitBookingMethod => BOOKING_METHODS.includes(m as TransitBookingMethod),
+  );
+  const note = toText(b.bookingNote);
+  const contact = (b.bookingContact ?? null) as { phone?: unknown; url?: unknown } | null;
+  const latestTime = typeof b.latestBookingTime === 'string' ? b.latestBookingTime : undefined;
+  // Entur sends an (often empty) arrangement on ordinary legs too. Only a leg
+  // that says *how* or *by when* to book actually requires booking; anything
+  // less would slap a "must be booked" warning on every scheduled bus.
+  if (methods.length === 0 && !note && !latestTime) return undefined;
+  const dayOffset = b.latestBookingDay;
+  return {
+    methods,
+    ...(note ? { note } : {}),
+    ...(typeof contact?.phone === 'string' ? { phone: contact.phone } : {}),
+    ...(typeof contact?.url === 'string' ? { url: contact.url } : {}),
+    ...(latestTime ? { latestTime } : {}),
+    ...(typeof dayOffset === 'number' ? { latestDayOffset: dayOffset } : {}),
+  };
+}
+
+const PROBLEM_CODES: readonly TransitProblemCode[] = [
+  'locationNotFound',
+  'noStopsInRange',
+  'noTransitConnection',
+  'noTransitConnectionInSearchWindow',
+  'outsideBounds',
+  'outsideServicePeriod',
+  'walkingBetterThanTransit',
+];
+
+function toProblems(wire: unknown): TransitProblem[] {
+  if (!Array.isArray(wire)) return [];
+  return wire.map((item) => {
+    const e = item as { code?: unknown; inputField?: unknown };
+    const code = PROBLEM_CODES.includes(e.code as TransitProblemCode)
+      ? (e.code as TransitProblemCode)
+      : 'unknown';
+    const field = e.inputField;
+    return {
+      code,
+      ...(field === 'from' || field === 'to' || field === 'dateTime' ? { inputField: field } : {}),
+    };
+  });
+}
+
 function toPoints(wire: unknown): LatLng[] {
   const encoded = (wire as { points?: unknown } | null)?.points;
   if (typeof encoded !== 'string' || !encoded) return [];
@@ -214,6 +356,7 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
   const calls = Array.isArray(wire.intermediateEstimatedCalls)
     ? wire.intermediateEstimatedCalls
     : [];
+  const booking = toBooking(wire.bookingArrangements);
   return {
     mode: toMode(wire.mode),
     distanceM: toNumber(wire.distance),
@@ -233,6 +376,8 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
       return toPlace({ ...quay, quay: quay ?? null });
     }),
     points: toPoints(wire.pointsOnLink),
+    situations: toSituations(wire.situations),
+    ...(booking ? { booking } : {}),
   };
 }
 
@@ -255,15 +400,30 @@ export class TransitError extends Error {
 export function parseEnturResponse(body: unknown): TransitResult {
   const root = body as {
     errors?: { message?: unknown }[];
-    data?: { trip?: { tripPatterns?: unknown } | null } | null;
+    data?: {
+      trip?: {
+        tripPatterns?: unknown;
+        routingErrors?: unknown;
+        nextPageCursor?: unknown;
+        previousPageCursor?: unknown;
+      } | null;
+    } | null;
   } | null;
 
   if (Array.isArray(root?.errors) && root.errors.length > 0) {
     const first = root.errors[0]?.message;
     throw new TransitError(typeof first === 'string' ? first : 'journey planner error');
   }
-  const patterns = root?.data?.trip?.tripPatterns;
-  if (!Array.isArray(patterns)) return { trips: [] };
+  const trip = root?.data?.trip;
+  const problems = toProblems(trip?.routingErrors);
+  const cursors = {
+    ...(typeof trip?.nextPageCursor === 'string' ? { nextCursor: trip.nextPageCursor } : {}),
+    ...(typeof trip?.previousPageCursor === 'string'
+      ? { previousCursor: trip.previousPageCursor }
+      : {}),
+  };
+  const patterns = trip?.tripPatterns;
+  if (!Array.isArray(patterns)) return { trips: [], problems, ...cursors };
 
   const trips: TransitTrip[] = patterns.map((pattern) => {
     const p = pattern as Record<string, unknown>;
@@ -280,5 +440,5 @@ export function parseEnturResponse(body: unknown): TransitResult {
       legs,
     };
   });
-  return { trips };
+  return { trips, problems, ...cursors };
 }

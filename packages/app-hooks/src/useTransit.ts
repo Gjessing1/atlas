@@ -1,6 +1,12 @@
 import type { LatLng } from '@atlas/core';
 import { RIDE_MODES, TransitError, transitCoverage, transitCoversPoint } from '@atlas/transit';
-import type { TransitMode, TransitQuery, TransitResult, TransitTrip } from '@atlas/transit';
+import type {
+  TransitMode,
+  TransitProblem,
+  TransitQuery,
+  TransitResult,
+  TransitTrip,
+} from '@atlas/transit';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { RoutePlanner } from './useRoute.js';
@@ -26,6 +32,12 @@ export interface TransitPlanner {
   trips: TransitTrip[] | null;
   loading: boolean;
   error: string | null;
+  /**
+   * Why the planner returned nothing, when it said. Distinct from `error`:
+   * these are answers ("no stops in range"), not failures, and the board should
+   * report them without the language of something having gone wrong.
+   */
+  problems: TransitProblem[];
   /** Epoch ms to plan around, or null for "now" (the server's now). */
   timeMs: number | null;
   setTimeMs: (ms: number | null) => void;
@@ -46,6 +58,14 @@ export interface TransitPlanner {
   clearModes: () => void;
   /** Re-ask with the same query — the answer decays, so this is a real action, not a retry. */
   refresh: () => void;
+  /**
+   * Page to the departures just before / just after the ones shown, using the
+   * planner's own cursors. These are null when there is no such page — the
+   * controls must then be absent rather than dead, because at the end of the
+   * service day there genuinely is no "later".
+   */
+  pageEarlier: (() => void) | null;
+  pageLater: (() => void) | null;
 }
 
 /**
@@ -63,10 +83,16 @@ export function useTransit(
   const [trips, setTrips] = useState<TransitTrip[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [timeMs, setTimeMs] = useState<number | null>(null);
-  const [arriveBy, setArriveBy] = useState(false);
+  const [problems, setProblems] = useState<TransitProblem[]>([]);
+  const [timeMs, setTimeMsState] = useState<number | null>(null);
+  const [arriveBy, setArriveByState] = useState(false);
   const [modes, setModes] = useState<TransitMode[]>([]);
   const [seed, setSeed] = useState(0);
+  // The page being shown, and the cursors out of it. Held together because any
+  // change to the *question* (time, modes, endpoints) makes a cursor from the
+  // old question meaningless — it would page through the wrong timetable.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [pages, setPages] = useState<{ next?: string; previous?: string }>({});
   const abortRef = useRef<AbortController | null>(null);
   // Order-independent identity for the mode set, so re-selecting the same modes
   // in a different order doesn't re-ask.
@@ -83,6 +109,8 @@ export function useTransit(
     if (!active || !covered || !from || !to) {
       setTrips(null);
       setError(null);
+      setProblems([]);
+      setPages({});
       setLoading(false);
       return;
     }
@@ -94,15 +122,25 @@ export function useTransit(
       if (timeMs !== null) query.dateTimeMs = timeMs;
       if (arriveBy) query.arriveBy = true;
       if (modes.length > 0) query.modes = modes;
+      // A cursor supersedes the time window it came from, so the two are never
+      // sent together as competing instructions.
+      if (cursor !== null) query.pageCursor = cursor;
       try {
         const result = await transit(query, controller.signal);
         if (controller.signal.aborted) return; // superseded — don't paint it
         setTrips(result.trips);
+        setProblems(result.problems ?? []);
+        setPages({
+          ...(result.nextCursor ? { next: result.nextCursor } : {}),
+          ...(result.previousCursor ? { previous: result.previousCursor } : {}),
+        });
         setError(null);
         setLoading(false);
       } catch (err) {
         if (controller.signal.aborted) return;
         setTrips(null);
+        setProblems([]);
+        setPages({});
         setLoading(false);
         setError(
           err instanceof TransitError
@@ -118,11 +156,28 @@ export function useTransit(
     // `from`/`to` enter the deps through their value keys above: callers rebuild
     // the objects each render, and re-asking a national planner on every render
     // would be both wrong and rude.
-  }, [active, covered, fromKey, toKey, timeMs, arriveBy, modeKey, seed, transit]);
+  }, [active, covered, fromKey, toKey, timeMs, arriveBy, modeKey, cursor, seed, transit]);
 
-  const refresh = useCallback(() => setSeed((s) => s + 1), []);
-  const clearModes = useCallback(() => setModes([]), []);
+  // Every control that changes the question also drops the cursor: paging is
+  // only ever relative to the answer currently on screen.
+  const refresh = useCallback(() => {
+    setCursor(null);
+    setSeed((s) => s + 1);
+  }, []);
+  const setTimeMs = useCallback((ms: number | null) => {
+    setCursor(null);
+    setTimeMsState(ms);
+  }, []);
+  const setArriveBy = useCallback((on: boolean) => {
+    setCursor(null);
+    setArriveByState(on);
+  }, []);
+  const clearModes = useCallback(() => {
+    setCursor(null);
+    setModes([]);
+  }, []);
   const toggleMode = useCallback((mode: TransitMode) => {
+    setCursor(null);
     setModes((current) => {
       // An empty selection means "all modes", so the first exclusion has to
       // expand to "everything except this one" — otherwise unticking Train
@@ -134,11 +189,19 @@ export function useTransit(
     });
   }, []);
 
+  const pageEarlier = useCallback(() => {
+    if (pages.previous) setCursor(pages.previous);
+  }, [pages.previous]);
+  const pageLater = useCallback(() => {
+    if (pages.next) setCursor(pages.next);
+  }, [pages.next]);
+
   return {
     covered,
     trips,
     loading,
     error,
+    problems,
     timeMs,
     setTimeMs,
     arriveBy,
@@ -147,6 +210,8 @@ export function useTransit(
     toggleMode,
     clearModes,
     refresh,
+    pageEarlier: pages.previous ? pageEarlier : null,
+    pageLater: pages.next ? pageLater : null,
   };
 }
 

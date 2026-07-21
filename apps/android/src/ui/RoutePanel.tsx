@@ -14,6 +14,7 @@ import type { RoutePlanner } from '../routing/useRoute';
 import type { TransitPlan } from '../routing/useTransit';
 import { geoSearch, type SearchBias } from '../search/geoSearch';
 import { ElevationChart } from './ElevationChart';
+import { PROFILE_ICON, TramIcon } from './modeIcons';
 import { TransitResults } from './TransitResults';
 
 function fmtKm(m: number): string {
@@ -75,7 +76,10 @@ function StopSearch({
   places,
   getBias,
   placeholder,
+  initialQuery = '',
+  autoFocus = false,
   onPick,
+  onCancel,
 }: {
   packs: LocalPack[];
   places: PlaceRecord[];
@@ -83,10 +87,19 @@ function StopSearch({
   getBias: SearchBias;
   /** Says which end this box fills, so the box is not a mystery slot. */
   placeholder: string;
+  /**
+   * Pre-filled text when editing an existing stop. It is *selected* rather than
+   * appended to, so the first keystroke replaces "My location" instead of
+   * having to be backspaced away.
+   */
+  initialQuery?: string;
+  autoFocus?: boolean;
   /** The hit's name rides along: a stop the user chose by name should keep it. */
   onPick: (position: LatLng, name: string) => void;
+  /** Present when this box is editing an existing stop — leaves it unchanged. */
+  onCancel?: () => void;
 }) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<StopHit[]>([]);
   const generation = useRef(0);
 
@@ -119,15 +132,31 @@ function StopSearch({
   }, [query, packs, places, getBias]);
 
   return (
-    <View>
-      <TextInput
-        style={styles.stopInput}
-        placeholder={placeholder}
-        value={query}
-        onChangeText={setQuery}
-        autoCorrect={false}
-        testID="route-stop-search"
-      />
+    <View style={styles.stopSearch}>
+      <View style={styles.stopInputRow}>
+        <TextInput
+          style={[styles.stopInput, styles.stopInputGrow]}
+          placeholder={placeholder}
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoFocus={autoFocus}
+          selectTextOnFocus
+          testID="route-stop-search"
+        />
+        {onCancel ? (
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => {
+              Keyboard.dismiss();
+              onCancel();
+            }}
+            testID="route-stop-cancel"
+          >
+            <Text style={styles.iconText}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {hits.length > 0 ? (
         <View style={styles.stopResults}>
           {hits.map((hit, i) => (
@@ -213,7 +242,14 @@ export function RoutePanel({
 
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
+  /** Waypoint id whose search box is open for re-pointing, or null. */
+  const [editing, setEditing] = useState<number | null>(null);
   const stops = route.waypoints;
+  // A stop that disappears (cleared, removed, reversed away) must not leave an
+  // orphaned editor bound to an id that no longer exists.
+  useEffect(() => {
+    if (editing !== null && !stops.some((w) => w.id === editing)) setEditing(null);
+  }, [editing, stops]);
   // Which end the *search box* fills: the first stop is the start, anything
   // after it extends the route, which in transit mode means the destination.
   // The My-location button is deliberately not governed by this — see below.
@@ -266,31 +302,43 @@ export function RoutePanel({
         keyboardShouldPersistTaps="handled"
         testID="route-scroll"
       >
-        <View style={styles.chipRow}>
-          {ROUTING_PROFILES.map((p) => (
-            <Pressable
-              key={p.id}
-              style={[styles.chip, !transitMode && p.id === route.profile && styles.chipSelected]}
-              onPress={() => {
-                transit.setEnabled(false);
-                route.setProfile(p.id);
-              }}
-              testID={`route-profile-${p.id}`}
-            >
-              <Text style={styles.chipText}>
-                {p.icon} {p.label}
-              </Text>
-            </Pressable>
-          ))}
+        {/* Icon-only, the way every maps app picks a travel mode: five labelled
+          chips wrapped onto two rows and read as a paragraph, where five glyphs
+          read as one control. The accessibility label carries the word the chip
+          no longer shows. */}
+        <View style={styles.modeRow}>
+          {ROUTING_PROFILES.map((p) => {
+            const Icon = PROFILE_ICON[p.id];
+            const on = !transitMode && p.id === route.profile;
+            return (
+              <Pressable
+                key={p.id}
+                style={[styles.modeTab, on && styles.modeTabSelected]}
+                onPress={() => {
+                  transit.setEnabled(false);
+                  route.setProfile(p.id);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={p.label}
+                accessibilityState={{ selected: on }}
+                testID={`route-profile-${p.id}`}
+              >
+                <Icon color={on ? '#1a73e8' : '#5a6478'} />
+              </Pressable>
+            );
+          })}
           {/* Transit is a travel mode, not a fifth routing profile — and it is
             offered only where the national planner can actually answer. */}
           {transit.offered ? (
             <Pressable
-              style={[styles.chip, transitMode && styles.chipSelected]}
+              style={[styles.modeTab, transitMode && styles.modeTabSelected]}
               onPress={() => transit.setEnabled(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Public transport"
+              accessibilityState={{ selected: transitMode }}
               testID="route-profile-transit"
             >
-              <Text style={styles.chipText}>🚌 Transit</Text>
+              <TramIcon color={transitMode ? '#1a73e8' : '#5a6478'} />
             </Pressable>
           ) : null}
         </View>
@@ -328,17 +376,24 @@ export function RoutePanel({
           ) : null}
         </View>
 
-        <StopSearch
-          packs={packs}
-          places={places}
-          getBias={getBias}
-          placeholder={
-            nextRole === 'start'
-              ? 'Start: address or saved place'
-              : 'Destination: address or saved place'
-          }
-          onPick={(position, name) => route.addWaypoint(position, name)}
-        />
+        {/* While a stop is being re-pointed, the add-a-stop box stands down —
+          two open search boxes with two different meanings is how you end up
+          appending a stop you meant to replace. */}
+        {editing === null ? (
+          <StopSearch
+            packs={packs}
+            places={places}
+            getBias={getBias}
+            placeholder={
+              nextRole === 'start'
+                ? 'Start: address or saved place'
+                : stops.length >= 2
+                  ? 'Add a stop'
+                  : 'Destination: address or saved place'
+            }
+            onPick={(position, name) => route.addWaypoint(position, name)}
+          />
+        ) : null}
 
         <View style={styles.sourceRow}>
           <Pressable
@@ -371,10 +426,40 @@ export function RoutePanel({
                     {waypointLabel(i, route.roundTrip, route.waypoints.length)}
                   </Text>
                 )}
-                <Text style={styles.wpName} numberOfLines={1}>
-                  {stopTitle(w)}
-                </Text>
-                {!route.roundTrip ? (
+                {/* A stop that cannot be changed without deleting it is the
+                  thing every other maps app lets you tap. Editing in place also
+                  keeps the stop's position in the order, which delete-then-add
+                  does not. */}
+                {editing === w.id ? (
+                  <View style={styles.wpEdit}>
+                    <StopSearch
+                      packs={packs}
+                      places={places}
+                      getBias={getBias}
+                      placeholder="Change this stop"
+                      initialQuery={w.name ?? ''}
+                      autoFocus
+                      onPick={(position, name) => {
+                        route.replaceWaypoint(w.id, position, name);
+                        setEditing(null);
+                      }}
+                      onCancel={() => setEditing(null)}
+                    />
+                  </View>
+                ) : (
+                  <Pressable
+                    style={styles.wpNameTap}
+                    onPress={() => setEditing(w.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Change ${stopTitle(w)}`}
+                    testID={`route-wp-edit-${w.id}`}
+                  >
+                    <Text style={styles.wpName} numberOfLines={1}>
+                      {stopTitle(w)}
+                    </Text>
+                  </Pressable>
+                )}
+                {editing === w.id ? null : !route.roundTrip ? (
                   <>
                     <Pressable
                       style={styles.iconButton}
@@ -401,13 +486,15 @@ export function RoutePanel({
                     </Pressable>
                   </>
                 ) : null}
-                <Pressable
-                  style={styles.iconButton}
-                  onPress={() => route.removeWaypoint(w.id)}
-                  testID={`route-wp-remove-${w.id}`}
-                >
-                  <Text style={styles.iconText}>✕</Text>
-                </Pressable>
+                {editing === w.id ? null : (
+                  <Pressable
+                    style={styles.iconButton}
+                    onPress={() => route.removeWaypoint(w.id)}
+                    testID={`route-wp-remove-${w.id}`}
+                  >
+                    <Text style={styles.iconText}>✕</Text>
+                  </Pressable>
+                )}
               </View>
             ))}
           </View>
@@ -443,9 +530,12 @@ export function RoutePanel({
         ) : null}
 
         <View style={styles.actionRow}>
+          {/* Reverse works in transit mode too — swapping the ends is the
+            commonest thing anyone does to a journey ("now get me home"), and
+            unlike Optimize it means something to a timetable. */}
           <Pressable
             style={[styles.button, styles.buttonQuiet]}
-            disabled={transitMode || route.roundTrip || route.waypoints.length < 2}
+            disabled={route.roundTrip || route.waypoints.length < 2}
             onPress={route.reverse}
           >
             <Text style={styles.buttonQuietText}>Reverse</Text>
@@ -557,6 +647,25 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
   chipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  // Icon-only mode picker: equal-width tabs under a shared rule, with the
+  // selected one underlined rather than filled — a filled pill at this size
+  // fights the line badges further down the panel for attention.
+  modeRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6e9f0',
+    marginBottom: 4,
+  },
+  modeTab: {
+    flexGrow: 1,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+    // Pulls the tab's own underline over the row's hairline rule.
+    marginBottom: -1,
+  },
+  modeTabSelected: { borderBottomColor: '#1a73e8' },
   roundRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   kmInput: {
     borderWidth: 1,
@@ -594,7 +703,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  wpName: { flexGrow: 1, flexShrink: 1, fontSize: 14, color: '#223' },
+  // The tap target is the row-wide box, not just the glyph-width text: a stop
+  // called "5" was otherwise a two-character target.
+  wpNameTap: { flexGrow: 1, flexShrink: 1, paddingVertical: 4 },
+  wpName: { fontSize: 14, color: '#223' },
+  wpEdit: { flexGrow: 1, flexShrink: 1 },
   sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   chipBusy: { opacity: 0.6 },
   hint: { fontSize: 12, color: '#889' },
@@ -622,6 +735,9 @@ const styles = StyleSheet.create({
   error: { fontSize: 13, color: '#b3261e' },
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   stats: { fontSize: 14, color: '#111', fontWeight: '600', flexShrink: 1 },
+  stopSearch: { flexGrow: 1 },
+  stopInputRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  stopInputGrow: { flexGrow: 1, flexShrink: 1 },
   stopInput: {
     borderWidth: 1,
     borderColor: '#cdd3dd',

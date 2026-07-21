@@ -1046,6 +1046,92 @@ body {
   color: #898781;
 }
 
+/* A disruption flag on the collapsed summary row: the card must not look clean
+   when a leg inside it is cancelled. */
+.transit-trip-flag {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.transit-trip-flag.info {
+  color: #1a4d8f;
+}
+
+.transit-trip-flag.warning {
+  color: #8a5300;
+}
+
+.transit-trip-flag.severe {
+  color: #b3261e;
+}
+
+/* Notices sit in a tinted well rather than as coloured text: a cancellation has
+   to survive being skimmed past at the top of a dense leg. */
+.transit-notice {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 1px solid;
+  border-radius: 8px;
+}
+
+.transit-notice.info {
+  border-color: #cfdcf2;
+  background: #eef3fb;
+  color: #1a4d8f;
+}
+
+.transit-notice.warning {
+  border-color: #f2ddb8;
+  background: #fff5e6;
+  color: #8a5300;
+}
+
+.transit-notice.severe {
+  border-color: #f3c4bf;
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.transit-notice-mark {
+  flex: none;
+  width: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.transit-notice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.transit-notice-summary {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+button.transit-notice-summary {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.transit-notice-detail {
+  margin: 0;
+  color: #4a4740;
+  font-size: 12px;
+}
+
 .transit-line-chip {
   display: inline-block;
   padding: 1px 6px;

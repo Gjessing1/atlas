@@ -4,30 +4,22 @@ import {
   legDelayMs,
   RIDE_MODES,
   transferCount,
+  transitProblemMessage,
+  tripNeedsBooking,
+  tripSeverity,
+  type TransitBooking,
   type TransitLeg,
   type TransitLine,
   type TransitMode,
+  type TransitSeverity,
+  type TransitSituation,
   type TransitTrip,
 } from '@atlas/transit';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { TransitPlan } from '../routing/useTransit';
-
-/** One glyph per mode — the fastest way to read a board is by shape, not words. */
-const MODE_ICON: Record<TransitMode, string> = {
-  foot: '🚶',
-  bus: '🚌',
-  coach: '🚌',
-  tram: '🚊',
-  metro: '🚇',
-  rail: '🚆',
-  water: '⛴️',
-  air: '✈️',
-  funicular: '🚟',
-  cableway: '🚡',
-  unknown: '•',
-};
+import { transitIcon } from './modeIcons';
 
 /** Mode names as a traveller would tick them in a filter. */
 const MODE_LABEL: Record<TransitMode, string> = {
@@ -43,6 +35,113 @@ const MODE_LABEL: Record<TransitMode, string> = {
   cableway: 'Cable car',
   unknown: 'Other',
 };
+
+/** Mode glyph at board size — vector, so it takes the row's colour. */
+function ModeIcon({
+  mode,
+  size = 16,
+  color,
+}: {
+  mode: TransitMode;
+  size?: number;
+  color?: string;
+}) {
+  const Icon = transitIcon(mode);
+  return <Icon size={size} color={color ?? '#5a6478'} />;
+}
+
+/**
+ * Skin for a severity. A function rather than a lookup table because `styles`
+ * is defined at the foot of the file — a module-level table would read it
+ * before it exists.
+ */
+function severityStyle(severity: TransitSeverity) {
+  if (severity === 'info') {
+    return { box: styles.noticeInfo, text: styles.noticeInfoText, mark: 'i' };
+  }
+  if (severity === 'severe') {
+    return { box: styles.noticeSevere, text: styles.noticeSevereText, mark: '!' };
+  }
+  return { box: styles.noticeWarn, text: styles.noticeWarnText, mark: '!' };
+}
+
+/**
+ * A disruption notice. Collapsed to its headline, because a leg can carry four
+ * of them and an operator's full text runs to paragraphs — but expandable,
+ * since the advice ("use the replacement bus from stand F") is usually the only
+ * part that changes what the traveller does.
+ */
+function SituationNotice({ situation }: { situation: TransitSituation }) {
+  const [open, setOpen] = useState(false);
+  const skin = severityStyle(situation.severity);
+  const detail = situation.advice ?? situation.description;
+  return (
+    <Pressable
+      style={[styles.notice, skin.box]}
+      onPress={() => detail && setOpen((v) => !v)}
+      testID="transit-situation"
+    >
+      <Text style={[styles.noticeMark, skin.text]}>{skin.mark}</Text>
+      <View style={styles.noticeBody}>
+        <Text style={[styles.noticeText, skin.text]} numberOfLines={open ? undefined : 2}>
+          {situation.summary}
+        </Text>
+        {open && detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+        {open && situation.url ? (
+          <Text style={styles.link} onPress={() => void Linking.openURL(situation.url!)}>
+            Operator's notice ↗
+          </Text>
+        ) : null}
+        {!open && detail ? <Text style={styles.noticeMore}>Tap for details</Text> : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** How to book a flexible service, in the order a traveller would try them. */
+function bookingHow(booking: TransitBooking): string {
+  if (booking.phone) return `Book by phone: ${booking.phone}`;
+  if (booking.methods.includes('online') && booking.url) return 'Book online before travelling';
+  if (booking.methods.includes('callDriver')) return 'Call the driver to book';
+  if (booking.methods.includes('callOffice')) return 'Call the operator to book';
+  if (booking.methods.includes('text')) return 'Book by text message';
+  return 'This service must be booked in advance';
+}
+
+/** By when, phrased the way the operator means it rather than as a raw offset. */
+function bookingWhen(booking: TransitBooking): string | null {
+  if (!booking.latestTime) return null;
+  const days = booking.latestDayOffset ?? 0;
+  if (days <= 0) return `by ${booking.latestTime} the same day`;
+  if (days === 1) return `by ${booking.latestTime} the day before`;
+  return `by ${booking.latestTime}, ${days} days ahead`;
+}
+
+/**
+ * The booking notice for flexible transport. This is not a nicety: an
+ * unbooked `bestillingstransport` bus does not turn up at all, so a leg shown
+ * as an ordinary departure would strand someone at a rural stop.
+ */
+function BookingNotice({ booking }: { booking: TransitBooking }) {
+  const when = bookingWhen(booking);
+  return (
+    <View style={[styles.notice, styles.noticeWarn]} testID="transit-booking">
+      <Text style={[styles.noticeMark, styles.noticeWarnText]}>☎</Text>
+      <View style={styles.noticeBody}>
+        <Text style={[styles.noticeText, styles.noticeWarnText]}>
+          Must be booked ahead{when ? ` — ${when}` : ''}
+        </Text>
+        <Text style={styles.noticeDetail}>{bookingHow(booking)}</Text>
+        {booking.note ? <Text style={styles.noticeDetail}>{booking.note}</Text> : null}
+        {booking.url ? (
+          <Text style={styles.link} onPress={() => void Linking.openURL(booking.url!)}>
+            Booking page ↗
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
 
 /** A delay worth painting: under a minute is timetable noise, not news. */
 const DELAY_THRESHOLD_MS = 60_000;
@@ -132,8 +231,17 @@ function LegRow({ leg }: { leg: TransitLeg }) {
 
   return (
     <View style={styles.leg}>
-      <Text style={styles.legIcon}>{MODE_ICON[leg.mode]}</Text>
+      <View style={styles.legIcon}>
+        <ModeIcon mode={leg.mode} />
+      </View>
       <View style={styles.legBody}>
+        {/* Disruptions ride above the times deliberately: a cancelled service
+            with a confident departure time is the one thing a journey planner
+            must never render calmly. */}
+        {leg.situations.map((situation, i) => (
+          <SituationNotice key={situation.id ?? i} situation={situation} />
+        ))}
+        {leg.booking ? <BookingNotice booking={leg.booking} /> : null}
         {ride && leg.line ? (
           <>
             <View style={styles.legHead}>
@@ -218,6 +326,10 @@ function TripCard({
   const firstRide = trip.legs.find((leg) => isRideMode(leg.mode));
   const delay = firstRide ? legDelayMs(firstRide) : 0;
   const late = firstRide?.realtime === true && delay >= DELAY_THRESHOLD_MS;
+  // A collapsed card must not look clean when a leg inside it is cancelled —
+  // the whole point of the summary row is deciding without expanding.
+  const severity = tripSeverity(trip);
+  const needsBooking = tripNeedsBooking(trip);
 
   return (
     <View style={[styles.trip, expanded && styles.tripSelected]}>
@@ -227,23 +339,38 @@ function TripCard({
             {fmtClock(trip.startMs)} – {fmtClock(trip.endMs)}
           </Text>
           {late ? <Text style={styles.late}>+{Math.round(delay / 60_000)} min</Text> : null}
+          {severity ? (
+            <Text
+              style={[styles.tripFlag, severityStyle(severity).text]}
+              testID="transit-trip-alert"
+            >
+              {severity === 'severe' ? '! Disruption' : '! Notice'}
+            </Text>
+          ) : null}
+          {needsBooking ? (
+            <Text style={[styles.tripFlag, styles.noticeWarnText]}>☎ Book ahead</Text>
+          ) : null}
         </View>
         <View style={styles.tripLines}>
           {trip.legs.map((leg, i) =>
             leg.line ? (
               <LineChip key={i} line={leg.line} />
             ) : (
-              <Text key={i} style={styles.legIcon}>
-                {MODE_ICON[leg.mode]}
-              </Text>
+              <View key={i} style={styles.legIcon}>
+                <ModeIcon mode={leg.mode} size={15} />
+              </View>
             ),
           )}
         </View>
-        <Text style={styles.tripMeta}>
-          {fmtDuration(trip.durationMs)} ·{' '}
-          {transfers === 0 ? 'direct' : `${transfers} ${transfers === 1 ? 'change' : 'changes'}`} ·
-          🚶 {fmtKm(trip.walkDistanceM)}
-        </Text>
+        <View style={styles.tripMetaRow}>
+          <Text style={styles.tripMeta}>
+            {fmtDuration(trip.durationMs)} ·{' '}
+            {transfers === 0 ? 'direct' : `${transfers} ${transfers === 1 ? 'change' : 'changes'}`}{' '}
+            ·{' '}
+          </Text>
+          <ModeIcon mode="foot" size={13} color="#667" />
+          <Text style={styles.tripMeta}> {fmtKm(trip.walkDistanceM)}</Text>
+        </View>
       </Pressable>
       {expanded ? (
         <View style={styles.legs}>
@@ -286,19 +413,27 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
     if (transit.timeMs === null) transit.setTimeMs(Date.now());
   };
 
-  // Paging a timetable is done in *departures*, not in fixed time steps: the
-  // next page starts just after the earliest option already shown, so nothing
-  // is skipped however sparse or dense the service is.
-  const showEarlier = () => {
-    if (!first) return;
-    transit.setArriveBy(true);
-    transit.setTimeMs(first.startMs - 60_000);
-  };
-  const showLater = () => {
-    if (!last) return;
-    transit.setArriveBy(false);
-    transit.setTimeMs((trips!.length > 1 ? first!.startMs : last.startMs) + 60_000);
-  };
+  // Paging uses Entur's own page cursors, which know exactly where the last
+  // page ended — the old arithmetic (re-query at "one minute after the first
+  // departure shown") both skipped and repeated departures at the seam when
+  // several left in the same minute. Falls back to that arithmetic only if the
+  // planner sent no cursor, which it does at the very ends of the timetable.
+  const showEarlier =
+    transit.pageEarlier ??
+    (first
+      ? () => {
+          transit.setArriveBy(true);
+          transit.setTimeMs(first.startMs - 60_000);
+        }
+      : null);
+  const showLater =
+    transit.pageLater ??
+    (last
+      ? () => {
+          transit.setArriveBy(false);
+          transit.setTimeMs((trips!.length > 1 ? first!.startMs : last.startMs) + 60_000);
+        }
+      : null);
 
   return (
     <View style={styles.board}>
@@ -353,13 +488,16 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
           {RIDE_MODES.map((mode) => (
             <Pressable
               key={mode}
-              style={[styles.chip, accepts(mode) && styles.chipSelected]}
+              style={[styles.chip, styles.modeChip, accepts(mode) && styles.chipSelected]}
               onPress={() => transit.toggleMode(mode)}
+              accessibilityState={{ selected: accepts(mode) }}
               testID={`transit-mode-${mode}`}
             >
-              <Text style={styles.chipText}>
-                {MODE_ICON[mode]} {MODE_LABEL[mode]}
-              </Text>
+              {/* Labelled here, unlike the travel-mode picker: a filter is a
+                  list of promises about what will be excluded, and "no ferries"
+                  has to be unambiguous in a way a glyph alone is not. */}
+              <ModeIcon mode={mode} size={15} color={accepts(mode) ? '#1a73e8' : '#5a6478'} />
+              <Text style={styles.chipText}> {MODE_LABEL[mode]}</Text>
             </Pressable>
           ))}
           <Text style={styles.muted}>Walking to and between stops is always included.</Text>
@@ -384,10 +522,14 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
         // *that you allowed*. Blaming the timetable for the traveller's own
         // filter would send them hunting for a departure that exists.
         <View>
+          {/* The planner usually says *which* nothing this is — no stops in
+              range, outside the timetable's date range, nothing in this search
+              window. Its reason beats our guess; ours is the fallback. */}
           <Text style={styles.muted}>
             {filtered
               ? 'No journeys with the modes you picked.'
-              : 'No departures found for this time. Try a different time or a nearer stop.'}
+              : (transitProblemMessage(transit.problems) ??
+                'No departures found for this time. Try a different time or a nearer stop.')}
           </Text>
           {filtered ? (
             <Pressable onPress={transit.clearModes} testID="transit-all-modes-empty">
@@ -399,9 +541,13 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
 
       {trips && trips.length > 0 ? (
         <>
-          <Pressable onPress={showEarlier} testID="transit-earlier">
-            <Text style={styles.link}>↑ Earlier</Text>
-          </Pressable>
+          {/* Absent, not disabled, when the planner has no earlier page: at the
+              first departure of the service day there genuinely is no earlier. */}
+          {showEarlier ? (
+            <Pressable onPress={showEarlier} testID="transit-earlier">
+              <Text style={styles.link}>↑ Earlier</Text>
+            </Pressable>
+          ) : null}
           {trips.map((trip, i) => (
             <TripCard
               key={`${trip.startMs}-${i}`}
@@ -411,9 +557,11 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
               onToggle={() => transit.select(transit.selected === i ? null : i)}
             />
           ))}
-          <Pressable onPress={showLater} testID="transit-later">
-            <Text style={styles.link}>↓ Later</Text>
-          </Pressable>
+          {showLater ? (
+            <Pressable onPress={showLater} testID="transit-later">
+              <Text style={styles.link}>↓ Later</Text>
+            </Pressable>
+          ) : null}
         </>
       ) : null}
     </View>
@@ -433,6 +581,7 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: '#1a73e8', backgroundColor: '#e7effd' },
   chipText: { fontSize: 13, color: '#334', fontWeight: '600' },
+  modeChip: { flexDirection: 'row', alignItems: 'center' },
   stepChip: { paddingHorizontal: 10 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   timeValue: { fontSize: 15, fontWeight: '700', color: '#111', flexGrow: 1, textAlign: 'center' },
@@ -451,9 +600,33 @@ const styles = StyleSheet.create({
   tripTimes: { fontSize: 15, fontWeight: '700', color: '#111' },
   tripLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
   tripMeta: { fontSize: 12, color: '#667' },
+  tripMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  tripFlag: { fontSize: 11, fontWeight: '700' },
+  // Notices sit in a tinted well rather than as coloured text: a cancellation
+  // has to survive being skimmed past at the top of a dense leg.
+  notice: {
+    flexDirection: 'row',
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 2,
+  },
+  noticeBody: { flexShrink: 1, flexGrow: 1, gap: 2 },
+  noticeMark: { fontSize: 13, fontWeight: '800', width: 12, textAlign: 'center' },
+  noticeText: { fontSize: 12, fontWeight: '700', flexShrink: 1 },
+  noticeDetail: { fontSize: 12, color: '#445' },
+  noticeMore: { fontSize: 11, color: '#889' },
+  noticeInfo: { backgroundColor: '#eef3fb', borderColor: '#cfdcf2' },
+  noticeInfoText: { color: '#1a4d8f' },
+  noticeWarn: { backgroundColor: '#fff5e6', borderColor: '#f2ddb8' },
+  noticeWarnText: { color: '#8a5300' },
+  noticeSevere: { backgroundColor: '#fdecea', borderColor: '#f3c4bf' },
+  noticeSevereText: { color: '#b3261e' },
   legs: { marginTop: 6, gap: 8, borderTopWidth: 1, borderTopColor: '#eef1f6', paddingTop: 8 },
   leg: { flexDirection: 'row', gap: 8 },
-  legIcon: { fontSize: 14 },
+  legIcon: { alignItems: 'center', justifyContent: 'center' },
   legBody: { flexShrink: 1, flexGrow: 1, gap: 2 },
   legHead: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   legDetail: { fontSize: 13, color: '#223', flexShrink: 1 },
