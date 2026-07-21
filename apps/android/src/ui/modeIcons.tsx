@@ -106,6 +106,55 @@ export function HikeIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   );
 }
 
+/** Explore: a compass, because this profile has no routing opinion. */
+export function CompassIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={12} cy={12} r={8.8} stroke={color} strokeWidth={1.7} fill="none" />
+      <Path
+        d="M15.8 8.2l-2.2 5.4-5.4 2.2 2.2-5.4z"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Circle cx={12} cy={12} r={1} fill={color} />
+    </Svg>
+  );
+}
+
+/** Ski: crossed skis and poles, kept legible at the profile switch's 20 dp. */
+export function SkiIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M7 4l8.5 15.2c.7 1.2 2.1 1.8 3.4 1.4M13 3.5L5.8 18.8c-.6 1.3-2 2-3.4 1.7M5 8l3.5 1.7M16 8.5l3-1.8M5 8l-2 9M19 6.7l1.8 10"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Stacked map sheets: the compact overlay-catalog control. */
+export function LayersIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 3l8.5 4.5L12 12 3.5 7.5zM4.5 12l7.5 4 7.5-4M4.5 16.5l7.5 4 7.5-4"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Bus: windscreen, body, wheels — the shape used for coaches too. */
 export function BusIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   return (
@@ -296,6 +345,15 @@ export const PROFILE_ICON: Record<RoutingProfile, ModeIcon> = {
   bike: BicycleIcon,
   foot: WalkIcon,
   hike: HikeIcon,
+};
+
+/** Activity profiles, including the non-routing Explore and Ski modes. */
+export const MAP_PROFILE_ICON: Record<string, ModeIcon> = {
+  explore: CompassIcon,
+  drive: CarIcon,
+  bike: BicycleIcon,
+  hike: HikeIcon,
+  ski: SkiIcon,
 };
 
 /**

@@ -2,6 +2,7 @@ import { fmtClock } from '@atlas/core';
 import { pathViaLabels, ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
 import { useMemo } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
+import { ROUTING_ICON } from '../icons.js';
 import type { WebNavController } from './useWebNavigation.js';
 
 /** Extra minutes over the fastest choice, e.g. "+4 min" ("+<1 min" when tiny). */
@@ -29,17 +30,22 @@ export function RoutePreview({ nav }: { nav: WebNavController }) {
       {/* A walk to the car ferry is a different trip: switch the profile here
           and the choices refetch for the same origin/destination. */}
       <div className="route-profiles">
-        {ROUTING_PROFILES.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            aria-pressed={p.id === nav.profile}
-            disabled={nav.previewLoading}
-            onClick={() => nav.setProfile(p.id)}
-          >
-            {p.icon} {p.label}
-          </button>
-        ))}
+        {ROUTING_PROFILES.map((p) => {
+          const Icon = ROUTING_ICON[p.id];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              aria-pressed={p.id === nav.profile}
+              disabled={nav.previewLoading}
+              onClick={() => nav.setProfile(p.id)}
+            >
+              <span className="mode-label">
+                <Icon size={18} /> {p.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
       {nav.previewError && (
         <p className="nav-preview-error">No route for that profile — kept the current one</p>

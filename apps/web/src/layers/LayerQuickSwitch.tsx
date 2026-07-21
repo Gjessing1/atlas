@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LayersIcon } from '../icons.js';
 import type { LayerCatalog } from './useLayerCatalog.js';
 
 interface LayerQuickSwitchProps {
@@ -76,7 +77,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
         title="Map layers"
         onClick={() => setOpen((v) => !v)}
       >
-        <span aria-hidden="true">▤</span>
+        <LayersIcon size={18} />
         {activeCount > 0 && <span className="layer-switch-count">{activeCount}</span>}
       </button>
     </div>

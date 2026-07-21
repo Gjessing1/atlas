@@ -101,8 +101,11 @@ export function useLayerCatalog(userData: SettingsAccess, profileId: string): La
 
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
-      update((cur) => ({ ...cur, [id]: { on: cur[id]?.on ?? false, opacity } })),
-    [update],
+      update((cur) => ({
+        ...cur,
+        [id]: { on: cur[id]?.on ?? layerDefaultsOn(id, profileId), opacity },
+      })),
+    [update, profileId],
   );
 
   // Contextual layers are hidden outside their profile, so they must stop

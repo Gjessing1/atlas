@@ -46,7 +46,7 @@ export function LayersSheet({
                 <View key={group}>
                   <Text style={styles.groupHeading}>{group}</Text>
                   {metas.map((meta) => {
-                    const on = overlays.state[meta.id]?.on ?? false;
+                    const on = overlays.isOn(meta.id);
                     const opacity = overlays.state[meta.id]?.opacity ?? meta.defaultOpacity;
                     return (
                       <View key={meta.id} style={styles.row}>

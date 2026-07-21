@@ -13,6 +13,11 @@ export {
   type StoredRoutePlan,
 } from './useRoute.js';
 export {
+  useMapProfile,
+  type MapProfileController,
+  type MapProfileSettings,
+} from './useMapProfile.js';
+export {
   useTransit,
   useTransitPlan,
   type TransitFn,

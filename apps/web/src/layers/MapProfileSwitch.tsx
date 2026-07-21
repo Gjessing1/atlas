@@ -1,4 +1,5 @@
 import { MAP_PROFILES } from '@atlas/core';
+import { mapProfileIcon } from '../icons.js';
 
 interface MapProfileSwitchProps {
   /** Id of the active profile. */
@@ -24,6 +25,7 @@ export function MapProfileSwitch({ active, onPick }: MapProfileSwitchProps) {
     <div className="profile-switch" role="radiogroup" aria-label="Map profile">
       {MAP_PROFILES.map((p) => {
         const on = p.id === active;
+        const Icon = mapProfileIcon(p.id);
         return (
           <button
             key={p.id}
@@ -34,7 +36,7 @@ export function MapProfileSwitch({ active, onPick }: MapProfileSwitchProps) {
             title={p.label}
             onClick={() => onPick(p.id)}
           >
-            <span aria-hidden="true">{p.icon}</span>
+            <Icon size={19} />
             <span className="profile-switch-label">{p.label}</span>
           </button>
         );

@@ -730,8 +730,15 @@ body {
   border-color: #2a78d6;
 }
 
-/* Trip time under each mode's icon, so the picker reads "🚗 24 min ·
-   🚲 1 h 10" before a mode is chosen. Muted so the label leads. */
+.route-profiles .mode-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Trip time under each mode's icon, so every option can be compared before a
+   mode is chosen. Muted so the label leads. */
 .route-profiles .mode-time {
   font-size: 10px;
   color: #667;

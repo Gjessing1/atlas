@@ -11,16 +11,17 @@ import {
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
+import { useMapProfile } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
+import { RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
-import { useMapProfile } from './layers/useMapProfile.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -447,7 +448,7 @@ export function App() {
           aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((open) => !open)}
         >
-          <span aria-hidden="true">★</span>
+          <StarIcon size={18} />
           <span className="topbar-label">Saved</span>
         </button>
         <button
@@ -472,7 +473,7 @@ export function App() {
             }
           }}
         >
-          <span aria-hidden="true">⇄</span>
+          <RouteIcon size={18} />
           <span className="topbar-label">Route</span>
         </button>
         <button
@@ -482,7 +483,7 @@ export function App() {
           aria-pressed={weatherTarget !== null}
           onClick={toggleWeather}
         >
-          <span aria-hidden="true">☀</span>
+          <SunIcon size={18} />
           <span className="topbar-label">Weather</span>
         </button>
         <button
@@ -492,7 +493,7 @@ export function App() {
           aria-expanded={settingsOpen}
           onClick={() => setSettingsOpen((open) => !open)}
         >
-          <span aria-hidden="true">⚙</span>
+          <SettingsIcon size={18} />
           <span className="topbar-label">Settings</span>
         </button>
       </div>

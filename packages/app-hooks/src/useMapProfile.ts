@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 // purpose, so this never syncs (`local.` keys are excluded from sync).
 const PROFILE_SETTING = 'local.map.profile';
 
-interface SettingsAccess {
+export interface MapProfileSettings {
   status: string;
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => void;
@@ -25,17 +25,21 @@ export interface MapProfileController {
  * and nothing else — no saved data moves, and layers the user had switched on
  * keep their on-state for when they come back.
  */
-export function useMapProfile(userData: SettingsAccess): MapProfileController {
+export function useMapProfile(settings: MapProfileSettings): MapProfileController {
   const [id, setId] = useState<string>(DEFAULT_MAP_PROFILE);
-  const { status, getSetting, setSetting } = userData;
+  const { status, getSetting, setSetting } = settings;
 
   useEffect(() => {
     if (status !== 'ready') return;
+    let cancelled = false;
     void getSetting(PROFILE_SETTING).then((raw) => {
       // An unknown id (downgrade, hand-edited setting) falls back to Explore
-      // rather than hiding the whole contextual catalog behind a dead profile.
-      if (isMapProfile(raw)) setId(raw);
+      // rather than hiding the contextual catalog behind a dead profile.
+      if (!cancelled && isMapProfile(raw)) setId(raw);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [status, getSetting]);
 
   const setProfile = useCallback(

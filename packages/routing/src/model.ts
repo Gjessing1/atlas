@@ -7,16 +7,14 @@ export type RoutingProfile = 'car' | 'bike' | 'foot' | 'hike';
 export interface RoutingProfileInfo {
   id: RoutingProfile;
   label: string;
-  /** Pictogram for compact profile pickers. */
-  icon: string;
 }
 
 /** All profiles, in display order. */
 export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
-  { id: 'car', label: 'Drive', icon: '🚗' },
-  { id: 'bike', label: 'Cycle', icon: '🚲' },
-  { id: 'foot', label: 'Walk', icon: '🚶' },
-  { id: 'hike', label: 'Hike', icon: '🥾' },
+  { id: 'car', label: 'Drive' },
+  { id: 'bike', label: 'Cycle' },
+  { id: 'foot', label: 'Walk' },
+  { id: 'hike', label: 'Hike' },
 ];
 
 /**

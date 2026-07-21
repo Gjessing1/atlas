@@ -670,7 +670,6 @@ export function fmtDayClock(epochMs: number): string {
 export interface MapProfile {
   id: string;
   label: string;
-  icon: string;
   routing: string | null;
   /**
    * `LayerMeta.profiles` tags this profile surfaces. Kept explicit rather than
@@ -690,18 +689,17 @@ export interface MapProfile {
 }
 
 export const MAP_PROFILES: readonly MapProfile[] = [
-  { id: 'explore', label: 'Explore', icon: '🧭', routing: null, layerTags: [] },
-  { id: 'drive', label: 'Drive', icon: '🚗', routing: 'car', layerTags: [] },
-  { id: 'bike', label: 'Cycle', icon: '🚲', routing: 'bike', layerTags: ['bike'] },
+  { id: 'explore', label: 'Explore', routing: null, layerTags: [] },
+  { id: 'drive', label: 'Drive', routing: 'car', layerTags: [] },
+  { id: 'bike', label: 'Cycle', routing: 'bike', layerTags: ['bike'] },
   {
     id: 'hike',
     label: 'Hike',
-    icon: '🥾',
     routing: 'hike',
     layerTags: ['hiking'],
     defaultLayers: ['trails-hiking'],
   },
-  { id: 'ski', label: 'Ski', icon: '⛷️', routing: null, layerTags: ['ski'] },
+  { id: 'ski', label: 'Ski', routing: null, layerTags: ['ski'] },
 ];
 
 /** The profile Atlas starts in, and the fallback for an unknown stored id. */

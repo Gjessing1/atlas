@@ -1,7 +1,9 @@
+import { useMapProfile } from '@atlas/app-hooks';
 import {
   decodeMapLink,
   encodeMapHash,
   haversineM,
+  mapProfile,
   placeIsVisible,
   POI_LAYER_IDS,
   type SearchResult,
@@ -10,6 +12,7 @@ import {
 import { buildGpx } from '@atlas/gpx';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
+  isRoutingProfile,
   ROUTING_PROFILES,
   routePathToTrackData,
   viaInsertIndex,
@@ -64,6 +67,7 @@ import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCar
 import { CrosshairIcon, NavArrowIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MenuCluster } from './src/ui/MenuCluster';
+import { MapActivityControls } from './src/ui/MapActivityControls';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
@@ -123,8 +127,10 @@ function AppInner() {
   const transit = useTransitPlan(route);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
-  // Overlay catalog + per-device visibility/opacity (☰ → Layers sheet).
-  const overlaysCtl = useOverlays(data);
+  // Activity profile + overlay state are device-local and shared by the
+  // one-tap map controls, the route default, and the full Layers sheet.
+  const profiles = useMapProfile(data);
+  const overlaysCtl = useOverlays(data, profiles.profile.id);
 
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -161,6 +167,7 @@ function AppInner() {
   const [initialView, setInitialView] = useState<MapView | null>(null);
   // Latest settled camera — feeds the search bias, share links and persistence.
   const viewRef = useRef<MapView | null>(null);
+  const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // While a trip is active the nav banner owns the top of the screen, so drop
@@ -307,6 +314,7 @@ function AppInner() {
   const onViewChange = useCallback(
     (view: MapView) => {
       viewRef.current = view;
+      setMapZoom(Math.round(view.zoom));
       if (persistTimer.current) clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(() => {
         setSetting(
@@ -324,6 +332,17 @@ function AppInner() {
 
   // Viewport bias for geocoding (web parity: SearchBox sends lat/lon).
   const getBias = useCallback(async () => viewRef.current?.center ?? null, []);
+
+  // Picking an activity also chooses the route planner's starting mode where
+  // one exists. Explore and Ski intentionally leave its last mode alone.
+  const onPickMapProfile = useCallback(
+    (id: string) => {
+      profiles.setProfile(id);
+      const routing = mapProfile(id).routing;
+      if (routing !== null && isRoutingProfile(routing)) route.setProfile(routing);
+    },
+    [profiles, route],
+  );
 
   // Share the destination as a web #map= link (opens in any browser; the
   // installed app also answers atlas: links with the same fragment).
@@ -777,6 +796,18 @@ function AppInner() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
           onPlanRoute={() => route.start()}
+        />
+      ) : null}
+
+      {!planning && !previewing && !following ? (
+        <MapActivityControls
+          profile={profiles}
+          overlays={overlaysCtl}
+          mapZoom={mapZoom}
+          // Clear the system navigation bar, locate button, and optional
+          // offline toggle. The inset also keeps this safe in landscape.
+          bottom={bottomInset + (packs.length > 0 ? 134 : 84)}
+          onPickProfile={onPickMapProfile}
         />
       ) : null}
 

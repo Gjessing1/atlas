@@ -9,6 +9,7 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
 import { fmtDuration, fmtKm } from '../format.js';
+import { ROUTING_ICON, TrainIcon } from '../icons.js';
 import { TransitResults } from './TransitResults.js';
 import type { RoutePlanner } from './useRoute.js';
 import type { TransitPlan } from './useTransit.js';
@@ -213,24 +214,27 @@ export function RoutePanel({
       </div>
 
       <div className="route-profiles" role="group" aria-label="Routing profile">
-        {ROUTING_PROFILES.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            aria-pressed={!transitMode && p.id === route.profile}
-            onClick={() => {
-              transit.setEnabled(false);
-              route.setProfile(p.id);
-            }}
-          >
-            <span>
-              <span aria-hidden="true">{p.icon}</span> {p.label}
-            </span>
-            {showModeTimes && (
-              <span className="mode-time">{modeTimeLabel(route.modeTimes[p.id])}</span>
-            )}
-          </button>
-        ))}
+        {ROUTING_PROFILES.map((p) => {
+          const Icon = ROUTING_ICON[p.id];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              aria-pressed={!transitMode && p.id === route.profile}
+              onClick={() => {
+                transit.setEnabled(false);
+                route.setProfile(p.id);
+              }}
+            >
+              <span className="mode-label">
+                <Icon size={18} /> {p.label}
+              </span>
+              {showModeTimes && (
+                <span className="mode-time">{modeTimeLabel(route.modeTimes[p.id])}</span>
+              )}
+            </button>
+          );
+        })}
         {transit.offered && (
           <button
             type="button"
@@ -239,7 +243,7 @@ export function RoutePanel({
             title="Public transport departures (Norway, live from Entur)"
           >
             <span>
-              <span aria-hidden="true">🚆</span> Transit
+              <TrainIcon size={18} /> Transit
             </span>
             {showModeTimes && transitTimeMs !== undefined && (
               <span className="mode-time">{fmtDuration(transitTimeMs)}</span>

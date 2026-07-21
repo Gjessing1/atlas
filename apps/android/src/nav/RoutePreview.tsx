@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { NavController } from './useNavigation';
+import { PROFILE_ICON } from '../ui/modeIcons';
 
 function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;
@@ -55,6 +56,7 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
       <View style={styles.profileRow}>
         {ROUTING_PROFILES.map((p) => {
           const active = p.id === nav.profile;
+          const Icon = PROFILE_ICON[p.id];
           return (
             <Pressable
               key={p.id}
@@ -63,7 +65,7 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
               disabled={nav.previewLoading}
               testID={`nav-profile-${p.id}`}
             >
-              <Text style={styles.profileIcon}>{p.icon}</Text>
+              <Icon color={active ? '#1d4fd7' : '#5c6270'} size={18} />
               <Text style={[styles.profileLabel, active && styles.profileLabelActive]}>
                 {p.label}
               </Text>
@@ -147,7 +149,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#eceef2',
   },
   profileChipActive: { backgroundColor: '#d7e4ff' },
-  profileIcon: { fontSize: 14 },
   profileLabel: { fontSize: 13, fontWeight: '600', color: '#5c6270' },
   profileLabelActive: { color: '#1d4fd7' },
   previewError: { fontSize: 13, color: '#b3261e' },
