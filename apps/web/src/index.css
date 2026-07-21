@@ -711,6 +711,10 @@ body {
 
 .route-profiles button {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
   padding: 4px 2px;
   border: 1px solid #ccc;
   border-radius: 6px;
@@ -724,6 +728,19 @@ body {
 .route-profiles button[aria-pressed='true'] {
   background: #eef3fb;
   border-color: #2a78d6;
+}
+
+/* Trip time under each mode's icon, so the picker reads "🚗 24 min ·
+   🚲 1 h 10" before a mode is chosen. Muted so the label leads. */
+.route-profiles .mode-time {
+  font-size: 10px;
+  color: #667;
+  line-height: 1.1;
+  min-height: 12px;
+}
+
+.route-profiles button[aria-pressed='true'] .mode-time {
+  color: #2a78d6;
 }
 
 /* `hidden` has to beat the flex display, or the row stays on screen. */

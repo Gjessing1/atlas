@@ -101,6 +101,57 @@ describe('useRoute', () => {
     expect(result.current.waypoints[0]!.pos).toEqual(B);
   });
 
+  it('routes every mode in the background so the picker can show trip times', async () => {
+    const timeByProfile: Record<string, number> = {
+      car: 1_440_000,
+      bike: 4_200_000,
+      foot: 10_800_000,
+    };
+    const route = vi.fn<RouteFn>((q) => {
+      // Hike has no route here — its chip must read "no time", not a stale one.
+      if (q.profile === 'hike') return Promise.reject(new RoutingError('no hike route'));
+      return Promise.resolve({
+        paths: [
+          {
+            points: q.points.map((p) => ({ ...p })),
+            distanceM: 1000,
+            timeMs: timeByProfile[q.profile] ?? 60_000,
+            ascentM: 0,
+            descentM: 0,
+          },
+        ],
+      });
+    });
+    const { result } = renderHook(() => useRoute(route));
+
+    act(() => result.current.start(A));
+    act(() => result.current.addWaypoint(B));
+    // Main re-route debounce (250) then the background mode-times pass (400).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(result.current.modeTimes.car).toBe(1_440_000);
+    expect(result.current.modeTimes.bike).toBe(4_200_000);
+    expect(result.current.modeTimes.foot).toBe(10_800_000);
+    expect(result.current.modeTimes.hike).toBe('none'); // rejection → no time to show
+
+    // The background pass is lightweight — no alternatives, no instructions —
+    // and covers all four road profiles once.
+    const bgProfiles = route.mock.calls
+      .filter(([q]) => q.alternatives === false && q.instructions === false)
+      .map(([q]) => q.profile)
+      .sort();
+    expect(bgProfiles).toEqual(['bike', 'car', 'foot', 'hike']);
+
+    // A loop is not comparable across modes, so the times stand down.
+    act(() => result.current.setRoundTrip(true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(result.current.modeTimes).toEqual({});
+  });
+
   it('surfaces RoutingError messages and a generic fallback', async () => {
     let fail: Error = new RoutingError('No route between these points');
     const route = vi.fn<RouteFn>(() => Promise.reject(fail));

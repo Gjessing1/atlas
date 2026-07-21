@@ -33,6 +33,16 @@ function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): s
   return via ? `${head} via ${via}` : head;
 }
 
+/**
+ * Compact trip time for a mode chip: the duration, "—" when the mode can't
+ * route this plan, or "…" while the background pass is still routing it.
+ */
+function modeTimeLabel(t: number | 'none' | undefined): string {
+  if (t === undefined) return '…';
+  if (t === 'none') return '—';
+  return fmtDuration(t);
+}
+
 /** Waypoint label, matching the map markers: A, B, C… (⟳ for a round trip). */
 function waypointLabel(index: number, roundTrip: boolean, count: number): string {
   if (roundTrip || count === 1) return '⟳';
@@ -156,6 +166,12 @@ export function RoutePanel({
   const [copied, setCopied] = useState(false);
   const path = route.paths?.[route.selectedPath];
   const transitMode = transit.enabled;
+  // Trip times sit under the mode icons only for a point-to-point plan, where
+  // comparing modes makes sense; a loop or a single stop has nothing to compare.
+  const showModeTimes = !route.roundTrip && route.waypoints.length >= 2;
+  // Transit's chip time comes from its own board, not a costing — and only once
+  // that board has been asked (the planner runs only while transit is selected).
+  const transitTimeMs = transit.trips?.[0]?.durationMs;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
 
@@ -207,7 +223,12 @@ export function RoutePanel({
               route.setProfile(p.id);
             }}
           >
-            <span aria-hidden="true">{p.icon}</span> {p.label}
+            <span>
+              <span aria-hidden="true">{p.icon}</span> {p.label}
+            </span>
+            {showModeTimes && (
+              <span className="mode-time">{modeTimeLabel(route.modeTimes[p.id])}</span>
+            )}
           </button>
         ))}
         {transit.offered && (
@@ -217,7 +238,12 @@ export function RoutePanel({
             onClick={() => transit.setEnabled(true)}
             title="Public transport departures (Norway, live from Entur)"
           >
-            <span aria-hidden="true">🚆</span> Transit
+            <span>
+              <span aria-hidden="true">🚆</span> Transit
+            </span>
+            {showModeTimes && transitTimeMs !== undefined && (
+              <span className="mode-time">{fmtDuration(transitTimeMs)}</span>
+            )}
           </button>
         )}
       </div>

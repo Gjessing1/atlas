@@ -30,6 +30,16 @@ function fmtDuration(ms: number): string {
 
 const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
+/**
+ * Compact trip time for a mode chip: the duration, "—" when the mode can't
+ * route this plan, or "…" while the background pass is still routing it.
+ */
+function modeTimeLabel(t: number | 'none' | undefined): string {
+  if (t === undefined) return '…';
+  if (t === 'none') return '—';
+  return fmtDuration(t);
+}
+
 /** Alternative chip: the fastest shows its duration, others their extra minutes. */
 function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {
   const extraMin = Math.round((paths[i]!.timeMs - paths[0]!.timeMs) / 60000);
@@ -230,6 +240,12 @@ export function RoutePanel({
 }) {
   const transitMode = transit.enabled;
   const path = route.paths?.[route.selectedPath] ?? null;
+  // Trip times sit under the mode icons only for a point-to-point plan, where
+  // comparing modes makes sense; a loop or a single stop has nothing to compare.
+  const showModeTimes = !route.roundTrip && route.waypoints.length >= 2;
+  // Transit's chip time comes from its own board, not a costing — and only once
+  // that board has been asked (the planner runs only while transit is selected).
+  const transitTimeMs = transit.trips?.[0]?.durationMs;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -324,6 +340,11 @@ export function RoutePanel({
                 testID={`route-profile-${p.id}`}
               >
                 <Icon color={on ? '#1a73e8' : '#5a6478'} />
+                {showModeTimes ? (
+                  <Text style={[styles.modeTime, on && styles.modeTimeSelected]}>
+                    {modeTimeLabel(route.modeTimes[p.id])}
+                  </Text>
+                ) : null}
               </Pressable>
             );
           })}
@@ -339,6 +360,11 @@ export function RoutePanel({
               testID="route-profile-transit"
             >
               <TramIcon color={transitMode ? '#1a73e8' : '#5a6478'} />
+              {showModeTimes && transitTimeMs !== undefined ? (
+                <Text style={[styles.modeTime, transitMode && styles.modeTimeSelected]}>
+                  {fmtDuration(transitTimeMs)}
+                </Text>
+              ) : null}
             </Pressable>
           ) : null}
         </View>
@@ -661,6 +687,10 @@ const styles = StyleSheet.create({
     marginBottom: -1,
   },
   modeTabSelected: { borderBottomColor: '#1a73e8' },
+  // Trip time under each mode icon, so the picker reads "24 min / 1 h 10"
+  // before a mode is chosen. Muted so the icon leads.
+  modeTime: { marginTop: 2, fontSize: 10, color: '#667' },
+  modeTimeSelected: { color: '#1a73e8' },
   roundRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   kmInput: {
     borderWidth: 1,

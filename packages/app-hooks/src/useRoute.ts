@@ -1,6 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import {
   optimizeWaypointOrder,
+  ROUTING_PROFILES,
   RoutingError,
   type RoutePath,
   type RouteQuery,
@@ -40,6 +41,13 @@ export interface StoredRoutePlan {
  */
 export type RouteFn = (query: RouteQuery, signal: AbortSignal) => Promise<RouteResult>;
 
+/**
+ * A travel mode's trip time for the picker: the duration in ms, or `'none'`
+ * when that mode cannot route the current plan (no path, or the mode was
+ * refused offline). Absent from the map = not computed yet / still routing.
+ */
+export type ModeTime = number | 'none';
+
 /** Route-planning state: waypoints in, routed paths out, auto-refreshed. */
 export interface RoutePlanner {
   active: boolean;
@@ -52,6 +60,14 @@ export interface RoutePlanner {
   selectedPath: number;
   loading: boolean;
   error: string | null;
+  /**
+   * Trip time per road profile for the mode picker, so each mode can show its
+   * duration ("🚗 24 min · 🚲 1 h 10") before one is committed to. Filled by a
+   * debounced background pass over the current stops; only meaningful for a
+   * point-to-point plan, so empty for a round trip. Transit's time is not here
+   * — it comes from the journey board, not a costing.
+   */
+  modeTimes: Partial<Record<RoutingProfile, ModeTime>>;
 
   /**
    * Enter route mode, optionally seeding the first stop (e.g. from a dropped
@@ -117,6 +133,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const [selectedPath, setSelectedPath] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modeTimes, setModeTimes] = useState<Partial<Record<RoutingProfile, ModeTime>>>({});
   const idRef = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -175,6 +192,42 @@ export function useRoute(route: RouteFn): RoutePlanner {
       controller.abort();
     };
   }, [active, profile, waypoints, roundTrip, roundTripKm, seed, route]);
+
+  // Trip time for *every* mode, for the picker's "🚗 24 min · 🚲 1 h 10" row.
+  // The main effect above only routes the selected profile; this fills in the
+  // rest with one debounced background pass per stop edit — lightweight queries
+  // (no alternatives, no instructions) fired in parallel, each chip filling as
+  // it resolves. Not keyed on `profile`: the geometry inputs are the stops, so
+  // switching the selected mode reads these cached times rather than re-routing.
+  // Point-to-point only — a round trip's fixed-length loops aren't comparable
+  // across modes, and transit is timed by its own board, not a costing.
+  useEffect(() => {
+    if (!active || roundTrip || waypoints.length < 2) {
+      setModeTimes({});
+      return;
+    }
+    const points = waypoints.map((w) => w.pos);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      for (const { id } of ROUTING_PROFILES) {
+        route({ profile: id, points, alternatives: false, instructions: false }, controller.signal)
+          .then((result) => {
+            if (controller.signal.aborted) return;
+            const best = result.paths[0];
+            setModeTimes((prev) => ({ ...prev, [id]: best ? best.timeMs : 'none' }));
+          })
+          .catch(() => {
+            // A real "no route for this mode" and a transient failure look the
+            // same to the picker: either way this mode has no time to show.
+            if (!controller.signal.aborted) setModeTimes((prev) => ({ ...prev, [id]: 'none' }));
+          });
+      }
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [active, roundTrip, waypoints, route]);
 
   const start = useCallback(
     (at?: LatLng, name?: string) => {
@@ -316,6 +369,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     selectedPath,
     loading,
     error,
+    modeTimes,
     start,
     restore,
     plan,
