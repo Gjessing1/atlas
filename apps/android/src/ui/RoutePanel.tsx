@@ -11,8 +11,10 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
+import type { TransitPlan } from '../routing/useTransit';
 import { geoSearch, type SearchBias } from '../search/geoSearch';
 import { ElevationChart } from './ElevationChart';
+import { TransitResults } from './TransitResults';
 
 function fmtKm(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -146,6 +148,7 @@ function StopSearch({
  */
 export function RoutePanel({
   route,
+  transit,
   packs,
   places,
   getBias,
@@ -153,6 +156,8 @@ export function RoutePanel({
   bottomInset = 0,
 }: {
   route: RoutePlanner;
+  /** Public transport for this plan — a travel mode beside the road profiles. */
+  transit: TransitPlan;
   /** Downloaded packs — the stop search falls back to their FTS index offline. */
   packs: LocalPack[];
   /** Saved places, offered in the stop search alongside geocoder results. */
@@ -163,6 +168,7 @@ export function RoutePanel({
   onExport: (path: RoutePath) => void;
   bottomInset?: number;
 }) {
+  const transitMode = transit.enabled;
   const path = route.paths?.[route.selectedPath] ?? null;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
@@ -188,8 +194,11 @@ export function RoutePanel({
         {ROUTING_PROFILES.map((p) => (
           <Pressable
             key={p.id}
-            style={[styles.chip, p.id === route.profile && styles.chipSelected]}
-            onPress={() => route.setProfile(p.id)}
+            style={[styles.chip, !transitMode && p.id === route.profile && styles.chipSelected]}
+            onPress={() => {
+              transit.setEnabled(false);
+              route.setProfile(p.id);
+            }}
             testID={`route-profile-${p.id}`}
           >
             <Text style={styles.chipText}>
@@ -197,16 +206,31 @@ export function RoutePanel({
             </Text>
           </Pressable>
         ))}
+        {/* Transit is a travel mode, not a fifth routing profile — and it is
+            offered only where the national planner can actually answer. */}
+        {transit.offered ? (
+          <Pressable
+            style={[styles.chip, transitMode && styles.chipSelected]}
+            onPress={() => transit.setEnabled(true)}
+            testID="route-profile-transit"
+          >
+            <Text style={styles.chipText}>🚌 Transit</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.roundRow}>
-        <Pressable
-          style={[styles.chip, route.roundTrip && styles.chipSelected]}
-          onPress={() => route.setRoundTrip(!route.roundTrip)}
-          testID="route-roundtrip"
-        >
-          <Text style={styles.chipText}>Round trip</Text>
-        </Pressable>
+        {/* A timetable has no notion of a loop, so the whole round-trip control
+            stands down in transit mode rather than sitting there inert. */}
+        {!transitMode ? (
+          <Pressable
+            style={[styles.chip, route.roundTrip && styles.chipSelected]}
+            onPress={() => route.setRoundTrip(!route.roundTrip)}
+            testID="route-roundtrip"
+          >
+            <Text style={styles.chipText}>Round trip</Text>
+          </Pressable>
+        ) : null}
         {route.roundTrip ? (
           <>
             <TextInput
@@ -290,17 +314,26 @@ export function RoutePanel({
         </Text>
       )}
 
+      {/* Via points cannot be honoured by a timetable, so say so rather than
+          quietly planning between the ends only. */}
+      {transitMode && route.waypoints.length > 2 ? (
+        <Text style={styles.muted}>
+          Public transport is planned between the first and last stop — stops in between are
+          ignored.
+        </Text>
+      ) : null}
+
       <View style={styles.actionRow}>
         <Pressable
           style={[styles.button, styles.buttonQuiet]}
-          disabled={route.roundTrip || route.waypoints.length < 2}
+          disabled={transitMode || route.roundTrip || route.waypoints.length < 2}
           onPress={route.reverse}
         >
           <Text style={styles.buttonQuietText}>Reverse</Text>
         </Pressable>
         <Pressable
           style={[styles.button, styles.buttonQuiet]}
-          disabled={route.roundTrip || route.waypoints.length < 4}
+          disabled={transitMode || route.roundTrip || route.waypoints.length < 4}
           onPress={route.optimize}
         >
           <Text style={styles.buttonQuietText}>Optimize</Text>
@@ -312,9 +345,11 @@ export function RoutePanel({
         >
           <Text style={styles.buttonQuietText}>Clear</Text>
         </Pressable>
+        {/* A journey is legs and times, not a track — there is nothing to export
+            as GPX, so the button goes dead rather than writing a lie. */}
         <Pressable
-          style={[styles.button, !path && styles.buttonDisabled]}
-          disabled={!path}
+          style={[styles.button, (!path || transitMode) && styles.buttonDisabled]}
+          disabled={!path || transitMode}
           onPress={() => path && onExport(path)}
           testID="route-export"
         >
@@ -322,8 +357,10 @@ export function RoutePanel({
         </Pressable>
       </View>
 
-      {route.error ? <Text style={styles.error}>{route.error}</Text> : null}
-      {path ? (
+      {transitMode ? <TransitResults transit={transit} /> : null}
+
+      {!transitMode && route.error ? <Text style={styles.error}>{route.error}</Text> : null}
+      {!transitMode && path ? (
         <View style={styles.statsRow}>
           <Text style={styles.stats}>
             {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
@@ -340,8 +377,8 @@ export function RoutePanel({
           ) : null}
         </View>
       ) : null}
-      {profileOpen && profileData ? <ElevationChart data={profileData} /> : null}
-      {route.paths && route.paths.length > 1 ? (
+      {!transitMode && profileOpen && profileData ? <ElevationChart data={profileData} /> : null}
+      {!transitMode && route.paths && route.paths.length > 1 ? (
         <View style={styles.chipRow}>
           {route.paths.map((p, i) => (
             <Pressable

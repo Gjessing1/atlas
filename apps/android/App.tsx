@@ -58,6 +58,7 @@ import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
 import { useSync } from './src/sync/useSync';
 import { useRoute } from './src/routing/useRoute';
+import { useTransitPlan } from './src/routing/useTransit';
 import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
@@ -120,6 +121,7 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
+  const transit = useTransitPlan(route);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
   // Overlay catalog + per-device visibility/opacity (☰ → Layers sheet).
@@ -598,6 +600,7 @@ function AppInner() {
         trackGeo={trackGeo}
         nav={nav}
         route={route}
+        transit={transit}
         destination={destination}
         visiblePlaces={visiblePlaces}
         showPuck={showPuck}
@@ -835,6 +838,7 @@ function AppInner() {
       {planning ? (
         <RoutePanel
           route={route}
+          transit={transit}
           packs={packs}
           places={data.places}
           getBias={getBias}

@@ -23,8 +23,10 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { ActiveOverlay } from '../layers/useOverlays';
 import type { NavController } from '../nav/useNavigation';
+import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
+import type { TransitPlan } from '../routing/useTransit';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import { PlacePin } from '../ui/icons';
 import { ScaleBar } from './ScaleBar';
@@ -61,6 +63,49 @@ function previewRoutesGeoJSON(paths: { points: LatLng[] }[], selected: number) {
   };
 }
 
+/**
+ * The selected journey as one collection: each leg carries its own colour and
+ * whether it is a walk, so rides draw in the line's official colour and walks
+ * draw dashed. A journey has no single geometry, so this is per-leg by nature.
+ */
+function transitLegsGeoJSON(trip: TransitTrip) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: trip.legs
+      .filter((leg) => leg.points.length > 1)
+      .map((leg) => ({
+        type: 'Feature' as const,
+        properties: {
+          walk: !isRideMode(leg.mode),
+          // No official colour means "we were not told one" — fall back to the
+          // planned-route purple rather than inventing a brand colour.
+          colour: leg.line?.colour ?? '#7c3aed',
+        },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: leg.points.map((p) => [p.lng, p.lat]),
+        },
+      })),
+  };
+}
+
+/** Boarding/alighting points — where the traveller actually changes vehicle. */
+function transitStopsGeoJSON(trip: TransitTrip) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: trip.legs
+      .filter((leg) => isRideMode(leg.mode))
+      .map((leg) => ({
+        type: 'Feature' as const,
+        properties: {},
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [leg.from.position.lng, leg.from.position.lat],
+        },
+      })),
+  };
+}
+
 /** The default boot view (Oslo) when no camera has been persisted yet. */
 export const DEFAULT_VIEW = { center: { lat: 59.91, lng: 10.75 }, zoom: 10 };
 
@@ -76,6 +121,8 @@ interface MapSceneProps {
   trackGeo: TrackGeometry;
   nav: NavController;
   route: RoutePlanner;
+  /** Public transport plan — draws the selected journey instead of a road line. */
+  transit: TransitPlan;
   /** Picked destination awaiting the travel-mode card (red pin). */
   destination: DestinationTarget | null;
   visiblePlaces: PlaceRecord[];
@@ -118,6 +165,7 @@ export function MapScene({
   trackGeo,
   nav,
   route,
+  transit,
   destination,
   visiblePlaces,
   showPuck,
@@ -149,6 +197,8 @@ export function MapScene({
   );
 
   const planning = route.active;
+  // In transit mode the road line stands down so the map shows one answer.
+  const transitTrip = transit.enabled ? transit.trip : null;
   // The routed line to draw while planning (selected path, primary or alt).
   const planPath = route.paths?.[route.selectedPath] ?? null;
 
@@ -364,7 +414,7 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Planned route (route-planning panel): distinct colour from navigation. */}
-        {planning && planPath ? (
+        {planning && planPath && !transitTrip ? (
           <GeoJSONSource
             id="atlas-plan"
             data={lineStringFeature(planPath.points.map((p) => [p.lng, p.lat]))}
@@ -394,6 +444,48 @@ export function MapScene({
               paint={{ 'text-color': '#ffffff' }}
             />
           </GeoJSONSource>
+        ) : null}
+        {/* The selected public transport journey: rides in the line's own
+          colour, walks dashed, boarding points ringed. Drawn instead of the
+          planned road line, never alongside it. */}
+        {planning && transitTrip ? (
+          <>
+            <GeoJSONSource id="atlas-transit" data={transitLegsGeoJSON(transitTrip)}>
+              <Layer
+                type="line"
+                id="atlas-transit-walk"
+                filter={['to-boolean', ['get', 'walk']]}
+                paint={{
+                  'line-color': '#5f6773',
+                  'line-width': 4,
+                  'line-opacity': 0.9,
+                  'line-dasharray': [1, 1.6],
+                }}
+              />
+              <Layer
+                type="line"
+                id="atlas-transit-ride"
+                filter={['!', ['to-boolean', ['get', 'walk']]]}
+                paint={{
+                  'line-color': ['get', 'colour'],
+                  'line-width': 6,
+                  'line-opacity': 0.95,
+                }}
+              />
+            </GeoJSONSource>
+            <GeoJSONSource id="atlas-transit-stops" data={transitStopsGeoJSON(transitTrip)}>
+              <Layer
+                type="circle"
+                id="atlas-transit-stop-dots"
+                paint={{
+                  'circle-radius': 5,
+                  'circle-color': '#ffffff',
+                  'circle-stroke-color': '#1a1a1a',
+                  'circle-stroke-width': 2,
+                }}
+              />
+            </GeoJSONSource>
+          </>
         ) : null}
         {/* Waypoints are draggable (long-press, then drag — MapLibre Native's
           annotation drag gesture); releasing re-routes through the new point.

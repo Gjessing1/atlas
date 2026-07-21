@@ -12,7 +12,13 @@ export {
   type RouteWaypoint,
   type StoredRoutePlan,
 } from './useRoute.js';
-export { useTransit, type TransitFn, type TransitPlanner } from './useTransit.js';
+export {
+  useTransit,
+  useTransitPlan,
+  type TransitFn,
+  type TransitPlan,
+  type TransitPlanner,
+} from './useTransit.js';
 export {
   useUserData,
   sanitizeFileName,
