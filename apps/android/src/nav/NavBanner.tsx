@@ -1,3 +1,4 @@
+import type { NavController } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
 import { laneGlyphs, laneLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
@@ -7,7 +8,6 @@ import Svg, { Path } from 'react-native-svg';
 import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
 import { TurnIcon } from './TurnIcon';
-import type { NavController } from './useNavigation';
 
 function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;

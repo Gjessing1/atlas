@@ -1,8 +1,8 @@
+import type { NavController } from '@atlas/app-hooks';
 import { pathViaLabels, ROUTING_PROFILES } from '@atlas/routing';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import type { NavController } from './useNavigation';
 import { BottomSheet } from '../ui/BottomSheet';
 import { PROFILE_ICON } from '../ui/modeIcons';
 import { theme } from '../ui/theme';

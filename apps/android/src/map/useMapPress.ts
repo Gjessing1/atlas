@@ -1,3 +1,4 @@
+import type { NavController } from '@atlas/app-hooks';
 import {
   haversineM,
   identifyOverlays,
@@ -12,7 +13,6 @@ import { useCallback, useRef } from 'react';
 import type { RefObject } from 'react';
 
 import type { ActiveOverlay } from '../layers/useOverlays';
-import type { NavController } from '../nav/useNavigation';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import { NAV_PREVIEW_LAYER_IDS, PLAN_LINE_LAYER_ID } from './MapScene';

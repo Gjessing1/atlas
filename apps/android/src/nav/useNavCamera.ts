@@ -1,9 +1,8 @@
+import type { NavController } from '@atlas/app-hooks';
 import { followZoom, remainingRouteBounds } from '@atlas/navigation';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
-
-import type { NavController } from './useNavigation';
 
 /** A manual pan pauses the follow; it resumes by itself after this long. */
 const AUTO_RESUME_MS = 12_000;

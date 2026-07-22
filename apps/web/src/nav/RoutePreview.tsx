@@ -1,8 +1,8 @@
+import type { NavController } from '@atlas/app-hooks';
 import { fmtDuration, fmtEta, fmtKm } from '@atlas/core';
 import { pathViaLabels, ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
 import { useMemo } from 'react';
 import { ROUTING_ICON } from '../icons.js';
-import type { WebNavController } from './useWebNavigation.js';
 
 /** Extra minutes over the fastest choice, e.g. "+4 min" ("+<1 min" when tiny). */
 function fmtExtra(timeMs: number, fastestMs: number): string {
@@ -16,7 +16,7 @@ function fmtExtra(timeMs: number, fastestMs: number): string {
  * duration, arrival time, distance and a "via …" label where the roads tell
  * the choices apart. Start begins guidance along the selected row.
  */
-export function RoutePreview({ nav }: { nav: WebNavController }) {
+export function RoutePreview({ nav }: { nav: NavController }) {
   const paths: RoutePath[] | null = nav.previewPaths;
   const vias = useMemo(() => (paths ? pathViaLabels(paths) : []), [paths]);
   if (nav.phase !== 'preview' || !paths || paths.length === 0) return null;

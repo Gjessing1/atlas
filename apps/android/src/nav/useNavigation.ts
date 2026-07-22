@@ -1,644 +1,170 @@
-import type { LatLng } from '@atlas/core';
 import {
-  headingRateDegPerSec,
-  navOptionsForProfile,
-  NavigationSession,
-  type NavState,
-} from '@atlas/navigation';
-import {
-  enrichRoute,
-  httpTraceTransport,
-  sortRouteChoices,
-  type RoutePath,
-  type RoutingProfile,
-} from '@atlas/routing';
+  useNavigationController,
+  type NavController,
+  type NavOriginFix,
+  type NavPlatform,
+} from '@atlas/app-hooks';
+import { headingRateDegPerSec, type Position } from '@atlas/navigation';
+import { httpTraceTransport } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
 import * as Speech from 'expo-speech';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 
 import { AudioFocus } from '../../modules/audiofocus';
 import { makeRouteProvider } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
-import { type LocationFix, NAV_LOCATION_TASK, setLocationHandler } from './locationTask';
+import { NAV_LOCATION_TASK, setLocationHandler, toPosition } from './locationTask';
 
-export type NavPhase =
-  'idle' | 'starting' | 'preview' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+/** How stale a last-known position may be when a live fix never arrives. */
+const LAST_KNOWN_MAX_AGE_MS = 120_000;
 
-/** What the arrival card shows once the trip is over. */
-export interface TripSummary {
-  distanceM: number;
-  durationMs: number;
-}
+/**
+ * Utterances queued or playing. Audio focus is held while it is non-zero, so
+ * one duck spans a whole burst of prompts rather than flapping between them.
+ */
+let utterances = 0;
 
-export interface NavController {
-  phase: NavPhase;
-  state: NavState | null;
-  /** Active route geometry as [lng, lat] pairs, for the map line source. */
-  routeCoords: number[][];
-  /** The route being followed (instructions included, for on-map turn arrows). */
-  activePath: RoutePath | null;
-  profile: RoutingProfile;
-  /** Where the trip is headed (for the finish marker); null when idle. */
-  destination: LatLng | null;
-  /** Route choices while in the preview phase (fastest first); null otherwise. */
-  previewPaths: RoutePath[] | null;
-  /** Index into previewPaths of the choice guidance will follow. */
-  previewIndex: number;
-  /** True while a profile switch is refetching the preview choices. */
-  previewLoading: boolean;
-  /** Why the last profile switch kept the old choices (no route, offline …). */
-  previewError: string | null;
-  /** Latest ground speed in m/s, or null when unknown/stationary. */
-  speedMps: number | null;
-  /** Whether voice prompts are muted. */
-  muted: boolean;
-  /** Distance/time of the finished trip (arrived phase only), else null. */
-  tripSummary: TripSummary | null;
-  /** True while off-route but the reroute keeps failing (routing unreachable). */
-  rerouteFailed: boolean;
-  error: string | null;
-  start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
-  /** Pick one of the preview route choices (preview phase only). */
-  selectPreview: (index: number) => void;
-  /** Switch profile and refetch the preview choices (preview phase only). */
-  setProfile: (profile: RoutingProfile) => void;
-  /** Begin guidance along the selected preview choice. */
-  go: () => Promise<void>;
-  toggleMute: () => void;
-  /** Set mute directly (the persisted preference applies through this). */
-  setMuted: (muted: boolean) => void;
-  /**
-   * End the trip as *arrived* on the traveller's say-so. Offered because both
-   * automatic rules can miss at the destination — a fix that never gets
-   * accurate enough, or a destination the road data puts across a wall.
-   */
-  arriveNow: () => void;
-  stop: () => void;
+function focus(on: boolean): void {
+  try {
+    if (on) AudioFocus?.requestDuck();
+    else AudioFocus?.abandon();
+  } catch (err) {
+    console.warn('audio focus failed', err);
+  }
 }
 
 /**
- * Drives @atlas/navigation's NavigationSession from live device GPS, speaks its
- * voice prompts (expo-speech), and re-routes when the traveller leaves the line.
- * Routing goes through the shared offline-first provider: the embedded Valhalla
- * engine when a downloaded pack covers the trip, otherwise the server. Location
- * runs under an Android foreground service so guidance survives screen-off.
- *
- * Starting a trip is two-step (Google-style): `start` fetches the route plus
- * up to two alternatives and enters the `preview` phase — the fastest is
- * pre-selected, the map shows all choices — then `go` begins guidance along
- * the selected one. Re-routes after leaving the line always take the fastest.
+ * Speak a prompt, ducking music/podcasts for its duration — expo-speech never
+ * asks for audio focus itself, so prompts used to talk over media.
  */
-export function useNavigation(): NavController {
-  const serverOrigin = useServerOrigin();
-  const provider = useMemo(() => makeRouteProvider(serverOrigin), [serverOrigin]);
+function speak(text: string): void {
+  if (utterances === 0) focus(true);
+  utterances++;
+  const release = () => {
+    utterances = Math.max(0, utterances - 1);
+    if (utterances === 0) focus(false);
+  };
+  try {
+    // Instructions are English; without a pinned language a Norwegian device
+    // voice garbles them.
+    Speech.speak(text, { language: 'en', onDone: release, onStopped: release, onError: release });
+  } catch (err) {
+    release();
+    throw err;
+  }
+}
 
-  const [phase, setPhase] = useState<NavPhase>('idle');
-  const [state, setState] = useState<NavState | null>(null);
-  const [routeCoords, setRouteCoords] = useState<number[][]>([]);
-  const [activePath, setActivePath] = useState<RoutePath | null>(null);
-  const [profile, setProfile] = useState<RoutingProfile>('car');
-  const [destination, setDestination] = useState<LatLng | null>(null);
-  const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [speedMps, setSpeedMps] = useState<number | null>(null);
-  const [muted, setMutedState] = useState(false);
-  const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
-  const [rerouteFailed, setRerouteFailed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+async function currentFix(timeoutMs: number): Promise<NavOriginFix> {
+  const fg = await Location.requestForegroundPermissionsAsync();
+  if (!fg.granted) throw new Error('Location permission is required to navigate');
+  // Background permission is best-effort: navigation still works while the
+  // app is foregrounded even if the user declines "allow all the time".
+  await Location.requestBackgroundPermissionsAsync().catch(() => undefined);
 
-  const sessionRef = useRef<NavigationSession | null>(null);
-  const destRef = useRef<LatLng | null>(null);
-  /** Where the preview was requested from, so a profile switch can refetch. */
-  const originRef = useRef<LatLng | null>(null);
-  /** Guards against an older profile fetch landing after a newer one. */
-  const previewSeq = useRef(0);
-  /** Prevents a quick double tap from starting two location/route requests. */
-  const startInFlight = useRef(false);
-  const profileRef = useRef<RoutingProfile>('car');
-  const rerouteInFlight = useRef(false);
-  /** Earliest time (epoch ms) a failed reroute may be retried (backoff). */
-  const rerouteBackoffUntil = useRef(0);
-  /** Consecutive reroute failures, driving the backoff exponent. */
-  const rerouteFailCount = useRef(0);
-  // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
-  const mutedRef = useRef(false);
-  /** When guidance began, for the arrival card's elapsed time. */
-  const tripStartRef = useRef<number | null>(null);
-  /** Distance driven across reroutes (each reroute starts a fresh session). */
-  const traveledBaseRef = useRef(0);
-  /** Latest NavState, readable from callbacks without a stale closure. */
-  const lastStateRef = useRef<NavState | null>(null);
-  /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
-  const enrichAbort = useRef<AbortController | null>(null);
-  /** Utterances queued or playing — audio focus is held while it's non-zero. */
-  const utterancesRef = useRef(0);
+  // getCurrentPositionAsync has no timeout of its own — indoors it can simply
+  // never resolve, wedging the caller forever. Fall back to the last known
+  // position: a slightly stale preview origin beats no preview, and guidance
+  // reroutes from the first live fix anyway.
+  const cur = await Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+  const pos = cur ?? (await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }));
+  if (!pos) throw new Error('Could not get a GPS fix — is location on?');
+  return { fix: toPosition(pos), atMs: pos.timestamp };
+}
 
-  /** Speak a voice prompt, unless muted; never let a TTS error interrupt navigation. */
-  const speak = useCallback((text: string): void => {
-    if (mutedRef.current) return;
-    // Duck music/podcasts for the duration of the prompt (expo-speech never
-    // asks for audio focus itself, so prompts used to talk over media). One
-    // focus hold spans a whole queued burst of utterances.
-    const focus = (on: boolean) => {
-      try {
-        if (on) AudioFocus?.requestDuck();
-        else AudioFocus?.abandon();
-      } catch (err) {
-        console.warn('audio focus failed', err);
-      }
-    };
-    if (utterancesRef.current === 0) focus(true);
-    utterancesRef.current++;
-    const release = () => {
-      utterancesRef.current = Math.max(0, utterancesRef.current - 1);
-      if (utterancesRef.current === 0) focus(false);
-    };
-    try {
-      // Instructions are English; without a pinned language a Norwegian
-      // device voice garbles them.
-      Speech.speak(text, {
-        language: 'en',
-        onDone: release,
-        onStopped: release,
-        onError: release,
-      });
-    } catch (err) {
-      release();
-      console.warn('tts failed', err);
-    }
-  }, []);
-
-  const setMuted = useCallback((next: boolean) => {
-    mutedRef.current = next;
-    if (next) Speech.stop();
-    setMutedState(next);
-  }, []);
-
-  const toggleMute = useCallback(() => setMuted(!mutedRef.current), [setMuted]);
-
-  const fetchPath = useCallback(
-    async (
-      origin: LatLng,
-      destination: LatLng,
-      prof: RoutingProfile,
-      headingDeg?: number,
-    ): Promise<RoutePath> => {
-      const result = await provider.route({
-        profile: prof,
-        points: [origin, destination],
-        instructions: true,
-        ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
-      });
-      const path = result.paths[0];
-      if (!path) throw new Error('no route found');
-      return path;
-    },
-    [provider],
-  );
-
-  const stopUpdates = useCallback(() => {
+/**
+ * Fixes under an Android foreground service, so guidance survives screen-off.
+ * The background task cannot touch React state, so it forwards through the
+ * module-level handler in `locationTask`.
+ */
+async function watchFixes(onFix: (fix: Position) => void): Promise<() => void> {
+  setLocationHandler(onFix);
+  const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
+  if (!already) {
+    await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
+      accuracy: Location.Accuracy.BestForNavigation,
+      // Time-based, not distance-based: with a distance filter no fixes arrive
+      // at a standstill, freezing the ETA at every red light.
+      timeInterval: 1000,
+      distanceInterval: 0,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: 'Atlas navigation',
+        notificationBody: 'Guiding you to your destination',
+      },
+    });
+  }
+  return () => {
     setLocationHandler(null);
     void Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK).then((started) => {
       if (started) void Location.stopLocationUpdatesAsync(NAV_LOCATION_TASK);
     });
-  }, []);
+  };
+}
 
-  /**
-   * Fetch road attributes (speed limits) for a route and hand them to its
-   * session. Server-only for now: the embedded engine has the same data in its
-   * tiles, but the native bridge exposes `/route` alone, so an offline drive
-   * simply shows no limit until a `trace_attributes` bridge method ships in a
-   * new APK. Fire-and-forget either way — guidance never waits on this.
-   */
-  const enrich = useCallback(
-    (session: NavigationSession, path: RoutePath): void => {
-      enrichAbort.current?.abort();
-      const controller = new AbortController();
-      enrichAbort.current = controller;
-      void enrichRoute(path, profileRef.current, httpTraceTransport({ baseUrl: serverOrigin }), {
-        signal: controller.signal,
-      })
-        .then((enrichment) => {
-          // A reroute (or End) may have replaced this session mid-request;
-          // attributes from the old line would mislabel the new one.
-          if (sessionRef.current !== session) return;
-          const refreshed = session.setEnrichment(enrichment);
-          if (refreshed) {
-            setState(refreshed);
-            lastStateRef.current = refreshed;
-          }
-        })
-        .catch(() => {
-          // Optional by design: offline, or the server is unreachable.
-        });
-    },
+/**
+ * Yaw rate from the gyro, integrated into a per-report delta. The magnetometer
+ * is useless in a car in a tunnel; the gyro's relative yaw since the last good
+ * fix is the reliable signal.
+ */
+function watchHeadingRate(onDelta: (deltaDeg: number) => void): () => void {
+  DeviceMotion.setUpdateInterval(100);
+  let lastMs: number | null = null;
+  const sub = DeviceMotion.addListener((m) => {
+    const rot = m.rotationRate;
+    const grav = m.accelerationIncludingGravity;
+    if (!rot || !grav) return;
+    const now = Date.now();
+    const dtSec = lastMs === null ? 0 : Math.min(0.5, (now - lastMs) / 1000);
+    lastMs = now;
+    if (dtSec <= 0) return;
+    // W3C device axes: beta about x, gamma about y, alpha about z (deg/s).
+    const rate = headingRateDegPerSec(
+      { x: rot.beta ?? 0, y: rot.gamma ?? 0, z: rot.alpha ?? 0 },
+      grav,
+    );
+    if (rate !== null) onDelta(rate * dtSec);
+  });
+  return () => sub.remove();
+}
+
+/**
+ * Turn-by-turn navigation on Android: the device half of the shared navigation
+ * controller. Fixes come from a foreground-service location task, prompts from
+ * expo-speech (with audio ducking), and routes from the offline-first provider
+ * — the embedded Valhalla engine when a downloaded pack covers the trip,
+ * otherwise the server. The trip logic itself is `useNavigationController`,
+ * which the web drives through the same seam.
+ *
+ * Enrichment (speed limits, tunnels) is server-only for now: the embedded
+ * engine has the same data in its tiles, but the native bridge exposes
+ * `/route` alone, so an offline drive shows no limit until a
+ * `trace_attributes` bridge method ships in a new APK.
+ */
+export function useNavigation(): NavController {
+  const serverOrigin = useServerOrigin();
+  const platform = useMemo<NavPlatform>(
+    () => ({
+      provider: makeRouteProvider(serverOrigin),
+      trace: httpTraceTransport({ baseUrl: serverOrigin }),
+      currentFix,
+      watchFixes,
+      speak,
+      stopSpeaking: () => Speech.stop(),
+      keepAwake: () => {
+        void activateKeepAwakeAsync('atlas-nav').catch(() => undefined);
+        return () => {
+          void deactivateKeepAwake('atlas-nav').catch(() => undefined);
+        };
+      },
+      watchHeadingRate,
+    }),
     [serverOrigin],
   );
 
-  const stop = useCallback(
-    (arrived = false) => {
-      stopUpdates();
-      enrichAbort.current?.abort();
-      enrichAbort.current = null;
-      sessionRef.current = null;
-      destRef.current = null;
-      originRef.current = null;
-      previewSeq.current++;
-      startInFlight.current = false;
-      rerouteInFlight.current = false;
-      rerouteBackoffUntil.current = 0;
-      rerouteFailCount.current = 0;
-      setRerouteFailed(false);
-      setRouteCoords([]);
-      setActivePath(null);
-      setPreviewPaths(null);
-      setPreviewIndex(0);
-      setPreviewLoading(false);
-      setPreviewError(null);
-      setSpeedMps(null);
-      if (!arrived) {
-        setState(null);
-        setDestination(null);
-        setTripSummary(null);
-      }
-      tripStartRef.current = null;
-      traveledBaseRef.current = 0;
-      setPhase(arrived ? 'arrived' : 'idle');
-    },
-    [stopUpdates],
-  );
-
-  /**
-   * "I've arrived" — the driver's own escape hatch, for when neither automatic
-   * rule can fire. Ends the trip exactly as a detected arrival does (summary,
-   * spoken confirmation, `arrived` phase) rather than as a cancellation, which
-   * is the difference the button exists to express.
-   */
-  const arriveNow = useCallback(() => {
-    const session = sessionRef.current;
-    if (!session) return;
-    const next = session.declareArrived();
-    if (next) {
-      setState(next);
-      lastStateRef.current = next;
-    }
-    speak(session.arrivalText());
-    setTripSummary({
-      distanceM: traveledBaseRef.current + (next?.traveledM ?? 0),
-      durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
-    });
-    stop(true);
-  }, [speak, stop]);
-
-  const reroute = useCallback(
-    async (from: LocationFix) => {
-      if (rerouteInFlight.current || !destRef.current) return;
-      // A failed reroute must not retry on every 1 Hz off-route fix — back off
-      // exponentially so an unreachable routing server isn't hammered.
-      if (Date.now() < rerouteBackoffUntil.current) return;
-      rerouteInFlight.current = true;
-      setPhase('rerouting');
-      try {
-        // Pass the travel direction (only meaningful when moving) so the new
-        // route continues the way the car points instead of via a U-turn.
-        const heading =
-          typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
-        const path = await fetchPath(from, destRef.current, profileRef.current, heading);
-        // End (or arrival) may have fired during the fetch — stop() clears the
-        // in-flight flag and destination. Applying now would resurrect a dead
-        // nav UI with a fresh session, so bail out.
-        if (!rerouteInFlight.current || !destRef.current) return;
-        // The old session dies here — bank its driven distance for the summary.
-        traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
-        // Rerouting happens mid-drive: never regress to the pre-departure
-        // framing (calm camera / no snap-lock) the fresh session starts in.
-        const previousSession = sessionRef.current;
-        const nextSession = new NavigationSession(
-          path,
-          navOptionsForProfile(profileRef.current, {
-            startDeparted: lastStateRef.current?.departed ?? true,
-          }),
-        );
-        if (previousSession) nextSession.inheritPaceFrom(previousSession);
-        sessionRef.current = nextSession;
-        setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-        setActivePath(path);
-        rerouteFailCount.current = 0;
-        rerouteBackoffUntil.current = 0;
-        setRerouteFailed(false);
-        // "Which way now?" is most urgent right after recalculating.
-        enrich(sessionRef.current, path);
-        const depart = sessionRef.current.departurePrompt();
-        if (depart) speak(depart.text);
-      } catch {
-        // Keep the old session (the driver continues on the drawn line) and
-        // back off before the next attempt: 5 s, 10 s, 20 s … capped at 60 s.
-        rerouteFailCount.current++;
-        rerouteBackoffUntil.current =
-          Date.now() + Math.min(60_000, 5_000 * 2 ** (rerouteFailCount.current - 1));
-        setRerouteFailed(true);
-      } finally {
-        rerouteInFlight.current = false;
-        // Only resume the navigating UI if the trip is still alive; a race with
-        // End/arrival leaves the session null and must not flip us back.
-        if (sessionRef.current) setPhase('navigating');
-      }
-    },
-    [fetchPath, speak, enrich],
-  );
-
-  const onFix = useCallback(
-    (fix: LocationFix) => {
-      const session = sessionRef.current;
-      if (!session) return;
-      // Runs on every GPS fix (incl. the headless background task); an uncaught
-      // throw here would take the whole app down in a release build.
-      try {
-        const { state: next, prompts } = session.update(fix, Date.now());
-        setState(next);
-        lastStateRef.current = next;
-        setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
-        for (const prompt of prompts) speak(prompt.text);
-        if (next.status === 'arrived') {
-          speak(session.arrivalText());
-          setTripSummary({
-            distanceM: traveledBaseRef.current + next.traveledM,
-            durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
-          });
-          stop(true);
-        } else if (next.status === 'off-route') {
-          void reroute(fix);
-        } else {
-          // Back on the line: any lingering "can't reroute" notice is stale.
-          setRerouteFailed(false);
-        }
-      } catch (err) {
-        console.warn('navigation fix failed', err);
-      }
-    },
-    [reroute, stop, speak],
-  );
-
-  const start = useCallback(
-    async (destination: LatLng, prof: RoutingProfile = 'car') => {
-      if (startInFlight.current) return;
-      startInFlight.current = true;
-      const seq = ++previewSeq.current;
-      setError(null);
-      setPhase('starting');
-      try {
-        const fg = await Location.requestForegroundPermissionsAsync();
-        if (!fg.granted) throw new Error('Location permission is required to navigate');
-        // Background permission is best-effort: navigation still works while the
-        // app is foregrounded even if the user declines "allow all the time".
-        await Location.requestBackgroundPermissionsAsync().catch(() => undefined);
-
-        // getCurrentPositionAsync has no timeout of its own — indoors it can
-        // simply never resolve, wedging the phase in `starting` forever (the
-        // web hook already races a 20 s limit). Fall back to the last known
-        // position: a slightly stale preview origin beats no preview, and
-        // guidance reroutes from the first live fix anyway.
-        const cur = await Promise.race([
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000)),
-        ]);
-        const pos = cur ?? (await Location.getLastKnownPositionAsync({ maxAge: 120_000 }));
-        if (!pos) throw new Error('Could not get a GPS fix — is location on?');
-        if (seq !== previewSeq.current) return;
-        const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-
-        destRef.current = destination;
-        originRef.current = origin;
-        profileRef.current = prof;
-        setProfile(prof);
-        setDestination(destination);
-        setSpeedMps(null);
-        setState(null);
-        setRouteCoords([]);
-        setPreviewError(null);
-
-        // Route choices: the fastest plus up to two alternatives, offered
-        // before guidance starts. Selecting nothing keeps the fastest.
-        const result = await provider.route({
-          profile: prof,
-          points: [origin, destination],
-          instructions: true,
-          alternatives: true,
-        });
-        if (seq !== previewSeq.current) return;
-        if (result.paths.length === 0) throw new Error('no route found');
-        setPreviewPaths(sortRouteChoices(result.paths));
-        setPreviewIndex(0);
-        setPhase('preview');
-      } catch (err) {
-        if (seq !== previewSeq.current) return;
-        setLocationHandler(null);
-        sessionRef.current = null;
-        destRef.current = null;
-        originRef.current = null;
-        setDestination(null);
-        setError(err instanceof Error ? err.message : String(err));
-        setPhase('error');
-      } finally {
-        if (seq === previewSeq.current) startInFlight.current = false;
-      }
-    },
-    [provider],
-  );
-
-  // Profile switch on the preview card: refetch the choices for the same trip.
-  // On failure the previous profile's choices stay up (with a note) — a dead
-  // end here (no bike route, brief offline) must not kill the whole preview.
-  const setNavProfile = useCallback(
-    (prof: RoutingProfile) => {
-      const origin = originRef.current;
-      const dest = destRef.current;
-      if (!origin || !dest || prof === profileRef.current) return;
-      const seq = ++previewSeq.current;
-      setPreviewLoading(true);
-      setPreviewError(null);
-      void (async () => {
-        try {
-          const result = await provider.route({
-            profile: prof,
-            points: [origin, dest],
-            instructions: true,
-            alternatives: true,
-          });
-          if (seq !== previewSeq.current) return;
-          if (result.paths.length === 0) throw new Error('no route found');
-          profileRef.current = prof;
-          setProfile(prof);
-          setPreviewPaths(sortRouteChoices(result.paths));
-          setPreviewIndex(0);
-        } catch (err) {
-          if (seq !== previewSeq.current) return;
-          setPreviewError(err instanceof Error ? err.message : String(err));
-        } finally {
-          if (seq === previewSeq.current) setPreviewLoading(false);
-        }
-      })();
-    },
-    [provider],
-  );
-
-  const go = useCallback(async () => {
-    const previewPath = previewPaths?.[previewIndex];
-    if (!previewPath) return;
-    const seq = ++previewSeq.current;
-    setPreviewLoading(true);
-    try {
-      const path = previewPath;
-      // Cancel/profile-switch between the tap and this task invalidates it.
-      if (seq !== previewSeq.current || !destRef.current) return;
-      const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
-      sessionRef.current = session;
-      enrich(session, path);
-      tripStartRef.current = Date.now();
-      traveledBaseRef.current = 0;
-      lastStateRef.current = null;
-      setTripSummary(null);
-      setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-      setActivePath(path);
-      previewSeq.current++;
-      setPreviewPaths(null);
-      setPreviewIndex(0);
-      setPreviewLoading(false);
-      setPreviewError(null);
-      setState(null);
-
-      setLocationHandler(onFix);
-      const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
-      if (!already) {
-        await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
-          accuracy: Location.Accuracy.BestForNavigation,
-          // Time-based, not distance-based: with a distance filter no fixes
-          // arrive at a standstill, freezing the ETA at every red light.
-          timeInterval: 1000,
-          distanceInterval: 0,
-          showsBackgroundLocationIndicator: true,
-          foregroundService: {
-            notificationTitle: 'Atlas navigation',
-            notificationBody: 'Guiding you to your destination',
-          },
-        });
-      }
-      setPhase('navigating');
-      // Guidance used to be silent until the first approach threshold —
-      // exactly when the driver wonders "which way?".
-      const depart = session.departurePrompt();
-      if (depart) speak(depart.text);
-      // Seed guidance with the same fresh fix that produced the preview.
-      // Subsequent one-second fixes drive the session and trigger the normal
-      // reroute path if the traveller moved away while choosing a route.
-      if (originRef.current) {
-        const origin = originRef.current;
-        onFix({
-          lat: origin.lat,
-          lng: origin.lng,
-        });
-      }
-    } catch (err) {
-      setLocationHandler(null);
-      sessionRef.current = null;
-      destRef.current = null;
-      originRef.current = null;
-      setDestination(null);
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase('error');
-    }
-  }, [previewPaths, previewIndex, onFix, speak, enrich]);
-
-  // Tear down the foreground service if the app unmounts mid-trip.
-  useEffect(() => () => stopUpdates(), [stopUpdates]);
-
-  // A navigating phone is a dashboard: keep the screen on for the whole trip.
-  const guiding = phase === 'navigating' || phase === 'rerouting';
-
-  // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
-  // state to signal-lost when fixes stop, so the puck never just freezes.
-  useEffect(() => {
-    if (!guiding) return;
-    const timer = setInterval(() => {
-      const session = sessionRef.current;
-      if (!session) return;
-      try {
-        const update = session.tick(Date.now());
-        if (!update) return;
-        setState(update.state);
-        lastStateRef.current = update.state;
-        for (const prompt of update.prompts) speak(prompt.text);
-      } catch (err) {
-        console.warn('navigation tick failed', err);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [guiding, speak]);
-  // While dead reckoning (tunnel), feed the gyro's world-vertical yaw into the
-  // session so it can notice the car turning off the assumed line — an
-  // in-tunnel fork or roundabout exit that cross-track can't see without GPS.
-  // The magnetometer is useless in a car in a tunnel; the gyro's relative yaw
-  // since the last good fix is the reliable signal. Subscribed only during
-  // gaps: while fixes flow the session ignores reports anyway.
-  const reckoning = guiding && state?.fix === 'estimated';
-  useEffect(() => {
-    if (!reckoning) return;
-    DeviceMotion.setUpdateInterval(100);
-    let lastMs: number | null = null;
-    const sub = DeviceMotion.addListener((m) => {
-      const session = sessionRef.current;
-      const rot = m.rotationRate;
-      const grav = m.accelerationIncludingGravity;
-      if (!session || !rot || !grav) return;
-      const now = Date.now();
-      const dtSec = lastMs === null ? 0 : Math.min(0.5, (now - lastMs) / 1000);
-      lastMs = now;
-      if (dtSec <= 0) return;
-      // W3C device axes: beta about x, gamma about y, alpha about z (deg/s).
-      const rate = headingRateDegPerSec(
-        { x: rot.beta ?? 0, y: rot.gamma ?? 0, z: rot.alpha ?? 0 },
-        grav,
-      );
-      if (rate !== null) session.reportHeadingDelta(rate * dtSec);
-    });
-    return () => sub.remove();
-  }, [reckoning]);
-
-  useEffect(() => {
-    if (!guiding) return;
-    void activateKeepAwakeAsync('atlas-nav').catch(() => undefined);
-    return () => {
-      void deactivateKeepAwake('atlas-nav').catch(() => undefined);
-    };
-  }, [guiding]);
-
-  return {
-    phase,
-    state,
-    routeCoords,
-    activePath,
-    profile,
-    destination,
-    previewPaths,
-    previewIndex,
-    previewLoading,
-    previewError,
-    speedMps,
-    muted,
-    tripSummary,
-    rerouteFailed,
-    error,
-    start,
-    selectPreview: setPreviewIndex,
-    setProfile: setNavProfile,
-    go,
-    toggleMute,
-    setMuted,
-    arriveNow,
-    stop: () => stop(false),
-  };
+  return useNavigationController(platform);
 }

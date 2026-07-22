@@ -1,8 +1,8 @@
+import type { NavController } from '@atlas/app-hooks';
 import { lineStringFeature } from '@atlas/core';
 import { followZoom, maneuverArrowsGeoJSON, remainingRouteBounds } from '@atlas/navigation';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { WebNavController } from '../nav/useWebNavigation.js';
 
 const SOURCE_ID = 'atlas-nav';
 const CASING = 'atlas-nav-casing';
@@ -48,7 +48,7 @@ export interface NavFollowControls {
  */
 export function useNavLayers(
   map: maplibregl.Map | null,
-  nav: WebNavController,
+  nav: NavController,
   followMode: 'course' | 'north',
 ): NavFollowControls {
   const [followPaused, setFollowPaused] = useState(false);

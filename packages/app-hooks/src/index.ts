@@ -27,6 +27,14 @@ export {
   type NavPrefsTarget,
 } from './useNavPrefs.js';
 export {
+  useNavigationController,
+  type NavController,
+  type NavOriginFix,
+  type NavPhase,
+  type NavPlatform,
+  type NavTripSummary,
+} from './useNavigationController.js';
+export {
   useTransit,
   useTransitPlan,
   type TransitFn,

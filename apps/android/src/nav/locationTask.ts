@@ -1,3 +1,4 @@
+import type { Position } from '@atlas/navigation';
 import type * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
@@ -13,18 +14,24 @@ import * as TaskManager from 'expo-task-manager';
  */
 export const NAV_LOCATION_TASK = 'atlas-nav-location';
 
-export type LocationFix = {
-  lat: number;
-  lng: number;
-  headingDeg?: number;
-  speedMps?: number;
-  accuracyM?: number;
-};
+/**
+ * An expo-location fix as the navigation session reads it. Android reports -1
+ * for an unknown heading or speed, so a bare pass-through would tell the
+ * session the traveller is facing due north while standing still.
+ */
+export function toPosition(pos: Location.LocationObject): Position {
+  const c = pos.coords;
+  const fix: Position = { lat: c.latitude, lng: c.longitude };
+  if (typeof c.accuracy === 'number' && c.accuracy >= 0) fix.accuracyM = c.accuracy;
+  if (typeof c.heading === 'number' && c.heading >= 0) fix.headingDeg = c.heading;
+  if (typeof c.speed === 'number' && c.speed >= 0) fix.speedMps = c.speed;
+  return fix;
+}
 
-let handler: ((fix: LocationFix) => void) | null = null;
+let handler: ((fix: Position) => void) | null = null;
 
 /** Install (or clear, with null) the sink the background task forwards fixes to. */
-export function setLocationHandler(h: ((fix: LocationFix) => void) | null): void {
+export function setLocationHandler(h: ((fix: Position) => void) | null): void {
   handler = h;
 }
 
@@ -33,12 +40,5 @@ TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
   const locations = (data as { locations?: Location.LocationObject[] } | null)?.locations ?? [];
   const last = locations[locations.length - 1];
   if (!last) return;
-  const c = last.coords;
-  handler({
-    lat: c.latitude,
-    lng: c.longitude,
-    headingDeg: c.heading ?? undefined,
-    speedMps: c.speed ?? undefined,
-    accuracyM: c.accuracy ?? undefined,
-  });
+  handler(toPosition(last));
 });

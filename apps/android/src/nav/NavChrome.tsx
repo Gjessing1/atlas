@@ -1,4 +1,4 @@
-import type { NavFollowMode } from '@atlas/app-hooks';
+import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import { tunnelChipLabel } from '@atlas/navigation';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -7,7 +7,6 @@ import { MapOverviewIcon, NavArrowIcon } from '../ui/icons';
 import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
 import type { NavCameraControls } from './useNavCamera';
-import type { NavController } from './useNavigation';
 
 /** Where the position marker sits, and which marker the map should draw. */
 export interface NavPuck {

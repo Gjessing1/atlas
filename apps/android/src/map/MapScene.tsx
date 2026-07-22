@@ -1,3 +1,4 @@
+import type { NavController } from '@atlas/app-hooks';
 import {
   bboxOutlinesFeatureCollection,
   lineStringFeature,
@@ -23,7 +24,6 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
-import type { NavController } from '../nav/useNavigation';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';

@@ -20,6 +20,7 @@
   "dependencies": {
     "@atlas/core": "*",
     "@atlas/gpx": "*",
+    "@atlas/navigation": "*",
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",

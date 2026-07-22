@@ -1,8 +1,8 @@
+import type { NavController } from '@atlas/app-hooks';
 import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
 import { laneGlyphs, laneLabel, tunnelChipLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { TurnIcon } from './TurnIcon.js';
-import type { WebNavController } from './useWebNavigation.js';
 
 /** Ground speed in km/h, or null when stationary/unknown. */
 function speedKph(speedMps: number | null): number | null {
@@ -84,7 +84,7 @@ export function NavBanner({
   overview,
   onToggleOverview,
 }: {
-  nav: WebNavController;
+  nav: NavController;
   followPaused: boolean;
   onResumeFollow: () => void;
   followMode: 'course' | 'north';
