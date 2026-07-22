@@ -26,6 +26,18 @@ interface WmsUpstream {
   layers: string;
   /** QUERY_LAYERS for GetFeatureInfo; unset = not identifiable. */
   identifyLayers?: string;
+  /**
+   * Ordered allow-list of identify attributes worth showing. Unset = pass
+   * everything through (the generic noise filter still applies).
+   *
+   * Needed because a rich upstream answers with far more than a reader wants:
+   * NVE's lake polygon returns ~25 attributes (catchment area, normal runoff,
+   * PDF filenames, municipality number), and clients render the *first* handful
+   * in upstream order — so without a list the depth gets crowded out by
+   * bookkeeping. Names are matched case-insensitively, since the same field is
+   * `maksdyp` over WMS and `maksdyp_m` over the REST service.
+   */
+  identifyFields?: string[];
   styles?: string;
   /**
    * Render GetMap tiles at this multiple of 256 px (with a matching DPI hint),
@@ -100,7 +112,29 @@ export function norwegianLayers(): OverlayLayer[] {
         // previously only in identifyLayers, so the numbers a lake carries never
         // appeared on the map, only on a tap.
         layers: 'Dybdekart,DybdeKurve,DybdePunkt',
-        identifyLayers: 'DybdePunkt,DybdeKurve',
+        // `Dybdekart` is the per-lake *polygon*, and it is the only one of the
+        // three that answers for a lake NVE surveyed but drew no vectors for:
+        // it carries `maksdyp_m`/`middeldyp_m` as attributes. Verkensvannet
+        // (vatnlnr 2478, 59.813/10.370) is exactly that case — 21.5 m max depth
+        // recorded in 1965, yet zero DybdePunkt and zero DybdeKurve features, so
+        // identifying only the vector layers returned nothing at all. Listed
+        // last so a real sounding or contour still wins when one exists.
+        identifyLayers: 'DybdePunkt,DybdeKurve,Dybdekart',
+        // Depth first, then just enough provenance to judge it — these surveys
+        // are often decades old (Verkensvannet's is from 1965) and the contour
+        // interval says how precise the reading is. `dybde_m` answers for a
+        // sounding/contour hit, `maksdyp`/`middeldyp` for the lake polygon;
+        // both spellings of the name are listed because the layers disagree.
+        identifyFields: [
+          'navn',
+          'innsjonavn',
+          'dybde_m',
+          'maksdyp',
+          'middeldyp',
+          'oppmaltAar',
+          'ekv_m',
+          'kommune',
+        ],
         // Contours + sounding labels are thin/small; render at 2× so they stay
         // legible on a phone instead of a stretched, muddy 256 px tile.
         renderScale: 2,
@@ -273,6 +307,15 @@ function substituteEnv(template: string, env: Record<string, string | undefined>
 const NOISE_KEYS =
   /^(objectid|objtype|fid|gml_id|globalid|boundedby|bbox|styleurl|se_anno_cad_data|shape([._].*)?|geometri.*|symbol.*|ltema|opphav|kopidato|oppdateringsdato|datauttaksdato|malemetode|noyaktighet)$/i;
 
+/**
+ * `-1` is the "not measured" sentinel across NVE's depth attributes (a lake with
+ * a surveyed max depth still reports `middeldyp=-1` and `volum_Mm3=-1` when only
+ * the maximum was read off the paper chart). Passing it through would render as
+ * "middeldyp: -1" — a depth of minus one metre, which is worse than saying
+ * nothing. No layer we identify has a genuine -1, so drop it outright.
+ */
+const UNKNOWN_SENTINEL = /^-1(\.0+)?$/;
+
 function cleanProps(props: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(props)) {
@@ -280,7 +323,28 @@ function cleanProps(props: Record<string, unknown>): Record<string, string> {
     if (value === null || value === undefined) continue;
     const text = String(value).trim();
     if (!text || text.toLowerCase() === 'null') continue;
+    if (UNKNOWN_SENTINEL.test(text)) continue;
     out[key] = text.slice(0, 200);
+  }
+  return out;
+}
+
+/**
+ * Narrow identify attributes to `identifyFields`, in that order. Anything not
+ * listed is dropped; a feature left with nothing is dropped by the caller.
+ */
+function selectFields(
+  props: Record<string, string>,
+  fields: string[] | undefined,
+): Record<string, string> {
+  if (!fields || fields.length === 0) return props;
+  const byLower = new Map(
+    Object.entries(props).map(([k, v]) => [k.toLowerCase(), [k, v] as const]),
+  );
+  const out: Record<string, string> = {};
+  for (const want of fields) {
+    const hit = byLower.get(want.toLowerCase());
+    if (hit) out[hit[0]] = hit[1];
   }
   return out;
 }
@@ -481,7 +545,10 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
     '/api/overlay/:id/identify',
     async (request, reply) => {
       const layer = byId.get(request.params.id);
-      if (!layer || layer.upstream.kind !== 'wms' || !layer.upstream.identifyLayers) {
+      // Narrow onto a local: the per-format callbacks below re-read the
+      // upstream, and narrowing on `layer.upstream` does not survive into them.
+      const wms = layer?.upstream.kind === 'wms' ? layer.upstream : undefined;
+      if (!layer || !wms?.identifyLayers) {
         return reply.code(404).send({ error: 'layer not identifiable' });
       }
       const lat = Number(request.query.lat);
@@ -511,15 +578,15 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
       ];
       let upstreamDown = false;
       for (const { format, parse } of formats) {
-        const url = wmsBaseParams(layer.upstream, z, tx, ty);
+        const url = wmsBaseParams(wms, z, tx, ty);
         const p = url.searchParams;
         p.set('REQUEST', 'GetFeatureInfo');
-        p.set('QUERY_LAYERS', layer.upstream.identifyLayers);
+        p.set('QUERY_LAYERS', wms.identifyLayers);
         p.set('INFO_FORMAT', format);
         p.set('FEATURE_COUNT', '10');
         // 1.3.0 renamed the identify pixel params X/Y → I/J.
-        p.set(layer.upstream.version === '1.3.0' ? 'I' : 'X', String(px));
-        p.set(layer.upstream.version === '1.3.0' ? 'J' : 'Y', String(py));
+        p.set(wms.version === '1.3.0' ? 'I' : 'X', String(px));
+        p.set(wms.version === '1.3.0' ? 'J' : 'Y', String(py));
         try {
           const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
           if (!res.ok) continue;
@@ -528,7 +595,10 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
           const results = parse(body);
           if (results === null) continue; // unparseable in this format
           status?.record(probeId(layer.meta.id), true);
-          return { results: results.slice(0, 8) };
+          const selected = results
+            .map((r) => selectFields(r, wms.identifyFields))
+            .filter((r) => Object.keys(r).length > 0);
+          return { results: selected.slice(0, 8) };
         } catch (err) {
           request.log.warn({ err, layer: layer.meta.id, format }, 'identify upstream failed');
           upstreamDown = true;

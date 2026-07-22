@@ -53,6 +53,8 @@ function testLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'Contours',
         renderScale: 2,
+        identifyLayers: 'Dybdekart',
+        identifyFields: ['navn', 'maksdyp', 'middeldyp'],
       },
     },
     {
@@ -285,6 +287,46 @@ describe('identify proxy', () => {
     expect(Number(p.get('I'))).toBeLessThan(256);
     expect(Number(p.get('J'))).toBeGreaterThanOrEqual(0);
     expect(Number(p.get('J'))).toBeLessThan(256);
+  });
+
+  it('keeps only identifyFields, in listed order, and drops -1 sentinels', async () => {
+    // Shaped like NVE's lake polygon: the surveyed maximum is real, the mean is
+    // the -1 "not measured" marker, and the rest is bookkeeping that would
+    // otherwise crowd the depth out of the client's first few rows.
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        features: [
+          {
+            properties: {
+              maksdyp: 21.5,
+              nedbfAreal: 27.2,
+              middeldyp: -1,
+              pdf1: '2478a.pdf',
+              navn: 'Verkensvannet',
+              kommune: 'Asker',
+            },
+          },
+        ],
+      }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/hidpi/identify?lat=59.8&lng=10.4&zoom=13' });
+    expect(res.statusCode).toBe(200);
+    const [only] = (res.json() as { results: Record<string, string>[] }).results;
+    expect(only).toEqual({ navn: 'Verkensvannet', maksdyp: '21.5' });
+    // Order is the configured one, not the upstream's.
+    expect(Object.keys(only!)).toEqual(['navn', 'maksdyp']);
+  });
+
+  it('drops a feature whose every attribute was filtered out', async () => {
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features: [{ properties: { pdf1: 'x.pdf', middeldyp: -1 } }] }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/hidpi/identify?lat=59.8&lng=10.4&zoom=13' });
+    expect(res.json()).toEqual({ results: [] });
   });
 
   it('falls back from an exception body to GML, then text/plain', async () => {
