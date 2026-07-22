@@ -55,6 +55,10 @@ export function useDirections(route: RoutePlanner): Directions {
    * showing bare coordinates for somewhere the user had just picked by name.
    * Seeding the current position as the start is a convenience, not a
    * requirement: with no fix the panel opens asking for a start.
+   *
+   * A round trip in progress becomes a point-to-point plan from its anchor:
+   * that anchor is where the traveller already said they are, so it is the
+   * start, not something to overwrite.
    */
   const planTo = useCallback(
     (dest: LatLng, name?: string) => {
@@ -65,8 +69,7 @@ export function useDirections(route: RoutePlanner): Directions {
       // instead of making the Directions button appear frozen for several
       // seconds. The destination is useful even when location is unavailable.
       route.start();
-      route.setRoundTrip(false);
-      const destinationId = route.addWaypoint(dest, name);
+      const destinationId = route.addDestination(dest, name);
 
       if (hadPlan) {
         setLocatingOrigin(false);

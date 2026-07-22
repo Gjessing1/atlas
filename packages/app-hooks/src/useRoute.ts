@@ -114,6 +114,14 @@ export interface RoutePlanner {
    * new stop's id, so a caller can label it once a lookup resolves.
    */
   addWaypoint: (pos: LatLng, name?: string) => number;
+  /**
+   * Append a stop *and* leave loop mode in one update — "Directions to here"
+   * from a place card. Doing it as two calls looks equivalent and is not:
+   * `addWaypoint` reads the round-trip flag from the render it was created in,
+   * so a preceding `setRoundTrip(false)` has not landed yet and the loop's
+   * anchor — the traveller's start — is replaced instead of kept.
+   */
+  addDestination: (pos: LatLng, name?: string) => number;
   insertWaypoint: (index: number, pos: LatLng, name?: string) => number;
   /** Move a stop; its label is dropped, since it no longer describes the spot. */
   moveWaypointTo: (id: number, pos: LatLng) => void;
@@ -316,6 +324,18 @@ export function useRoute(route: RouteFn): RoutePlanner {
     [roundTrip, nextWaypoint],
   );
 
+  // Both halves of "route me there" in one commit, so neither reads the
+  // other's stale state: a loop's anchor becomes the start it always was.
+  const addDestination = useCallback(
+    (pos: LatLng, name?: string) => {
+      const wp = nextWaypoint(pos, name);
+      setRoundTripState(false);
+      setWaypoints((wps) => [...wps, wp]);
+      return wp.id;
+    },
+    [nextWaypoint],
+  );
+
   const insertWaypoint = useCallback(
     (index: number, pos: LatLng, name?: string) => {
       const wp = nextWaypoint(pos, name);
@@ -455,6 +475,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     stop,
     setProfile,
     addWaypoint,
+    addDestination,
     insertWaypoint,
     moveWaypointTo,
     replaceWaypoint,

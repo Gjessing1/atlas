@@ -101,6 +101,27 @@ describe('useRoute', () => {
     expect(result.current.waypoints[0]!.pos).toEqual(B);
   });
 
+  it('turns a loop into a route from its anchor when a destination is added', async () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+
+    act(() => result.current.start(A));
+    act(() => result.current.setRoundTrip(true));
+    await settle();
+
+    // "Directions to B" while a loop is planned: the anchor is where the
+    // traveller is, so it becomes the start rather than being overwritten.
+    // Both halves in one commit — setRoundTrip(false) then addWaypoint(B)
+    // would still take the loop branch and drop A.
+    act(() => result.current.addDestination(B, 'Bergen'));
+    await settle();
+    expect(result.current.roundTrip).toBe(false);
+    expect(result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
+    expect(result.current.waypoints[1]!.name).toBe('Bergen');
+    expect(route.mock.calls.at(-1)![0].points).toEqual([A, B]);
+    expect(route.mock.calls.at(-1)![0].roundTrip).toBeUndefined();
+  });
+
   it('routes every mode in the background so the picker can show trip times', async () => {
     const timeByProfile: Record<string, number> = {
       car: 1_440_000,

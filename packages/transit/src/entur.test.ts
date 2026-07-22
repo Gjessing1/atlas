@@ -229,6 +229,36 @@ describe('parseEnturResponse — degenerate payloads', () => {
     expect(variables.pageCursor).toBe('next-abc');
   });
 
+  it('takes the per-passenger CO₂ figure, and refuses a nonsensical one', () => {
+    /** One trip pattern carrying the given `emission` wire value. */
+    const co2Of = (emission: unknown) =>
+      parseEnturResponse({
+        data: {
+          trip: {
+            tripPatterns: [
+              { duration: 600, walkDistance: 0, emission, legs: [{ mode: 'rail', duration: 600 }] },
+            ],
+          },
+        },
+      }).trips[0]!.co2Grams;
+
+    // Grams per passenger, as Entur reports them for this exact journey.
+    expect(co2Of({ co2: 742.871 })).toBe(742.871);
+    // A trip Entur cannot account for says nothing rather than "0 g" — and a
+    // negative figure is a data fault, not a carbon-negative train.
+    expect(co2Of(null)).toBeUndefined();
+    expect(co2Of({ co2: null })).toBeUndefined();
+    expect(co2Of({ co2: -5 })).toBeUndefined();
+    // An all-walk journey has no emitting leg to account for.
+    expect(co2Of(undefined)).toBeUndefined();
+  });
+
+  it('asks Entur for the emission figure', () => {
+    expect(buildEnturRequest({ from: asker, to: nationaltheatret }).query).toContain(
+      'emission{co2}',
+    );
+  });
+
   /** One trip with one ride leg carrying the given extra wire fields. */
   function legWith(extra: Record<string, unknown>) {
     const [trip] = parseEnturResponse({

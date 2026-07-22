@@ -26,6 +26,7 @@ function plan(over: Partial<TransitPlan> = {}): TransitPlan {
     loading: false,
     error: null,
     problems: [],
+    updatedMs: null,
     timeMs: null,
     setTimeMs: vi.fn(),
     arriveBy: false,
@@ -174,6 +175,20 @@ describe('the empty answer', () => {
     const { result } = board({ trips: [] });
     expect(result.current.emptyMessage).toBe(
       'No departures found for this time. Try a different time or a nearer stop.',
+    );
+  });
+});
+
+describe('live notice', () => {
+  it('states the online-only caveat before anything has failed', () => {
+    // Not an error state: the board says so while it is working, which is the
+    // only moment the warning can still change what someone relies on.
+    expect(board().result.current.liveNotice).toBe('Live timetable — needs a connection.');
+  });
+
+  it('names when the shown answer was fetched, so it can age in plain sight', () => {
+    expect(board({ trips: [tripAt(8, 0)], updatedMs: at(8, 41) }).result.current.liveNotice).toBe(
+      'Live timetable, checked 08:41 — needs a connection to update.',
     );
   });
 });

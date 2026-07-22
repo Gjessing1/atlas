@@ -4,6 +4,7 @@ import {
   bookingDeadlineLabel,
   bookingHowLabel,
   bookingSummaryLabel,
+  co2Label,
   delayLabel,
   DELAY_THRESHOLD_MS,
   legStopsLabel,
@@ -181,6 +182,16 @@ describe('severity and transfer wording', () => {
     expect(transfersLabel(2)).toBe('2 changes');
   });
 
+  it('reads emissions in the unit the number deserves', () => {
+    expect(co2Label(742.871)).toBe('743 g CO₂');
+    expect(co2Label(0)).toBe('0 g CO₂');
+    expect(co2Label(1240)).toBe('1.2 kg CO₂');
+    expect(co2Label(14_800)).toBe('15 kg CO₂');
+    // Not known is not zero: an unquotable figure is left unsaid.
+    expect(co2Label(undefined)).toBeNull();
+    expect(co2Label(-1)).toBeNull();
+  });
+
   it('signs a delay the way a departure board does', () => {
     expect(delayLabel(4 * 60_000)).toBe('+4 min');
     expect(delayLabel(-2 * 60_000)).toBe('-2 min');
@@ -193,6 +204,9 @@ describe('tripSummary', () => {
     expect(summary.times).toBe('08:00 – 08:52');
     expect(summary.meta).toBe('52 min · direct');
     expect(summary.walk).toBe('1.2 km');
+    // No emission figure on this trip: the row simply does not claim one.
+    expect(summary.co2).toBeNull();
+    expect(tripSummary(trip({ co2Grams: 742.871 })).co2).toBe('743 g CO₂');
     expect(summary.delay).toBeNull();
     expect(summary.severity).toBeNull();
     expect(summary.needsBooking).toBe(false);

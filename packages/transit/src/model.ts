@@ -184,6 +184,13 @@ export interface TransitTrip {
   durationMs: number;
   /** Total metres on foot across all walk legs — the number that decides comfort. */
   walkDistanceM: number;
+  /**
+   * Grams of CO₂ per passenger for the whole journey, when the planner can
+   * account for every service on it. Absent means "not known", never "none":
+   * only a figure the operator data actually supports is worth quoting next to
+   * a mode comparison that a car would otherwise win by feel.
+   */
+  co2Grams?: number;
   legs: TransitLeg[];
 }
 

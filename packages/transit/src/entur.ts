@@ -40,7 +40,7 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateT
  trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow,pageCursor:$pageCursor){
   nextPageCursor previousPageCursor
   routingErrors{ code inputField }
-  tripPatterns{ expectedStartTime expectedEndTime duration walkDistance
+  tripPatterns{ expectedStartTime expectedEndTime duration walkDistance emission{co2}
    legs{ mode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
     pointsOnLink{points}
@@ -337,6 +337,17 @@ function toProblems(wire: unknown): TransitProblem[] {
   });
 }
 
+/**
+ * `emission { co2 }` in grams of CO₂ per passenger, or null when Entur has no
+ * figure for the services involved. Negative or non-finite values are treated
+ * as no answer: they can only be a data fault, and a journey advertised as
+ * carbon-negative would be a lie that reads as a feature.
+ */
+function toCo2(wire: unknown): number | null {
+  const co2 = (wire as { co2?: unknown } | null)?.co2;
+  return typeof co2 === 'number' && Number.isFinite(co2) && co2 >= 0 ? co2 : null;
+}
+
 function toPoints(wire: unknown): LatLng[] {
   const encoded = (wire as { points?: unknown } | null)?.points;
   if (typeof encoded !== 'string' || !encoded) return [];
@@ -430,6 +441,7 @@ export function parseEnturResponse(body: unknown): TransitResult {
     const legs = (Array.isArray(p.legs) ? p.legs : []).map((leg) =>
       toLeg(leg as Record<string, unknown>),
     );
+    const co2 = toCo2(p.emission);
     return {
       // Prefer the legs' own times: the pattern-level fields agree with them,
       // and deriving keeps a trip internally consistent if Entur ever disagrees.
@@ -437,6 +449,11 @@ export function parseEnturResponse(body: unknown): TransitResult {
       endMs: legs[legs.length - 1]?.expectedEndMs ?? toMs(p.expectedEndTime),
       durationMs: toNumber(p.duration) * 1000,
       walkDistanceM: toNumber(p.walkDistance),
+      // Entur only knows the emission of some services; a journey it cannot
+      // account for is left absent rather than quoted as a suspiciously green
+      // zero. Walk legs carry no figure at all, which is why an all-walk trip
+      // has none either — "0 g" would be true but is not what null means here.
+      ...(co2 === null ? {} : { co2Grams: co2 }),
       legs,
     };
   });

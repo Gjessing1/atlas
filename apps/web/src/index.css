@@ -1259,6 +1259,14 @@ button {
   justify-content: flex-end;
 }
 
+/* The board's standing caveat: present at all times, quiet enough not to
+   compete with the departures it qualifies. */
+.transit-live-notice {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .transit-trip-meta {
   grid-column: 1 / -1;
   font-size: 12px;

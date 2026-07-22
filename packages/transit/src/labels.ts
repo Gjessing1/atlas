@@ -156,6 +156,31 @@ export function walkLegLabel(leg: TransitLeg): string {
   return `Walk ${fmtDuration(leg.durationMs)} · ${fmtKm(leg.distanceM)}${to}`;
 }
 
+/**
+ * The board's standing caveat, stated rather than discovered. Public transport
+ * is Atlas's one deliberate exception to offline-first — a timetable cannot be
+ * recomputed from local data, so a screen kept open off-grid is showing history
+ * with no way to know it. Naming the time it was checked lets the answer age
+ * visibly in front of the traveller, which the absence of an error never does.
+ */
+export function liveTimetableLabel(checkedMs: number | null): string {
+  if (checkedMs === null) return 'Live timetable — needs a connection.';
+  return `Live timetable, checked ${fmtClock(checkedMs)} — needs a connection to update.`;
+}
+
+/**
+ * Per-passenger CO₂ as a traveller can hold it: grams below a kilo, one
+ * decimal of a kilo above. Null when the planner had no figure — an unknown
+ * emission is silence, not a zero, because the number's whole job is to make
+ * the comparison with driving honest.
+ */
+export function co2Label(grams: number | undefined): string | null {
+  if (grams === undefined || !Number.isFinite(grams) || grams < 0) return null;
+  if (grams < 1000) return `${Math.round(grams)} g CO₂`;
+  const kg = grams / 1000;
+  return `${kg < 10 ? kg.toFixed(1) : Math.round(kg)} kg CO₂`;
+}
+
 /** "direct" / "1 change" / "3 changes" — a change is what makes a journey fail. */
 export function transfersLabel(transfers: number): string {
   if (transfers === 0) return 'direct';
@@ -182,6 +207,8 @@ export interface TripSummary {
   meta: string;
   /** Total walking distance, e.g. "1.2 km". */
   walk: string;
+  /** "740 g CO₂" per passenger, or null when the planner had no figure. */
+  co2: string | null;
   /** Line codes in order — the screen-reader rendering of the line chips. */
   lineCodes: string[];
 }
@@ -208,6 +235,7 @@ export function tripSummary(trip: TransitTrip): TripSummary {
     transfers,
     meta: `${fmtDuration(trip.durationMs)} · ${transfersLabel(transfers)}`,
     walk: fmtKm(trip.walkDistanceM),
+    co2: co2Label(trip.co2Grams),
     lineCodes: tripLineCodes(trip),
   };
 }

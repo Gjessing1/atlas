@@ -296,7 +296,11 @@ function TripCard({
         <View style={styles.tripMetaRow}>
           <Text style={styles.tripMeta}>{summary.meta} · </Text>
           <ModeIcon mode="foot" size={13} color={theme.icon} />
-          <Text style={styles.tripMeta}> {summary.walk}</Text>
+          <Text style={styles.tripMeta}>
+            {' '}
+            {summary.walk}
+            {summary.co2 ? ` · ${summary.co2}` : ''}
+          </Text>
         </View>
       </Pressable>
       {expanded ? (
@@ -466,6 +470,10 @@ export function TransitResults({
           ) : null}
         </>
       ) : null}
+
+      {/* Last line of the board, always: the one part of Atlas that stops
+          working off-grid should say so before it is relied on. */}
+      <Text style={styles.liveNotice}>{board.liveNotice}</Text>
     </View>
   );
 }
@@ -494,6 +502,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   muted: { fontSize: 13, color: theme.textMuted },
+  liveNotice: { fontSize: 11, color: theme.textMuted },
   link: { fontSize: 13, color: theme.accent, fontWeight: '600', paddingVertical: 4 },
   error: { fontSize: 13, color: theme.danger },
   trip: {

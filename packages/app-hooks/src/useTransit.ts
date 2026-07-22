@@ -38,6 +38,13 @@ export interface TransitPlanner {
    * report them without the language of something having gone wrong.
    */
   problems: TransitProblem[];
+  /**
+   * When the shown answer came back, epoch ms — null while there is none. A
+   * timetable is only true at the moment it was fetched, and this is the one
+   * offline-first exception in Atlas: nothing here can be recomputed from
+   * local data, so the board has to be able to say how old what it shows is.
+   */
+  updatedMs: number | null;
   /** Epoch ms to plan around, or null for "now" (the server's now). */
   timeMs: number | null;
   setTimeMs: (ms: number | null) => void;
@@ -84,6 +91,7 @@ export function useTransit(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<TransitProblem[]>([]);
+  const [updatedMs, setUpdatedMs] = useState<number | null>(null);
   const [timeMs, setTimeMsState] = useState<number | null>(null);
   const [arriveBy, setArriveByState] = useState(false);
   const [modes, setModes] = useState<TransitMode[]>([]);
@@ -111,6 +119,7 @@ export function useTransit(
       setError(null);
       setProblems([]);
       setPages({});
+      setUpdatedMs(null);
       setLoading(false);
       return;
     }
@@ -135,12 +144,15 @@ export function useTransit(
           ...(result.previousCursor ? { previous: result.previousCursor } : {}),
         });
         setError(null);
+        setUpdatedMs(Date.now());
         setLoading(false);
       } catch (err) {
         if (controller.signal.aborted) return;
         setTrips(null);
         setProblems([]);
         setPages({});
+        // A failed lookup leaves nothing on screen, so there is no age to state.
+        setUpdatedMs(null);
         setLoading(false);
         setError(
           err instanceof TransitError
@@ -202,6 +214,7 @@ export function useTransit(
     loading,
     error,
     problems,
+    updatedMs,
     timeMs,
     setTimeMs,
     arriveBy,

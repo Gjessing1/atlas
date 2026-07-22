@@ -262,6 +262,7 @@ function TripCard({
         </span>
         <span className="transit-trip-meta">
           {summary.meta} · 🚶 {summary.walk}
+          {summary.co2 ? ` · ${summary.co2}` : ''}
         </span>
       </button>
       {/* The screen-reader summary of a collapsed card is the line list, which
@@ -415,6 +416,9 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
           )}
         </>
       )}
+      {/* Last line of the board, always: the one part of Atlas that stops
+          working off-grid should say so before it is relied on. */}
+      <p className="route-hint transit-live-notice">{board.liveNotice}</p>
     </div>
   );
 }

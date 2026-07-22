@@ -236,5 +236,23 @@ describe('useTransitPlan', () => {
     expect(r.current.transit.error).toMatch(/planner unavailable/i);
     // An empty array would read as "nothing runs then" — a different answer.
     expect(r.current.transit.trips).toBeNull();
+    // Nothing on screen, so there is no age to claim for it either.
+    expect(r.current.transit.updatedMs).toBeNull();
+  });
+
+  it('stamps when the shown timetable was fetched', async () => {
+    // The board quotes this so an answer kept open off-grid ages visibly:
+    // transit is the one thing here that cannot be recomputed locally.
+    vi.setSystemTime(new Date(2026, 6, 21, 8, 41));
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+
+    act(() => r.current.transit.setEnabled(true));
+    await settle();
+
+    // The moment the answer landed — one debounce after the question.
+    const asked = new Date(2026, 6, 21, 8, 41).getTime();
+    expect(r.current.transit.updatedMs).toBeGreaterThanOrEqual(asked);
+    expect(r.current.transit.updatedMs).toBeLessThanOrEqual(asked + 300);
   });
 });

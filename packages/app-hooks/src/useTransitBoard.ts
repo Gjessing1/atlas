@@ -14,7 +14,7 @@
  * other. Only the decisions are here.
  */
 
-import { transitProblemMessage, type TransitMode } from '@atlas/transit';
+import { liveTimetableLabel, transitProblemMessage, type TransitMode } from '@atlas/transit';
 import { useCallback, useMemo } from 'react';
 
 import type { TransitPlan } from './useTransit.js';
@@ -47,6 +47,12 @@ export interface TransitBoard {
   emptyMessage: string | null;
   /** The empty answer is the mode filter's doing, so offer the way out of it. */
   emptyFromFilter: boolean;
+  /**
+   * The standing "this is live, and it needs a connection" line, carrying the
+   * time the shown answer was fetched. Always present: a caveat that only
+   * appears once something has already gone wrong is not a warning.
+   */
+  liveNotice: string;
 }
 
 export function useTransitBoard(transit: TransitPlan): TransitBoard {
@@ -129,5 +135,6 @@ export function useTransitBoard(transit: TransitPlan): TransitBoard {
     showLater,
     emptyMessage,
     emptyFromFilter,
+    liveNotice: liveTimetableLabel(transit.updatedMs),
   };
 }
