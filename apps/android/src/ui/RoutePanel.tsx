@@ -12,7 +12,16 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  BackHandler,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
@@ -421,6 +430,11 @@ export function RoutePanel({
   bottomInset?: number;
 }) {
   const sheetRef = useRef<BottomSheetHandle>(null);
+  // True once a transit journey has been sent to the map (the panel collapsed
+  // to a peek to uncover it). Back then re-opens the panel — returning to the
+  // journey card — before a second Back closes the planner, instead of the
+  // first Back throwing the whole plan away.
+  const [tripOnMap, setTripOnMap] = useState(false);
   const transitMode = transit.enabled;
   const path = route.paths?.[route.selectedPath] ?? null;
   // Trip times sit under the mode icons only for a point-to-point plan, where
@@ -450,6 +464,32 @@ export function RoutePanel({
   useEffect(() => {
     if (editing !== null && !stops.some((w) => w.id === editing)) setEditing(null);
   }, [editing, stops]);
+
+  // Leaving transit mode drops the "a trip is on the map" state so Back doesn't
+  // spend a press re-opening a panel the user is no longer looking at a trip in.
+  useEffect(() => {
+    if (!transitMode) setTripOnMap(false);
+  }, [transitMode]);
+
+  // Back handling for the planner: while a journey is peeked open on the map,
+  // the first Back brings the panel back up (the journey card the user came
+  // from); otherwise Back closes the planner instead of falling through to
+  // Android backgrounding the whole app. route.stop is read through a ref so
+  // this only re-subscribes when the two-step state flips.
+  const stopRef = useRef(route.stop);
+  stopRef.current = route.stop;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (tripOnMap) {
+        setTripOnMap(false);
+        sheetRef.current?.snapTo('half');
+        return true;
+      }
+      stopRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, [tripOnMap]);
   // Which end the *search box* fills: the first stop is the start, anything
   // after it extends the route, which in transit mode means the destination.
   // The My-location button is deliberately not governed by this — see below.
@@ -799,6 +839,7 @@ export function RoutePanel({
               transit.select(index);
               Keyboard.dismiss();
               sheetRef.current?.snapTo('peek');
+              setTripOnMap(true);
               onShowTransitTrip(trip);
             }}
           />

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
@@ -52,6 +53,22 @@ export function DestinationCard({
   onCancel: () => void;
   bottomInset?: number;
 }) {
+  // A single tap on Directions/Save/Edit hands the point off and closes the
+  // card, but a fast second tap arrives before the card unmounts and used to
+  // fire the action twice — adding the same stop, or saving the same pin,
+  // twice. Latch on the first fire (reset when the card shows a new point) so
+  // only the first tap counts. Weather/Share reopen the same sheet, so they
+  // don't need it.
+  const fired = useRef(false);
+  useEffect(() => {
+    fired.current = false;
+  }, [target.lat, target.lng, target.placeId]);
+  const once = (fn: () => void) => () => {
+    if (fired.current) return;
+    fired.current = true;
+    fn();
+  };
+
   return (
     // The action row can wrap on narrower phones. Reserve three rows so
     // Weather, Save/Edit and Share stay inside the sheet and above Android's
@@ -82,24 +99,44 @@ export function DestinationCard({
       </View>
 
       <View style={styles.actions}>
-        <Pressable style={styles.navigate} onPress={onDirections} testID="destination-navigate">
+        <Pressable
+          style={({ pressed }) => [styles.navigate, pressed && styles.pressed]}
+          onPress={once(onDirections)}
+          testID="destination-navigate"
+        >
           <Text style={styles.navigateText}>Directions</Text>
         </Pressable>
         {target.canSave && onSave ? (
-          <Pressable style={styles.save} onPress={onSave} testID="destination-save">
+          <Pressable
+            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+            onPress={once(onSave)}
+            testID="destination-save"
+          >
             <Text style={styles.saveText}>Save pin</Text>
           </Pressable>
         ) : null}
         {onEdit ? (
-          <Pressable style={styles.save} onPress={onEdit} testID="destination-edit">
+          <Pressable
+            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+            onPress={once(onEdit)}
+            testID="destination-edit"
+          >
             <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
-        <Pressable style={styles.save} onPress={onWeather} testID="destination-weather">
+        <Pressable
+          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          onPress={onWeather}
+          testID="destination-weather"
+        >
           <WeatherIcon />
           <Text style={styles.saveText}>Weather</Text>
         </Pressable>
-        <Pressable style={styles.save} onPress={onShare} testID="destination-share">
+        <Pressable
+          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          onPress={onShare}
+          testID="destination-share"
+        >
           <Text style={styles.saveText}>Share</Text>
         </Pressable>
       </View>
@@ -133,4 +170,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveText: { color: theme.text, fontWeight: '700', fontSize: 15 },
+  pressed: { opacity: 0.65 },
 });

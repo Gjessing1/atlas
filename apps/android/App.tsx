@@ -1,7 +1,6 @@
 import { useMapProfile, useThemeMode } from '@atlas/app-hooks';
 import {
   decodeMapLink,
-  encodeMapHash,
   haversineM,
   mapProfile,
   placeIsVisible,
@@ -30,7 +29,6 @@ import {
   BackHandler,
   Linking,
   Pressable,
-  Share,
   StyleSheet,
   Switch,
   Text,
@@ -52,7 +50,6 @@ import {
   PLAN_LINE_LAYER_ID,
 } from './src/map/MapScene';
 import { tunnelChipLabel } from '@atlas/navigation';
-import { getServerOrigin } from './src/serverOrigin';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
@@ -75,6 +72,7 @@ import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
 import { RoutePanel } from './src/ui/RoutePanel';
+import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
 import { useTrackGeometry } from './src/useTrackGeometry';
@@ -172,6 +170,8 @@ function AppInner() {
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
+  // Point whose share-format chooser is open (null = closed).
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   // Map orientation while navigating: course-up (direction of travel) or north-up.
   const [navFollow, setNavFollow] = useState<'course' | 'north'>('course');
   // Show the location puck once the user has asked to be located (also true
@@ -385,13 +385,11 @@ function AppInner() {
     [profiles, overlaysCtl, route],
   );
 
-  // Share the destination as a web #map= link (opens in any browser; the
-  // installed app also answers atlas: links with the same fragment).
+  // Open the share-format chooser for the destination (Atlas link, plain
+  // coordinates, or a geo: hand-off to the user's preferred map app).
   const shareDestination = useCallback(() => {
     if (!destination) return;
-    const pin = { lat: destination.lat, lng: destination.lng };
-    const hash = encodeMapHash({ center: pin, zoom: viewRef.current?.zoom ?? 14, pin });
-    void Share.share({ message: `${destination.name} — ${getServerOrigin()}/${hash}` });
+    setShareTarget({ lat: destination.lat, lng: destination.lng, name: destination.name });
   }, [destination]);
 
   // The red pin was dragged: the destination becomes that adjusted point.
@@ -774,7 +772,11 @@ function AppInner() {
         showPuck={showPuck}
         suppressPuck={suppressNativePuck}
         navDot={navDot}
-        initialView={initialView}
+        // Switching light/dark remounts the scene (keyed on colorScheme) to
+        // reload the restyled map; boot that fresh scene at wherever the camera
+        // already is, not back at the persisted launch view — otherwise a theme
+        // toggle jumps the map. viewRef holds the latest settled camera.
+        initialView={viewRef.current ?? initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
         onViewChange={onViewChange}
@@ -884,7 +886,14 @@ function AppInner() {
           camera + Re-centre pill cover it, so it's hidden too). */}
       {!planning && !previewing && !following && !idleSheetOpen ? (
         <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
-          <Pressable style={styles.roundButton} onPress={() => void locate()} testID="locate">
+          {/* Press feedback (dim + shrink) so the tap visibly registers — the
+              fix can take a second to arrive and the button looked dead until
+              the camera moved. */}
+          <Pressable
+            style={({ pressed }) => [styles.roundButton, pressed && styles.roundButtonPressed]}
+            onPress={() => void locate()}
+            testID="locate"
+          >
             <CrosshairIcon />
           </Pressable>
         </View>
@@ -997,6 +1006,13 @@ function AppInner() {
         bottomInset={bottomInset}
       />
 
+      <ShareSheet
+        target={shareTarget}
+        zoom={viewRef.current?.zoom ?? 14}
+        onClose={() => setShareTarget(null)}
+        bottomInset={bottomInset}
+      />
+
       <RoutePreview nav={nav} bottomInset={bottomInset} />
 
       <AppSheets
@@ -1103,6 +1119,7 @@ const styles = StyleSheet.create({
   },
   orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
   roundButtonActive: { backgroundColor: theme.surfaceActive },
+  roundButtonPressed: { backgroundColor: theme.surfaceActive, transform: [{ scale: 0.9 }] },
   roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   // Landscape: hug the left edge so the centred nav chevron stays uncovered.
   roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 76 },

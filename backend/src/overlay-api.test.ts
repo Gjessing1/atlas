@@ -38,6 +38,25 @@ function testLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'hidpi',
+        title: 'HiDPI',
+        description: 'renderScale WMS layer',
+        group: 'Water',
+        attribution: '© Test',
+        maxzoom: 15,
+        defaultOpacity: 0.8,
+        identify: false,
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://upstream.example/wms',
+        version: '1.3.0',
+        layers: 'Contours',
+        renderScale: 2,
+      },
+    },
+    {
+      meta: {
         id: 'legacy',
         title: 'Legacy',
         description: 'WMS 1.1.1 layer',
@@ -129,7 +148,7 @@ describe('layer catalog', () => {
     const res = await app.inject({ url: '/api/layers' });
     expect(res.statusCode).toBe(200);
     const { layers } = res.json() as { layers: Record<string, unknown>[] };
-    expect(layers.map((l) => l.id)).toEqual(['depth', 'legacy']);
+    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy']);
     expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
 
@@ -175,6 +194,19 @@ describe('overlay tile proxy', () => {
     const bbox = p.get('BBOX')!.split(',').map(Number);
     expect(bbox[0]).toBeCloseTo(0, 3);
     expect(bbox[3]).toBeCloseTo(20037508.342789244, 3);
+  });
+
+  it('renders renderScale WMS layers at 2× with a DPI hint', async () => {
+    const { app, cacheDir, requests } = await build(() => ({ body: PNG_BYTES }));
+    track(app, cacheDir);
+    await app.inject({ url: '/api/overlay/hidpi/3/4/2.png' });
+    const p = requests[0]!.searchParams;
+    // Same bbox, a 2× image, and the DPI/MAP_RESOLUTION hint so the upstream
+    // scales its symbology instead of just rendering smaller marks.
+    expect(p.get('WIDTH')).toBe('512');
+    expect(p.get('HEIGHT')).toBe('512');
+    expect(p.get('DPI')).toBe('192');
+    expect(p.get('MAP_RESOLUTION')).toBe('192');
   });
 
   it('uses SRS for WMS 1.1.1 upstreams', async () => {

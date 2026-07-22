@@ -27,6 +27,14 @@ interface WmsUpstream {
   /** QUERY_LAYERS for GetFeatureInfo; unset = not identifiable. */
   identifyLayers?: string;
   styles?: string;
+  /**
+   * Render GetMap tiles at this multiple of 256 px (with a matching DPI hint),
+   * so fine linework and labels stay crisp on high-density phone screens
+   * instead of being drawn at 256 px and stretched. 1 (or unset) = plain 256 px.
+   * Only meaningful for sources whose symbology carries thin lines or text
+   * (bathymetry contours + soundings); a shaded raster gains nothing from it.
+   */
+  renderScale?: number;
 }
 
 interface XyzUpstream {
@@ -87,8 +95,15 @@ export function norwegianLayers(): OverlayLayer[] {
         kind: 'wms',
         url: 'https://kart.nve.no/enterprise/services/Innsjodatabase2/MapServer/WMSServer',
         version: '1.3.0',
-        layers: 'Dybdekart,DybdeKurve',
+        // DybdePunkt (the individual depth soundings) is drawn last so the
+        // single depth numbers land on top of the shading and contours — it was
+        // previously only in identifyLayers, so the numbers a lake carries never
+        // appeared on the map, only on a tap.
+        layers: 'Dybdekart,DybdeKurve,DybdePunkt',
         identifyLayers: 'DybdePunkt,DybdeKurve',
+        // Contours + sounding labels are thin/small; render at 2× so they stay
+        // legible on a phone instead of a stretched, muddy 256 px tile.
+        renderScale: 2,
       },
     },
     {
@@ -217,7 +232,12 @@ function tileCoords(lat: number, lng: number, z: number): { x: number; y: number
   };
 }
 
-function wmsBaseParams(u: WmsUpstream, z: number, x: number, y: number): URL {
+/**
+ * `size` is the GetMap image edge in px. Identify keeps the default 256 (its
+ * I/J pixel is computed against a 256 px tile); GetMap can ask for a larger
+ * image over the same bbox for hi-dpi rendering (see `renderScale`).
+ */
+function wmsBaseParams(u: WmsUpstream, z: number, x: number, y: number, size = 256): URL {
   const url = new URL(u.url);
   const p = url.searchParams;
   p.set('SERVICE', 'WMS');
@@ -226,8 +246,17 @@ function wmsBaseParams(u: WmsUpstream, z: number, x: number, y: number): URL {
   p.set('STYLES', u.styles ?? '');
   p.set('FORMAT', 'image/png');
   p.set('TRANSPARENT', 'TRUE');
-  p.set('WIDTH', '256');
-  p.set('HEIGHT', '256');
+  p.set('WIDTH', String(size));
+  p.set('HEIGHT', String(size));
+  // A bigger image over the same bbox is only crisper if the server also scales
+  // its symbology; the DPI hint asks it to (ArcGIS honours DPI, MapServer/
+  // GeoServer MAP_RESOLUTION — both are set, unknown params are ignored). Left
+  // off at 256 px so plain tiles keep their existing request shape.
+  if (size !== 256) {
+    const dpi = String(Math.round((96 * size) / 256));
+    p.set('DPI', dpi);
+    p.set('MAP_RESOLUTION', dpi);
+  }
   // 1.3.0 uses CRS, 1.1.1 uses SRS; EPSG:3857 keeps x,y axis order in both.
   p.set(u.version === '1.3.0' ? 'CRS' : 'SRS', 'EPSG:3857');
   p.set('BBOX', tileBbox3857(z, x, y).join(','));
@@ -401,7 +430,13 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
 
       const upstream =
         layer.upstream.kind === 'wms'
-          ? wmsBaseParams(layer.upstream, z, x, y)
+          ? wmsBaseParams(
+              layer.upstream,
+              z,
+              x,
+              y,
+              256 * Math.max(1, Math.round(layer.upstream.renderScale ?? 1)),
+            )
           : new URL(
               substituteEnv(layer.upstream.template, env)
                 .replace('{z}', String(z))
