@@ -1,7 +1,16 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
 import { flattenFolders } from './folders';
@@ -12,6 +21,17 @@ export type EditablePlacePatch = Pick<
   PlacePatch,
   'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
 >;
+
+/**
+ * Ask before a delete. The undo toast catches mistakes afterwards, but these
+ * buttons sit in dense rows where a mis-tap is easy — cheaper to ask first.
+ */
+function confirmDelete(title: string, message: string, onConfirm: () => void): void {
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: onConfirm },
+  ]);
+}
 
 /** Controlled place editor: changes land together when Save is tapped. */
 function PlaceEditor({
@@ -155,8 +175,10 @@ function PlaceEditor({
           style={[styles.button, styles.buttonDanger]}
           onPress={() => {
             Keyboard.dismiss();
-            onClose();
-            onDelete();
+            confirmDelete(`Delete “${place.name}”?`, 'You can undo this right after.', () => {
+              onClose();
+              onDelete();
+            });
           }}
           testID={`favorite-delete-${place.id}`}
         >
@@ -541,7 +563,13 @@ export function FavoritesSheet({
                 </Pressable>
                 <Pressable
                   style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => onDeleteFolder(folder.id)}
+                  onPress={() =>
+                    confirmDelete(
+                      `Delete folder “${folder.name}”?`,
+                      'Places, tracks and subfolders inside it move up one level.',
+                      () => onDeleteFolder(folder.id),
+                    )
+                  }
                   testID={`folder-delete-${folder.id}`}
                 >
                   <Text style={styles.buttonQuietText}>Delete</Text>

@@ -1,8 +1,10 @@
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
-import { useRef, useState } from 'react';
-import { EyeIcon } from './icons.js';
+import { useCallback, useRef, useState } from 'react';
+import { EyeIcon, FolderIcon } from './icons.js';
 import { LayersPanel } from './layers/LayersPanel.js';
 import type { LayerCatalog } from './layers/useLayerCatalog.js';
+import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
+import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
 import { useSidebarDnd } from './sidebar/useSidebarDnd.js';
 import type { ImportOptions, ImportResult, UserData } from './storage/useUserData.js';
@@ -108,7 +110,9 @@ export function Sidebar({
   // ({ parentId } — null parent means the root level).
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
-  const { drag, dropKey, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
+  // Pending destructive action, awaiting the confirmation dialog.
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
@@ -119,6 +123,25 @@ export function Sidebar({
       else next.add(id);
       return next;
     });
+
+  /**
+   * Start naming a new folder. Creating inside a collapsed folder has to expand
+   * it first, or the name field renders into a hidden subtree and the button
+   * looks dead.
+   */
+  const startCreating = (parentId: string | null) => {
+    if (parentId !== null) {
+      setCollapsedFolders((current) => {
+        if (!current.has(parentId)) return current;
+        const next = new Set(current);
+        next.delete(parentId);
+        return next;
+      });
+    }
+    setCreating({ parentId });
+  };
+
+  const closeConfirm = useCallback(() => setConfirm(null), []);
 
   /** Move a nested collection to its parent's parent (root from depth one). */
   const moveCollectionUp = (folder: (typeof data.collections)[number]) => {
@@ -156,15 +179,33 @@ export function Sidebar({
     return (
       <li key={key} className={`item-row${place.visible ? '' : ' hidden'}`}>
         <div
-          className={`item-line${dropKey === key ? ' drop-target' : ''}${drag?.id === place.id ? ' dragging' : ''}`}
+          className={`item-line${dropClass(key)}${drag?.id === place.id ? ' dragging' : ''}`}
           {...dragProps(
             key,
             'place',
             place.id,
             (d) => d.kind === 'place' && d.id !== place.id,
-            () => dropOnPlace(place),
+            (zone) => dropOnPlace(place, zone),
           )}
         >
+          <span className="row-indent" aria-hidden="true" />
+          <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
+            {place.icon}
+          </span>
+          <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
+            {place.name}
+          </button>
+          <span className="row-actions">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Edit ${place.name}`}
+              aria-expanded={expanded === key}
+              onClick={() => toggleExpanded(key)}
+            >
+              ✎
+            </button>
+          </span>
           <button
             type="button"
             className="icon-button visibility-toggle"
@@ -174,21 +215,6 @@ export function Sidebar({
             onClick={() => void data.updatePlace(place.id, { visible: !place.visible })}
           >
             <EyeIcon off={!place.visible} size={18} />
-          </button>
-          <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
-            {place.icon}
-          </span>
-          <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
-            {place.name}
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Edit ${place.name}`}
-            aria-expanded={expanded === key}
-            onClick={() => toggleExpanded(key)}
-          >
-            ✎
           </button>
         </div>
         {place.tags.length > 0 && <div className="item-tags">{place.tags.join(' · ')}</div>}
@@ -201,7 +227,13 @@ export function Sidebar({
             collections={data.collections}
             style={{ icon: place.icon, color: place.color }}
             onPatch={(patch) => void data.updatePlace(place.id, patch)}
-            onDelete={() => void data.deletePlace(place.id)}
+            onDelete={() =>
+              setConfirm({
+                title: `Delete “${place.name}”?`,
+                confirmLabel: 'Delete place',
+                onConfirm: () => void data.deletePlace(place.id),
+              })
+            }
           />
         )}
       </li>
@@ -218,6 +250,24 @@ export function Sidebar({
     return (
       <li key={key} className={`item-row${selectedTrackId === track.id ? ' selected' : ''}`}>
         <div className="item-line">
+          <span className="row-indent" aria-hidden="true" />
+          <span className="item-icon track-icon" aria-hidden="true">
+            〰
+          </span>
+          <button type="button" className="item-name" onClick={() => onShowTrack(track)}>
+            {track.name}
+          </button>
+          <span className="row-actions">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Edit ${track.name}`}
+              aria-expanded={expanded === key}
+              onClick={() => toggleExpanded(key)}
+            >
+              ✎
+            </button>
+          </span>
           <button
             type="button"
             className="icon-button visibility-toggle"
@@ -227,18 +277,6 @@ export function Sidebar({
             onClick={() => void data.updateTrack(track.id, { visible: !track.visible })}
           >
             <EyeIcon off={!track.visible} size={18} />
-          </button>
-          <button type="button" className="item-name" onClick={() => onShowTrack(track)}>
-            {track.name}
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Edit ${track.name}`}
-            aria-expanded={expanded === key}
-            onClick={() => toggleExpanded(key)}
-          >
-            ✎
           </button>
         </div>
         {meta.length > 0 && <div className="item-tags">{meta.join(' · ')}</div>}
@@ -250,7 +288,13 @@ export function Sidebar({
             collectionId={track.collectionId}
             collections={data.collections}
             onPatch={(patch) => void data.updateTrack(track.id, patch)}
-            onDelete={() => void data.deleteTrack(track.id)}
+            onDelete={() =>
+              setConfirm({
+                title: `Delete “${track.name}”?`,
+                confirmLabel: 'Delete track',
+                onConfirm: () => void data.deleteTrack(track.id),
+              })
+            }
             actions={
               <>
                 <button type="button" onClick={() => void data.exportTrack(track.id, 'gpx')}>
@@ -286,11 +330,14 @@ export function Sidebar({
       );
     }
     return (
-      <ul className="item-list" style={depth > 0 ? { paddingLeft: 14 } : undefined}>
+      <ul className={`item-list${depth > 0 ? ' nested' : ''}`}>
         {creatingHere && (
           <li className="folder-row">
             <div className="item-line">
-              <span className="item-icon">📁</span>
+              <span className="row-indent" aria-hidden="true" />
+              <span className="item-icon folder-icon">
+                <FolderIcon size={16} />
+              </span>
               <FolderNameInput
                 initial=""
                 placeholder="New folder name"
@@ -303,92 +350,107 @@ export function Sidebar({
             </div>
           </li>
         )}
-        {folders.map((folder) => (
-          <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
-            <div
-              className={`item-line${dropKey === `folder:${folder.id}` ? ' drop-target' : ''}${drag?.id === folder.id ? ' dragging' : ''}`}
-              {...dragProps(
-                `folder:${folder.id}`,
-                'folder',
-                folder.id,
-                (d) => d.id !== folder.id,
-                () => dropOnFolder(folder),
-              )}
-            >
-              <button
-                type="button"
-                className="icon-button folder-toggle"
-                aria-label={`${collapsedFolders.has(folder.id) ? 'Expand' : 'Collapse'} ${folder.name}`}
-                aria-expanded={!collapsedFolders.has(folder.id)}
-                onClick={() => toggleFolder(folder.id)}
+        {folders.map((folder) => {
+          const open = !collapsedFolders.has(folder.id);
+          return (
+            <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
+              <div
+                className={`item-line${dropClass(`folder:${folder.id}`)}${drag?.id === folder.id ? ' dragging' : ''}`}
+                {...dragProps(
+                  `folder:${folder.id}`,
+                  'folder',
+                  folder.id,
+                  (d) => d.id !== folder.id,
+                  (zone) => void dropOnFolder(folder, zone),
+                  drag?.kind === 'place' ? 'inside' : 'all',
+                )}
               >
-                {collapsedFolders.has(folder.id) ? '▸' : '▾'}
-              </button>
-              <button
-                type="button"
-                className="icon-button visibility-toggle"
-                title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
-                aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
-                aria-pressed={folder.visible}
-                onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
-              >
-                <EyeIcon off={!folder.visible} size={18} />
-              </button>
-              <span className="item-icon">📁</span>
-              {renaming === folder.id ? (
-                <FolderNameInput
-                  initial={folder.name}
-                  placeholder="Folder name"
-                  onCommit={(name) => {
-                    void data.renameCollection(folder.id, name);
-                    setRenaming(null);
-                  }}
-                  onCancel={() => setRenaming(null)}
-                />
-              ) : (
-                <span className="folder-name">{folder.name}</span>
-              )}
-              {folder.parentId !== null && (
                 <button
                   type="button"
-                  className="icon-button"
-                  aria-label={`Move ${folder.name} up one level`}
-                  title="Move up one level"
-                  onClick={() => moveCollectionUp(folder)}
+                  className="icon-button folder-toggle"
+                  aria-label={`${open ? 'Collapse' : 'Expand'} ${folder.name}`}
+                  aria-expanded={open}
+                  onClick={() => toggleFolder(folder.id)}
                 >
-                  ↑
+                  {open ? '▾' : '▸'}
                 </button>
-              )}
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`New folder inside ${folder.name}`}
-                title="New subfolder"
-                onClick={() => setCreating({ parentId: folder.id })}
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`Rename ${folder.name}`}
-                onClick={() => setRenaming(folder.id)}
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`Delete ${folder.name}`}
-                title="Delete folder (contents move up a level)"
-                onClick={() => void data.deleteCollection(folder.id)}
-              >
-                ✕
-              </button>
-            </div>
-            {!collapsedFolders.has(folder.id) && branch(folder.id, depth + 1)}
-          </li>
-        ))}
+                <span className="item-icon folder-icon">
+                  <FolderIcon open={open} size={16} />
+                </span>
+                {renaming === folder.id ? (
+                  <FolderNameInput
+                    initial={folder.name}
+                    placeholder="Folder name"
+                    onCommit={(name) => {
+                      void data.renameCollection(folder.id, name);
+                      setRenaming(null);
+                    }}
+                    onCancel={() => setRenaming(null)}
+                  />
+                ) : (
+                  <span className="folder-name">{folder.name}</span>
+                )}
+                <span className="row-actions">
+                  {folder.parentId !== null && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Move ${folder.name} up one level`}
+                      title="Move up one level"
+                      onClick={() => moveCollectionUp(folder)}
+                    >
+                      ↑
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`New folder inside ${folder.name}`}
+                    title="New subfolder"
+                    onClick={() => startCreating(folder.id)}
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Rename ${folder.name}`}
+                    onClick={() => setRenaming(folder.id)}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Delete ${folder.name}`}
+                    title="Delete folder (contents move up a level)"
+                    onClick={() =>
+                      setConfirm({
+                        title: `Delete folder “${folder.name}”?`,
+                        body: 'Places, tracks and subfolders inside it move up one level.',
+                        confirmLabel: 'Delete folder',
+                        onConfirm: () => void data.deleteCollection(folder.id),
+                      })
+                    }
+                  >
+                    ✕
+                  </button>
+                </span>
+                <button
+                  type="button"
+                  className="icon-button visibility-toggle"
+                  title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
+                  aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
+                  aria-pressed={folder.visible}
+                  onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
+                >
+                  <EyeIcon off={!folder.visible} size={18} />
+                </button>
+              </div>
+              {open && branch(folder.id, depth + 1)}
+            </li>
+          );
+        })}
         {places.map(placeRow)}
         {tracks.map(trackRow)}
       </ul>
@@ -426,7 +488,7 @@ export function Sidebar({
           </button>
           <button
             type="button"
-            onClick={() => setCreating({ parentId: null })}
+            onClick={() => startCreating(null)}
             disabled={data.status !== 'ready'}
           >
             New folder
@@ -505,6 +567,7 @@ export function Sidebar({
         {data.status === 'ready' && branch(null, 0)}
         <LayersPanel layers={layers} mapZoom={mapZoom} />
       </div>
+      {confirm && <ConfirmDialog request={confirm} onCancel={closeConfirm} />}
     </aside>
   );
 }

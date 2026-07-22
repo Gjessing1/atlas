@@ -46,3 +46,62 @@ test('a nested collection can move up to the root', async ({ page }) => {
     page.locator('.sidebar-body > .item-list > .folder-row > .item-line > .folder-name'),
   ).toHaveText(['Parent', 'Child']);
 });
+
+test('a subfolder can be created inside a collapsed folder, and deletes are confirmed', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByPlaceholder('New folder name').fill('Trips');
+  await page.getByPlaceholder('New folder name').press('Enter');
+
+  // Collapsing must not make "+" a dead button: it re-expands and shows the field.
+  await page.getByRole('button', { name: 'Collapse Trips' }).click();
+  await page.getByRole('button', { name: 'New folder inside Trips' }).click();
+  await page.getByPlaceholder('New folder name').fill('Autumn');
+  await page.getByPlaceholder('New folder name').press('Enter');
+
+  const trips = page.locator('.folder-row').filter({
+    has: page.locator(':scope > .item-line > .folder-name', { hasText: /^Trips$/ }),
+  });
+  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
+
+  // Delete asks first — cancelling keeps the folder.
+  await page.getByRole('button', { name: 'Delete Autumn' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
+
+  await page.getByRole('button', { name: 'Delete Autumn' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete folder' }).click();
+  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveCount(0);
+  await expect(page.locator('.undo-toast')).toBeVisible();
+});
+
+test('a folder can be dragged into another folder', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+
+  for (const name of ['Alpha', 'Beta']) {
+    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    await page.getByPlaceholder('New folder name').fill(name);
+    await page.getByPlaceholder('New folder name').press('Enter');
+  }
+
+  const row = (name: string) =>
+    page.locator('.folder-row').filter({
+      has: page.locator(':scope > .item-line > .folder-name', { hasText: new RegExp(`^${name}$`) }),
+    });
+
+  // The middle of a folder row means "drop inside"; the edges reorder.
+  const target = row('Alpha').locator(':scope > .item-line');
+  const box = (await target.boundingBox())!;
+  await row('Beta')
+    .locator(':scope > .item-line')
+    .dragTo(target, { targetPosition: { x: box.width / 2, y: box.height / 2 } });
+
+  await expect(row('Alpha').locator(':scope > .item-list .folder-name')).toHaveText('Beta');
+});

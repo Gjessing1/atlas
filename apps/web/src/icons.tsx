@@ -208,6 +208,29 @@ export function LayersIcon(props: IconProps) {
   );
 }
 
+/** Folder glyph for collection rows — open when the folder is expanded. */
+export function FolderIcon({ open = false, ...props }: IconProps & { open?: boolean }) {
+  return (
+    <IconFrame {...props}>
+      {open ? (
+        <path
+          d="M3 19V6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.5h6.8A1.5 1.5 0 0 1 19 9v1.5M3 19l2.7-7.2a1.5 1.5 0 0 1 1.4-1h13.3a1 1 0 0 1 .94 1.35L18.9 19z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <path
+          d="M3 18.5v-12A1.5 1.5 0 0 1 4.5 5h4.2l2 2.5h8.8A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+      )}
+    </IconFrame>
+  );
+}
+
 export function EyeIcon({ off = false, ...props }: IconProps & { off?: boolean }) {
   return (
     <IconFrame {...props}>
