@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type ColorValue } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { theme } from './theme';
@@ -50,8 +50,8 @@ export function NavArrowIcon({
   color = '#1a73e8',
   notchColor = '#fff',
 }: {
-  color?: string;
-  notchColor?: string;
+  color?: ColorValue;
+  notchColor?: ColorValue;
 }) {
   return (
     <View style={aStyles.box}>

@@ -1,13 +1,15 @@
-import type { NavController } from '@atlas/app-hooks';
+import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
 import { laneGlyphs, laneLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import { MapOverviewIcon, NavArrowIcon } from '../ui/icons';
 import { theme } from '../ui/theme';
 import type { NavViewport } from './navViewport';
 import { TurnIcon } from './TurnIcon';
+import type { NavCameraControls } from './useNavCamera';
 
 function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;
@@ -111,12 +113,18 @@ export function NavBanner({
   topInset = 0,
   bottomInset = 0,
   viewport,
+  navCam,
+  followMode,
+  onToggleFollowMode,
   onHeight,
 }: {
   nav: NavController;
   topInset?: number;
   bottomInset?: number;
   viewport: NavViewport;
+  navCam: NavCameraControls;
+  followMode: NavFollowMode;
+  onToggleFollowMode: () => void;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
@@ -279,7 +287,54 @@ export function NavBanner({
         ) : null}
       </View>
 
-      <View style={styles.actionRow}>
+      {/* These map-view controls are part of the guidance layout, rather than
+          a second absolutely-positioned overlay. The card, controls and
+          driving actions therefore share one collision boundary. Portrait
+          uses the familiar right-edge stack; landscape turns it into one
+          compact row directly below the guidance card. */}
+      {moving ? (
+        <View
+          style={[
+            styles.mapControlsSlot,
+            landscape ? styles.mapControlsSlotLandscape : styles.mapControlsSlotPortrait,
+          ]}
+        >
+          <View style={[styles.mapControlGroup, landscape && styles.mapControlGroupLandscape]}>
+            <Pressable
+              style={styles.mapControlButton}
+              onPress={onToggleFollowMode}
+              testID="toggle-orientation"
+              accessibilityRole="button"
+              accessibilityLabel={
+                followMode === 'course' ? 'Switch to north-up' : 'Switch to course-up'
+              }
+            >
+              {followMode === 'north' ? (
+                <Text style={styles.orientText}>N</Text>
+              ) : (
+                <NavArrowIcon notchColor={theme.surfaceOverlay} />
+              )}
+            </Pressable>
+            <View
+              style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
+            />
+            <Pressable
+              style={[styles.mapControlButton, navCam.overview && styles.mapControlButtonActive]}
+              onPress={navCam.toggleOverview}
+              testID="toggle-overview"
+              accessibilityRole="button"
+              accessibilityLabel={navCam.overview ? 'Back to follow view' : 'Show route overview'}
+              accessibilityState={{ selected: navCam.overview }}
+            >
+              <MapOverviewIcon />
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.mapControlsSpacer} />
+      )}
+
+      <View style={[styles.actionRow, landscape && styles.actionRowLandscape]}>
         {moving && !canDeclareArrival ? (
           <View
             style={styles.speedGroup}
@@ -341,9 +396,9 @@ export function NavBanner({
 }
 
 const styles = StyleSheet.create({
-  // Position and width come from the shared navigation viewport. Distributing
-  // the children vertically makes the top banner and bottom actions one rail.
-  wrap: { position: 'absolute', justifyContent: 'space-between', alignItems: 'stretch' },
+  // Position and width come from the shared navigation viewport. Card, view
+  // controls and driving actions deliberately live in one layout tree.
+  wrap: { position: 'absolute', alignItems: 'stretch' },
   card: {
     width: '100%',
     backgroundColor: theme.surfaceOverlay,
@@ -463,15 +518,43 @@ const styles = StyleSheet.create({
   progressFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
   reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
+  mapControlsSlot: { flex: 1, paddingTop: 10 },
+  mapControlsSlotPortrait: { minHeight: 106, alignItems: 'flex-end' },
+  mapControlsSlotLandscape: { minHeight: 58, alignItems: 'flex-start' },
+  mapControlsSpacer: { flex: 1 },
+  mapControlGroup: {
+    width: 48,
+    borderRadius: 24,
+    backgroundColor: theme.surfaceOverlay,
+    overflow: 'hidden',
+    elevation: 5,
+  },
+  mapControlGroupLandscape: { width: 96, flexDirection: 'row' },
+  mapControlButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  mapControlButtonActive: { backgroundColor: theme.surfaceActive },
+  mapControlDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 10,
+    backgroundColor: theme.border,
+  },
+  mapControlDividerLandscape: {
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    marginHorizontal: 0,
+    marginVertical: 10,
+  },
+  orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
   // No bar behind the controls — every control is its own floating chip, so the
   // map shows through the gaps between them.
   actionRow: {
+    flexShrink: 0,
     maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
+  actionRowLandscape: { minHeight: 46 },
   actionSpacer: { flex: 1 },
   actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   speedGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },

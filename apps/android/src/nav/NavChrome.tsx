@@ -3,7 +3,7 @@ import type { LatLng } from '@atlas/core';
 import { tunnelChipLabel } from '@atlas/navigation';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { MapOverviewIcon, NavArrowIcon } from '../ui/icons';
+import { NavArrowIcon } from '../ui/icons';
 import { theme } from '../ui/theme';
 import type { NavViewport } from './navViewport';
 import type { NavCameraControls } from './useNavCamera';
@@ -75,32 +75,20 @@ export interface NavChromeProps {
   nav: NavController;
   navCam: NavCameraControls;
   puck: NavPuck;
-  followMode: NavFollowMode;
-  onToggleFollowMode: () => void;
-  /** Top of the button column — below the status bar and the nav banner. */
-  controlsTop: number;
   bottomInset: number;
   viewport: NavViewport;
 }
 
 /**
  * The map chrome that belongs to an active trip: the position chevron, the
- * orientation and overview buttons, the current-road chip and the re-centre
- * pill. All of it appears only while guidance is running — the idle map has
- * its own controls, and the route-choice preview has none of these.
+ * current-road chip and the re-centre pill. The orientation and overview
+ * controls live in NavBanner so every control in the guidance rail shares one
+ * collision-free layout. All of this appears only while guidance is running.
  */
-export function NavChrome({
-  nav,
-  navCam,
-  puck,
-  followMode,
-  onToggleFollowMode,
-  controlsTop,
-  bottomInset,
-  viewport,
-}: NavChromeProps) {
+export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChromeProps) {
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   if (!following) return null;
+  const roadLabel = nav.state?.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state?.currentRoad;
   return (
     <>
       {puck.visible ? (
@@ -116,86 +104,40 @@ export function NavChrome({
         </View>
       ) : null}
 
-      {/* Portrait: below the banner on the right. Landscape: a horizontal pair
-          in the leading guidance rail, between its header and bottom actions. */}
-      <View
-        style={[
-          styles.buttonColumn,
-          viewport.landscape && styles.buttonRow,
-          viewport.landscape
-            ? { top: controlsTop, left: viewport.guidanceLeft }
-            : { top: controlsTop, right: 12 },
-        ]}
-      >
-        <Pressable
-          style={styles.roundButton}
-          onPress={onToggleFollowMode}
-          testID="toggle-orientation"
-          accessibilityRole="button"
-          accessibilityLabel={
-            followMode === 'course' ? 'Switch to north-up' : 'Switch to course-up'
-          }
-        >
-          {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
-          {followMode === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
-        </Pressable>
-        {/* Whole-remaining-route overview; tap again (or wait) to re-follow. */}
-        <Pressable
-          style={[styles.roundButton, navCam.overview && styles.roundButtonActive]}
-          onPress={navCam.toggleOverview}
-          testID="toggle-overview"
-          accessibilityRole="button"
-          accessibilityLabel={navCam.overview ? 'Back to follow view' : 'Show route overview'}
-          accessibilityState={{ selected: navCam.overview }}
-        >
-          <MapOverviewIcon />
-        </Pressable>
-      </View>
-
-      {/* Name of the road being driven, pinned bottom-centre (Google-style).
-          Inside a mapped tunnel it names the tunnel and counts it down
-          instead — the road underneath is still E6, but "Brynstunnelen ·
-          1.2 km" is what the driver can check against the world outside. */}
-      {nav.state?.tunnel || nav.state?.currentRoad ? (
+      {/* The re-centre pill and road name are one ordered bottom stack. They
+          can no longer land on the same coordinates when both are visible.
+          In landscape the stack belongs only to the open map pane. */}
+      {navCam.followPaused || roadLabel ? (
         <View
           style={[
-            styles.roadChipWrap,
+            styles.mapBottomStack,
             {
-              bottom: bottomInset + (viewport.landscape ? 18 : 74),
+              bottom: bottomInset + (viewport.landscape ? 16 : 70),
               left: viewport.landscape ? viewport.mapLeft : 0,
-              right: viewport.landscape ? undefined : 0,
               width: viewport.landscape ? viewport.mapRight - viewport.mapLeft : undefined,
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <View style={[styles.roadChip, viewport.landscape && styles.roadChipLandscape]}>
-            <Text style={styles.roadChipText} numberOfLines={1}>
-              {nav.state.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state.currentRoad}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {/* Free look-around during navigation: a pan pauses the follow camera;
-          this pill (or the locate button, or a 12 s timeout) re-engages it. */}
-      {navCam.followPaused ? (
-        <View
-          style={[
-            styles.recentreWrap,
-            {
-              bottom: bottomInset + (viewport.landscape ? 64 : 122),
-              left: viewport.landscape ? viewport.mapLeft : 0,
               right: viewport.landscape ? undefined : 0,
-              width: viewport.landscape ? viewport.mapRight - viewport.mapLeft : undefined,
             },
           ]}
           pointerEvents="box-none"
         >
-          <Pressable style={styles.recentrePill} onPress={navCam.resumeFollow} testID="recentre">
-            <NavArrowIcon />
-            <Text style={styles.recentreText}>Re-centre</Text>
-          </Pressable>
+          {/* Free look-around during navigation: a pan pauses follow; this
+              pill (or the 12 s timeout) re-engages it. */}
+          {navCam.followPaused ? (
+            <Pressable style={styles.recentrePill} onPress={navCam.resumeFollow} testID="recentre">
+              <NavArrowIcon />
+              <Text style={styles.recentreText}>Re-centre</Text>
+            </Pressable>
+          ) : null}
+          {roadLabel ? (
+            <View
+              style={[styles.roadChip, viewport.landscape && styles.roadChipLandscape]}
+              pointerEvents="none"
+            >
+              <Text style={styles.roadChipText} numberOfLines={1}>
+                {roadLabel}
+              </Text>
+            </View>
+          ) : null}
         </View>
       ) : null}
     </>
@@ -203,10 +145,6 @@ export function NavChrome({
 }
 
 const styles = StyleSheet.create({
-  // Edge and top positions come from the shared navigation viewport.
-  buttonColumn: { position: 'absolute', gap: 10, alignItems: 'center' },
-  buttonRow: { flexDirection: 'row' },
-  recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   navPuckWrap: {
     position: 'absolute',
     width: 42,
@@ -228,18 +166,12 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   recentreText: { color: theme.text, fontWeight: '700', fontSize: 15 },
-  roundButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: theme.surface,
+  mapBottomStack: {
+    position: 'absolute',
     alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
+    gap: 8,
+    paddingHorizontal: 12,
   },
-  orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
-  roundButtonActive: { backgroundColor: theme.surfaceActive },
-  roadChipWrap: { position: 'absolute', alignItems: 'center' },
   roadChipLandscape: { maxWidth: '74%' },
   roadChip: {
     backgroundColor: theme.surfaceOverlay,

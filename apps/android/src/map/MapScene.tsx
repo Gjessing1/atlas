@@ -115,8 +115,9 @@ interface MapSceneProps {
   mapRef: RefObject<MapRef | null>;
   cameraRef: RefObject<CameraRef | null>;
   mapStyle: string;
-  topInset: number;
   bottomInset: number;
+  /** Native attribution button, kept outside whichever nav region is active. */
+  attributionPosition: { top: number; left: number };
   packs: LocalPack[];
   /** Enabled catalog overlays (WMS rasters proxied by the backend). */
   overlays: ActiveOverlay[];
@@ -164,8 +165,8 @@ export function MapScene({
   mapRef,
   cameraRef,
   mapStyle,
-  topInset,
   bottomInset,
+  attributionPosition,
   packs,
   overlays,
   overlayLabels,
@@ -242,7 +243,7 @@ export function MapScene({
         // the bottom it competed with Atlas's menu, scale and locate controls.
         // The MapLibre logo watermark is off (attribution remains available).
         logo={false}
-        attributionPosition={{ top: topInset + 8, left: side.left + 8 }}
+        attributionPosition={attributionPosition}
         // Track the zoom for zoom-proportional pin sizes; a user-driven move
         // additionally pauses the nav follow camera (free look-around).
         onRegionIsChanging={(e) => {
@@ -622,7 +623,7 @@ export function MapScene({
       {/* Sits where the native bar used to: middle of the bottom edge, between
           the menu cluster and the locate button. Hidden during turn-by-turn —
           dead weight on a driving screen. */}
-      {!following ? (
+      {nav.phase === 'idle' ? (
         <ScaleBar
           lat={scaleAt.lat}
           zoom={scaleAt.zoom}

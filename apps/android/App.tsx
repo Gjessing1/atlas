@@ -195,7 +195,12 @@ function AppInner() {
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
-  const controlsTop = topInset + 8 + (navActive && !previewing ? navHeight + 8 : 0);
+  const attributionPosition =
+    navActive && !previewing
+      ? landscape
+        ? { top: topInset + 8, left: viewport.mapLeft + 8 }
+        : { top: topInset + navHeight + 20, left: side.left + 8 }
+      : { top: topInset + 8, left: side.left + 8 };
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
   const idleSheetOpen = searchOpen || menuOpen || dest.destination !== null;
@@ -316,6 +321,10 @@ function AppInner() {
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
   const planning = route.active;
+  // Idle map actions are one region with one visibility rule. Navigation owns
+  // that region from route startup through arrival/error, not only while its
+  // follow camera is running.
+  const showIdleChrome = !planning && !navActive && !idleSheetOpen;
 
   // Share the planned route as GPX (parity with the web RoutePanel export).
   const exportRoute = useCallback(
@@ -409,8 +418,8 @@ function AppInner() {
         mapRef={mapRef}
         cameraRef={cameraRef}
         mapStyle={mapStyle}
-        topInset={topInset}
         bottomInset={bottomInset}
+        attributionPosition={attributionPosition}
         packs={packs}
         overlays={overlaysCtl.overlays}
         overlayLabels={overlayLabels}
@@ -446,6 +455,9 @@ function AppInner() {
         topInset={topInset}
         bottomInset={bottomInset}
         viewport={viewport}
+        navCam={navCam}
+        followMode={navPrefs.followMode}
+        onToggleFollowMode={navPrefs.toggleFollowMode}
         onHeight={setNavHeight}
       />
 
@@ -454,16 +466,13 @@ function AppInner() {
         nav={nav}
         navCam={navCam}
         puck={navPuck}
-        followMode={navPrefs.followMode}
-        onToggleFollowMode={navPrefs.toggleFollowMode}
-        controlsTop={controlsTop}
         bottomInset={bottomInset}
         viewport={viewport}
       />
 
       {/* Search shares the bottom-sheet model and stays above the keyboard;
           hidden while navigating because the guidance UI owns the screen. */}
-      {searchOpen && !following && !planning && !previewing ? (
+      {searchOpen && !navActive && !planning ? (
         <SearchBar
           packs={packs}
           getBias={getBias}
@@ -478,7 +487,7 @@ function AppInner() {
       {/* Bottom-right: recentre on the current position (RoutePanel owns the
           bottom while planning, so hide it then; while navigating the follow
           camera + Re-centre pill cover it, so it's hidden too). */}
-      {!planning && !previewing && !following && !idleSheetOpen ? (
+      {showIdleChrome ? (
         <View style={[styles.locateWrap, { bottom: bottomInset + 24, right: side.right + 12 }]}>
           {/* Press feedback (dim + shrink) so the tap visibly registers — the
               fix can take a second to arrive and the button looked dead until
@@ -493,8 +502,10 @@ function AppInner() {
         </View>
       ) : null}
 
-      {/* Hidden while planning/previewing — a panel owns the bottom then. */}
-      {!planning && !previewing && !idleSheetOpen ? (
+      {/* The whole idle toolbar disappears for every navigation phase. This
+          includes route startup and terminal/error states, not only the
+          follow-camera phases, so it cannot share coordinates with End. */}
+      {showIdleChrome ? (
         <MenuCluster
           bottomInset={bottomInset}
           onToggleMenu={() => setMenuOpen((o) => !o)}
@@ -504,7 +515,7 @@ function AppInner() {
         />
       ) : null}
 
-      {!planning && !previewing && !following && !idleSheetOpen ? (
+      {showIdleChrome ? (
         <MapActivityControls
           profile={profiles}
           overlays={overlaysCtl}
@@ -516,7 +527,7 @@ function AppInner() {
         />
       ) : null}
 
-      {useOffline && !planning && !previewing && !following && !idleSheetOpen ? (
+      {useOffline && showIdleChrome ? (
         // Above the scalebar strip (bottom-centre) so the two never overlap.
         // Hidden mid-trip: in landscape the bottom offsets put it across the
         // middle of the map, and which tile source is in use is not something
@@ -530,7 +541,7 @@ function AppInner() {
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
-      {packs.length > 0 && !planning && !previewing && !following && !idleSheetOpen ? (
+      {packs.length > 0 && showIdleChrome ? (
         // Stacked above the bottom-right locate button. Hidden mid-trip: the
         // offline fallback is automatic (useMapStyle), the switch only forces it.
         <View style={[styles.offlineToggle, { bottom: bottomInset + 84, right: side.right + 12 }]}>
@@ -564,7 +575,7 @@ function AppInner() {
       <UpdateNotices storage={data.storage} topInset={topInset} />
 
       <MainMenuSheet
-        visible={menuOpen && !planning && !previewing}
+        visible={menuOpen && !planning && !navActive}
         onClose={() => setMenuOpen(false)}
         onOpenFavorites={() => setFavoritesOpen(true)}
         onOpenTracks={() => setTracksOpen(true)}
@@ -573,7 +584,7 @@ function AppInner() {
         bottomInset={bottomInset}
       />
 
-      {destination && !planning ? (
+      {destination && !planning && !navActive ? (
         <DestinationCard
           target={destination}
           onDirections={() => {
