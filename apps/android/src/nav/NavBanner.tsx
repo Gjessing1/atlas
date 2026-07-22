@@ -2,11 +2,11 @@ import type { NavController } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
 import { laneGlyphs, laneLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
-import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
+import type { NavViewport } from './navViewport';
 import { TurnIcon } from './TurnIcon';
 
 function formatDistance(m: number): string {
@@ -109,22 +109,22 @@ function AudioIcon({ muted }: { muted: boolean }) {
 export function NavBanner({
   nav,
   topInset = 0,
+  bottomInset = 0,
+  viewport,
   onHeight,
 }: {
   nav: NavController;
   topInset?: number;
+  bottomInset?: number;
+  viewport: NavViewport;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
-  const win = useWindowDimensions();
-  // Landscape parks the system navigation bar on one side of the screen; the
-  // banner has to start inside it, not under it (both are 0 in portrait).
-  const side = useSideInsets();
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
-  // Landscape: park the banner on the left (Google-style side panel) so the
-  // road ahead keeps the rest of the width.
-  const landscape = win.width > win.height;
+  // Landscape: park guidance on the leading side so the road ahead owns the
+  // trailing map pane. In portrait the same card spans the usable width.
+  const { landscape } = viewport;
 
   const { state } = nav;
   const maneuver = state?.upcoming;
@@ -151,13 +151,19 @@ export function NavBanner({
     <View
       style={[
         styles.wrap,
-        { top: topInset + 8, left: side.left + 12, right: side.right + 12 },
-        landscape && { right: undefined, width: Math.min(360, Math.round(win.width * 0.42)) },
+        {
+          top: topInset + 8,
+          bottom: bottomInset + 12,
+          left: viewport.guidanceLeft,
+          width: viewport.guidanceWidth,
+        },
       ]}
       pointerEvents="box-none"
-      onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
     >
-      <View style={[styles.card, landscape && styles.cardCompact]}>
+      <View
+        style={[styles.card, landscape && styles.cardCompact]}
+        onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+      >
         {nav.phase === 'starting' ? (
           <View style={styles.stateBlock}>
             <Text style={styles.eyebrow}>Navigation</Text>
@@ -335,8 +341,9 @@ export function NavBanner({
 }
 
 const styles = StyleSheet.create({
-  // Horizontal position (12 dp plus the safe-area inset) is applied inline.
-  wrap: { position: 'absolute', gap: 10, alignItems: 'stretch' },
+  // Position and width come from the shared navigation viewport. Distributing
+  // the children vertically makes the top banner and bottom actions one rail.
+  wrap: { position: 'absolute', justifyContent: 'space-between', alignItems: 'stretch' },
   card: {
     width: '100%',
     backgroundColor: theme.surfaceOverlay,

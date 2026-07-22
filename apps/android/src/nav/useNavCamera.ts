@@ -4,6 +4,8 @@ import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
 
+import type { NavViewport } from './navViewport';
+
 /** A manual pan pauses the follow; it resumes by itself after this long. */
 const AUTO_RESUME_MS = 12_000;
 /** The overview camera returns to the follow by itself after this long. */
@@ -36,6 +38,8 @@ export function useNavCamera(
   cameraRef: RefObject<CameraRef | null>,
   nav: NavController,
   navFollow: 'course' | 'north',
+  viewport: NavViewport,
+  guidanceHeight: number,
 ): NavCameraControls {
   const win = useWindowDimensions();
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
@@ -98,7 +102,7 @@ export function useNavCamera(
       // Flat and north-up: the follow camera's course bearing and pitch would
       // make an overview unreadable.
       cameraRef.current?.fitBounds([bounds.sw.lng, bounds.sw.lat, bounds.ne.lng, bounds.ne.lat], {
-        padding: { top: 90, right: 60, bottom: 90, left: 60 },
+        padding: viewport.overviewPadding,
         bearing: 0,
         pitch: 0,
         duration: 600,
@@ -106,7 +110,7 @@ export function useNavCamera(
     }
     const timer = setTimeout(() => setOverview(false), OVERVIEW_RESUME_MS);
     return () => clearTimeout(timer);
-  }, [overview, cameraRef]);
+  }, [overview, cameraRef, viewport]);
 
   const state = nav.state;
   useEffect(() => {
@@ -118,23 +122,40 @@ export function useNavCamera(
     // standing next to the car shouldn't look like barreling down the route.
     // The moment it flips, the ease below rotates into driving view.
     const courseUp = navFollow === 'course' && state.departed;
-    // Bottom-anchor (course-up only — in north-up "ahead" isn't up, so centre):
-    // top padding of half the screen puts the car ~75% of the way down.
-    const anchorTop = courseUp ? Math.round(win.height * 0.5) : 0;
-    const forwardDp = Math.round(win.height * (courseUp ? 0.6 : 0.4));
+    const padding = courseUp ? viewport.coursePadding : viewport.flatPadding;
+    // On a portrait screen the header hides the top of the route, so zoom for
+    // the genuinely visible road between its bottom and the puck. Landscape's
+    // right map pane is open all the way to the status bar.
+    const visibleTop = viewport.landscape
+      ? viewport.flatPadding.top
+      : viewport.flatPadding.top + 8 + guidanceHeight;
+    const forwardDp = courseUp
+      ? Math.max(160, Math.round(viewport.courseAnchor.y - visibleTop - 12))
+      : Math.round(win.height * 0.4);
     lastCenterRef.current = [snapped.lng, snapped.lat];
     cameraRef.current?.easeTo({
       center: [snapped.lng, snapped.lat],
       zoom: followZoom(nav.speedMps, snapped.lat, state.upcoming?.distanceToM ?? null, forwardDp),
       bearing: courseUp ? bearingRef.current : 0,
       pitch: courseUp ? 45 : 0,
-      padding: { top: anchorTop },
+      padding,
       // Linear easing over roughly the fix interval keeps back-to-back
       // updates from stuttering (web-nav parity).
       duration: 800,
       easing: 'linear',
     });
-  }, [cameraRef, following, followPaused, overview, state, navFollow, nav.speedMps, win.height]);
+  }, [
+    cameraRef,
+    following,
+    followPaused,
+    overview,
+    state,
+    navFollow,
+    nav.speedMps,
+    win.height,
+    viewport,
+    guidanceHeight,
+  ]);
 
   // Trip over: put the camera back the way the rest of the app expects it —
   // north-up, flat, un-padded (padding needs a centre-carrying move to reset).
@@ -145,7 +166,7 @@ export function useNavCamera(
         center: lastCenterRef.current,
         bearing: 0,
         pitch: 0,
-        padding: { top: 0 },
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
         duration: 600,
       });
       lastCenterRef.current = null;

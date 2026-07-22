@@ -1,11 +1,11 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import { tunnelChipLabel } from '@atlas/navigation';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MapOverviewIcon, NavArrowIcon } from '../ui/icons';
-import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
+import type { NavViewport } from './navViewport';
 import type { NavCameraControls } from './useNavCamera';
 
 /** Where the position marker sits, and which marker the map should draw. */
@@ -16,7 +16,8 @@ export interface NavPuck {
   dot: LatLng | null;
   /** Hide MapLibre's own puck for the whole trip. */
   suppressNative: boolean;
-  top: number;
+  x: number;
+  y: number;
   rotation: number;
 }
 
@@ -48,21 +49,22 @@ export function useNavPuck(
   nav: NavController,
   navCam: NavCameraControls,
   followMode: NavFollowMode,
+  viewport: NavViewport,
 ): NavPuck {
-  const win = useWindowDimensions();
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const courseUp = followMode === 'course' && (nav.state?.departed ?? false);
   const visible = following && !navCam.followPaused && !navCam.overview && nav.state !== null;
+  const anchor = courseUp ? viewport.courseAnchor : viewport.flatAnchor;
   return {
     visible,
     dot: following && nav.state !== null && !visible ? nav.state.snapped : null,
     suppressNative: following && nav.state !== null,
-    // Anchor point of the follow camera (see useNavCamera): course-up pads the
-    // centre down to 75% of the screen; otherwise (north-up, or before the
-    // drive has begun) it keeps the centre at the middle. Track the same
-    // `courseUp` the camera frames with, so the chevron lands where the camera
-    // actually centres.
-    top: courseUp ? win.height * 0.75 : win.height * 0.5,
+    // Anchor point of the follow camera (see useNavCamera): course-up puts it
+    // low for look-ahead; north-up centres it vertically. Landscape centres
+    // both in the unobstructed right map pane. Track the exact same geometry so
+    // the chevron lands where the camera actually centres.
+    x: anchor.x,
+    y: anchor.y,
     // Course-up rotates the map to the course, so the chevron points straight
     // up; otherwise the map is north-up (bearing 0), so the chevron shows it.
     rotation: courseUp ? 0 : Math.round(nav.state?.courseDeg ?? 0),
@@ -78,7 +80,7 @@ export interface NavChromeProps {
   /** Top of the button column — below the status bar and the nav banner. */
   controlsTop: number;
   bottomInset: number;
-  landscape: boolean;
+  viewport: NavViewport;
 }
 
 /**
@@ -95,12 +97,8 @@ export function NavChrome({
   onToggleFollowMode,
   controlsTop,
   bottomInset,
-  landscape,
+  viewport,
 }: NavChromeProps) {
-  const win = useWindowDimensions();
-  // Landscape puts the system navigation bar on one side; every control that
-  // hugs a vertical edge has to clear it (in portrait both insets are 0).
-  const side = useSideInsets();
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   if (!following) return null;
   return (
@@ -108,7 +106,7 @@ export function NavChrome({
       {puck.visible ? (
         <View
           pointerEvents="none"
-          style={[styles.navPuckWrap, { top: puck.top - 21, left: win.width / 2 - 21 }]}
+          style={[styles.navPuckWrap, { top: puck.y - 21, left: puck.x - 21 }]}
         >
           <View style={{ transform: [{ rotate: `${puck.rotation}deg` }] }}>
             {/* Grey when the GPS signal is lost, so a frozen puck reads as
@@ -118,8 +116,17 @@ export function NavChrome({
         </View>
       ) : null}
 
-      {/* Top-right during navigation: map orientation + route overview. */}
-      <View style={[styles.buttonColumn, { top: controlsTop, right: side.right + 12 }]}>
+      {/* Portrait: below the banner on the right. Landscape: a horizontal pair
+          in the leading guidance rail, between its header and bottom actions. */}
+      <View
+        style={[
+          styles.buttonColumn,
+          viewport.landscape && styles.buttonRow,
+          viewport.landscape
+            ? { top: controlsTop, left: viewport.guidanceLeft }
+            : { top: controlsTop, right: 12 },
+        ]}
+      >
         <Pressable
           style={styles.roundButton}
           onPress={onToggleFollowMode}
@@ -153,16 +160,16 @@ export function NavChrome({
         <View
           style={[
             styles.roadChipWrap,
-            landscape && styles.roadChipWrapLandscape,
             {
-              bottom: bottomInset + 26,
-              paddingLeft: (landscape ? 76 : 0) + side.left,
-              paddingRight: side.right,
+              bottom: bottomInset + (viewport.landscape ? 18 : 74),
+              left: viewport.landscape ? viewport.mapLeft : 0,
+              right: viewport.landscape ? undefined : 0,
+              width: viewport.landscape ? viewport.mapRight - viewport.mapLeft : undefined,
             },
           ]}
           pointerEvents="none"
         >
-          <View style={[styles.roadChip, landscape && styles.roadChipLandscape]}>
+          <View style={[styles.roadChip, viewport.landscape && styles.roadChipLandscape]}>
             <Text style={styles.roadChipText} numberOfLines={1}>
               {nav.state.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state.currentRoad}
             </Text>
@@ -176,7 +183,12 @@ export function NavChrome({
         <View
           style={[
             styles.recentreWrap,
-            { bottom: bottomInset + 88, left: side.left, right: side.right },
+            {
+              bottom: bottomInset + (viewport.landscape ? 64 : 122),
+              left: viewport.landscape ? viewport.mapLeft : 0,
+              right: viewport.landscape ? undefined : 0,
+              width: viewport.landscape ? viewport.mapRight - viewport.mapLeft : undefined,
+            },
           ]}
           pointerEvents="box-none"
         >
@@ -191,8 +203,9 @@ export function NavChrome({
 }
 
 const styles = StyleSheet.create({
-  // `right` (12 dp plus the safe-area inset) and `top` are applied inline.
+  // Edge and top positions come from the shared navigation viewport.
   buttonColumn: { position: 'absolute', gap: 10, alignItems: 'center' },
+  buttonRow: { flexDirection: 'row' },
   recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   navPuckWrap: {
     position: 'absolute',
@@ -226,13 +239,8 @@ const styles = StyleSheet.create({
   },
   orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
   roundButtonActive: { backgroundColor: theme.surfaceActive },
-  roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  // Landscape: hug the left edge so the centred nav chevron stays uncovered
-  // (the 76 dp indent is applied inline, on top of the left safe-area inset).
-  roadChipWrapLandscape: { alignItems: 'flex-start' },
-  // …and keep a long road name from growing back into the chevron's column;
-  // the name ellipsises instead (numberOfLines is already 1).
-  roadChipLandscape: { maxWidth: '40%' },
+  roadChipWrap: { position: 'absolute', alignItems: 'center' },
+  roadChipLandscape: { maxWidth: '74%' },
   roadChip: {
     backgroundColor: theme.surfaceOverlay,
     borderRadius: 16,

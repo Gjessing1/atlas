@@ -41,6 +41,7 @@ import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
+import { navViewport } from './src/nav/navViewport';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
@@ -178,12 +179,18 @@ function AppInner() {
   // orientation while travelling).
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const win = useWindowDimensions();
+  const viewport = useMemo(
+    () => navViewport(win.width, win.height, side, topInset, bottomInset),
+    [win.width, win.height, side, topInset, bottomInset],
+  );
+  const landscape = viewport.landscape;
   // Mute and map orientation survive across trips (device-local, web parity).
   const navPrefs = useNavPrefs(data, nav);
-  // The follow camera: bottom-anchored, course-up, speed/turn-aware zoom; a
-  // manual pan pauses it (re-centre pill / locate button / timeout resume it).
-  const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode);
-  const navPuck = useNavPuck(nav, navCam, navPrefs.followMode);
+  // The follow camera uses the same responsive viewport as the visible puck:
+  // centred in portrait, or in the unobstructed right pane in landscape.
+  const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, navHeight);
+  const navPuck = useNavPuck(nav, navCam, navPrefs.followMode, viewport);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
@@ -192,10 +199,8 @@ function AppInner() {
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
   const idleSheetOpen = searchOpen || menuOpen || dest.destination !== null;
-  // Landscape is short, so several pieces of chrome move out of the centre
-  // column (see NavChrome) and route fits get a narrower bottom pad.
-  const win = useWindowDimensions();
-  const landscape = win.width > win.height;
+  // Landscape is short, so several pieces of chrome move into the leading
+  // guidance rail and route fits get a narrower bottom pad.
 
   const { onMapPress, onPickPoint } = useMapPress({
     mapRef,
@@ -436,7 +441,13 @@ function AppInner() {
         <Animated.View pointerEvents="none" style={[styles.tunnelDim, { opacity: tunnelDim }]} />
       ) : null}
 
-      <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
+      <NavBanner
+        nav={nav}
+        topInset={topInset}
+        bottomInset={bottomInset}
+        viewport={viewport}
+        onHeight={setNavHeight}
+      />
 
       {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}
       <NavChrome
@@ -447,7 +458,7 @@ function AppInner() {
         onToggleFollowMode={navPrefs.toggleFollowMode}
         controlsTop={controlsTop}
         bottomInset={bottomInset}
-        landscape={landscape}
+        viewport={viewport}
       />
 
       {/* Search shares the bottom-sheet model and stays above the keyboard;
