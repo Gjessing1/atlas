@@ -30,6 +30,7 @@ export {
   useUserData,
   sanitizeFileName,
   importedCount,
+  type ImportOptions,
   type ImportResult,
   type UndoableDelete,
   type UserData,

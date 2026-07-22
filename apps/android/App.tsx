@@ -78,7 +78,7 @@ import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
 import { useTrackGeometry } from './src/useTrackGeometry';
-import { useUserData } from './src/useUserData';
+import { useUserData, type ImportOptions } from './src/useUserData';
 import { useWeather } from './src/weather/useWeather';
 
 /**
@@ -685,16 +685,23 @@ function AppInner() {
   );
 
   // Pick GPX/KML/KMZ files from the device and import them (parser validates by
-  // name/content, so we allow any type through the picker).
-  const importTracks = useCallback(async () => {
-    const res = await DocumentPicker.getDocumentAsync({
-      type: '*/*',
-      multiple: true,
-      copyToCacheDirectory: true,
-    });
-    if (res.canceled) return null;
-    return data.importFiles(res.assets.map((a) => ({ name: a.name, uri: a.uri })));
-  }, [data]);
+  // name/content, so we allow any type through the picker). `options` carries
+  // the folder the sheet asked for; backups keep their own structure regardless.
+  const importTracks = useCallback(
+    async (options?: ImportOptions) => {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled) return null;
+      return data.importFiles(
+        res.assets.map((a) => ({ name: a.name, uri: a.uri })),
+        options,
+      );
+    },
+    [data],
+  );
 
   // Recentre on the user's position. While navigating this re-engages the
   // follow camera after a manual pan; when idle it's a one-shot fly-to that

@@ -4,6 +4,7 @@ import {
   buildElevationProfile,
   buildGpx,
   buildKml,
+  buildKmlTree,
   computeTrackStats,
   parseGpx,
   parseKml,
@@ -89,6 +90,40 @@ describe('buildKml', () => {
       original.segments.map((s) => s.map(({ lat, lng, ele }) => ({ lat, lng, ele }))),
     );
     expect(rebuilt.waypoints).toEqual(original.waypoints);
+  });
+});
+
+describe('buildKmlTree', () => {
+  it('nests folders and keeps every placemark readable by parseKml', () => {
+    const kml = buildKmlTree({
+      name: 'Atlas',
+      items: [{ segments: [], waypoints: [{ lat: 59.9, lng: 10.7, name: 'Loose pin' }] }],
+      children: [
+        {
+          name: 'Trips & tours',
+          items: [{ ...parseGpx(SAMPLE_GPX), name: 'Morning ride' }],
+          children: [
+            {
+              name: 'Nested',
+              items: [{ segments: [], waypoints: [{ lat: 60.1, lng: 11.2, name: 'Deep pin' }] }],
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(kml).toContain('<name>Trips &amp; tours</name>');
+    expect(kml.indexOf('<name>Nested</name>')).toBeLessThan(kml.indexOf('<name>Deep pin'));
+    // Folder nesting: the child folder closes before its parent does.
+    expect(kml.match(/<Folder>/g)).toHaveLength(2);
+
+    // Flat read-back (parseKml ignores folders) still sees everything.
+    const parsed = parseKml(kml);
+    expect(parsed.waypoints.map((w) => w.name)).toEqual(
+      expect.arrayContaining(['Loose pin', 'Deep pin', 'Cabin & camp']),
+    );
+    expect(parsed.segments.length).toBe(parseGpx(SAMPLE_GPX).segments.length);
   });
 });
 

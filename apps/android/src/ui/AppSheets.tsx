@@ -3,7 +3,7 @@ import type { SyncState, ThemeModeController } from '@atlas/app-hooks';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import type { LocalPack } from '../regions/packs';
-import type { ImportResult, UserData } from '../useUserData';
+import type { ImportOptions, ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
 import { LayersSheet } from './LayersSheet';
@@ -40,7 +40,7 @@ interface AppSheetsProps {
   onFlyTo: (p: LatLng) => void;
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
-  onImportTracks: () => Promise<ImportResult | null>;
+  onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
 }
 
 /**
@@ -114,6 +114,7 @@ export function AppSheets({
         onRename={(id, name) => void data.updateTrack(id, { name })}
         onExport={(id, format) => void data.exportTrack(id, format)}
         onDelete={(id) => void data.deleteTrack(id)}
+        collections={data.collections}
         onImport={onImportTracks}
         onLoadTrackData={(id) => data.getTrackData(id)}
         bottomInset={bottomInset}

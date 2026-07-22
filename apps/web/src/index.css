@@ -392,6 +392,57 @@ button {
   cursor: default;
 }
 
+/* Import destination picker, opened by the Import button. */
+.sidebar-import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.sidebar-import label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-import select,
+.sidebar-import input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.sidebar-import button {
+  align-self: flex-start;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-import button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-import small {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .sidebar-body {
   flex: 1;
   overflow-y: auto;
@@ -498,6 +549,14 @@ button {
 
 .item-name:hover {
   text-decoration: underline;
+}
+
+/* Collapse chevron: fixed width so folder names stay aligned open or closed. */
+.folder-toggle {
+  width: 18px;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 10px;
 }
 
 .folder-name {

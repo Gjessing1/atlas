@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { AtlasStorage } from '@atlas/storage';
 import type { SqlDriver, SqlRow, SqlValue } from '@atlas/storage';
+import { parseKmz } from '@atlas/gpx';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { unzipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
@@ -234,6 +235,23 @@ describe('useUserData', () => {
     expect(data?.segments[0]).toHaveLength(2);
   });
 
+  it('files imported tracks and waypoints into a newly requested collection', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.importFiles([gpxFile('ride.gpx'), waypointsFile], {
+        newCollection: { name: 'Norway trip' },
+      });
+    });
+
+    const folder = result.current.collections.find((item) => item.name === 'Norway trip');
+    expect(folder).toBeDefined();
+    expect(result.current.tracks[0]!.collectionId).toBe(folder!.id);
+    expect(result.current.places.every((place) => place.collectionId === folder!.id)).toBe(true);
+  });
+
   it('exports a single track as gpx or kml via the platform seam', async () => {
     const { platform, savedText } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));
@@ -267,6 +285,7 @@ describe('useUserData', () => {
     const entries = unzipSync(zipped.savedZips[0]!.bytes);
     expect(Object.keys(entries).sort()).toEqual([
       'atlas-export.json',
+      'atlas-export.kmz',
       'places.gpx',
       'tracks/Morning_ride.gpx',
     ]);
@@ -279,6 +298,40 @@ describe('useUserData', () => {
     });
     expect(plain.savedText[0]!.mime).toBe('application/json');
     expect(JSON.parse(plain.savedText[0]!.body)).toHaveProperty('places');
+  });
+
+  it('exports an interop KMZ that mirrors the folder structure', async () => {
+    const zipped = createPlatform({ zip: true });
+    const { result } = renderHook(() => useUserData(zipped.platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.savePlace({ name: 'Loose pin', lat: 59.9, lng: 10.7 });
+      await result.current.createCollection('Trips');
+    });
+    const folder = result.current.collections[0]!;
+    await act(async () => {
+      await result.current.savePlace({
+        name: 'Filed pin',
+        lat: 60.1,
+        lng: 11.2,
+        collectionId: folder.id,
+      });
+      await result.current.importFiles([gpxFile('ride.gpx')], { collectionId: folder.id });
+      await result.current.exportAll();
+    });
+
+    const kmz = unzipSync(zipped.savedZips[0]!.bytes)['atlas-export.kmz']!;
+    const kml = new TextDecoder().decode(unzipSync(kmz)['doc.kml']!);
+    expect(kml).toContain('<name>Trips</name>');
+    // The filed records sit inside the folder, the loose pin above it.
+    expect(kml.indexOf('Loose pin')).toBeLessThan(kml.indexOf('<Folder>'));
+    expect(kml.indexOf('Filed pin')).toBeGreaterThan(kml.indexOf('<Folder>'));
+    expect(kml.indexOf('Morning ride')).toBeGreaterThan(kml.indexOf('<Folder>'));
+
+    // And it is a real KMZ: another platform can read it back.
+    const data = parseKmz(kmz);
+    expect(data.waypoints.map((w) => w.name).sort()).toEqual(['Filed pin', 'Loose pin']);
+    expect(data.segments).toHaveLength(1);
   });
 
   /**

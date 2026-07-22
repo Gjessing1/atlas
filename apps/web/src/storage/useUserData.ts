@@ -6,7 +6,7 @@ import {
 import type { UserDataPlatform } from '@atlas/app-hooks';
 import { openStorage } from './db.js';
 
-export type { ImportResult } from '@atlas/app-hooks';
+export type { ImportOptions, ImportResult } from '@atlas/app-hooks';
 export type UserData = SharedUserData<File>;
 export { sanitizeFileName };
 

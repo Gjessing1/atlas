@@ -14,7 +14,7 @@ export interface PickedFile {
   uri: string;
 }
 
-export type { ImportResult } from '@atlas/app-hooks';
+export type { ImportOptions, ImportResult } from '@atlas/app-hooks';
 export type UserData = SharedUserData<PickedFile>;
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';

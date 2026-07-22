@@ -5,7 +5,7 @@ import { LayersPanel } from './layers/LayersPanel.js';
 import type { LayerCatalog } from './layers/useLayerCatalog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
 import { useSidebarDnd } from './sidebar/useSidebarDnd.js';
-import type { ImportResult, UserData } from './storage/useUserData.js';
+import type { ImportOptions, ImportResult, UserData } from './storage/useUserData.js';
 
 interface SidebarProps {
   data: UserData;
@@ -97,6 +97,10 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importTarget, setImportTarget] = useState('root');
+  const [importFolderName, setImportFolderName] = useState('');
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
   // Totals from a restored backup — merges by id, so nothing new shows up in
   // the lists to tell the user it worked. Reported explicitly instead.
   const [restored, setRestored] = useState<ImportSummary | null>(null);
@@ -108,6 +112,13 @@ export function Sidebar({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
+  const toggleFolder = (id: string) =>
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   /** Move a nested collection to its parent's parent (root from depth one). */
   const moveCollectionUp = (folder: (typeof data.collections)[number]) => {
@@ -124,12 +135,18 @@ export function Sidebar({
     if (!files || files.length === 0) return;
     setImporting(true);
     try {
-      const result = await data.importFiles([...files]);
+      const options: ImportOptions =
+        importTarget === 'new'
+          ? { newCollection: { name: importFolderName.trim() } }
+          : { collectionId: importTarget === 'root' ? null : importTarget };
+      const result = await data.importFiles([...files], options);
       setImportErrors(result.errors);
       setRestored(result.restored);
       onImported(result);
     } finally {
       setImporting(false);
+      setImportOpen(false);
+      setImportFolderName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -300,6 +317,15 @@ export function Sidebar({
             >
               <button
                 type="button"
+                className="icon-button folder-toggle"
+                aria-label={`${collapsedFolders.has(folder.id) ? 'Expand' : 'Collapse'} ${folder.name}`}
+                aria-expanded={!collapsedFolders.has(folder.id)}
+                onClick={() => toggleFolder(folder.id)}
+              >
+                {collapsedFolders.has(folder.id) ? '▸' : '▾'}
+              </button>
+              <button
+                type="button"
                 className="icon-button visibility-toggle"
                 title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
                 aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
@@ -360,7 +386,7 @@ export function Sidebar({
                 ✕
               </button>
             </div>
-            {branch(folder.id, depth + 1)}
+            {!collapsedFolders.has(folder.id) && branch(folder.id, depth + 1)}
           </li>
         ))}
         {places.map(placeRow)}
@@ -376,9 +402,10 @@ export function Sidebar({
         <div className="sidebar-actions">
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setImportOpen((open) => !open)}
             disabled={importing || data.status !== 'ready'}
-            title="Import GPX/KML/KMZ tracks, or restore an Atlas backup (.json/.zip)"
+            title="Import GPX/KML/KMZ into a folder, or restore an Atlas backup (.json/.zip)"
+            aria-expanded={importOpen}
           >
             {importing ? 'Importing…' : 'Import'}
           </button>
@@ -417,6 +444,41 @@ export function Sidebar({
           onChange={(e) => void onImportFiles(e.target.files)}
         />
       </div>
+      {importOpen && (
+        <div className="sidebar-import">
+          <label>
+            Import into
+            <select value={importTarget} onChange={(event) => setImportTarget(event.target.value)}>
+              <option value="root">No folder</option>
+              {data.collections.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+              <option value="new">Create new folder…</option>
+            </select>
+          </label>
+          {importTarget === 'new' && (
+            <input
+              value={importFolderName}
+              onChange={(event) => setImportFolderName(event.target.value)}
+              placeholder="New folder name"
+              aria-label="New import folder name"
+            />
+          )}
+          <button
+            type="button"
+            disabled={importing || (importTarget === 'new' && !importFolderName.trim())}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Choose files
+          </button>
+          <small>
+            GPX, KML and KMZ tracks or waypoints use this folder. Atlas JSON/ZIP backups keep their
+            original folders.
+          </small>
+        </div>
+      )}
       {restored && (
         <div className="sidebar-notice">
           <p>{describeRestore(restored)}</p>

@@ -1,7 +1,7 @@
 import { importedCount } from '@atlas/app-hooks';
 import type { TrackData } from '@atlas/gpx';
-import type { TrackRecord } from '@atlas/storage';
-import { useRef, useState } from 'react';
+import type { CollectionRecord, TrackRecord } from '@atlas/storage';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,9 +12,10 @@ import {
   View,
 } from 'react-native';
 
-import type { ImportResult } from '../useUserData';
+import type { ImportOptions, ImportResult } from '../useUserData';
 import { BottomSheet } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
+import { flattenFolders } from './folders';
 import { theme } from './theme';
 
 function fmtKm(m: number): string {
@@ -47,6 +48,7 @@ export function TracksSheet({
   visible,
   onClose,
   tracks,
+  collections,
   onSetVisible,
   onRename,
   onExport,
@@ -58,12 +60,14 @@ export function TracksSheet({
   visible: boolean;
   onClose: () => void;
   tracks: TrackRecord[];
+  /** Folders offered as import destinations. */
+  collections: CollectionRecord[];
   onSetVisible: (id: string, visible: boolean) => void;
   onRename: (id: string, name: string) => void;
   onExport: (id: string, format: 'gpx' | 'kml') => void;
   onDelete: (id: string) => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
-  onImport: () => Promise<ImportResult | null>;
+  onImport: (options?: ImportOptions) => Promise<ImportResult | null>;
   /** Parsed geometry for the elevation profile (cached by the shared hook). */
   onLoadTrackData: (id: string) => Promise<TrackData | null>;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
@@ -71,6 +75,9 @@ export function TracksSheet({
 }) {
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Import destination: a folder id, 'root' for no folder, or 'new' (named below).
+  const [target, setTarget] = useState('root');
+  const [newFolder, setNewFolder] = useState('');
   // Track whose elevation profile is expanded, and its lazily-loaded geometry
   // (null = still loading; the wrapper marks "loaded but unparseable" apart).
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -91,12 +98,23 @@ export function TracksSheet({
     });
   };
 
+  const folders = useMemo(() => flattenFolders(collections), [collections]);
+  const importDisabled = importing || (target === 'new' && !newFolder.trim());
+
   const runImport = async () => {
     setImporting(true);
     setMessage(null);
     try {
-      const result = await onImport();
+      const options: ImportOptions =
+        target === 'new'
+          ? { newCollection: { name: newFolder.trim() } }
+          : { collectionId: target === 'root' ? null : target };
+      const result = await onImport(options);
       if (result) {
+        // The new folder now exists as a normal chip — drop back to the default
+        // rather than silently creating a second folder of the same name.
+        setNewFolder('');
+        if (target === 'new') setTarget('root');
         const bits: string[] = [];
         if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
         if (result.places.length) bits.push(`${result.places.length} place(s)`);
@@ -128,8 +146,8 @@ export function TracksSheet({
       <View style={styles.headerRow}>
         <Text style={styles.heading}>Tracks</Text>
         <Pressable
-          style={[styles.button, importing ? styles.buttonDisabled : null]}
-          disabled={importing}
+          style={[styles.button, importDisabled ? styles.buttonDisabled : null]}
+          disabled={importDisabled}
           onPress={() => void runImport()}
           testID="tracks-import"
         >
@@ -140,6 +158,48 @@ export function TracksSheet({
           )}
         </Pressable>
       </View>
+
+      {/* Destination for GPX/KML/KMZ imports; backups keep their own folders. */}
+      <Text style={styles.fieldLabel}>Import into</Text>
+      <View style={styles.choiceRow}>
+        <Pressable
+          style={[styles.folderChip, target === 'root' && styles.folderChipSelected]}
+          onPress={() => setTarget('root')}
+          testID="import-folder-none"
+        >
+          <Text style={styles.folderChipText}>No folder</Text>
+        </Pressable>
+        {folders.map(({ folder, depth }) => (
+          <Pressable
+            key={folder.id}
+            style={[styles.folderChip, target === folder.id && styles.folderChipSelected]}
+            onPress={() => setTarget(folder.id)}
+            testID={`import-folder-${folder.id}`}
+          >
+            <Text style={styles.folderChipText}>
+              {depth > 0 ? '└ ' : ''}📁 {folder.name}
+            </Text>
+          </Pressable>
+        ))}
+        <Pressable
+          style={[styles.folderChip, target === 'new' && styles.folderChipSelected]}
+          onPress={() => setTarget('new')}
+          testID="import-folder-new"
+        >
+          <Text style={styles.folderChipText}>＋ New folder</Text>
+        </Pressable>
+      </View>
+      {target === 'new' ? (
+        <TextInput
+          style={styles.nameInput}
+          value={newFolder}
+          onChangeText={setNewFolder}
+          placeholder="New folder name"
+          returnKeyType="done"
+          accessibilityLabel="New import folder name"
+          testID="import-folder-name"
+        />
+      ) : null}
       {message ? <Text style={styles.muted}>{message}</Text> : null}
 
       {tracks.length === 0 ? (
@@ -250,6 +310,17 @@ const styles = StyleSheet.create({
     color: theme.text,
   },
   actionRow: { flexDirection: 'row', gap: 8 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted, marginTop: 8 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  folderChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  folderChipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceMuted },
+  folderChipText: { fontSize: 12, color: theme.text },
   profileLoading: { marginVertical: 12 },
   button: {
     backgroundColor: theme.accent,

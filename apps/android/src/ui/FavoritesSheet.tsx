@@ -4,34 +4,9 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
+import { flattenFolders } from './folders';
 import { ReorderableList } from './ReorderableList';
 import { theme } from './theme';
-
-/** Folders flattened depth-first, with their nesting depth (for indented lists). */
-function flattenFolders(
-  collections: CollectionRecord[],
-): { folder: CollectionRecord; depth: number }[] {
-  const byParent = new Map<string | null, CollectionRecord[]>();
-  for (const c of collections) {
-    const key = c.parentId && collections.some((p) => p.id === c.parentId) ? c.parentId : null;
-    const list = byParent.get(key) ?? [];
-    list.push(c);
-    byParent.set(key, list);
-  }
-  const out: { folder: CollectionRecord; depth: number }[] = [];
-  const walk = (parentId: string | null, depth: number) => {
-    for (const folder of byParent.get(parentId) ?? []) {
-      out.push({ folder, depth });
-      walk(folder.id, depth + 1);
-    }
-  };
-  walk(null, 0);
-  // Defensive: folders stranded by a cyclic parent chain still get listed.
-  for (const c of collections) {
-    if (!out.some((f) => f.folder.id === c.id)) out.push({ folder: c, depth: 0 });
-  }
-  return out;
-}
 
 export type EditablePlacePatch = Pick<
   PlacePatch,
@@ -334,6 +309,16 @@ export function FavoritesSheet({
   const [newFolder, setNewFolder] = useState('');
   // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
+  // Folders whose contents are hidden (the ▾/▸ chevron toggles them). Kept in
+  // memory only — a collapsed folder is a view preference, not user data.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // A row is being dragged: freeze the sheet's scroll and close any editor so
   // row heights are uniform while the drag measures its way through the list.
   const [dragActive, setDragActive] = useState(false);
@@ -506,6 +491,14 @@ export function FavoritesSheet({
                 testID={`folder-row-${folder.id}`}
               >
                 {handle}
+                <Pressable
+                  style={styles.chevronButton}
+                  onPress={() => toggleCollapsed(folder.id)}
+                  accessibilityLabel={`${collapsed.has(folder.id) ? 'Expand' : 'Collapse'} ${folder.name}`}
+                  testID={`folder-collapse-${folder.id}`}
+                >
+                  <Text style={styles.chevronText}>{collapsed.has(folder.id) ? '▸' : '▾'}</Text>
+                </Pressable>
                 <Text style={styles.folderIcon}>📁</Text>
                 <TextInput
                   style={styles.folderName}
@@ -554,8 +547,12 @@ export function FavoritesSheet({
                   <Text style={styles.buttonQuietText}>Delete</Text>
                 </Pressable>
               </View>
-              {renderPlaces(folder.id, true)}
-              {renderFolderLevel(folder.id, depth + 1)}
+              {collapsed.has(folder.id) ? null : (
+                <>
+                  {renderPlaces(folder.id, true)}
+                  {renderFolderLevel(folder.id, depth + 1)}
+                </>
+              )}
             </View>
           )}
         />
@@ -668,6 +665,9 @@ const styles = StyleSheet.create({
   subButtonText: { fontSize: 16, color: theme.textMuted, fontWeight: '700' },
   subLevel: { paddingLeft: 18 },
   folderIcon: { fontSize: 18 },
+  // Fixed width so folder names line up whether open or collapsed.
+  chevronButton: { width: 22, paddingVertical: 6, alignItems: 'center' },
+  chevronText: { fontSize: 12, color: theme.textMuted },
   folderName: {
     flexGrow: 1,
     flexShrink: 1,

@@ -1,15 +1,18 @@
 import {
   buildGpx,
   buildKml,
+  buildKmlTree,
   computeTrackStats,
   parseGpx,
   parseTrackFile,
+  type KmlFolder,
   type TrackData,
 } from '@atlas/gpx';
 import type {
   AtlasStorage,
   CollectionRecord,
   DeletedRecord,
+  ExportedData,
   ImportSummary,
   NewPlace,
   PlacePatch,
@@ -44,6 +47,52 @@ export interface UserDataPlatform<TFile> {
 /** The file name `exportAll` writes the dump under, inside the export zip. */
 const EXPORT_JSON_NAME = 'atlas-export.json';
 
+/**
+ * The whole library as one KMZ (a zip holding `doc.kml`), so the export is not
+ * only restorable into Atlas but also portable to other mapping platforms with
+ * the folder structure intact. Tracks whose stored GPX no longer parses are
+ * skipped — a backup must never fail over one bad row.
+ */
+function buildLibraryKmz(dump: ExportedData): Uint8Array {
+  const ids = new Set(dump.collections.map((c) => c.id));
+  const itemsIn = (collectionId: string | null): TrackData[] => {
+    const inFolder = <T extends { collectionId: string | null }>(record: T): boolean =>
+      collectionId === null
+        ? record.collectionId === null || !ids.has(record.collectionId)
+        : record.collectionId === collectionId;
+
+    const items: TrackData[] = [];
+    const waypoints = dump.places
+      .filter(inFolder)
+      .map((p) => ({ lat: p.lat, lng: p.lng, name: p.name }));
+    if (waypoints.length > 0) items.push({ segments: [], waypoints });
+    for (const track of dump.tracks.filter(inFolder)) {
+      try {
+        items.push({ ...parseGpx(track.gpx), name: track.name });
+      } catch (err) {
+        console.error('Skipping unparseable track in KMZ export', track.id, err);
+      }
+    }
+    return items;
+  };
+
+  const asFolder = (collection: CollectionRecord): KmlFolder => ({
+    name: collection.name,
+    items: itemsIn(collection.id),
+    children: dump.collections.filter((c) => c.parentId === collection.id).map(asFolder),
+  });
+
+  const kml = buildKmlTree({
+    name: 'Atlas',
+    items: itemsIn(null),
+    // Folders with a missing parent are roots, matching how the lists render.
+    children: dump.collections
+      .filter((c) => c.parentId === null || !ids.has(c.parentId))
+      .map(asFolder),
+  });
+  return zipSync({ 'doc.kml': new TextEncoder().encode(kml) });
+}
+
 export interface ImportResult {
   tracks: TrackRecord[];
   places: PlaceRecord[];
@@ -54,6 +103,14 @@ export interface ImportResult {
    * appear in `tracks`/`places` — the UI reports it separately.
    */
   restored: ImportSummary | null;
+}
+
+/** Where regular GPX/KML/KMZ records should be filed after import. */
+export interface ImportOptions {
+  /** Existing collection, or null/the default for the root. */
+  collectionId?: string | null;
+  /** Create this collection lazily when the file contains importable records. */
+  newCollection?: { name: string; parentId?: string | null };
 }
 
 const addSummary = (a: ImportSummary | null, b: ImportSummary): ImportSummary => {
@@ -77,8 +134,8 @@ export const importedCount = (s: ImportSummary): number =>
 /**
  * The export dump inside a picked file, or null when it is not a backup.
  * Accepts both shapes `exportAll` produces: the bare JSON dump, and the zip
- * (which also holds GPX copies — those are for other apps to read, the JSON is
- * the authoritative one, so the GPX entries are deliberately ignored here).
+ * (which also holds GPX/KMZ copies — those are for other apps to read, the JSON
+ * is the authoritative one, so the other entries are deliberately ignored here).
  */
 function readBackupFile(name: string, bytes: Uint8Array): ReturnType<typeof parseExportedData> {
   const lower = name.toLowerCase();
@@ -140,7 +197,7 @@ export interface UserData<TFile> {
   /** Persist a drag-and-drop arrangement of folders (ids in their new order). */
   reorderCollections: (orderedIds: string[]) => Promise<void>;
 
-  importFiles: (files: TFile[]) => Promise<ImportResult>;
+  importFiles: (files: TFile[], options?: ImportOptions) => Promise<ImportResult>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
   deleteTrack: (id: string) => Promise<void>;
   /** Parsed geometry for a track (cached in memory). */
@@ -327,10 +384,28 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   );
 
   const importFiles = useCallback(
-    async (files: TFile[]): Promise<ImportResult> => {
+    async (files: TFile[], options: ImportOptions = {}): Promise<ImportResult> => {
       const s = storageRef.current;
       const result: ImportResult = { tracks: [], places: [], errors: [], restored: null };
       if (!s) return result;
+
+      // Create a requested destination only after finding an importable regular
+      // file. Backups restore their own hierarchy and must never be rewritten
+      // into this target (or leave an empty folder behind).
+      let targetCollectionId: string | null | undefined = options.newCollection
+        ? undefined
+        : (options.collectionId ?? null);
+      const resolveTargetCollection = async (): Promise<string | null> => {
+        if (targetCollectionId !== undefined) return targetCollectionId;
+        const name = options.newCollection?.name.trim();
+        if (!name) {
+          targetCollectionId = null;
+          return targetCollectionId;
+        }
+        const collection = await s.createCollection(name, options.newCollection?.parentId ?? null);
+        targetCollectionId = collection.id;
+        return targetCollectionId;
+      };
 
       for (const file of files) {
         let name = '(unreadable file)';
@@ -357,7 +432,12 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
               ? new TextDecoder().decode(read.bytes)
               : buildGpx(data);
             const stats = computeTrackStats(data) as unknown as Record<string, number>;
-            const track = await s.createTrack({ name: data.name ?? read.name, gpx, stats });
+            const track = await s.createTrack({
+              name: data.name ?? read.name,
+              gpx,
+              stats,
+              collectionId: await resolveTargetCollection(),
+            });
             trackDataCache.current.set(track.id, data);
             result.tracks.push(track);
           } else if (data.waypoints.length > 0) {
@@ -368,6 +448,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
                   name: w.name ?? `${w.lat.toFixed(5)}, ${w.lng.toFixed(5)}`,
                   lat: w.lat,
                   lng: w.lng,
+                  collectionId: await resolveTargetCollection(),
                 }),
               );
             }
@@ -539,7 +620,11 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
       return;
     }
     const encoder = new TextEncoder();
-    const files: Record<string, Uint8Array> = { 'atlas-export.json': encoder.encode(json) };
+    const files: Record<string, Uint8Array> = {
+      [EXPORT_JSON_NAME]: encoder.encode(json),
+      // Interop copy: the same library as KMZ, for other mapping platforms.
+      'atlas-export.kmz': buildLibraryKmz(dump),
+    };
     if (dump.places.length > 0) {
       files['places.gpx'] = encoder.encode(
         buildGpx({
