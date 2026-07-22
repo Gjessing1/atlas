@@ -167,9 +167,15 @@ export function norwegianLayers(): OverlayLayer[] {
           'ekv_m',
           'kommune',
         ],
-        // Contours + sounding labels are thin/small; render at 2× so they stay
-        // legible on a phone instead of a stretched, muddy 256 px tile.
-        renderScale: 2,
+        // No renderScale here, deliberately. v0.46.0 requested these tiles at
+        // 2× with a DPI hint expecting crisper contours; measured against the
+        // live service it does the opposite. ArcGIS only *partly* honours DPI:
+        // doubling the image to 512 px widens a contour stroke from 2 px to
+        // 3 px, not 4 px, so every line and label ends up ~25% smaller relative
+        // to the tile and then gets downscaled for display. The contour numbers
+        // came out fainter than the plain 256 px request they replaced. If a
+        // hi-dpi variant is wanted later, verify the symbology actually scales
+        // before shipping it — the request looks correct either way.
         // Draw each surveyed lake's maximum depth on the lake itself. Without
         // this a lake like Verkensvannet — measured 21.5 m in 1965, but with no
         // sounding or contour geometry — renders as a bare outline, which is

@@ -28,8 +28,8 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
-    // Expo config plugins run in node at prebuild time, as CommonJS.
-    files: ['apps/android/plugins/**/*.js'],
+    // Expo config plugins (prebuild) and the Metro config run in node as CommonJS.
+    files: ['apps/android/plugins/**/*.js', 'apps/android/metro.config.js'],
     languageOptions: { globals: globals.node, sourceType: 'commonjs' },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },

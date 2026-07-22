@@ -315,8 +315,14 @@ export function MapScene({
                   'text-field': ['get', 'label'],
                   'text-font': ['Noto Sans Bold'],
                   'text-size': 13,
-                  'text-allow-overlap': false,
-                  'text-padding': 4,
+                  // Sits below the anchor so it reads under the basemap's own
+                  // lake name rather than through it — both are centred on the
+                  // same water, and overlap-forcing alone stacked them.
+                  'text-offset': [0, 1.4],
+                  // Always drawn: added after the basemap's symbol layers, so
+                  // with collision on it would lose placement and flicker.
+                  'text-allow-overlap': true,
+                  'text-ignore-placement': true,
                 }}
                 paint={{
                   'text-color': '#0b3d63',
