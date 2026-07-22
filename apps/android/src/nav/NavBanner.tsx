@@ -29,12 +29,12 @@ function speedKph(speedMps: number | null): number | null {
   return Math.round(speedMps * 3.6);
 }
 
-function LaneRow({ lanes }: { lanes: RouteLane[] }) {
+function LaneRow({ lanes, compact }: { lanes: RouteLane[]; compact: boolean }) {
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={styles.lanesScroll}
+      style={[styles.lanesScroll, compact && styles.lanesScrollCompact]}
       contentContainerStyle={styles.lanes}
       accessibilityLabel="Lane guidance"
     >
@@ -45,13 +45,14 @@ function LaneRow({ lanes }: { lanes: RouteLane[] }) {
             key={index}
             style={[
               styles.lane,
+              compact && styles.laneCompact,
               carrying && styles.laneCarrying,
               lane.state === 'active' && styles.laneActive,
             ]}
             accessible
             accessibilityLabel={`Lane ${index + 1}: ${laneLabel(lane)}`}
           >
-            <Svg width={25} height={34} viewBox="0 0 24 32">
+            <Svg width={compact ? 21 : 25} height={compact ? 28 : 34} viewBox="0 0 24 32">
               {laneGlyphs(lane).map((glyph) => (
                 <Path
                   key={glyph.direction}
@@ -151,12 +152,12 @@ export function NavBanner({
       style={[
         styles.wrap,
         { top: topInset + 8, left: side.left + 12, right: side.right + 12 },
-        landscape && { right: undefined, width: Math.min(420, Math.round(win.width * 0.46)) },
+        landscape && { right: undefined, width: Math.min(360, Math.round(win.width * 0.42)) },
       ]}
       pointerEvents="box-none"
       onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
     >
-      <View style={styles.card}>
+      <View style={[styles.card, landscape && styles.cardCompact]}>
         {nav.phase === 'starting' ? (
           <View style={styles.stateBlock}>
             <Text style={styles.eyebrow}>Navigation</Text>
@@ -181,20 +182,23 @@ export function NavBanner({
         ) : maneuver ? (
           <>
             <View style={styles.guidanceRow}>
-              <View style={styles.turnPanel}>
+              <View style={[styles.turnPanel, landscape && styles.turnPanelCompact]}>
                 <TurnIcon
                   instruction={sustain ? { sign: 0 } : maneuver.instruction}
-                  size={44}
+                  size={landscape ? 36 : 44}
                   color="#fff"
                 />
               </View>
               <View style={styles.maneuverText}>
-                <Text style={styles.distanceTo}>
+                <Text style={[styles.distanceTo, landscape && styles.distanceToCompact]}>
                   {sustain
                     ? `Continue for ${formatDistance(sustain.distanceRemainingM)}`
                     : `In ${formatDistance(maneuver.distanceToM)}`}
                 </Text>
-                <Text style={styles.maneuver} numberOfLines={2}>
+                <Text
+                  style={[styles.maneuver, landscape && styles.maneuverCompact]}
+                  numberOfLines={landscape ? 1 : 2}
+                >
                   {sustain ? sustain.road : maneuver.instruction.text}
                 </Text>
                 {!sustain && maneuver.instruction.exitSign ? (
@@ -204,9 +208,11 @@ export function NavBanner({
                 ) : null}
               </View>
             </View>
-            {state?.laneGuidance ? <LaneRow lanes={state.laneGuidance} /> : null}
+            {state?.laneGuidance ? (
+              <LaneRow lanes={state.laneGuidance} compact={landscape} />
+            ) : null}
             {thenManeuver ? (
-              <View style={styles.thenRow}>
+              <View style={[styles.thenRow, landscape && styles.thenRowCompact]}>
                 <Text style={styles.thenLabel}>Then</Text>
                 <TurnIcon instruction={thenManeuver.instruction} size={20} color={theme.icon} />
                 <Text style={styles.thenText} numberOfLines={1}>
@@ -232,17 +238,30 @@ export function NavBanner({
 
         {state && nav.phase !== 'arrived' ? (
           <>
-            <View style={styles.tripRow}>
-              <View style={styles.etaBlock}>
-                <Text style={styles.eta}>{formatEta(state.etaEpochMs)}</Text>
-                <Text style={styles.etaLabel}>Arrival</Text>
-              </View>
-              <Text style={styles.summary} numberOfLines={1}>
-                {formatDuration(state.timeRemainingMs)} · {formatDistance(state.distanceRemainingM)}{' '}
-                remaining
-              </Text>
+            {/* Landscape has no vertical room to spare: the arrival time, the
+                remaining trip and its label collapse onto one line. */}
+            <View style={[styles.tripRow, landscape && styles.tripRowCompact]}>
+              {landscape ? (
+                <Text style={styles.summaryCompact} numberOfLines={1}>
+                  <Text style={styles.etaInline}>{formatEta(state.etaEpochMs)}</Text>
+                  {'  '}
+                  {formatDuration(state.timeRemainingMs)} ·{' '}
+                  {formatDistance(state.distanceRemainingM)}
+                </Text>
+              ) : (
+                <>
+                  <View style={styles.etaBlock}>
+                    <Text style={styles.eta}>{formatEta(state.etaEpochMs)}</Text>
+                    <Text style={styles.etaLabel}>Arrival</Text>
+                  </View>
+                  <Text style={styles.summary} numberOfLines={1}>
+                    {formatDuration(state.timeRemainingMs)} ·{' '}
+                    {formatDistance(state.distanceRemainingM)} remaining
+                  </Text>
+                </>
+              )}
             </View>
-            <View style={styles.progressTrack}>
+            <View style={[styles.progressTrack, landscape && styles.progressTrackCompact]}>
               <View
                 style={[
                   styles.progressFill,
@@ -260,7 +279,7 @@ export function NavBanner({
             style={styles.speedGroup}
             accessibilityLabel={`Current speed ${speed ?? 0} kilometers per hour`}
           >
-            <View style={styles.speedReadout}>
+            <View style={styles.speedDial}>
               <Text style={styles.speedValue}>{speed ?? 0}</Text>
               <Text style={styles.speedUnit}>km/h</Text>
             </View>
@@ -317,7 +336,7 @@ export function NavBanner({
 
 const styles = StyleSheet.create({
   // Horizontal position (12 dp plus the safe-area inset) is applied inline.
-  wrap: { position: 'absolute', gap: 10, alignItems: 'center' },
+  wrap: { position: 'absolute', gap: 10, alignItems: 'stretch' },
   card: {
     width: '100%',
     backgroundColor: theme.surfaceOverlay,
@@ -327,6 +346,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     elevation: 7,
   },
+  // Landscape screens are short — the card gives back every dp it can.
+  cardCompact: { borderRadius: 16, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8 },
   guidanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
   turnPanel: {
     width: 60,
@@ -336,9 +357,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  turnPanelCompact: { width: 48, height: 48, borderRadius: 14 },
   maneuverText: { flex: 1, minWidth: 0, gap: 4, paddingTop: 1 },
   distanceTo: { color: theme.accent, fontSize: 17, fontWeight: '800', lineHeight: 20 },
+  distanceToCompact: { fontSize: 15, lineHeight: 18 },
   maneuver: { color: theme.text, fontSize: 20, fontWeight: '700', lineHeight: 24 },
+  maneuverCompact: { fontSize: 17, lineHeight: 21 },
   exitSign: {
     alignSelf: 'flex-start',
     backgroundColor: '#1f7a3f',
@@ -351,7 +375,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   lanesScroll: { marginTop: 10, marginLeft: 74 },
+  lanesScrollCompact: { marginTop: 7, marginLeft: 62 },
   lanes: { flexGrow: 1, gap: 5 },
+  laneCompact: { minWidth: 28, maxWidth: 40, height: 36 },
   lane: {
     minWidth: 34,
     maxWidth: 48,
@@ -378,6 +404,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: theme.surfaceMuted,
   },
+  thenRowCompact: { minHeight: 28, marginTop: 7, marginLeft: 62, paddingVertical: 3 },
   thenLabel: {
     color: theme.textMuted,
     fontSize: 11,
@@ -404,6 +431,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.border,
   },
+  tripRowCompact: { marginTop: 8, paddingTop: 7 },
+  summaryCompact: { color: theme.textMuted, fontSize: 13, fontWeight: '600' },
+  etaInline: { color: theme.text, fontSize: 15, fontWeight: '800' },
   etaBlock: { flexShrink: 0 },
   eta: { color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 20 },
   etaLabel: {
@@ -422,27 +452,32 @@ const styles = StyleSheet.create({
     marginTop: 9,
     overflow: 'hidden',
   },
+  progressTrackCompact: { marginTop: 6 },
   progressFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
   reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
+  // No bar behind the controls — every control is its own floating chip, so the
+  // map shows through the gaps between them.
   actionRow: {
     maxWidth: '100%',
-    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    backgroundColor: theme.surfaceOverlay,
-    borderRadius: 27,
-    paddingLeft: 12,
-    paddingRight: 6,
-    paddingVertical: 5,
-    elevation: 5,
+    gap: 10,
   },
   actionSpacer: { flex: 1 },
-  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   speedGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  speedReadout: { minWidth: 48, alignItems: 'center' },
+  // The driver's own speed: a round dial mirroring the posted-limit sign beside it.
+  speedDial: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surfaceOverlay,
+    elevation: 5,
+  },
   speedValue: { color: theme.text, fontWeight: '800', fontSize: 18, lineHeight: 19 },
   speedUnit: {
     color: theme.textMuted,
@@ -455,37 +490,42 @@ const styles = StyleSheet.create({
   // The European posted-limit sign: red ring, white face, black number —
   // drawn, not themed, so it reads as road signage at a glance.
   speedLimitSign: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 4,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 5,
     borderColor: '#d81e05',
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 5,
   },
-  speedLimitValue: { color: '#111', fontWeight: '800', fontSize: 15 },
+  speedLimitValue: { color: '#111', fontWeight: '800', fontSize: 17 },
   muteButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: theme.surfaceOverlay,
+    elevation: 5,
   },
   stop: {
-    minHeight: 40,
+    minHeight: 44,
     justifyContent: 'center',
     backgroundColor: theme.danger,
-    borderRadius: 20,
+    borderRadius: 22,
     paddingHorizontal: 18,
+    elevation: 5,
   },
   // Completing the trip, not abandoning it — green against the red End beside it.
   arrived: {
-    minHeight: 40,
+    minHeight: 44,
     justifyContent: 'center',
     backgroundColor: '#1e8e3e',
-    borderRadius: 20,
+    borderRadius: 22,
     paddingHorizontal: 16,
+    elevation: 5,
   },
   stopText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

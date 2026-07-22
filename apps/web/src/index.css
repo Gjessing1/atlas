@@ -2354,26 +2354,30 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
+/* No bar behind the controls — each one is its own floating chip, so the map
+   shows through the gaps instead of a full-width slab. */
 .nav-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  width: 100%;
   max-width: 100%;
-  min-height: 50px;
-  padding: 5px 6px 5px 12px;
-  background: var(--surface-overlay);
-  border: 1px solid rgba(52, 64, 79, 0.1);
-  border-radius: 27px;
-  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
-  backdrop-filter: blur(8px);
 }
 
+/* The driver's own speed: a round dial mirroring the posted-limit sign. */
 .nav-speed {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 48px;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--surface-overlay);
+  border: 1px solid rgba(52, 64, 79, 0.1);
+  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
+  backdrop-filter: blur(8px);
   color: var(--text);
   line-height: 1;
 }
@@ -2409,13 +2413,14 @@ button.transit-notice-summary {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   background: #fff;
-  border: 4px solid #d81e05;
+  border: 5px solid #d81e05;
+  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
   color: #111;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1;
 }
@@ -2423,15 +2428,19 @@ button.transit-notice-summary {
 .nav-buttons {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  /* Holds the right edge even when the speed group is hidden (arrival). */
+  margin-left: auto;
 }
 
 .nav-buttons button {
-  border: none;
-  border-radius: 20px;
-  min-height: 40px;
-  padding: 7px 14px;
-  background: transparent;
+  border: 1px solid rgba(52, 64, 79, 0.1);
+  border-radius: 22px;
+  min-height: 44px;
+  padding: 7px 16px;
+  background: var(--surface-overlay);
+  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
+  backdrop-filter: blur(8px);
   color: var(--text);
   font: inherit;
   font-size: 14px;
@@ -2452,7 +2461,8 @@ button.transit-notice-summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
+  width: 44px;
+  border-radius: 50%;
   padding: 0;
 }
 
@@ -2491,6 +2501,50 @@ button.transit-notice-summary {
 
 .nav-buttons .nav-arrived:hover {
   background: #187533;
+}
+
+/* A short viewport (a phone held sideways) has no vertical room to spare: the
+   banner gives back padding, type scale and the ETA's second line so the road
+   ahead keeps the screen. */
+@media (max-height: 560px) {
+  .nav-banner {
+    top: 8px;
+    gap: 8px;
+    width: min(calc(100vw - 24px), 420px);
+  }
+
+  .nav-card {
+    border-radius: 16px;
+    padding: 10px 12px 8px;
+  }
+
+  .nav-turn-panel {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .nav-maneuver {
+    font-size: 17px;
+    line-height: 21px;
+  }
+
+  .nav-distance-to {
+    font-size: 15px;
+  }
+
+  .nav-trip-row {
+    margin-top: 8px;
+    padding-top: 7px;
+  }
+
+  .nav-eta small {
+    display: none;
+  }
+
+  .nav-eta strong {
+    font-size: 15px;
+  }
 }
 
 .topbar-nav-hidden {
