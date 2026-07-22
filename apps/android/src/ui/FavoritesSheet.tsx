@@ -1,3 +1,4 @@
+import { flattenCollectionTree, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord, PlacePatch, PlaceRecord } from '@atlas/storage';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
@@ -367,22 +368,10 @@ export function FavoritesSheet({
     return map;
   }, [places]);
 
-  // Folder tree (folders nest via parentId; dangling parents count as roots).
-  const flatFolders = useMemo(() => flattenFolders(collections), [collections]);
-  const collectionIds = useMemo(
-    () => new Set(collections.map((folder) => folder.id)),
-    [collections],
-  );
-  const childrenOf = useMemo(() => {
-    const map = new Map<string | null, CollectionRecord[]>();
-    for (const { folder, depth } of flatFolders) {
-      const key = depth === 0 ? null : folder.parentId;
-      const list = map.get(key) ?? [];
-      list.push(folder);
-      map.set(key, list);
-    }
-    return map;
-  }, [flatFolders]);
+  // Folder tree — derived by the shared model, so web and Android agree on
+  // nesting, ordering and what happens to a folder whose parent is missing.
+  const tree = useCollectionTree({ collections, places });
+  const flatFolders = useMemo(() => flattenCollectionTree(tree), [tree]);
 
   const allShown = places.every((p) => p.visible) && collections.every((c) => c.visible);
 
@@ -469,11 +458,7 @@ export function FavoritesSheet({
   );
 
   const renderPlaces = (collectionId: string | null, nested = false): ReactNode => {
-    const level = places.filter((place) =>
-      collectionId === null
-        ? place.collectionId === null || !collectionIds.has(place.collectionId)
-        : place.collectionId === collectionId,
-    );
+    const level = collectionId === null ? tree.places : (tree.byId.get(collectionId)?.places ?? []);
     if (level.length === 0) return null;
     return (
       <View style={nested ? styles.subLevel : undefined}>
@@ -492,7 +477,7 @@ export function FavoritesSheet({
   /** One nesting level of the folder tree: siblings reorder among themselves,
       each row followed by its (indented) subtree so a drag carries it along. */
   const renderFolderLevel = (parentId: string | null, depth: number): ReactNode => {
-    const level = childrenOf.get(parentId) ?? [];
+    const level = (tree.byParent.get(parentId) ?? []).map((node) => node.folder);
     if (level.length === 0) return null;
     return (
       <View style={depth > 0 ? styles.subLevel : undefined}>
@@ -536,10 +521,7 @@ export function FavoritesSheet({
                 {folder.parentId !== null ? (
                   <Pressable
                     style={styles.eyeButton}
-                    onPress={() => {
-                      const parent = collections.find((c) => c.id === folder.parentId);
-                      onMoveFolder(folder.id, parent?.parentId ?? null);
-                    }}
+                    onPress={() => onMoveFolder(folder.id, promoteParentId(collections, folder))}
                     accessibilityLabel={`Move ${folder.name} up one level`}
                     testID={`folder-up-${folder.id}`}
                   >

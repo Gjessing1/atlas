@@ -36,6 +36,17 @@ export {
   type StopSearchPlace,
 } from './useStopSearch.js';
 export {
+  useCollectionTree,
+  buildCollectionTree,
+  flattenCollectionTree,
+  promoteParentId,
+  type CollectionNode,
+  type CollectionTree,
+  type CollectionTreeInput,
+  type TreeFolder,
+  type TreeItem,
+} from './useCollectionTree.js';
+export {
   useUserData,
   sanitizeFileName,
   importedCount,

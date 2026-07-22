@@ -1,3 +1,4 @@
+import { promoteParentId, useCollectionTree } from '@atlas/app-hooks';
 import { fmtKm } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useRef, useState } from 'react';
@@ -111,6 +112,13 @@ export function Sidebar({
   // Pending destructive action, awaiting the confirmation dialog.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
+  // The shared tree derivation: one orphan policy for both apps (a folder whose
+  // parent is gone shows at the root instead of vanishing with its subtree).
+  const tree = useCollectionTree({
+    collections: data.collections,
+    places: data.places,
+    tracks: data.tracks,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
@@ -144,8 +152,7 @@ export function Sidebar({
   /** Move a nested collection to its parent's parent (root from depth one). */
   const moveCollectionUp = (folder: (typeof data.collections)[number]) => {
     if (folder.parentId === null) return;
-    const parent = data.collections.find((candidate) => candidate.id === folder.parentId);
-    void data.moveCollection(folder.id, parent?.parentId ?? null);
+    void data.moveCollection(folder.id, promoteParentId(data.collections, folder));
   };
 
   // "Show all" appears once anything is hidden; otherwise the button hides all.
@@ -311,9 +318,10 @@ export function Sidebar({
 
   /** One collection level: its child folders, then its places and tracks. */
   const branch = (parentId: string | null, depth: number): React.ReactNode => {
-    const folders = data.collections.filter((c) => c.parentId === parentId);
-    const places = data.places.filter((p) => p.collectionId === parentId);
-    const tracks = data.tracks.filter((t) => t.collectionId === parentId);
+    const node = parentId === null ? null : tree.byId.get(parentId);
+    const folders = tree.byParent.get(parentId) ?? [];
+    const places = parentId === null ? tree.places : (node?.places ?? []);
+    const tracks = parentId === null ? tree.tracks : (node?.tracks ?? []);
     const creatingHere = creating?.parentId === parentId;
     if (
       parentId === null &&
@@ -348,7 +356,7 @@ export function Sidebar({
             </div>
           </li>
         )}
-        {folders.map((folder) => {
+        {folders.map(({ folder }) => {
           const open = !collapsedFolders.has(folder.id);
           return (
             <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
