@@ -20,6 +20,10 @@ class ValhallaModule : Module() {
       nativeRoute(requestJson)
     }
 
+    AsyncFunction("traceAttributes") { requestJson: String ->
+      nativeTraceAttributes(requestJson)
+    }
+
     AsyncFunction("close") {
       nativeClose()
     }
@@ -27,6 +31,7 @@ class ValhallaModule : Module() {
 
   private external fun nativeOpen(configJson: String)
   private external fun nativeRoute(requestJson: String): String
+  private external fun nativeTraceAttributes(requestJson: String): String
   private external fun nativeClose()
 
   companion object {

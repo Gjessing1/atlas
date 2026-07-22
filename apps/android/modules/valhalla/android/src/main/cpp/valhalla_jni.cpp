@@ -72,6 +72,26 @@ extern "C" JNIEXPORT jstring JNICALL Java_io_gjessing_atlas_valhalla_ValhallaMod
   }
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_gjessing_atlas_valhalla_ValhallaModule_nativeTraceAttributes(
+    JNIEnv* env,
+    jobject /*this*/,
+    jstring request_json) {
+  try {
+    const std::string request = to_string(env, request_json);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_actor) {
+      throw_runtime(env, "valhalla engine is not open");
+      return nullptr;
+    }
+    const std::string response = g_actor->trace_attributes(request);
+    return env->NewStringUTF(response.c_str());
+  } catch (const std::exception& e) {
+    throw_runtime(env, e.what());
+    return nullptr;
+  }
+}
+
 extern "C" JNIEXPORT void JNICALL Java_io_gjessing_atlas_valhalla_ValhallaModule_nativeClose(
     JNIEnv* env,
     jobject /*this*/) {

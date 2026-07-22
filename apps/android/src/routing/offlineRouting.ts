@@ -1,10 +1,12 @@
 import { bboxContains, type LatLng } from '@atlas/core';
 import {
   httpRouteProvider,
+  httpTraceTransport,
   roundTripLocations,
   valhallaRouteProvider,
   type RouteProvider,
   type RouteQuery,
+  type ValhallaTransport,
 } from '@atlas/routing';
 
 import { Valhalla } from '../../modules/valhalla';
@@ -28,9 +30,9 @@ function queryPoints(query: RouteQuery): LatLng[] {
     : query.points;
 }
 
-/** The downloaded pack that can answer this query offline, if any. */
-export function offlinePackFor(packs: LocalPack[], query: RouteQuery): LocalPack | null {
-  const points = queryPoints(query);
+/** The downloaded pack whose tiles cover every one of these points, if any. */
+function packCovering(packs: LocalPack[], points: LatLng[]): LocalPack | null {
+  if (points.length === 0) return null;
   return (
     packs.find(
       (pack) =>
@@ -38,6 +40,11 @@ export function offlinePackFor(packs: LocalPack[], query: RouteQuery): LocalPack
         points.every((point) => bboxContains(pack.manifest.bbox, point)),
     ) ?? null
   );
+}
+
+/** The downloaded pack that can answer this query offline, if any. */
+export function offlinePackFor(packs: LocalPack[], query: RouteQuery): LocalPack | null {
+  return packCovering(packs, queryPoints(query));
 }
 
 /** Plain filesystem path of a pack's Valhalla tile extract. */
@@ -87,5 +94,44 @@ export function makeRouteProvider(serverOrigin: string): RouteProvider {
       }
       return online.route(query, signal);
     },
+  };
+}
+
+/** The shape a trace_attributes request walks, as plain points. */
+function traceShape(request: Record<string, unknown>): LatLng[] {
+  const shape = request.shape;
+  if (!Array.isArray(shape)) return [];
+  return shape.flatMap((point) => {
+    const { lat, lon } = (point ?? {}) as { lat?: unknown; lon?: unknown };
+    return typeof lat === 'number' && typeof lon === 'number' ? [{ lat, lng: lon }] : [];
+  });
+}
+
+/**
+ * The app's enrichment transport (speed limits, tunnels), offline-first like
+ * routing itself: the attributes live in the very tiles the offline route came
+ * from, so a drive on a downloaded pack is enriched with no network at all.
+ *
+ * Coverage is judged on the trace shape rather than the route's endpoints, and
+ * an empty or uncovered shape goes to the server — a route may leave the pack
+ * even when both ends are inside it. Failure falls back the same way; if the
+ * server is unreachable too the caller simply gets no enrichment, which
+ * navigation is built to survive.
+ */
+export function makeTraceTransport(serverOrigin: string): ValhallaTransport {
+  const online = httpTraceTransport({ baseUrl: serverOrigin });
+  return async (request, signal) => {
+    if (Valhalla?.traceAttributes) {
+      try {
+        const pack = packCovering(await listLocalPacks(), traceShape(request));
+        if (pack) {
+          await ensureEngine(tileExtractPath(pack));
+          return JSON.parse(await Valhalla.traceAttributes(JSON.stringify(request))) as unknown;
+        }
+      } catch (error) {
+        console.warn('offline enrichment failed, falling back to server:', error);
+      }
+    }
+    return online(request, signal);
   };
 }

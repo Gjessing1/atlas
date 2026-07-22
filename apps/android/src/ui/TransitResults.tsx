@@ -20,6 +20,7 @@ import {
   type TransitSituation,
   type TransitTrip,
 } from '@atlas/transit';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 
@@ -114,8 +115,36 @@ function BookingNotice({ booking }: { booking: TransitBooking }) {
   );
 }
 
-/** How far one tap moves the chosen departure/arrival, lacking a native picker. */
-const TIME_STEP_MS = 30 * 60_000;
+/**
+ * Ask for a departure/arrival moment with the platform's own pickers: date
+ * first, then clock, which is Android's standing two-step for a datetime.
+ * Dismissing either step leaves the chosen time alone — a half-answered
+ * question must not move the board.
+ *
+ * `is24Hour` is forced because Atlas states times in 24-hour form everywhere
+ * (see `fmtClock`); a picker that disagreed with the board it feeds would be
+ * the one place a traveller reads am/pm.
+ */
+function pickDateTime(currentMs: number, onPicked: (ms: number) => void): void {
+  DateTimePickerAndroid.open({
+    value: new Date(currentMs),
+    mode: 'date',
+    onChange: (dateEvent, date) => {
+      if (dateEvent.type !== 'set' || !date) return;
+      DateTimePickerAndroid.open({
+        value: date,
+        mode: 'time',
+        is24Hour: true,
+        onChange: (timeEvent, time) => {
+          if (timeEvent.type !== 'set' || !time) return;
+          const picked = new Date(date);
+          picked.setHours(time.getHours(), time.getMinutes(), 0, 0);
+          onPicked(picked.getTime());
+        },
+      });
+    },
+  });
+}
 
 /**
  * Departure/arrival time, struck through and corrected when a live feed says
@@ -328,10 +357,9 @@ function TripCard({
  * differently from the planner being unreachable.
  *
  * The decisions behind the controls live in `useTransitBoard`, shared with the
- * web board; what is left here is markup. There is no native date picker in
- * this build (adding one would mean a new APK rather than an OTA update), so an
- * exact time is reached by stepping in half hours, and the Earlier/Later paging
- * below walks real departures.
+ * web board; what is left here is markup. A chosen departure/arrival opens the
+ * platform's own date and clock pickers, matching the web's single
+ * datetime field; the Earlier/Later paging below walks real departures.
  */
 export function TransitResults({
   transit,
@@ -375,24 +403,15 @@ export function TransitResults({
           <Text style={styles.link}>↻ Refresh departures</Text>
         </Pressable>
       ) : (
-        <View style={styles.timeRow}>
-          <Pressable
-            style={[styles.chip, styles.stepChip]}
-            onPress={() => board.stepTime(-TIME_STEP_MS)}
-            testID="transit-time-earlier"
-          >
-            <Text style={styles.chipText}>−30 min</Text>
-          </Pressable>
-          {/* Day + clock, so a departure stepped past midnight doesn't read as today. */}
+        <Pressable
+          style={styles.timeRow}
+          onPress={() => pickDateTime(transit.timeMs ?? Date.now(), transit.setTimeMs)}
+          testID="transit-time-pick"
+        >
+          {/* Day + clock, so a time picked past midnight doesn't read as today. */}
           <Text style={styles.timeValue}>{fmtWhenClock(transit.timeMs ?? Date.now())}</Text>
-          <Pressable
-            style={[styles.chip, styles.stepChip]}
-            onPress={() => board.stepTime(TIME_STEP_MS)}
-            testID="transit-time-later"
-          >
-            <Text style={styles.chipText}>+30 min</Text>
-          </Pressable>
-        </View>
+          <Text style={styles.timeHint}>Change</Text>
+        </Pressable>
       )}
 
       {showFilters ? (
@@ -492,8 +511,17 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   modeChip: { flexDirection: 'row', alignItems: 'center' },
-  stepChip: { paddingHorizontal: 10 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  timeHint: { fontSize: 13, color: theme.accent, fontWeight: '600' },
   timeValue: {
     fontSize: 15,
     fontWeight: '700',

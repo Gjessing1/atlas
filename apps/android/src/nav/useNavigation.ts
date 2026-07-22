@@ -5,7 +5,6 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
-import { httpTraceTransport } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -13,7 +12,7 @@ import * as Speech from 'expo-speech';
 import { useMemo } from 'react';
 
 import { AudioFocus } from '../../modules/audiofocus';
-import { makeRouteProvider } from '../routing/offlineRouting';
+import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { NAV_LOCATION_TASK, setLocationHandler, toPosition } from './locationTask';
 
@@ -140,17 +139,17 @@ function watchHeadingRate(onDelta: (deltaDeg: number) => void): () => void {
  * otherwise the server. The trip logic itself is `useNavigationController`,
  * which the web drives through the same seam.
  *
- * Enrichment (speed limits, tunnels) is server-only for now: the embedded
- * engine has the same data in its tiles, but the native bridge exposes
- * `/route` alone, so an offline drive shows no limit until a
- * `trace_attributes` bridge method ships in a new APK.
+ * Enrichment (speed limits, tunnels) is offline-first too: the bridge exposes
+ * `trace_attributes`, so a drive covered by a downloaded pack reads its limits
+ * out of the very tiles the route came from, with the server as the fallback
+ * for anything outside one.
  */
 export function useNavigation(): NavController {
   const serverOrigin = useServerOrigin();
   const platform = useMemo<NavPlatform>(
     () => ({
       provider: makeRouteProvider(serverOrigin),
-      trace: httpTraceTransport({ baseUrl: serverOrigin }),
+      trace: makeTraceTransport(serverOrigin),
       currentFix,
       watchFixes,
       speak,

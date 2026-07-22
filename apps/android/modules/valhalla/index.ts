@@ -13,6 +13,13 @@ export interface ValhallaNativeModule {
   open(configJson: string): Promise<void>;
   /** Run a route request (Valhalla /route JSON in, response JSON out). */
   route(requestJson: string): Promise<string>;
+  /**
+   * Run a `/trace_attributes` request (JSON in, response JSON out) — per-edge
+   * road attributes (speed limits, tunnels) for navigation enrichment. The
+   * data is in the same tiles a route came from, so an offline drive gets the
+   * same enrichment an online one does.
+   */
+  traceAttributes(requestJson: string): Promise<string>;
   /** Tear the engine down and release the tile extract. */
   close(): Promise<void>;
 }
