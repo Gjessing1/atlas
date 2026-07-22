@@ -20,6 +20,13 @@ export {
 } from './useMapProfile.js';
 export { useThemeMode, type ThemeModeController, type ThemeModeSettings } from './useThemeMode.js';
 export {
+  useNavPrefs,
+  type NavFollowMode,
+  type NavPrefsController,
+  type NavPrefsSettings,
+  type NavPrefsTarget,
+} from './useNavPrefs.js';
+export {
   useTransit,
   useTransitPlan,
   type TransitFn,

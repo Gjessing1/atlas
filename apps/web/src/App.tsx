@@ -13,7 +13,7 @@ import {
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
-import { useMapProfile, useThemeMode } from '@atlas/app-hooks';
+import { useMapProfile, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -24,6 +24,7 @@ import { RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
+import { useCameraPersistence } from './map/useCameraPersistence.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -43,6 +44,7 @@ import { SearchBox } from './SearchBox.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
 import { useWeather } from './weather/useWeather.js';
+import { useWeatherTarget } from './weather/useWeatherTarget.js';
 
 // The side/overlay panels are code-split: none of them is needed for the
 // initial map render, and Sidebar pulls in the GPX/KML import machinery.
@@ -61,10 +63,6 @@ const SettingsPanel = lazy(() =>
 );
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
-const LAST_VIEW_SETTING = 'lastView';
-// Nav preferences are device-local (`local.` keys never sync).
-const NAV_MUTED_SETTING = 'local.nav.muted';
-const NAV_FOLLOW_SETTING = 'local.nav.follow';
 
 // Decoded once at startup; afterwards the map keeps the hash in sync. A share
 // link (hash) always wins over the persisted last view.
@@ -100,8 +98,6 @@ export function App() {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Weather is targeted at a point (pin / map centre); null = panel closed.
-  const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
     data: TrackData;
@@ -166,7 +162,9 @@ export function App() {
 
   const nav = useWebNavigation();
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
-  const follow = useNavLayers(map, nav);
+  // Mute and map orientation survive across trips (device-local, Android parity).
+  const navPrefs = useNavPrefs(userData, nav);
+  const follow = useNavLayers(map, nav, navPrefs.followMode);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
   const onNavigateToTarget = useCallback(
@@ -207,14 +205,9 @@ export function App() {
 
   // ---- weather & conditions ----
 
+  const weatherAt = useWeatherTarget(pin, getBias, DEFAULT_VIEW.center);
+  const weatherTarget = weatherAt.target;
   const weather = useWeather(weatherTarget);
-  const toggleWeather = useCallback(() => {
-    // Open onto the dropped pin if there is one, else the current map centre.
-    setWeatherTarget((cur) => (cur ? null : (pin ?? getBias() ?? DEFAULT_VIEW.center)));
-  }, [pin, getBias]);
-  const retargetWeather = useCallback(() => {
-    setWeatherTarget(getBias() ?? DEFAULT_VIEW.center);
-  }, [getBias]);
 
   // A picked search result becomes a pin plus the same card a POI tap opens.
   const onSearchSelect = useCallback((result: SearchResult) => {
@@ -239,7 +232,7 @@ export function App() {
 
   // ---- user data on the map ----
 
-  const { tracks, getTrackData, setSetting, getSetting, savePlace } = userData;
+  const { tracks, getTrackData, savePlace } = userData;
 
   const selectTrack = useCallback(
     (id: string | null) => {
@@ -393,67 +386,8 @@ export function App() {
     return () => clearTimeout(t);
   }, [undoable, clearUndoable]);
 
-  // Nav preferences survive across trips (device-local — `local.` never syncs).
-  const { setMuted } = nav;
-  const { setFollowMode } = follow;
-  useEffect(() => {
-    if (userData.status !== 'ready') return;
-    void getSetting(NAV_MUTED_SETTING).then((raw) => {
-      if (raw != null) setMuted(raw === 'true');
-    });
-    void getSetting(NAV_FOLLOW_SETTING).then((raw) => {
-      if (raw === 'north' || raw === 'course') setFollowMode(raw);
-    });
-  }, [userData.status, getSetting, setMuted, setFollowMode]);
-  const onToggleFollowMode = useCallback(() => {
-    const next = follow.followMode === 'course' ? 'north' : 'course';
-    setFollowMode(next);
-    setSetting(NAV_FOLLOW_SETTING, next);
-  }, [follow.followMode, setFollowMode, setSetting]);
-  // Mute toggles through nav.toggleMute (banner button); persist the result.
-  const prevMutedRef = useRef(nav.muted);
-  useEffect(() => {
-    if (prevMutedRef.current !== nav.muted) {
-      prevMutedRef.current = nav.muted;
-      if (userData.status === 'ready') setSetting(NAV_MUTED_SETTING, String(nav.muted));
-    }
-  }, [nav.muted, userData.status, setSetting]);
-
   // Auto-save the camera; restore it on startup when the URL has no view hash.
-  useEffect(() => {
-    if (!map || userData.status !== 'ready') return;
-    if (!hashView) {
-      void getSetting(LAST_VIEW_SETTING).then((raw) => {
-        if (!raw) return;
-        // Don't fight the user: only restore while the camera still sits at
-        // the startup default. (The URL hash is no signal here — the map
-        // echoes the camera into it on load.)
-        const center = map.getCenter();
-        const untouched =
-          Math.abs(map.getZoom() - initialView.zoom) < 0.01 &&
-          Math.abs(center.lat - initialView.center.lat) < 1e-6 &&
-          Math.abs(center.lng - initialView.center.lng) < 1e-6;
-        if (!untouched) return;
-        try {
-          const view = JSON.parse(raw) as MapViewState;
-          map.jumpTo({ center: view.center, zoom: view.zoom });
-        } catch {
-          // Ignore a corrupt setting; the default view is fine.
-        }
-      });
-    }
-    const save = () => {
-      const center = map.getCenter();
-      setSetting(
-        LAST_VIEW_SETTING,
-        JSON.stringify({ center: { lat: center.lat, lng: center.lng }, zoom: map.getZoom() }),
-      );
-    };
-    map.on('moveend', save);
-    return () => {
-      map.off('moveend', save);
-    };
-  }, [map, userData.status, getSetting, setSetting]);
+  useCameraPersistence(map, userData, initialView, hashView === null);
 
   return (
     <div style={{ height: '100%', position: 'relative' }}>
@@ -479,8 +413,8 @@ export function App() {
         nav={nav}
         followPaused={follow.followPaused}
         onResumeFollow={follow.resumeFollow}
-        followMode={follow.followMode}
-        onToggleFollowMode={onToggleFollowMode}
+        followMode={navPrefs.followMode}
+        onToggleFollowMode={navPrefs.toggleFollowMode}
         overview={follow.overview}
         onToggleOverview={follow.toggleOverview}
       />
@@ -529,7 +463,7 @@ export function App() {
           className="sidebar-toggle"
           aria-label="Weather"
           aria-pressed={weatherTarget !== null}
-          onClick={toggleWeather}
+          onClick={weatherAt.toggle}
         >
           <SunIcon size={18} />
           <span className="topbar-label">Weather</span>
@@ -569,7 +503,7 @@ export function App() {
           }}
           onAddStop={onAddStop}
           onShare={onShareTarget}
-          onWeather={() => setWeatherTarget(target.position)}
+          onWeather={() => weatherAt.setTarget(target.position)}
           onRemovePin={() => onPinChange(null)}
           onClose={() => setTarget(null)}
         />
@@ -599,8 +533,8 @@ export function App() {
             target={weatherTarget}
             weather={weather}
             settings={userData}
-            onRetarget={retargetWeather}
-            onClose={() => setWeatherTarget(null)}
+            onRetarget={weatherAt.retarget}
+            onClose={() => weatherAt.setTarget(null)}
           />
         )}
         {route.active && (

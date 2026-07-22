@@ -27,10 +27,6 @@ export interface NavFollowControls {
   /** True after a manual pan/rotate/zoom; the camera stops following. */
   followPaused: boolean;
   resumeFollow: () => void;
-  followMode: 'course' | 'north';
-  toggleFollowMode: () => void;
-  /** Set the mode directly (the persisted preference applies through this). */
-  setFollowMode: (mode: 'course' | 'north') => void;
   /** Whole-remaining-route overview instead of the follow camera. */
   overview: boolean;
   toggleOverview: () => void;
@@ -45,10 +41,17 @@ export interface NavFollowControls {
  * `resumeFollow` (the banner's recenter button) re-engages it. The overview
  * toggle swaps the follow for a fit of the whole remaining route, returning
  * on tap or by itself after a timeout.
+ *
+ * The orientation (`followMode`) is passed in rather than owned here: it is a
+ * persisted user preference (`useNavPrefs`), and this hook only frames the
+ * camera the way that preference asks for.
  */
-export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController): NavFollowControls {
+export function useNavLayers(
+  map: maplibregl.Map | null,
+  nav: WebNavController,
+  followMode: 'course' | 'north',
+): NavFollowControls {
   const [followPaused, setFollowPaused] = useState(false);
-  const [followMode, setFollowMode] = useState<'course' | 'north'>('course');
   const [overview, setOverview] = useState(false);
   const active = nav.phase === 'navigating' || nav.phase === 'rerouting';
 
@@ -476,9 +479,6 @@ export function useNavLayers(map: maplibregl.Map | null, nav: WebNavController):
       setFollowPaused(false);
       setOverview(false);
     },
-    followMode,
-    toggleFollowMode: () => setFollowMode((m) => (m === 'course' ? 'north' : 'course')),
-    setFollowMode,
     overview,
     toggleOverview: () => {
       setOverview((o) => !o);

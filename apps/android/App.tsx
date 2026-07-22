@@ -1,21 +1,11 @@
-import { useMapProfile, useThemeMode } from '@atlas/app-hooks';
-import {
-  decodeMapLink,
-  haversineM,
-  mapProfile,
-  placeIsVisible,
-  POI_LAYER_IDS,
-  type SearchResult,
-  type MapAppearance,
-  type VisibilityFolder,
-} from '@atlas/core';
+import { useMapProfile, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
+import { mapProfile, placeIsVisible, type MapAppearance, type VisibilityFolder } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
   isRoutingProfile,
   ROUTING_PROFILES,
   routePathToTrackData,
-  viaInsertIndex,
   type RoutePath,
 } from '@atlas/routing';
 import { transitTripBounds, type TransitTrip } from '@atlas/transit';
@@ -27,8 +17,6 @@ import {
   Animated,
   Appearance,
   BackHandler,
-  Dimensions,
-  Linking,
   Pressable,
   StyleSheet,
   Switch,
@@ -44,31 +32,30 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { LatLng } from '@atlas/core';
-import {
-  DEFAULT_VIEW,
-  MapScene,
-  NAV_PREVIEW_LAYER_IDS,
-  PLAN_LINE_LAYER_ID,
-} from './src/map/MapScene';
-import { tunnelChipLabel } from '@atlas/navigation';
-import { labelCellFor, useOverlayLabels } from './src/layers/useOverlayLabels';
+import { MapScene } from './src/map/MapScene';
+import { useBootCamera } from './src/map/useBootCamera';
+import { useMapPress } from './src/map/useMapPress';
+import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
+import { NavChrome, useNavPuck } from './src/nav/NavChrome';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
+import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
+import { useDirections } from './src/routing/useDirections';
 import { useRoute } from './src/routing/useRoute';
 import { useTransitPlan } from './src/routing/useTransit';
-import { shareText } from './src/share';
 import { AppSheets } from './src/ui/AppSheets';
-import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
-import { CrosshairIcon, MapOverviewIcon, NavArrowIcon } from './src/ui/icons';
+import { DestinationCard } from './src/ui/DestinationCard';
+import { useDestination } from './src/ui/useDestination';
+import { CrosshairIcon } from './src/ui/icons';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
@@ -91,29 +78,6 @@ import { useWeather } from './src/weather/useWeather';
 const NAV_BAR_FALLBACK = 48;
 const STATUS_BAR_FALLBACK = 28;
 
-/** Settings key for the persisted camera (device-local — `local.` never syncs). */
-const CAMERA_SETTING = 'local.map.camera';
-/** Nav preferences that survive across trips (device-local, web parity). */
-const NAV_MUTED_SETTING = 'local.nav.muted';
-const NAV_FOLLOW_SETTING = 'local.nav.follow';
-
-const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
-
-type MapView = { center: LatLng; zoom: number };
-
-/** Parse a persisted camera setting; null when absent or malformed. */
-function parseCameraSetting(raw: string | null): MapView | null {
-  if (!raw) return null;
-  try {
-    const v = JSON.parse(raw) as { lat?: number; lng?: number; zoom?: number };
-    if (![v.lat, v.lng, v.zoom].every((n) => typeof n === 'number' && Number.isFinite(n)))
-      return null;
-    return { center: { lat: v.lat!, lng: v.lng! }, zoom: v.zoom! };
-  } catch {
-    return null;
-  }
-}
-
 function AppInner() {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
@@ -135,11 +99,8 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
-  const routeRef = useRef(route);
-  routeRef.current = route;
-  const directionsSeq = useRef(0);
-  const [directionsLocating, setDirectionsLocating] = useState(false);
   const transit = useTransitPlan(route);
+  const directions = useDirections(route);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
   // Activity profile + overlay state are device-local and shared by the
@@ -165,35 +126,32 @@ function AppInner() {
   const [navHeight, setNavHeight] = useState(0);
   // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
   const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
-  // A picked place awaiting an action (search result, long-press, place or
-  // favorite). Cleared once the route planner takes it over. The travel mode is
-  // not decided here — the RoutePanel is the app's single mode picker.
-  const [destination, setDestination] = useState<DestinationTarget | null>(null);
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
   // Point whose share-format chooser is open (null = closed).
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
-  // Map orientation while navigating: course-up (direction of travel) or north-up.
-  const [navFollow, setNavFollow] = useState<'course' | 'north'>('course');
   // Show the location puck once the user has asked to be located (also true
   // while navigating). Idle recentres are one-shot fly-tos, so tapping locate
   // never locks the camera and fights a pan.
   const [showPuck, setShowPuck] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
-  // Boot camera: a #map= launch link wins, else the persisted last view. Null
-  // until resolved — the map holds at the loading screen so the first frame is
-  // already at the right place (no Oslo flash).
-  const [initialView, setInitialView] = useState<MapView | null>(null);
-  // Latest settled camera — feeds the search bias, share links and persistence.
-  const viewRef = useRef<MapView | null>(null);
-  const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
-  // Snapped viewport for on-map overlay labels. Quantized so a pan only sets
-  // state when it crosses a cell boundary — see labelCellFor.
-  const [labelCell, setLabelCell] = useState<string | null>(null);
-  const overlayLabels = useOverlayLabels(overlaysCtl.overlays, labelCell);
-  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flyTo = useCallback((p: LatLng) => {
+    cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
+  }, []);
+
+  // Every picked point — map tap, long-press, search hit, favorite, link pin.
+  const dest = useDestination(flyTo);
+  const { pickPoint } = dest;
+  // A pin carried by a launch/deep link opens its card; the camera is already
+  // on its way there from the link's own view, so it must not fly again.
+  const onLinkPin = useCallback((pin: LatLng) => pickPoint(pin, false), [pickPoint]);
+  // Where the map opens, where it is now, and remembering that for next launch.
+  const camera = useBootCamera(data, cameraRef, onLinkPin);
+  const { initialView, viewRef, mapZoom, getBias } = camera;
+  const overlayLabels = useOverlayLabels(overlaysCtl.overlays, camera.labelCell);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -213,9 +171,12 @@ function AppInner() {
   // orientation while travelling).
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  // Mute and map orientation survive across trips (device-local, web parity).
+  const navPrefs = useNavPrefs(data, nav);
   // The follow camera: bottom-anchored, course-up, speed/turn-aware zoom; a
   // manual pan pauses it (re-centre pill / locate button / timeout resume it).
-  const navCam = useNavCamera(cameraRef, nav, navFollow);
+  const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode);
+  const navPuck = useNavPuck(nav, navCam, navPrefs.followMode);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
@@ -223,156 +184,21 @@ function AppInner() {
   const controlsTop = topInset + 8 + (navActive && !previewing ? navHeight + 8 : 0);
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
-  const idleSheetOpen = searchOpen || menuOpen || destination !== null;
-
-  // While the follow camera is actively tracking, the puck is drawn as a
-  // screen-fixed chevron at the camera's anchor point — the camera eases to
-  // the road-snapped fix, so the chevron sits glued to the route line with
-  // none of the native puck's raw-GPS wobble. Falls back to the native puck
-  // when paused/off-route (the map moves freely under the true position then).
+  const idleSheetOpen = searchOpen || menuOpen || dest.destination !== null;
+  // Landscape is short, so several pieces of chrome move out of the centre
+  // column (see NavChrome) and route fits get a narrower bottom pad.
   const win = useWindowDimensions();
-  // Show the chevron on exactly the condition useNavCamera eases the camera to
-  // `state.snapped` (following, not paused, not in overview, a fix in hand) —
-  // no tighter. Gating it additionally on `departed`, a 25 m snap band, or
-  // off-route meant the camera kept tracking the live position while the
-  // chevron vanished, so the native puck's fuzzy accuracy blob showed for the
-  // whole drive instead — even on a perfect fix a lane's width off the route
-  // centreline. The chevron sits at the camera's centre, so wherever the
-  // camera points (glued to the line or the raw fix, on-route or off) it is
-  // the honest marker; it simply greys when the fix is genuinely lost.
-  const courseUp = navFollow === 'course' && (nav.state?.departed ?? false);
-  const navPuckVisible =
-    following && !navCam.followPaused && !navCam.overview && nav.state !== null;
-  // Once a trip has a position, the native puck is never the right marker: the
-  // fuzzy accuracy blob ("the cloud") looks like a bug next to our own puck, and
-  // any flip between the two — a stray gesture, an overview toggle, a device
-  // rotation that resizes the map — reads as the marker vanishing mid-drive.
-  // So suppress it for the whole trip and always draw one of ours: the
-  // screen-fixed chevron while the follow camera frames the position, a
-  // map-anchored dot whenever it doesn't.
-  const navDot = following && nav.state !== null && !navPuckVisible ? nav.state.snapped : null;
-  const suppressNativePuck = following && nav.state !== null;
-  // Anchor point of the follow camera (see useNavCamera): course-up pads the
-  // centre down to 75% of the screen; otherwise (north-up, or before the drive
-  // has begun) it keeps the centre at the middle. Track the same `courseUp` the
-  // camera frames with, so the chevron lands where the camera actually centres.
-  const navPuckTop = courseUp ? win.height * 0.75 : win.height * 0.5;
-  // Course-up rotates the map to the course, so the chevron points straight
-  // up; otherwise the map is north-up (bearing 0), so the chevron shows the course.
-  const navPuckRotation = courseUp ? 0 : Math.round(nav.state?.courseDeg ?? 0);
-  // Landscape is short: the camera anchor at 75% leaves only a quarter of a
-  // ~400 dp viewport below the chevron, which the bottom-centred road chip was
-  // sitting in — the chip covered the puck. Portrait has the room, so keep the
-  // centred chip there and move it out of the chevron's column in landscape,
-  // where the extra width is free.
   const landscape = win.width > win.height;
 
-  const flyTo = useCallback((p: LatLng) => {
-    cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
-  }, []);
-
-  // Show a destination card (mode picker + Navigate) for any picked point.
-  const pickDestination = useCallback(
-    (target: DestinationTarget) => {
-      setDestination(target);
-      flyTo({ lat: target.lat, lng: target.lng });
-    },
-    [flyTo],
-  );
-
-  // Resolve the boot camera once storage has settled: a #map= launch link
-  // (share link / atlas: deep link) wins, else the persisted last view.
-  const { getSetting, setSetting } = data;
-  useEffect(() => {
-    if (data.status === 'loading' || initialView !== null) return;
-    let cancelled = false;
-    void (async () => {
-      const launch = decodeMapLink((await Linking.getInitialURL().catch(() => null)) ?? '');
-      if (cancelled) return;
-      if (launch) {
-        setInitialView({ center: launch.center, zoom: launch.zoom });
-        if (launch.pin) {
-          const p = launch.pin;
-          setDestination({ lat: p.lat, lng: p.lng, name: coordName(p), canSave: true });
-        }
-        return;
-      }
-      const saved = parseCameraSetting(await getSetting(CAMERA_SETTING));
-      if (!cancelled) setInitialView(saved ?? DEFAULT_VIEW);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [data.status, initialView, getSetting]);
-
-  // #map= links arriving while the app is running: fly there, pin included.
-  useEffect(() => {
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      const view = decodeMapLink(url);
-      if (!view) return;
-      if (view.pin) {
-        const p = view.pin;
-        setDestination({ lat: p.lat, lng: p.lng, name: coordName(p), canSave: true });
-      }
-      cameraRef.current?.flyTo({
-        center: [view.center.lng, view.center.lat],
-        zoom: view.zoom,
-        duration: 900,
-      });
-    });
-    return () => sub.remove();
-  }, []);
-
-  // Nav preferences (mute, course-up/north-up) survive across trips.
-  const { setMuted: setNavMuted } = nav;
-  useEffect(() => {
-    if (data.status !== 'ready') return;
-    void getSetting(NAV_MUTED_SETTING).then((raw) => {
-      if (raw != null) setNavMuted(raw === 'true');
-    });
-    void getSetting(NAV_FOLLOW_SETTING).then((raw) => {
-      if (raw === 'north' || raw === 'course') setNavFollow(raw);
-    });
-  }, [data.status, getSetting, setNavMuted]);
-  const toggleNavFollow = useCallback(() => {
-    setNavFollow((m) => {
-      const next = m === 'course' ? 'north' : 'course';
-      setSetting(NAV_FOLLOW_SETTING, next);
-      return next;
-    });
-  }, [setSetting]);
-  // Mute toggles through nav.toggleMute (banner button); persist the result.
-  const prevMutedRef = useRef(nav.muted);
-  useEffect(() => {
-    if (prevMutedRef.current !== nav.muted) {
-      prevMutedRef.current = nav.muted;
-      if (data.status === 'ready') setSetting(NAV_MUTED_SETTING, String(nav.muted));
-    }
-  }, [nav.muted, data.status, setSetting]);
-
-  // Track the settled camera and persist it (debounced) as the boot view.
-  const onViewChange = useCallback(
-    (view: MapView) => {
-      viewRef.current = view;
-      setMapZoom(Math.round(view.zoom));
-      setLabelCell(labelCellFor(view.center, view.zoom, Dimensions.get('window')));
-      if (persistTimer.current) clearTimeout(persistTimer.current);
-      persistTimer.current = setTimeout(() => {
-        setSetting(
-          CAMERA_SETTING,
-          JSON.stringify({
-            lat: Number(view.center.lat.toFixed(5)),
-            lng: Number(view.center.lng.toFixed(5)),
-            zoom: Number(view.zoom.toFixed(2)),
-          }),
-        );
-      }, 800);
-    },
-    [setSetting],
-  );
-
-  // Viewport bias for geocoding (web parity: SearchBox sends lat/lon).
-  const getBias = useCallback(async () => viewRef.current?.center ?? null, []);
+  const { onMapPress, onPickPoint } = useMapPress({
+    mapRef,
+    nav,
+    route,
+    places: visiblePlaces,
+    menuOpen,
+    closeMenu: () => setMenuOpen(false),
+    pickDestination: dest.pick,
+  });
 
   // Picking an activity also chooses the route planner's starting mode where
   // one exists. Explore and Ski intentionally leave its last mode alone.
@@ -390,124 +216,6 @@ function AppInner() {
       if (routing !== null && isRoutingProfile(routing)) route.setProfile(routing);
     },
     [profiles, overlaysCtl, route],
-  );
-
-  // Open the share-format chooser for the destination (Atlas link, plain
-  // coordinates, or a geo: hand-off to the user's preferred map app).
-  const shareDestination = useCallback(() => {
-    if (!destination) return;
-    setShareTarget({ lat: destination.lat, lng: destination.lng, name: destination.name });
-  }, [destination]);
-
-  // The red pin was dragged: the destination becomes that adjusted point.
-  const onDestinationMoved = useCallback((p: LatLng) => {
-    setDestination((d) => (d ? { lat: p.lat, lng: p.lng, name: coordName(p), canSave: true } : d));
-  }, []);
-
-  // One handler for every map tap: dismiss the ☰ menu if it's open; while
-  // planning, a tap on the routed line inserts a via into that leg and any
-  // other tap appends a stop; otherwise hit-test the saved pins, then the
-  // basemap POIs. Pins are picked here at the map level because touches on
-  // Marker child views are not delivered reliably on-device — the map press
-  // always is.
-  const onMapPress = useCallback(
-    ({ lat, lng }: LatLng, pixel: { x: number; y: number }) => {
-      // Finger-sized query box for layer hit-tests (a 1px point is too strict).
-      const pixelBounds: [[number, number], [number, number]] = [
-        [pixel.x - 12, pixel.y - 12],
-        [pixel.x + 12, pixel.y + 12],
-      ];
-      if (menuOpen) {
-        setMenuOpen(false);
-        return;
-      }
-      if (nav.phase === 'preview') {
-        // A tap on one of the drawn route choices makes it the selection.
-        void (async () => {
-          const hits = await mapRef.current
-            ?.queryRenderedFeatures(pixelBounds, { layers: NAV_PREVIEW_LAYER_IDS })
-            .catch(() => undefined);
-          const index = hits?.[0]?.properties?.['index'] as number | undefined;
-          if (typeof index === 'number') nav.selectPreview(index);
-        })();
-        return;
-      }
-      if (route.active) {
-        void (async () => {
-          // Tap on the selected line: insert a via there (web parity — the
-          // shared viaInsertIndex picks the leg the tapped point belongs to).
-          const path = route.paths?.[route.selectedPath];
-          if (path && !route.roundTrip && route.waypoints.length >= 2) {
-            const hits = await mapRef.current
-              ?.queryRenderedFeatures(pixelBounds, { layers: [PLAN_LINE_LAYER_ID] })
-              .catch(() => undefined);
-            if (hits && hits.length > 0) {
-              const at = { lat, lng };
-              route.insertWaypoint(
-                viaInsertIndex(
-                  path.points,
-                  route.waypoints.map((w) => w.pos),
-                  at,
-                ),
-                at,
-              );
-              return;
-            }
-          }
-          route.addWaypoint({ lat, lng });
-        })();
-        return;
-      }
-      void (async () => {
-        const zoom = await mapRef.current?.getZoom();
-        if (zoom === undefined) return;
-        // Ground size of one screen pixel at this zoom (512px tiles) makes the
-        // tap tolerance a constant ~36 px at any zoom level.
-        const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
-        let best: (typeof visiblePlaces)[number] | undefined;
-        let bestM = Infinity;
-        for (const place of visiblePlaces) {
-          const d = haversineM({ lat, lng }, { lat: place.lat, lng: place.lng });
-          if (d < bestM) {
-            bestM = d;
-            best = place;
-          }
-        }
-        if (best && bestM <= 36 * metersPerPx) {
-          pickDestination({
-            lat: best.lat,
-            lng: best.lng,
-            name: best.name,
-            canSave: false,
-            placeId: best.id,
-          });
-          return;
-        }
-        // No pin hit — try the basemap POIs (name/class popup, web parity).
-        const pois = await mapRef.current
-          ?.queryRenderedFeatures(pixelBounds, { layers: POI_LAYER_IDS })
-          .catch(() => undefined);
-        const poi = pois?.[0];
-        if (!poi) return;
-        const props = (poi.properties ?? {}) as Record<string, unknown>;
-        const name = (props['name'] ?? props['name:latin']) as string | undefined;
-        if (!name) return;
-        const kind = [props['class'], props['subclass']]
-          .filter((v): v is string => typeof v === 'string' && v !== name)
-          .join(' · ');
-        // Anchor on the POI's own coordinate when it has one, not the tap.
-        const [poiLng, poiLat] =
-          poi.geometry?.type === 'Point' ? (poi.geometry.coordinates as number[]) : [lng, lat];
-        pickDestination({
-          lat: poiLat ?? lat,
-          lng: poiLng ?? lng,
-          name,
-          detail: kind || undefined,
-          canSave: true,
-        });
-      })();
-    },
-    [menuOpen, nav, route, visiblePlaces, pickDestination],
   );
 
   // Entering the route-choice preview (or switching choice): fit the whole
@@ -529,7 +237,6 @@ function AppInner() {
     if (!Number.isFinite(west) || west === east || south === north) return;
     // The choice card covers the bottom in portrait but the left in landscape
     // (a 300 dp bottom pad would swallow a landscape screen whole).
-    const landscape = win.width > win.height;
     // Mirrors the RoutePreview card width so the fit clears it exactly.
     const cardW = Math.min(420, Math.round(win.width * 0.45));
     cameraRef.current?.fitBounds([west, south, east, north], {
@@ -538,7 +245,7 @@ function AppInner() {
         : { top: topInset + 48, right: 48, bottom: bottomInset + 300, left: 48 },
       duration: 700,
     });
-  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset, win.width, win.height]);
+  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset, landscape, win.width]);
 
   // A journey card can collapse the planner and ask to see its actual shape.
   // Frame every walk/ride leg, leaving room for the peek sheet that remains.
@@ -559,110 +266,15 @@ function AppInner() {
     [bottomInset, landscape, topInset],
   );
 
-  // Long-press outside route planning: pick any point as a destination.
-  const onPickPoint = useCallback(
-    ({ lat, lng }: LatLng) => {
-      pickDestination({
-        lat,
-        lng,
-        name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-        canSave: true,
-      });
-    },
-    [pickDestination],
-  );
-
-  /**
-   * A GPS fix for the route planner's "My location" shortcut, or null when the
-   * permission is refused or no fix is available — the panel then just says so
-   * rather than silently doing nothing.
-   */
-  const getMyLocation = useCallback(async (): Promise<LatLng | null> => {
-    try {
-      const fg = await Location.requestForegroundPermissionsAsync();
-      if (!fg.granted) return null;
-      // Indoors Android can leave a current-position request pending forever.
-      // The planner is already visible, but it must also stop saying "Getting
-      // location…" and remain editable when no new fix arrives.
-      const fresh = await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
-      ]);
-      const pos = fresh ?? (await Location.getLastKnownPositionAsync({ maxAge: 120_000 }));
-      return pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  /**
-   * "Directions" on the place card: hand the point to the route planner, which
-   * is where every travel-mode decision now happens. The place's *name* goes
-   * with it — the old transit hand-off dropped it and the planner opened
-   * showing bare coordinates for somewhere the user had just picked by name.
-   * Seeding the current position as the start is a convenience, not a
-   * requirement: with no fix the panel opens asking for a start.
-   */
-  const planTo = useCallback(() => {
-    if (!destination) return;
-    const dest = { lat: destination.lat, lng: destination.lng };
-    const name = destination.name;
-    const hadPlan = route.waypoints.length > 0;
-    const seq = ++directionsSeq.current;
-
-    // Transition immediately. GPS and routing happen behind the visible panel
-    // instead of making the Directions button appear frozen for several
-    // seconds. The destination is useful even when location is unavailable.
-    setDestination(null);
-    route.start();
-    route.setRoundTrip(false);
-    const destinationId = route.addWaypoint(dest, name);
-
-    if (hadPlan) {
-      setDirectionsLocating(false);
-      return;
-    }
-    setDirectionsLocating(true);
-    void getMyLocation()
-      .then((origin) => {
-        if (!origin || seq !== directionsSeq.current) return;
-        const current = routeRef.current;
-        const onlyStop = current.waypoints[0];
-        // A user edit wins over the late GPS result. Only fill the untouched
-        // destination-only plan that this exact Directions tap created.
-        if (
-          current.active &&
-          current.waypoints.length === 1 &&
-          onlyStop?.id === destinationId &&
-          onlyStop.pos.lat === dest.lat &&
-          onlyStop.pos.lng === dest.lng
-        ) {
-          current.insertWaypoint(0, origin, 'My location');
-        }
-      })
-      .finally(() => {
-        if (seq === directionsSeq.current) setDirectionsLocating(false);
-      });
-  }, [destination, route, getMyLocation]);
-
-  // Closing the planner while a fix is pending prevents that fix from
-  // resurrecting or editing a route the user has dismissed.
-  useEffect(() => {
-    if (route.active) return;
-    directionsSeq.current++;
-    setDirectionsLocating(false);
-  }, [route.active]);
-
   /** Start guidance to the planner's destination in the chosen road profile. */
   const startNavigation = useCallback(
-    (dest: LatLng) => {
-      setNavFollow('course');
+    (target: LatLng) => {
       // Route selection moves from the planner to Navigation's route-choice
       // preview. Close the planner immediately so it cannot cover that sheet,
       // and so its background route/mode requests are cancelled while
       // Navigation obtains a current-position route exactly once.
       route.stop();
-      void nav.start(dest, route.profile);
+      void nav.start(target, route.profile);
     },
     [nav, route],
   );
@@ -747,18 +359,6 @@ function AppInner() {
     refreshPacks,
   );
 
-  const onPickResult = useCallback(
-    (result: SearchResult) => {
-      pickDestination({
-        lat: result.position.lat,
-        lng: result.position.lng,
-        name: result.name || result.label || 'Dropped pin',
-        canSave: true,
-      });
-    },
-    [pickDestination],
-  );
-
   if (data.status === 'loading' || !originReady || mapStyle === null || initialView === null) {
     return (
       <View style={styles.loading}>
@@ -766,6 +366,8 @@ function AppInner() {
       </View>
     );
   }
+
+  const destination = dest.destination;
 
   return (
     <View key={appearance.colorScheme} style={styles.container}>
@@ -785,8 +387,8 @@ function AppInner() {
         destination={destination}
         visiblePlaces={visiblePlaces}
         showPuck={showPuck}
-        suppressPuck={suppressNativePuck}
-        navDot={navDot}
+        suppressPuck={navPuck.suppressNative}
+        navDot={navPuck.dot}
         // Switching light/dark remounts the scene (keyed on colorScheme) to
         // reload the restyled map; boot that fresh scene at wherever the camera
         // already is, not back at the persisted launch view — otherwise a theme
@@ -794,9 +396,9 @@ function AppInner() {
         initialView={viewRef.current ?? initialView}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
-        onViewChange={onViewChange}
+        onViewChange={camera.onViewChange}
         onUserGesture={navCam.onUserGesture}
-        onDestinationMoved={onDestinationMoved}
+        onDestinationMoved={dest.onMoved}
       />
 
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
@@ -805,21 +407,19 @@ function AppInner() {
         <Animated.View pointerEvents="none" style={[styles.tunnelDim, { opacity: tunnelDim }]} />
       ) : null}
 
-      {/* The screen-fixed nav chevron (see navPuckVisible above). */}
-      {navPuckVisible ? (
-        <View
-          pointerEvents="none"
-          style={[styles.navPuckWrap, { top: navPuckTop - 21, left: win.width / 2 - 21 }]}
-        >
-          <View style={{ transform: [{ rotate: `${navPuckRotation}deg` }] }}>
-            {/* Grey when the GPS signal is lost, so a frozen puck reads as
-                "no signal", not "we're still here". */}
-            <NavArrowIcon color={nav.state?.fix === 'lost' ? theme.icon : theme.accent} />
-          </View>
-        </View>
-      ) : null}
-
       <NavBanner nav={nav} topInset={topInset} onHeight={setNavHeight} />
+
+      {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}
+      <NavChrome
+        nav={nav}
+        navCam={navCam}
+        puck={navPuck}
+        followMode={navPrefs.followMode}
+        onToggleFollowMode={navPrefs.toggleFollowMode}
+        controlsTop={controlsTop}
+        bottomInset={bottomInset}
+        landscape={landscape}
+      />
 
       {/* Search shares the bottom-sheet model and stays above the keyboard;
           hidden while navigating because the guidance UI owns the screen. */}
@@ -827,73 +427,12 @@ function AppInner() {
         <SearchBar
           packs={packs}
           getBias={getBias}
-          onPick={onPickResult}
+          onPick={dest.pickResult}
           onClose={() => setSearchOpen(false)}
           bottomInset={bottomInset}
-          getSetting={getSetting}
-          setSetting={setSetting}
+          getSetting={data.getSetting}
+          setSetting={data.setSetting}
         />
-      ) : null}
-
-      {/* Top-right during navigation: map orientation + route overview. */}
-      {following ? (
-        <View style={[styles.buttonColumn, { top: controlsTop }]}>
-          <Pressable
-            style={styles.roundButton}
-            onPress={toggleNavFollow}
-            testID="toggle-orientation"
-            accessibilityRole="button"
-            accessibilityLabel={
-              navFollow === 'course' ? 'Switch to north-up' : 'Switch to course-up'
-            }
-          >
-            {/* Course-up = blue arrow pointing forward (up on screen); north-up = N. */}
-            {navFollow === 'north' ? <Text style={styles.orientText}>N</Text> : <NavArrowIcon />}
-          </Pressable>
-          {/* Whole-remaining-route overview; tap again (or wait) to re-follow. */}
-          <Pressable
-            style={[styles.roundButton, navCam.overview && styles.roundButtonActive]}
-            onPress={navCam.toggleOverview}
-            testID="toggle-overview"
-            accessibilityRole="button"
-            accessibilityLabel={navCam.overview ? 'Back to follow view' : 'Show route overview'}
-            accessibilityState={{ selected: navCam.overview }}
-          >
-            <MapOverviewIcon />
-          </Pressable>
-        </View>
-      ) : null}
-
-      {/* Name of the road being driven, pinned bottom-centre (Google-style).
-          Inside a mapped tunnel it names the tunnel and counts it down
-          instead — the road underneath is still E6, but "Brynstunnelen ·
-          1.2 km" is what the driver can check against the world outside. */}
-      {following && (nav.state?.tunnel || nav.state?.currentRoad) ? (
-        <View
-          style={[
-            styles.roadChipWrap,
-            landscape && styles.roadChipWrapLandscape,
-            { bottom: bottomInset + 26 },
-          ]}
-          pointerEvents="none"
-        >
-          <View style={[styles.roadChip, landscape && styles.roadChipLandscape]}>
-            <Text style={styles.roadChipText} numberOfLines={1}>
-              {nav.state.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state.currentRoad}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {/* Free look-around during navigation: a pan pauses the follow camera;
-          this pill (or the locate button, or a 12 s timeout) re-engages it. */}
-      {following && navCam.followPaused ? (
-        <View style={[styles.recentreWrap, { bottom: bottomInset + 88 }]} pointerEvents="box-none">
-          <Pressable style={styles.recentrePill} onPress={navCam.resumeFollow} testID="recentre">
-            <NavArrowIcon />
-            <Text style={styles.recentreText}>Re-centre</Text>
-          </Pressable>
-        </View>
       ) : null}
 
       {/* Bottom-right: recentre on the current position (RoutePanel owns the
@@ -984,7 +523,10 @@ function AppInner() {
       {destination && !planning ? (
         <DestinationCard
           target={destination}
-          onDirections={planTo}
+          onDirections={() => {
+            dest.clear();
+            directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);
+          }}
           onSave={
             destination.canSave
               ? () => {
@@ -993,7 +535,7 @@ function AppInner() {
                     lat: destination.lat,
                     lng: destination.lng,
                   });
-                  setDestination(null);
+                  dest.clear();
                 }
               : undefined
           }
@@ -1001,13 +543,21 @@ function AppInner() {
             destination.placeId
               ? () => {
                   setEditPlaceId(destination.placeId!);
-                  setDestination(null);
+                  dest.clear();
                 }
               : undefined
           }
-          onShare={shareDestination}
+          // Open the share-format chooser (Atlas link, plain coordinates, or a
+          // geo: hand-off to the user's preferred map app).
+          onShare={() =>
+            setShareTarget({
+              lat: destination.lat,
+              lng: destination.lng,
+              name: destination.name,
+            })
+          }
           onWeather={() => setWeatherTarget({ lat: destination.lat, lng: destination.lng })}
-          onCancel={() => setDestination(null)}
+          onCancel={dest.clear}
           bottomInset={bottomInset}
         />
       ) : null}
@@ -1051,7 +601,7 @@ function AppInner() {
         pendingPin={pendingPin}
         onDismissPendingPin={() => setPendingPin(null)}
         onFlyTo={flyTo}
-        onPickDestination={pickDestination}
+        onPickDestination={dest.pick}
         onImportTracks={importTracks}
       />
       {planning ? (
@@ -1064,8 +614,8 @@ function AppInner() {
           onExport={exportRoute}
           onNavigate={startNavigation}
           onShowTransitTrip={showTransitTrip}
-          getMyLocation={getMyLocation}
-          locatingOrigin={directionsLocating}
+          getMyLocation={directions.getMyLocation}
+          locatingOrigin={directions.locatingOrigin}
           bottomInset={bottomInset}
         />
       ) : null}
@@ -1099,30 +649,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(4, 8, 16, 0.4)',
   },
-  buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
   locateWrap: { position: 'absolute', right: 12 },
-  recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  navPuckWrap: {
-    position: 'absolute',
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: theme.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 5,
-  },
-  recentrePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: theme.surface,
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    elevation: 5,
-  },
-  recentreText: { color: theme.text, fontWeight: '700', fontSize: 15 },
   roundButton: {
     width: 44,
     height: 44,
@@ -1132,24 +659,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 4,
   },
-  orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
-  roundButtonActive: { backgroundColor: theme.surfaceActive },
   roundButtonPressed: { backgroundColor: theme.surfaceActive, transform: [{ scale: 0.9 }] },
-  roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  // Landscape: hug the left edge so the centred nav chevron stays uncovered.
-  roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 76 },
-  // …and keep a long road name from growing back into the chevron's column;
-  // the name ellipsises instead (numberOfLines is already 1).
-  roadChipLandscape: { maxWidth: '40%' },
-  roadChip: {
-    backgroundColor: theme.surfaceOverlay,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    maxWidth: '70%',
-    elevation: 4,
-  },
-  roadChipText: { color: theme.text, fontWeight: '700', fontSize: 14 },
   offlineBadge: {
     position: 'absolute',
     bottom: 96,
