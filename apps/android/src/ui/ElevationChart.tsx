@@ -1,12 +1,9 @@
+import { fmtKm } from '@atlas/core';
 import { buildElevationProfile, type TrackData } from '@atlas/gpx';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import { theme } from './theme';
-
-function fmtKm(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
-}
 
 const CHART_HEIGHT = 96;
 /** Downsample to roughly one bar per couple of px so layout stays cheap. */

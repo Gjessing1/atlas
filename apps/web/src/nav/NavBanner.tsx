@@ -1,11 +1,8 @@
-import { fmtClock } from '@atlas/core';
+import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
 import { laneGlyphs, laneLabel, tunnelChipLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
-import { fmtDuration, fmtKm } from '../format.js';
 import { TurnIcon } from './TurnIcon.js';
 import type { WebNavController } from './useWebNavigation.js';
-
-const fmtEta = fmtClock;
 
 /** Ground speed in km/h, or null when stationary/unknown. */
 function speedKph(speedMps: number | null): number | null {
@@ -193,7 +190,7 @@ export function NavBanner({
             <>
               <div className="nav-trip-row">
                 <span className="nav-eta">
-                  <strong>{fmtEta(state.etaEpochMs)}</strong>
+                  <strong>{fmtClock(state.etaEpochMs)}</strong>
                   <small>arrival</small>
                 </span>
                 <span className="nav-summary">

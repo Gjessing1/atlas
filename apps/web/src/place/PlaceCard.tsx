@@ -27,8 +27,12 @@ interface PlaceCardProps {
   onSave: () => void;
   onShowSaved: (place: PlaceRecord) => void;
   onAddStop: () => void;
-  /** Copy a share link to this spot; returns once the clipboard write settled. */
-  onShare: () => void;
+  /**
+   * Share this spot. Resolves with how it went out: the OS share sheet took it
+   * ('shared'), or it went to the clipboard instead ('copied' — the only case
+   * the button needs to confirm, since a share sheet is its own feedback).
+   */
+  onShare: () => Promise<'shared' | 'copied'>;
   /** Open the forecast panel on this spot rather than on the map centre. */
   onWeather: () => void;
   /** Remove the dropped pin (pin targets only). */
@@ -170,8 +174,9 @@ export function PlaceCard({
         <button
           type="button"
           onClick={() => {
-            onShare();
-            setCopied('link');
+            void onShare().then((how) => {
+              if (how === 'copied') setCopied('link');
+            });
           }}
         >
           {copied === 'link' ? 'Copied' : 'Share'}

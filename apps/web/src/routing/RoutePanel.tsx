@@ -1,4 +1,11 @@
-import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
+import {
+  fmtDuration,
+  fmtEta,
+  fmtKm,
+  matchPlacesByName,
+  type LatLng,
+  type SearchResult,
+} from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import {
   distanceToRouteM,
@@ -12,7 +19,6 @@ import {
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
-import { fmtDuration, fmtKm } from '../format.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
 import { TransitResults } from './TransitResults.js';
 import type { RoutePlanner } from './useRoute.js';
@@ -26,8 +32,6 @@ function downloadText(fileName: string, text: string, type: string): void {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
 /** Alternative chip: the fastest shows its duration, others their extra minutes. */
 function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {

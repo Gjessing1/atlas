@@ -1,10 +1,11 @@
 import {
+  atlasShareUrl,
   decodeMapHash,
-  encodeMapHash,
   mapProfile,
   placeIsVisible,
   placeTargetTitle,
   savedPlaceAt,
+  shareMessage,
   type ColorScheme,
   type LatLng,
   type MapViewState,
@@ -329,13 +330,34 @@ export function App() {
   // A link to this exact spot, independent of where the camera happens to sit
   // (the address bar's hash follows the map, which is not what "share this
   // place" means).
-  const onShareTarget = useCallback(() => {
-    if (!target) return;
+  //
+  // Where the browser has one, the OS share sheet gets it — that is what puts
+  // the location into the recipient's messaging and maps apps rather than into
+  // a page only Atlas users can open. The payload carries the plain coordinates
+  // as well as the Atlas link, so someone on Google Maps or OsmAnd can still act
+  // on it; the clipboard fallback copies the same text.
+  const onShareTarget = useCallback(async (): Promise<'shared' | 'copied'> => {
+    if (!target) return 'copied';
     const zoom = Math.max(mapRef.current?.getZoom() ?? 14, 14);
-    const hash = encodeMapHash({ center: target.position, zoom, pin: target.position });
-    void navigator.clipboard.writeText(
-      `${window.location.origin}${window.location.pathname}${hash}`,
+    const url = atlasShareUrl(
+      `${window.location.origin}${window.location.pathname}`,
+      target.position,
+      zoom,
     );
+    const text = shareMessage(target.position, target.name, url);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: target.name ?? 'Location', text });
+        return 'shared';
+      } catch (err) {
+        // A dismissed share sheet is not a failure — say nothing and stop.
+        if (err instanceof DOMException && err.name === 'AbortError') return 'shared';
+        // Anything else (no permission, unsupported payload): fall through to
+        // the clipboard so the user still gets something they can paste.
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    return 'copied';
   }, [target]);
 
   // Elevation-profile hover → a small dot marker on the map.

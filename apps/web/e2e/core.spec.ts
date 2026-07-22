@@ -146,6 +146,37 @@ test('share link restores camera and pin; garbage hash falls back', async ({ pag
   expect((await cameraState(page)).zoom).toBeCloseTo(5, 0);
 });
 
+test('sharing a place hands out the pin, the coordinates and the Atlas link', async ({ page }) => {
+  // Capture whatever goes to the OS share sheet. Without this the browser has
+  // no navigator.share and the card falls back to the clipboard, which needs
+  // per-browser permissions to read back.
+  await page.addInitScript(() => {
+    (window as unknown as { __shared: string[] }).__shared = [];
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: (data: { text?: string }) => {
+        (window as unknown as { __shared: string[] }).__shared.push(data.text ?? '');
+        return Promise.resolve();
+      },
+    });
+  });
+  await page.goto('/#map=13/59.5/10.5&pin=59.5/10.5');
+  await waitForMap(page);
+  await page.locator('.place-card').getByRole('button', { name: 'Share' }).click();
+
+  await page.waitForFunction(
+    () => (window as unknown as { __shared: string[] }).__shared.length > 0,
+  );
+  const shared = await page.evaluate(
+    () => (window as unknown as { __shared: string[] }).__shared[0]!,
+  );
+  // The pin must survive: a share link that only carries `map=` puts the
+  // recipient near the spot instead of on it.
+  expect(shared).toContain('pin=59.5/10.5');
+  // And the payload must be usable by someone who does not have Atlas.
+  expect(shared).toContain('59.50000, 10.50000');
+});
+
 test('search result flies the camera and drops the pin', async ({ page }) => {
   await mockSearch(page);
   await page.goto('/');

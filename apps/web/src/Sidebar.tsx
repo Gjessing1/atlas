@@ -1,3 +1,4 @@
+import { fmtKm } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
@@ -19,9 +20,6 @@ interface SidebarProps {
   onImported: (result: ImportResult) => void;
   onClose: () => void;
 }
-
-const fmtKm = (m: number): string =>
-  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 
 /**
  * Plain-language result of a backup restore. "Skipped" is worth saying out

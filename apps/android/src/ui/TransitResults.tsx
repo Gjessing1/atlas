@@ -1,4 +1,4 @@
-import { fmtClock } from '@atlas/core';
+import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
 import {
   isRideMode,
   legDelayMs,
@@ -149,17 +149,6 @@ const DELAY_THRESHOLD_MS = 60_000;
 
 /** How far one tap moves the chosen departure/arrival, lacking a native picker. */
 const TIME_STEP_MS = 30 * 60_000;
-
-function fmtKm(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
-}
-
-function fmtDuration(ms: number): string {
-  const total = Math.round(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const min = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h} h ${min} min` : `${min} min`;
-}
 
 /** Day + clock, so a departure stepped past midnight doesn't read as today. */
 function fmtWhen(ms: number): string {

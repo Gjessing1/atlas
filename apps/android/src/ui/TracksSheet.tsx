@@ -1,4 +1,5 @@
 import { importedCount } from '@atlas/app-hooks';
+import { fmtDuration, fmtKm } from '@atlas/core';
 import type { TrackData } from '@atlas/gpx';
 import type { CollectionRecord, TrackRecord } from '@atlas/storage';
 import { useMemo, useRef, useState } from 'react';
@@ -17,17 +18,6 @@ import { BottomSheet } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
 import { theme } from './theme';
-
-function fmtKm(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
-}
-
-function fmtDuration(ms: number): string {
-  const total = Math.round(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const min = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h} h ${min} min` : `${min} min`;
-}
 
 function trackSummary(stats: Record<string, number>): string {
   const parts: string[] = [];

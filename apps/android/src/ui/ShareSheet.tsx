@@ -1,4 +1,4 @@
-import { encodeMapHash, type LatLng } from '@atlas/core';
+import { atlasShareUrl, fmtCoords, geoUri, shareMessage, type LatLng } from '@atlas/core';
 import { Linking, Modal, Pressable, Share, StyleSheet, Text } from 'react-native';
 
 import { getServerOrigin } from '../serverOrigin';
@@ -6,11 +6,6 @@ import { theme } from './theme';
 
 export interface ShareTarget extends LatLng {
   name: string;
-}
-
-/** Coordinates the way people paste them: "59.80563, 10.36701". */
-function coordText(t: LatLng): string {
-  return `${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}`;
 }
 
 /**
@@ -36,19 +31,20 @@ export function ShareSheet({
   const pin = { lat: target.lat, lng: target.lng };
 
   const shareLink = () => {
-    const hash = encodeMapHash({ center: pin, zoom, pin });
-    void Share.share({ message: `${target.name} — ${getServerOrigin()}/${hash}` });
+    // The coordinates travel with the link: a recipient without Atlas cannot
+    // open our instance usefully, but they can paste "59.80563, 10.36701" into
+    // whatever map app they do use.
+    const url = atlasShareUrl(`${getServerOrigin()}/`, pin, zoom);
+    void Share.share({ message: shareMessage(pin, target.name, url) });
     onClose();
   };
   const shareCoords = () => {
-    void Share.share({ message: coordText(target) });
+    void Share.share({ message: fmtCoords(pin) });
     onClose();
   };
   const openInMaps = () => {
-    // geo: lets Android offer every installed map app; q= drops a labelled pin
-    // in the ones that honour it, and the raw coordinate is the fallback.
-    const label = encodeURIComponent(target.name);
-    void Linking.openURL(`geo:${target.lat},${target.lng}?q=${target.lat},${target.lng}(${label})`);
+    // geo: lets Android offer every installed map app.
+    void Linking.openURL(geoUri(pin, target.name));
     onClose();
   };
 
@@ -62,7 +58,7 @@ export function ShareSheet({
     {
       key: 'coords',
       title: 'Coordinates',
-      subtitle: coordText(target),
+      subtitle: fmtCoords(pin),
       onPress: shareCoords,
     },
     {

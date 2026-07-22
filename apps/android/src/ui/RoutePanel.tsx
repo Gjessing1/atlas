@@ -1,4 +1,11 @@
-import { fmtClock, matchPlacesByName, type LatLng, type SearchResult } from '@atlas/core';
+import {
+  fmtDuration,
+  fmtEta,
+  fmtKm,
+  matchPlacesByName,
+  type LatLng,
+  type SearchResult,
+} from '@atlas/core';
 import {
   distanceToRouteM,
   pathViaLabels,
@@ -32,19 +39,6 @@ import { ElevationChart } from './ElevationChart';
 import { PROFILE_ICON, TramIcon } from './modeIcons';
 import { theme } from './theme';
 import { TransitResults } from './TransitResults';
-
-function fmtKm(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
-}
-
-function fmtDuration(ms: number): string {
-  const total = Math.round(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const min = Math.floor((total % 3600) / 60);
-  return h > 0 ? `${h} h ${min} min` : `${min} min`;
-}
-
-const fmtEta = (timeMs: number): string => fmtClock(Date.now() + timeMs);
 
 /**
  * Compact trip time for a mode chip: the duration, "—" when the mode can't

@@ -1,0 +1,67 @@
+import { describe, expect, it } from 'vitest';
+import { fmtClock, fmtCoords, fmtDistanceM, fmtDuration, fmtEta, fmtKm } from './index.js';
+
+describe('fmtClock', () => {
+  // Local-time constructor, so these hold whatever timezone the suite runs in.
+  const at = (h: number, m: number) => new Date(2026, 6, 20, h, m).getTime();
+
+  it('formats 24-hour with a zero-padded hour', () => {
+    expect(fmtClock(at(21, 5))).toBe('21:05');
+    expect(fmtClock(at(9, 5))).toBe('09:05');
+  });
+
+  it('renders midnight as 00:xx, never 24:xx or 12 AM', () => {
+    expect(fmtClock(at(0, 5))).toBe('00:05');
+    expect(fmtClock(at(12, 0))).toBe('12:00');
+  });
+
+  it('never emits an AM/PM marker', () => {
+    for (let h = 0; h < 24; h++) {
+      expect(fmtClock(at(h, 30))).toMatch(/^\d{2}:30$/);
+    }
+  });
+});
+
+describe('distance & coordinate formatting', () => {
+  it('formats coordinates and distances for display', () => {
+    expect(fmtCoords({ lat: 59.9139456, lng: 10.7522123 })).toBe('59.91395, 10.75221');
+    expect(fmtDistanceM(42.4)).toBe('42 m');
+    // Above 100 m the last digit would only track GPS jitter.
+    expect(fmtDistanceM(347)).toBe('350 m');
+    expect(fmtDistanceM(1240)).toBe('1.2 km');
+    expect(fmtDistanceM(24_800)).toBe('25 km');
+  });
+
+  it('keeps the metre/kilometre boundary at exactly 1000 m', () => {
+    expect(fmtKm(999)).toBe('999 m');
+    expect(fmtKm(1000)).toBe('1.0 km');
+    // Unlike the live readout, a static total keeps its precision at any size.
+    expect(fmtKm(347)).toBe('347 m');
+    expect(fmtKm(24_800)).toBe('24.8 km');
+    expect(fmtKm(0)).toBe('0 m');
+  });
+});
+
+describe('fmtDuration', () => {
+  it('splits hours only above the hour', () => {
+    expect(fmtDuration(0)).toBe('0 min');
+    expect(fmtDuration(45 * 60_000)).toBe('45 min');
+    expect(fmtDuration(125 * 60_000)).toBe('2 h 5 min');
+  });
+
+  it('rounds to whole minutes before splitting', () => {
+    // 59.98 min: the two apps used to render this as "1 h 0 min" and "59 min".
+    expect(fmtDuration(3_599_000)).toBe('1 h 0 min');
+    expect(fmtDuration(59.6 * 60_000)).toBe('1 h 0 min');
+    expect(fmtDuration(29_000)).toBe('0 min');
+  });
+});
+
+describe('fmtEta', () => {
+  it('is the clock time a trip of this length ends at', () => {
+    const at = (h: number, m: number) => new Date(2026, 6, 20, h, m).getTime();
+    expect(fmtEta(90 * 60_000, at(21, 5))).toBe('22:35');
+    // Past midnight is an ordinary answer, not a wrap-around bug.
+    expect(fmtEta(60 * 60_000, at(23, 30))).toBe('00:30');
+  });
+});

@@ -1,4 +1,4 @@
-import { fmtClock } from '@atlas/core';
+import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
 import {
   isRideMode,
   legDelayMs,
@@ -17,7 +17,6 @@ import {
   type TransitTrip,
 } from '@atlas/transit';
 import { useState } from 'react';
-import { fmtDuration, fmtKm } from '../format.js';
 import type { TransitPlan } from './useTransit.js';
 
 /** One glyph per mode — the fastest way to read a board is by shape, not words. */

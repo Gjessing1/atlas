@@ -12,7 +12,10 @@ services:
       ATLAS_DATA_DIR: /data
       # Self-hosted services on the shared external `atlas` docker network.
       PHOTON_URL: http://atlas-photon:2322
-      GRAPHHOPPER_URL: http://atlas-graphhopper:8989
+      VALHALLA_URL: http://atlas-valhalla:8002
+      # Accounts + sync stay off unless both of these are set (see CLAUDE.md).
+      # DATABASE_URL: postgres://atlas:<password>@atlas-postgres:5432/atlas
+      # JWT_SECRET: <long random string>
     ports:
       # The app defaults to 3100 (3000 is taken by Forgejo on this host).
       - '3100:3100'
@@ -23,7 +26,9 @@ services:
       - atlas
 
 networks:
-  # Shared with the self-hosted services (photon, graphhopper):
-  # docker network create atlas
+  # Shared with the self-hosted services — photon (infrastructure/photon),
+  # valhalla (infrastructure/valhalla) and postgres (infrastructure/postgres),
+  # each brought up from its own directory:
+  #   docker network create atlas
   atlas:
     external: true

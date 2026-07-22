@@ -1,8 +1,7 @@
-import type { LatLng } from '@atlas/core';
+import { fmtDuration, fmtKm, type LatLng } from '@atlas/core';
 import { buildElevationProfile } from '@atlas/gpx';
 import type { TrackData } from '@atlas/gpx';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtDuration, fmtKm } from './format.js';
 
 /** A "nice" tick step (1/2/5 × 10^k) giving roughly `target` intervals. */
 function niceStep(range: number, target: number): number {
