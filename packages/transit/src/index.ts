@@ -31,5 +31,24 @@ export {
   WIDE_SEARCH_WINDOW_MINUTES,
   RIDE_MODES,
 } from './model.js';
+export {
+  TRANSIT_MODE_LABEL,
+  DELAY_THRESHOLD_MS,
+  bookingDeadlineLabel,
+  bookingHowLabel,
+  bookingSummaryLabel,
+  delayLabel,
+  legStopsLabel,
+  legTimeParts,
+  quayLabel,
+  severityFlagLabel,
+  severityMark,
+  transfersLabel,
+  tripSummary,
+  walkLegLabel,
+  type LegTimeParts,
+  type TransitTimeTone,
+  type TripSummary,
+} from './labels.js';
 export { ENTUR_TRIP_QUERY, TransitError, buildEnturRequest, parseEnturResponse } from './entur.js';
 export { fetchTransitTrips, type FetchTransitOptions } from './client.js';

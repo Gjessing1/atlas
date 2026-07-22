@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { fmtClock, fmtCoords, fmtDistanceM, fmtDuration, fmtEta, fmtKm } from './index.js';
+import {
+  fmtClock,
+  fmtCoords,
+  fmtDayClock,
+  fmtDistanceM,
+  fmtDuration,
+  fmtEta,
+  fmtKm,
+  fmtWhenClock,
+} from './index.js';
 
 describe('fmtClock', () => {
   // Local-time constructor, so these hold whatever timezone the suite runs in.
@@ -19,6 +28,28 @@ describe('fmtClock', () => {
     for (let h = 0; h < 24; h++) {
       expect(fmtClock(at(h, 30))).toMatch(/^\d{2}:30$/);
     }
+  });
+});
+
+describe('fmtWhenClock', () => {
+  const on = (day: number, h: number, m: number) => new Date(2026, 6, day, h, m).getTime();
+  const now = on(20, 12, 0);
+
+  it('says only the clock when the time is today', () => {
+    expect(fmtWhenClock(on(20, 7, 30), now)).toBe('07:30');
+    expect(fmtWhenClock(on(20, 23, 59), now)).toBe('23:59');
+  });
+
+  it('names the day once the time is not today', () => {
+    // A departure stepped past midnight reading "00:30" would look like half
+    // past midnight this morning — twenty-three hours in the wrong direction.
+    expect(fmtWhenClock(on(21, 0, 30), now)).toBe(fmtDayClock(on(21, 0, 30)));
+    expect(fmtWhenClock(on(19, 22, 0), now)).toBe(fmtDayClock(on(19, 22, 0)));
+  });
+
+  it('compares calendar days, not elapsed hours', () => {
+    // 23:30 and 00:30 are an hour apart and still different days.
+    expect(fmtWhenClock(on(21, 0, 30), on(20, 23, 30))).toBe(fmtDayClock(on(21, 0, 30)));
   });
 });
 

@@ -30,6 +30,22 @@ export function fmtDayClock(epochMs: number): string {
   return `${weekday} ${fmtClock(epochMs)}`;
 }
 
+/**
+ * A time that may or may not be today: the clock alone when it is, weekday plus
+ * clock when it is not. For anything the user *steps* through — a chosen
+ * departure, a picked arrival — where "00:30" stepped past midnight would
+ * otherwise read as half past midnight this morning, twenty-three hours ago.
+ */
+export function fmtWhenClock(epochMs: number, nowMs = Date.now()): string {
+  const d = new Date(epochMs);
+  const now = new Date(nowMs);
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay ? fmtClock(epochMs) : fmtDayClock(epochMs);
+}
+
 /** Coordinates as a fixed 5-decimal (~1 m) "lat, lng" string. */
 export function fmtCoords(p: LatLng): string {
   return `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;

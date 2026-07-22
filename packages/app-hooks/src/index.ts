@@ -33,6 +33,7 @@ export {
   type TransitPlan,
   type TransitPlanner,
 } from './useTransit.js';
+export { useTransitBoard, type TransitBoard, type TransitTiming } from './useTransitBoard.js';
 export {
   useStopSearch,
   useAlongRouteSearch,

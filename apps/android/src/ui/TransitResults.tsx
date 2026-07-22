@@ -1,12 +1,17 @@
-import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
+import { useTransitBoard } from '@atlas/app-hooks';
+import { fmtWhenClock } from '@atlas/core';
 import {
+  bookingHowLabel,
+  bookingSummaryLabel,
   isRideMode,
-  legDelayMs,
+  legStopsLabel,
+  legTimeParts,
+  quayLabel,
   RIDE_MODES,
-  transferCount,
-  transitProblemMessage,
-  tripNeedsBooking,
-  tripSeverity,
+  severityMark,
+  TRANSIT_MODE_LABEL,
+  tripSummary,
+  walkLegLabel,
   type TransitBooking,
   type TransitLeg,
   type TransitLine,
@@ -21,21 +26,6 @@ import { useState } from 'react';
 import type { TransitPlan } from '../routing/useTransit';
 import { transitIcon } from './modeIcons';
 import { theme } from './theme';
-
-/** Mode names as a traveller would tick them in a filter. */
-const MODE_LABEL: Record<TransitMode, string> = {
-  foot: 'Walk',
-  bus: 'Bus',
-  coach: 'Coach',
-  tram: 'Tram',
-  metro: 'Metro',
-  rail: 'Train',
-  water: 'Ferry',
-  air: 'Flight',
-  funicular: 'Funicular',
-  cableway: 'Cable car',
-  unknown: 'Other',
-};
 
 /** Mode glyph at board size — vector, so it takes the row's colour. */
 function ModeIcon({
@@ -58,12 +48,12 @@ function ModeIcon({
  */
 function severityStyle(severity: TransitSeverity) {
   if (severity === 'info') {
-    return { box: styles.noticeInfo, text: styles.noticeInfoText, mark: 'i' };
+    return { box: styles.noticeInfo, text: styles.noticeInfoText };
   }
   if (severity === 'severe') {
-    return { box: styles.noticeSevere, text: styles.noticeSevereText, mark: '!' };
+    return { box: styles.noticeSevere, text: styles.noticeSevereText };
   }
-  return { box: styles.noticeWarn, text: styles.noticeWarnText, mark: '!' };
+  return { box: styles.noticeWarn, text: styles.noticeWarnText };
 }
 
 /**
@@ -82,7 +72,7 @@ function SituationNotice({ situation }: { situation: TransitSituation }) {
       onPress={() => detail && setOpen((v) => !v)}
       testID="transit-situation"
     >
-      <Text style={[styles.noticeMark, skin.text]}>{skin.mark}</Text>
+      <Text style={[styles.noticeMark, skin.text]}>{severityMark(situation.severity)}</Text>
       <View style={styles.noticeBody}>
         <Text style={[styles.noticeText, skin.text]} numberOfLines={open ? undefined : 2}>
           {situation.summary}
@@ -99,40 +89,20 @@ function SituationNotice({ situation }: { situation: TransitSituation }) {
   );
 }
 
-/** How to book a flexible service, in the order a traveller would try them. */
-function bookingHow(booking: TransitBooking): string {
-  if (booking.phone) return `Book by phone: ${booking.phone}`;
-  if (booking.methods.includes('online') && booking.url) return 'Book online before travelling';
-  if (booking.methods.includes('callDriver')) return 'Call the driver to book';
-  if (booking.methods.includes('callOffice')) return 'Call the operator to book';
-  if (booking.methods.includes('text')) return 'Book by text message';
-  return 'This service must be booked in advance';
-}
-
-/** By when, phrased the way the operator means it rather than as a raw offset. */
-function bookingWhen(booking: TransitBooking): string | null {
-  if (!booking.latestTime) return null;
-  const days = booking.latestDayOffset ?? 0;
-  if (days <= 0) return `by ${booking.latestTime} the same day`;
-  if (days === 1) return `by ${booking.latestTime} the day before`;
-  return `by ${booking.latestTime}, ${days} days ahead`;
-}
-
 /**
  * The booking notice for flexible transport. This is not a nicety: an
  * unbooked `bestillingstransport` bus does not turn up at all, so a leg shown
  * as an ordinary departure would strand someone at a rural stop.
  */
 function BookingNotice({ booking }: { booking: TransitBooking }) {
-  const when = bookingWhen(booking);
   return (
     <View style={[styles.notice, styles.noticeWarn]} testID="transit-booking">
       <Text style={[styles.noticeMark, styles.noticeWarnText]}>☎</Text>
       <View style={styles.noticeBody}>
         <Text style={[styles.noticeText, styles.noticeWarnText]}>
-          Must be booked ahead{when ? ` — ${when}` : ''}
+          {bookingSummaryLabel(booking)}
         </Text>
-        <Text style={styles.noticeDetail}>{bookingHow(booking)}</Text>
+        <Text style={styles.noticeDetail}>{bookingHowLabel(booking)}</Text>
         {booking.note ? <Text style={styles.noticeDetail}>{booking.note}</Text> : null}
         {booking.url ? (
           <Text style={styles.link} onPress={() => void Linking.openURL(booking.url!)}>
@@ -144,24 +114,8 @@ function BookingNotice({ booking }: { booking: TransitBooking }) {
   );
 }
 
-/** A delay worth painting: under a minute is timetable noise, not news. */
-const DELAY_THRESHOLD_MS = 60_000;
-
 /** How far one tap moves the chosen departure/arrival, lacking a native picker. */
 const TIME_STEP_MS = 30 * 60_000;
-
-/** Day + clock, so a departure stepped past midnight doesn't read as today. */
-function fmtWhen(ms: number): string {
-  const d = new Date(ms);
-  const today = new Date();
-  const sameDay =
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
-  return sameDay
-    ? fmtClock(ms)
-    : `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${fmtClock(ms)}`;
-}
 
 /**
  * Departure/arrival time, struck through and corrected when a live feed says
@@ -177,16 +131,13 @@ function LegTime({
   expectedMs: number;
   realtime: boolean;
 }) {
-  const delta = expectedMs - aimedMs;
-  if (!realtime || Math.abs(delta) < DELAY_THRESHOLD_MS) {
-    return <Text style={styles.time}>{fmtClock(expectedMs)}</Text>;
-  }
-  const minutes = Math.round(delta / 60_000);
+  const time = legTimeParts({ aimedMs, expectedMs, realtime });
+  if (!time.delay) return <Text style={styles.time}>{time.expected}</Text>;
   return (
     <Text style={styles.time}>
-      <Text style={styles.timeAimed}>{fmtClock(aimedMs)}</Text>{' '}
-      <Text style={delta > 0 ? styles.late : styles.early}>
-        {fmtClock(expectedMs)} ({minutes > 0 ? `+${minutes}` : minutes} min)
+      <Text style={styles.timeAimed}>{time.aimed}</Text>{' '}
+      <Text style={time.tone === 'late' ? styles.late : styles.early}>
+        {time.expected} ({time.delay})
       </Text>
     </Text>
   );
@@ -207,10 +158,10 @@ function LineChip({ line }: { line: TransitLine }) {
   );
 }
 
-/** A quay reference, e.g. "plat. 3" — only rendered when the stop has one. */
-function quayNote(leg: TransitLeg, which: 'from' | 'to'): string {
-  const code = leg[which].quay?.publicCode;
-  return code ? ` · plat. ${code}` : '';
+/** A quay reference as a suffix, e.g. " · plat. 3" — empty when the stop has none. */
+function quaySuffix(leg: TransitLeg, which: 'from' | 'to'): string {
+  const label = quayLabel(leg[which]);
+  return label ? ` · ${label}` : '';
 }
 
 /** One row of the expanded journey: a walk, or a ride on one vehicle. */
@@ -249,7 +200,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
             </View>
             <Text style={styles.legDetail}>
               {leg.from.name}
-              {quayNote(leg, 'from')}
+              {quaySuffix(leg, 'from')}
             </Text>
             {/* Who runs it decides which ticket app you need, and the query
                 already asks for it — it was fetched and then thrown away. */}
@@ -261,8 +212,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
             {stops > 0 ? (
               <Pressable onPress={() => setShowStops((v) => !v)} testID="transit-stops-toggle">
                 <Text style={styles.link}>
-                  {showStops ? '▾' : '▸'} {stops} {stops === 1 ? 'stop' : 'stops'} ·{' '}
-                  {fmtDuration(leg.durationMs)}
+                  {showStops ? '▾' : '▸'} {legStopsLabel(leg)}
                 </Text>
               </Pressable>
             ) : null}
@@ -281,17 +231,14 @@ function LegRow({ leg }: { leg: TransitLeg }) {
               />
               <Text style={styles.legDetail}>
                 {leg.to.name}
-                {quayNote(leg, 'to')}
+                {quaySuffix(leg, 'to')}
               </Text>
             </View>
           </>
         ) : (
-          // Walk legs carry no line and no live feed: distance and duration are
-          // the whole story, and the destination names what you are walking to.
           <Text style={styles.legDetail}>
-            Walk {fmtDuration(leg.durationMs)} · {fmtKm(leg.distanceM)}
-            {leg.to.name ? ` to ${leg.to.name}` : ''}
-            {quayNote(leg, 'to')}
+            {walkLegLabel(leg)}
+            {quaySuffix(leg, 'to')}
           </Text>
         )}
       </View>
@@ -313,33 +260,25 @@ function TripCard({
   onShowMap: () => void;
   index: number;
 }) {
-  const transfers = transferCount(trip);
-  // The delay that decides whether you make it: the first vehicle you board.
-  const firstRide = trip.legs.find((leg) => isRideMode(leg.mode));
-  const delay = firstRide ? legDelayMs(firstRide) : 0;
-  const late = firstRide?.realtime === true && delay >= DELAY_THRESHOLD_MS;
   // A collapsed card must not look clean when a leg inside it is cancelled —
   // the whole point of the summary row is deciding without expanding.
-  const severity = tripSeverity(trip);
-  const needsBooking = tripNeedsBooking(trip);
+  const summary = tripSummary(trip);
 
   return (
     <View style={[styles.trip, expanded && styles.tripSelected]}>
       <Pressable onPress={onToggle} testID={`transit-trip-${index}`}>
         <View style={styles.tripHead}>
-          <Text style={styles.tripTimes}>
-            {fmtClock(trip.startMs)} – {fmtClock(trip.endMs)}
-          </Text>
-          {late ? <Text style={styles.late}>+{Math.round(delay / 60_000)} min</Text> : null}
-          {severity ? (
+          <Text style={styles.tripTimes}>{summary.times}</Text>
+          {summary.delay ? <Text style={styles.late}>{summary.delay}</Text> : null}
+          {summary.severity ? (
             <Text
-              style={[styles.tripFlag, severityStyle(severity).text]}
+              style={[styles.tripFlag, severityStyle(summary.severity).text]}
               testID="transit-trip-alert"
             >
-              {severity === 'severe' ? '! Disruption' : '! Notice'}
+              ! {summary.severityLabel}
             </Text>
           ) : null}
-          {needsBooking ? (
+          {summary.needsBooking ? (
             <Text style={[styles.tripFlag, styles.noticeWarnText]}>☎ Book ahead</Text>
           ) : null}
         </View>
@@ -355,13 +294,9 @@ function TripCard({
           )}
         </View>
         <View style={styles.tripMetaRow}>
-          <Text style={styles.tripMeta}>
-            {fmtDuration(trip.durationMs)} ·{' '}
-            {transfers === 0 ? 'direct' : `${transfers} ${transfers === 1 ? 'change' : 'changes'}`}{' '}
-            ·{' '}
-          </Text>
+          <Text style={styles.tripMeta}>{summary.meta} · </Text>
           <ModeIcon mode="foot" size={13} color={theme.icon} />
-          <Text style={styles.tripMeta}> {fmtKm(trip.walkDistanceM)}</Text>
+          <Text style={styles.tripMeta}> {summary.walk}</Text>
         </View>
       </Pressable>
       {expanded ? (
@@ -388,9 +323,11 @@ function TripCard({
  * online-only — an empty answer means "nothing runs then", which is worded
  * differently from the planner being unreachable.
  *
- * There is no native date picker in this build (adding one would mean a new
- * APK rather than an OTA update), so an exact time is reached by stepping in
- * half hours, and the Earlier/Later paging below walks real departures.
+ * The decisions behind the controls live in `useTransitBoard`, shared with the
+ * web board; what is left here is markup. There is no native date picker in
+ * this build (adding one would mean a new APK rather than an OTA update), so an
+ * exact time is reached by stepping in half hours, and the Earlier/Later paging
+ * below walks real departures.
  */
 export function TransitResults({
   transit,
@@ -400,45 +337,8 @@ export function TransitResults({
   onShowMap: (trip: TransitTrip, index: number) => void;
 }) {
   const [showFilters, setShowFilters] = useState(false);
+  const board = useTransitBoard(transit);
   const trips = transit.trips;
-  const first = trips?.[0];
-  const last = trips && trips.length > 0 ? trips[trips.length - 1] : undefined;
-  const timing = transit.timeMs === null ? 'now' : transit.arriveBy ? 'arrive' : 'depart';
-  // An empty mode list means "all of them", so it is not a filter.
-  const filtered = transit.modes.length > 0;
-  const accepts = (mode: TransitMode) => !filtered || transit.modes.includes(mode);
-
-  const pick = (choice: 'now' | 'depart' | 'arrive') => {
-    if (choice === 'now') {
-      transit.setTimeMs(null);
-      transit.setArriveBy(false);
-      return;
-    }
-    transit.setArriveBy(choice === 'arrive');
-    if (transit.timeMs === null) transit.setTimeMs(Date.now());
-  };
-
-  // Paging uses Entur's own page cursors, which know exactly where the last
-  // page ended — the old arithmetic (re-query at "one minute after the first
-  // departure shown") both skipped and repeated departures at the seam when
-  // several left in the same minute. Falls back to that arithmetic only if the
-  // planner sent no cursor, which it does at the very ends of the timetable.
-  const showEarlier =
-    transit.pageEarlier ??
-    (first
-      ? () => {
-          transit.setArriveBy(true);
-          transit.setTimeMs(first.startMs - 60_000);
-        }
-      : null);
-  const showLater =
-    transit.pageLater ??
-    (last
-      ? () => {
-          transit.setArriveBy(false);
-          transit.setTimeMs((trips!.length > 1 ? first!.startMs : last.startMs) + 60_000);
-        }
-      : null);
 
   return (
     <View style={styles.board}>
@@ -446,8 +346,8 @@ export function TransitResults({
         {(['now', 'depart', 'arrive'] as const).map((choice) => (
           <Pressable
             key={choice}
-            style={[styles.chip, timing === choice && styles.chipSelected]}
-            onPress={() => pick(choice)}
+            style={[styles.chip, board.timing === choice && styles.chipSelected]}
+            onPress={() => board.chooseTiming(choice)}
             testID={`transit-when-${choice}`}
           >
             <Text style={styles.chipText}>
@@ -456,15 +356,17 @@ export function TransitResults({
           </Pressable>
         ))}
         <Pressable
-          style={[styles.chip, filtered && styles.chipSelected]}
+          style={[styles.chip, board.filtered && styles.chipSelected]}
           onPress={() => setShowFilters((v) => !v)}
           testID="transit-modes-toggle"
         >
-          <Text style={styles.chipText}>Modes{filtered ? ` (${transit.modes.length})` : ''}</Text>
+          <Text style={styles.chipText}>
+            Modes{board.filtered ? ` (${transit.modes.length})` : ''}
+          </Text>
         </Pressable>
       </View>
 
-      {timing === 'now' ? (
+      {board.timing === 'now' ? (
         <Pressable onPress={transit.refresh} testID="transit-refresh">
           <Text style={styles.link}>↻ Refresh departures</Text>
         </Pressable>
@@ -472,15 +374,16 @@ export function TransitResults({
         <View style={styles.timeRow}>
           <Pressable
             style={[styles.chip, styles.stepChip]}
-            onPress={() => transit.setTimeMs((transit.timeMs ?? Date.now()) - TIME_STEP_MS)}
+            onPress={() => board.stepTime(-TIME_STEP_MS)}
             testID="transit-time-earlier"
           >
             <Text style={styles.chipText}>−30 min</Text>
           </Pressable>
-          <Text style={styles.timeValue}>{fmtWhen(transit.timeMs ?? Date.now())}</Text>
+          {/* Day + clock, so a departure stepped past midnight doesn't read as today. */}
+          <Text style={styles.timeValue}>{fmtWhenClock(transit.timeMs ?? Date.now())}</Text>
           <Pressable
             style={[styles.chip, styles.stepChip]}
-            onPress={() => transit.setTimeMs((transit.timeMs ?? Date.now()) + TIME_STEP_MS)}
+            onPress={() => board.stepTime(TIME_STEP_MS)}
             testID="transit-time-later"
           >
             <Text style={styles.chipText}>+30 min</Text>
@@ -493,20 +396,24 @@ export function TransitResults({
           {RIDE_MODES.map((mode) => (
             <Pressable
               key={mode}
-              style={[styles.chip, styles.modeChip, accepts(mode) && styles.chipSelected]}
+              style={[styles.chip, styles.modeChip, board.accepts(mode) && styles.chipSelected]}
               onPress={() => transit.toggleMode(mode)}
-              accessibilityState={{ selected: accepts(mode) }}
+              accessibilityState={{ selected: board.accepts(mode) }}
               testID={`transit-mode-${mode}`}
             >
               {/* Labelled here, unlike the travel-mode picker: a filter is a
                   list of promises about what will be excluded, and "no ferries"
                   has to be unambiguous in a way a glyph alone is not. */}
-              <ModeIcon mode={mode} size={15} color={accepts(mode) ? theme.accent : theme.icon} />
-              <Text style={styles.chipText}> {MODE_LABEL[mode]}</Text>
+              <ModeIcon
+                mode={mode}
+                size={15}
+                color={board.accepts(mode) ? theme.accent : theme.icon}
+              />
+              <Text style={styles.chipText}> {TRANSIT_MODE_LABEL[mode]}</Text>
             </Pressable>
           ))}
           <Text style={styles.muted}>Walking to and between stops is always included.</Text>
-          {filtered ? (
+          {board.filtered ? (
             <Pressable onPress={transit.clearModes} testID="transit-all-modes">
               <Text style={styles.link}>Use all modes</Text>
             </Pressable>
@@ -522,21 +429,10 @@ export function TransitResults({
       ) : null}
       {transit.loading ? <Text style={styles.muted}>Looking up departures…</Text> : null}
       {transit.error ? <Text style={styles.error}>{transit.error}</Text> : null}
-      {!transit.loading && !transit.error && trips?.length === 0 ? (
-        // Two very different empty answers: nothing runs, versus nothing runs
-        // *that you allowed*. Blaming the timetable for the traveller's own
-        // filter would send them hunting for a departure that exists.
+      {board.emptyMessage ? (
         <View>
-          {/* The planner usually says *which* nothing this is — no stops in
-              range, outside the timetable's date range, nothing in this search
-              window. Its reason beats our guess; ours is the fallback. */}
-          <Text style={styles.muted}>
-            {filtered
-              ? 'No journeys with the modes you picked.'
-              : (transitProblemMessage(transit.problems) ??
-                'No departures found for this time. Try a different time or a nearer stop.')}
-          </Text>
-          {filtered ? (
+          <Text style={styles.muted}>{board.emptyMessage}</Text>
+          {board.emptyFromFilter ? (
             <Pressable onPress={transit.clearModes} testID="transit-all-modes-empty">
               <Text style={styles.link}>Use all modes</Text>
             </Pressable>
@@ -548,8 +444,8 @@ export function TransitResults({
         <>
           {/* Absent, not disabled, when the planner has no earlier page: at the
               first departure of the service day there genuinely is no earlier. */}
-          {showEarlier ? (
-            <Pressable onPress={showEarlier} testID="transit-earlier">
+          {board.showEarlier ? (
+            <Pressable onPress={board.showEarlier} testID="transit-earlier">
               <Text style={styles.link}>↑ Earlier</Text>
             </Pressable>
           ) : null}
@@ -563,8 +459,8 @@ export function TransitResults({
               onShowMap={() => onShowMap(trip, i)}
             />
           ))}
-          {showLater ? (
-            <Pressable onPress={showLater} testID="transit-later">
+          {board.showLater ? (
+            <Pressable onPress={board.showLater} testID="transit-later">
               <Text style={styles.link}>↓ Later</Text>
             </Pressable>
           ) : null}
