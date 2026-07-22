@@ -55,6 +55,14 @@ function testLayers(): OverlayLayer[] {
         renderScale: 2,
         identifyLayers: 'Dybdekart',
         identifyFields: ['navn', 'maksdyp', 'middeldyp'],
+        labels: {
+          url: 'https://upstream.example/arcgis/4/query',
+          valueField: 'maksdyp_m',
+          nameField: 'innsjonavn',
+          unit: 'm',
+          minzoom: 10,
+          simplifyDeg: 0.0005,
+        },
       },
     },
     {
@@ -400,5 +408,127 @@ describe('identify proxy', () => {
     track(app, cacheDir);
     const res = await app.inject({ url: '/api/overlay/depth/identify?lat=60&lng=10&zoom=12' });
     expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('overlay labels', () => {
+  /** One square lake with a depth, shaped like the ArcGIS polygon response. */
+  const lake = (maksdyp_m: number | null, innsjonavn = 'Testvatnet') => ({
+    attributes: { maksdyp_m, innsjonavn },
+    geometry: {
+      rings: [
+        [
+          [10.0, 59.0],
+          [10.2, 59.0],
+          [10.2, 59.2],
+          [10.0, 59.2],
+          [10.0, 59.0],
+        ],
+      ],
+    },
+  });
+
+  it('turns polygons into labelled points at their centre', async () => {
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features: [lake(21.5, 'Verkensvannet')] }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/hidpi/labels?bbox=10.0,59.0,10.3,59.3&zoom=13',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { features: { properties: Record<string, unknown> }[] };
+    expect(body.features).toHaveLength(1);
+    expect(body.features[0]!.properties).toEqual({
+      label: '21.5 m',
+      value: 21.5,
+      name: 'Verkensvannet',
+    });
+
+    // The envelope must go upstream in the service's native grid, not degrees:
+    // NVE ignores inSR, so lon/lat would silently match nothing.
+    const p = requests[0]!.searchParams;
+    const [minX, minY] = p.get('geometry')!.split(',').map(Number);
+    expect(minX).toBeGreaterThan(100_000);
+    expect(minY).toBeGreaterThan(1_000_000);
+    expect(p.get('outSR')).toBe('4326');
+    // Simplification is in output units (degrees) — metres here would collapse
+    // every ring to a point and yield no labels at all.
+    expect(Number(p.get('maxAllowableOffset'))).toBeLessThan(1);
+  });
+
+  it('drops lakes whose depth is missing or the -1 sentinel', async () => {
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features: [lake(-1), lake(null), lake(12)] }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/hidpi/labels?bbox=10.0,59.0,10.3,59.3&zoom=13',
+    });
+    const body = res.json() as { features: unknown[] };
+    expect(body.features).toHaveLength(1);
+  });
+
+  it('returns nothing below the layer minzoom without calling upstream', async () => {
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features: [lake(21.5)] }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/hidpi/labels?bbox=10.0,59.0,10.3,59.3&zoom=8',
+    });
+    expect(res.json()).toEqual({ type: 'FeatureCollection', features: [] });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('serves a second nearby viewport from cache', async () => {
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features: [lake(21.5)] }),
+    }));
+    track(app, cacheDir);
+    await app.inject({ url: '/api/overlay/hidpi/labels?bbox=10.0,59.0,10.3,59.3&zoom=13' });
+    await app.inject({ url: '/api/overlay/hidpi/labels?bbox=10.01,59.01,10.29,59.29&zoom=13' });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('degrades to empty when the upstream fails, leaving the raster alone', async () => {
+    const { app, cacheDir } = await build(() => ({ status: 500, body: 'boom' }));
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/hidpi/labels?bbox=10.0,59.0,10.3,59.3&zoom=13',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ type: 'FeatureCollection', features: [] });
+  });
+
+  it('rejects a nonsense or oversized bbox, and layers without labels', async () => {
+    const { app, cacheDir } = await build(() => ({ contentType: 'application/json', body: '{}' }));
+    track(app, cacheDir);
+    expect(
+      (await app.inject({ url: '/api/overlay/hidpi/labels?bbox=nope&zoom=13' })).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject({ url: '/api/overlay/hidpi/labels?bbox=0,0,90,80&zoom=13' })).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject({ url: '/api/overlay/depth/labels?bbox=10,59,10.3,59.3&zoom=13' }))
+        .statusCode,
+    ).toBe(404);
+  });
+
+  it('advertises labels in the catalog only for layers that have a source', async () => {
+    const { app, cacheDir } = await build(() => ({ body: PNG_BYTES }));
+    track(app, cacheDir);
+    const { layers } = (await app.inject({ url: '/api/layers' })).json() as {
+      layers: { id: string; labels?: unknown }[];
+    };
+    expect(layers.find((l) => l.id === 'hidpi')?.labels).toEqual({ minzoom: 10, unit: 'm' });
+    expect(layers.find((l) => l.id === 'depth')?.labels).toBeUndefined();
+    // The upstream query URL must not leak with it.
+    expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
 });

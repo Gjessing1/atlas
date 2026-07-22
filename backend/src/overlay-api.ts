@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { LayerMeta } from '@atlas/core';
-import type { FastifyInstance } from 'fastify';
+import { bboxToUtm33, polygonLabelPoint, snapLabelBbox } from '@atlas/core';
+import type { LayerMeta, LngLatBbox, OverlayLabel } from '@atlas/core';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { StatusRegistry } from './status.js';
 
 /**
@@ -38,6 +39,15 @@ interface WmsUpstream {
    * `maksdyp` over WMS and `maksdyp_m` over the REST service.
    */
   identifyFields?: string[];
+  /**
+   * Optional ArcGIS REST source for map labels — a number the raster tile can
+   * never show because it lives in the upstream's *attributes*, not its
+   * symbology. NVE's lake bathymetry is the motivating case: a surveyed lake
+   * carries `maksdyp_m` on its `Dybdekart` polygon, and lakes surveyed off a
+   * paper chart have no sounding or contour features at all, so the WMS draws
+   * an outline and nothing else.
+   */
+  labels?: ArcGisLabelSource;
   styles?: string;
   /**
    * Render GetMap tiles at this multiple of 256 px (with a matching DPI hint),
@@ -47,6 +57,28 @@ interface WmsUpstream {
    * (bathymetry contours + soundings); a shaded raster gains nothing from it.
    */
   renderScale?: number;
+}
+
+interface ArcGisLabelSource {
+  /** Layer query endpoint, e.g. `…/MapServer/4/query`. */
+  url: string;
+  /** Numeric attribute drawn as the label. */
+  valueField: string;
+  /** Attribute holding a display name, when the layer has one. */
+  nameField?: string;
+  /** Unit suffix appended to the number. */
+  unit: string;
+  /** Below this zoom labels are omitted — too many lakes, too little room. */
+  minzoom: number;
+  /**
+   * `maxAllowableOffset` for the query, **in degrees** — ArcGIS reads this in
+   * the units of `outSR`, and we ask for WGS84. Getting the unit wrong fails
+   * silently and expensively: a value of 50 (intended as metres) is 50 degrees,
+   * which collapses every ring to a single repeated vertex, so the response
+   * still looks well-formed and simply yields no labels. Only a label point is
+   * derived from the geometry, so a coarse outline is plenty.
+   */
+  simplifyDeg: number;
 }
 
 interface XyzUpstream {
@@ -138,6 +170,19 @@ export function norwegianLayers(): OverlayLayer[] {
         // Contours + sounding labels are thin/small; render at 2× so they stay
         // legible on a phone instead of a stretched, muddy 256 px tile.
         renderScale: 2,
+        // Draw each surveyed lake's maximum depth on the lake itself. Without
+        // this a lake like Verkensvannet — measured 21.5 m in 1965, but with no
+        // sounding or contour geometry — renders as a bare outline, which is
+        // indistinguishable from "not surveyed".
+        labels: {
+          url: 'https://kart.nve.no/enterprise/rest/services/Innsjodatabase2/MapServer/4/query',
+          valueField: 'maksdyp_m',
+          nameField: 'innsjonavn',
+          unit: 'm',
+          minzoom: 10,
+          // ~55 m — enough detail for a centroid, a fraction of the payload.
+          simplifyDeg: 0.0005,
+        },
       },
     },
     {
@@ -405,6 +450,66 @@ function parseTextInfo(body: string): Record<string, string>[] {
   return Object.keys(cleaned).length > 0 ? [cleaned] : [];
 }
 
+// ---- map labels (attribute values the raster can't draw) ----
+
+interface ArcGisPolygonResponse {
+  features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[];
+  error?: { message?: string };
+}
+
+/** Labels change on the order of decades; an hour in memory is plenty. */
+const LABEL_TTL_MS = 60 * 60 * 1000;
+const LABEL_CACHE_MAX = 500;
+type LabelCache = Map<string, { features: OverlayLabel[]; expires: number }>;
+
+function parseBbox(raw: string | undefined): LngLatBbox | null {
+  if (!raw) return null;
+  const parts = raw.split(',').map(Number);
+  if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) return null;
+  const [w, s, e, n] = parts as [number, number, number, number];
+  if (w >= e || s >= n || Math.abs(s) > 85 || Math.abs(n) > 85) return null;
+  // A whole-world request would ask the upstream for every lake in Norway.
+  if (e - w > 20 || n - s > 20) return null;
+  return [w, s, e, n];
+}
+
+function labelReply(reply: FastifyReply, features: OverlayLabel[]) {
+  return reply
+    .header('cache-control', `public, max-age=${LABEL_MAX_AGE_S}`)
+    .send({ type: 'FeatureCollection', features });
+}
+
+const LABEL_MAX_AGE_S = 24 * 3600;
+
+function toLabelFeatures(body: ArcGisPolygonResponse, source: ArcGisLabelSource): OverlayLabel[] {
+  const out: OverlayLabel[] = [];
+  for (const feature of body.features ?? []) {
+    const raw = feature.attributes?.[source.valueField];
+    const value = typeof raw === 'number' ? raw : Number(raw);
+    // -1 is the upstream's "not measured" marker (see UNKNOWN_SENTINEL); a
+    // lake carrying it is surveyed but has no figure worth drawing.
+    if (!Number.isFinite(value) || value <= 0) continue;
+    const point = polygonLabelPoint(feature.geometry?.rings ?? []);
+    if (!point) continue;
+    const name = source.nameField ? feature.attributes?.[source.nameField] : undefined;
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [point.lng, point.lat] },
+      properties: {
+        label: `${trimNumber(value)} ${source.unit}`,
+        value,
+        ...(typeof name === 'string' && name.trim() ? { name: name.trim() } : {}),
+      },
+    });
+  }
+  return out;
+}
+
+/** "21.5" not "21.50", "30" not "30.0". */
+function trimNumber(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
 // ---- the API ----
 
 /** 1×1 fully transparent PNG — the "blank ≠ broken" fallback tile. */
@@ -444,7 +549,21 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
   for (const l of layers) status?.register(probeId(l.meta.id), l.meta.title, 'Overlays');
 
   // Public catalog: LayerMeta only — never the upstream config.
-  app.get('/api/layers', () => ({ layers: layers.map((l) => l.meta) }));
+  // The catalog is `meta` plus whatever the upstream config implies for
+  // clients — `labels` is derived here rather than duplicated in `meta`, so a
+  // layer can never advertise labels it has no source for.
+  // Per-registration, not module-level: two app instances (and two tests) must
+  // not see each other's cached viewports.
+  const labelCache: LabelCache = new Map();
+
+  app.get('/api/layers', () => ({
+    layers: layers.map((l) => {
+      const labels = l.upstream.kind === 'wms' ? l.upstream.labels : undefined;
+      return labels
+        ? { ...l.meta, labels: { minzoom: labels.minzoom, unit: labels.unit } }
+        : l.meta;
+    }),
+  }));
 
   const cachePath = (id: string, z: number, x: number, y: number) =>
     path.join(opts.cacheDir, id, String(z), String(x), `${y}.png`);
@@ -610,6 +729,72 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
       }
       status?.record(probeId(layer.meta.id), true);
       return { results: [] };
+    },
+  );
+
+  // Map labels: numbers that live in upstream attributes rather than in the
+  // rendered raster, fetched per viewport and drawn as a symbol layer.
+  app.get<{ Params: { id: string }; Querystring: { bbox?: string; zoom?: string } }>(
+    '/api/overlay/:id/labels',
+    async (request, reply) => {
+      const layer = byId.get(request.params.id);
+      const source = layer?.upstream.kind === 'wms' ? layer.upstream.labels : undefined;
+      if (!layer || !source) {
+        return reply.code(404).send({ error: 'layer has no labels' });
+      }
+      const bbox = parseBbox(request.query.bbox);
+      if (!bbox) return reply.code(400).send({ error: 'invalid bbox' });
+
+      // Below the layer's own threshold the answer is "nothing to draw" — a
+      // valid, cacheable result, not an error: at z8 a viewport holds hundreds
+      // of lakes and the numbers would be an unreadable mat.
+      const zoom = Number(request.query.zoom);
+      if (Number.isFinite(zoom) && zoom < source.minzoom) {
+        return labelReply(reply, []);
+      }
+
+      const key = `${layer.meta.id}:${snapLabelBbox(bbox).join(',')}`;
+      const hit = labelCache.get(key);
+      if (hit && hit.expires > Date.now()) return labelReply(reply, hit.features);
+
+      const [minX, minY, maxX, maxY] = bboxToUtm33(snapLabelBbox(bbox));
+      const url = new URL(source.url);
+      const p = url.searchParams;
+      p.set('where', '1=1');
+      // The envelope goes in the service's *native* grid: NVE ignores `inSR`
+      // and reads whatever it is given as metres, so lon/lat here would match
+      // nothing at all rather than fail loudly.
+      p.set('geometry', `${minX},${minY},${maxX},${maxY}`);
+      p.set('geometryType', 'esriGeometryEnvelope');
+      p.set('spatialRel', 'esriSpatialRelIntersects');
+      p.set('outFields', [source.valueField, source.nameField].filter(Boolean).join(','));
+      p.set('returnGeometry', 'true');
+      p.set('maxAllowableOffset', String(source.simplifyDeg));
+      p.set('outSR', '4326');
+      p.set('f', 'json');
+
+      try {
+        const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) throw new Error(`labels upstream ${res.status}`);
+        const body = (await res.json()) as ArcGisPolygonResponse;
+        if (body.error) throw new Error(body.error.message ?? 'labels upstream error');
+        const features = toLabelFeatures(body, source);
+        labelCache.set(key, { features, expires: Date.now() + LABEL_TTL_MS });
+        if (labelCache.size > LABEL_CACHE_MAX) {
+          // Cheap eviction: the oldest insertion is the first key.
+          const oldest = labelCache.keys().next();
+          if (!oldest.done) labelCache.delete(oldest.value);
+        }
+        status?.record(probeId(layer.meta.id), true);
+        return labelReply(reply, features);
+      } catch (err) {
+        request.log.warn({ err, layer: layer.meta.id }, 'labels upstream failed');
+        // Labels are an enhancement over a raster that still renders, so a dead
+        // upstream must not blank the overlay — answer empty, briefly cached.
+        return reply
+          .header('cache-control', 'public, max-age=60')
+          .send({ type: 'FeatureCollection', features: [] });
+      }
     },
   );
 }

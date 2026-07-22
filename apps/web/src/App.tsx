@@ -24,7 +24,7 @@ import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useNavLayers } from './map/useNavLayers.js';
-import { useOverlayIdentify, useOverlayLayers } from './map/useOverlayLayers.js';
+import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTransitLayers } from './map/useTransitLayers.js';
 import { useShareHash } from './map/useShareHash.js';
@@ -147,6 +147,7 @@ export function App() {
     [profiles, route],
   );
   useOverlayLayers(map, layers.overlays);
+  useOverlayLabels(map, layers.overlays);
   useOverlayIdentify(map, layers.overlays, routeActiveRef);
   // Rounded zoom for the panel's live "zoom in to z14+" hints.
   const [mapZoom, setMapZoom] = useState(Math.round(initialView.zoom));

@@ -27,6 +27,7 @@ import {
   Animated,
   Appearance,
   BackHandler,
+  Dimensions,
   Linking,
   Pressable,
   StyleSheet,
@@ -50,6 +51,7 @@ import {
   PLAN_LINE_LAYER_ID,
 } from './src/map/MapScene';
 import { tunnelChipLabel } from '@atlas/navigation';
+import { labelCellFor, useOverlayLabels } from './src/layers/useOverlayLabels';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import type { LocalPack } from './src/regions/packs';
@@ -187,6 +189,10 @@ function AppInner() {
   // Latest settled camera — feeds the search bias, share links and persistence.
   const viewRef = useRef<MapView | null>(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
+  // Snapped viewport for on-map overlay labels. Quantized so a pan only sets
+  // state when it crosses a cell boundary — see labelCellFor.
+  const [labelCell, setLabelCell] = useState<string | null>(null);
+  const overlayLabels = useOverlayLabels(overlaysCtl.overlays, labelCell);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // The system consumes the first Back press while the keyboard is visible.
@@ -349,6 +355,7 @@ function AppInner() {
     (view: MapView) => {
       viewRef.current = view;
       setMapZoom(Math.round(view.zoom));
+      setLabelCell(labelCellFor(view.center, view.zoom, Dimensions.get('window')));
       if (persistTimer.current) clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(() => {
         setSetting(
@@ -763,6 +770,7 @@ function AppInner() {
         bottomInset={bottomInset}
         packs={packs}
         overlays={overlaysCtl.overlays}
+        overlayLabels={overlayLabels}
         trackGeo={trackGeo}
         nav={nav}
         route={route}

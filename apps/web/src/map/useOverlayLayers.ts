@@ -1,6 +1,10 @@
-import type { LayerMeta, OverlayIdentifyResponse } from '@atlas/core';
+import { snapLabelBbox } from '@atlas/core';
+import type { LayerMeta, OverlayIdentifyResponse, OverlayLabelsResponse } from '@atlas/core';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
+
+/** Shared empty payload for a label source before its first fetch lands. */
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /** An overlay the user has switched on, with their chosen opacity. */
 export interface ActiveOverlay {
@@ -64,6 +68,114 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
       cancelled = true;
       map.off('style.load', sync);
       map.off('idle', sync);
+    };
+  }, [map, overlays]);
+}
+
+const LABEL_PREFIX = 'atlas-overlay-label-';
+
+/**
+ * Draws an overlay's attribute labels straight onto the map — the number a
+ * raster tile cannot carry because it lives in the upstream's attributes
+ * rather than its symbology (a surveyed lake's maximum depth).
+ *
+ * Fetched per viewport rather than per tile: the backend snaps the bbox to a
+ * coarse grid and caches, so panning around a region reuses one upstream
+ * answer. Fetches are keyed on the snapped viewport too, so a pan that stays
+ * inside the same cell doesn't re-request at all.
+ */
+export function useOverlayLabels(map: maplibregl.Map | null, overlays: ActiveOverlay[]): void {
+  useEffect(() => {
+    if (!map) return;
+    let cancelled = false;
+    const labelled = overlays.filter((o) => o.meta.labels);
+    // Remembers the last viewport fetched per layer, so moveend is cheap.
+    const fetched = new Map<string, string>();
+
+    const ensure = () => {
+      if (cancelled || !map.isStyleLoaded()) return;
+      const style = map.getStyle();
+      const wanted = new Map(labelled.map((o) => [LABEL_PREFIX + o.meta.id, o]));
+      for (const layer of style.layers ?? []) {
+        if (layer.id.startsWith(LABEL_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
+      }
+      for (const sourceId of Object.keys(style.sources ?? {})) {
+        if (sourceId.startsWith(LABEL_PREFIX) && !wanted.has(sourceId)) map.removeSource(sourceId);
+      }
+      for (const [id, overlay] of wanted) {
+        if (!map.getSource(id)) {
+          map.addSource(id, { type: 'geojson', data: EMPTY_FC });
+          fetched.delete(id); // a fresh source starts empty, so refetch into it
+        }
+        if (!map.getLayer(id)) {
+          // Added on top (no beforeId): unlike the raster, these are meant to
+          // read over everything, including the basemap's own labels.
+          map.addLayer({
+            id,
+            type: 'symbol',
+            source: id,
+            minzoom: overlay.meta.labels?.minzoom ?? 0,
+            layout: {
+              'text-field': ['get', 'label'],
+              'text-font': ['Noto Sans Bold'],
+              'text-size': 13,
+              // A lake gets one number; dropping it when it collides with a
+              // basemap label is better than stacking two unreadable ones.
+              'text-allow-overlap': false,
+              'text-padding': 4,
+            },
+            paint: {
+              'text-color': '#0b3d63',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 1.6,
+            },
+          });
+        }
+      }
+    };
+
+    const refresh = () => {
+      if (cancelled || labelled.length === 0 || !map.isStyleLoaded()) return;
+      const b = map.getBounds();
+      // Snapped to the shared grid so a small pan is not a new request at all,
+      // and so this key matches the one the backend caches under.
+      const bbox = snapLabelBbox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]).join(',');
+      const zoom = Math.round(map.getZoom());
+      for (const overlay of labelled) {
+        const id = LABEL_PREFIX + overlay.meta.id;
+        const key = `${bbox}@${zoom}`;
+        if (fetched.get(id) === key) continue;
+        fetched.set(id, key);
+        void (async () => {
+          try {
+            const res = await fetch(
+              `/api/overlay/${overlay.meta.id}/labels?bbox=${bbox}&zoom=${zoom}`,
+            );
+            if (!res.ok || cancelled) return;
+            const body = (await res.json()) as OverlayLabelsResponse;
+            const source = map.getSource(id) as maplibregl.GeoJSONSource | undefined;
+            if (!cancelled && source) source.setData(body as unknown as GeoJSON.FeatureCollection);
+          } catch {
+            // Labels are an enhancement; the raster underneath still renders.
+            fetched.delete(id);
+          }
+        })();
+      }
+    };
+
+    const sync = () => {
+      ensure();
+      refresh();
+    };
+    sync();
+    map.on('style.load', sync);
+    map.on('idle', sync);
+    map.on('moveend', refresh);
+    return () => {
+      cancelled = true;
+      map.off('style.load', sync);
+      map.off('idle', sync);
+      map.off('moveend', refresh);
     };
   }, [map, overlays]);
 }

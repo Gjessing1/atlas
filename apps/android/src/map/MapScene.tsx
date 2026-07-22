@@ -21,6 +21,7 @@ import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import type { NavController } from '../nav/useNavigation';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
@@ -118,6 +119,8 @@ interface MapSceneProps {
   packs: LocalPack[];
   /** Enabled catalog overlays (WMS rasters proxied by the backend). */
   overlays: ActiveOverlay[];
+  /** Per-overlay label GeoJSON for the current viewport (see useOverlayLabels). */
+  overlayLabels: OverlayLabelData;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   nav: NavController;
@@ -164,6 +167,7 @@ export function MapScene({
   bottomInset,
   packs,
   overlays,
+  overlayLabels,
   trackGeo,
   nav,
   route,
@@ -290,6 +294,39 @@ export function MapScene({
             />
           </RasterSource>
         ))}
+        {/* Attribute labels drawn over the raster — the number a tile can't
+          carry (a surveyed lake's max depth). Mounted after the rasters so
+          they read on top, and only while the overlay itself is on. */}
+        {overlays.map((overlay) => {
+          const labels = overlay.meta.labels;
+          const data = labels ? overlayLabels[overlay.meta.id] : undefined;
+          if (!labels || !data || data.features.length === 0) return null;
+          return (
+            <GeoJSONSource
+              key={`labels-${overlay.meta.id}`}
+              id={`atlas-overlay-labels-${overlay.meta.id}`}
+              data={data}
+            >
+              <Layer
+                type="symbol"
+                id={`atlas-overlay-labels-${overlay.meta.id}-layer`}
+                minzoom={labels.minzoom}
+                layout={{
+                  'text-field': ['get', 'label'],
+                  'text-font': ['Noto Sans Bold'],
+                  'text-size': 13,
+                  'text-allow-overlap': false,
+                  'text-padding': 4,
+                }}
+                paint={{
+                  'text-color': '#0b3d63',
+                  'text-halo-color': '#ffffff',
+                  'text-halo-width': 1.6,
+                }}
+              />
+            </GeoJSONSource>
+          );
+        })}
         {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
         {packs.length > 0 ? (
           <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>

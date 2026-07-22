@@ -344,6 +344,19 @@ export interface LayerMeta {
   coverageNote?: string;
   /** Activity profiles this layer belongs to (absent = general purpose). */
   profiles?: string[];
+  /**
+   * Present when `/api/overlay/:id/labels` can draw a number directly on the
+   * map for this layer — the value a raster tile cannot show because it lives
+   * in the upstream's attributes rather than its symbology (a lake's maximum
+   * depth). Clients that render it fetch per viewport; clients that don't
+   * simply ignore the field.
+   */
+  labels?: {
+    /** Below this zoom the labels are too dense to read, so they are skipped. */
+    minzoom: number;
+    /** Unit suffix to draw after the number, e.g. "m". */
+    unit: string;
+  };
 }
 
 /** GET /api/layers */
@@ -357,6 +370,28 @@ export interface LayersResponse {
  */
 export interface OverlayIdentifyResponse {
   results: Record<string, string>[];
+}
+
+/**
+ * GET /api/overlay/:id/labels?bbox=w,s,e,n — point labels to draw over the
+ * raster, as GeoJSON so both maps can hand it straight to a symbol layer.
+ */
+export interface OverlayLabel {
+  type: 'Feature';
+  geometry: { type: 'Point'; coordinates: [number, number] };
+  properties: {
+    /** Ready-to-draw text, unit included ("21.5 m"). */
+    label: string;
+    /** The bare number, for clients that want to restyle or filter. */
+    value: number;
+    /** Feature name where the upstream has one ("Verkensvannet"). */
+    name?: string;
+  };
+}
+
+export interface OverlayLabelsResponse {
+  type: 'FeatureCollection';
+  features: OverlayLabel[];
 }
 
 /**
@@ -895,3 +930,12 @@ export {
   type MapAppearance,
   type ThemeMode,
 } from './appearance.js';
+export {
+  bboxToUtm33,
+  polygonLabelPoint,
+  snapLabelBbox,
+  wgs84ToUtm33,
+  OVERLAY_LABEL_SNAP_DEG,
+  type LngLatBbox,
+  type Ring,
+} from './geoproject.js';
