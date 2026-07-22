@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
+import { useSideInsets } from './insets';
 import { LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
 
@@ -30,6 +31,11 @@ export function MapActivityControls({
   const [layersOpen, setLayersOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
   const win = useWindowDimensions();
+  // In landscape the system navigation bar sits on a side of the screen: the
+  // triggers and the menus they open both start inside it. `right` is the
+  // 64 dp gap that keeps the row clear of the locate button, plus that inset.
+  const side = useSideInsets();
+  const right = side.right + 64;
   const activeCount = overlays.overlays.length;
   const activeProfile = profile.profile;
   const ActiveIcon = MAP_PROFILE_ICON[activeProfile.id]!;
@@ -51,7 +57,7 @@ export function MapActivityControls({
 
       {profilesOpen ? (
         <View
-          style={[styles.profileMenu, { bottom: bottom + 52 }]}
+          style={[styles.profileMenu, { bottom: bottom + 52, right }]}
           accessibilityLabel="Map profile"
         >
           {MAP_PROFILES.map((item) => {
@@ -87,6 +93,7 @@ export function MapActivityControls({
             styles.layerMenu,
             {
               bottom: bottom + 52,
+              right,
               // In landscape the system inset + offline controls can consume
               // half the short edge; cap the menu to the room actually left.
               maxHeight: Math.max(88, Math.min(win.height * 0.48, 380, win.height - bottom - 64)),
@@ -122,7 +129,7 @@ export function MapActivityControls({
         </View>
       ) : null}
 
-      <View style={[styles.controlRow, { bottom }]}>
+      <View style={[styles.controlRow, { bottom, right }]}>
         <Pressable
           style={[styles.profileTrigger, profilesOpen && styles.controlSelected]}
           onPress={() => {
@@ -173,7 +180,6 @@ const styles = StyleSheet.create({
   },
   controlRow: {
     position: 'absolute',
-    right: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -219,7 +225,6 @@ const styles = StyleSheet.create({
   countText: { color: theme.onAccent, fontSize: 10, fontWeight: '800' },
   layerMenu: {
     position: 'absolute',
-    right: 64,
     width: 250,
     padding: 4,
     borderRadius: 12,
@@ -228,7 +233,6 @@ const styles = StyleSheet.create({
   },
   profileMenu: {
     position: 'absolute',
-    right: 64,
     width: 172,
     padding: 4,
     borderRadius: 12,

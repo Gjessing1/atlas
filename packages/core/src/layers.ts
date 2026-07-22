@@ -1,5 +1,7 @@
 /** Overlay layer catalog: the client-side layer registry and its map style. */
 
+import type { LatLng } from './geo.js';
+
 /**
  * Layer ids of the OpenFreeMap Liberty style that render the OpenMapTiles
  * `poi` source layer — the tap/click targets for POI info popups. Shared so
@@ -71,6 +73,50 @@ export interface LayersResponse {
  */
 export interface OverlayIdentifyResponse {
   results: Record<string, string>[];
+}
+
+/** One overlay's answer to "what is here?", ready for a client to render. */
+export interface OverlayIdentifyGroup {
+  /** The overlay's title — a single tap can hit several, so each answer says whose it is. */
+  title: string;
+  /** Cleaned, display-ready attributes (the backend has already dropped the noise). */
+  properties: Record<string, string>;
+}
+
+/** The identify endpoint for one overlay at one point. `origin` is '' on the web. */
+export function overlayIdentifyUrl(origin: string, id: string, at: LatLng, zoom: number): string {
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(id)}/identify` +
+    `?lat=${at.lat}&lng=${at.lng}&zoom=${Math.round(zoom)}`
+  );
+}
+
+/**
+ * Ask every identify-capable overlay what sits under a tap, in parallel.
+ *
+ * Overlays that are switched off are not asked, and an overlay that errors,
+ * answers slowly-and-then-fails, or simply has nothing there contributes
+ * nothing: most taps are navigation, not questions, so a failed identify must
+ * never become an error the user has to dismiss. An empty array therefore means
+ * "no answer", not "something went wrong".
+ */
+export async function identifyOverlays(
+  origin: string,
+  visible: readonly LayerMeta[],
+  at: LatLng,
+  zoom: number,
+): Promise<OverlayIdentifyGroup[]> {
+  const targets = visible.filter((meta) => meta.identify);
+  if (targets.length === 0) return [];
+  const settled = await Promise.allSettled(
+    targets.map(async (meta): Promise<OverlayIdentifyGroup[]> => {
+      const res = await fetch(overlayIdentifyUrl(origin, meta.id, at, zoom));
+      if (!res.ok) return [];
+      const body = (await res.json()) as OverlayIdentifyResponse;
+      return body.results.map((properties) => ({ title: meta.title, properties }));
+    }),
+  );
+  return settled.flatMap((s) => (s.status === 'fulfilled' ? s.value : []));
 }
 
 /**

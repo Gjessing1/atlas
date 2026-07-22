@@ -1,4 +1,4 @@
-import type { LatLng, SearchResult } from '@atlas/core';
+import type { LatLng, OverlayIdentifyGroup, SearchResult } from '@atlas/core';
 import { useCallback, useState } from 'react';
 
 import type { DestinationTarget } from './DestinationCard';
@@ -16,6 +16,12 @@ export interface DestinationController {
   pickPoint: (at: LatLng, fly?: boolean) => void;
   /** A search hit the user chose from the results list. */
   pickResult: (result: SearchResult) => void;
+  /**
+   * Overlay tap-to-identify answered for the tapped point: show it on the card
+   * that tap opened, or open one for the bare point when the tap hit no pin or
+   * POI (a lake with a surveyed depth is worth a card of its own).
+   */
+  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[]) => void;
   /** The red pin was dragged: the destination becomes that adjusted point. */
   onMoved: (at: LatLng) => void;
   clear: () => void;
@@ -61,6 +67,15 @@ export function useDestination(flyTo: (at: LatLng) => void): DestinationControll
     [pick],
   );
 
+  const showIdentify = useCallback((at: LatLng, groups: OverlayIdentifyGroup[]) => {
+    if (groups.length === 0) return;
+    setDestination((d) =>
+      d
+        ? { ...d, identify: groups }
+        : { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true, identify: groups },
+    );
+  }, []);
+
   const onMoved = useCallback((at: LatLng) => {
     setDestination((d) =>
       d ? { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true } : d,
@@ -69,5 +84,5 @@ export function useDestination(flyTo: (at: LatLng) => void): DestinationControll
 
   const clear = useCallback(() => setDestination(null), []);
 
-  return { destination, pick, pickPoint, pickResult, onMoved, clear };
+  return { destination, pick, pickPoint, pickResult, showIdentify, onMoved, clear };
 }

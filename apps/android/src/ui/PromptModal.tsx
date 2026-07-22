@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { useSideInsets } from './insets';
 import { theme } from './theme';
 
 /**
@@ -34,10 +35,15 @@ export function PromptModal({
   useEffect(() => {
     if (visible) setValue(initialValue);
   }, [visible, initialValue]);
+  const side = useSideInsets();
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onCancel}>
-      <View style={styles.backdrop}>
+      {/* Landscape: keep the card (its buttons are right-aligned) clear of the
+          side-mounted system navigation bar. */}
+      <View
+        style={[styles.backdrop, { paddingLeft: 24 + side.left, paddingRight: 24 + side.right }]}
+      >
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>
           <TextInput

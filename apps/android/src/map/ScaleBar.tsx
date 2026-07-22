@@ -8,6 +8,8 @@ interface Props {
   zoom: number;
   /** Distance from the bottom edge, already including the safe-area inset. */
   bottom: number;
+  /** Distance from the left edge, likewise inset-adjusted (landscape nav bar). */
+  left?: number;
   /** Longest the bar may draw, in px. The rounded distance fits inside this. */
   maxWidth?: number;
 }
@@ -20,13 +22,13 @@ interface Props {
  * maplibre-react-native (`scaleBar` is a bare boolean) — so an en-US device
  * showed feet. Atlas is metric everywhere, hence our own bar.
  */
-export function ScaleBar({ lat, zoom, bottom, maxWidth = 110 }: Props) {
+export function ScaleBar({ lat, zoom, bottom, left = 20, maxWidth = 110 }: Props) {
   const bar = useMemo(() => scaleBarFor(lat, zoom, maxWidth), [lat, zoom, maxWidth]);
   const dark = useColorScheme() === 'dark';
   const ink = dark ? '#fff' : '#111';
   const halo = dark ? 'rgba(22,28,33,0.92)' : 'rgba(255,255,255,0.92)';
   return (
-    <View pointerEvents="none" style={[styles.wrap, { bottom }]}>
+    <View pointerEvents="none" style={[styles.wrap, { bottom, left }]}>
       <Text style={[styles.label, { color: ink, textShadowColor: halo }]}>{bar.label}</Text>
       <View
         style={[
@@ -39,7 +41,7 @@ export function ScaleBar({ lat, zoom, bottom, maxWidth = 110 }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 20, alignItems: 'flex-start' },
+  wrap: { position: 'absolute', alignItems: 'flex-start' },
   // Text is drawn over the map, so it carries its own halo rather than a plate.
   label: {
     fontSize: 11,

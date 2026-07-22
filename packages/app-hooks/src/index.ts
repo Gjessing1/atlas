@@ -64,3 +64,11 @@ export {
   type UserData,
   type UserDataPlatform,
 } from './useUserData.js';
+export {
+  useStatus,
+  groupUpstreams,
+  statusAge,
+  upstreamDetail,
+  UPSTREAM_HEALTH_LABEL,
+  type StatusState,
+} from './useStatus.js';

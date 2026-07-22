@@ -1,6 +1,13 @@
 import { fmtClock, type RegionPackManifest } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
-import type { ThemeModeController } from '@atlas/app-hooks';
+import {
+  groupUpstreams,
+  UPSTREAM_HEALTH_LABEL,
+  upstreamDetail,
+  useStatus,
+  type ThemeModeController,
+} from '@atlas/app-hooks';
+import type { UpstreamHealth } from '@atlas/core';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -308,6 +315,78 @@ function ServerSection({ storage }: { storage: AtlasStorage | null }) {
   );
 }
 
+/** The dot's colour per health level — same five words the web panel uses. */
+const HEALTH_COLOR: Record<UpstreamHealth, string> = {
+  ok: '#3faa63',
+  degraded: theme.warning,
+  down: theme.danger,
+  unknown: theme.icon,
+};
+
+/**
+ * Server & upstream health (web parity, §5 N7). The phone talks to the same
+ * upstreams as the browser and fails just as silently, so it gets the same
+ * answer to "is it me, the server, or Kartverket?" — fetched only while the
+ * sheet is open.
+ */
+function StatusSection({ visible }: { visible: boolean }) {
+  const origin = useServerOrigin();
+  const status = useStatus(origin, visible);
+
+  return (
+    <View>
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet, status.loading && styles.buttonDisabled]}
+          disabled={status.loading}
+          onPress={status.refresh}
+          testID="status-refresh"
+        >
+          <Text style={styles.buttonQuietText}>{status.loading ? 'Checking…' : 'Refresh'}</Text>
+        </Pressable>
+        {status.data ? (
+          <View style={styles.statusOverall}>
+            <View
+              style={[styles.statusDot, { backgroundColor: HEALTH_COLOR[status.data.overall] }]}
+            />
+            <Text style={styles.rowText}>{UPSTREAM_HEALTH_LABEL[status.data.overall]}</Text>
+          </View>
+        ) : null}
+      </View>
+      {status.error && !status.data ? (
+        <Text style={styles.error}>Status unavailable — {status.error}.</Text>
+      ) : null}
+      {!status.data && !status.error ? <Text style={styles.muted}>Loading…</Text> : null}
+      {status.data
+        ? groupUpstreams(status.data.sources).map(([group, sources]) => (
+            <View key={group} style={styles.statusGroup}>
+              <Text style={styles.statusGroupName}>{group}</Text>
+              {sources.map((source) => (
+                <View key={source.id} style={styles.statusRow} testID={`status-${source.id}`}>
+                  <View
+                    style={[styles.statusDot, { backgroundColor: HEALTH_COLOR[source.health] }]}
+                  />
+                  <Text style={styles.statusName} numberOfLines={1}>
+                    {source.label}
+                  </Text>
+                  <Text style={styles.statusDetail} numberOfLines={2}>
+                    {upstreamDetail(source)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))
+        : null}
+      {status.data ? (
+        <Text style={styles.muted}>
+          Backend build {status.data.gitSha === 'dev' ? 'dev' : status.data.gitSha.slice(0, 8)}.
+          Checks reflect real usage: a source stays “not checked” until the app has used it.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function UpdateSection() {
   const { current, update, download } = useAppUpdate();
   const ota = useOtaUpdate();
@@ -421,6 +500,8 @@ export function SettingsSheet({
         <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
         <Text style={styles.heading}>Server</Text>
         <ServerSection storage={storage} />
+        <Text style={styles.heading}>Server status</Text>
+        <StatusSection visible={visible} />
         <Text style={styles.heading}>App</Text>
         <UpdateSection />
         <Text style={styles.heading}>Your data</Text>
@@ -495,5 +576,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   regionInfo: { flexShrink: 1, paddingRight: 10 },
+  statusOverall: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusGroup: { marginTop: 12 },
+  statusGroupName: { fontSize: 12, fontWeight: '700', color: theme.textMuted, marginBottom: 4 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  statusDot: { width: 9, height: 9, borderRadius: 5 },
+  statusName: { fontSize: 14, color: theme.text, fontWeight: '600' },
+  statusDetail: { flex: 1, fontSize: 12, color: theme.textMuted, textAlign: 'right' },
   closeButton: { marginTop: 12, alignSelf: 'stretch', alignItems: 'center' },
 });

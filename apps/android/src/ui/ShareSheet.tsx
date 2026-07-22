@@ -2,6 +2,7 @@ import { atlasShareUrl, fmtCoords, geoUri, shareMessage, type LatLng } from '@at
 import { Linking, Modal, Pressable, Share, StyleSheet, Text } from 'react-native';
 
 import { getServerOrigin } from '../serverOrigin';
+import { useSideInsets } from './insets';
 import { theme } from './theme';
 
 export interface ShareTarget extends LatLng {
@@ -27,6 +28,7 @@ export function ShareSheet({
   onClose: () => void;
   bottomInset?: number;
 }) {
+  const side = useSideInsets();
   if (!target) return null;
   const pin = { lat: target.lat, lng: target.lng };
 
@@ -81,7 +83,15 @@ export function ShareSheet({
       <Pressable style={styles.backdrop} onPress={onClose} testID="share-backdrop">
         {/* Stop taps on the card itself from dismissing the sheet. */}
         <Pressable
-          style={[styles.sheet, { paddingBottom: bottomInset + 16 }]}
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: bottomInset + 16,
+              // Landscape: clear the side-mounted system navigation bar.
+              paddingLeft: 20 + side.left,
+              paddingRight: 20 + side.right,
+            },
+          ]}
           onPress={() => {}}
           testID="share-sheet"
         >

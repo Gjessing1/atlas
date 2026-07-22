@@ -4,6 +4,7 @@ import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
 import { TurnIcon } from './TurnIcon';
 import type { NavController } from './useNavigation';
@@ -115,6 +116,9 @@ export function NavBanner({
   onHeight?: (height: number) => void;
 }) {
   const win = useWindowDimensions();
+  // Landscape parks the system navigation bar on one side of the screen; the
+  // banner has to start inside it, not under it (both are 0 in portrait).
+  const side = useSideInsets();
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
   // Landscape: park the banner on the left (Google-style side panel) so the
@@ -146,7 +150,7 @@ export function NavBanner({
     <View
       style={[
         styles.wrap,
-        { top: topInset + 8 },
+        { top: topInset + 8, left: side.left + 12, right: side.right + 12 },
         landscape && { right: undefined, width: Math.min(420, Math.round(win.width * 0.46)) },
       ]}
       pointerEvents="box-none"
@@ -312,7 +316,8 @@ export function NavBanner({
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 12, right: 12, gap: 10, alignItems: 'center' },
+  // Horizontal position (12 dp plus the safe-area inset) is applied inline.
+  wrap: { position: 'absolute', gap: 10, alignItems: 'center' },
   card: {
     width: '100%',
     backgroundColor: theme.surfaceOverlay,

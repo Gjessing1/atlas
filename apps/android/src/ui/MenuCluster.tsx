@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { MenuIcon, SearchIcon } from './icons';
+import { useSideInsets } from './insets';
 import { DirectionsIcon } from './modeIcons';
 import { theme } from './theme';
 
@@ -24,8 +25,13 @@ export function MenuCluster({
   onOpenSearch,
   onPlanRoute,
 }: MenuClusterProps) {
+  // Landscape moves the system navigation bar to a side: start inside it.
+  const side = useSideInsets();
   return (
-    <View style={[styles.menuWrap, { bottom: bottomInset + 24 }]} pointerEvents="box-none">
+    <View
+      style={[styles.menuWrap, { bottom: bottomInset + 24, left: side.left + 12 }]}
+      pointerEvents="box-none"
+    >
       <View style={styles.bottomRow}>
         <Pressable style={styles.roundButton} onPress={onToggleMenu} testID="open-menu">
           <MenuIcon />
@@ -46,7 +52,7 @@ export function MenuCluster({
 }
 
 const styles = StyleSheet.create({
-  menuWrap: { position: 'absolute', left: 12 },
+  menuWrap: { position: 'absolute' },
   bottomRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   roundButton: {
     width: 44,

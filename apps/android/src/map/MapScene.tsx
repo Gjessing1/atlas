@@ -30,6 +30,7 @@ import type { RoutePlanner } from '../routing/useRoute';
 import type { TransitPlan } from '../routing/useTransit';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import { PlacePin } from '../ui/icons';
+import { useSideInsets } from '../ui/insets';
 import { ScaleBar } from './ScaleBar';
 import type { TrackGeometry } from '../useTrackGeometry';
 
@@ -203,6 +204,9 @@ export function MapScene({
   );
 
   const planning = route.active;
+  // The map itself stays edge-to-edge under the system bars, but the controls
+  // drawn on top of it start inside the landscape navigation bar (0 in portrait).
+  const side = useSideInsets();
   // In transit mode the road line stands down so the map shows one answer.
   const transitTrip = transit.enabled ? transit.trip : null;
   // The routed line to draw while planning (selected path, primary or alt).
@@ -238,7 +242,7 @@ export function MapScene({
         // the bottom it competed with Atlas's menu, scale and locate controls.
         // The MapLibre logo watermark is off (attribution remains available).
         logo={false}
-        attributionPosition={{ top: topInset + 8, left: 8 }}
+        attributionPosition={{ top: topInset + 8, left: side.left + 8 }}
         // Track the zoom for zoom-proportional pin sizes; a user-driven move
         // additionally pauses the nav follow camera (free look-around).
         onRegionIsChanging={(e) => {
@@ -619,7 +623,12 @@ export function MapScene({
           the menu cluster and the locate button. Hidden during turn-by-turn —
           dead weight on a driving screen. */}
       {!following ? (
-        <ScaleBar lat={scaleAt.lat} zoom={scaleAt.zoom} bottom={bottomInset + 88} />
+        <ScaleBar
+          lat={scaleAt.lat}
+          zoom={scaleAt.zoom}
+          bottom={bottomInset + 88}
+          left={side.left + 20}
+        />
       ) : null}
     </View>
   );

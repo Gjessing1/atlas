@@ -1,5 +1,6 @@
+import type { OverlayIdentifyGroup } from '@atlas/core';
 import { useEffect, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
 import { WeatherIcon } from './icons';
@@ -16,7 +17,17 @@ export interface DestinationTarget {
   canSave?: boolean;
   /** Set when the target is a saved place — enables the Edit action. */
   placeId?: string;
+  /**
+   * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
+   * depth, a parcel's number). Arrives after the card opens — the network round
+   * trip must not delay the actions.
+   */
+  identify?: OverlayIdentifyGroup[];
 }
+
+/** Attribute rows shown per overlay, and how many of each fit the card. */
+const MAX_IDENTIFY_GROUPS = 3;
+const MAX_IDENTIFY_ROWS = 6;
 
 /**
  * Bottom card shown after a *place* is picked (search result, long-press, saved
@@ -53,6 +64,7 @@ export function DestinationCard({
   onCancel: () => void;
   bottomInset?: number;
 }) {
+  const identify = target.identify ?? [];
   // A single tap on Directions/Save/Edit hands the point off and closes the
   // card, but a fast second tap arrives before the card unmounts and used to
   // fire the action twice — adding the same stop, or saving the same pin,
@@ -78,7 +90,9 @@ export function DestinationCard({
       mode="map"
       onClose={onCancel}
       initialSnap="peek"
-      peekHeight={218}
+      // Overlay answers need room of their own; without them the card keeps its
+      // three action rows exactly as before.
+      peekHeight={identify.length > 0 ? 340 : 218}
       bottomInset={bottomInset}
       testID="destination-sheet"
     >
@@ -97,6 +111,30 @@ export function DestinationCard({
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </View>
+
+      {identify.length > 0 ? (
+        // "What's here" from the visible overlays. Scrolls inside the card so a
+        // chatty upstream can never push the actions off the sheet.
+        <ScrollView style={styles.identify} bounces={false} testID="destination-identify">
+          {identify.slice(0, MAX_IDENTIFY_GROUPS).map((group, i) => (
+            <View key={`${group.title}-${i}`} style={styles.identifyGroup}>
+              <Text style={styles.identifyTitle}>{group.title}</Text>
+              {Object.entries(group.properties)
+                .slice(0, MAX_IDENTIFY_ROWS)
+                .map(([key, value]) => (
+                  <View key={key} style={styles.identifyRow}>
+                    <Text style={styles.identifyKey} numberOfLines={1}>
+                      {key}
+                    </Text>
+                    <Text style={styles.identifyValue} numberOfLines={2}>
+                      {value}
+                    </Text>
+                  </View>
+                ))}
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
 
       <View style={styles.actions}>
         <Pressable
@@ -150,6 +188,12 @@ const styles = StyleSheet.create({
   name: { fontSize: 17, fontWeight: '700', color: theme.text },
   detail: { fontSize: 13, color: theme.textMuted, marginTop: 1 },
   close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
+  identify: { maxHeight: 132, marginTop: 12 },
+  identifyGroup: { marginBottom: 8 },
+  identifyTitle: { fontSize: 12, fontWeight: '800', color: theme.textMuted, marginBottom: 2 },
+  identifyRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  identifyKey: { flexShrink: 1, fontSize: 13, color: theme.textMuted },
+  identifyValue: { flex: 1, fontSize: 13, color: theme.text, fontWeight: '600' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {
     flexGrow: 1,

@@ -1,10 +1,17 @@
-import { haversineM, POI_LAYER_IDS, type LatLng } from '@atlas/core';
+import {
+  haversineM,
+  identifyOverlays,
+  POI_LAYER_IDS,
+  type LatLng,
+  type OverlayIdentifyGroup,
+} from '@atlas/core';
 import { viaInsertIndex } from '@atlas/routing';
 import type { MapRef } from '@maplibre/maplibre-react-native';
 import type { PlaceRecord } from '@atlas/storage';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { RefObject } from 'react';
 
+import type { ActiveOverlay } from '../layers/useOverlays';
 import type { NavController } from '../nav/useNavigation';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
@@ -30,9 +37,15 @@ export interface MapPressOptions {
   nav: NavController;
   route: RoutePlanner;
   places: PlaceRecord[];
+  /** Overlays currently drawn — the identify-capable ones answer map taps. */
+  overlays: ActiveOverlay[];
+  /** Atlas server the identify requests go to. */
+  origin: string;
   menuOpen: boolean;
   closeMenu: () => void;
   pickDestination: (target: DestinationTarget) => void;
+  /** Report what the overlays say is under the tap (web parity, §Android queue). */
+  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[]) => void;
 }
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
@@ -57,10 +70,17 @@ export function useMapPress({
   nav,
   route,
   places,
+  overlays,
+  origin,
   menuOpen,
   closeMenu,
   pickDestination,
+  showIdentify,
 }: MapPressOptions): MapPressHandlers {
+  // Identify is a network round trip, so a second tap can land before the first
+  // answers. Only the newest tap's answer may reach the card — otherwise the
+  // rows would describe a point the user has already moved away from.
+  const tapSeq = useRef(0);
   const onMapPress = useCallback(
     ({ lat, lng }: LatLng, pixel: Pixel) => {
       const pixelBounds = boxAround(pixel);
@@ -108,6 +128,17 @@ export function useMapPress({
       void (async () => {
         const zoom = await mapRef.current?.getZoom();
         if (zoom === undefined) return;
+        // Asked in parallel with the local hit-tests below: the pin/POI card
+        // opens immediately and the overlay rows drop into it when they land.
+        const tap = ++tapSeq.current;
+        void identifyOverlays(
+          origin,
+          overlays.map((o) => o.meta),
+          { lat, lng },
+          zoom,
+        ).then((groups) => {
+          if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
+        });
         // Ground size of one screen pixel at this zoom (512px tiles) makes the
         // tap tolerance a constant ~36 px at any zoom level.
         const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
@@ -154,7 +185,18 @@ export function useMapPress({
         });
       })();
     },
-    [mapRef, menuOpen, closeMenu, nav, route, places, pickDestination],
+    [
+      mapRef,
+      menuOpen,
+      closeMenu,
+      nav,
+      route,
+      places,
+      overlays,
+      origin,
+      pickDestination,
+      showIdentify,
+    ],
   );
 
   const onPickPoint = useCallback(

@@ -4,6 +4,7 @@ import { tunnelChipLabel } from '@atlas/navigation';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { MapOverviewIcon, NavArrowIcon } from '../ui/icons';
+import { useSideInsets } from '../ui/insets';
 import { theme } from '../ui/theme';
 import type { NavCameraControls } from './useNavCamera';
 import type { NavController } from './useNavigation';
@@ -98,6 +99,9 @@ export function NavChrome({
   landscape,
 }: NavChromeProps) {
   const win = useWindowDimensions();
+  // Landscape puts the system navigation bar on one side; every control that
+  // hugs a vertical edge has to clear it (in portrait both insets are 0).
+  const side = useSideInsets();
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   if (!following) return null;
   return (
@@ -116,7 +120,7 @@ export function NavChrome({
       ) : null}
 
       {/* Top-right during navigation: map orientation + route overview. */}
-      <View style={[styles.buttonColumn, { top: controlsTop }]}>
+      <View style={[styles.buttonColumn, { top: controlsTop, right: side.right + 12 }]}>
         <Pressable
           style={styles.roundButton}
           onPress={onToggleFollowMode}
@@ -151,7 +155,11 @@ export function NavChrome({
           style={[
             styles.roadChipWrap,
             landscape && styles.roadChipWrapLandscape,
-            { bottom: bottomInset + 26 },
+            {
+              bottom: bottomInset + 26,
+              paddingLeft: (landscape ? 76 : 0) + side.left,
+              paddingRight: side.right,
+            },
           ]}
           pointerEvents="none"
         >
@@ -166,7 +174,13 @@ export function NavChrome({
       {/* Free look-around during navigation: a pan pauses the follow camera;
           this pill (or the locate button, or a 12 s timeout) re-engages it. */}
       {navCam.followPaused ? (
-        <View style={[styles.recentreWrap, { bottom: bottomInset + 88 }]} pointerEvents="box-none">
+        <View
+          style={[
+            styles.recentreWrap,
+            { bottom: bottomInset + 88, left: side.left, right: side.right },
+          ]}
+          pointerEvents="box-none"
+        >
           <Pressable style={styles.recentrePill} onPress={navCam.resumeFollow} testID="recentre">
             <NavArrowIcon />
             <Text style={styles.recentreText}>Re-centre</Text>
@@ -178,7 +192,8 @@ export function NavChrome({
 }
 
 const styles = StyleSheet.create({
-  buttonColumn: { position: 'absolute', right: 12, gap: 10, alignItems: 'center' },
+  // `right` (12 dp plus the safe-area inset) and `top` are applied inline.
+  buttonColumn: { position: 'absolute', gap: 10, alignItems: 'center' },
   recentreWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   navPuckWrap: {
     position: 'absolute',
@@ -213,8 +228,9 @@ const styles = StyleSheet.create({
   orientText: { fontSize: 18, fontWeight: '800', color: theme.accent },
   roundButtonActive: { backgroundColor: theme.surfaceActive },
   roadChipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  // Landscape: hug the left edge so the centred nav chevron stays uncovered.
-  roadChipWrapLandscape: { alignItems: 'flex-start', paddingLeft: 76 },
+  // Landscape: hug the left edge so the centred nav chevron stays uncovered
+  // (the 76 dp indent is applied inline, on top of the left safe-area inset).
+  roadChipWrapLandscape: { alignItems: 'flex-start' },
   // …and keep a long road name from growing back into the chevron's column;
   // the name ellipsises instead (numberOfLines is already 1).
   roadChipLandscape: { maxWidth: '40%' },

@@ -226,7 +226,18 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
           <View style={styles.handle} />
         </Pressable>
       </View>
-      <View style={[styles.content, { paddingBottom: 12 }, contentStyle]}>{children}</View>
+      {/* Landscape puts the system navigation bar on a side of the screen, and
+          the sheet spans the full width; indent the content past it so buttons
+          at the sheet's edges stay visible and tappable (0 in portrait). */}
+      <View
+        style={[
+          styles.content,
+          { paddingBottom: 12, paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right },
+          contentStyle,
+        ]}
+      >
+        {children}
+      </View>
     </Animated.View>
   );
 

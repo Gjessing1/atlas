@@ -1,5 +1,5 @@
-import { snapLabelBbox } from '@atlas/core';
-import type { LayerMeta, OverlayIdentifyResponse, OverlayLabelsResponse } from '@atlas/core';
+import { identifyOverlays, snapLabelBbox } from '@atlas/core';
+import type { LayerMeta, OverlayLabelsResponse } from '@atlas/core';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 
@@ -238,21 +238,13 @@ export function useOverlayIdentify(
     if (!map) return;
     const onClick = async (e: maplibregl.MapMouseEvent) => {
       if (suppress?.current) return;
-      const targets = overlaysRef.current.filter((o) => o.meta.identify);
-      if (targets.length === 0) return;
-      const { lat, lng } = e.lngLat;
-      const zoom = Math.round(map.getZoom());
-      const settled = await Promise.allSettled(
-        targets.map(async (o) => {
-          const res = await fetch(
-            `/api/overlay/${o.meta.id}/identify?lat=${lat}&lng=${lng}&zoom=${zoom}`,
-          );
-          if (!res.ok) return [];
-          const body = (await res.json()) as OverlayIdentifyResponse;
-          return body.results.map((properties) => ({ title: o.meta.title, properties }));
-        }),
+      // Served same-origin, so the shared helper needs no origin prefix.
+      const results = await identifyOverlays(
+        '',
+        overlaysRef.current.map((o) => o.meta),
+        e.lngLat,
+        map.getZoom(),
       );
-      const results = settled.flatMap((s) => (s.status === 'fulfilled' ? s.value : []));
       if (results.length === 0) return;
 
       const el = document.createElement('div');

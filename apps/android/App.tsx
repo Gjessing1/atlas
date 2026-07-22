@@ -47,6 +47,7 @@ import { useNavigation } from './src/nav/useNavigation';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
 import { SearchBar } from './src/search/SearchBar';
+import { useServerOrigin } from './src/serverOrigin';
 import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
 import { useDirections } from './src/routing/useDirections';
@@ -56,6 +57,7 @@ import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard } from './src/ui/DestinationCard';
 import { useDestination } from './src/ui/useDestination';
 import { CrosshairIcon } from './src/ui/icons';
+import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
@@ -82,6 +84,10 @@ function AppInner() {
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom || NAV_BAR_FALLBACK;
   const topInset = insets.top || STATUS_BAR_FALLBACK;
+  // Landscape moves the system navigation bar to a side of the screen, so
+  // edge-anchored chrome has to clear it there too (0 in portrait; each piece
+  // of chrome reads the same insets for itself — see src/ui/insets.ts).
+  const side = useSideInsets();
   const data = useUserData();
   const systemColorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const appearance = useThemeMode(data, systemColorScheme);
@@ -111,6 +117,7 @@ function AppInner() {
     [appearance.colorScheme, profiles.profile.id],
   );
   const overlaysCtl = useOverlays(data, profiles.profile.id);
+  const serverOrigin = useServerOrigin();
 
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -195,9 +202,12 @@ function AppInner() {
     nav,
     route,
     places: visiblePlaces,
+    overlays: overlaysCtl.overlays,
+    origin: serverOrigin,
     menuOpen,
     closeMenu: () => setMenuOpen(false),
     pickDestination: dest.pick,
+    showIdentify: dest.showIdentify,
   });
 
   // Picking an activity also chooses the route planner's starting mode where
@@ -241,11 +251,30 @@ function AppInner() {
     const cardW = Math.min(420, Math.round(win.width * 0.45));
     cameraRef.current?.fitBounds([west, south, east, north], {
       padding: landscape
-        ? { top: topInset + 48, right: 48, bottom: bottomInset + 48, left: cardW + 40 }
-        : { top: topInset + 48, right: 48, bottom: bottomInset + 300, left: 48 },
+        ? {
+            top: topInset + 48,
+            right: side.right + 48,
+            bottom: bottomInset + 48,
+            left: side.left + cardW + 40,
+          }
+        : {
+            top: topInset + 48,
+            right: side.right + 48,
+            bottom: bottomInset + 300,
+            left: side.left + 48,
+          },
       duration: 700,
     });
-  }, [nav.phase, nav.previewPaths, nav.previewIndex, topInset, bottomInset, landscape, win.width]);
+  }, [
+    nav.phase,
+    nav.previewPaths,
+    nav.previewIndex,
+    topInset,
+    bottomInset,
+    side,
+    landscape,
+    win.width,
+  ]);
 
   // A journey card can collapse the planner and ask to see its actual shape.
   // Frame every walk/ride leg, leaving room for the peek sheet that remains.
@@ -256,14 +285,14 @@ function AppInner() {
       cameraRef.current?.fitBounds(bounds, {
         padding: {
           top: topInset + 40,
-          right: 40,
+          right: side.right + 40,
           bottom: bottomInset + (landscape ? 220 : 300),
-          left: 40,
+          left: side.left + 40,
         },
         duration: 700,
       });
     },
-    [bottomInset, landscape, topInset],
+    [bottomInset, landscape, side, topInset],
   );
 
   /** Start guidance to the planner's destination in the chosen road profile. */
@@ -439,7 +468,7 @@ function AppInner() {
           bottom while planning, so hide it then; while navigating the follow
           camera + Re-centre pill cover it, so it's hidden too). */}
       {!planning && !previewing && !following && !idleSheetOpen ? (
-        <View style={[styles.locateWrap, { bottom: bottomInset + 24 }]}>
+        <View style={[styles.locateWrap, { bottom: bottomInset + 24, right: side.right + 12 }]}>
           {/* Press feedback (dim + shrink) so the tap visibly registers — the
               fix can take a second to arrive and the button looked dead until
               the camera moved. */}
@@ -481,27 +510,40 @@ function AppInner() {
         // Hidden mid-trip: in landscape the bottom offsets put it across the
         // middle of the map, and which tile source is in use is not something
         // a driver needs told while the banner and road chip own the screen.
-        <View style={[styles.offlineBadge, { bottom: bottomInset + 116 }]}>
+        <View
+          style={[
+            styles.offlineBadge,
+            { bottom: bottomInset + 116, marginLeft: side.left, marginRight: side.right },
+          ]}
+        >
           <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
         </View>
       ) : null}
       {packs.length > 0 && !planning && !previewing && !following && !idleSheetOpen ? (
         // Stacked above the bottom-right locate button. Hidden mid-trip: the
         // offline fallback is automatic (useMapStyle), the switch only forces it.
-        <View style={[styles.offlineToggle, { bottom: bottomInset + 84 }]}>
+        <View style={[styles.offlineToggle, { bottom: bottomInset + 84, right: side.right + 12 }]}>
           <Text style={styles.offlineToggleText}>Offline</Text>
           <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
         </View>
       ) : null}
 
       {data.status === 'error' ? (
-        <View style={[styles.banner, { top: topInset + 60 }]}>
+        <View
+          style={[
+            styles.banner,
+            { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
+          ]}
+        >
           <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
         </View>
       ) : null}
       {writeError ? (
         <Pressable
-          style={[styles.banner, { top: topInset + 60 }]}
+          style={[
+            styles.banner,
+            { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
+          ]}
           onPress={clearWriteError}
           testID="write-error-banner"
         >
@@ -649,7 +691,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(4, 8, 16, 0.4)',
   },
-  locateWrap: { position: 'absolute', right: 12 },
+  locateWrap: { position: 'absolute' },
   roundButton: {
     width: 44,
     height: 44,
@@ -674,7 +716,6 @@ const styles = StyleSheet.create({
   offlineToggle: {
     position: 'absolute',
     bottom: 36,
-    right: 12,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.surface,
@@ -688,8 +729,6 @@ const styles = StyleSheet.create({
   banner: {
     position: 'absolute',
     top: 100,
-    left: 12,
-    right: 12,
     backgroundColor: theme.danger,
     borderRadius: 8,
     padding: 10,
