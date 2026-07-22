@@ -19,6 +19,7 @@ export * from './maphash.js';
 export * from './packs.js';
 export * from './places.js';
 export * from './profiles.js';
+export * from './routelabels.js';
 export * from './search.js';
 export * from './share.js';
 

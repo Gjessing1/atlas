@@ -27,6 +27,15 @@ export {
   type TransitPlanner,
 } from './useTransit.js';
 export {
+  useStopSearch,
+  useAlongRouteSearch,
+  type AlongRouteSearch,
+  type StopGeocodeFn,
+  type StopGeocodeQuery,
+  type StopSearch,
+  type StopSearchPlace,
+} from './useStopSearch.js';
+export {
   useUserData,
   sanitizeFileName,
   importedCount,

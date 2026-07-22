@@ -1,24 +1,26 @@
 import {
+  altChipLabel,
+  detourLabel,
   fmtDuration,
   fmtEta,
   fmtKm,
-  matchPlacesByName,
+  modeTimeLabel,
+  stopHitKey,
+  stopRole,
+  stopTitle,
+  waypointLabel,
   type LatLng,
-  type SearchResult,
 } from '@atlas/core';
+import { useAlongRouteSearch, useStopSearch, type StopGeocodeFn } from '@atlas/app-hooks';
 import {
-  distanceToRouteM,
   pathViaLabels,
-  photonBbox,
   ROUTING_PROFILES,
-  routeSearchBounds,
   routePathToTrackData,
-  ROUTE_SEARCH_CORRIDOR_M,
   type RoutePath,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Keyboard,
@@ -41,84 +43,33 @@ import { theme } from './theme';
 import { TransitResults } from './TransitResults';
 
 /**
- * Compact trip time for a mode chip: the duration, "—" when the mode can't
- * route this plan, or "…" while the background pass is still routing it.
+ * Geocoding for the stop searches: the server's Photon proxy when reachable,
+ * the downloaded packs' FTS index when it isn't — so a stop can be searched
+ * for with no network at all. Viewport bias applies only to the free stop
+ * search; an along-route search is already constrained by the route's bbox.
  */
-function modeTimeLabel(t: number | 'none' | undefined): string {
-  if (t === undefined) return '…';
-  if (t === 'none') return '—';
-  return fmtDuration(t);
-}
-
-/** Alternative chip: the fastest shows its duration, others their extra minutes. */
-function altChipLabel(paths: RoutePath[], i: number, vias: (string | null)[]): string {
-  const extraMin = Math.round((paths[i]!.timeMs - paths[0]!.timeMs) / 60000);
-  const head =
-    i === 0 ? fmtDuration(paths[0]!.timeMs) : extraMin < 1 ? '+<1 min' : `+${extraMin} min`;
-  const via = vias[i];
-  return via ? `${head} via ${via}` : head;
-}
-
-/** Waypoint label, matching the map markers: A, B, C… (⟳ for a round trip). */
-function waypointLabel(index: number, roundTrip: boolean, count: number): string {
-  if (roundTrip || count === 1) return '⟳';
-  return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
-}
-
-/**
- * What a stop row says it is. Lettered markers match the map pins and are right
- * for a multi-stop road route, but they are a riddle on the two-stop journey
- * people actually plan — "A" does not tell you it is where you are leaving
- * from. So the ends are named outright whenever there are only two of them,
- * which is also the only shape transit supports.
- */
-function stopRole(index: number, count: number, roundTrip: boolean): string | null {
-  if (roundTrip || count !== 2) return null;
-  return index === 0 ? 'From' : 'To';
-}
-
-/** What a stop is called: its looked-up name, or coordinates when it has none. */
-function stopTitle(w: { pos: LatLng; name?: string }): string {
-  return w.name ?? `${w.pos.lat.toFixed(4)}, ${w.pos.lng.toFixed(4)}`;
-}
-
-interface StopHit {
-  name: string;
-  label: string;
-  position: LatLng;
-  /** True for the user's saved places — listed first, marked with a star. */
-  saved: boolean;
-}
-
-interface AlongRouteHit extends StopHit {
-  insertIndex: number;
-  extraTimeMs: number;
-  extraDistanceM: number;
-}
-
-const stopHitKey = (hit: StopHit): string =>
-  `${hit.position.lat.toFixed(5)}/${hit.position.lng.toFixed(5)}`;
-
-function detourLabel(timeMs: number): string {
-  if (timeMs < 60_000) return '+<1 min';
-  return `+${Math.round(timeMs / 60_000)} min`;
+function useGeocode(packs: LocalPack[], getBias: SearchBias): StopGeocodeFn {
+  return useCallback(
+    async ({ text, bbox, limit }) => {
+      const { results } = await geoSearch(packs, text, bbox ? undefined : getBias, { bbox, limit });
+      return results;
+    },
+    [packs, getBias],
+  );
 }
 
 /** Search box that adds a stop by name: saved places first, then addresses. */
 function StopSearch({
-  packs,
   places,
-  getBias,
+  geocode,
   placeholder,
   initialQuery = '',
   autoFocus = false,
   onPick,
   onCancel,
 }: {
-  packs: LocalPack[];
   places: PlaceRecord[];
-  /** Current map centre, to bias geocoder results towards the viewport. */
-  getBias: SearchBias;
+  geocode: StopGeocodeFn;
   /** Says which end this box fills, so the box is not a mystery slot. */
   placeholder: string;
   /**
@@ -133,37 +84,12 @@ function StopSearch({
   /** Present when this box is editing an existing stop — leaves it unchanged. */
   onCancel?: () => void;
 }) {
-  const [query, setQuery] = useState(initialQuery);
-  const [hits, setHits] = useState<StopHit[]>([]);
-  const generation = useRef(0);
-
-  useEffect(() => {
-    const q = query.trim();
-    const gen = ++generation.current;
-    if (q.length < 2) {
-      setHits([]);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void (async () => {
-        const saved: StopHit[] = matchPlacesByName(places, q, 4).map((p) => ({
-          name: p.name,
-          label: 'Saved place',
-          position: { lat: p.lat, lng: p.lng },
-          saved: true,
-        }));
-        const { results } = await geoSearch(packs, q, getBias);
-        const remote: StopHit[] = results.map((r: SearchResult) => ({
-          name: r.name,
-          label: r.label,
-          position: r.position,
-          saved: false,
-        }));
-        if (gen === generation.current) setHits([...saved, ...remote].slice(0, 6));
-      })();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, packs, places, getBias]);
+  const { query, setQuery, hits, reset } = useStopSearch({
+    geocode,
+    places,
+    initialQuery,
+    debounceMs: 300,
+  });
 
   return (
     <View style={styles.stopSearch}>
@@ -202,8 +128,7 @@ function StopSearch({
               onPress={() => {
                 Keyboard.dismiss();
                 onPick(hit.position, hit.name);
-                setQuery('');
-                setHits([]);
+                reset();
               }}
             >
               <Text style={styles.stopResultName} numberOfLines={1}>
@@ -227,96 +152,23 @@ function StopSearch({
 function AlongRouteSearch({
   route,
   path,
-  packs,
   places,
+  geocode,
 }: {
   route: RoutePlanner;
   path: RoutePath;
-  packs: LocalPack[];
   places: PlaceRecord[];
+  geocode: StopGeocodeFn;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<AlongRouteHit[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (!open || q.length < 2) {
-      setHits([]);
-      setLoading(false);
-      return;
-    }
-    const bounds = routeSearchBounds(path.points);
-    if (!bounds) return;
-    const controller = new AbortController();
-    let current = true;
-    setHits([]);
-    setLoading(true);
-
-    const mergeEstimated = async (candidates: StopHit[]) => {
-      if (candidates.length === 0) return;
-      const estimates = await route.estimateDetours(
-        candidates.map((hit) => hit.position),
-        controller.signal,
-      );
-      if (!current || controller.signal.aborted) return;
-      const next: AlongRouteHit[] = [];
-      for (let i = 0; i < candidates.length; i++) {
-        const estimate = estimates[i];
-        if (estimate) next.push({ ...candidates[i]!, ...estimate });
-      }
-      setHits((previous) => {
-        const merged = new Map(previous.map((hit) => [stopHitKey(hit), hit]));
-        for (const hit of next) merged.set(stopHitKey(hit), hit);
-        return [...merged.values()]
-          .sort((a, b) => a.extraTimeMs - b.extraTimeMs || a.extraDistanceM - b.extraDistanceM)
-          .slice(0, 6);
-      });
-    };
-
-    const saved: StopHit[] = matchPlacesByName(places, q, 8)
-      .map((place) => ({
-        name: place.name,
-        label: 'Saved place',
-        position: { lat: place.lat, lng: place.lng },
-        saved: true,
-      }))
-      .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
-      .slice(0, 4);
-    void mergeEstimated(saved);
-
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const { results } = await geoSearch(packs, q, undefined, {
-            bbox: photonBbox(bounds),
-            limit: 20,
-          });
-          if (!current) return;
-          const savedKeys = new Set(saved.map(stopHitKey));
-          const searched = results
-            .map<StopHit>((result) => ({
-              name: result.name,
-              label: result.label,
-              position: result.position,
-              saved: false,
-            }))
-            .filter((hit) => !savedKeys.has(stopHitKey(hit)))
-            .filter((hit) => distanceToRouteM(hit.position, path.points) <= ROUTE_SEARCH_CORRIDOR_M)
-            .slice(0, Math.max(6 - saved.length, 0));
-          await mergeEstimated(searched);
-        } finally {
-          if (current) setLoading(false);
-        }
-      })();
-    }, 300);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [open, query, path, packs, places, route.estimateDetours]);
+  const { query, setQuery, hits, loading, reset } = useAlongRouteSearch({
+    geocode,
+    places,
+    path,
+    estimateDetours: route.estimateDetours,
+    active: open,
+    debounceMs: 300,
+  });
 
   return (
     <View style={styles.alongSearch}>
@@ -356,7 +208,7 @@ function AlongRouteSearch({
                     Keyboard.dismiss();
                     route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
                     setOpen(false);
-                    setQuery('');
+                    reset();
                   }}
                 >
                   <Text style={styles.stopResultName} numberOfLines={1}>
@@ -424,6 +276,7 @@ export function RoutePanel({
   bottomInset?: number;
 }) {
   const sheetRef = useRef<BottomSheetHandle>(null);
+  const geocode = useGeocode(packs, getBias);
   // True once a transit journey has been sent to the map (the panel collapsed
   // to a peek to uncover it). Back then re-opens the panel — returning to the
   // journey card — before a second Back closes the planner, instead of the
@@ -638,9 +491,8 @@ export function RoutePanel({
           appending a stop you meant to replace. */}
         {editing === null ? (
           <StopSearch
-            packs={packs}
             places={places}
-            getBias={getBias}
+            geocode={geocode}
             placeholder={
               nextRole === 'start'
                 ? 'Start: address or saved place'
@@ -653,7 +505,7 @@ export function RoutePanel({
         ) : null}
 
         {!route.roundTrip && !transitMode && path && stops.length >= 2 ? (
-          <AlongRouteSearch route={route} path={path} packs={packs} places={places} />
+          <AlongRouteSearch route={route} path={path} places={places} geocode={geocode} />
         ) : null}
 
         <View style={styles.sourceRow}>
@@ -694,9 +546,8 @@ export function RoutePanel({
                 {editing === w.id ? (
                   <View style={styles.wpEdit}>
                     <StopSearch
-                      packs={packs}
                       places={places}
-                      getBias={getBias}
+                      geocode={geocode}
                       placeholder="Change this stop"
                       initialQuery={w.name ?? ''}
                       autoFocus
