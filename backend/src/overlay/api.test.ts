@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  norwegianLayers,
-  registerOverlayApi,
-  tileBbox3857,
-  type OverlayLayer,
-} from './overlay-api.js';
+import { norwegianLayers, registerOverlayApi, type OverlayLayer } from './index.js';
 
 const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
@@ -132,24 +127,6 @@ function track(app: FastifyInstance, cacheDir: string) {
     await rm(cacheDir, { recursive: true, force: true });
   });
 }
-
-describe('tile bbox math', () => {
-  it('maps z0 to the full mercator extent', () => {
-    const [minx, miny, maxx, maxy] = tileBbox3857(0, 0, 0);
-    expect(minx).toBeCloseTo(-20037508.342789244, 3);
-    expect(miny).toBeCloseTo(-20037508.342789244, 3);
-    expect(maxx).toBeCloseTo(20037508.342789244, 3);
-    expect(maxy).toBeCloseTo(20037508.342789244, 3);
-  });
-
-  it('maps z1 x1 y0 to the north-east quadrant', () => {
-    const [minx, miny, maxx, maxy] = tileBbox3857(1, 1, 0);
-    expect(minx).toBeCloseTo(0, 3);
-    expect(miny).toBeCloseTo(0, 3);
-    expect(maxx).toBeCloseTo(20037508.342789244, 3);
-    expect(maxy).toBeCloseTo(20037508.342789244, 3);
-  });
-});
 
 describe('layer catalog', () => {
   it('lists layer metadata without upstream details', async () => {

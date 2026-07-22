@@ -12,7 +12,7 @@ import {
 } from '@atlas/core';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
-import { registerOverlayApi, type OverlayApiOptions } from './overlay-api.js';
+import { registerOverlayApi, type OverlayApiOptions } from './overlay/index.js';
 import { registerPacksApi } from './packs-api.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
