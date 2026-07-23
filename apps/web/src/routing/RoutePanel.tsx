@@ -190,6 +190,8 @@ export function RoutePanel({
   transit,
   places,
   getBias,
+  locatingOrigin,
+  onNavigate,
 }: {
   route: RoutePlanner;
   /** Public transport for the same plan — a travel mode beside the road profiles. */
@@ -198,6 +200,13 @@ export function RoutePanel({
   places: PlaceRecord[];
   /** Current map center, biasing the geocoder towards the viewport. */
   getBias: () => LatLng | null;
+  /** A "Directions" hand-off is still waiting for the browser's fix. */
+  locatingOrigin: boolean;
+  /**
+   * Start turn-by-turn to the last stop in the current profile. This panel is
+   * the app's only travel-mode picker, so guidance starts from here.
+   */
+  onNavigate: (destination: LatLng) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -211,6 +220,11 @@ export function RoutePanel({
   // asked as soon as the plan has two ends, so this fills in alongside the
   // other modes rather than only after transit is picked.
   const transitTimeMs = transit.trips?.[0]?.durationMs;
+  // Turn-by-turn goes to the plan's last stop; a loop has no destination to
+  // be guided to that isn't where the traveller already is.
+  const destination = !route.roundTrip
+    ? route.waypoints[route.waypoints.length - 1]?.pos
+    : undefined;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
 
@@ -241,6 +255,7 @@ export function RoutePanel({
       <div className="route-header">
         <strong>Route</strong>
         {route.loading && <span className="route-loading">Routing…</span>}
+        {locatingOrigin && <span className="route-loading">Getting location…</span>}
         <button
           type="button"
           className="icon-button"
@@ -377,6 +392,15 @@ export function RoutePanel({
         <p className="route-hint">
           Drag rows to reorder · drag markers to move · click the route line to add a via point.
         </p>
+      )}
+
+      {/* This panel is the only travel-mode picker, so guidance starts here.
+          Transit has no turn-by-turn — it shows the journey board below instead
+          of a button that would promise directions it cannot give. */}
+      {!transitMode && destination && (
+        <button type="button" className="route-navigate" onClick={() => onNavigate(destination)}>
+          Start navigation
+        </button>
       )}
 
       {/* Each action appears only once it can do something, rather than sitting

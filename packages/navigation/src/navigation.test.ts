@@ -969,21 +969,35 @@ describe('NavigationSession wrong-branch detection (gyro)', () => {
 });
 
 describe('headingRateDegPerSec', () => {
+  // DeviceMotion reports gravity pointing down: screen up and flat is -z.
   it('projects yaw about the vertical for a flat-mounted device', () => {
     // Screen up, rotating counterclockwise seen from above → bearing falls.
-    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: 9.81 })).toBeCloseTo(-10);
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: -9.81 })).toBeCloseTo(-10);
+    // ...and clockwise → bearing grows.
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: -10 }, { x: 0, y: 0, z: -9.81 })).toBeCloseTo(10);
   });
 
-  it('is mount-agnostic: portrait in a windshield cradle reads the same turn', () => {
-    // Upright portrait: gravity reaction along +y, world yaw is device y.
-    expect(headingRateDegPerSec({ x: 0, y: 10, z: 0 }, { x: 0, y: 9.81, z: 0 })).toBeCloseTo(-10);
+  it('is mount-agnostic: one right turn reads the same portrait or landscape', () => {
+    // Upright portrait in a cradle: the top edge (+y) points at the sky, so
+    // the world vertical is device -y and a right turn is -y rotation.
+    expect(headingRateDegPerSec({ x: 0, y: -10, z: 0 }, { x: 0, y: -9.81, z: 0 })).toBeCloseTo(10);
     // Rotation about the other axes (pitch/roll in this mount) is not a turn.
-    expect(headingRateDegPerSec({ x: 15, y: 0, z: 0 }, { x: 0, y: 9.81, z: 0 })).toBeCloseTo(0);
+    expect(headingRateDegPerSec({ x: 15, y: 0, z: 0 }, { x: 0, y: -9.81, z: 0 })).toBeCloseTo(0);
+    // Same cradle turned to landscape (+x now points at the ground): the same
+    // physical right turn, and the same reading — nothing rotates the raw
+    // sensor frame with the screen, and the projection needs no orientation.
+    expect(headingRateDegPerSec({ x: 10, y: 0, z: 0 }, { x: 9.81, y: 0, z: 0 })).toBeCloseTo(10);
+    expect(headingRateDegPerSec({ x: 0, y: 15, z: 0 }, { x: 9.81, y: 0, z: 0 })).toBeCloseTo(0);
+    // Tilted back 45° in the cradle — still the same turn.
+    const s = 9.81 / Math.SQRT2;
+    expect(headingRateDegPerSec({ x: 0, y: -7.07, z: 7.07 }, { x: 0, y: -s, z: s })).toBeCloseTo(
+      10,
+    );
   });
 
   it('returns null when the accelerometer is far from 1 g', () => {
-    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: 0.5 })).toBeNull();
-    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 9, y: 9, z: 9 })).toBeNull();
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: 0, y: 0, z: -0.5 })).toBeNull();
+    expect(headingRateDegPerSec({ x: 0, y: 0, z: 10 }, { x: -9, y: -9, z: -9 })).toBeNull();
   });
 });
 

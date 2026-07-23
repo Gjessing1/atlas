@@ -144,3 +144,14 @@ export async function mockRouting(page: Page): Promise<void> {
     });
   });
 }
+
+/**
+ * Place card → turn-by-turn, the way a user gets there since the card stopped
+ * choosing a travel mode: "Directions" hands the point to the route planner
+ * (the app's one mode picker, transit included) and guidance starts from the
+ * planner's own button.
+ */
+export async function startNavigationFromCard(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Directions' }).click();
+  await page.getByRole('button', { name: 'Start navigation' }).click();
+}

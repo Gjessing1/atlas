@@ -328,8 +328,14 @@ button {
 
 /* ---- sidebar (collections of places & tracks) ---- */
 
+/* Topbar buttons are icon-only: the glyphs (star, route, sun, gear) say what
+   they do, and four labels beside a 320 px search box crowded the map. The
+   accessible name lives on aria-label, with a title for a pointer hover. */
 .sidebar-toggle {
-  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
   border: none;
   border-radius: 8px;
   background: var(--surface-overlay);
@@ -1041,6 +1047,24 @@ button {
   color: var(--text-muted);
 }
 
+/* The planner is the app's one travel-mode picker, so guidance starts here —
+   the primary action of the panel, above the secondary row (Android parity). */
+.route-navigate {
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.route-navigate:hover {
+  filter: brightness(1.06);
+}
+
 .route-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1610,12 +1634,24 @@ button.transit-notice-summary {
   background: var(--danger-bg);
 }
 
-/* ---- map-layer quick switcher (bottom-right, above the attribution bar) ---- */
+/* ---- map-layer quick switcher (bottom-right, above the map controls) ---- */
+
+/* Height of MapLibre's own bottom-right column (attribution, zoom, locate),
+   which the Atlas switches stack on top of so every map control reads as one
+   right-hand column. Shrinks on phones, where the zoom buttons are hidden. */
+:root {
+  --map-ctrl-stack: 184px;
+}
+
+/* Line MapLibre's controls up with the Atlas switches' right edge. */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl {
+  margin-right: 12px;
+}
 
 .layer-switch {
   position: absolute;
   right: 12px;
-  bottom: 34px;
+  bottom: var(--map-ctrl-stack);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -3151,7 +3187,7 @@ button.transit-notice-summary {
 .profile-switch {
   position: absolute;
   right: 12px;
-  bottom: 80px;
+  bottom: calc(var(--map-ctrl-stack) + 46px);
   display: flex;
   gap: 2px;
   padding: 3px;
@@ -3206,22 +3242,12 @@ button.transit-notice-summary {
    for a desktop window. This is the cheap pass — the full bottom-sheet
    interaction model (peek → half → full) is still ahead. */
 @media (max-width: 640px) {
-  /* Buttons collapse to their glyphs; the accessible name stays on each button
-     via aria-label, so nothing is lost to a screen reader. The bar also stops
-     short of the map's right-hand controls and wraps the buttons onto a second
-     row, which is what actually keeps them from sliding underneath. */
+  /* The bar spans the width: the map's own controls have moved to the bottom
+     right, so nothing up here to stay clear of. Wrapping is kept for the
+     narrowest phones, where four buttons plus the search box still overflow. */
   .topbar {
-    right: 56px;
+    right: 12px;
     flex-wrap: wrap;
-  }
-
-  .topbar-label {
-    display: none;
-  }
-
-  .sidebar-toggle {
-    padding: 6px 10px;
-    font-size: 16px;
   }
 
   .searchbox {
@@ -3229,10 +3255,14 @@ button.transit-notice-summary {
   }
 
   /* Pinch and two-finger rotate already do this on touch, and the buttons cost
-     the width the topbar needs. The geolocate control has no gesture, so it
-     stays. */
-  .maplibregl-ctrl-top-right .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) {
+     screen the map wants. The geolocate control has no gesture, so it stays —
+     and the switch stack above drops by the height the buttons freed. */
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) {
     display: none;
+  }
+
+  :root {
+    --map-ctrl-stack: 84px;
   }
 
   /* Panels span the viewport instead of floating at a desktop width, and clear

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { encodeShape, mockRouting, waitForMap } from './helpers';
+import { encodeShape, mockRouting, startNavigationFromCard, waitForMap } from './helpers';
 
 /**
  * Turn-by-turn web navigation: geolocation is mocked at the browser level and
@@ -19,17 +19,19 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
   await waitForMap(page);
 
-  // Navigate from the pin's place card offers the route choices first; Start
-  // commits to the selected one and guidance begins.
+  // Directions from the pin's place card opens the planner; Start navigation
+  // there offers the route choices, and Start commits to the selected one.
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await expect(page.locator('.nav-preview')).toBeVisible();
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.nav-preview')).toHaveCount(0);
 
   // Banner up, guidance summary showing, route drawn, puck snapped to the line.
   await expect(page.locator('.nav-banner')).toBeVisible();
-  await expect(page.locator('.nav-eta')).toContainText('left');
+  // Time left leads the banner as a bare number (no "left" label, Android
+  // parity) — assert the shape, since the value depends on the mocked trip.
+  await expect(page.locator('.nav-eta')).toHaveText(/^\d+ (min|h( \d+ min)?)$/);
   await expect(page.locator('.nav-summary')).toContainText('arrival');
   await expect(page.locator('.topbar')).toBeHidden();
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav')));
@@ -63,18 +65,23 @@ test('Start refreshes a preview route from the latest position', async ({ page, 
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await page.getByRole('button', { name: 'Directions' }).click();
+  await expect(page.locator('.route-stats')).toBeVisible();
+  await page.getByRole('button', { name: 'Start navigation' }).click();
   await expect(page.locator('.nav-preview')).toBeVisible();
 
   // Move while considering the preview. The second route request made by
   // Start must use this position, not the fix that opened the preview.
   await context.setGeolocation({ latitude: 59.915, longitude: 10.755 });
+  const before = [...routeOrigins];
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.nav-banner')).toBeVisible();
 
-  expect(routeOrigins).toHaveLength(2);
-  expect(routeOrigins[0]).toEqual({ lat: 59.91, lon: 10.75 });
-  expect(routeOrigins[1]).toEqual({ lat: 59.915, lon: 10.755 });
+  // The planner routes the plan and each mode chip's trip time from the same
+  // endpoint, so counting requests proves nothing — the origins do: nothing
+  // asked from the moved position until Start, and Start did.
+  expect(before.every((o) => o.lat === 59.91 && o.lon === 10.75)).toBe(true);
+  expect(routeOrigins).toContainEqual({ lat: 59.915, lon: 10.755 });
 });
 
 test('a long motorway leg leads with the road, keeping the distant turn secondary', async ({
@@ -140,7 +147,7 @@ test('a long motorway leg leads with the road, keeping the distant turn secondar
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await page.getByRole('button', { name: 'Start' }).click();
 
   await expect(page.locator('.nav-distance-to')).toContainText('Continue for');
@@ -221,7 +228,7 @@ test('lane guidance requests Valhalla lanes and highlights the carrying lane on 
   await page.goto('/#map=15/59.91/10.75&pin=59.912/10.752');
   await waitForMap(page);
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await page.getByRole('button', { name: 'Start' }).click();
 
   await expect(page.locator('.nav-lanes')).toBeVisible();
@@ -240,7 +247,7 @@ test('a fix too poor to arrive on still lets the driver finish the trip', async 
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.nav-banner')).toBeVisible();
 
@@ -273,7 +280,7 @@ test('the arrival hatch stays hidden far from the destination', async ({ page })
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.nav-banner')).toBeVisible();
   // Still ~1.2 km out at the start fix — offering "I've arrived" here would be
@@ -288,7 +295,7 @@ test('geolocation denied shows an error state, End dismisses it', async ({ page,
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
 
   await expect(page.locator('.nav-error')).toBeVisible();
   await page.getByRole('button', { name: 'End' }).click();
@@ -321,7 +328,7 @@ test('a mapped tunnel names itself in the road chip and dims the map', async ({ 
   await waitForMap(page);
 
   await page.locator('.place-marker').click();
-  await page.getByRole('button', { name: 'Navigate' }).click();
+  await startNavigationFromCard(page);
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.nav-banner')).toBeVisible();
 

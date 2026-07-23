@@ -36,6 +36,7 @@ import { RoutePreview } from './nav/RoutePreview.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
+import { useDirections } from './routing/useDirections.js';
 import { useRoute } from './routing/useRoute.js';
 import { useTransitPlan } from './routing/useTransit.js';
 import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
@@ -118,6 +119,8 @@ export function App() {
   // profiles. The panel lists the journeys; the map draws the selected one, and
   // the road line stands down while it does.
   const transit = useTransitPlan(route);
+  // The place card's hand-off into the planner (seeds "My location" as start).
+  const directions = useDirections(route);
   useRouteLayers(map, route, transit.enabled);
   useTransitLayers(map, transit.enabled ? transit.trip : null);
   // The plan survives a reload, and rides along in the shareable URL hash.
@@ -167,7 +170,7 @@ export function App() {
   const follow = useNavLayers(map, nav, navPrefs.followMode);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
-  const onNavigateToTarget = useCallback(
+  const onStartNavigation = useCallback(
     (dest: LatLng) => {
       setPin(null);
       setTarget(null);
@@ -175,6 +178,18 @@ export function App() {
       void startNav(dest);
     },
     [startNav, stopRoute],
+  );
+  // "Directions" on the place card opens the planner with that point as the
+  // destination (Android parity): the planner is the one travel-mode picker, so
+  // public transport is offered there whether the trip started from a map pin
+  // or from the Route button. Turn-by-turn then starts from the panel.
+  const onDirectionsToTarget = useCallback(
+    (dest: LatLng, name?: string) => {
+      setPin(null);
+      setTarget(null);
+      directions.planTo(dest, name);
+    },
+    [directions],
   );
   // The route elevation profile can be dismissed; it comes back per route session.
   const [routeProfileHidden, setRouteProfileHidden] = useState(false);
@@ -427,16 +442,17 @@ export function App() {
           type="button"
           className="sidebar-toggle"
           aria-label="Collections"
+          title="Collections"
           aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((open) => !open)}
         >
           <StarIcon size={18} />
-          <span className="topbar-label">Collections</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
           aria-label="Route"
+          title="Route"
           aria-pressed={route.active}
           onClick={() => {
             // Starting from a dropped pin routes "from here".
@@ -456,27 +472,26 @@ export function App() {
           }}
         >
           <RouteIcon size={18} />
-          <span className="topbar-label">Route</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
           aria-label="Weather"
+          title="Weather"
           aria-pressed={weatherTarget !== null}
           onClick={weatherAt.toggle}
         >
           <SunIcon size={18} />
-          <span className="topbar-label">Weather</span>
         </button>
         <button
           type="button"
           className="sidebar-toggle"
           aria-label="Settings"
+          title="Settings"
           aria-expanded={settingsOpen}
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <SettingsIcon size={18} />
-          <span className="topbar-label">Settings</span>
         </button>
       </div>
       {/* Overlay switcher, hidden mid-trip like the other map chrome — the
@@ -495,7 +510,7 @@ export function App() {
           userAt={userAt}
           routeActive={route.active}
           shifted={sidebarOpen}
-          onNavigate={() => onNavigateToTarget(target.position)}
+          onDirections={() => onDirectionsToTarget(target.position, target.name)}
           onSave={onSaveTarget}
           onShowSaved={(place) => {
             setSidebarOpen(true);
@@ -538,7 +553,14 @@ export function App() {
           />
         )}
         {route.active && (
-          <RoutePanel route={route} transit={transit} places={userData.places} getBias={getBias} />
+          <RoutePanel
+            route={route}
+            transit={transit}
+            places={userData.places}
+            getBias={getBias}
+            locatingOrigin={directions.locatingOrigin}
+            onNavigate={onStartNavigation}
+          />
         )}
         {sidebarOpen && (
           <Sidebar

@@ -123,9 +123,13 @@ export function watchHeadingRate(onDelta: (deltaDeg: number, dtSec: number) => v
     const dtSec = lastMs === null ? 0 : Math.min(0.5, (now - lastMs) / 1000);
     lastMs = now;
     if (dtSec <= 0) return;
-    // W3C device axes: beta about x, gamma about y, alpha about z (deg/s).
+    // expo-sensors names the rotation rates alpha/beta/gamma but documents
+    // (and on Android delivers) them as the plain device x/y/z axes — NOT the
+    // W3C beta-about-x order. `accelerationIncludingGravity` is the W3C
+    // down-pointing vector; both are raw device frame, unrotated by the screen
+    // orientation, which is exactly what the gravity projection wants.
     const rate = headingRateDegPerSec(
-      { x: rot.beta ?? 0, y: rot.gamma ?? 0, z: rot.alpha ?? 0 },
+      { x: rot.alpha ?? 0, y: rot.beta ?? 0, z: rot.gamma ?? 0 },
       grav,
     );
     if (rate !== null) onDelta(rate * dtSec, dtSec);

@@ -98,7 +98,7 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   // A bare pin is titled by its own coordinates, and offers the shared actions.
   const card = page.locator('.place-card');
   await expect(card.locator('strong')).toHaveText(/^-?\d+\.\d{5}, -?\d+\.\d{5}$/);
-  await expect(card.getByRole('button', { name: 'Navigate' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Directions' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Save' })).toBeVisible();
   // The Light row is offline maths, so it is always there and always 24-hour.
   // Elevation is deliberately not asserted: it comes from a live upstream, and a

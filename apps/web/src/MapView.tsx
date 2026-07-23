@@ -127,7 +127,10 @@ export function MapView({
       center: initialView.center,
       zoom: initialView.zoom,
     });
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    // Every map control lives in one bottom-right column — zoom and locate
+    // here, the activity and layer switches stacked above them in CSS — so the
+    // top of the screen belongs to search and the panels alone.
+    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
     // Location puck + accuracy circle with a locate/recenter button; keeps
     // following until the user pans away (web-nav prerequisite, Android parity).
     const geolocate = new maplibregl.GeolocateControl({
@@ -140,7 +143,7 @@ export function MapView({
       const { latitude, longitude } = (e as GeolocationPosition).coords;
       onUserLocationRef.current({ lat: latitude, lng: longitude });
     });
-    map.addControl(geolocate, 'top-right');
+    map.addControl(geolocate, 'bottom-right');
     // `metric` is MapLibre's default too, but pinned deliberately: Atlas never
     // shows feet or miles, and that must not ride on a library default.
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');

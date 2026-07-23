@@ -23,7 +23,8 @@ interface PlaceCardProps {
   routeActive: boolean;
   /** The Collections sidebar is open and occupies the card's usual corner. */
   shifted: boolean;
-  onNavigate: () => void;
+  /** Open the route planner with this point as the destination. */
+  onDirections: () => void;
   onSave: () => void;
   onShowSaved: (place: PlaceRecord) => void;
   onAddStop: () => void;
@@ -70,6 +71,11 @@ function describeLight(sun: SunDay): string {
  * navigated to, a saved place could only show its name, and only the pin could
  * be shared. The actions are the same set every time; only the ones that cannot
  * apply are left out.
+ *
+ * Like the Android card, it deliberately does **not** choose a travel mode:
+ * "Directions" opens the route planner with this point as the destination, and
+ * every mode decision — including public transport, which needs a journey board
+ * this card has no room for — lives there, in one place.
  */
 export function PlaceCard({
   target,
@@ -78,7 +84,7 @@ export function PlaceCard({
   userAt,
   routeActive,
   shifted,
-  onNavigate,
+  onDirections,
   onSave,
   onShowSaved,
   onAddStop,
@@ -146,8 +152,8 @@ export function PlaceCard({
         )}
       </dl>
       <div className="place-card-actions">
-        <button type="button" className="primary" onClick={onNavigate}>
-          Navigate
+        <button type="button" className="primary" onClick={onDirections}>
+          Directions
         </button>
         {routeActive && (
           <button type="button" onClick={onAddStop}>
