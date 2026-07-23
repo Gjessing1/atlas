@@ -106,11 +106,13 @@ async function watchFixes(onFix: (fix: Position) => void): Promise<() => void> {
 }
 
 /**
- * Yaw rate from the gyro, integrated into a per-report delta. The magnetometer
- * is useless in a car in a tunnel; the gyro's relative yaw since the last good
- * fix is the reliable signal.
+ * Yaw rate from the gyro, integrated into a per-report delta (with the
+ * interval it covers). The magnetometer is useless in a car — steel body,
+ * speakers, cradle magnet, and hopeless in a tunnel; the gyro's relative yaw
+ * is the reliable signal. Two subscribers: the session while dead reckoning
+ * (a turn taken with no fixes), and the follow camera for the whole trip.
  */
-function watchHeadingRate(onDelta: (deltaDeg: number) => void): () => void {
+export function watchHeadingRate(onDelta: (deltaDeg: number, dtSec: number) => void): () => void {
   DeviceMotion.setUpdateInterval(100);
   let lastMs: number | null = null;
   const sub = DeviceMotion.addListener((m) => {
@@ -126,7 +128,7 @@ function watchHeadingRate(onDelta: (deltaDeg: number) => void): () => void {
       { x: rot.beta ?? 0, y: rot.gamma ?? 0, z: rot.alpha ?? 0 },
       grav,
     );
-    if (rate !== null) onDelta(rate * dtSec);
+    if (rate !== null) onDelta(rate * dtSec, dtSec);
   });
   return () => sub.remove();
 }

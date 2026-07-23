@@ -488,10 +488,10 @@ export class NavigationSession {
       this.yawExpectedDeg += wrapDeg(course - this.reckonCourseDeg);
     }
     if (course !== null) this.reckonCourseDeg = course;
-    // The expected yaw leads the actual one through a bend (the course tangent
-    // looks ~25–60 m ahead), so a sharp corner spikes the divergence for a few
-    // seconds even when the driver follows the route — only a sustained
-    // mismatch is evidence of a wrong branch.
+    // Reckoned position and real position drift apart through a bend, so a
+    // sharp corner spikes the divergence for a few seconds even when the
+    // driver follows the route — only a sustained mismatch is evidence of a
+    // wrong branch.
     if (Math.abs(this.yawActualDeg - this.yawExpectedDeg) > this.opts.wrongBranchDeg) {
       this.wrongBranchTicks++;
       if (this.wrongBranchTicks >= WRONG_BRANCH_GRACE_TICKS) this.wrongBranch = true;

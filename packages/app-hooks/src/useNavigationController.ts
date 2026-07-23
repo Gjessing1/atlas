@@ -73,10 +73,12 @@ export interface NavPlatform {
   /** Hold the screen awake for the trip; returns the release. */
   keepAwake?(): () => void;
   /**
-   * Report yaw *change* in degrees while dead reckoning, so the session can
-   * notice a turn taken inside a tunnel. Subscribed only during GPS gaps.
+   * Report yaw *change* in degrees (with the interval it covers) while dead
+   * reckoning, so the session can notice a turn taken inside a tunnel.
+   * Subscribed only during GPS gaps — the follow camera subscribes to the same
+   * source separately, for the whole trip.
    */
-  watchHeadingRate?(onDelta: (deltaDeg: number) => void): () => void;
+  watchHeadingRate?(onDelta: (deltaDeg: number, dtSec: number) => void): () => void;
 }
 
 export interface NavController {
