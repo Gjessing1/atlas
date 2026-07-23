@@ -5,15 +5,9 @@ FROM protomaps/go-pmtiles:v1.31.1 AS pmtiles
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
-COPY packages/core/package.json ./packages/core/
-COPY packages/conditions/package.json ./packages/conditions/
-COPY packages/gpx/package.json ./packages/gpx/
-COPY packages/storage/package.json ./packages/storage/
-COPY packages/routing/package.json ./packages/routing/
-COPY packages/navigation/package.json ./packages/navigation/
-COPY packages/app-hooks/package.json ./packages/app-hooks/
-COPY packages/sync/package.json ./packages/sync/
-COPY packages/transit/package.json ./packages/transit/
+# Whole packages tree (source only — .dockerignore excludes dist/ + node_modules),
+# so a new workspace never needs a hand-added COPY line. dist/ is rebuilt below.
+COPY packages ./packages
 COPY apps/web/package.json ./apps/web/
 COPY backend/package.json ./backend/
 # Single deterministic install for every workspace. The npm download cache persists
@@ -39,21 +33,13 @@ ARG GIT_SHA=
 ENV GIT_SHA=$GIT_SHA
 COPY --from=pmtiles /go-pmtiles /usr/local/bin/pmtiles
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/packages/core/package.json ./packages/core/
-COPY --from=build /app/packages/core/dist ./packages/core/dist
-# @atlas/conditions currently only lends the backend types, but ship its dist
-# so a future value import can't crash the runtime image.
-COPY --from=build /app/packages/conditions/package.json ./packages/conditions/
-COPY --from=build /app/packages/conditions/dist ./packages/conditions/dist
-# @atlas/sync is a runtime import of the backend (LWW + protocol helpers).
-COPY --from=build /app/packages/sync/package.json ./packages/sync/
-COPY --from=build /app/packages/sync/dist ./packages/sync/dist
-# @atlas/transit is a runtime import of the backend (Entur request/response
-# mapping behind /api/transit). Omitting it does not fail the build: the root
-# node_modules copy still carries the @atlas/transit *symlink*, which then
-# dangles because its target was never copied, and the server dies on import.
-COPY --from=build /app/packages/transit/package.json ./packages/transit/
-COPY --from=build /app/packages/transit/dist ./packages/transit/dist
+# Every workspace package, wholesale (dist + manifest for all of them). The root
+# node_modules copy carries an @atlas/* symlink for each package; if a package
+# the backend imports isn't copied here that symlink dangles and the server
+# crash-loops on import — exactly what @atlas/routing did in v0.75.0. Copying the
+# whole tree means a new backend import can never rot this list again. dist was
+# built and dev-deps pruned in the build stage; leftover source .ts is harmless.
+COPY --from=build /app/packages ./packages
 COPY --from=build /app/backend/package.json ./backend/
 # Workspace-nested deps (npm nests a package here when the root already holds a
 # different version — e.g. @sinclair/typebox 0.34 vs a transitive 0.27): the

@@ -10,8 +10,8 @@
     "backend"
   ],
   "scripts": {
-    "_comment:build:packages": "Hand-ordered dependency waves — npm does not topologically sort -w. EVERY new package must be added here, in a wave after the packages it imports, or it is simply never built: the tree keeps working locally on a stale dist/ while a clean build (the Docker quality gate) fails.",
-    "build:packages": "npm run build -w @atlas/core -w @atlas/conditions && npm run build -w @atlas/gpx -w @atlas/storage -w @atlas/transit && npm run build -w @atlas/routing -w @atlas/sync && npm run build -w @atlas/navigation && npm run build -w @atlas/app-hooks",
+    "_comment:build:packages": "Dependency order is derived from each package's @atlas/* deps by scripts/build-packages.mjs — no hand-maintained wave list. A new package needs no edit here: drop it in packages/, declare its deps, done.",
+    "build:packages": "node scripts/build-packages.mjs",
     "build": "npm run build:packages && npm run build -w @atlas/backend && npm run build -w @atlas/web",
     "dev": "npm run build:packages && concurrently -k -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
     "dev:backend": "npm run dev -w @atlas/backend",

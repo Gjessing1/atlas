@@ -55,6 +55,30 @@ jobs:
             -t "$IMAGE:latest" -t "$IMAGE:$SHA_TAG" \
             -t "$PUSH_IMAGE:latest" -t "$PUSH_IMAGE:$SHA_TAG" .
 
+      # A green quality gate proves the code compiles; it does NOT prove the image
+      # RUNS. A runtime dep that isn't shipped (e.g. an @atlas/* dist missing from the
+      # image) only surfaces as an import-time crash loop — which is what shipped in
+      # v0.75.0. Boot the freshly built image with no sync env (anonymous local-only)
+      # and require /api/health before anything is pushed. Poll via `docker exec` (the
+      # container runs on the HOST daemon; a host-published port is not reachable from
+      # this job container, same as the registry-auth note above), so a crash-exit is
+      # caught as an exec failure. Nothing is pushed unless the server actually answers.
+      - name: Smoke test — the image must actually boot
+        run: |
+          SHA_TAG="${GITHUB_SHA::7}"
+          cid=$(docker run -d "$IMAGE:$SHA_TAG")
+          ok=""
+          for i in $(seq 1 30); do
+            if docker exec "$cid" node -e "fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+              ok=1; break
+            fi
+            sleep 1
+          done
+          echo "----- container logs -----"; docker logs "$cid" 2>&1 | tail -40 || true
+          docker rm -f "$cid" >/dev/null 2>&1 || true
+          if [ -z "$ok" ]; then echo "::error::built image failed to serve /api/health"; exit 1; fi
+          echo "image booted and served /api/health"
+
       - name: Push image
         run: |
           SHA_TAG="${GITHUB_SHA::7}"

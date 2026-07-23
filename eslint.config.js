@@ -23,8 +23,8 @@ export default tseslint.config(
     },
   },
   {
-    // Plain-node infrastructure scripts (e.g. infrastructure/packs/*.mjs).
-    files: ['infrastructure/**/*.mjs'],
+    // Plain-node scripts (build tooling in scripts/, infrastructure/packs/*.mjs).
+    files: ['scripts/**/*.mjs', 'infrastructure/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {
