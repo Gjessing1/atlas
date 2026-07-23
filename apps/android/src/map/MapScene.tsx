@@ -189,6 +189,12 @@ export function MapScene({
   // The follow camera itself lives in useNavCamera (App drives it through
   // cameraRef) — the scene only renders the puck and reports gestures.
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  // The trip isn't over until the traveller taps Done: the arrival card stays
+  // up while they finish the last few metres on foot or hunt for the entrance,
+  // and a position marker that vanishes the moment we say "you have arrived"
+  // is exactly when it is missed. The native puck keeps updating on its own
+  // location feed, so it tracks them without the trip's GPS watch running.
+  const locating = following || showPuck || nav.phase === 'arrived';
 
   // On-map turn arrows for the active route; turns already passed are hidden
   // by the alongM filter below rather than by rebuilding the geometry.
@@ -572,9 +578,7 @@ export function MapScene({
             zoom: initialView.zoom,
           }}
         />
-        {!suppressPuck && (following || showPuck) ? (
-          <UserLocation heading={following} animated />
-        ) : null}
+        {!suppressPuck && locating ? <UserLocation heading={following} animated /> : null}
         {/* Map-anchored nav dot: the honest marker while the follow camera is
             paused or in overview. Directionless on purpose — the map carries
             whatever bearing the user left it at, so an arrow drawn here would

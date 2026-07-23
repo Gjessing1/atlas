@@ -1,4 +1,4 @@
-import { decodePolyline, type LatLng } from '@atlas/core';
+import { decodePolyline, haversineM, type LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
 import type {
   LaneDirection,
@@ -64,6 +64,59 @@ function project(origin: LatLng, distM: number, bearingDeg: number): LatLng {
     lat: (lat2 * 180) / Math.PI,
     lng: (((((lng2 * 180) / Math.PI + 540) % 360) + 360) % 360) - 180,
   };
+}
+
+/** Compass bearing (deg, 0 = north, clockwise) from `a` to `b`. */
+function bearingBetween(a: LatLng, b: LatLng): number {
+  const φ1 = (a.lat * Math.PI) / 180;
+  const φ2 = (b.lat * Math.PI) / 180;
+  const Δλ = ((b.lng - a.lng) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/** Shortest signed difference b − a, in (−180, 180]. */
+function angleDelta(a: number, b: number): number {
+  return ((((b - a + 180) % 360) + 360) % 360) - 180;
+}
+
+/** Ignore shape vertices this close together — their bearing is noise. */
+const HEADING_SPAN_M = 8;
+
+/**
+ * Direction of travel through `index`: `forward` gives the road leaving it,
+ * otherwise the road arriving at it. Vertices nearer than `HEADING_SPAN_M` are
+ * skipped, so a cluster of near-identical shape points can't yield a
+ * meaningless bearing. Null when the shape runs out before that span.
+ */
+function headingAlong(points: LatLng[], index: number, forward: boolean): number | null {
+  const here = points[index];
+  if (!here) return null;
+  const step = forward ? 1 : -1;
+  for (let i = index + step; i >= 0 && i < points.length; i += step) {
+    const other = points[i]!;
+    if (haversineM(here, other) < HEADING_SPAN_M) continue;
+    return forward ? bearingBetween(here, other) : bearingBetween(other, here);
+  }
+  return null;
+}
+
+/**
+ * How far a roundabout turns the traveller: the departing road's heading minus
+ * the approaching road's. Valhalla reports the exit *count* and nothing about
+ * direction, yet the direction is what the icon has to draw — a "2nd exit" is
+ * straight on at one roundabout and a hard right at the next.
+ */
+function roundaboutExitAngle(
+  points: LatLng[],
+  enterIndex: number,
+  exitIndex: number,
+): number | undefined {
+  const approach = headingAlong(points, enterIndex, false);
+  const departure = headingAlong(points, exitIndex, true);
+  if (approach === null || departure === null) return undefined;
+  return Math.round(angleDelta(approach, departure));
 }
 
 /**
@@ -383,6 +436,10 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
     for (let i = startIdx; i < shape.length; i++) {
       points.push({ lat: shape[i]![0], lng: shape[i]![1] });
     }
+    // The roundabout-enter maneuver is the one the banner shows, but the angle
+    // it turns through is only known once its matching exit arrives — hold it
+    // open until then (both carry sign 6, so both want the angle).
+    let ring: { instruction: RouteInstruction; index: number } | null = null;
     for (const m of leg.maneuvers ?? []) {
       const begin = m.begin_shape_index;
       const end = m.end_shape_index;
@@ -404,8 +461,18 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       if (verbal) instruction.verbal = verbal;
       const lanes = parseLanes(m.lanes);
       if (lanes) instruction.lanes = lanes;
-      if (m.type === 26 && typeof m.roundabout_exit_count === 'number') {
-        instruction.exitNumber = m.roundabout_exit_count;
+      if (m.type === 26) {
+        if (typeof m.roundabout_exit_count === 'number') {
+          instruction.exitNumber = m.roundabout_exit_count;
+        }
+        ring = { instruction, index: offset + begin };
+      } else if (m.type === 27 && ring) {
+        const angle = roundaboutExitAngle(points, ring.index, offset + begin);
+        if (angle !== undefined) {
+          ring.instruction.exitAngleDeg = angle;
+          instruction.exitAngleDeg = angle;
+        }
+        ring = null;
       }
       instructions.push(instruction);
     }

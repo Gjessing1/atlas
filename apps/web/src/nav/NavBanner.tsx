@@ -191,15 +191,14 @@ export function NavBanner({
           {state && nav.phase !== 'arrived' ? (
             <>
               {/* Time left leads (Android parity): mid-drive "12 min" is the
-                  number the driver decides on; the clock time it works out to
-                  is context beside it. */}
+                  number the driver decides on, and needs no "left" label in a
+                  guidance banner. Arrival clock next, distance last. */}
               <div className="nav-trip-row">
                 <span className="nav-eta">
                   <strong>{fmtDuration(state.timeRemainingMs)}</strong>
-                  <small>left</small>
                 </span>
                 <span className="nav-summary">
-                  {fmtKm(state.distanceRemainingM)} · {fmtClock(state.etaEpochMs)} arrival
+                  {fmtClock(state.etaEpochMs)} arrival · {fmtKm(state.distanceRemainingM)}
                 </span>
               </div>
               <div className="nav-progress-track" aria-hidden="true">

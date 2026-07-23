@@ -66,6 +66,15 @@ export interface RouteInstruction {
   /** Which exit to take, for roundabout maneuvers (`sign === 6`). */
   exitNumber?: number;
   /**
+   * How far the roundabout turns the traveller, in degrees relative to the
+   * approach road (−180…180, negative = left/anticlockwise of straight on).
+   * Measured from the route geometry, because the exit *number* says nothing
+   * about the direction: the 2nd exit can be straight on, hard right or back
+   * the way you came. Icons draw the exit arrow at this angle. Roundabout
+   * maneuvers only, and absent when the geometry is too short to measure.
+   */
+  exitAngleDeg?: number;
+  /**
    * Refines the coarse `sign` for maneuvers it flattens: a highway on-ramp,
    * a highway exit, a keep-at-fork, a merge (all otherwise just ±7/0), or
    * boarding a `ferry` (sign 0 — a leg to ride, not a turn). UIs may render

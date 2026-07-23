@@ -446,6 +446,39 @@ describe('formatExitSign', () => {
     const ins = parseValhallaResponse(round).paths[0]!.instructions![0]!;
     expect(ins.sign).toBe(6);
     expect(ins.exitNumber).toBe(2);
+    // No matching exit maneuver in this trip → nothing to measure, so the
+    // icon falls back to its straight-on arrow rather than guessing.
+    expect(ins.exitAngleDeg).toBeUndefined();
+  });
+
+  it('measures the roundabout exit angle from the shape', () => {
+    // North up the approach road, out east from the ring: a right-hand exit,
+    // whatever its exit number happens to be.
+    const round = {
+      trip: {
+        units: 'kilometers',
+        summary: { length: 1, time: 10 },
+        legs: [
+          {
+            shape: encodeShape([
+              [59.999, 10],
+              [60.0, 10],
+              [60.0005, 10.0005],
+              [60.0005, 10.001],
+              [60.0005, 10.004],
+            ]),
+            maneuvers: [
+              { type: 26, roundabout_exit_count: 2, begin_shape_index: 1, end_shape_index: 3 },
+              { type: 27, begin_shape_index: 3, end_shape_index: 4 },
+            ],
+          },
+        ],
+      },
+    };
+    const instructions = parseValhallaResponse(round).paths[0]!.instructions!;
+    expect(instructions[0]!.exitAngleDeg).toBeCloseTo(90, -0.5);
+    // The exit maneuver carries the same angle — both render as the ring.
+    expect(instructions[1]!.exitAngleDeg).toBe(instructions[0]!.exitAngleDeg);
   });
 
   it('keeps ramp/exit/keep/merge maneuvers distinct via kind', () => {

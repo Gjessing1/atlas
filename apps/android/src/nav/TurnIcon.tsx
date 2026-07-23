@@ -1,3 +1,4 @@
+import { roundaboutGlyph, ROUNDABOUT_RING } from '@atlas/navigation';
 import type { RouteInstruction } from '@atlas/routing';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Path } from 'react-native-svg';
@@ -96,29 +97,37 @@ export function TurnIcon({
   size = 34,
   color = theme.icon,
 }: {
-  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
+  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg'>;
   size?: number;
   color?: string;
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
+    const ring = roundaboutGlyph(instruction.exitAngleDeg);
     return (
       <View style={styles.box}>
         <Svg width={size} height={size} viewBox="0 0 24 24">
           <Circle
-            cx={12}
-            cy={14}
-            r={4.2}
+            cx={ROUNDABOUT_RING.cx}
+            cy={ROUNDABOUT_RING.cy}
+            r={ROUNDABOUT_RING.r}
             fill="none"
             stroke={color}
             strokeWidth={2.4}
             opacity={0.75}
           />
-          <Path d="M12 9.8 V6.5" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+          <Path
+            d={ring.entry}
+            stroke={color}
+            strokeWidth={2.4}
+            strokeLinecap="round"
+            opacity={0.75}
+          />
+          <Path d={ring.exit} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
           <Path
             d="M-1.2 -3.4 L4.2 0 L-1.2 3.4 Z"
             fill={color}
-            transform="translate(12 6) rotate(-90)"
+            transform={`translate(${ring.head.x} ${ring.head.y}) rotate(${ring.head.angleDeg})`}
           />
         </Svg>
         {exitNumber ? <Text style={styles.exit}>{exitNumber}</Text> : null}

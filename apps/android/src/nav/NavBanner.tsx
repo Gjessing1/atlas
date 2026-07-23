@@ -253,25 +253,23 @@ export function NavBanner({
         {state && nav.phase !== 'arrived' ? (
           <>
             {/* Time left leads: mid-drive "12 min" is the number the driver is
-                actually deciding on, while the clock time it works out to is
-                context. Landscape has no vertical room to spare, so the same
-                order collapses onto one line. */}
+                actually deciding on — unlabelled, because a duration in a
+                guidance banner can only mean time remaining. Arrival clock
+                next, distance last. Landscape has no vertical room to spare,
+                so the same order collapses onto one line. */}
             <View style={[styles.tripRow, landscape && styles.tripRowCompact]}>
               {landscape ? (
                 <Text style={styles.summaryCompact} numberOfLines={1}>
                   <Text style={styles.etaInline}>{formatDuration(state.timeRemainingMs)}</Text>
                   {'  '}
-                  {formatDistance(state.distanceRemainingM)} · {formatEta(state.etaEpochMs)}
+                  {formatEta(state.etaEpochMs)} · {formatDistance(state.distanceRemainingM)}
                 </Text>
               ) : (
                 <>
-                  <View style={styles.etaBlock}>
-                    <Text style={styles.eta}>{formatDuration(state.timeRemainingMs)}</Text>
-                    <Text style={styles.etaLabel}>Left</Text>
-                  </View>
+                  <Text style={styles.eta}>{formatDuration(state.timeRemainingMs)}</Text>
                   <Text style={styles.summary} numberOfLines={1}>
-                    {formatDistance(state.distanceRemainingM)} · {formatEta(state.etaEpochMs)}{' '}
-                    arrival
+                    {formatEta(state.etaEpochMs)} arrival ·{' '}
+                    {formatDistance(state.distanceRemainingM)}
                   </Text>
                 </>
               )}
@@ -497,16 +495,7 @@ const styles = StyleSheet.create({
   tripRowCompact: { marginTop: 8, paddingTop: 7 },
   summaryCompact: { color: theme.textMuted, fontSize: 13, fontWeight: '600' },
   etaInline: { color: theme.text, fontSize: 15, fontWeight: '800' },
-  etaBlock: { flexShrink: 0 },
-  eta: { color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 20 },
-  etaLabel: {
-    color: theme.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    marginTop: 3,
-    textTransform: 'uppercase',
-  },
+  eta: { flexShrink: 0, color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 22 },
   summary: { flexShrink: 1, color: theme.textMuted, fontSize: 13, fontWeight: '600' },
   progressTrack: {
     height: 3,

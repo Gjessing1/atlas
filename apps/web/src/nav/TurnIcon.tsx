@@ -1,3 +1,4 @@
+import { roundaboutGlyph, ROUNDABOUT_RING } from '@atlas/navigation';
 import type { RouteInstruction } from '@atlas/routing';
 
 /**
@@ -90,28 +91,36 @@ export function TurnIcon({
   instruction,
   size = 34,
 }: {
-  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber'>;
+  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg'>;
   size?: number;
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
+    const ring = roundaboutGlyph(instruction.exitAngleDeg);
     return (
       <span className="nav-turn">
         <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
           <circle
-            cx="12"
-            cy="14"
-            r="4.2"
+            cx={ROUNDABOUT_RING.cx}
+            cy={ROUNDABOUT_RING.cy}
+            r={ROUNDABOUT_RING.r}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.4"
             opacity="0.75"
           />
-          <path d="M12 9.8 V6.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+          <path
+            d={ring.entry}
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            opacity="0.75"
+          />
+          <path d={ring.exit} stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
           <path
             d="M-1.2 -3.4 L4.2 0 L-1.2 3.4 Z"
             fill="currentColor"
-            transform="translate(12 6) rotate(-90)"
+            transform={`translate(${ring.head.x} ${ring.head.y}) rotate(${ring.head.angleDeg})`}
           />
         </svg>
         {exitNumber ? <span className="nav-turn-exit">{exitNumber}</span> : null}
