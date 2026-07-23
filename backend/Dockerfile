@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 # Multi-stage build for the Atlas backend + web app (served same-origin).
+FROM protomaps/go-pmtiles:v1.31.1 AS pmtiles
+
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
@@ -35,6 +37,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ARG GIT_SHA=
 ENV GIT_SHA=$GIT_SHA
+COPY --from=pmtiles /go-pmtiles /usr/local/bin/pmtiles
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/core/package.json ./packages/core/
 COPY --from=build /app/packages/core/dist ./packages/core/dist

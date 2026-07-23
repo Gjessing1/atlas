@@ -3082,6 +3082,54 @@ button.transit-notice-summary {
   color: var(--text-muted);
 }
 
+.map-style-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.style-color-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.style-color {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 13px;
+}
+
+.style-color input[type='color'] {
+  width: 36px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.style-color .link-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-size: 12px;
+}
+
+.style-range {
+  display: grid;
+  grid-template-columns: 110px 1fr 42px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.style-range output {
+  text-align: right;
+  color: var(--text-muted);
+}
+
 .settings-error {
   color: var(--danger);
 }

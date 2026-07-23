@@ -14,6 +14,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerOverlayApi, type OverlayApiOptions } from './overlay/index.js';
 import { registerPacksApi } from './packs-api.js';
+import type { RegionJobOptions } from './region-jobs.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
@@ -68,6 +69,8 @@ export interface AppOptions {
   transitApi?: TransitApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
+  /** Test/deployment seams for custom offline-region extraction. */
+  regionJobs?: RegionJobOptions;
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
@@ -123,7 +126,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         request.url.startsWith('/api/overlay/') ||
         request.url.startsWith('/tiles/') ||
         request.url.startsWith('/assets/') ||
-        request.url.startsWith('/packs/'),
+        request.url.startsWith('/packs/') ||
+        request.url.startsWith('/region-jobs/files/'),
     });
   } else {
     // Still register (unlimited) so per-route limits keep working when the
@@ -416,7 +420,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   }
 
   // Offline region packs + Android app self-update (Phase 6).
-  await registerPacksApi(app, opts.dataDir);
+  await registerPacksApi(app, opts.dataDir, opts.regionJobs);
   registerUpdatesApi(app, opts.dataDir);
 
   // In production the built web app is copied to backend/public (see backend/Dockerfile)
@@ -431,6 +435,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       request.url.startsWith('/tiles/') ||
       request.url.startsWith('/assets/') ||
       request.url.startsWith('/packs/') ||
+      request.url.startsWith('/region-jobs/') ||
       request.url.startsWith('/app/')
     ) {
       return reply.code(404).send({ error: 'not found' });

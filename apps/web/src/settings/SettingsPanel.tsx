@@ -4,6 +4,7 @@ import {
   upstreamDetail,
   useStatus,
   type ThemeModeController,
+  type MapStyleEditorController,
 } from '@atlas/app-hooks';
 import type { SystemStatus, UpstreamStatus } from '@atlas/core';
 import { AccountPanel } from '../sync/AccountPanel.js';
@@ -12,7 +13,77 @@ import type { SyncState } from '../sync/useSync.js';
 interface SettingsPanelProps {
   sync: SyncState;
   appearance: ThemeModeController;
+  mapStyle: MapStyleEditorController;
   onClose: () => void;
+}
+
+const STYLE_COLORS = [
+  ['landColor', 'Land', '#f5f3ee'],
+  ['waterColor', 'Water', '#abc9dc'],
+  ['roadColor', 'Roads', '#d49b5f'],
+  ['pathColor', 'Paths & tracks', '#a94f4b'],
+] as const;
+
+function MapStyleSection({ editor }: { editor: MapStyleEditorController }) {
+  return (
+    <div className="map-style-editor">
+      <div className="style-color-grid">
+        {STYLE_COLORS.map(([key, label, fallback]) => {
+          const custom = editor.value[key];
+          return (
+            <label className="style-color" key={key}>
+              <span>{label}</span>
+              <input
+                type="color"
+                value={custom ?? fallback}
+                onChange={(event) => editor.setColor(key, event.target.value)}
+                aria-label={`${label} color`}
+              />
+              {custom && (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => editor.setColor(key, null)}
+                >
+                  Default
+                </button>
+              )}
+            </label>
+          );
+        })}
+      </div>
+      <label className="style-range">
+        <span>Label size</span>
+        <input
+          type="range"
+          min={75}
+          max={150}
+          step={5}
+          value={Math.round(editor.value.labelScale * 100)}
+          onChange={(event) => editor.setLabelScale(Number(event.target.value) / 100)}
+        />
+        <output>{Math.round(editor.value.labelScale * 100)}%</output>
+      </label>
+      <label className="style-range">
+        <span>Points of interest</span>
+        <input
+          type="range"
+          min={50}
+          max={150}
+          step={5}
+          value={Math.round(editor.value.poiScale * 100)}
+          onChange={(event) => editor.setPoiScale(Number(event.target.value) / 100)}
+        />
+        <output>{Math.round(editor.value.poiScale * 100)}%</output>
+      </label>
+      <button type="button" className="link-button" onClick={editor.reset}>
+        Reset map style
+      </button>
+      <p className="settings-note">
+        Changes stay on this device and apply to every activity profile.
+      </p>
+    </div>
+  );
 }
 
 /** One upstream row: coloured dot, label, and the most telling timestamp/message. */
@@ -57,7 +128,7 @@ function StatusSection({ data }: { data: SystemStatus }) {
  * panel (moved out of the Collections sidebar footer), and build info. The status
  * answers "why is this overlay blank?" without leaving the app.
  */
-export function SettingsPanel({ sync, appearance, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ sync, appearance, mapStyle, onClose }: SettingsPanelProps) {
   // Served by the backend itself, so status lives at a relative path.
   const status = useStatus('', true);
 
@@ -87,6 +158,7 @@ export function SettingsPanel({ sync, appearance, onClose }: SettingsPanelProps)
           ))}
         </div>
         <p className="settings-note">System follows this device’s light or dark setting.</p>
+        <MapStyleSection editor={mapStyle} />
       </div>
 
       <div className="settings-section">

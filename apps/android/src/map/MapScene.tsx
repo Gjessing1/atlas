@@ -3,6 +3,7 @@ import {
   bboxOutlinesFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  type BBox,
   type LatLng,
 } from '@atlas/core';
 import {
@@ -39,6 +40,32 @@ function packOutlinesGeoJSON(packs: LocalPack[]) {
   return bboxOutlinesFeatureCollection(
     packs.map((p) => ({ name: p.manifest.name, bbox: p.manifest.bbox })),
   );
+}
+
+/** Translucent rectangle while the user chooses a custom offline region. */
+function selectedRegionGeoJSON(bbox: BBox) {
+  const { sw, ne } = bbox;
+  return {
+    type: 'FeatureCollection' as const,
+    features: [
+      {
+        type: 'Feature' as const,
+        properties: {},
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [
+            [
+              [sw.lng, sw.lat],
+              [ne.lng, sw.lat],
+              [ne.lng, ne.lat],
+              [sw.lng, ne.lat],
+              [sw.lng, sw.lat],
+            ],
+          ],
+        },
+      },
+    ],
+  };
 }
 
 /** Layer id of the planned-route line — App hit-tests taps on it to insert vias. */
@@ -125,6 +152,9 @@ interface MapSceneProps {
   overlayLabels: OverlayLabelData;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
+  /** First corner and completed rectangle while drawing a custom offline region. */
+  offlineRegionCorner: LatLng | null;
+  offlineRegionBbox: BBox | null;
   nav: NavController;
   route: RoutePlanner;
   /** Public transport plan — draws the selected journey instead of a road line. */
@@ -171,6 +201,8 @@ export function MapScene({
   overlays,
   overlayLabels,
   trackGeo,
+  offlineRegionCorner,
+  offlineRegionBbox,
   nav,
   route,
   transit,
@@ -356,6 +388,23 @@ export function MapScene({
                 'line-opacity': 0.45,
                 'line-dasharray': [2, 2],
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {offlineRegionBbox ? (
+          <GeoJSONSource
+            id="atlas-offline-region-selection"
+            data={selectedRegionGeoJSON(offlineRegionBbox)}
+          >
+            <Layer
+              type="fill"
+              id="atlas-offline-region-selection-fill"
+              paint={{ 'fill-color': '#7c3aed', 'fill-opacity': 0.18 }}
+            />
+            <Layer
+              type="line"
+              id="atlas-offline-region-selection-line"
+              paint={{ 'line-color': '#7c3aed', 'line-width': 3, 'line-dasharray': [2, 1] }}
             />
           </GeoJSONSource>
         ) : null}
@@ -588,6 +637,11 @@ export function MapScene({
             <View style={styles.navDot} />
           </Marker>
         ) : null}
+        {offlineRegionCorner && !offlineRegionBbox ? (
+          <Marker lngLat={[offlineRegionCorner.lng, offlineRegionCorner.lat]} anchor="center">
+            <View style={styles.regionCorner} />
+          </Marker>
+        ) : null}
         {nav.destination ? (
           <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
             <View style={pinScaleStyle}>
@@ -657,6 +711,15 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     backgroundColor: '#1a73e8',
+    borderWidth: 3,
+    borderColor: '#fff',
+    elevation: 4,
+  },
+  regionCorner: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#7c3aed',
     borderWidth: 3,
     borderColor: '#fff',
     elevation: 4,

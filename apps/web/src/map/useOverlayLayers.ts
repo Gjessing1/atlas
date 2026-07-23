@@ -1,4 +1,4 @@
-import { identifyOverlays, snapLabelBbox } from '@atlas/core';
+import { identifyOverlays, overlayTileUrl, snapLabelBbox } from '@atlas/core';
 import type { LayerMeta, OverlayLabelsResponse } from '@atlas/core';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
@@ -43,7 +43,7 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
         if (!map.getSource(id)) {
           map.addSource(id, {
             type: 'raster',
-            tiles: [`${location.origin}/api/overlay/${overlay.meta.id}/{z}/{x}/{y}.png`],
+            tiles: [overlayTileUrl(location.origin, overlay.meta)],
             tileSize: 256,
             maxzoom: overlay.meta.maxzoom,
             ...(overlay.meta.minzoom !== undefined ? { minzoom: overlay.meta.minzoom } : {}),

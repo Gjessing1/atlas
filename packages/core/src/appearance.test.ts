@@ -30,6 +30,12 @@ const style = JSON.stringify({
       },
     },
     { id: 'label_city', type: 'symbol', paint: { 'text-color': '#000' } },
+    {
+      id: 'poi_r1',
+      type: 'symbol',
+      layout: { 'text-size': 12, 'icon-size': 1 },
+      paint: { 'text-color': '#000' },
+    },
   ],
 });
 
@@ -85,6 +91,34 @@ describe('map appearance', () => {
     expect(
       result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-width'],
     ).toEqual(['interpolate', ['linear'], ['zoom'], 8, 0.56, 20, 14.560000000000002]);
+  });
+
+  it('applies sanitized user edits after the curated theme/profile', () => {
+    const result = layers(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        custom: {
+          landColor: '#112233',
+          waterColor: '#224466',
+          roadColor: '#aa5500',
+          pathColor: '#00aa77',
+          labelScale: 1.25,
+          poiScale: 1.5,
+        },
+      }),
+    );
+    expect(result.find((layer) => layer.id === 'background')?.paint['background-color']).toBe(
+      '#112233',
+    );
+    expect(result.find((layer) => layer.id === 'water')?.paint['fill-color']).toBe('#224466');
+    expect(
+      result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-color'],
+    ).toBe('#aa5500');
+    expect(result.find((layer) => layer.id === 'road_path_pedestrian')?.paint['line-color']).toBe(
+      '#00aa77',
+    );
+    expect(result.find((layer) => layer.id === 'poi_r1')?.paint['text-opacity']).toBe(1);
   });
 });
 

@@ -50,6 +50,8 @@ export interface SyncState {
   available: boolean | null;
   /** Whether this server accepts new accounts; null while probing. */
   registration: RegistrationMode | null;
+  /** Local storage and the persisted session have finished opening. */
+  ready: boolean;
   status: SyncStatus;
   email: string | null;
   lastSyncAt: number | null;
@@ -388,6 +390,7 @@ export function useSync(
   return {
     available,
     registration,
+    ready: storage !== null && sessionLoaded,
     status,
     email: session?.email ?? null,
     lastSyncAt,

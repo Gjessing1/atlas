@@ -26,6 +26,12 @@ export function resolveStyleTemplate(template: string, origin: string): string {
  */
 export interface LayerMeta {
   id: string;
+  /**
+   * Monotonic render revision. Bump whenever this layer's upstream, styles or
+   * proxy rendering changes; clients append it to tile URLs and the backend
+   * includes it in its disk-cache path, invalidating every cache in one move.
+   */
+  rev: number;
   title: string;
   /** One-line description shown in the layer panel. */
   description: string;
@@ -65,6 +71,17 @@ export interface LayerMeta {
 /** GET /api/layers */
 export interface LayersResponse {
   layers: LayerMeta[];
+}
+
+/** Cache-revisioned raster URL used by web and Android. */
+export function overlayTileUrl(origin: string, meta: Pick<LayerMeta, 'id' | 'rev'>): string {
+  // `rev ?? 1` keeps an Android client's last cached pre-revision catalog
+  // usable during an offline start immediately after upgrading.
+  const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/{z}/{x}/{y}.png` +
+    `?v=${encodeURIComponent(String(rev))}`
+  );
 }
 
 /**

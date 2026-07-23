@@ -11,10 +11,14 @@ test('register, sync status, sign out', async ({ page, baseURL }) => {
   await waitForMap(page);
   await page.getByRole('button', { name: 'Settings' }).click();
 
+  const create = page.getByRole('button', { name: 'Create account' });
+  // Map readiness precedes OPFS/SQLite readiness on a cold browser. Wait for
+  // the account adapter instead of racing a deliberately disabled submit.
+  await expect(create).toBeEnabled();
   const email = `e2e-${Date.now()}@example.com`;
   await page.getByPlaceholder('email').fill(email);
   await page.getByPlaceholder('password').fill('secret-password');
-  await page.getByRole('button', { name: 'Create account' }).click();
+  await create.click();
 
   await expect(page.locator('.account-line strong')).toHaveText(email);
   await expect(page.locator('.account-panel')).toContainText(/Synced|Signed in|Syncing/);

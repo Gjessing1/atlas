@@ -118,7 +118,8 @@ export async function downloadPack(
   let doneBytes = 0;
 
   for (const [kind, file] of entries) {
-    const url = `${getServerOrigin()}/packs/${manifest.id}/${file.path}`;
+    const base = manifest.downloadBase ?? `/packs/${manifest.id}`;
+    const url = `${getServerOrigin()}${base}/${file.path}`;
     const target = `${dir}/${file.path}`;
     const isZip = file.path.endsWith('.zip');
     // assets.zip → <dir>/assets/…

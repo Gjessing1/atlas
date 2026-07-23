@@ -2,8 +2,14 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
-import type { AppVersionResponse, RegionPackManifest, RegionsResponse } from '@atlas/core';
+import type {
+  AppVersionResponse,
+  CreateRegionPackJobRequest,
+  RegionPackManifest,
+  RegionsResponse,
+} from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
+import { RegionJobError, RegionJobManager, type RegionJobOptions } from './region-jobs.js';
 
 /**
  * Offline content for the Android app (Phase 6):
@@ -18,9 +24,49 @@ import type { FastifyInstance } from 'fastify';
  * Everything is optional: without the directories the endpoints answer with
  * empty/404 responses and the app simply hides the corresponding UI.
  */
-export async function registerPacksApi(app: FastifyInstance, dataDir: string): Promise<void> {
+export async function registerPacksApi(
+  app: FastifyInstance,
+  dataDir: string,
+  regionJobOptions?: RegionJobOptions,
+): Promise<void> {
   const packsDir = path.join(dataDir, 'packs');
   const appDir = path.join(dataDir, 'app');
+  const jobs = new RegionJobManager(dataDir, app.log, regionJobOptions);
+  await jobs.init();
+  app.addHook('onClose', () => jobs.close());
+
+  app.post<{ Body: CreateRegionPackJobRequest }>(
+    '/api/region-jobs',
+    {
+      // The endpoint is intentionally available without an Atlas account, but
+      // one client may not turn the host into an unlimited extraction service.
+      config: { rateLimit: { max: 3, timeWindow: '1 day' } },
+    },
+    async (request, reply) => {
+      try {
+        return await jobs.create(request.body);
+      } catch (error) {
+        if (error instanceof RegionJobError) {
+          return reply.code(error.statusCode).send({ error: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>('/api/region-jobs/:id', async (request, reply) => {
+    const job = jobs.get(request.params.id);
+    return job ?? reply.code(404).send({ error: 'region job not found' });
+  });
+
+  // Custom artifacts are job-scoped and expire server-side; clients discover
+  // the exact base from RegionPackManifest.downloadBase.
+  await app.register(fastifyStatic, {
+    root: jobs.artifactsDir,
+    prefix: '/region-jobs/files/',
+    decorateReply: false,
+    maxAge: '1h',
+  });
 
   app.get('/api/regions', async (request): Promise<RegionsResponse> => {
     if (!existsSync(packsDir)) return { regions: [] };

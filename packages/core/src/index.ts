@@ -25,9 +25,12 @@ export * from './share.js';
 
 export {
   applyMapAppearance,
+  DEFAULT_MAP_STYLE_OVERRIDES,
   isThemeMode,
+  sanitizeMapStyleOverrides,
   type ColorScheme,
   type MapAppearance,
+  type MapStyleOverrides,
   type ThemeMode,
 } from './appearance.js';
 export {

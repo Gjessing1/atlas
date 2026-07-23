@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -15,6 +15,7 @@ function testLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'depth',
+        rev: 1,
         title: 'Depth',
         description: 'Test WMS layer',
         group: 'Water',
@@ -34,6 +35,7 @@ function testLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'hidpi',
+        rev: 1,
         title: 'HiDPI',
         description: 'renderScale WMS layer',
         group: 'Water',
@@ -63,6 +65,7 @@ function testLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'legacy',
+        rev: 1,
         title: 'Legacy',
         description: 'WMS 1.1.1 layer',
         group: 'Misc',
@@ -76,6 +79,7 @@ function testLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'ortho',
+        rev: 1,
         title: 'Ortho',
         description: 'Tokened XYZ layer',
         group: 'Imagery',
@@ -154,6 +158,9 @@ describe('layer catalog', () => {
     const ids = norwegianLayers().map((l) => l.meta.id);
     expect(ids).toContain('lake-depth');
     expect(ids).toContain('hillshade');
+    expect(ids).toContain('terrain-slope');
+    expect(ids).toContain('terrain-contours');
+    expect(ids).toContain('satellite-2025');
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
@@ -213,6 +220,9 @@ describe('overlay tile proxy', () => {
     expect(res.statusCode).toBe(200);
     expect(res.rawPayload.equals(PNG_BYTES)).toBe(true);
     expect(requests).toHaveLength(1);
+    expect(
+      (await readFile(path.join(cacheDir, 'depth', 'v1', '1', '1', '0.png'))).equals(PNG_BYTES),
+    ).toBe(true);
   });
 
   it('substitutes env tokens into xyz templates', async () => {

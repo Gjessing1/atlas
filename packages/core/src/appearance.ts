@@ -11,6 +11,51 @@ export interface MapAppearance {
   colorScheme: ColorScheme;
   /** One of Atlas's curated activity profile ids. Unknown ids degrade to Explore. */
   profile: string;
+  /** Optional per-device edits applied after Atlas's theme/profile tuning. */
+  custom?: MapStyleOverrides;
+}
+
+/** The deliberately small, portable style-editor surface shared by both maps. */
+export interface MapStyleOverrides {
+  landColor?: string;
+  waterColor?: string;
+  roadColor?: string;
+  pathColor?: string;
+  /** Multiplier for every symbol's text size (0.75–1.5). */
+  labelScale: number;
+  /** Multiplier for POI text/icon size and opacity (0.5–1.5). */
+  poiScale: number;
+}
+
+export const DEFAULT_MAP_STYLE_OVERRIDES: MapStyleOverrides = {
+  labelScale: 1,
+  poiScale: 1,
+};
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function optionalColor(value: unknown): string | undefined {
+  return typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : undefined;
+}
+
+function boundedScale(value: unknown, min: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : 1;
+}
+
+/** Parse persisted/imported editor state without letting malformed paint values into MapLibre. */
+export function sanitizeMapStyleOverrides(value: unknown): MapStyleOverrides {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_MAP_STYLE_OVERRIDES };
+  const raw = value as Record<string, unknown>;
+  return {
+    ...(optionalColor(raw['landColor']) ? { landColor: optionalColor(raw['landColor']) } : {}),
+    ...(optionalColor(raw['waterColor']) ? { waterColor: optionalColor(raw['waterColor']) } : {}),
+    ...(optionalColor(raw['roadColor']) ? { roadColor: optionalColor(raw['roadColor']) } : {}),
+    ...(optionalColor(raw['pathColor']) ? { pathColor: optionalColor(raw['pathColor']) } : {}),
+    labelScale: boundedScale(raw['labelScale'], 0.75, 1.5),
+    poiScale: boundedScale(raw['poiScale'], 0.5, 1.5),
+  };
 }
 
 interface StyleLayer {
@@ -60,6 +105,59 @@ function multiplyPaint(layer: StyleLayer, property: string, factor: number): voi
           : part,
       ),
     );
+  }
+}
+
+function multiplyStyleValue(value: unknown, factor: number): unknown {
+  if (typeof value === 'number') return value * factor;
+  if (Array.isArray(value) && value[0] === 'interpolate') {
+    return value.map((part, index) =>
+      index >= 4 && index % 2 === 0 && typeof part === 'number' ? part * factor : part,
+    );
+  }
+  if (Array.isArray(value) && value[0] === 'step') {
+    return value.map((part, index) =>
+      (index === 2 || (index >= 4 && index % 2 === 0)) && typeof part === 'number'
+        ? part * factor
+        : part,
+    );
+  }
+  return value;
+}
+
+function applyCustomStyle(layer: StyleLayer, custom: MapStyleOverrides): void {
+  if (custom.landColor && layer.type === 'background') {
+    paint(layer, 'background-color', custom.landColor);
+  }
+  if (custom.waterColor) {
+    if (layer.id === 'water') paint(layer, 'fill-color', custom.waterColor);
+    if (/^waterway_/.test(layer.id)) paint(layer, 'line-color', custom.waterColor);
+  }
+  if (
+    custom.roadColor &&
+    layer.type === 'line' &&
+    /^road_/.test(layer.id) &&
+    !/(path_pedestrian|service_track|_casing|_hatching)$/.test(layer.id)
+  ) {
+    paint(layer, 'line-color', custom.roadColor);
+  }
+  if (custom.pathColor && /(path_pedestrian|service_track|-track-contrast)$/.test(layer.id)) {
+    paint(layer, 'line-color', custom.pathColor);
+  }
+  if (layer.type !== 'symbol') return;
+  if (custom.labelScale !== 1 && layer.layout?.['text-size'] !== undefined) {
+    layer.layout['text-size'] = multiplyStyleValue(layer.layout['text-size'], custom.labelScale);
+  }
+  if (/^poi_/.test(layer.id) && custom.poiScale !== 1) {
+    if (layer.layout?.['text-size'] !== undefined) {
+      layer.layout['text-size'] = multiplyStyleValue(layer.layout['text-size'], custom.poiScale);
+    }
+    if (layer.layout?.['icon-size'] !== undefined) {
+      layer.layout['icon-size'] = multiplyStyleValue(layer.layout['icon-size'], custom.poiScale);
+    }
+    const opacity = Math.min(1, 0.78 * custom.poiScale);
+    paint(layer, 'text-opacity', opacity);
+    paint(layer, 'icon-opacity', opacity);
   }
 }
 
@@ -255,6 +353,11 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     const baseId = track.id.replace(/^atlas-/, '').replace(/-track-contrast$/, '');
     const baseIndex = style.layers.findIndex((layer) => layer.id === baseId);
     style.layers.splice(baseIndex + 1, 0, track);
+  }
+
+  if (appearance.custom) {
+    const custom = sanitizeMapStyleOverrides(appearance.custom);
+    for (const layer of style.layers) applyCustomStyle(layer, custom);
   }
 
   style.name = `Atlas ${dark ? 'Dark' : 'Light'} · ${profile}`;

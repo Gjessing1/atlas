@@ -13,7 +13,7 @@ import {
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
-import { useMapProfile, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
+import { useMapProfile, useMapStyleEditor, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -107,6 +107,7 @@ export function App() {
   const userData = useUserData();
   const sync = useSync(userData);
   const appearance = useThemeMode(userData, useSystemColorScheme());
+  const mapStyleEditor = useMapStyleEditor(userData);
   useEffect(() => {
     document.documentElement.dataset['theme'] = appearance.colorScheme;
     document.documentElement.style.colorScheme = appearance.colorScheme;
@@ -420,6 +421,7 @@ export function App() {
         suppressPoiClicks={routeActiveRef}
         colorScheme={appearance.colorScheme}
         profile={profiles.profile.id}
+        customStyle={mapStyleEditor.value}
       />
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
           top stays bright) until live GPS returns. */}
@@ -578,6 +580,7 @@ export function App() {
           <SettingsPanel
             sync={sync}
             appearance={appearance}
+            mapStyle={mapStyleEditor}
             onClose={() => setSettingsOpen(false)}
           />
         )}

@@ -22,8 +22,8 @@ const TILE_MAX_AGE_S = 7 * 24 * 3600; // upstream data changes on the order of m
 export function registerTileRoute(ctx: OverlayContext): void {
   const { app, byId, env, fetchImpl } = ctx;
 
-  const cachePath = (id: string, z: number, x: number, y: number) =>
-    path.join(ctx.cacheDir, id, String(z), String(x), `${y}.png`);
+  const cachePath = (id: string, rev: number, z: number, x: number, y: number) =>
+    path.join(ctx.cacheDir, id, `v${rev}`, String(z), String(x), `${y}.png`);
 
   async function writeCache(file: string, data: Buffer): Promise<void> {
     // Temp-file + rename so a concurrent reader never sees a half tile; cache
@@ -64,7 +64,7 @@ export function registerTileRoute(ctx: OverlayContext): void {
           .header('cache-control', `public, max-age=${maxAge}`)
           .send(data);
 
-      const file = cachePath(layer.meta.id, z, x, y);
+      const file = cachePath(layer.meta.id, layer.meta.rev, z, x, y);
       const cached = await readFile(file).catch(() => null);
       if (cached) return servePng(cached);
 

@@ -1,5 +1,10 @@
 import type { LatLng } from '@atlas/core';
-import type { SyncState, ThemeModeController } from '@atlas/app-hooks';
+import type {
+  MapStyleEditorController,
+  RegionPackJobsController,
+  SyncState,
+  ThemeModeController,
+} from '@atlas/app-hooks';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import type { TileSource } from '../map/useTileSource';
@@ -35,6 +40,9 @@ interface AppSheetsProps {
   /** Basemap tile source — Settings owns the "stream tiles anyway" switch. */
   tiles: TileSource;
   appearance: ThemeModeController;
+  mapStyleEditor: MapStyleEditorController;
+  regionJobs: RegionPackJobsController;
+  onDrawRegion: () => void;
 
   /** Coords awaiting a name before they're saved as a pin (name-on-save prompt). */
   pendingPin: LatLng | null;
@@ -70,6 +78,9 @@ export function AppSheets({
   onCloseSettings,
   tiles,
   appearance,
+  mapStyleEditor,
+  regionJobs,
+  onDrawRegion,
   pendingPin,
   onDismissPendingPin,
   onFlyTo,
@@ -139,6 +150,9 @@ export function AppSheets({
         tiles={tiles}
         onExportAll={() => void data.exportAll()}
         appearance={appearance}
+        mapStyleEditor={mapStyleEditor}
+        regionJobs={regionJobs}
+        onDrawRegion={onDrawRegion}
         bottomInset={bottomInset}
       />
       <PromptModal

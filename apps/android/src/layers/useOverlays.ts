@@ -1,6 +1,7 @@
 import {
   layerDefaultsOn,
   layersForProfile,
+  overlayTileUrl,
   type LayerMeta,
   type LayersResponse,
   type OverlayStateMap,
@@ -145,7 +146,7 @@ export function useOverlays(data: UserData, profileId: string): OverlaysControll
         .map((meta) => ({
           meta,
           opacity: state[meta.id]?.opacity ?? meta.defaultOpacity,
-          tileUrlTemplate: `${origin}/api/overlay/${meta.id}/{z}/{x}/{y}.png`,
+          tileUrlTemplate: overlayTileUrl(origin, meta),
         })),
     [catalog, state, origin, isOn],
   );

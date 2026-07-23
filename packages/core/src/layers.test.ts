@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   identifyOverlays,
   overlayIdentifyUrl,
+  overlayTileUrl,
   resolveStyleTemplate,
   type LayerMeta,
 } from './index.js';
@@ -22,6 +23,7 @@ describe('resolveStyleTemplate', () => {
 
 const layer = (id: string, identify: boolean): LayerMeta => ({
   id,
+  rev: 1,
   title: id.toUpperCase(),
   description: '',
   group: 'Water & depth',
@@ -29,6 +31,14 @@ const layer = (id: string, identify: boolean): LayerMeta => ({
   maxzoom: 16,
   defaultOpacity: 0.8,
   identify,
+});
+
+describe('overlay tile URLs', () => {
+  it('carry the catalog revision and encode the layer id', () => {
+    expect(overlayTileUrl('https://atlas.example', { id: 'slope / steep', rev: 7 })).toBe(
+      'https://atlas.example/api/overlay/slope%20%2F%20steep/{z}/{x}/{y}.png?v=7',
+    );
+  });
 });
 
 describe('overlayIdentifyUrl', () => {

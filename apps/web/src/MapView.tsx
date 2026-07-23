@@ -7,6 +7,7 @@ import {
   type LatLng,
   type ColorScheme,
   type MapViewState,
+  type MapStyleOverrides,
   type PlaceTarget,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
@@ -32,6 +33,7 @@ let templatePromise: Promise<string> | null = null;
 async function loadStyle(
   colorScheme: ColorScheme,
   profile: string,
+  custom: MapStyleOverrides,
 ): Promise<string | StyleSpecification> {
   try {
     templatePromise ??= fetch(STYLE_TEMPLATE_URL).then(async (res) => {
@@ -40,7 +42,9 @@ async function loadStyle(
     });
     const template = await templatePromise;
     const resolved = resolveStyleTemplate(template, window.location.origin);
-    return JSON.parse(applyMapAppearance(resolved, { colorScheme, profile })) as StyleSpecification;
+    return JSON.parse(
+      applyMapAppearance(resolved, { colorScheme, profile, custom }),
+    ) as StyleSpecification;
   } catch (err) {
     templatePromise = null;
     console.warn('Self-hosted style unavailable, using fallback style.', err);
@@ -95,6 +99,8 @@ interface MapViewProps {
   colorScheme: ColorScheme;
   /** Curated activity profile; changes map emphasis without changing data. */
   profile: string;
+  /** User-edited colours and label/POI scale. */
+  customStyle: MapStyleOverrides;
 }
 
 export function MapView({
@@ -108,6 +114,7 @@ export function MapView({
   suppressPoiClicks,
   colorScheme,
   profile,
+  customStyle,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
@@ -223,13 +230,13 @@ export function MapView({
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    void loadStyle(colorScheme, profile).then((style) => {
+    void loadStyle(colorScheme, profile, customStyle).then((style) => {
       if (!cancelled) map.setStyle(style);
     });
     return () => {
       cancelled = true;
     };
-  }, [map, colorScheme, profile]);
+  }, [map, colorScheme, profile, customStyle]);
 
   // Render the (single) dropped pin as a draggable marker. Clicking it reopens
   // the place card; the card itself is App-level React, not a MapLibre popup.

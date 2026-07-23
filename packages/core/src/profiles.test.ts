@@ -11,7 +11,8 @@ import {
 } from './index.js';
 
 describe('map profiles', () => {
-  const meta = (id: string, profiles?: string[]): LayerMeta => ({ id, profiles }) as LayerMeta;
+  const meta = (id: string, profiles?: string[]): LayerMeta =>
+    ({ id, rev: 1, profiles }) as LayerMeta;
 
   it('narrows unknown ids to the default profile', () => {
     expect(isMapProfile('hike')).toBe(true);

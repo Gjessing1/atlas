@@ -21,6 +21,16 @@ export {
 } from './useMapProfile.js';
 export { useThemeMode, type ThemeModeController, type ThemeModeSettings } from './useThemeMode.js';
 export {
+  useMapStyleEditor,
+  type MapStyleEditorController,
+  type MapStyleSettings,
+} from './useMapStyleEditor.js';
+export {
+  useRegionPackJobs,
+  type RegionJobSettings,
+  type RegionPackJobsController,
+} from './useRegionPackJobs.js';
+export {
   useNavPrefs,
   type NavFollowMode,
   type NavPrefsController,

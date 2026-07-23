@@ -12,4 +12,6 @@ PORT="${E2E_PORT:-3199}"
 export PORT
 export DATABASE_URL=memory
 export JWT_SECRET=e2e-secret
+export ATLAS_DATA_DIR="${ATLAS_E2E_DATA_DIR:-/tmp/atlas-e2e-data}"
+mkdir -p "$ATLAS_DATA_DIR"
 exec node backend/dist/index.js

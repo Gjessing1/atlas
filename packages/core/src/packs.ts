@@ -23,6 +23,12 @@ export interface RegionPackManifest {
   version: number;
   /** Unix ms timestamp of the pack build. */
   builtAt: number;
+  /** Custom packs use their job-scoped file endpoint instead of /packs/<id>. */
+  downloadBase?: string;
+  /** True for a user-selected region assembled by the background job queue. */
+  custom?: boolean;
+  /** Job artifacts are temporary on the server; downloaded device files are not. */
+  expiresAt?: number;
   files: {
     /** Vector basemap, a .pmtiles archive (MapLibre Native reads it via pmtiles://file://…). */
     basemap?: RegionPackFile;
@@ -38,4 +44,25 @@ export interface RegionPackManifest {
 /** GET /api/regions */
 export interface RegionsResponse {
   regions: RegionPackManifest[];
+}
+
+export type RegionPackJobStatus = 'queued' | 'extracting' | 'assembling' | 'done' | 'failed';
+
+/** Persistent background job returned by POST/GET /api/region-jobs. */
+export interface RegionPackJob {
+  id: string;
+  name: string;
+  bbox: BBox;
+  status: RegionPackJobStatus;
+  progress: number;
+  detail: string;
+  createdAt: number;
+  updatedAt: number;
+  manifest?: RegionPackManifest;
+  error?: string;
+}
+
+export interface CreateRegionPackJobRequest {
+  name: string;
+  bbox: BBox;
 }

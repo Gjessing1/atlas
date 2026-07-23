@@ -5,6 +5,8 @@ import {
   UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
   useStatus,
+  type MapStyleEditorController,
+  type RegionPackJobsController,
   type ThemeModeController,
 } from '@atlas/app-hooks';
 import type { UpstreamHealth } from '@atlas/core';
@@ -105,7 +107,7 @@ function AccountSection({ sync }: { sync: SyncState }) {
       <View style={styles.buttonRow}>
         <Pressable
           style={styles.button}
-          disabled={busy}
+          disabled={busy || !sync.ready}
           onPress={() => void submit('login')}
           testID="account-signin"
         >
@@ -113,7 +115,7 @@ function AccountSection({ sync }: { sync: SyncState }) {
         </Pressable>
         <Pressable
           style={[styles.button, styles.buttonQuiet]}
-          disabled={busy}
+          disabled={busy || !sync.ready}
           onPress={() => void submit('register')}
           testID="account-register"
         >
@@ -121,6 +123,7 @@ function AccountSection({ sync }: { sync: SyncState }) {
         </Pressable>
         {busy ? <ActivityIndicator /> : null}
       </View>
+      {!sync.ready ? <Text style={styles.muted}>Opening local storage…</Text> : null}
     </View>
   );
 }
@@ -132,9 +135,13 @@ function mb(bytes: number): string {
 function RegionsSection({
   packs,
   onPacksChanged,
+  jobs,
+  onDrawRegion,
 }: {
   packs: LocalPack[];
   onPacksChanged: () => void;
+  jobs: RegionPackJobsController;
+  onDrawRegion: () => void;
 }) {
   const [regions, setRegions] = useState<RegionPackManifest[] | null>(null);
   const [regionsError, setRegionsError] = useState<string | null>(null);
@@ -200,12 +207,48 @@ function RegionsSection({
   );
 
   const local = new Map(packs.map((p) => [p.manifest.id, p]));
-  const rows: RegionPackManifest[] = regions ?? packs.map((p) => p.manifest);
+  const rowsById = new Map<string, RegionPackManifest>();
+  for (const region of regions ?? []) rowsById.set(region.id, region);
+  for (const job of jobs.jobs) {
+    if (job.manifest) rowsById.set(job.manifest.id, job.manifest);
+  }
+  // Keep installed custom packs manageable after their temporary server
+  // artifact and job history expire.
+  for (const pack of packs) {
+    if (!rowsById.has(pack.manifest.id)) rowsById.set(pack.manifest.id, pack.manifest);
+  }
+  const rows = [...rowsById.values()];
+  const pendingJobs = jobs.jobs.filter((job) => !job.manifest);
 
   return (
     <View>
+      <Text style={styles.muted}>
+        Draw any rectangle on the map. Atlas extracts its map tiles in the background and adds
+        routing and search from the smallest published region that fully contains it.
+      </Text>
+      <View style={styles.buttonRow}>
+        <Pressable style={styles.button} onPress={onDrawRegion} testID="region-draw">
+          <Text style={styles.buttonText}>Draw custom region</Text>
+        </Pressable>
+      </View>
       {regionsError ? <Text style={styles.muted}>{regionsError}</Text> : null}
-      {rows.length === 0 && !regionsError ? (
+      {jobs.error ? <Text style={styles.error}>{jobs.error}</Text> : null}
+      {pendingJobs.map((job) => (
+        <View key={job.id} style={styles.regionRow}>
+          <View style={styles.regionInfo}>
+            <Text style={styles.rowText}>{job.name}</Text>
+            <Text style={job.status === 'failed' ? styles.error : styles.muted}>
+              {job.status === 'failed' ? job.error || job.detail : job.detail}
+            </Text>
+          </View>
+          {job.status === 'failed' ? (
+            <Text style={styles.error}>Failed</Text>
+          ) : (
+            <Text style={styles.rowText}>{Math.round(job.progress * 100)}%</Text>
+          )}
+        </View>
+      ))}
+      {rows.length === 0 && pendingJobs.length === 0 && !regionsError ? (
         <Text style={styles.muted}>{regions === null ? 'Loading…' : 'No regions published.'}</Text>
       ) : null}
       {rows.map((region) => {
@@ -218,6 +261,7 @@ function RegionsSection({
               <Text style={styles.rowText}>{region.name}</Text>
               <Text style={styles.muted}>
                 {mb(totalBytes)}
+                {region.custom ? ' · custom' : ''}
                 {installed
                   ? installed.manifest.version < region.version
                     ? ' · update available'
@@ -480,6 +524,112 @@ function TilesSection({ tiles }: { tiles: TileSource }) {
   );
 }
 
+const STYLE_COLORS = [
+  ['landColor', 'Land'],
+  ['waterColor', 'Water'],
+  ['roadColor', 'Roads'],
+  ['pathColor', 'Paths & tracks'],
+] as const;
+
+function StyleColorInput({
+  editor,
+  colorKey,
+  label,
+}: {
+  editor: MapStyleEditorController;
+  colorKey: (typeof STYLE_COLORS)[number][0];
+  label: string;
+}) {
+  const current = editor.value[colorKey] ?? '';
+  const [draft, setDraft] = useState(current);
+  useEffect(() => setDraft(current), [current]);
+  const commit = () => {
+    const normalized = draft.trim().toLowerCase();
+    if (normalized === '') editor.setColor(colorKey, null);
+    else if (/^#[0-9a-f]{6}$/.test(normalized)) editor.setColor(colorKey, normalized);
+    else setDraft(current);
+  };
+  return (
+    <View style={styles.styleColorRow}>
+      <Text style={styles.rowText}>{label}</Text>
+      <TextInput
+        style={[styles.input, styles.styleColorInput]}
+        value={draft}
+        onChangeText={setDraft}
+        onEndEditing={commit}
+        onSubmitEditing={commit}
+        placeholder="Atlas default"
+        placeholderTextColor={theme.textMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        maxLength={7}
+        testID={`style-${colorKey}`}
+      />
+    </View>
+  );
+}
+
+function ScaleChoices({
+  label,
+  value,
+  choices,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  choices: number[];
+  onChange: (value: number) => void;
+}) {
+  return (
+    <View style={styles.styleScale}>
+      <Text style={styles.rowText}>{label}</Text>
+      <View style={styles.themeRow}>
+        {choices.map((choice) => (
+          <Pressable
+            key={choice}
+            style={[styles.styleScaleOption, value === choice && styles.themeOptionOn]}
+            onPress={() => onChange(choice)}
+          >
+            <Text style={[styles.themeOptionText, value === choice && styles.themeOptionTextOn]}>
+              {Math.round(choice * 100)}%
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function MapStyleSection({ editor }: { editor: MapStyleEditorController }) {
+  return (
+    <View>
+      <Text style={styles.muted}>
+        Enter #RRGGBB colours, or leave a field empty for the Atlas default.
+      </Text>
+      {STYLE_COLORS.map(([key, label]) => (
+        <StyleColorInput key={key} editor={editor} colorKey={key} label={label} />
+      ))}
+      <ScaleChoices
+        label="Label size"
+        value={editor.value.labelScale}
+        choices={[0.75, 1, 1.25, 1.5]}
+        onChange={editor.setLabelScale}
+      />
+      <ScaleChoices
+        label="Points of interest"
+        value={editor.value.poiScale}
+        choices={[0.5, 1, 1.25, 1.5]}
+        onChange={editor.setPoiScale}
+      />
+      <View style={styles.buttonRow}>
+        <Pressable style={[styles.button, styles.buttonQuiet]} onPress={editor.reset}>
+          <Text style={styles.buttonQuietText}>Reset map style</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function SettingsSheet({
   visible,
   onClose,
@@ -490,6 +640,9 @@ export function SettingsSheet({
   tiles,
   onExportAll,
   appearance,
+  mapStyleEditor,
+  regionJobs,
+  onDrawRegion,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -503,6 +656,10 @@ export function SettingsSheet({
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
   onExportAll: () => void;
   appearance: ThemeModeController;
+  mapStyleEditor: MapStyleEditorController;
+  regionJobs: RegionPackJobsController;
+  /** Close Settings and let the user select two corners on the map. */
+  onDrawRegion: () => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -538,12 +695,19 @@ export function SettingsSheet({
           ))}
         </View>
         <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
+        <Text style={styles.heading}>Map style</Text>
+        <MapStyleSection editor={mapStyleEditor} />
         <Text style={styles.heading}>Account</Text>
         <AccountSection sync={sync} />
         <Text style={styles.heading}>Map tiles</Text>
         <TilesSection tiles={tiles} />
         <Text style={styles.heading}>Offline regions</Text>
-        <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
+        <RegionsSection
+          packs={packs}
+          onPacksChanged={onPacksChanged}
+          jobs={regionJobs}
+          onDrawRegion={onDrawRegion}
+        />
         <Text style={styles.heading}>Server</Text>
         <ServerSection storage={storage} />
         <Text style={styles.heading}>Server status</Text>
@@ -616,6 +780,24 @@ const styles = StyleSheet.create({
   themeOptionOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   themeOptionText: { color: theme.text, fontSize: 13, fontWeight: '600' },
   themeOptionTextOn: { color: theme.accent },
+  styleColorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 8,
+  },
+  styleColorInput: { width: 132, marginBottom: 0, fontFamily: 'monospace' },
+  styleScale: { gap: 6, marginTop: 12 },
+  styleScaleOption: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
   regionRow: {
     flexDirection: 'row',
     alignItems: 'center',

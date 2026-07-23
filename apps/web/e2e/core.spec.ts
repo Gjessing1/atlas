@@ -41,6 +41,12 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
             source: 'roads',
             paint: { 'line-color': '#fff', 'line-width': 2 },
           },
+          {
+            id: 'poi_r20',
+            type: 'symbol',
+            source: 'roads',
+            layout: { 'text-field': 'POI', 'text-size': 10, 'icon-size': 1 },
+          },
         ],
       }),
     }),
@@ -73,9 +79,42 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
   expect(contrast.path).toEqual([2, 1.35]);
   expect(contrast.track).toEqual([2.4, 1.4]);
 
+  // The style editor is applied after theme/profile tuning and persists with
+  // the rest of the device-local map appearance.
+  await page.getByLabel('Land color').fill('#123456');
+  await page.getByLabel('Label size').fill('125');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'background')?.paint?.[
+            'background-color'
+          ],
+      ),
+    )
+    .toBe('#123456');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'poi_r20')?.layout?.[
+            'text-size'
+          ],
+      ),
+    )
+    .toBe(12.5);
+
   await page.reload();
   await waitForMap(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(
+    await page.evaluate(
+      () =>
+        window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'background')?.paint?.[
+          'background-color'
+        ],
+    ),
+  ).toBe('#123456');
   await page.getByRole('radio', { name: 'Hike' }).click();
   await expect
     .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))

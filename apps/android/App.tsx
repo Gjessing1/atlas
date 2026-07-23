@@ -1,5 +1,18 @@
-import { useMapProfile, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
-import { mapProfile, placeIsVisible, type MapAppearance, type VisibilityFolder } from '@atlas/core';
+import {
+  useMapProfile,
+  useRegionPackJobs,
+  useMapStyleEditor,
+  useNavPrefs,
+  useThemeMode,
+} from '@atlas/app-hooks';
+import {
+  mapProfile,
+  placeIsVisible,
+  type BBox,
+  type LatLng,
+  type MapAppearance,
+  type VisibilityFolder,
+} from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
@@ -30,7 +43,6 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
-import type { LatLng } from '@atlas/core';
 import { MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
@@ -63,6 +75,8 @@ import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
+import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
+import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
@@ -92,6 +106,7 @@ function AppInner() {
   const data = useUserData();
   const systemColorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const appearance = useThemeMode(data, systemColorScheme);
+  const mapStyleEditor = useMapStyleEditor(data);
   useEffect(() => {
     Appearance.setColorScheme(appearance.mode === 'system' ? 'unspecified' : appearance.mode);
   }, [appearance.mode]);
@@ -114,11 +129,16 @@ function AppInner() {
   // one-tap map controls, the route default, and the full Layers sheet.
   const profiles = useMapProfile(data);
   const mapAppearance = useMemo<MapAppearance>(
-    () => ({ colorScheme: appearance.colorScheme, profile: profiles.profile.id }),
-    [appearance.colorScheme, profiles.profile.id],
+    () => ({
+      colorScheme: appearance.colorScheme,
+      profile: profiles.profile.id,
+      custom: mapStyleEditor.value,
+    }),
+    [appearance.colorScheme, profiles.profile.id, mapStyleEditor.value],
   );
   const overlaysCtl = useOverlays(data, profiles.profile.id);
   const serverOrigin = useServerOrigin();
+  const regionJobs = useRegionPackJobs(data, serverOrigin);
 
   const [packs, setPacks] = useState<LocalPack[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -133,6 +153,11 @@ function AppInner() {
   const [navHeight, setNavHeight] = useState(0);
   // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
   const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
+  const [offlineRegion, setOfflineRegion] = useState<{
+    corner: LatLng | null;
+    bbox: BBox | null;
+  } | null>(null);
+  const [pendingRegion, setPendingRegion] = useState<BBox | null>(null);
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
@@ -202,11 +227,12 @@ function AppInner() {
       : { top: topInset + 8, left: side.left + 8 };
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
-  const idleSheetOpen = searchOpen || menuOpen || dest.destination !== null;
+  const idleSheetOpen =
+    searchOpen || menuOpen || dest.destination !== null || offlineRegion !== null;
   // Landscape is short, so several pieces of chrome move into the leading
   // guidance rail and route fits get a narrower bottom pad.
 
-  const { onMapPress, onPickPoint } = useMapPress({
+  const { onMapPress: onRegularMapPress, onPickPoint: onRegularPickPoint } = useMapPress({
     mapRef,
     nav,
     route,
@@ -218,6 +244,45 @@ function AppInner() {
     pickDestination: dest.pick,
     showIdentify: dest.showIdentify,
   });
+  const selectOfflineRegionPoint = useCallback((point: LatLng) => {
+    setOfflineRegion((current) => {
+      if (!current) return current;
+      if (!current.corner) return { corner: point, bbox: null };
+      return {
+        corner: current.corner,
+        bbox: {
+          sw: {
+            lat: Math.min(current.corner.lat, point.lat),
+            lng: Math.min(current.corner.lng, point.lng),
+          },
+          ne: {
+            lat: Math.max(current.corner.lat, point.lat),
+            lng: Math.max(current.corner.lng, point.lng),
+          },
+        },
+      };
+    });
+  }, []);
+  const onMapPress = useCallback(
+    (point: LatLng, pixel: { x: number; y: number }) => {
+      if (offlineRegion) {
+        selectOfflineRegionPoint(point);
+        return;
+      }
+      onRegularMapPress(point, pixel);
+    },
+    [offlineRegion, onRegularMapPress, selectOfflineRegionPoint],
+  );
+  const onPickPoint = useCallback(
+    (point: LatLng) => {
+      if (offlineRegion) {
+        selectOfflineRegionPoint(point);
+        return;
+      }
+      onRegularPickPoint(point);
+    },
+    [offlineRegion, onRegularPickPoint, selectOfflineRegionPoint],
+  );
 
   // Picking an activity also chooses the route planner's starting mode where
   // one exists. Explore and Ski intentionally leave its last mode alone.
@@ -425,6 +490,8 @@ function AppInner() {
         overlays={overlaysCtl.overlays}
         overlayLabels={overlayLabels}
         trackGeo={trackGeo}
+        offlineRegionCorner={offlineRegion?.corner ?? null}
+        offlineRegionBbox={offlineRegion?.bbox ?? null}
         nav={nav}
         route={route}
         transit={transit}
@@ -444,6 +511,21 @@ function AppInner() {
         onUserGesture={navCam.onUserGesture}
         onDestinationMoved={dest.onMoved}
       />
+      {offlineRegion ? (
+        <OfflineRegionDrawControls
+          corner={offlineRegion.corner}
+          bbox={offlineRegion.bbox}
+          topInset={topInset}
+          bottomInset={bottomInset}
+          onReset={() => setOfflineRegion({ corner: null, bbox: null })}
+          onCancel={() => setOfflineRegion(null)}
+          onBuild={() => {
+            if (!offlineRegion.bbox) return;
+            setPendingRegion(offlineRegion.bbox);
+            setOfflineRegion(null);
+          }}
+        />
+      ) : null}
 
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
           top stays bright) until live GPS returns. */}
@@ -661,11 +743,32 @@ function AppInner() {
         settingsOpen={settingsOpen}
         onCloseSettings={() => setSettingsOpen(false)}
         appearance={appearance}
+        mapStyleEditor={mapStyleEditor}
+        regionJobs={regionJobs}
+        onDrawRegion={() => {
+          setSettingsOpen(false);
+          setOfflineRegion({ corner: null, bbox: null });
+        }}
         pendingPin={pendingPin}
         onDismissPendingPin={() => setPendingPin(null)}
         onFlyTo={flyTo}
         onPickDestination={dest.pick}
         onImportTracks={importTracks}
+      />
+      <PromptModal
+        visible={pendingRegion !== null}
+        title="Name offline region"
+        placeholder="e.g. Jotunheimen trip"
+        confirmLabel="Queue build"
+        onCancel={() => setPendingRegion(null)}
+        onConfirm={(value) => {
+          if (!pendingRegion) return;
+          const bbox = pendingRegion;
+          const name = value.trim() || 'Custom offline region';
+          setPendingRegion(null);
+          setSettingsOpen(true);
+          void regionJobs.create(name, bbox);
+        }}
       />
       {planning ? (
         <RoutePanel

@@ -226,16 +226,21 @@ export function AccountPanel({ sync }: { sync: SyncState }) {
             />
           )}
           <div className="account-actions">
-            <button type="submit" disabled={pending}>
+            <button type="submit" disabled={pending || !sync.ready}>
               Sign in
             </button>
             {canRegister && (
-              <button type="button" disabled={pending} onClick={() => submit('register')}>
+              <button
+                type="button"
+                disabled={pending || !sync.ready}
+                onClick={() => submit('register')}
+              >
                 Create account
               </button>
             )}
           </div>
         </form>
+        {!sync.ready && <p className="account-note">Opening local storage…</p>}
         {!canRegister && <p className="account-note">This server is not accepting new accounts.</p>}
         {formError && <p className="account-error">{formError}</p>}
       </div>

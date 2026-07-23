@@ -93,6 +93,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'hillshade',
+        rev: 1,
         title: 'Hillshade',
         description: 'Terrain relief shading from the national elevation model.',
         group: 'Terrain',
@@ -111,7 +112,81 @@ export function norwegianLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'terrain-slope',
+        rev: 1,
+        title: 'Steepness',
+        description: 'Colour-classified steep terrain for avalanche and landslide assessment.',
+        group: 'Terrain',
+        attribution: '© NVE',
+        metadataUrl: 'https://kartkatalog.nve.no/',
+        minzoom: 7,
+        maxzoom: 16,
+        defaultOpacity: 0.55,
+        identify: false,
+        coverageNote:
+          'A planning aid, not a live hazard forecast. Blank areas are below the mapped thresholds.',
+        profiles: ['hiking', 'ski'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/Bratthet/MapServer/WMSServer',
+        version: '1.3.0',
+        layers: 'Bratthet_snoskred,Bratthet_jordskred',
+      },
+    },
+    {
+      meta: {
+        id: 'terrain-contours',
+        rev: 1,
+        title: 'Contour lines',
+        description: 'Scale-aware elevation contours from Norway’s national topographic map.',
+        group: 'Terrain',
+        attribution: '© Kartverket',
+        metadataUrl: `${KARTKATALOG}h%C3%B8ydekurver`,
+        minzoom: 7,
+        maxzoom: 17,
+        defaultOpacity: 0.72,
+        identify: false,
+        profiles: ['hiking', 'ski'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.geonorge.no/skwms1/wms.topo',
+        version: '1.3.0',
+        // The group selects N50/N100/… or detailed FKB contours at the
+        // appropriate scale instead of stretching one dataset across every
+        // zoom.
+        layers: 'kd_hoydekurver',
+      },
+    },
+    {
+      meta: {
+        id: 'satellite-2025',
+        rev: 1,
+        title: 'Satellite mosaic (2025)',
+        description: 'Cloud-minimized Sentinel-2 summer mosaic of Norway from Copernicus imagery.',
+        group: 'Imagery',
+        attribution: '© Copernicus Sentinel data / Kartverket',
+        metadataUrl: `${KARTKATALOG}sentinel-2`,
+        maxzoom: 15,
+        defaultOpacity: 1,
+        identify: false,
+        coverageNote:
+          'About 10 m per source pixel. Best for landscape-scale use; isolated clouds, shadows and stitching artefacts can remain.',
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.geonorge.no/skwms1/wms.sentinel2',
+        version: '1.3.0',
+        // Pin the acquisition year. Moving to a future mosaic is an explicit
+        // catalog + rev change, so old CDN and disk tiles cannot bleed through.
+        layers: '2025',
+      },
+    },
+    {
+      meta: {
         id: 'lake-depth',
+        rev: 2,
         title: 'Lake depth',
         description: 'Bathymetry of surveyed lakes: depth shading, contours and soundings.',
         group: 'Water & depth',
@@ -181,6 +256,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'sea-depth',
+        rev: 1,
         title: 'Sea depth',
         description: 'Coastal depth shading, contours and soundings.',
         group: 'Water & depth',
@@ -200,6 +276,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'property',
+        rev: 1,
         title: 'Property boundaries',
         description: 'Cadastral parcel boundaries (eiendomsgrenser) from Matrikkelen.',
         group: 'Property',
@@ -222,6 +299,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'trails-hiking',
+        rev: 1,
         title: 'Hiking trails',
         description: 'Marked walking routes (Fotrute) from the national trail database.',
         group: 'Trails',
@@ -242,6 +320,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'trails-ski',
+        rev: 1,
         title: 'Ski tracks',
         description: 'Marked cross-country ski routes (Skiløype).',
         group: 'Trails',
@@ -262,6 +341,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'trails-bike',
+        rev: 1,
         title: 'Bike routes',
         description: 'Marked cycling routes (Sykkelrute).',
         group: 'Trails',
