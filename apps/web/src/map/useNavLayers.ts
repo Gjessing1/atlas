@@ -416,10 +416,10 @@ export function useNavLayers(
     const state = nav.state;
     const snapped = state?.snapped;
     if (!state || !snapped) return;
-    // Until the drive has demonstrably begun (state.departed), hold a calm
-    // north-up flat frame instead of the pitched course-up follow (Android
-    // parity — standing still shouldn't look like barreling down the route).
-    const courseUp = followMode === 'course' && state.departed;
+    // Course-up from the first fix, before the drive has demonstrably begun
+    // (Android parity): the route tangent gives a stable bearing standing
+    // still, so the driving frame is up the moment guidance starts.
+    const courseUp = followMode === 'course';
     // Standard driving-nav framing (Android parity): top padding of half the
     // viewport puts the car ~75% of the way down in course-up, so the top
     // three quarters show the road ahead; in north-up "ahead" isn't up, so

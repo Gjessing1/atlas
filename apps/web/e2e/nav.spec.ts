@@ -29,8 +29,8 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
 
   // Banner up, guidance summary showing, route drawn, puck snapped to the line.
   await expect(page.locator('.nav-banner')).toBeVisible();
-  await expect(page.locator('.nav-eta')).toContainText('arrival');
-  await expect(page.locator('.nav-summary')).toContainText('remaining');
+  await expect(page.locator('.nav-eta')).toContainText('left');
+  await expect(page.locator('.nav-summary')).toContainText('arrival');
   await expect(page.locator('.topbar')).toBeHidden();
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav')));
   await expect(page.locator('.nav-puck')).toBeVisible();

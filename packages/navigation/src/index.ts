@@ -28,3 +28,4 @@ export { headingRateDegPerSec, type Vec3 } from './sensors.js';
 export { followZoom, remainingRouteBounds, zoomForSpeed } from './camera.js';
 export { maneuverArrowsGeoJSON } from './overlays.js';
 export { laneGlyphs, laneLabel, type LaneGlyph } from './lanes.js';
+export { shortManeuverText, type ShortenableInstruction } from './instructions.js';

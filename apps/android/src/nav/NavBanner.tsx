@@ -1,6 +1,6 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
-import { laneGlyphs, laneLabel } from '@atlas/navigation';
+import { laneGlyphs, laneLabel, shortManeuverText } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -213,7 +213,7 @@ export function NavBanner({
                   style={[styles.maneuver, landscape && styles.maneuverCompact]}
                   numberOfLines={landscape ? 1 : 2}
                 >
-                  {sustain ? sustain.road : maneuver.instruction.text}
+                  {sustain ? sustain.road : shortManeuverText(maneuver.instruction)}
                 </Text>
                 {!sustain && maneuver.instruction.exitSign ? (
                   <Text style={styles.exitSign} numberOfLines={1}>
@@ -230,7 +230,7 @@ export function NavBanner({
                 <Text style={styles.thenLabel}>Then</Text>
                 <TurnIcon instruction={thenManeuver.instruction} size={20} color={theme.icon} />
                 <Text style={styles.thenText} numberOfLines={1}>
-                  {thenManeuver.instruction.text}
+                  {shortManeuverText(thenManeuver.instruction)}
                 </Text>
               </View>
             ) : null}
@@ -252,25 +252,26 @@ export function NavBanner({
 
         {state && nav.phase !== 'arrived' ? (
           <>
-            {/* Landscape has no vertical room to spare: the arrival time, the
-                remaining trip and its label collapse onto one line. */}
+            {/* Time left leads: mid-drive "12 min" is the number the driver is
+                actually deciding on, while the clock time it works out to is
+                context. Landscape has no vertical room to spare, so the same
+                order collapses onto one line. */}
             <View style={[styles.tripRow, landscape && styles.tripRowCompact]}>
               {landscape ? (
                 <Text style={styles.summaryCompact} numberOfLines={1}>
-                  <Text style={styles.etaInline}>{formatEta(state.etaEpochMs)}</Text>
+                  <Text style={styles.etaInline}>{formatDuration(state.timeRemainingMs)}</Text>
                   {'  '}
-                  {formatDuration(state.timeRemainingMs)} ·{' '}
-                  {formatDistance(state.distanceRemainingM)}
+                  {formatDistance(state.distanceRemainingM)} · {formatEta(state.etaEpochMs)}
                 </Text>
               ) : (
                 <>
                   <View style={styles.etaBlock}>
-                    <Text style={styles.eta}>{formatEta(state.etaEpochMs)}</Text>
-                    <Text style={styles.etaLabel}>Arrival</Text>
+                    <Text style={styles.eta}>{formatDuration(state.timeRemainingMs)}</Text>
+                    <Text style={styles.etaLabel}>Left</Text>
                   </View>
                   <Text style={styles.summary} numberOfLines={1}>
-                    {formatDuration(state.timeRemainingMs)} ·{' '}
-                    {formatDistance(state.distanceRemainingM)} remaining
+                    {formatDistance(state.distanceRemainingM)} · {formatEta(state.etaEpochMs)}{' '}
+                    arrival
                   </Text>
                 </>
               )}

@@ -52,7 +52,7 @@ export function useNavPuck(
   viewport: NavViewport,
 ): NavPuck {
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const courseUp = followMode === 'course' && (nav.state?.departed ?? false);
+  const courseUp = followMode === 'course';
   const visible = following && !navCam.followPaused && !navCam.overview && nav.state !== null;
   const anchor = courseUp ? viewport.courseAnchor : viewport.flatAnchor;
   return {

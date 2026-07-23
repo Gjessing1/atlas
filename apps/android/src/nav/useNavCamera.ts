@@ -117,11 +117,13 @@ export function useNavCamera(
     if (!following || followPaused || overview || !state) return;
     const snapped = state.snapped;
     if (state.courseDeg !== null) bearingRef.current = state.courseDeg;
-    // Until the drive has demonstrably begun (state.departed), hold a calm
-    // north-up flat frame instead of the full pitched course-up follow —
-    // standing next to the car shouldn't look like barreling down the route.
-    // The moment it flips, the ease below rotates into driving view.
-    const courseUp = navFollow === 'course' && state.departed;
+    // Course-up from the first fix, not from the first movement: the driving
+    // frame is what "Start" promises, and the route tangent already gives a
+    // stable bearing while stationary (courseDeg comes from the line, not from
+    // jittery GPS course). Waiting for `departed` meant every trip opened in a
+    // north-up frame that then swung round on pulling away — the one moment
+    // the driver is looking for the road ahead, not a camera animation.
+    const courseUp = navFollow === 'course';
     const padding = courseUp ? viewport.coursePadding : viewport.flatPadding;
     // On a portrait screen the header hides the top of the route, so zoom for
     // the genuinely visible road between its bottom and the puck. Landscape's

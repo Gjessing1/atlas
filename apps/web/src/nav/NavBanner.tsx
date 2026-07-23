@@ -1,6 +1,6 @@
 import type { NavController } from '@atlas/app-hooks';
 import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
-import { laneGlyphs, laneLabel, tunnelChipLabel } from '@atlas/navigation';
+import { laneGlyphs, laneLabel, shortManeuverText, tunnelChipLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { TurnIcon } from './TurnIcon.js';
 
@@ -157,7 +157,7 @@ export function NavBanner({
                       : `In ${fmtKm(maneuver.distanceToM)}`}
                   </span>
                   <span className="nav-maneuver">
-                    {sustain ? sustain.road : maneuver.instruction.text}
+                    {sustain ? sustain.road : shortManeuverText(maneuver.instruction)}
                   </span>
                   {!sustain && maneuver.instruction.exitSign ? (
                     <span className="nav-exit-sign">
@@ -171,7 +171,9 @@ export function NavBanner({
                 <div className="nav-then-row">
                   <span className="nav-then-label">Then</span>
                   <TurnIcon instruction={thenManeuver.instruction} size={20} />
-                  <span className="nav-then-text">{thenManeuver.instruction.text}</span>
+                  <span className="nav-then-text">
+                    {shortManeuverText(thenManeuver.instruction)}
+                  </span>
                 </div>
               ) : null}
             </>
@@ -188,13 +190,16 @@ export function NavBanner({
           ) : null}
           {state && nav.phase !== 'arrived' ? (
             <>
+              {/* Time left leads (Android parity): mid-drive "12 min" is the
+                  number the driver decides on; the clock time it works out to
+                  is context beside it. */}
               <div className="nav-trip-row">
                 <span className="nav-eta">
-                  <strong>{fmtClock(state.etaEpochMs)}</strong>
-                  <small>arrival</small>
+                  <strong>{fmtDuration(state.timeRemainingMs)}</strong>
+                  <small>left</small>
                 </span>
                 <span className="nav-summary">
-                  {fmtDuration(state.timeRemainingMs)} · {fmtKm(state.distanceRemainingM)} remaining
+                  {fmtKm(state.distanceRemainingM)} · {fmtClock(state.etaEpochMs)} arrival
                 </span>
               </div>
               <div className="nav-progress-track" aria-hidden="true">
