@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SqlDriver, SqlStatement } from './driver.js';
 import { migrate } from './migrations.js';
 import { createNodeSqlDriver as createNodeDriver } from './node-driver.js';
@@ -621,6 +621,78 @@ describe('AtlasStorage', () => {
 
       await restored.importAll(dump);
       expect(await restored.getSetting('units')).toBe('imperial');
+    });
+  });
+
+  describe('LWW stamps (monotonic hybrid clock)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('stays monotonic when the wall clock steps backwards', async () => {
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      const place = await storage.createPlace({ name: 'P', lat: 1, lng: 2 });
+
+      clock.mockReturnValue(start - 60_000); // clock jumps back a minute
+      await storage.updatePlace(place.id, { notes: 'later edit' });
+      const record = await storage.readSyncRecord('place', place.id);
+      expect(record!.updatedAt).toBeGreaterThan(place.updatedAt);
+    });
+
+    it('an edit on a lagging clock still outranks remote state it has seen', async () => {
+      const remoteStamp = Date.now() + 60_000; // the other device's clock runs ahead
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'shared',
+        updatedAt: remoteStamp,
+        deleted: false,
+        data: { name: 'From ahead-clock device', lat: 1, lng: 2, createdAt: 1 },
+      });
+
+      await storage.updatePlace('shared', { name: 'Edited here afterwards' });
+      const record = await storage.readSyncRecord('place', 'shared');
+      // Without the observed-stamp rule this edit would carry a lower stamp
+      // and lose LWW everywhere to the state it was made on top of.
+      expect(record!.updatedAt).toBeGreaterThan(remoteStamp);
+    });
+
+    it('reseeds the clock from stored stamps after a reopen', async () => {
+      const driver = createNodeDriver();
+      const first = new AtlasStorage(driver);
+      await first.init();
+      const futureStamp = Date.now() + 60_000;
+      await first.applyRemoteChange({
+        entity: 'place',
+        id: 'p',
+        updatedAt: futureStamp,
+        deleted: false,
+        data: { name: 'Future-stamped', lat: 1, lng: 2, createdAt: 1 },
+      });
+
+      const reopened = new AtlasStorage(driver);
+      await reopened.init();
+      await reopened.updatePlace('p', { notes: 'after restart' });
+      expect((await reopened.readSyncRecord('place', 'p'))!.updatedAt).toBeGreaterThan(futureStamp);
+    });
+
+    it('applies an equal-stamp remote change — the server broke the tie', async () => {
+      const t = Date.now() + 1000;
+      vi.spyOn(Date, 'now').mockReturnValue(t);
+      const place = await storage.createPlace({ name: 'Mine', lat: 1, lng: 2 });
+      expect(place.updatedAt).toBe(t);
+
+      const outcome = await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: t,
+        deleted: false,
+        data: { name: 'Tie winner from other device', lat: 3, lng: 4, createdAt: 1 },
+      });
+      expect(outcome).toBe('applied');
+      expect((await storage.listPlaces())[0]!.name).toBe('Tie winner from other device');
+      // The superseded local outbox entry went with it — no echo back.
+      expect(await storage.countOutbox()).toBe(0);
     });
   });
 

@@ -77,6 +77,28 @@ describe.skipIf(!url)('createPgStores', () => {
     expect(stale.skipped).toBe(1);
   });
 
+  it('breaks equal-stamp ties on device id, and replays stay no-ops', async () => {
+    // Smaller device id first: the larger one wins the tie.
+    await stores.sync.apply(userId, 'dev-a', [
+      { ...change('tie', 5500), data: { name: 'from a', lat: 1, lng: 2 } },
+    ]);
+    const winner = await stores.sync.apply(userId, 'dev-b', [
+      { ...change('tie', 5500), data: { name: 'from b', lat: 1, lng: 2 } },
+    ]);
+    expect(winner).toEqual({ applied: 1, skipped: 0 });
+
+    // Reverse arrival picks the same winner: b's replay and a's late push both skip.
+    expect(await stores.sync.apply(userId, 'dev-b', [change('tie', 5500)])).toMatchObject({
+      applied: 0,
+    });
+    expect(await stores.sync.apply(userId, 'dev-a', [change('tie', 5500)])).toMatchObject({
+      applied: 0,
+    });
+
+    const pull = await stores.sync.changesSince(userId, 0, 'reader', 100);
+    expect(pull.changes.find((c) => c.id === 'tie')!.data).toMatchObject({ name: 'from b' });
+  });
+
   it('applies a whole batch in one statement, including deletes and null data', async () => {
     const batch: SyncChange[] = [
       change('b1', 6000),

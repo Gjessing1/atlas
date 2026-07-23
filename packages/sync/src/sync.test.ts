@@ -4,7 +4,7 @@ import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { describe, expect, it } from 'vitest';
 import { SYNC_CURSOR_KEY, SyncEngine, SyncError } from './engine.js';
 import type { SyncPullResponse, SyncPushRequest } from './protocol.js';
-import { lwwWins } from './protocol.js';
+import { MAX_CLOCK_SKEW_MS, clampFutureStamps, lwwWins } from './protocol.js';
 
 /** In-memory model of the backend sync store: LWW rows + a pull sequence. */
 class FakeServer {
@@ -42,7 +42,10 @@ class FakeServer {
       for (const change of body.changes) {
         const key = `${change.entity}|${change.id}`;
         const existing = this.rows.get(key);
-        if (lwwWins(change.updatedAt, existing?.change.updatedAt ?? null)) {
+        const stored = existing
+          ? { updatedAt: existing.change.updatedAt, deviceId: existing.deviceId }
+          : null;
+        if (lwwWins({ updatedAt: change.updatedAt, deviceId: body.deviceId }, stored)) {
           this.rows.set(key, { change, seq: ++this.seq, deviceId: body.deviceId });
           applied++;
         } else {
@@ -88,11 +91,41 @@ async function createDevice(
 }
 
 describe('lwwWins', () => {
-  it('applies newer, keeps ties and older', () => {
-    expect(lwwWins(2, null)).toBe(true);
-    expect(lwwWins(2, 1)).toBe(true);
-    expect(lwwWins(2, 2)).toBe(false);
-    expect(lwwWins(1, 2)).toBe(false);
+  const stamp = (updatedAt: number, deviceId = 'a') => ({ updatedAt, deviceId });
+
+  it('applies newer, keeps older', () => {
+    expect(lwwWins(stamp(2), null)).toBe(true);
+    expect(lwwWins(stamp(2), stamp(1))).toBe(true);
+    expect(lwwWins(stamp(1), stamp(2))).toBe(false);
+  });
+
+  it('breaks equal stamps deterministically on device id', () => {
+    // A genuine two-device tie resolves the same way whichever push lands
+    // first — larger device id wins.
+    expect(lwwWins(stamp(2, 'b'), stamp(2, 'a'))).toBe(true);
+    expect(lwwWins(stamp(2, 'a'), stamp(2, 'b'))).toBe(false);
+    // A replay from the same device stays a no-op.
+    expect(lwwWins(stamp(2, 'a'), stamp(2, 'a'))).toBe(false);
+  });
+});
+
+describe('clampFutureStamps', () => {
+  it('clamps only stamps beyond the skew window', () => {
+    const now = 1_000_000;
+    const change = (updatedAt: number): SyncChange => ({
+      entity: 'place',
+      id: 'p',
+      updatedAt,
+      deleted: false,
+      data: {},
+    });
+    const [past, nearFuture, farFuture] = clampFutureStamps(
+      [change(now - 1), change(now + MAX_CLOCK_SKEW_MS), change(now + MAX_CLOCK_SKEW_MS + 1)],
+      now,
+    );
+    expect(past!.updatedAt).toBe(now - 1);
+    expect(nearFuture!.updatedAt).toBe(now + MAX_CLOCK_SKEW_MS);
+    expect(farFuture!.updatedAt).toBe(now + MAX_CLOCK_SKEW_MS);
   });
 });
 

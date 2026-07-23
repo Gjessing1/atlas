@@ -91,7 +91,10 @@ class FakeServer {
       for (const change of body.changes) {
         const key = `${change.entity}|${change.id}`;
         const existing = this.rows.get(key);
-        if (lwwWins(change.updatedAt, existing?.change.updatedAt ?? null)) {
+        const stored = existing
+          ? { updatedAt: existing.change.updatedAt, deviceId: existing.deviceId }
+          : null;
+        if (lwwWins({ updatedAt: change.updatedAt, deviceId: body.deviceId }, stored)) {
           this.rows.set(key, { change, seq: ++this.seq, deviceId: body.deviceId });
           applied++;
         } else {

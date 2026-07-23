@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { SyncChange } from '@atlas/storage';
+import { MAX_CLOCK_SKEW_MS } from '@atlas/sync';
 import type { AuthResponse, SyncPullResponse, SyncPushResponse } from '@atlas/sync';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -324,6 +325,56 @@ describe('sync push/pull', () => {
     const pull = await app.inject({ url: '/api/sync/pull?since=0&device=c', headers: auth });
     const body = pull.json() as SyncPullResponse;
     expect(body.changes[0]!.data).toMatchObject({ name: 'Pin' });
+  });
+
+  it('breaks equal-stamp ties on device id, independent of push order', async () => {
+    const token = await register('tie@example.com');
+    const auth = { authorization: `Bearer ${token}` };
+    const pushFrom = (deviceId: string, name: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/sync/push',
+        headers: auth,
+        payload: { deviceId, changes: [change({ id: 'tied', updatedAt: 5000, data: { name } })] },
+      });
+
+    // Smaller device id lands first; the larger one still wins the tie.
+    await pushFrom('dev-a', 'From a');
+    const second = await pushFrom('dev-b', 'From b');
+    expect(second.json() as SyncPushResponse).toEqual({ applied: 1, skipped: 0 });
+
+    // The reverse order picks the same winner — dev-b's replay is a no-op,
+    // dev-a's late arrival is skipped.
+    const replay = await pushFrom('dev-b', 'From b');
+    expect(replay.json() as SyncPushResponse).toEqual({ applied: 0, skipped: 1 });
+    const loser = await pushFrom('dev-a', 'From a');
+    expect(loser.json() as SyncPushResponse).toEqual({ applied: 0, skipped: 1 });
+
+    const pull = await app.inject({ url: '/api/sync/pull?since=0&device=other', headers: auth });
+    const tied = (pull.json() as SyncPullResponse).changes.find((c) => c.id === 'tied');
+    expect(tied!.data).toMatchObject({ name: 'From b' });
+  });
+
+  it('clamps stamps claiming to be implausibly far in the future', async () => {
+    const token = await register('skew@example.com');
+    const auth = { authorization: `Bearer ${token}` };
+    const before = Date.now();
+    await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: {
+        deviceId: 'broken-clock',
+        changes: [change({ id: 'future', updatedAt: before + 365 * 24 * 3600_000 })],
+      },
+    });
+
+    const pull = await app.inject({ url: '/api/sync/pull?since=0&device=other', headers: auth });
+    const stored = (pull.json() as SyncPullResponse).changes.find((c) => c.id === 'future')!;
+    // Clamped to the skew window — a correctly clocked device editing a few
+    // minutes later out-ranks it instead of losing for a year.
+    expect(stored.updatedAt).toBeLessThanOrEqual(Date.now() + MAX_CLOCK_SKEW_MS);
+    expect(stored.updatedAt).toBeGreaterThanOrEqual(before + MAX_CLOCK_SKEW_MS);
   });
 
   it('keeps users separate', async () => {

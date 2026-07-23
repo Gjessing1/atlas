@@ -1,6 +1,7 @@
 import fastifyJwt from '@fastify/jwt';
 import { Type, type Static } from '@sinclair/typebox';
 import type { SyncChange } from '@atlas/storage';
+import { clampFutureStamps } from '@atlas/sync';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { hashPassword, verifyPassword } from './passwords.js';
 import type { Stores } from './stores.js';
@@ -278,7 +279,10 @@ export async function registerSyncApi(
       }
       const deviceId = request.body.deviceId ?? '';
       // The schema mirrors SyncChange, minus `data`'s exact record type.
-      const changes = request.body.changes as SyncChange[];
+      // Stamps claiming to be implausibly far in the future are clamped —
+      // one mis-set device clock must not permanently out-rank every later
+      // edit from correctly configured devices (see @atlas/sync).
+      const changes = clampFutureStamps(request.body.changes as SyncChange[], Date.now());
       return stores.sync.apply(request.user.sub, deviceId, changes);
     },
   );

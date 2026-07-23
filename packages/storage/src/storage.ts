@@ -112,11 +112,41 @@ const TRACK_COLUMNS =
  * silently fails to sync, or stop a multi-row operation halfway.
  */
 export class AtlasStorage {
+  /**
+   * Highest LWW stamp this instance has issued or observed. Backs `tick()`,
+   * the monotonic hybrid clock all mutations stamp `updated_at` from: raw
+   * `Date.now()` would let a device whose clock stepped backwards issue edits
+   * that lose to its own earlier ones, and a device whose clock lags another
+   * device issue edits that lose to remote state it has already seen.
+   */
+  private lastVersion = 0;
+
   constructor(private readonly driver: SqlDriver) {}
 
   /** Run pending migrations; call once before anything else. */
   async init(): Promise<void> {
     await migrate(this.driver);
+    // Seed the clock from everything stored: covers stamps issued before a
+    // restart (in-memory state is gone) and remote stamps applied earlier.
+    // The outbox is included because a pending delete's stamp lives only there.
+    for (const table of ['collections', 'places', 'tracks', 'settings', 'outbox']) {
+      const rows = await this.driver.query(`SELECT MAX(updated_at) AS m FROM ${table}`);
+      const max = Number(rows[0]?.['m'] ?? 0);
+      if (Number.isFinite(max) && max > this.lastVersion) this.lastVersion = max;
+    }
+  }
+
+  /**
+   * Issue the next LWW stamp: wall clock when it is ahead, else one past the
+   * highest stamp seen. Every local mutation must outrank whatever state this
+   * device has stored or observed, whatever the wall clock claims. (The server
+   * clamps stamps that claim to be implausibly far in the future, bounding how
+   * far one broken clock can drag this forward — see @atlas/sync.)
+   */
+  private tick(): number {
+    const v = Math.max(Date.now(), this.lastVersion + 1);
+    this.lastVersion = v;
+    return v;
   }
 
   /**
@@ -136,7 +166,7 @@ export class AtlasStorage {
   }
 
   async createCollection(name: string, parentId: string | null = null): Promise<CollectionRecord> {
-    const now = Date.now();
+    const now = this.tick();
     const record: CollectionRecord = {
       id: crypto.randomUUID(),
       name,
@@ -167,7 +197,7 @@ export class AtlasStorage {
   }
 
   async renameCollection(id: string, name: string): Promise<void> {
-    const now = Date.now();
+    const now = this.tick();
     await this.driver.batch([
       {
         sql: 'UPDATE collections SET name = ?, updated_at = ? WHERE id = ?',
@@ -228,7 +258,7 @@ export class AtlasStorage {
     const rows = await this.driver.query('SELECT parent_id FROM collections WHERE id = ?', [id]);
     if (rows.length === 0 || snapshot === null) return null;
     const parentId = rows[0]!['parent_id'] ?? null;
-    const now = Date.now();
+    const now = this.tick();
     // Read the affected rows first, then apply the whole reparent + delete as
     // one transaction — a folder deletion must never stop halfway up a tree.
     const movedChildren: { entity: SyncEntity; id: string }[] = [];
@@ -274,7 +304,7 @@ export class AtlasStorage {
   }
 
   async createPlace(input: NewPlace): Promise<PlaceRecord> {
-    const now = Date.now();
+    const now = this.tick();
     const record: PlaceRecord = {
       id: crypto.randomUUID(),
       name: input.name,
@@ -356,7 +386,7 @@ export class AtlasStorage {
     const rows = await this.driver.query(`SELECT id, sort_index FROM ${table}`);
     const current = new Map(rows.map((r) => [String(r['id']), Number(r['sort_index'])]));
     const statements: SqlStatement[] = [];
-    const now = Date.now();
+    const now = this.tick();
     for (const [i, id] of orderedIds.entries()) {
       const sortIndex = i + 1;
       if (!current.has(id) || current.get(id) === sortIndex) continue;
@@ -371,7 +401,7 @@ export class AtlasStorage {
     const snapshot = await this.readSyncRecord('place', id);
     await this.driver.batch([
       { sql: 'DELETE FROM places WHERE id = ?', params: [id] },
-      this.enqueueStmt('place', id, 'delete', Date.now()),
+      this.enqueueStmt('place', id, 'delete', this.tick()),
     ]);
     return snapshot && { entity: 'place', id, data: snapshot.data };
   }
@@ -390,7 +420,7 @@ export class AtlasStorage {
   }
 
   async createTrack(input: NewTrack): Promise<TrackRecord> {
-    const now = Date.now();
+    const now = this.tick();
     const record: TrackRecord = {
       id: crypto.randomUUID(),
       name: input.name,
@@ -440,7 +470,7 @@ export class AtlasStorage {
     const snapshot = await this.readSyncRecord('track', id);
     await this.driver.batch([
       { sql: 'DELETE FROM tracks WHERE id = ?', params: [id] },
-      this.enqueueStmt('track', id, 'delete', Date.now()),
+      this.enqueueStmt('track', id, 'delete', this.tick()),
     ]);
     return snapshot && { entity: 'track', id, data: snapshot.data };
   }
@@ -452,7 +482,7 @@ export class AtlasStorage {
    * carries the undo to other devices rather than letting the older delete win.
    */
   async restore(deleted: DeletedRecord): Promise<void> {
-    const now = Date.now();
+    const now = this.tick();
     const statements: SqlStatement[] = [
       this.upsertStmt({
         entity: deleted.entity,
@@ -489,7 +519,7 @@ export class AtlasStorage {
   }
 
   async setSetting(key: string, value: string): Promise<void> {
-    const now = Date.now();
+    const now = this.tick();
     const statements: SqlStatement[] = [this.settingUpsertStmt(key, value, now)];
     if (!key.startsWith(LOCAL_SETTING_PREFIX))
       statements.push(this.enqueueStmt('setting', key, 'upsert', now));
@@ -552,6 +582,9 @@ export class AtlasStorage {
       }
       statements.push(this.upsertStmt({ entity, id, updatedAt, deleted: false, data }));
       statements.push(this.enqueueStmt(entity, id, 'upsert', updatedAt));
+      // Observe the dump's stamp, as with a pulled change: later local edits
+      // must out-rank what was just restored.
+      if (updatedAt > this.lastVersion) this.lastVersion = updatedAt;
       into.imported += 1;
     };
     // Folders first, so places and tracks land on a parent that already exists.
@@ -627,7 +660,7 @@ export class AtlasStorage {
         summary.settings.skipped += 1;
         continue;
       }
-      const now = Date.now();
+      const now = this.tick();
       statements.push(this.settingUpsertStmt(key, value, now));
       statements.push(this.enqueueStmt('setting', key, 'upsert', now));
       summary.settings.imported += 1;
@@ -750,13 +783,18 @@ export class AtlasStorage {
    * Apply one change arriving from the server, last-write-wins against the
    * local row. Never writes the outbox (remote state must not echo back), and
    * clears any pending outbox entry the change supersedes.
+   *
+   * An *equal* stamp applies: pulls exclude this device's own writes, so an
+   * equal-stamp change is a genuine two-device tie the server has already
+   * broken deterministically — taking the server's winner is what makes both
+   * devices converge instead of each keeping its own copy forever.
    */
   async applyRemoteChange(change: SyncChange): Promise<'applied' | 'skipped'> {
     // `local.` settings are device-private and never pushed; a server echoing one
     // back (buggy or hostile) must not clobber our sync cursor or device id.
     if (change.entity === 'setting' && change.id.startsWith(LOCAL_SETTING_PREFIX)) return 'skipped';
     const local = await this.localUpdatedAt(change.entity, change.id);
-    if (local !== null && local >= change.updatedAt) return 'skipped';
+    if (local !== null && local > change.updatedAt) return 'skipped';
     const statements: SqlStatement[] = [];
     if (change.deleted) {
       if (change.entity === 'setting') {
@@ -776,6 +814,9 @@ export class AtlasStorage {
       params: [change.entity, change.id, change.updatedAt],
     });
     await this.driver.batch(statements);
+    // Observe the remote stamp: a later local edit — even on a lagging wall
+    // clock — must out-rank the state it was made on top of.
+    if (change.updatedAt > this.lastVersion) this.lastVersion = change.updatedAt;
     return 'applied';
   }
 
@@ -948,7 +989,7 @@ export class AtlasStorage {
     id: string,
     columns: Record<string, SqlValue | undefined>,
   ): Promise<void> {
-    const statements = this.patchStmts(table, entity, id, columns, Date.now());
+    const statements = this.patchStmts(table, entity, id, columns, this.tick());
     if (statements.length > 0) await this.driver.batch(statements);
   }
 }

@@ -60,9 +60,42 @@ export interface SyncPullResponse {
 }
 
 /**
- * Last-write-wins: does an incoming change beat the stored state? Ties keep
- * the existing copy, which makes replays of an already-accepted change no-ops.
+ * The furthest ahead of the server's clock a pushed `updatedAt` may claim to
+ * be. Client stamps come from device wall clocks; a device set far into the
+ * future would otherwise write records that permanently out-rank every later
+ * edit from correctly configured devices. Stamps beyond the window are clamped
+ * to it at push time (see clampFutureStamps). Five minutes tolerates ordinary
+ * drift on devices without network time.
  */
-export function lwwWins(incomingUpdatedAt: number, existingUpdatedAt: number | null): boolean {
-  return existingUpdatedAt === null || incomingUpdatedAt > existingUpdatedAt;
+export const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+
+/** One side of an LWW comparison: the stamp and the device that wrote it. */
+export interface LwwStamp {
+  updatedAt: number;
+  deviceId: string;
+}
+
+/**
+ * Last-write-wins: does an incoming change beat the stored state? Equal
+ * stamps are broken deterministically by device id (larger wins), so the
+ * outcome of a genuine two-device tie does not depend on push order. A replay
+ * from the same device (equal stamp, equal device) keeps the existing copy,
+ * so re-pushing an already-accepted change stays a no-op.
+ */
+export function lwwWins(incoming: LwwStamp, existing: LwwStamp | null): boolean {
+  if (existing === null) return true;
+  if (incoming.updatedAt !== existing.updatedAt) return incoming.updatedAt > existing.updatedAt;
+  return incoming.deviceId > existing.deviceId;
+}
+
+/**
+ * Clamp implausibly future change stamps to `now + MAX_CLOCK_SKEW_MS`. Run by
+ * the server on every push, so one mis-set device clock cannot poison the
+ * account: an accepted future stamp would both beat all later honest edits and
+ * — because clients raise their own clocks to every stamp they observe —
+ * drag every other device's stamps into the future with it.
+ */
+export function clampFutureStamps(changes: SyncChange[], now: number): SyncChange[] {
+  const max = now + MAX_CLOCK_SKEW_MS;
+  return changes.map((c) => (c.updatedAt > max ? { ...c, updatedAt: max } : c));
 }

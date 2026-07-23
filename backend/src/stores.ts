@@ -110,7 +110,11 @@ export function createMemoryStores(): Stores {
         for (const change of changes) {
           const key = `${change.entity}|${change.id}`;
           const existing = m.get(key);
-          if (lwwWins(change.updatedAt, existing?.change.updatedAt ?? null)) {
+          const incoming = { updatedAt: change.updatedAt, deviceId };
+          const stored = existing
+            ? { updatedAt: existing.change.updatedAt, deviceId: existing.deviceId }
+            : null;
+          if (lwwWins(incoming, stored)) {
             m.set(key, { change, seq: ++seq, deviceId });
             applied++;
           } else {
