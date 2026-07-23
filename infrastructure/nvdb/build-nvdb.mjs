@@ -56,8 +56,13 @@ const EGENSKAP_SATK_RETNING = 9519;
 // scope (no NVDB road network there worth shipping).
 const NORWAY_BBOX = '4.0,57.9,31.6,71.3';
 
-const outPath = process.argv[2] ?? '/mnt/data/atlas/nvdb/nvdb.sqlite';
-const bbox = process.argv[3] ?? NORWAY_BBOX;
+// --cameras-only: import just the ATK cameras into an existing DB, leaving the
+// (expensive) speed_segment table untouched. Used to resume after the camera
+// stage dies without re-fetching the whole national speed dataset.
+const camerasOnly = process.argv.includes('--cameras-only');
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const outPath = positional[0] ?? '/mnt/data/atlas/nvdb/nvdb.sqlite';
+const bbox = positional[1] ?? NORWAY_BBOX;
 
 /**
  * Parse a WKT LINESTRING (with or without a Z ordinate) into `[[lat, lng], …]`.
@@ -218,18 +223,24 @@ async function linkBearingAt(veglenkesekvensid, relativPosisjon) {
   return bearingDeg(points[i], points[i + 1]);
 }
 
-function openDb(file) {
+// In cameras-only mode the speed tables are left as-is; only the camera tables
+// are dropped and recreated, so the run is idempotent without touching the
+// completed speed dataset.
+function openDb(file, { camerasOnly = false } = {}) {
   mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(`
-    DROP TABLE IF EXISTS speed_segment;
-    DROP TABLE IF EXISTS speed_rtree;
+    ${camerasOnly ? '' : 'DROP TABLE IF EXISTS speed_segment; DROP TABLE IF EXISTS speed_rtree;'}
     DROP TABLE IF EXISTS camera_point;
     DROP TABLE IF EXISTS camera_point_rtree;
     DROP TABLE IF EXISTS camera_section;
     DROP TABLE IF EXISTS camera_section_rtree;
-    CREATE TABLE speed_segment (id INTEGER PRIMARY KEY, limit_kph INTEGER NOT NULL, geom TEXT NOT NULL);
-    CREATE VIRTUAL TABLE speed_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
+    ${
+      camerasOnly
+        ? ''
+        : `CREATE TABLE speed_segment (id INTEGER PRIMARY KEY, limit_kph INTEGER NOT NULL, geom TEXT NOT NULL);
+    CREATE VIRTUAL TABLE speed_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);`
+    }
     CREATE TABLE camera_point (id INTEGER PRIMARY KEY, name TEXT, bearing_deg REAL, lat REAL NOT NULL, lng REAL NOT NULL);
     CREATE VIRTUAL TABLE camera_point_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
     CREATE TABLE camera_section (id INTEGER PRIMARY KEY, name TEXT, geom TEXT NOT NULL);
@@ -370,10 +381,10 @@ async function importSectionCameras(db) {
 }
 
 async function main() {
-  console.log(`==> NVDB → ${outPath}`);
+  console.log(`==> NVDB → ${outPath}${camerasOnly ? ' (cameras only)' : ''}`);
   console.log(`    extent: ${bbox}`);
-  const db = openDb(outPath);
-  await importSpeedLimits(db);
+  const db = openDb(outPath, { camerasOnly });
+  if (!camerasOnly) await importSpeedLimits(db);
   await importPointCameras(db);
   await importSectionCameras(db);
   db.exec('PRAGMA optimize; VACUUM;');
