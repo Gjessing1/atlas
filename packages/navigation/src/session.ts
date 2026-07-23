@@ -3,6 +3,7 @@ import {
   speedLimitKphAt,
   tunnelAt,
   tunnelNear,
+  type RouteCameras,
   type RouteEnrichment,
   type RouteInstruction,
   type RouteLane,
@@ -16,6 +17,8 @@ import {
   type NavState,
   type NavUpdate,
   type Position,
+  type SectionControlState,
+  type SpeedCameraState,
   type SustainGuidance,
   type TunnelState,
   type UpcomingManeuver,
@@ -45,6 +48,22 @@ const PACE_MAX = 2;
 const WRONG_BRANCH_GRACE_TICKS = 5;
 /** Atlas turn code for a roundabout leg — both entering (26) and exiting (27). */
 const ROUNDABOUT_SIGN = 6;
+/** Farthest ahead (m) the next speed camera is surfaced in the state at all. */
+const CAMERA_CHIP_M = 2000;
+/**
+ * Minimum/fallback distance (m) and lead time (s) for camera voice alerts —
+ * the same speed-scaled shape as maneuver approach cues. Vegvesen's own
+ * warning sign (556) stands a few hundred metres before the camera, so this
+ * roughly matches what the driver sees out the windscreen. (NVDB's signed
+ * influence zones, type 775, were deliberately not used for timing: for
+ * section installations they cover the whole multi-kilometre stretch, which
+ * would fire a "camera ahead" absurdly early.)
+ */
+const CAMERA_ALERT_M = 500;
+const CAMERA_ALERT_LEAD_S = 20;
+/** Shortest sample (m / s) inside a section before the average is worth showing. */
+const SECTION_AVG_MIN_M = 100;
+const SECTION_AVG_MIN_S = 5;
 
 /** A time-derived warning distance, never tighter than the tuned fallback. */
 function leadDistanceM(fallbackM: number, leadTimeS: number, speedMps: number | null): number {
@@ -119,6 +138,20 @@ export class NavigationSession {
    * driver is already moving while it is in flight.
    */
   private enrichment: RouteEnrichment | null = null;
+  /** ATK cameras matched onto this route; attached like enrichment, optional. */
+  private cameras: RouteCameras | null = null;
+  /**
+   * Where and when the current average-speed stretch was entered. `measured`
+   * is true only when the entry crossing itself was observed — an average
+   * started mid-stretch is not the number the installation measures, so it is
+   * withheld rather than shown wrong.
+   */
+  private sectionEntry: {
+    index: number;
+    alongM: number;
+    atMs: number;
+    measured: boolean;
+  } | null = null;
   private wrongBranch = false;
   private wrongBranchAnnounced = false;
   /** Consecutive reckoned ticks with the divergence above threshold. */
@@ -180,6 +213,154 @@ export class NavigationSession {
   }
 
   /**
+   * Attach (or replace) the route's matched ATK cameras once the camera
+   * request for this route resolves — the same late-arrival contract as
+   * {@link setEnrichment}: guidance runs unchanged without them, and the
+   * refreshed state is handed back so a camera already inside the chip window
+   * appears now rather than at the next fix.
+   */
+  setCameras(cameras: RouteCameras | null, nowMs: number = Date.now()): NavState | null {
+    this.cameras = cameras;
+    this.sectionEntry = null;
+    if (this.lastState && this.lastState.status !== 'arrived') {
+      this.lastState = {
+        ...this.lastState,
+        speedCamera: this.speedCameraState(this.lastState.traveledM),
+        sectionControl: this.sectionControlState(this.lastState.traveledM, nowMs),
+      };
+    }
+    return this.lastState;
+  }
+
+  /** The next point camera ahead, once inside the chip window. */
+  private speedCameraState(alongM: number): SpeedCameraState | null {
+    const points = this.cameras?.points;
+    if (!points) return null;
+    for (const p of points) {
+      // Small just-passed slack so the chip drops as the camera goes by
+      // rather than lingering to the next one.
+      if (p.atM >= alongM - 25) {
+        const distanceM = Math.max(0, p.atM - alongM);
+        return distanceM <= CAMERA_CHIP_M ? { distanceM, name: p.name } : null;
+      }
+    }
+    return null;
+  }
+
+  /** The average-speed stretch containing `alongM`, with our own running average. */
+  private sectionControlState(alongM: number, nowMs: number): SectionControlState | null {
+    const sections = this.cameras?.sections;
+    if (!sections) return null;
+    const index = sections.findIndex((s) => alongM >= s.startM && alongM <= s.endM);
+    if (index < 0) return null;
+    const section = sections[index]!;
+    let avgKph: number | null = null;
+    const entry = this.sectionEntry;
+    if (entry && entry.index === index && entry.measured) {
+      const dM = alongM - entry.alongM;
+      const dtS = (nowMs - entry.atMs) / 1000;
+      if (dM >= SECTION_AVG_MIN_M && dtS >= SECTION_AVG_MIN_S) {
+        avgKph = Math.round((dM / dtS) * 3.6);
+      }
+    }
+    return {
+      name: section.name,
+      remainingM: Math.max(0, section.endM - alongM),
+      avgKph,
+      limitKph: speedLimitKphAt(this.enrichment, alongM),
+    };
+  }
+
+  /**
+   * Keep the section-entry anchor in step with the position. The average must
+   * span everything since the entry camera — including a stop, or a spell
+   * off-route — because that is exactly what the installation measures: wall
+   * time between the two endpoint passages.
+   */
+  private trackSection(prevAlongM: number | null, alongM: number, nowMs: number): void {
+    const sections = this.cameras?.sections;
+    if (!sections) return;
+    const index = sections.findIndex((s) => alongM >= s.startM && alongM <= s.endM);
+    if (index < 0) {
+      this.sectionEntry = null;
+      return;
+    }
+    if (this.sectionEntry?.index === index) return;
+    this.sectionEntry = {
+      index,
+      alongM,
+      atMs: nowMs,
+      // Only an observed crossing may anchor an average: the previous position
+      // was still ahead of the entry line (small slack for the fix interval).
+      measured: prevAlongM !== null && prevAlongM < sections[index]!.startM + 50,
+    };
+  }
+
+  /** Camera voice alerts — the hazard counterpart of the maneuver cues. */
+  private cameraPrompts(alongM: number, speedMps: number | null): VoicePrompt[] {
+    const cams = this.cameras;
+    if (!cams) return [];
+    const prompts: VoicePrompt[] = [];
+    const leadM = leadDistanceM(CAMERA_ALERT_M, CAMERA_ALERT_LEAD_S, this.promptSpeed(speedMps));
+    cams.points.forEach((p, i) => {
+      const key = `cam:${i}`;
+      if (this.firedPrompts.has(key)) return;
+      if (p.atM <= alongM) {
+        // Already behind (a jump, or cameras attached late): never announce late.
+        this.firedPrompts.add(key);
+        return;
+      }
+      const d = p.atM - alongM;
+      if (d <= leadM) {
+        this.firedPrompts.add(key);
+        prompts.push({
+          text: `Speed camera in ${voiceDistance(d)}`,
+          kind: 'alert',
+          maneuverIndex: -1,
+          thresholdM: leadM,
+        });
+      }
+    });
+    cams.sections.forEach((s, i) => {
+      const enterKey = `sec:${i}`;
+      const doneKey = `sec:${i}:done`;
+      if (!this.firedPrompts.has(enterKey)) {
+        if (alongM >= s.endM) {
+          // The whole stretch is already behind — say nothing, ever.
+          this.firedPrompts.add(enterKey);
+          this.firedPrompts.add(doneKey);
+        } else if (alongM >= s.startM) {
+          // Entered without an approach cue (cameras attached mid-stretch).
+          this.firedPrompts.add(enterKey);
+          prompts.push({
+            text: `Average speed check for the next ${voiceDistance(s.endM - alongM)}`,
+            kind: 'alert',
+            maneuverIndex: -1,
+            thresholdM: 0,
+          });
+        } else if (s.startM - alongM <= leadM) {
+          this.firedPrompts.add(enterKey);
+          prompts.push({
+            text: `Average speed check ahead, for the next ${voiceDistance(s.endM - s.startM)}`,
+            kind: 'alert',
+            maneuverIndex: -1,
+            thresholdM: leadM,
+          });
+        }
+      } else if (!this.firedPrompts.has(doneKey) && alongM > s.endM) {
+        this.firedPrompts.add(doneKey);
+        prompts.push({
+          text: 'Average speed check complete',
+          kind: 'alert',
+          maneuverIndex: -1,
+          thresholdM: 0,
+        });
+      }
+    });
+    return prompts;
+  }
+
+  /**
    * The engine's own remaining-time estimate (ms) at the last known
    * along-route position, *without* the observed-pace adaptation. This is the
    * honest baseline for judging a freshly fetched candidate route: the
@@ -212,6 +393,8 @@ export class NavigationSession {
         then: null,
         sustain: null,
         laneGuidance: null,
+        speedCamera: null,
+        sectionControl: null,
       };
     }
     return this.lastState;
@@ -287,12 +470,14 @@ export class NavigationSession {
       moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
         ? position.headingDeg
         : null;
+    const prevAlongM = this.lastAlongM;
     const snap = snapToRoute(position, this.points, this.cum, {
       prevAlongM: this.lastAlongM,
       headingDeg,
     });
     this.lastAlongM = snap.alongM;
     const alongM = snap.alongM;
+    this.trackSection(prevAlongM, alongM, nowMs);
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
 
     // Only fixes accurate enough to prove a departure count toward off-route
@@ -379,6 +564,7 @@ export class NavigationSession {
 
     const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
     const prompts = this.arrived || offRoute ? [] : this.collectPrompts(alongM, upcoming, speedMps);
+    if (!this.arrived && !offRoute) prompts.push(...this.cameraPrompts(alongM, speedMps));
 
     // Display position: glue to the route only while the fix is genuinely
     // near it (tighter still before departure) — a puck pinned to a road the
@@ -432,6 +618,8 @@ export class NavigationSession {
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
+      speedCamera: this.arrived ? null : this.speedCameraState(alongM),
+      sectionControl: this.arrived ? null : this.sectionControlState(alongM, nowMs),
       departed: this.departed,
       viasPassed: this.viasPassedAt(alongM),
       courseDeg: shownCourse,
@@ -506,10 +694,15 @@ export class NavigationSession {
     // only a real fix may declare arrival.
     const ceiling = Math.max(this.alongAtFixM!, this.totalM - this.opts.arrivalRadiusM);
     const alongM = Math.min(this.alongAtFixM! + reckonedM, ceiling);
+    const prevAlongM = this.lastAlongM;
     this.lastAlongM = alongM; // keep the matcher's continuity hint moving too
+    this.trackSection(prevAlongM, alongM, nowMs);
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
     const [upcoming, then] = this.findUpcoming(alongM);
     const prompts = this.collectPrompts(alongM, upcoming, speed);
+    // A camera does not stop existing because GPS did — Norwegian tunnels have
+    // ATK too, and the reckoned position is exactly what the alert needs.
+    prompts.push(...this.cameraPrompts(alongM, speed));
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);
     const point = pointAtDistance(this.points, this.cum, alongM);
     const course = this.courseAt(alongM, speed);
@@ -559,6 +752,8 @@ export class NavigationSession {
       currentRoad: this.roadAt(alongM),
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
+      speedCamera: this.speedCameraState(alongM),
+      sectionControl: this.sectionControlState(alongM, nowMs),
       departed: this.departed,
       viasPassed: this.viasPassedAt(alongM),
       courseDeg: course,
@@ -635,6 +830,8 @@ export class NavigationSession {
       currentRoad: this.roadAt(0),
       speedLimitKph: speedLimitKphAt(this.enrichment, 0),
       tunnel: this.tunnelState(0),
+      speedCamera: this.speedCameraState(0),
+      sectionControl: this.sectionControlState(0, nowMs),
       departed: this.departed,
       viasPassed: 0,
       courseDeg: null,

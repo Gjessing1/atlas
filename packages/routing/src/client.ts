@@ -1,5 +1,6 @@
 import type { LatLng } from '@atlas/core';
 
+import type { RouteCameras } from './cameras.js';
 import type { RouteQuery, RouteResult } from './model.js';
 import type { SpeedLimitOverride } from './nvdb.js';
 import type { ValhallaTransport } from './provider.js';
@@ -30,6 +31,30 @@ export function httpNvdbLimits(opts: FetchRouteOptions = {}): NvdbLimitTransport
     if (!res.ok) throw new RoutingError(`nvdb limits failed (HTTP ${res.status})`);
     const json = (await res.json()) as { overrides?: SpeedLimitOverride[] };
     return json.overrides ?? [];
+  };
+}
+
+/**
+ * Ask the Atlas backend which ATK speed cameras (points and average-speed
+ * sections) the route passes. Pair with `NavigationSession.setCameras`. Same
+ * contract as {@link NvdbLimitTransport}: an empty result — no dataset on the
+ * server, or a route outside Norway — is a normal answer, never an error.
+ */
+export type NvdbCameraTransport = (points: LatLng[], signal?: AbortSignal) => Promise<RouteCameras>;
+
+/** {@link NvdbCameraTransport} backed by the backend's `/api/route/nvdb-cameras`. */
+export function httpNvdbCameras(opts: FetchRouteOptions = {}): NvdbCameraTransport {
+  return async (points, signal) => {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const res = await doFetch(`${opts.baseUrl ?? ''}/api/route/nvdb-cameras`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points }),
+      signal: signal ?? opts.signal,
+    });
+    if (!res.ok) throw new RoutingError(`nvdb cameras failed (HTTP ${res.status})`);
+    const json = (await res.json()) as { cameras?: RouteCameras };
+    return json.cameras ?? { points: [], sections: [] };
   };
 }
 

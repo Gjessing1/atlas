@@ -2478,6 +2478,35 @@ button.transit-notice-summary {
   pointer-events: none;
 }
 
+/* ATK camera guidance, stacked above the road chip: an approach warning for a
+   point camera, or the live average while inside a measured stretch. Amber so
+   it reads as a caution, not another road label; red once the measured average
+   is over the limit — the one number the driver cannot compute alone. */
+.nav-camera-chip {
+  position: absolute;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: #b45309;
+  color: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 16px;
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  max-width: 82vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 3px 12px rgba(28, 39, 51, 0.28);
+  pointer-events: none;
+}
+
+.nav-camera-chip.nav-camera-over {
+  background: #b91c1c;
+}
+
 .nav-turn-exit {
   position: absolute;
   bottom: -4px;

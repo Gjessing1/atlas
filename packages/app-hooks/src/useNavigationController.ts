@@ -26,6 +26,7 @@ import {
   enrichRoute,
   sortRouteChoices,
   viaInsertIndex,
+  type NvdbCameraTransport,
   type NvdbLimitTransport,
   type RoutePreferences,
   type RoutePath,
@@ -72,6 +73,13 @@ export interface NavPlatform {
    * tile limits standing, so it can never cost a roundel that `trace` produced.
    */
   nvdbLimits?: NvdbLimitTransport;
+  /**
+   * ATK speed cameras (points + average-speed sections) matched onto a route
+   * (ROADMAP §2.1). Same contract as `nvdbLimits`: optional and best-effort —
+   * absent, unreachable, or empty simply means no camera guidance, exactly
+   * the pre-camera behaviour and the everywhere-outside-Norway behaviour.
+   */
+  nvdbCameras?: NvdbCameraTransport;
   /**
    * One fix now, for the preview origin. Should reject with a
    * user-presentable message — it becomes the error phase's text — and must
@@ -411,10 +419,33 @@ export function useNavigationController(platform: NavPlatform): NavController {
     (session: NavigationSession, path: RoutePath): void => {
       enrichAbort.current?.abort();
       enrichAbort.current = null;
-      const trace = platformRef.current.trace;
-      if (!trace) return;
+      const { trace, nvdbCameras } = platformRef.current;
+      if (!trace && !nvdbCameras) return;
       const controller = new AbortController();
       enrichAbort.current = controller;
+      // Speed cameras ride the same fire-and-forget contract, but not the
+      // trace pipeline — they are their own dataset, useful even where the
+      // tiles carry no attributes. Car only, like the NVDB limits: ATK
+      // enforcement is about driving.
+      if (nvdbCameras && profileRef.current === 'car') {
+        void nvdbCameras(
+          path.points.map((p) => ({ lat: p.lat, lng: p.lng })),
+          controller.signal,
+        )
+          .then((cameras) => {
+            if (sessionRef.current !== session) return;
+            if (cameras.points.length === 0 && cameras.sections.length === 0) return;
+            const refreshed = session.setCameras(cameras);
+            if (refreshed) {
+              setState(refreshed);
+              lastStateRef.current = refreshed;
+            }
+          })
+          .catch(() => {
+            // Optional by design: offline, or no dataset on the server.
+          });
+      }
+      if (!trace) return;
       const nvdb = platformRef.current.nvdbLimits;
       void enrichRoute(path, profileRef.current, trace, { signal: controller.signal })
         .then(async (base) => {

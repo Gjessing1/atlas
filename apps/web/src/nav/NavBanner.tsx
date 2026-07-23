@@ -159,6 +159,15 @@ export function NavBanner({
   // No speed-limit roundel on foot: the 80 km/h sign on the road a footpath
   // parallels is driving furniture, not guidance.
   const speedLimit = moving && !walking ? (state?.speedLimitKph ?? null) : null;
+  // ATK camera guidance (car routes in Norway only — elsewhere the data is
+  // simply absent, so no chip: the §2.1 rule). A section in progress outranks
+  // the next point camera; the average is what section control is about.
+  const sectionControl = moving && !walking ? (state?.sectionControl ?? null) : null;
+  const speedCamera = !sectionControl && moving && !walking ? (state?.speedCamera ?? null) : null;
+  const sectionOver =
+    sectionControl?.avgKph != null &&
+    sectionControl.limitKph != null &&
+    sectionControl.avgKph > sectionControl.limitKph;
   // Walking modes offer the reroute instead of performing it — and for the
   // hiker who lost the trail with no network, the straight line back to it is
   // the half that still works offline.
@@ -405,6 +414,22 @@ export function NavBanner({
         </div>
       </div>
       {road ? <div className="nav-road-chip">{road}</div> : null}
+      {sectionControl ? (
+        <div
+          className={`nav-camera-chip${sectionOver ? ' nav-camera-over' : ''}`}
+          role="status"
+          aria-label="Average speed check"
+        >
+          {sectionControl.avgKph !== null
+            ? `Avg ${sectionControl.avgKph}${sectionControl.limitKph !== null ? ` / ${sectionControl.limitKph}` : ''} km/h · `
+            : 'Average speed check · '}
+          {fmtKm(sectionControl.remainingM)} left
+        </div>
+      ) : speedCamera ? (
+        <div className="nav-camera-chip" role="status" aria-label="Speed camera ahead">
+          Speed camera · {fmtDistanceM(speedCamera.distanceM)}
+        </div>
+      ) : null}
     </>
   );
 }

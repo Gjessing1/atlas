@@ -5,6 +5,7 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
+import { httpNvdbCameras, httpNvdbLimits } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -193,6 +194,12 @@ export function useNavigation(): NavController {
     () => ({
       provider: makeRouteProvider(serverOrigin),
       trace: makeTraceTransport(serverOrigin),
+      // NVDB limits + ATK cameras over the server for now — best-effort, so an
+      // offline drive simply keeps the tile limits and gets no camera guidance.
+      // The §2.1 end state is the same conflation against a pack-local copy of
+      // the dataset; that lands when packs actually ship the NVDB SQLite.
+      nvdbLimits: httpNvdbLimits({ baseUrl: serverOrigin }),
+      nvdbCameras: httpNvdbCameras({ baseUrl: serverOrigin }),
       currentFix,
       watchFixes,
       speak,

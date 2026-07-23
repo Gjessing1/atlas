@@ -1,5 +1,5 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
-import type { LatLng } from '@atlas/core';
+import { fmtDistanceM, fmtKm, type LatLng } from '@atlas/core';
 import { navCameraStyle, tunnelChipLabel } from '@atlas/navigation';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -95,6 +95,24 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   if (!following) return null;
   const roadLabel = nav.state?.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state?.currentRoad;
+  // ATK camera guidance (web NavBanner's twin): a section in progress outranks
+  // the next point camera — the average is what section control is about.
+  // Absent everywhere the dataset has nothing, which outside Norway is always.
+  const sectionControl = nav.state?.sectionControl ?? null;
+  const speedCamera = sectionControl ? null : (nav.state?.speedCamera ?? null);
+  const sectionOver =
+    sectionControl?.avgKph != null &&
+    sectionControl.limitKph != null &&
+    sectionControl.avgKph > sectionControl.limitKph;
+  const cameraLabel = sectionControl
+    ? `${
+        sectionControl.avgKph !== null
+          ? `Avg ${sectionControl.avgKph}${sectionControl.limitKph !== null ? ` / ${sectionControl.limitKph}` : ''} km/h · `
+          : 'Average speed check · '
+      }${fmtKm(sectionControl.remainingM)} left`
+    : speedCamera
+      ? `Speed camera · ${fmtDistanceM(speedCamera.distanceM)}`
+      : null;
   return (
     <>
       {puck.visible ? (
@@ -113,7 +131,7 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
       {/* The re-centre pill and road name are one ordered bottom stack. They
           can no longer land on the same coordinates when both are visible.
           In landscape the stack belongs only to the open map pane. */}
-      {navCam.followPaused || roadLabel ? (
+      {navCam.followPaused || roadLabel || cameraLabel ? (
         <View
           style={[
             styles.mapBottomStack,
@@ -133,6 +151,20 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
               <NavArrowIcon />
               <Text style={styles.recentreText}>Re-centre</Text>
             </Pressable>
+          ) : null}
+          {cameraLabel ? (
+            <View
+              style={[
+                styles.cameraChip,
+                sectionOver && styles.cameraChipOver,
+                viewport.landscape && styles.roadChipLandscape,
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={styles.cameraChipText} numberOfLines={1}>
+                {cameraLabel}
+              </Text>
+            </View>
           ) : null}
           {roadLabel ? (
             <View
@@ -188,4 +220,16 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   roadChipText: { color: theme.text, fontWeight: '700', fontSize: 14 },
+  // Amber caution for camera guidance; red once the measured average is over
+  // the limit — the number the driver cannot compute alone.
+  cameraChip: {
+    backgroundColor: '#b45309',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    maxWidth: '82%',
+    elevation: 4,
+  },
+  cameraChipOver: { backgroundColor: '#b91c1c' },
+  cameraChipText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

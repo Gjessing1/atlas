@@ -11,7 +11,7 @@ import {
   type SearchResult,
   type SystemStatus,
 } from '@atlas/core';
-import { nvdbSpeedOverrides } from '@atlas/routing';
+import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerExploreApi } from './explore-api.js';
@@ -384,13 +384,13 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // shipping without the Norwegian side-table.
   const nvdb = NvdbStore.open(opts.dataDir);
   if (nvdb) {
-    status.register('nvdb', 'NVDB speed limits', 'Routing');
+    status.register('nvdb', 'NVDB road data', 'Routing');
     status.record('nvdb', true);
     app.addHook('onClose', () => nvdb.close());
   }
-  app.post<{ Body: { points?: unknown } }>('/api/route/nvdb-limits', (request, reply) => {
-    const raw = request.body?.points;
-    const points: LatLng[] = Array.isArray(raw)
+  /** The request body's route shape, as validated points (possibly empty). */
+  const routeShape = (raw: unknown): LatLng[] =>
+    Array.isArray(raw)
       ? raw.filter(
           (p): p is LatLng =>
             typeof p === 'object' &&
@@ -399,7 +399,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
             typeof (p as LatLng).lng === 'number',
         )
       : [];
-    if (!nvdb || points.length < 2) return reply.send({ overrides: [] });
+  const shapeBounds = (points: LatLng[]): { sw: LatLng; ne: LatLng } => {
     let minLat = Infinity;
     let maxLat = -Infinity;
     let minLng = Infinity;
@@ -410,11 +410,33 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       if (p.lng < minLng) minLng = p.lng;
       if (p.lng > maxLng) maxLng = p.lng;
     }
-    const segments = nvdb.querySpeedSegments(
-      { lat: minLat, lng: minLng },
-      { lat: maxLat, lng: maxLng },
-    );
+    return { sw: { lat: minLat, lng: minLng }, ne: { lat: maxLat, lng: maxLng } };
+  };
+  app.post<{ Body: { points?: unknown } }>('/api/route/nvdb-limits', (request, reply) => {
+    const points = routeShape(request.body?.points);
+    if (!nvdb || points.length < 2) return reply.send({ overrides: [] });
+    const { sw, ne } = shapeBounds(points);
+    const segments = nvdb.querySpeedSegments(sw, ne);
     return reply.send({ overrides: nvdbSpeedOverrides(points, segments) });
+  });
+
+  // ATK speed cameras from the same dataset (ROADMAP §2.1): given a route
+  // shape, return the point cameras it passes (direction-filtered) and the
+  // average-speed sections it drives end to end. Empty is the normal answer
+  // for a dataset without camera tables (an older build) or a route outside
+  // Norway — never an error, so navigation degrades to exactly the pre-camera
+  // behaviour.
+  app.post<{ Body: { points?: unknown } }>('/api/route/nvdb-cameras', (request, reply) => {
+    const points = routeShape(request.body?.points);
+    if (!nvdb || points.length < 2) {
+      return reply.send({ cameras: { points: [], sections: [] } });
+    }
+    const { sw, ne } = shapeBounds(points);
+    const cameras = conflateCameras(points, {
+      points: nvdb.queryCameraPoints(sw, ne),
+      sections: nvdb.queryCameraSections(sw, ne),
+    });
+    return reply.send({ cameras });
   });
 
   // Map tiles, two ways:

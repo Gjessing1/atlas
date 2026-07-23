@@ -23,10 +23,22 @@ export {
   fetchRoute,
   httpTraceTransport,
   httpNvdbLimits,
+  httpNvdbCameras,
   RoutingError,
   type FetchRouteOptions,
   type NvdbLimitTransport,
+  type NvdbCameraTransport,
 } from './client.js';
+export {
+  conflateCameras,
+  type CameraConflationOptions,
+  type NvdbCameraData,
+  type NvdbCameraPoint,
+  type NvdbCameraSection,
+  type RouteCameraPoint,
+  type RouteCameraSection,
+  type RouteCameras,
+} from './cameras.js';
 export {
   buildTraceAttributesRequest,
   enrichRoute,

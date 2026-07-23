@@ -8,6 +8,8 @@ export {
   type NavUpdate,
   tunnelChipLabel,
   type Position,
+  type SectionControlState,
+  type SpeedCameraState,
   type SustainGuidance,
   type TunnelState,
   type UpcomingManeuver,

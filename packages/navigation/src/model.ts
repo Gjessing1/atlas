@@ -44,6 +44,36 @@ export function tunnelChipLabel(tunnel: TunnelState): string {
   return `${tunnel.name ?? 'Tunnel'} · ${fmtDistanceM(tunnel.remainingM)}`;
 }
 
+/** A fixed speed camera (Punkt-ATK) the route is approaching. */
+export interface SpeedCameraState {
+  /** Distance (m) from the current position to the camera. */
+  distanceM: number;
+  /** The installation's registered name, else null (display is optional). */
+  name: string | null;
+}
+
+/**
+ * An average-speed camera stretch (Streknings-ATK) being driven. The honest UI
+ * for section control is a progress state, not a ping: what the driver cannot
+ * compute alone is their *average* over the measured stretch, so that is the
+ * number this carries — from our own fixes, never from the camera.
+ */
+export interface SectionControlState {
+  name: string | null;
+  /** Distance (m) left inside the measured stretch. */
+  remainingM: number;
+  /**
+   * Average speed (km/h) since entering the stretch, measured from our own
+   * along-route progress. Null until the entry was actually observed (guidance
+   * that started — or learned of the section — mid-stretch has no honest
+   * average to show) and for the first moments inside, where the sample is
+   * too short to mean anything.
+   */
+  avgKph: number | null;
+  /** Posted limit (km/h) inside the stretch, when the enrichment knows it. */
+  limitKph: number | null;
+}
+
 /** The maneuver the traveller is approaching. */
 export interface UpcomingManeuver {
   instruction: RouteInstruction;
@@ -119,6 +149,15 @@ export interface NavState {
    * seconds later, and name the tunnel, which is what a driver recognises.
    */
   tunnel: TunnelState | null;
+  /**
+   * The next fixed speed camera ahead on the route, once it is close enough
+   * to show (a camera 40 km away is not guidance). Null without camera data —
+   * which outside Norway is always, so no UI may imply "no camera data": the
+   * chip is simply absent (ROADMAP §2.1 rule).
+   */
+  speedCamera: SpeedCameraState | null;
+  /** The average-speed camera stretch being driven, or null outside one. */
+  sectionControl: SectionControlState | null;
   /**
    * False until the vehicle demonstrably starts the drive (moving at
    * driving pace, or having progressed along the route). UIs keep a calmer

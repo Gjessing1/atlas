@@ -16,6 +16,11 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   context,
 }) => {
   await mockRouting(page);
+  // An ATK camera mid-route: the amber chip must appear once guidance starts
+  // (the fetch is fire-and-forget beside the enrichment pass).
+  await page.route('**/api/route/nvdb-cameras', (route) =>
+    route.fulfill({ json: { cameras: { points: [{ atM: 500, name: 'ATK' }], sections: [] } } }),
+  );
   await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
   await waitForMap(page);
 
@@ -41,6 +46,8 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   // The posted limit arrives from the enrichment pass a moment after guidance
   // starts (it is fetched in parallel, never blocking Start).
   await expect(page.locator('.nav-speed-limit')).toHaveText('60');
+  // So does the speed-camera warning, from its own NVDB dataset fetch.
+  await expect(page.locator('.nav-camera-chip')).toHaveText(/Speed camera · \d+ m/);
 
   // A fix near the destination arrives → the session declares arrival.
   await context.setGeolocation({ latitude: 59.9199, longitude: 10.7599 });

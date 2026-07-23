@@ -400,6 +400,43 @@ function viaPath(timeMs: number): RoutePath {
   };
 }
 
+describe('useNavigationController — speed cameras', () => {
+  it('fetches cameras for a car route and surfaces the approach state', async () => {
+    const nvdbCameras = vi.fn(() =>
+      Promise.resolve({ points: [{ atM: 800, name: 'ATK' }], sections: [] }),
+    );
+    const h = harness(undefined, { nvdbCameras });
+    const hook = await drive(h);
+    await waitFor(() => expect(nvdbCameras).toHaveBeenCalled());
+
+    act(() => h.emit(onLine(1, { speedMps: 15, headingDeg: 90 })));
+    await waitFor(() => expect(hook.result.current.state?.speedCamera).not.toBeNull());
+    const camera = hook.result.current.state!.speedCamera!;
+    expect(camera.name).toBe('ATK');
+    expect(camera.distanceM).toBeGreaterThan(600);
+    expect(camera.distanceM).toBeLessThan(800);
+  });
+
+  it('never asks for cameras on a walking trip', async () => {
+    const nvdbCameras = vi.fn(() => Promise.resolve({ points: [], sections: [] }));
+    const h = harness(undefined, { nvdbCameras, trace: () => Promise.resolve({}) });
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'foot'));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+    expect(nvdbCameras).not.toHaveBeenCalled();
+  });
+
+  it('keeps navigating when the camera request fails', async () => {
+    const nvdbCameras = vi.fn(() => Promise.reject(new Error('offline')));
+    const h = harness(undefined, { nvdbCameras });
+    const hook = await drive(h);
+    act(() => h.emit(onLine(1, { speedMps: 15, headingDeg: 90 })));
+    expect(hook.result.current.phase).toBe('navigating');
+    expect(hook.result.current.state?.speedCamera ?? null).toBeNull();
+  });
+});
+
 describe('useNavigationController — via stops', () => {
   it('routes every request through the vias, in order, and exposes them', async () => {
     const vias = [points[7]!, points[13]!];
