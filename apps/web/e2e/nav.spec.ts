@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { encodeShape, mockRouting, startNavigationFromCard, waitForMap } from './helpers';
+import { encodeShape, mockRouting, project, startNavigationFromCard, waitForMap } from './helpers';
 
 /**
  * Turn-by-turn web navigation: geolocation is mocked at the browser level and
@@ -325,6 +325,59 @@ test('a multi-stop plan is driven through its via stops', async ({ page }) => {
   await page.getByRole('button', { name: 'End' }).click();
   await expect(page.locator('.nav-banner')).toHaveCount(0);
   await expect(page.locator('.nav-via-marker')).toHaveCount(0);
+});
+
+test('a stop can be added mid-drive: quick category pick and tapped point', async ({ page }) => {
+  await mockRouting(page);
+  const navLocationCounts: number[] = [];
+  await page.route('**/api/route', async (route) => {
+    const body = route.request().postDataJSON() as { locations?: { lat: number }[] };
+    // Guidance requests start from the live fix (lat 59.91).
+    if (Math.abs((body.locations?.[0]?.lat ?? 0) - 59.91) < 1e-6) {
+      navLocationCounts.push(body.locations?.length ?? 0);
+    }
+    await route.fallback();
+  });
+  // The quick-stop panel asks the explore endpoint for its category; one gas
+  // station ahead on the line is enough — the corridor rules have unit tests.
+  await page.route('**/api/explore**', (route) =>
+    route.fulfill({
+      json: {
+        results: [
+          { name: 'Circle K Kværner', label: 'Oslo', position: { lat: 59.915, lng: 10.755 } },
+        ],
+      },
+    }),
+  );
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+  await page.locator('.place-marker').click();
+  await startNavigationFromCard(page);
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+  await expect(page.locator('.nav-via-marker')).toHaveCount(0);
+
+  // The banner's + opens the category panel; picking the station reroutes
+  // through it (fix + stop + destination) and it appears as a via dot.
+  await page.getByRole('button', { name: 'Add a stop', exact: true }).click();
+  await expect(page.locator('.nav-add-stop')).toBeVisible();
+  await page.locator('.nav-add-stop-list button').click();
+  await expect(page.locator('.nav-add-stop')).toHaveCount(0);
+  await expect(page.locator('.nav-via-marker')).toHaveCount(1);
+  expect(navLocationCounts).toContain(3);
+
+  // A point tapped on the map mid-drive asks one question — "stop here?" —
+  // and adding it reroutes through both stops in route order.
+  const [x, y] = await project(page, 59.9112, 10.7512);
+  await page.locator('.maplibregl-canvas').click({ button: 'right', position: { x, y } });
+  await expect(page.locator('.nav-stop-tap-card')).toBeVisible();
+  await page.locator('.nav-stop-tap-add').click();
+  await expect(page.locator('.nav-stop-tap-card')).toHaveCount(0);
+  await expect(page.locator('.nav-via-marker')).toHaveCount(2);
+  expect(navLocationCounts).toContain(4);
+
+  await page.getByRole('button', { name: 'End' }).click();
+  await expect(page.locator('.nav-banner')).toHaveCount(0);
 });
 
 test('geolocation denied shows an error state, End dismisses it', async ({ page, context }) => {

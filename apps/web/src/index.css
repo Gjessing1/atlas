@@ -2473,6 +2473,185 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
+/* The faster-route watch found a better line: an offer, never a silent swap. */
+.nav-faster-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.nav-faster-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.nav-faster-switch {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-faster-dismiss {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Mid-drive quick add-a-stop panel: bottom centre, clear of the banner. */
+.nav-add-stop {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(calc(100vw - 24px), 380px);
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface-overlay);
+  box-shadow: 0 10px 34px rgba(28, 39, 51, 0.28);
+  backdrop-filter: blur(8px);
+  z-index: 30;
+}
+
+.nav-add-stop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nav-add-stop-cats {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.nav-add-stop-cats button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.nav-add-stop-cats button.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.nav-add-stop-note {
+  margin: 12px 2px 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.nav-add-stop-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.nav-add-stop-list button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-add-stop-list button:hover {
+  background: var(--surface-muted);
+}
+
+.nav-add-stop-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.nav-add-stop-dist {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* A tapped place mid-drive: one question, two buttons. */
+.nav-stop-tap-card {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100vw - 24px), 380px);
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--surface-overlay);
+  box-shadow: 0 10px 34px rgba(28, 39, 51, 0.28);
+  backdrop-filter: blur(8px);
+  z-index: 30;
+}
+
+.nav-stop-tap-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.nav-stop-tap-add {
+  border: 0;
+  border-radius: 999px;
+  min-height: 38px;
+  padding: 7px 16px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .nav-state-block {
   display: flex;
   flex-direction: column;

@@ -12,6 +12,11 @@ export interface DestinationController {
   destination: DestinationTarget | null;
   /** Show the card for a picked point, and bring that point into view. */
   pick: (target: DestinationTarget) => void;
+  /**
+   * Show the card without moving the camera — mid-navigation taps, where the
+   * follow camera owns the view and a fly-to would fight it.
+   */
+  pickQuiet: (target: DestinationTarget) => void;
   /** Show the card for a bare coordinate (a share link's pin, a long-press). */
   pickPoint: (at: LatLng, fly?: boolean) => void;
   /** A search hit the user chose from the results list. */
@@ -45,6 +50,8 @@ export function useDestination(flyTo: (at: LatLng) => void): DestinationControll
     },
     [flyTo],
   );
+
+  const pickQuiet = useCallback((target: DestinationTarget) => setDestination(target), []);
 
   const pickPoint = useCallback(
     (at: LatLng, fly = true) => {
@@ -86,5 +93,5 @@ export function useDestination(flyTo: (at: LatLng) => void): DestinationControll
 
   const clear = useCallback(() => setDestination(null), []);
 
-  return { destination, pick, pickPoint, pickResult, showIdentify, onMoved, clear };
+  return { destination, pick, pickQuiet, pickPoint, pickResult, showIdentify, onMoved, clear };
 }

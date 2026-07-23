@@ -1,7 +1,8 @@
 import { haversineM, type LatLng } from './geo.js';
 import type { SearchResult } from './search.js';
 
-export type ExploreCategoryId = 'food' | 'coffee' | 'sights' | 'nature' | 'shops' | 'essentials';
+export type ExploreCategoryId =
+  'food' | 'coffee' | 'sights' | 'nature' | 'shops' | 'essentials' | 'fuel' | 'charging';
 
 export interface ExploreCategory {
   id: ExploreCategoryId;
@@ -38,6 +39,11 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
     label: 'Essentials',
     osmTags: ['amenity/fuel', 'amenity/pharmacy', 'amenity/hospital', 'amenity/toilets'],
   },
+  // Dedicated driving-stop categories: the mid-navigation "add a stop" flow
+  // asks for exactly these, and a driver hunting fuel must not wade through
+  // pharmacies to find it.
+  { id: 'fuel', label: 'Gas', osmTags: ['amenity/fuel'] },
+  { id: 'charging', label: 'Charging', osmTags: ['amenity/charging_station'] },
 ];
 
 export function isExploreCategory(value: unknown): value is ExploreCategoryId {

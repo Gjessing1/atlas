@@ -3,8 +3,10 @@ import {
   useMapProfilePreferences,
   useRegionPackJobs,
   useMapStyleEditor,
+  useNavAddStop,
   useNavPrefs,
   useThemeMode,
+  type FetchNearbyFn,
 } from '@atlas/app-hooks';
 import {
   mapProfile,
@@ -52,6 +54,7 @@ import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import { useTileSource } from './src/map/useTileSource';
 import type { LocalPack } from './src/regions/packs';
+import { AddStopSheet, NavStopTapCard } from './src/nav/AddStopSheet';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
 import { navViewport } from './src/nav/navViewport';
@@ -60,6 +63,7 @@ import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
+import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
 import { shareText } from './src/share';
@@ -68,7 +72,7 @@ import { useDirections } from './src/routing/useDirections';
 import { useRoute } from './src/routing/useRoute';
 import { useTransitPlan } from './src/routing/useTransit';
 import { AppSheets } from './src/ui/AppSheets';
-import { DestinationCard } from './src/ui/DestinationCard';
+import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { ExploreSheet } from './src/ui/ExploreSheet';
 import { useDestination } from './src/ui/useDestination';
 import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
@@ -235,6 +239,15 @@ function AppInner() {
   const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, navHeight);
   const navPuck = useNavPuck(nav, navCam, navPrefs.followMode, viewport);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
+  // Mid-drive "add a stop": category candidates via the online explore
+  // endpoint with the downloaded pack index as fallback (geoExplore), filtered
+  // to what is still ahead on the route (rules in @atlas/app-hooks).
+  const fetchNearbyStops = useCallback<FetchNearbyFn>(
+    async (category, center, radiusM) =>
+      (await geoExplore(packs, category, center, radiusM)).results,
+    [packs],
+  );
+  const navAddStop = useNavAddStop({ nav, fetchNearby: fetchNearbyStops });
   // Route-choice preview: the choice card owns the bottom of the screen and
   // map taps switch between the drawn choices (no banner at the top).
   const previewing = nav.phase === 'preview';
@@ -251,6 +264,15 @@ function AppInner() {
   // Landscape is short, so several pieces of chrome move into the leading
   // guidance rail and route fits get a narrower bottom pad.
 
+  // Mid-trip taps must not fly the camera away from the follow view — the
+  // card opens where the puck already is.
+  const pickPressTarget = useCallback(
+    (target: DestinationTarget) => {
+      if (following) dest.pickQuiet(target);
+      else dest.pick(target);
+    },
+    [following, dest],
+  );
   const { onMapPress: onRegularMapPress, onPickPoint: onRegularPickPoint } = useMapPress({
     mapRef,
     nav,
@@ -260,7 +282,7 @@ function AppInner() {
     origin: serverOrigin,
     menuOpen,
     closeMenu: () => setMenuOpen(false),
-    pickDestination: dest.pick,
+    pickDestination: pickPressTarget,
     showIdentify: dest.showIdentify,
   });
   const selectOfflineRegionPoint = useCallback((point: LatLng) => {
@@ -557,6 +579,7 @@ function AppInner() {
         followMode={navPrefs.followMode}
         onToggleFollowMode={navPrefs.toggleFollowMode}
         widgets={navPrefs.widgets}
+        onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
         onHeight={setNavHeight}
       />
 
@@ -685,6 +708,23 @@ function AppInner() {
         onOpenSettings={() => setSettingsOpen(true)}
         bottomInset={bottomInset}
       />
+
+      {/* Mid-drive quick add-a-stop: category sheet from the banner's +, and a
+          one-question card for a tapped place. */}
+      <AddStopSheet ctl={navAddStop} bottomInset={bottomInset} />
+      {destination && following && !navAddStop.open ? (
+        <NavStopTapCard
+          name={destination.name}
+          bottom={bottomInset + 16}
+          left={side.left + 12}
+          right={side.right + 12}
+          onAdd={() => {
+            nav.addStop({ lat: destination.lat, lng: destination.lng });
+            dest.clear();
+          }}
+          onClose={dest.clear}
+        />
+      ) : null}
 
       {destination && !planning && !navActive ? (
         <DestinationCard

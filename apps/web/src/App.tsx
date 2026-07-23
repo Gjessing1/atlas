@@ -18,8 +18,10 @@ import {
   useMapProfile,
   useMapProfilePreferences,
   useMapStyleEditor,
+  useNavAddStop,
   useNavPrefs,
   useThemeMode,
+  type FetchNearbyFn,
 } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
@@ -39,6 +41,7 @@ import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTransitLayers } from './map/useTransitLayers.js';
 import { useShareHash } from './map/useShareHash.js';
 import { useTrackLayers } from './map/useTrackLayers.js';
+import { NavAddStopPanel, NavStopTapCard } from './nav/NavAddStop.js';
 import { NavBanner } from './nav/NavBanner.js';
 import { RoutePreview } from './nav/RoutePreview.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
@@ -182,6 +185,21 @@ export function App() {
 
   const nav = useWebNavigation();
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
+  // Mid-drive "add a stop": category candidates from the explore endpoint,
+  // filtered to what is still ahead on the route (rules in @atlas/app-hooks).
+  const fetchNearbyStops = useCallback<FetchNearbyFn>(async (category, center, radiusM, signal) => {
+    const params = new URLSearchParams({
+      category,
+      lat: String(center.lat),
+      lon: String(center.lng),
+      radius: String(radiusM),
+    });
+    const response = await fetch(`/api/explore?${params}`, { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return ((await response.json()) as { results: SearchResult[] }).results;
+  }, []);
+  const addStop = useNavAddStop({ nav, fetchNearby: fetchNearbyStops });
+  const navMoving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   // Mute and map orientation survive across trips (device-local, Android parity).
   const navPrefs = useNavPrefs(userData, nav);
   const follow = useNavLayers(map, nav, navPrefs.followMode);
@@ -497,7 +515,26 @@ export function App() {
         overview={follow.overview}
         onToggleOverview={follow.toggleOverview}
         widgets={navPrefs.widgets}
+        onToggleAddStop={() => addStop.setOpen(!addStop.open)}
+        addStopOpen={addStop.open}
       />
+      <NavAddStopPanel ctl={addStop} />
+      {/* A tapped place mid-drive asks the only mid-drive question: stop here
+          on the way? The full place card stays an idle-time surface. */}
+      {target && navMoving && !addStop.open && (
+        <NavStopTapCard
+          title={placeTargetTitle(target)}
+          onAdd={() => {
+            nav.addStop(target.position);
+            setPin(null);
+            setTarget(null);
+          }}
+          onClose={() => {
+            setPin(null);
+            setTarget(null);
+          }}
+        />
+      )}
       <RoutePreview nav={nav} />
       <div
         className={`topbar${nav.phase !== 'idle' && nav.phase !== 'preview' ? ' topbar-nav-hidden' : ''}`}

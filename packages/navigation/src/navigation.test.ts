@@ -1113,6 +1113,32 @@ describe('NavigationSession adaptive ETA', () => {
   });
 });
 
+describe('NavigationSession plannedRemainingMs', () => {
+  it('is null before any fix has anchored a position', () => {
+    expect(new NavigationSession(route()).plannedRemainingMs()).toBeNull();
+  });
+
+  it('reports the engine estimate for the remaining route', () => {
+    const s = new NavigationSession(route());
+    // Halfway through the first 60 s leg: 30 s of it left plus the 60 s leg after.
+    s.update(pointAtAlong(routeCum[10]! / 2), 0);
+    expect(s.plannedRemainingMs()!).toBeCloseTo(90_000, -3);
+  });
+
+  it('ignores the observed-pace adaptation, unlike the displayed ETA', () => {
+    const s = new NavigationSession(route());
+    const still = { ...pointAtAlong(300), speedMps: 0 };
+    const planned = (s.update(still, 0), s.plannedRemainingMs()!);
+    // Stuck for five minutes: the displayed ETA stretches, the baseline must not.
+    let displayed = 0;
+    for (let t = 10_000; t <= 300_000; t += 10_000) {
+      displayed = s.update(still, t).state.timeRemainingMs;
+    }
+    expect(s.plannedRemainingMs()!).toBeCloseTo(planned, -1);
+    expect(displayed).toBeGreaterThan(planned * 1.5);
+  });
+});
+
 describe('NavigationSession voice extras', () => {
   // Two maneuvers ~222 m apart: close enough to chain into one prompt.
   const chained: RouteInstruction[] = [

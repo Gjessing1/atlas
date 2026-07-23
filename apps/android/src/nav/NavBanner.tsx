@@ -154,6 +154,7 @@ export function NavBanner({
   followMode,
   onToggleFollowMode,
   widgets,
+  onAddStop,
   onHeight,
 }: {
   nav: NavController;
@@ -164,6 +165,8 @@ export function NavBanner({
   followMode: NavFollowMode;
   onToggleFollowMode: () => void;
   widgets: NavWidgetId[];
+  /** Open the quick add-a-stop sheet (gas, charging, food). */
+  onAddStop: () => void;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
@@ -320,6 +323,31 @@ export function NavBanner({
               : 'Can’t reroute — continue on the line'}
           </Text>
         ) : null}
+        {nav.fasterRoute && nav.phase === 'navigating' ? (
+          <View style={styles.fasterRow}>
+            <Text style={styles.fasterText} numberOfLines={2}>
+              Faster route — saves {formatDuration(nav.fasterRoute.savesMs)}
+            </Text>
+            <Pressable
+              style={styles.fasterSwitch}
+              onPress={nav.acceptFasterRoute}
+              testID="faster-switch"
+              accessibilityRole="button"
+              accessibilityLabel="Switch to the faster route"
+            >
+              <Text style={styles.fasterSwitchText}>Switch</Text>
+            </Pressable>
+            <Pressable
+              onPress={nav.dismissFasterRoute}
+              hitSlop={10}
+              testID="faster-dismiss"
+              accessibilityRole="button"
+              accessibilityLabel="Keep the current route"
+            >
+              <Text style={styles.fasterDismiss}>✕</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {state?.wrongBranch && nav.phase === 'navigating' ? (
           <Text style={styles.reroute}>Check route — you may have taken a different turn</Text>
         ) : null}
@@ -400,6 +428,26 @@ export function NavBanner({
               accessibilityState={{ selected: navCam.overview }}
             >
               <MapOverviewIcon />
+            </Pressable>
+            <View
+              style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
+            />
+            <Pressable
+              style={styles.mapControlButton}
+              onPress={onAddStop}
+              testID="nav-add-stop"
+              accessibilityRole="button"
+              accessibilityLabel="Add a stop"
+            >
+              <Svg width={22} height={22} viewBox="0 0 24 24">
+                <Path
+                  d="M12 5v14M5 12h14"
+                  fill="none"
+                  stroke={theme.text}
+                  strokeWidth={1.9}
+                  strokeLinecap="round"
+                />
+              </Svg>
             </Pressable>
           </View>
         </View>
@@ -605,6 +653,26 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   offRouteButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  // The faster-route watch found a better line: an offer, never a silent swap.
+  fasterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceActive,
+  },
+  fasterText: { flex: 1, color: theme.accent, fontSize: 13, fontWeight: '600' },
+  fasterSwitch: {
+    backgroundColor: theme.accent,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  fasterSwitchText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  fasterDismiss: { color: theme.textMuted, fontSize: 16, paddingHorizontal: 2 },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
   mapControlsSlot: { flex: 1, paddingTop: 10 },
   mapControlsSlotPortrait: { minHeight: 106, alignItems: 'flex-end' },
@@ -617,7 +685,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     elevation: 5,
   },
-  mapControlGroupLandscape: { width: 96, flexDirection: 'row' },
+  mapControlGroupLandscape: { width: 144, flexDirection: 'row' },
   mapControlButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   mapControlButtonActive: { backgroundColor: theme.surfaceActive },
   mapControlDivider: {

@@ -45,11 +45,19 @@ export {
 export {
   useNavigationController,
   type NavController,
+  type NavFasterRoute,
   type NavOriginFix,
   type NavPhase,
   type NavPlatform,
   type NavTripSummary,
 } from './useNavigationController.js';
+export {
+  useNavAddStop,
+  NAV_STOP_CATEGORIES,
+  type FetchNearbyFn,
+  type NavAddStop,
+  type NavStopHit,
+} from './useNavAddStop.js';
 export {
   useTransit,
   useTransitPlan,

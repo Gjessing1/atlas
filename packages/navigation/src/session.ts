@@ -180,6 +180,19 @@ export class NavigationSession {
   }
 
   /**
+   * The engine's own remaining-time estimate (ms) at the last known
+   * along-route position, *without* the observed-pace adaptation. This is the
+   * honest baseline for judging a freshly fetched candidate route: the
+   * candidate's `timeMs` is equally pace-naive, so engine-vs-engine is the
+   * only comparison where a difference means the *roads* differ rather than
+   * the traffic estimate. Null before the first fix has anchored a position.
+   */
+  plannedRemainingMs(): number | null {
+    if (this.lastAlongM === null) return null;
+    return this.baseRemainingMs(this.lastAlongM, Math.max(0, this.totalM - this.lastAlongM));
+  }
+
+  /**
    * End the trip because the traveller says so — the banner's "I've arrived".
    * Both automatic rules can miss (a fix that never gets accurate enough, a
    * destination the road data puts across a wall), and the driver standing at
@@ -692,24 +705,29 @@ export class NavigationSession {
     );
   }
 
-  private remainingTimeMs(alongM: number, distanceRemainingM: number): number {
-    let base: number;
+  /** The route's static remaining-time estimate, before pace adaptation. */
+  private baseRemainingMs(alongM: number, distanceRemainingM: number): number {
     if (this.maneuvers.length === 0) {
-      base = this.totalM > 0 ? this.totalTimeMs * (distanceRemainingM / this.totalM) : 0;
-    } else {
-      // Find the maneuver currently being executed (last one started) and add
-      // the unfinished fraction of its leg to the time of every maneuver after.
-      const current = this.currentManeuverIndex(alongM);
-      const cur = this.maneuvers[current]!;
-      const next = this.maneuvers[current + 1];
-      const legM = (next?.alongStartM ?? this.totalM) - cur.alongStartM;
-      const fractionLeft =
-        legM > 0 ? Math.max(0, (next?.alongStartM ?? this.totalM) - alongM) / legM : 0;
-      base = fractionLeft * cur.timeMs + this.suffixTimeMs[current]!;
+      return this.totalM > 0 ? this.totalTimeMs * (distanceRemainingM / this.totalM) : 0;
     }
+    // Find the maneuver currently being executed (last one started) and add
+    // the unfinished fraction of its leg to the time of every maneuver after.
+    const current = this.currentManeuverIndex(alongM);
+    const cur = this.maneuvers[current]!;
+    const next = this.maneuvers[current + 1];
+    const legM = (next?.alongStartM ?? this.totalM) - cur.alongStartM;
+    const fractionLeft =
+      legM > 0 ? Math.max(0, (next?.alongStartM ?? this.totalM) - alongM) / legM : 0;
+    return fractionLeft * cur.timeMs + this.suffixTimeMs[current]!;
+  }
+
+  private remainingTimeMs(alongM: number, distanceRemainingM: number): number {
     // Traffic adaptation: scale the route's static estimate by the observed
     // pace so a jam (or a clear road) actually moves the ETA.
-    return base / Math.min(PACE_MAX, Math.max(PACE_MIN, this.paceFactor));
+    return (
+      this.baseRemainingMs(alongM, distanceRemainingM) /
+      Math.min(PACE_MAX, Math.max(PACE_MIN, this.paceFactor))
+    );
   }
 
   /**

@@ -3,7 +3,7 @@ import type { LatLng } from '@atlas/core';
 import type { Position } from '@atlas/navigation';
 import type { RoutePath, RouteQuery, RouteResult } from '@atlas/routing';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNavigationController, type NavPlatform } from './useNavigationController.js';
 
@@ -466,6 +466,167 @@ describe('useNavigationController — via stops', () => {
     expect(hook.result.current.viaPoints).toEqual([via]);
   });
 });
+
+describe('useNavigationController — add stop mid-trip', () => {
+  it('reroutes through the added stop, keeping the destination', async () => {
+    const h = harness();
+    const { result } = await drive(h);
+    const callsBefore = h.route.mock.calls.length;
+    h.route.mockResolvedValueOnce({ paths: [viaPath(600_000)] });
+    const stop = { lat: 60.0004, lng: 10.005 };
+
+    act(() => result.current.addStop(stop));
+
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 1));
+    const [query] = h.route.mock.calls.at(-1)!;
+    expect(query.points).toEqual([expect.anything(), stop, destination]);
+    await waitFor(() => expect(result.current.viaPoints).toEqual([stop]));
+    expect(result.current.phase).toBe('navigating');
+  });
+
+  it('slots the stop among the remaining vias by along-route position', async () => {
+    const via = points[13]!;
+    const h = harness(() => Promise.resolve({ paths: [viaPath(600_000)] }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'car', undefined, [via]));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+
+    // A stop projecting to ~index 5 comes *before* the via at index 13.
+    const callsBefore = h.route.mock.calls.length;
+    act(() => hook.result.current.addStop({ lat: 60.0004, lng: 10.005 }));
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 1));
+    let [query] = h.route.mock.calls.at(-1)!;
+    expect(query.points.slice(1)).toEqual([{ lat: 60.0004, lng: 10.005 }, via, destination]);
+
+    // One projecting to ~index 17 lands between the via and the destination.
+    act(() => hook.result.current.addStop({ lat: 60.0004, lng: 10.017 }));
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 2));
+    [query] = h.route.mock.calls.at(-1)!;
+    expect(query.points.slice(1)).toEqual([
+      { lat: 60.0004, lng: 10.005 },
+      via,
+      { lat: 60.0004, lng: 10.017 },
+      destination,
+    ]);
+  });
+});
+
+describe('useNavigationController — faster-route watch', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Start a car trip under fake timers and make it demonstrably driving. */
+  async function fakeDrive(h: Harness) {
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination));
+    expect(hook.result.current.phase).toBe('preview');
+    await act(() => hook.result.current.go());
+    expect(hook.result.current.phase).toBe('navigating');
+    act(() => h.emit(onLine(2, { speedMps: 15 })));
+    expect(hook.result.current.state?.departed).toBe(true);
+    return hook;
+  }
+
+  /** Advance the clock with live fixes flowing, one per simulated second. */
+  async function driveFor(h: Harness, seconds: number) {
+    for (let i = 0; i < seconds; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      act(() => h.emit(onLine(2, { speedMps: 15 })));
+    }
+  }
+
+  it('offers a genuinely faster route, speaking the saving once', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    // Current route: 600 s for ~1.1 km → ~540 s (engine) still remaining.
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+
+    await driveFor(h, 181);
+
+    const offer = hook.result.current.fasterRoute;
+    expect(offer).not.toBeNull();
+    expect(offer!.savesMs).toBeGreaterThan(FASTER_TEST_MIN_SAVING);
+    expect(h.spoken.filter((t) => t.startsWith('A faster route is available'))).toHaveLength(1);
+    // The line on the map is untouched until the driver says so.
+    expect(hook.result.current.activePath?.timeMs).toBe(600_000);
+  });
+
+  it('stays quiet when the freshly fetched route is no better', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    // Same engine answer as the followed route: nothing to offer.
+    await driveFor(h, 181);
+    expect(hook.result.current.fasterRoute).toBeNull();
+    expect(h.spoken.filter((t) => t.startsWith('A faster route'))).toHaveLength(0);
+  });
+
+  it('accepting swaps to the offered route without a second route request', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+    await driveFor(h, 181);
+    expect(hook.result.current.fasterRoute).not.toBeNull();
+    const calls = h.route.mock.calls.length;
+
+    act(() => hook.result.current.acceptFasterRoute());
+
+    expect(h.route.mock.calls.length).toBe(calls);
+    expect(hook.result.current.activePath?.timeMs).toBe(300_000);
+    expect(hook.result.current.fasterRoute).toBeNull();
+    expect(hook.result.current.phase).toBe('navigating');
+  });
+
+  it('a dismissal holds until an offer is meaningfully better', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+    await driveFor(h, 181);
+    expect(hook.result.current.fasterRoute).not.toBeNull();
+
+    act(() => hook.result.current.dismissFasterRoute());
+    expect(hook.result.current.fasterRoute).toBeNull();
+
+    // The same saving again: dismissed means dismissed.
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+    await driveFor(h, 181);
+    expect(hook.result.current.fasterRoute).toBeNull();
+
+    // A clearly better one may interrupt again.
+    h.route.mockResolvedValueOnce({ paths: [path(120_000, 0.002)] });
+    await driveFor(h, 181);
+    expect(hook.result.current.fasterRoute).not.toBeNull();
+  });
+
+  it('never second-guesses a walking trip', async () => {
+    const h = harness();
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'foot'));
+    await act(() => hook.result.current.go());
+    expect(hook.result.current.phase).toBe('navigating');
+    act(() => h.emit(onLine(2, { speedMps: 1.4 })));
+    const calls = h.route.mock.calls.length;
+
+    for (let i = 0; i < 181; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      act(() => h.emit(onLine(2, { speedMps: 1.4 })));
+    }
+
+    expect(h.route.mock.calls.length).toBe(calls);
+    expect(hook.result.current.fasterRoute).toBeNull();
+  });
+});
+
+/** The controller's minimum-saving bar (see FASTER_MIN_SAVING_MS). */
+const FASTER_TEST_MIN_SAVING = 120_000;
 
 describe('useNavigationController — walking modes', () => {
   /** Start a foot trip and begin guidance. */

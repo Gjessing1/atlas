@@ -24,6 +24,7 @@ import {
 import {
   enrichRoute,
   sortRouteChoices,
+  viaInsertIndex,
   type RoutePreferences,
   type RoutePath,
   type RouteProvider,
@@ -45,6 +46,12 @@ export interface NavTripSummary {
 export interface NavOriginFix {
   fix: Position;
   atMs: number;
+}
+
+/** A better route the periodic watch found, offered rather than imposed. */
+export interface NavFasterRoute {
+  /** Time it saves over the engine's own estimate for the current route. */
+  savesMs: number;
 }
 
 /** Everything a navigation controller needs from the device it runs on. */
@@ -138,6 +145,24 @@ export interface NavController {
    * a silently recalculated line. `rerouteNow` accepts the offer.
    */
   rerouteOffered: boolean;
+  /**
+   * A faster route the periodic mid-drive watch has found (driving modes
+   * only): the saving is real — engine estimate against engine estimate from
+   * the same position — and the offer waits for the driver's word instead of
+   * tearing up the line they are following. Null when the current route is
+   * (still) the best known.
+   */
+  fasterRoute: NavFasterRoute | null;
+  /** Switch to the offered faster route (keeps the stops still ahead). */
+  acceptFasterRoute: () => void;
+  /** Decline it; no new offer until one saves meaningfully more than this. */
+  dismissFasterRoute: () => void;
+  /**
+   * Insert a stop into the running trip — a tapped POI or a quick "nearest
+   * gas" pick. It slots into the remaining stops by along-route position and
+   * guidance recalculates from the last fix; the final destination stays.
+   */
+  addStop: (stop: LatLng) => void;
   /** Whether voice prompts are muted. */
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
@@ -183,6 +208,14 @@ const START_FIX_TIMEOUT_MS = 20_000;
 const GO_FIX_TIMEOUT_MS = 8_000;
 /** Beyond this age the preview's fix no longer describes where the traveller is. */
 const ORIGIN_FRESH_MS = 30_000;
+/** How often, while driving on-route, to ask whether a faster route exists. */
+const FASTER_CHECK_INTERVAL_MS = 180_000;
+/** Smallest saving worth interrupting a driver for. */
+const FASTER_MIN_SAVING_MS = 120_000;
+/** An unaccepted offer expires — the road it branches from recedes behind. */
+const FASTER_OFFER_TTL_MS = 120_000;
+/** After a dismissal, only an offer this much better may interrupt again. */
+const FASTER_REOFFER_STEP_MS = 60_000;
 
 /**
  * Read a value in a callback without rebuilding the callback when the value's
@@ -215,6 +248,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [altitudeM, setAltitudeM] = useState<number | null>(null);
   const [facing, setFacing] = useState<{ deg: number; accuracyDeg: number | null } | null>(null);
   const [muted, setMutedState] = useState(false);
+  const [fasterRoute, setFasterRoute] = useState<NavFasterRoute | null>(null);
   const [tripSummary, setTripSummary] = useState<NavTripSummary | null>(null);
   const [rerouteFailed, setRerouteFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -257,6 +291,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const lastFixRef = useRef<Position | null>(null);
   /** One spoken "off route" per episode in offer mode, not one per fix. */
   const offRouteSpokenRef = useRef(false);
+  /** The faster-route offer's payload; the state above only carries the saving. */
+  const fasterOfferRef = useRef<{
+    path: RoutePath;
+    vias: LatLng[];
+    savesMs: number;
+    atMs: number;
+  } | null>(null);
+  /** Saving the driver last dismissed — the bar a new offer must clear. */
+  const fasterDismissedMsRef = useRef<number | null>(null);
+  /** One faster-route probe at a time; a slow answer must not stack more. */
+  const fasterCheckInFlight = useRef(false);
+  /** The followed path, readable from callbacks (addStop's insert ordering). */
+  const activePathRef = useLatest(activePath);
   /** Compass-vs-course blending for the walking puck (speed hysteresis). */
   const facingBlender = useRef(new FacingBlender());
   /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
@@ -376,6 +423,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
     [platformRef],
   );
 
+  /** Withdraw a pending faster-route offer (route changed, expired, ended). */
+  const clearFasterOffer = useCallback(() => {
+    fasterOfferRef.current = null;
+    setFasterRoute((current) => (current === null ? current : null));
+  }, []);
+
   /** Drop every trace of an offered-but-unstarted preview. */
   const clearPreview = useCallback(() => {
     previewSeq.current++;
@@ -403,6 +456,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
       rerouteBackoffUntil.current = 0;
       rerouteFailCount.current = 0;
       setRerouteFailed(false);
+      clearFasterOffer();
+      fasterDismissedMsRef.current = null;
+      fasterCheckInFlight.current = false;
       setRouteCoords([]);
       setActivePath(null);
       setSpeedMps(null);
@@ -420,7 +476,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       traveledBaseRef.current = 0;
       setPhase(arrived ? 'arrived' : 'idle');
     },
-    [stopWatch, clearPreview],
+    [stopWatch, clearPreview, clearFasterOffer],
   );
 
   /** Abandon a trip that could not be set up, keeping the reason on screen. */
@@ -434,11 +490,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setViaPoints([]);
       originRef.current = null;
       preferencesRef.current = undefined;
+      clearFasterOffer();
       setDestination(null);
       setError(message(err));
       setPhase('error');
     },
-    [stopWatch, clearPreview],
+    [stopWatch, clearPreview, clearFasterOffer],
   );
 
   /** End the trip with an arrival: summary, spoken confirmation, `arrived`. */
@@ -472,7 +529,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   }, [finishArrived]);
 
   const reroute = useCallback(
-    async (from: Position) => {
+    async (from: Position, viasOverride?: LatLng[]) => {
       if (rerouteInFlight.current || !destRef.current) return;
       // A failed reroute must not retry on every 1 Hz off-route fix — back off
       // exponentially so an unreachable routing server isn't hammered.
@@ -488,9 +545,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // Route through the stops still ahead only — a via already visited
         // must not pull the recalculated route back to it. The trimmed list
         // becomes authoritative only if this reroute succeeds; on failure the
-        // old session (and its own passed-count) lives on.
+        // old session (and its own passed-count) lives on. `viasOverride` is
+        // addStop's already-updated list, which must not be re-trimmed with a
+        // passed-count belonging to the outgoing route.
         const passedVias = lastStateRef.current?.viasPassed ?? 0;
-        const remainingVias = passedVias > 0 ? viasRef.current.slice(passedVias) : viasRef.current;
+        const remainingVias =
+          viasOverride ?? (passedVias > 0 ? viasRef.current.slice(passedVias) : viasRef.current);
         const path = await fetchPath(
           from,
           destRef.current,
@@ -522,6 +582,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
         rerouteFailCount.current = 0;
         rerouteBackoffUntil.current = 0;
         setRerouteFailed(false);
+        // Any faster-route offer was measured against the route that just
+        // died; it cannot be accepted on top of this one.
+        clearFasterOffer();
         enrich(nextSession, path);
         // Seed the new session with the fix that triggered the reroute, so
         // the shown state (and an off-route offer banner) flips to the new
@@ -555,7 +618,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         }
       }
     },
-    [fetchPath, speak, enrich],
+    [fetchPath, speak, enrich, clearFasterOffer],
   );
 
   /** Accept an offered reroute: recalculate from the last known fix. */
@@ -568,11 +631,145 @@ export function useNavigationController(platform: NavPlatform): NavController {
     void reroute(fix);
   }, [reroute]);
 
+  /**
+   * Insert a stop into the running trip and recalculate through it. The stop
+   * slots into the remaining vias by along-route position — "add the gas
+   * station 3 km ahead" must not leapfrog a planned stop that comes first —
+   * and the final destination stays the final destination.
+   */
+  const addStop = useCallback(
+    (stop: LatLng) => {
+      const fix = lastFixRef.current;
+      const path = activePathRef.current;
+      if (!fix || !path || !sessionRef.current || !destRef.current) return;
+      const passed = lastStateRef.current?.viasPassed ?? 0;
+      const remaining = passed > 0 ? viasRef.current.slice(passed) : viasRef.current;
+      // Order along the followed line: the same leg-picking rule the planner
+      // uses for a tap on the drawn route.
+      const waypoints = [{ lat: fix.lat, lng: fix.lng }, ...remaining, destRef.current];
+      const insertAt = viaInsertIndex(path.points, waypoints, stop);
+      const vias = [...remaining];
+      vias.splice(insertAt - 1, 0, stop);
+      // The tap is explicit intent — a backoff from an earlier automatic
+      // failure must not swallow it.
+      rerouteBackoffUntil.current = 0;
+      void reroute(fix, vias);
+    },
+    [reroute, activePathRef],
+  );
+
+  /**
+   * The faster-route watch: ask the engine for today's best route from where
+   * the car actually is, and compare engine estimate against engine estimate.
+   * Anything better by a real margin becomes an *offer* — never a silent
+   * swap, which is exactly what the off-route reroute is not allowed to be
+   * either when the traveller chose the line deliberately.
+   */
+  const checkFasterRoute = useCallback(async () => {
+    const session = sessionRef.current;
+    const fix = lastFixRef.current;
+    const state = lastStateRef.current;
+    if (!session || !fix || !state || !destRef.current) return;
+    if (fasterCheckInFlight.current || rerouteInFlight.current) return;
+    // Only a settled, on-route, live-fix drive is worth second-guessing; and a
+    // trip nearly over cannot save enough to matter.
+    if (state.status !== 'navigating' || state.fix !== 'live' || !state.departed) return;
+    const plannedMs = session.plannedRemainingMs();
+    if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) return;
+    const trip = tripSeq.current;
+    fasterCheckInFlight.current = true;
+    try {
+      const heading =
+        typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
+      const passed = state.viasPassed;
+      const vias = passed > 0 ? viasRef.current.slice(passed) : viasRef.current;
+      const candidate = await fetchPath(
+        fix,
+        destRef.current,
+        profileRef.current,
+        preferencesRef.current,
+        heading,
+        vias,
+      );
+      if (trip !== tripSeq.current || !sessionRef.current) return;
+      const savesMs = plannedMs - candidate.timeMs;
+      const dismissedFloor =
+        fasterDismissedMsRef.current === null
+          ? 0
+          : fasterDismissedMsRef.current + FASTER_REOFFER_STEP_MS;
+      if (savesMs >= Math.max(FASTER_MIN_SAVING_MS, dismissedFloor)) {
+        fasterOfferRef.current = { path: candidate, vias, savesMs, atMs: Date.now() };
+        setFasterRoute({ savesMs });
+        const minutes = Math.max(1, Math.round(savesMs / 60_000));
+        speak(
+          `A faster route is available — it saves ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
+        );
+      } else if (fasterOfferRef.current) {
+        // The advantage evaporated before the driver acted on it.
+        clearFasterOffer();
+      }
+    } catch {
+      // Offline, or no route right now — the next interval asks again.
+    } finally {
+      if (trip === tripSeq.current) fasterCheckInFlight.current = false;
+    }
+  }, [fetchPath, speak, clearFasterOffer]);
+
+  /** Take the offered faster route, exactly as a successful reroute would. */
+  const acceptFasterRoute = useCallback(() => {
+    const offer = fasterOfferRef.current;
+    const previousSession = sessionRef.current;
+    if (!offer || !previousSession || !destRef.current) return;
+    clearFasterOffer();
+    const { path, vias } = offer;
+    // The old session dies here — bank its driven distance for the summary.
+    traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
+    const nextSession = new NavigationSession(
+      path,
+      navOptionsForProfile(profileRef.current, {
+        startDeparted: lastStateRef.current?.departed ?? true,
+      }),
+    );
+    nextSession.inheritPaceFrom(previousSession);
+    sessionRef.current = nextSession;
+    viasRef.current = vias;
+    setViaPoints(vias);
+    setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+    setActivePath(path);
+    rerouteFailCount.current = 0;
+    rerouteBackoffUntil.current = 0;
+    setRerouteFailed(false);
+    enrich(nextSession, path);
+    const fix = lastFixRef.current;
+    if (fix) {
+      try {
+        const seeded = nextSession.update(fix, Date.now());
+        setState(seeded.state);
+        lastStateRef.current = seeded.state;
+      } catch {
+        // The next live fix populates the state instead.
+      }
+    }
+    const depart = nextSession.departurePrompt();
+    if (depart) speak(depart.text);
+  }, [clearFasterOffer, enrich, speak]);
+
+  /** Decline the offer; only a meaningfully better one may interrupt again. */
+  const dismissFasterRoute = useCallback(() => {
+    const offer = fasterOfferRef.current;
+    if (offer) fasterDismissedMsRef.current = offer.savesMs;
+    clearFasterOffer();
+  }, [clearFasterOffer]);
+
   const onFix = useCallback(
     (fix: Position) => {
       const session = sessionRef.current;
       if (!session) return;
       lastFixRef.current = fix;
+      // A faster-route offer describes a branch from where the car *was*; once
+      // stale it may already be behind, so it quietly lapses.
+      const offer = fasterOfferRef.current;
+      if (offer && Date.now() - offer.atMs > FASTER_OFFER_TTL_MS) clearFasterOffer();
       setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
       setAltitudeM(
         typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
@@ -609,7 +806,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         console.warn('navigation fix failed', err);
       }
     },
-    [reroute, speak, finishArrived],
+    [reroute, speak, finishArrived, clearFasterOffer],
   );
 
   const start = useCallback(
@@ -803,6 +1000,18 @@ export function useNavigationController(platform: NavPlatform): NavController {
     return () => clearInterval(timer);
   }, [guiding, speak]);
 
+  // The faster-route watch. Driving modes only — the same modes that reroute
+  // automatically: on foot the "fastest" route barely moves, and the walker
+  // chose their path. Deliberately a slow cadence: this exists to catch a
+  // world that changed (a closure ahead, a mistake at the preview), not to
+  // second-guess every kilometre, and each check is a full route request.
+  useEffect(() => {
+    if (!guiding) return;
+    if (!(navOptionsForProfile(profile).autoReroute ?? true)) return;
+    const timer = setInterval(() => void checkFasterRoute(), FASTER_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [guiding, profile, checkFasterRoute]);
+
   // While dead reckoning, feed device yaw into the session so it can notice a
   // turn off the assumed line — an in-tunnel fork or roundabout exit that
   // cross-track cannot see without GPS. Subscribed only during gaps: while
@@ -894,6 +1103,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
       state?.status === 'off-route' &&
       !(navOptionsForProfile(profile).autoReroute ?? true),
     muted,
+    fasterRoute,
+    acceptFasterRoute,
+    dismissFasterRoute,
+    addStop,
     tripSummary,
     rerouteFailed,
     error,

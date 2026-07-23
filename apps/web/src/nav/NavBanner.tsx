@@ -121,6 +121,8 @@ export function NavBanner({
   overview,
   onToggleOverview,
   widgets,
+  onToggleAddStop,
+  addStopOpen,
 }: {
   nav: NavController;
   followPaused: boolean;
@@ -130,6 +132,9 @@ export function NavBanner({
   overview: boolean;
   onToggleOverview: () => void;
   widgets: NavWidgetId[];
+  /** Open/close the quick add-a-stop panel (gas, charging, food). */
+  onToggleAddStop: () => void;
+  addStopOpen: boolean;
 }) {
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
@@ -256,6 +261,25 @@ export function NavBanner({
                 : 'Can’t reroute — continue on the line'}
             </span>
           ) : null}
+          {nav.fasterRoute && nav.phase === 'navigating' ? (
+            <div className="nav-faster-row">
+              <span className="nav-faster-text">
+                Faster route — saves {fmtDuration(nav.fasterRoute.savesMs)}
+              </span>
+              <button type="button" className="nav-faster-switch" onClick={nav.acceptFasterRoute}>
+                Switch
+              </button>
+              <button
+                type="button"
+                className="nav-faster-dismiss"
+                onClick={nav.dismissFasterRoute}
+                aria-label="Keep the current route"
+                title="Keep the current route"
+              >
+                ✕
+              </button>
+            </div>
+          ) : null}
           {state && nav.phase !== 'arrived' ? (
             <>
               {/* Time left leads (Android parity): mid-drive "12 min" is the
@@ -313,6 +337,20 @@ export function NavBanner({
                 title="Recenter"
               >
                 <NavActionIcon kind="recenter" />
+              </button>
+            ) : null}
+            {moving ? (
+              <button
+                type="button"
+                className="nav-action-button"
+                onClick={onToggleAddStop}
+                aria-label="Add a stop"
+                aria-pressed={addStopOpen}
+                title="Add a stop (gas, charging, food)"
+              >
+                <svg className="nav-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
               </button>
             ) : null}
             {moving ? (

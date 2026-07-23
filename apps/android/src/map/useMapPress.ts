@@ -130,15 +130,20 @@ export function useMapPress({
         if (zoom === undefined) return;
         // Asked in parallel with the local hit-tests below: the pin/POI card
         // opens immediately and the overlay rows drop into it when they land.
+        // Not mid-trip, though — a tap there asks "stop here?", and lake-depth
+        // rows would only delay that card while burning a network round trip.
+        const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
         const tap = ++tapSeq.current;
-        void identifyOverlays(
-          origin,
-          overlays.map((o) => o.meta),
-          { lat, lng },
-          zoom,
-        ).then((groups) => {
-          if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
-        });
+        if (!guiding) {
+          void identifyOverlays(
+            origin,
+            overlays.map((o) => o.meta),
+            { lat, lng },
+            zoom,
+          ).then((groups) => {
+            if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
+          });
+        }
         // Ground size of one screen pixel at this zoom (512px tiles) makes the
         // tap tolerance a constant ~36 px at any zoom level.
         const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
