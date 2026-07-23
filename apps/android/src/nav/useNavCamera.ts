@@ -1,5 +1,5 @@
 import type { NavController } from '@atlas/app-hooks';
-import { CourseFuser, followZoom, remainingRouteBounds } from '@atlas/navigation';
+import { CourseFuser, followZoom, navCameraStyle, remainingRouteBounds } from '@atlas/navigation';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
@@ -146,21 +146,32 @@ export function useNavCamera(
     // north-up frame that then swung round on pulling away — the one moment
     // the driver is looking for the road ahead, not a camera animation.
     const courseUp = navFollow === 'course';
-    const padding = courseUp ? viewport.coursePadding : viewport.flatPadding;
+    // Per-mode framing: driving gets the pitched, bottom-anchored windscreen
+    // frame; walking modes stay flat, closer in, and centred — a pedestrian
+    // reads the streets around them, not the road ahead.
+    const camStyle = navCameraStyle(nav.profile);
+    const bottomAnchored = courseUp && camStyle.pitchDeg > 0;
+    const padding = bottomAnchored ? viewport.coursePadding : viewport.flatPadding;
     // On a portrait screen the header hides the top of the route, so zoom for
     // the genuinely visible road between its bottom and the puck. Landscape's
     // right map pane is open all the way to the status bar.
     const visibleTop = viewport.landscape
       ? viewport.flatPadding.top
       : viewport.flatPadding.top + 8 + guidanceHeight;
-    const forwardDp = courseUp
+    const forwardDp = bottomAnchored
       ? Math.max(160, Math.round(viewport.courseAnchor.y - visibleTop - 12))
       : Math.round(win.height * 0.4);
     lastCenterRef.current = [snapped.lng, snapped.lat];
     const frame = {
       center: [snapped.lng, snapped.lat] as [number, number],
-      zoom: followZoom(nav.speedMps, snapped.lat, state.upcoming?.distanceToM ?? null, forwardDp),
-      pitch: courseUp ? 45 : 0,
+      zoom: followZoom(
+        nav.speedMps,
+        snapped.lat,
+        state.upcoming?.distanceToM ?? null,
+        forwardDp,
+        camStyle,
+      ),
+      pitch: courseUp ? camStyle.pitchDeg : 0,
       padding,
     };
     // Only a course-up camera has a heading to refresh between fixes.
@@ -181,6 +192,7 @@ export function useNavCamera(
     state,
     navFollow,
     nav.speedMps,
+    nav.profile,
     win.height,
     viewport,
     guidanceHeight,

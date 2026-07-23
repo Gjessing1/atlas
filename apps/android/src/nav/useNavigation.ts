@@ -138,6 +138,43 @@ export function watchHeadingRate(onDelta: (deltaDeg: number, dtSec: number) => v
 }
 
 /**
+ * Sensor calibration grade (0–3) → a usable ± degrees for the uncertainty
+ * cone. Android reports compass health in grades, not degrees; these map the
+ * grades onto the spreads Google's own beam roughly shows. Grade 0
+ * (uncalibrated, needs the figure-8) maps past the blender's cutoff, so the
+ * puck degrades to a plain dot rather than pointing a confident arrow
+ * somewhere wrong.
+ */
+const HEADING_ACCURACY_DEG: Record<number, number> = { 3: 15, 2: 30, 1: 45, 0: 90 };
+
+/**
+ * Which way the device faces, from the rotation-vector compass
+ * (magnetometer fused with the accelerometer/gyro). This is the walking-mode
+ * heading source: a pedestrian standing at a junction has no GPS course, and
+ * the route tangent points down a path they have not chosen. True heading
+ * where declination is known, magnetic as the fallback.
+ */
+function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void {
+  let sub: Location.LocationSubscription | null = null;
+  let stopped = false;
+  Location.watchHeadingAsync((heading) => {
+    const deg = heading.trueHeading >= 0 ? heading.trueHeading : heading.magHeading;
+    if (typeof deg !== 'number' || deg < 0) return;
+    onFacing(deg, HEADING_ACCURACY_DEG[heading.accuracy] ?? null);
+  })
+    .then((subscription) => {
+      if (stopped) subscription.remove();
+      else sub = subscription;
+    })
+    .catch((err) => console.warn('heading watch failed', err));
+  return () => {
+    stopped = true;
+    sub?.remove();
+    sub = null;
+  };
+}
+
+/**
  * Turn-by-turn navigation on Android: the device half of the shared navigation
  * controller. Fixes come from a foreground-service location task, prompts from
  * expo-speech (with audio ducking), and routes from the offline-first provider
@@ -167,6 +204,7 @@ export function useNavigation(): NavController {
         };
       },
       watchHeadingRate,
+      watchFacing,
     }),
     [serverOrigin],
   );

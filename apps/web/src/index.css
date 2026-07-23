@@ -2386,6 +2386,37 @@ button.transit-notice-summary {
   margin: 8px 0 0 74px;
 }
 
+/* Walking modes: off-route is an offer ("Reroute?"), never a silent
+   recalculation — with the bearing back to the track alongside, which is the
+   half that still works offline. */
+.nav-offroute-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.nav-offroute-text {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.nav-offroute-reroute {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .nav-state-block {
   display: flex;
   flex-direction: column;
@@ -2667,8 +2698,45 @@ button.transit-notice-summary {
 }
 
 /* GPS signal lost: a grey puck reads as "no signal", not "we're still here". */
-.nav-puck-lost {
+.nav-puck-lost .nav-puck {
   background: #9aa0a6;
+}
+
+/* The dot plus its (usually hidden) compass beam, rotated as one marker. */
+.nav-puck-wrap {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Which way the walker faces: a cone of uncertainty, not a hard arrow — its
+   spread (--facing-cone) follows the compass's own accuracy report. Shown
+   only while the compass owns the heading (walking modes at walking pace). */
+.nav-puck-beam {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -100%);
+  background: conic-gradient(
+    from calc(var(--facing-cone, 60deg) / -2) at 50% 100%,
+    rgba(66, 133, 244, 0.06) 0deg,
+    rgba(66, 133, 244, 0.42) calc(var(--facing-cone, 60deg) / 2),
+    rgba(66, 133, 244, 0.06) var(--facing-cone, 60deg),
+    transparent var(--facing-cone, 60deg)
+  );
+  /* Fade the cone with distance from the walker, like Google's beam. */
+  mask-image: radial-gradient(circle at 50% 100%, #000 30%, transparent 72%);
+  -webkit-mask-image: radial-gradient(circle at 50% 100%, #000 30%, transparent 72%);
+}
+
+.nav-puck-facing .nav-puck-beam {
+  display: block;
 }
 
 /* Tunnel dimming: fades in slowly once dead reckoning has persisted (eyes

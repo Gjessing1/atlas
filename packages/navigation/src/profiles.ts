@@ -55,13 +55,14 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
   // walker stops and turns on the spot, steps round a bench, walks a few paces
   // backwards, and does all of it legally.
   foot: {
-    // Deliberately *looser* than the car's 40 m rather than tighter. A 1 m
-    // path plus a 10 m fix plus a legitimate detour round an obstacle is
-    // routinely 20 m of cross-track, and while off-route still triggers an
-    // automatic reroute (see ROADMAP) a tight threshold would mean rerouting a
-    // pedestrian for walking round a puddle.
-    offRouteM: 45,
-    offRouteGraceUpdates: 6,
+    // Off-route on foot is *offered*, never performed (autoReroute below), so
+    // a false positive costs a dismissible banner rather than a torn-up line —
+    // which is what lets this corridor sit near the cyclist's 30 m instead of
+    // the 45 m it needed back when tripping it silently rerouted a pedestrian
+    // for walking round a puddle.
+    offRouteM: 35,
+    autoReroute: false,
+    offRouteGraceUpdates: 4,
     offRouteMaxAccuracyM: 25,
     // Disabled entirely. Walking a path "backwards" is not a mistake, and a
     // walker standing still reports no course at all — every input this check
@@ -103,8 +104,13 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
   // off the line: the "trail" may be a suggestion, and canopy, ravines and
   // cliffs wreck GPS exactly where the route is hardest to follow.
   hike: {
-    offRouteM: 60,
-    offRouteGraceUpdates: 8,
+    // Wider than foot even though it too only *offers* the reroute: in
+    // terrain the fixes are worse and the mapped trail line itself is a
+    // rougher sketch, so a town-sized corridor would have the banner up half
+    // the walk.
+    offRouteM: 50,
+    autoReroute: false,
+    offRouteGraceUpdates: 6,
     // Loosened together on purpose: in terrain a 30 m-accuracy fix is often
     // the best on offer, and rejecting it would mean never evaluating
     // off-route at all. The wider corridor is what keeps that honest.

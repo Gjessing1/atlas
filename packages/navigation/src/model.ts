@@ -172,6 +172,17 @@ export interface NavUpdate {
 export interface NavigationOptions {
   /** Cross-track distance (m) beyond which a fix counts as off-route. */
   offRouteM?: number;
+  /**
+   * Whether an off-route status should *perform* a reroute or merely *offer*
+   * one. In a car a silent recalculation is right — leaving the corridor
+   * almost always means a missed turn, and the driver has no hands free. On
+   * foot the walker who leaves the path is usually doing it on purpose (a
+   * shortcut over the grass, a bench, a viewpoint), so the app asks
+   * ("Off route — reroute?") instead of tearing up a line the walker may be
+   * deliberately returning to. Read by the navigation controller, not the
+   * session — the session only reports the status either way.
+   */
+  autoReroute?: boolean;
   /** Consecutive off-route fixes before the session reports `off-route`. */
   offRouteGraceUpdates?: number;
   /**
@@ -287,6 +298,7 @@ export interface NavigationOptions {
 
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   offRouteM: 40,
+  autoReroute: true,
   offRouteGraceUpdates: 3,
   wrongWayDeg: 120, // near-opposite heading; a wrong turn trips cross-track first
 

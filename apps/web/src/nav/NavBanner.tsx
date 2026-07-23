@@ -1,6 +1,13 @@
 import type { NavController } from '@atlas/app-hooks';
 import { fmtClock, fmtDistanceM, fmtDuration, fmtKm, type NavWidgetId } from '@atlas/core';
-import { laneGlyphs, laneLabel, shortManeuverText, tunnelChipLabel } from '@atlas/navigation';
+import {
+  backToTrack,
+  laneGlyphs,
+  laneLabel,
+  remainingAscentM,
+  shortManeuverText,
+  tunnelChipLabel,
+} from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { TurnIcon } from './TurnIcon.js';
 
@@ -19,6 +26,14 @@ function widgetValue(widget: NavWidgetId, nav: NavController): { value: string; 
         value: nav.altitudeM === null ? '—' : String(Math.round(nav.altitudeM)),
         unit: 'altitude m',
       };
+    case 'ascent': {
+      // Climb still ahead — the number that matters on a hike. An honest dash
+      // where the route carries no elevation (offline packs have no DEM).
+      const ascent = nav.activePath
+        ? remainingAscentM(nav.activePath.points, nav.state?.traveledM ?? 0)
+        : null;
+      return { value: ascent === null ? '—' : String(ascent), unit: 'climb m' };
+    }
     case 'next-turn':
       return {
         value: nav.state?.upcoming ? fmtDistanceM(nav.state.upcoming.distanceToM) : '—',
@@ -135,7 +150,18 @@ export function NavBanner({
   // driver can check against the world outside the windscreen.
   const tunnel = moving ? (state?.tunnel ?? null) : null;
   const road = tunnel ? tunnelChipLabel(tunnel) : moving ? (state?.currentRoad ?? null) : null;
-  const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
+  const walking = nav.profile === 'foot' || nav.profile === 'hike';
+  // No speed-limit roundel on foot: the 80 km/h sign on the road a footpath
+  // parallels is driving furniture, not guidance.
+  const speedLimit = moving && !walking ? (state?.speedLimitKph ?? null) : null;
+  // Walking modes offer the reroute instead of performing it — and for the
+  // hiker who lost the trail with no network, the straight line back to it is
+  // the half that still works offline.
+  const trackBack =
+    nav.rerouteOffered && state && nav.activePath
+      ? backToTrack(nav.activePath.points, state.raw)
+      : null;
+  const trackWord = nav.profile === 'hike' ? 'Trail' : 'Route';
   // The manual way out, offered only near the destination — where the automatic
   // rules can fail (a fix that never gets accurate enough in a car park) and
   // where "I've arrived" is the one thing the traveller knows better than we do.
@@ -208,8 +234,27 @@ export function NavBanner({
           )}
 
           {nav.phase === 'rerouting' ? <span className="nav-reroute">Rerouting…</span> : null}
+          {nav.rerouteOffered ? (
+            <div className="nav-offroute-row">
+              <span className="nav-offroute-text">
+                Off route
+                {trackBack
+                  ? ` — ${trackWord.toLowerCase()} is ${fmtDistanceM(trackBack.distanceM)} ${trackBack.cardinal}`
+                  : ''}
+              </span>
+              <button type="button" className="nav-offroute-reroute" onClick={nav.rerouteNow}>
+                Reroute
+              </button>
+            </div>
+          ) : null}
           {nav.rerouteFailed && nav.phase === 'navigating' ? (
-            <span className="nav-reroute">Can’t reroute — continue on the line</span>
+            <span className="nav-reroute">
+              {nav.rerouteOffered
+                ? // The offline-hike case: no new line is coming, and the offer
+                  // row above still points the way back to the track.
+                  'Can’t reroute — no connection'
+                : 'Can’t reroute — continue on the line'}
+            </span>
           ) : null}
           {state && nav.phase !== 'arrived' ? (
             <>

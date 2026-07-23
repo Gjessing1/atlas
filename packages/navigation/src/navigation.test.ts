@@ -1534,12 +1534,18 @@ describe('navOptionsForProfile', () => {
     expect(est.state.traveledM).toBeCloseTo(200, 0);
   });
 
-  it('gives a walker a wider corridor than a driver before declaring off-route', () => {
-    // ~42 m off the line: past the driver's 40 m, inside the walker's 45 m.
-    // On foot that is a detour round a building; in a car it is another road.
-    const beside = { ...pointAtAlong(300), speedMps: 1.4 };
-    beside.lat += 0.00038;
+  it('leaves off-route on foot as an offer, with a tighter corridor and longer grace', () => {
+    // Off-route on foot no longer *performs* anything (autoReroute is off —
+    // the controller shows "Off route · Reroute?"), which is what lets the
+    // corridor sit at 35 m instead of the old 45 m without rerouting a
+    // pedestrian for walking round a puddle.
+    expect(navOptionsForProfile('foot').autoReroute).toBe(false);
+    expect(navOptionsForProfile('hike').autoReroute).toBe(false);
+    expect(navOptionsForProfile('car').autoReroute).toBeUndefined(); // default: true
 
+    // ~32 m off the line — a detour round a building — stays on-route.
+    const beside = { ...pointAtAlong(300), speedMps: 1.4 };
+    beside.lat += 0.00029;
     const walk = new NavigationSession(
       route(),
       navOptionsForProfile('foot', { startDeparted: true }),
@@ -1547,8 +1553,18 @@ describe('navOptionsForProfile', () => {
     for (let t = 0; t < 8; t++)
       expect(walk.update(beside, t * 1000).state.status).toBe('navigating');
 
+    // ~42 m off: both trip it, but the walker gets an extra grace fix.
+    const far = { ...pointAtAlong(300), speedMps: 1.4 };
+    far.lat += 0.00038;
+    const stray = new NavigationSession(
+      route(),
+      navOptionsForProfile('foot', { startDeparted: true }),
+    );
+    for (let t = 0; t < 3; t++) expect(stray.update(far, t * 1000).state.status).toBe('navigating');
+    expect(stray.update(far, 3000).state.status).toBe('off-route');
+
     const drive = new NavigationSession(route(), { startDeparted: true });
-    for (let t = 0; t < 2; t++) drive.update(beside, t * 1000);
-    expect(drive.update(beside, 2000).state.status).toBe('off-route');
+    for (let t = 0; t < 2; t++) drive.update(far, t * 1000);
+    expect(drive.update(far, 2000).state.status).toBe('off-route');
   });
 });

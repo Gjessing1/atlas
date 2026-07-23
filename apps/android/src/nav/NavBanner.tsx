@@ -1,7 +1,13 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import { fmtDistanceM, type NavWidgetId } from '@atlas/core';
 import { fmtClock } from '@atlas/core';
-import { laneGlyphs, laneLabel, shortManeuverText } from '@atlas/navigation';
+import {
+  backToTrack,
+  laneGlyphs,
+  laneLabel,
+  remainingAscentM,
+  shortManeuverText,
+} from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -41,6 +47,14 @@ function widgetValue(widget: NavWidgetId, nav: NavController): { value: string; 
         value: nav.altitudeM === null ? '—' : String(Math.round(nav.altitudeM)),
         unit: 'altitude m',
       };
+    case 'ascent': {
+      // Climb still ahead — the number that matters on a hike. An honest dash
+      // where the route carries no elevation (offline packs have no DEM).
+      const ascent = nav.activePath
+        ? remainingAscentM(nav.activePath.points, nav.state?.traveledM ?? 0)
+        : null;
+      return { value: ascent === null ? '—' : String(ascent), unit: 'climb m' };
+    }
     case 'next-turn':
       return {
         value: nav.state?.upcoming ? fmtDistanceM(nav.state.upcoming.distanceToM) : '—',
@@ -163,7 +177,18 @@ export function NavBanner({
   const maneuver = state?.upcoming;
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const sustain = moving ? (state?.sustain ?? null) : null;
-  const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
+  const walking = nav.profile === 'foot' || nav.profile === 'hike';
+  // No speed-limit roundel on foot: the 80 km/h sign on the road a footpath
+  // parallels is driving furniture, not guidance.
+  const speedLimit = moving && !walking ? (state?.speedLimitKph ?? null) : null;
+  // Walking modes offer the reroute instead of performing it — and for the
+  // hiker who lost the trail with no network, the straight line back to it is
+  // the half that still works offline.
+  const trackBack =
+    nav.rerouteOffered && state && nav.activePath
+      ? backToTrack(nav.activePath.points, state.raw)
+      : null;
+  const trackWord = nav.profile === 'hike' ? 'trail' : 'route';
   // The manual way out, offered only near the destination — where the automatic
   // rules can fail (a fix that never gets accurate enough in a car park) and
   // where "I've arrived" is the one thing the traveller knows better than we do.
@@ -267,8 +292,33 @@ export function NavBanner({
         )}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
+        {nav.rerouteOffered ? (
+          <View style={styles.offRouteRow}>
+            <Text style={styles.offRouteText} numberOfLines={2}>
+              Off route
+              {trackBack
+                ? ` — ${trackWord} is ${fmtDistanceM(trackBack.distanceM)} ${trackBack.cardinal}`
+                : ''}
+            </Text>
+            <Pressable
+              style={styles.offRouteButton}
+              onPress={nav.rerouteNow}
+              testID="reroute-now"
+              accessibilityRole="button"
+              accessibilityLabel="Reroute from here"
+            >
+              <Text style={styles.offRouteButtonText}>Reroute</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {nav.rerouteFailed && nav.phase === 'navigating' ? (
-          <Text style={styles.reroute}>Can’t reroute — continue on the line</Text>
+          <Text style={styles.reroute}>
+            {nav.rerouteOffered
+              ? // The offline-hike case: no new line is coming, and the offer
+                // row above still points the way back to the track.
+                'Can’t reroute — no connection'
+              : 'Can’t reroute — continue on the line'}
+          </Text>
         ) : null}
         {state?.wrongBranch && nav.phase === 'navigating' ? (
           <Text style={styles.reroute}>Check route — you may have taken a different turn</Text>
@@ -533,6 +583,28 @@ const styles = StyleSheet.create({
   progressTrackCompact: { marginTop: 6 },
   progressFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
   reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
+  // Walking modes: off-route is an offer ("Reroute?"), never a silent
+  // recalculation — with the bearing back to the track alongside, which is
+  // the half that still works offline.
+  offRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 196, 107, 0.14)',
+  },
+  offRouteText: { color: theme.warning, fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  offRouteButton: {
+    backgroundColor: theme.accent,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  offRouteButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
   mapControlsSlot: { flex: 1, paddingTop: 10 },
   mapControlsSlotPortrait: { minHeight: 106, alignItems: 'flex-end' },

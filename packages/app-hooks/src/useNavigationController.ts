@@ -15,6 +15,7 @@
 
 import type { LatLng } from '@atlas/core';
 import {
+  FacingBlender,
   navOptionsForProfile,
   NavigationSession,
   type NavState,
@@ -80,6 +81,17 @@ export interface NavPlatform {
    * source separately, for the whole trip.
    */
   watchHeadingRate?(onDelta: (deltaDeg: number, dtSec: number) => void): () => void;
+  /**
+   * Report absolute device orientation (compass heading, deg from true north,
+   * plus the sensor's declared ± accuracy where it has one) — which way the
+   * *traveller faces*, as opposed to where the route goes. Subscribed only for
+   * walking modes: a pedestrian standing at a junction has no GPS course and
+   * the route tangent points down a path they may not have chosen, so the
+   * compass is the only signal that answers "which way do I start walking?".
+   * Optional because a desktop browser genuinely has no compass — the puck
+   * then keeps the route-tangent fallback rather than pretending.
+   */
+  watchFacing?(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void;
 }
 
 export interface NavController {
@@ -104,6 +116,21 @@ export interface NavController {
   speedMps: number | null;
   /** Latest GPS altitude in metres, or null when the platform has none. */
   altitudeM: number | null;
+  /**
+   * Which way the traveller faces (deg from north), from the device compass —
+   * only while a walking mode is navigating at walking speed on a platform
+   * with a compass; null otherwise. The *puck* reads this; the camera keeps
+   * `state.courseDeg`, so the map does not spin with every turn of the head.
+   */
+  facingDeg: number | null;
+  /** Sensor-declared ± accuracy of `facingDeg` — widens the uncertainty cone. */
+  facingAccuracyDeg: number | null;
+  /**
+   * True while the session is off-route but this mode leaves rerouting to the
+   * traveller (walking modes): the UI shows "Off route — reroute?" instead of
+   * a silently recalculated line. `rerouteNow` accepts the offer.
+   */
+  rerouteOffered: boolean;
   /** Whether voice prompts are muted. */
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
@@ -132,6 +159,8 @@ export interface NavController {
    * accurate enough, or a destination the road data puts across a wall.
    */
   arriveNow: () => void;
+  /** Accept an offered reroute (walking modes' off-route banner). */
+  rerouteNow: () => void;
   stop: () => void;
 }
 
@@ -170,6 +199,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [altitudeM, setAltitudeM] = useState<number | null>(null);
+  const [facing, setFacing] = useState<{ deg: number; accuracyDeg: number | null } | null>(null);
   const [muted, setMutedState] = useState(false);
   const [tripSummary, setTripSummary] = useState<NavTripSummary | null>(null);
   const [rerouteFailed, setRerouteFailed] = useState(false);
@@ -207,6 +237,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
   const lastStateRef = useRef<NavState | null>(null);
+  /** Latest raw fix — the origin an accepted reroute offer recalculates from. */
+  const lastFixRef = useRef<Position | null>(null);
+  /** One spoken "off route" per episode in offer mode, not one per fix. */
+  const offRouteSpokenRef = useRef(false);
+  /** Compass-vs-course blending for the walking puck (speed hysteresis). */
+  const facingBlender = useRef(new FacingBlender());
   /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
   const enrichAbort = useRef<AbortController | null>(null);
   /** Teardown for the active fix watch, if any. */
@@ -349,6 +385,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setActivePath(null);
       setSpeedMps(null);
       setAltitudeM(null);
+      setFacing(null);
+      facingBlender.current.reset();
+      lastFixRef.current = null;
+      offRouteSpokenRef.current = false;
       if (!arrived) {
         setState(null);
         setDestination(null);
@@ -450,6 +490,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
         rerouteBackoffUntil.current = 0;
         setRerouteFailed(false);
         enrich(nextSession, path);
+        // Seed the new session with the fix that triggered the reroute, so
+        // the shown state (and an off-route offer banner) flips to the new
+        // line now rather than at the next fix. Its prompts are discarded —
+        // the departure prompt below already answers "which way now?".
+        try {
+          const seeded = nextSession.update(from, Date.now());
+          setState(seeded.state);
+          lastStateRef.current = seeded.state;
+        } catch {
+          // The next live fix populates the state instead.
+        }
         // "Which way now?" is most urgent right after recalculating.
         const depart = nextSession.departurePrompt();
         if (depart) speak(depart.text);
@@ -474,10 +525,21 @@ export function useNavigationController(platform: NavPlatform): NavController {
     [fetchPath, speak, enrich],
   );
 
+  /** Accept an offered reroute: recalculate from the last known fix. */
+  const rerouteNow = useCallback(() => {
+    const fix = lastFixRef.current;
+    if (!fix || !sessionRef.current) return;
+    // The tap is explicit consent — don't let a backoff from an earlier
+    // failed automatic attempt swallow it.
+    rerouteBackoffUntil.current = 0;
+    void reroute(fix);
+  }, [reroute]);
+
   const onFix = useCallback(
     (fix: Position) => {
       const session = sessionRef.current;
       if (!session) return;
+      lastFixRef.current = fix;
       setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
       setAltitudeM(
         typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
@@ -492,10 +554,23 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (next.status === 'arrived') {
           finishArrived(session, next.traveledM);
         } else if (next.status === 'off-route') {
-          void reroute(fix);
+          // Driving modes recalculate silently — a driver who left the
+          // corridor has missed a turn and has no hands free. Walking modes
+          // *offer* instead (`rerouteOffered` in the returned controller):
+          // the walker who leaves the path is usually doing it on purpose,
+          // and on a mountain the honest answer may be "back to the trail",
+          // not a new line. One spoken notice per episode, so eyes can stay
+          // off the screen without the banner going unnoticed.
+          if (navOptionsForProfile(profileRef.current).autoReroute ?? true) {
+            void reroute(fix);
+          } else if (!offRouteSpokenRef.current) {
+            offRouteSpokenRef.current = true;
+            speak('You are off the route');
+          }
         } else {
           // Back on the line: any lingering "can't reroute" notice is stale.
           setRerouteFailed(false);
+          offRouteSpokenRef.current = false;
         }
       } catch (err) {
         console.warn('navigation fix failed', err);
@@ -616,6 +691,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       tripSeq.current++;
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
+      offRouteSpokenRef.current = false;
       enrich(session, path);
       tripStartRef.current = Date.now();
       traveledBaseRef.current = 0;
@@ -697,6 +773,55 @@ export function useNavigationController(platform: NavPlatform): NavController {
     });
   }, [reckoning, platformRef]);
 
+  // Which way the walker faces, from the device compass. Subscribed only for
+  // walking modes during guidance: in a car the magnetometer is junk (steel
+  // body, cradle magnet) and the course machinery is right; on foot it is the
+  // only signal that works standing still. The blender applies the speed
+  // hysteresis (compass while walking, GPS course when moving fast enough for
+  // it to be trustworthy) and drops readings the sensor itself flags as bad —
+  // Google's degrade-to-a-dot behaviour, minus the figure-8 nag.
+  const walkingProfile = profile === 'foot' || profile === 'hike';
+  const speedRef = useLatest(speedMps);
+  useEffect(() => {
+    if (!guiding || !walkingProfile) return;
+    const watch = platformRef.current.watchFacing;
+    if (!watch) return;
+    const blender = facingBlender.current;
+    blender.reset();
+    let lastSetMs = 0;
+    let lastSetDeg: number | null = null;
+    const unsubscribe = watch((deg, accuracyDeg) => {
+      const now = Date.now();
+      blender.updateCompass(deg, accuracyDeg, now);
+      const sample = blender.current(speedRef.current, now);
+      if (!sample) {
+        if (lastSetDeg !== null) {
+          lastSetDeg = null;
+          setFacing(null);
+        }
+        return;
+      }
+      // Compass events arrive at sensor rate; re-render at most ~5 Hz and
+      // only for a visible change, or the puck costs more than it shows.
+      const delta =
+        lastSetDeg === null ? 180 : Math.abs(((sample.deg - lastSetDeg + 540) % 360) - 180);
+      if (now - lastSetMs < 200 || delta < 2) return;
+      lastSetMs = now;
+      lastSetDeg = sample.deg;
+      setFacing(sample);
+    });
+    return () => {
+      unsubscribe();
+      setFacing(null);
+    };
+  }, [guiding, walkingProfile, platformRef, speedRef]);
+
+  // Speeding up hands the puck back to the course even between compass events
+  // (a cyclist pushing off from a walk would otherwise keep a stale facing).
+  useEffect(() => {
+    if (facing && facingBlender.current.current(speedMps, Date.now()) === null) setFacing(null);
+  }, [speedMps, facing]);
+
   // A navigating device is a dashboard: keep the screen on for the whole trip.
   useEffect(() => {
     if (!guiding) return;
@@ -719,6 +844,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
     previewError,
     speedMps,
     altitudeM,
+    facingDeg: facing?.deg ?? null,
+    facingAccuracyDeg: facing?.accuracyDeg ?? null,
+    rerouteOffered:
+      phase === 'navigating' &&
+      state?.status === 'off-route' &&
+      !(navOptionsForProfile(profile).autoReroute ?? true),
     muted,
     tripSummary,
     rerouteFailed,
@@ -730,6 +861,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     toggleMute,
     setMuted,
     arriveNow,
+    rerouteNow,
     stop: useCallback(() => stop(false), [stop]),
   };
 }

@@ -1,4 +1,10 @@
-import { MAX_NAV_WIDGETS, parseNavWidgets, type NavWidgetId } from '@atlas/core';
+import {
+  defaultNavWidgetsFor,
+  isNavWidgetId,
+  MAX_NAV_WIDGETS,
+  type NavWidgetId,
+} from '@atlas/core';
+import type { RoutingProfile } from '@atlas/routing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -8,9 +14,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 const MUTED_SETTING = 'local.nav.muted';
 const FOLLOW_SETTING = 'local.nav.follow';
+/**
+ * Walking modes keep their own orientation preference: OsmAnd defaults
+ * pedestrians to north-up (the walker turns on the spot constantly — a map
+ * that spun with them would be unreadable) while course-up stays the right
+ * driving default, and one shared key would make each trip clobber the other
+ * mode's choice.
+ */
+const FOLLOW_WALK_SETTING = 'local.nav.follow.walk';
 const WIDGETS_SETTING = 'local.nav.widgets';
 
 export type NavFollowMode = 'course' | 'north';
+
+/** Modes where the traveller is a pedestrian, not a vehicle. */
+const isWalking = (profile: RoutingProfile): boolean => profile === 'foot' || profile === 'hike';
 
 export interface NavPrefsSettings {
   status: string;
@@ -18,10 +35,12 @@ export interface NavPrefsSettings {
   setSetting: (key: string, value: string) => void;
 }
 
-/** The slice of a navigation controller these preferences own. */
+/** The slice of a navigation controller these preferences own or read. */
 export interface NavPrefsTarget {
   muted: boolean;
   setMuted: (muted: boolean) => void;
+  /** Travel mode of the current trip — picks the orientation/widget defaults. */
+  profile: RoutingProfile;
 }
 
 export interface NavPrefsController {
@@ -34,19 +53,49 @@ export interface NavPrefsController {
   toggleWidget: (widget: NavWidgetId) => void;
 }
 
+const parseFollow = (raw: string | null): NavFollowMode | null =>
+  raw === 'north' || raw === 'course' ? raw : null;
+
+/** Parse a stored widget strip; null when nothing (valid) was ever saved. */
+function parseStoredWidgets(raw: string | null): NavWidgetId[] | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return null;
+    const widgets: NavWidgetId[] = [];
+    for (const item of value) {
+      if (isNavWidgetId(item) && !widgets.includes(item)) widgets.push(item);
+      if (widgets.length === MAX_NAV_WIDGETS) break;
+    }
+    return widgets;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Loads and persists the two nav preferences shared by both apps: voice mute
- * and map orientation.
+ * Loads and persists the nav preferences shared by both apps: voice mute, map
+ * orientation and the widget strip.
  *
  * Mute is owned by the navigation controller (the banner's button toggles it
  * there, and voice prompts read it); this hook only mirrors it to storage and
  * restores it at startup. The orientation is owned here, because the two apps
- * feed it to different camera implementations.
+ * feed it to different camera implementations — and it is kept per mode
+ * *class*: driving modes and walking modes each remember their own choice,
+ * with walking defaulting to north-up. Widgets follow the same shape: one
+ * saved strip wins everywhere, but until the user curates one the defaults
+ * track the trip's mode (a hike leads with climb, not speed).
  */
 export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): NavPrefsController {
   const { status, getSetting, setSetting } = settings;
-  const [followMode, setFollowModeState] = useState<NavFollowMode>('course');
-  const [widgets, setWidgets] = useState<NavWidgetId[]>(() => parseNavWidgets(null));
+  const [driveFollow, setDriveFollow] = useState<NavFollowMode>('course');
+  const [walkFollow, setWalkFollow] = useState<NavFollowMode>('north');
+  /** The user's saved strip, or null while the defaults apply. */
+  const [customWidgets, setCustomWidgets] = useState<NavWidgetId[] | null>(null);
+
+  const walking = isWalking(nav.profile);
+  const followMode = walking ? walkFollow : driveFollow;
+  const widgets = customWidgets ?? defaultNavWidgetsFor(nav.profile);
 
   // Read through a ref: a controller that hands out a fresh setMuted each
   // render would otherwise re-run the load effect and clobber a live toggle.
@@ -60,43 +109,62 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
       if (!cancelled && raw != null) setMutedRef.current(raw === 'true');
     });
     void getSetting(FOLLOW_SETTING).then((raw) => {
-      if (!cancelled && (raw === 'north' || raw === 'course')) setFollowModeState(raw);
+      const mode = parseFollow(raw);
+      if (!cancelled && mode) setDriveFollow(mode);
+    });
+    void getSetting(FOLLOW_WALK_SETTING).then((raw) => {
+      const mode = parseFollow(raw);
+      if (!cancelled && mode) setWalkFollow(mode);
     });
     void getSetting(WIDGETS_SETTING).then((raw) => {
-      if (!cancelled) setWidgets(parseNavWidgets(raw));
+      if (!cancelled) setCustomWidgets(parseStoredWidgets(raw));
     });
     return () => {
       cancelled = true;
     };
   }, [status, getSetting]);
 
+  const walkingRef = useRef(walking);
+  walkingRef.current = walking;
+
   const setFollowMode = useCallback(
     (mode: NavFollowMode) => {
-      setFollowModeState(mode);
-      setSetting(FOLLOW_SETTING, mode);
+      if (walkingRef.current) {
+        setWalkFollow(mode);
+        setSetting(FOLLOW_WALK_SETTING, mode);
+      } else {
+        setDriveFollow(mode);
+        setSetting(FOLLOW_SETTING, mode);
+      }
     },
     [setSetting],
   );
 
   const toggleFollowMode = useCallback(() => {
-    setFollowModeState((mode) => {
-      const next = mode === 'course' ? 'north' : 'course';
-      setSetting(FOLLOW_SETTING, next);
-      return next;
-    });
-  }, [setSetting]);
-
-  const toggleWidget = useCallback(
-    (widget: NavWidgetId) => {
-      setWidgets((current) => {
-        const next = current.includes(widget)
-          ? current.filter((item) => item !== widget)
-          : current.length < MAX_NAV_WIDGETS
-            ? [...current, widget]
-            : current;
-        setSetting(WIDGETS_SETTING, JSON.stringify(next));
+    const apply = (setState: typeof setDriveFollow, key: string) =>
+      setState((mode) => {
+        const next = mode === 'course' ? 'north' : 'course';
+        setSetting(key, next);
         return next;
       });
+    if (walkingRef.current) apply(setWalkFollow, FOLLOW_WALK_SETTING);
+    else apply(setDriveFollow, FOLLOW_SETTING);
+  }, [setSetting]);
+
+  // The first toggle materialises the mode's defaults as a saved strip; from
+  // then on the one curated strip applies to every mode.
+  const widgetsRef = useRef(widgets);
+  widgetsRef.current = widgets;
+  const toggleWidget = useCallback(
+    (widget: NavWidgetId) => {
+      const current = widgetsRef.current;
+      const next = current.includes(widget)
+        ? current.filter((item) => item !== widget)
+        : current.length < MAX_NAV_WIDGETS
+          ? [...current, widget]
+          : current;
+      setCustomWidgets(next);
+      setSetting(WIDGETS_SETTING, JSON.stringify(next));
     },
     [setSetting],
   );

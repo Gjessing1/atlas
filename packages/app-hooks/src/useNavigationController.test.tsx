@@ -368,3 +368,89 @@ describe('useNavigationController — rerouting', () => {
     expect(result.current.phase).toBe('rerouting');
   });
 });
+
+describe('useNavigationController — walking modes', () => {
+  /** Start a foot trip and begin guidance. */
+  async function walk(h: Harness) {
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'foot'));
+    expect(hook.result.current.phase).toBe('preview');
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+    return hook;
+  }
+
+  /** ~110 m north of the line: past foot's 35 m corridor, accurate fixes. */
+  const offPath = (i: number): Position => ({
+    lat: 60.001,
+    lng: 10.005 + i * 0.00005,
+    accuracyM: 5,
+    speedMps: 1,
+  });
+
+  it('offers the reroute on foot instead of performing it, announcing once', async () => {
+    const h = harness();
+    const { result } = await walk(h);
+    const callsBefore = h.route.mock.calls.length;
+
+    for (let i = 0; i < 6; i++) act(() => h.emit(offPath(i)));
+
+    await waitFor(() => expect(result.current.rerouteOffered).toBe(true));
+    expect(result.current.phase).toBe('navigating');
+    // The defining difference from driving: no automatic route fetch.
+    expect(h.route.mock.calls.length).toBe(callsBefore);
+    expect(h.spoken.filter((t) => t === 'You are off the route')).toHaveLength(1);
+
+    // Walking back to the line withdraws the offer by itself.
+    act(() => h.emit(onLine(5, { speedMps: 1 })));
+    expect(result.current.rerouteOffered).toBe(false);
+  });
+
+  it('rerouteNow accepts the offer and recalculates from the last fix', async () => {
+    const h = harness();
+    const { result } = await walk(h);
+    for (let i = 0; i < 6; i++) act(() => h.emit(offPath(i)));
+    await waitFor(() => expect(result.current.rerouteOffered).toBe(true));
+    const original = result.current.activePath;
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+
+    act(() => result.current.rerouteNow());
+
+    await waitFor(() => expect(result.current.activePath).not.toBe(original));
+    expect(result.current.phase).toBe('navigating');
+    expect(result.current.rerouteOffered).toBe(false);
+  });
+
+  it('shows the compass facing while walking and yields it to the course at speed', async () => {
+    let facingSink: ((deg: number, accuracyDeg: number | null) => void) | null = null;
+    const h = harness(undefined, {
+      watchFacing: (onFacing) => {
+        facingSink = onFacing;
+        return () => {
+          facingSink = null;
+        };
+      },
+    });
+    const { result } = await walk(h);
+    await waitFor(() => expect(facingSink).not.toBeNull());
+
+    act(() => facingSink?.(210, 15));
+    await waitFor(() => expect(result.current.facingDeg).toBe(210));
+    expect(result.current.facingAccuracyDeg).toBe(15);
+
+    // Above the blend-out speed the course owns the heading again.
+    act(() => h.emit(onLine(2, { speedMps: 3 })));
+    await waitFor(() => expect(result.current.facingDeg).toBeNull());
+
+    // End tears the compass watch down with the trip.
+    act(() => result.current.stop());
+    expect(facingSink).toBeNull();
+  });
+
+  it('never subscribes to the compass for a driving trip', async () => {
+    const watchFacing = vi.fn();
+    const h = harness(undefined, { watchFacing });
+    await drive(h);
+    expect(watchFacing).not.toHaveBeenCalled();
+  });
+});

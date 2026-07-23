@@ -66,6 +66,28 @@ function keepAwake(): () => void {
 }
 
 /**
+ * Device orientation as a compass heading, where the browser has one. Chrome
+ * on Android delivers `deviceorientationabsolute` (magnetometer-fused, no
+ * permission prompt); a desktop browser has no compass and simply never fires,
+ * which is the honest outcome — the puck keeps its route-tangent fallback
+ * rather than pretending. iOS Safari gates orientation behind a per-site
+ * permission that needs a user gesture; until that flow exists it lands in
+ * the same fallback. The event has no accuracy field, so null is reported and
+ * the blender applies its default cone.
+ */
+function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void {
+  const handler = (event: DeviceOrientationEvent) => {
+    if (!event.absolute || event.alpha == null) return;
+    // alpha is the device's rotation from north (counter-clockwise); the
+    // compass heading is its inverse, corrected for a rotated screen.
+    const screenDeg = screen.orientation?.angle ?? 0;
+    onFacing((360 - event.alpha + screenDeg) % 360, null);
+  };
+  window.addEventListener('deviceorientationabsolute', handler as EventListener);
+  return () => window.removeEventListener('deviceorientationabsolute', handler as EventListener);
+}
+
+/**
  * Turn-by-turn navigation for the web: the browser half of the shared
  * navigation controller. Fixes come from the geolocation watch, prompts from
  * the Web Speech API, and routes from the server — the trip logic itself is
@@ -102,6 +124,7 @@ export function useWebNavigation(): NavController {
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       },
       keepAwake,
+      watchFacing,
     }),
     [],
   );

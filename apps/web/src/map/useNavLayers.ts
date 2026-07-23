@@ -1,6 +1,11 @@
 import type { NavController } from '@atlas/app-hooks';
 import { lineStringFeature } from '@atlas/core';
-import { followZoom, maneuverArrowsGeoJSON, remainingRouteBounds } from '@atlas/navigation';
+import {
+  followZoom,
+  maneuverArrowsGeoJSON,
+  navCameraStyle,
+  remainingRouteBounds,
+} from '@atlas/navigation';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -334,19 +339,46 @@ export function useNavLayers(
   // ---- location puck (snapped position) + destination flag ----
   const puckRef = useRef<maplibregl.Marker | null>(null);
   const destRef = useRef<maplibregl.Marker | null>(null);
+  // The compass cone half-angle, quantized so jittery accuracy reports don't
+  // rebuild the sector path on every event.
+  const coneHalfDeg =
+    nav.facingDeg === null
+      ? null
+      : Math.min(60, Math.max(15, Math.round((nav.facingAccuracyDeg ?? 30) / 15) * 15));
   useEffect(() => {
     if (!map) return;
     const snapped = active ? nav.state?.snapped : undefined;
     if (snapped) {
       if (!puckRef.current) {
         const el = document.createElement('div');
-        el.className = 'nav-puck';
-        puckRef.current = new maplibregl.Marker({ element: el });
+        el.className = 'nav-puck-wrap';
+        // The uncertainty beam sits under the dot and only shows while the
+        // compass owns the heading (walking modes, standing or strolling).
+        const beam = document.createElement('div');
+        beam.className = 'nav-puck-beam';
+        const dot = document.createElement('div');
+        dot.className = 'nav-puck';
+        el.append(beam, dot);
+        // Map-aligned rotation: the beam points where the walker faces even
+        // when the camera is not north-up.
+        puckRef.current = new maplibregl.Marker({ element: el, rotationAlignment: 'map' });
       }
       puckRef.current.setLngLat(snapped).addTo(map);
+      const el = puckRef.current.getElement();
       // Grey when the GPS signal is lost, so a frozen puck reads as
       // "no signal", not "we're still here".
-      puckRef.current.getElement().classList.toggle('nav-puck-lost', nav.state?.fix === 'lost');
+      el.classList.toggle('nav-puck-lost', nav.state?.fix === 'lost');
+      // The walker's facing, drawn as a cone of uncertainty rather than a
+      // hard arrow — the compass deserves exactly as much confidence as its
+      // own accuracy report. Absent (driving, desktop, moving fast) the puck
+      // is the plain dot it always was.
+      el.classList.toggle('nav-puck-facing', coneHalfDeg !== null);
+      if (coneHalfDeg !== null) {
+        el.style.setProperty('--facing-cone', `${coneHalfDeg * 2}deg`);
+        puckRef.current.setRotation(nav.facingDeg ?? 0);
+      } else {
+        puckRef.current.setRotation(0);
+      }
     } else {
       puckRef.current?.remove();
       puckRef.current = null;
@@ -366,7 +398,16 @@ export function useNavLayers(
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [map, active, previewing, nav.state?.snapped, nav.state?.fix, nav.destination]);
+  }, [
+    map,
+    active,
+    previewing,
+    nav.state?.snapped,
+    nav.state?.fix,
+    nav.destination,
+    nav.facingDeg,
+    coneHalfDeg,
+  ]);
   useEffect(
     () => () => {
       puckRef.current?.remove();
@@ -420,24 +461,36 @@ export function useNavLayers(
     // (Android parity): the route tangent gives a stable bearing standing
     // still, so the driving frame is up the moment guidance starts.
     const courseUp = followMode === 'course';
+    // Per-mode framing: driving gets the windscreen treatment (pitched,
+    // speed-scaled zoom); walking modes stay flat and closer in, because a
+    // pedestrian reads the streets around them, not the road ahead.
+    const camStyle = navCameraStyle(nav.profile);
     // Standard driving-nav framing (Android parity): top padding of half the
     // viewport puts the car ~75% of the way down in course-up, so the top
-    // three quarters show the road ahead; in north-up "ahead" isn't up, so
-    // keep the car centred. The pitched view stretches the visible distance.
+    // three quarters show the road ahead; in north-up (and on foot, where a
+    // pitched look-ahead frame is meaningless at 1.4 m/s) "ahead" isn't the
+    // point, so keep the traveller centred.
+    const bottomAnchored = courseUp && camStyle.pitchDeg > 0;
     const height = map.getContainer().clientHeight || 600;
-    const anchorTop = courseUp ? Math.round(height * 0.5) : 0;
-    const forwardPx = Math.round(height * (courseUp ? 0.6 : 0.4));
+    const anchorTop = bottomAnchored ? Math.round(height * 0.5) : 0;
+    const forwardPx = Math.round(height * (bottomAnchored ? 0.6 : 0.4));
     map.easeTo({
       center: snapped,
-      zoom: followZoom(nav.speedMps, snapped.lat, state.upcoming?.distanceToM ?? null, forwardPx),
+      zoom: followZoom(
+        nav.speedMps,
+        snapped.lat,
+        state.upcoming?.distanceToM ?? null,
+        forwardPx,
+        camStyle,
+      ),
       bearing: courseUp ? courseRef.current : 0,
-      pitch: courseUp ? 45 : 0,
+      pitch: courseUp ? camStyle.pitchDeg : 0,
       padding: { top: anchorTop, bottom: 0, left: 0, right: 0 },
       duration: 800,
       // Linear easing keeps back-to-back fixes from stuttering.
       easing: (t) => t,
     });
-  }, [map, active, followPaused, overview, followMode, nav.state, nav.speedMps]);
+  }, [map, active, followPaused, overview, followMode, nav.state, nav.speedMps, nav.profile]);
 
   // Overview: fit the whole remaining route flat and north-up; back to the
   // follow on tap (toggle/recenter), a map gesture, or by itself on timeout.
