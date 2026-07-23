@@ -90,12 +90,28 @@ export const MIGRATIONS: readonly string[] = [
   `,
 ];
 
-/** Bring the database up to the latest schema version. */
-export async function migrate(driver: SqlDriver): Promise<void> {
+/**
+ * Bring the database up to the latest schema version. Each migration script
+ * and its `user_version` bump commit as one transaction (`user_version` lives
+ * in the database header and is journaled like any write), so a crash mid-way
+ * can never leave a half-applied script or rerun a non-idempotent one.
+ */
+export async function migrate(
+  driver: SqlDriver,
+  migrations: readonly string[] = MIGRATIONS,
+): Promise<void> {
   const rows = await driver.query('PRAGMA user_version');
   const version = Number(rows[0]?.['user_version'] ?? 0);
-  for (let v = version; v < MIGRATIONS.length; v++) {
-    await driver.execScript(MIGRATIONS[v]!);
-    await driver.execScript(`PRAGMA user_version = ${v + 1}`);
+  for (let v = version; v < migrations.length; v++) {
+    try {
+      await driver.execScript(
+        `BEGIN;\n${migrations[v]!}\nPRAGMA user_version = ${v + 1};\nCOMMIT;`,
+      );
+    } catch (err) {
+      await driver.execScript('ROLLBACK').catch(() => {
+        // Some failures abort the transaction on their own; nothing to roll back.
+      });
+      throw err;
+    }
   }
 }

@@ -1,24 +1,12 @@
 // @vitest-environment jsdom
-import { DatabaseSync } from 'node:sqlite';
 import { AtlasStorage } from '@atlas/storage';
-import type { SqlDriver, SqlRow, SqlValue, SyncChange } from '@atlas/storage';
+import type { SyncChange } from '@atlas/storage';
+import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { lwwWins } from '@atlas/sync';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SyncPlatform, SyncSession } from './useSync.js';
 import { useSync } from './useSync.js';
-
-function createNodeDriver(): SqlDriver {
-  const db = new DatabaseSync(':memory:');
-  return {
-    query: (sql: string, params: SqlValue[] = []) =>
-      Promise.resolve(db.prepare(sql).all(...params) as SqlRow[]),
-    execScript: (sql: string) => {
-      db.exec(sql);
-      return Promise.resolve();
-    },
-  };
-}
 
 /** Fake backend: health + auth + the LWW sync store the engine talks to. */
 class FakeServer {

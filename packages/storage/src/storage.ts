@@ -1,6 +1,6 @@
 import { DEFAULT_PLACE_COLOR, DEFAULT_PLACE_ICON } from '@atlas/core';
 
-import type { SqlDriver, SqlRow, SqlValue } from './driver.js';
+import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from './driver.js';
 import { migrate } from './migrations.js';
 import type {
   CollectionPatch,
@@ -105,9 +105,11 @@ const TRACK_COLUMNS =
 
 /**
  * The user-data repository: collections (folders), places (favorites/pins),
- * tracks (GPX), and settings. All writes stamp `updated_at` for the future
- * last-write-wins sync (Phase 5). Async throughout — the web driver crosses a
- * worker boundary.
+ * tracks (GPX), and settings. All writes stamp `updated_at` for the
+ * last-write-wins sync. Async throughout — the web driver crosses a worker
+ * boundary. Every mutation commits its authoritative rows *and* their outbox
+ * entries in one driver batch, so an interruption can never strand data that
+ * silently fails to sync, or stop a multi-row operation halfway.
  */
 export class AtlasStorage {
   constructor(private readonly driver: SqlDriver) {}
@@ -115,6 +117,15 @@ export class AtlasStorage {
   /** Run pending migrations; call once before anything else. */
   async init(): Promise<void> {
     await migrate(this.driver);
+  }
+
+  /**
+   * Release the underlying database (web: closes the worker's SQLite handle,
+   * freeing the exclusive OPFS locks, then terminates the worker). The
+   * instance is unusable afterwards.
+   */
+  async close(): Promise<void> {
+    await this.driver.close?.();
   }
 
   // ---- collections ----
@@ -136,31 +147,34 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query(
-      `INSERT INTO collections (id, name, parent_id, created_at, updated_at, visible, sort_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.id,
-        record.name,
-        record.parentId,
-        record.createdAt,
-        record.updatedAt,
-        record.visible ? 1 : 0,
-        record.sortIndex,
-      ],
-    );
-    await this.enqueue('collection', record.id, 'upsert', now);
+    await this.driver.batch([
+      {
+        sql: `INSERT INTO collections (id, name, parent_id, created_at, updated_at, visible, sort_index)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          record.id,
+          record.name,
+          record.parentId,
+          record.createdAt,
+          record.updatedAt,
+          record.visible ? 1 : 0,
+          record.sortIndex,
+        ],
+      },
+      this.enqueueStmt('collection', record.id, 'upsert', now),
+    ]);
     return record;
   }
 
   async renameCollection(id: string, name: string): Promise<void> {
     const now = Date.now();
-    await this.driver.query('UPDATE collections SET name = ?, updated_at = ? WHERE id = ?', [
-      name,
-      now,
-      id,
+    await this.driver.batch([
+      {
+        sql: 'UPDATE collections SET name = ?, updated_at = ? WHERE id = ?',
+        params: [name, now, id],
+      },
+      this.enqueueStmt('collection', id, 'upsert', now),
     ]);
-    await this.enqueue('collection', id, 'upsert', now);
   }
 
   /** Show or hide a folder (and, via effective visibility, everything under it). */
@@ -215,7 +229,10 @@ export class AtlasStorage {
     if (rows.length === 0 || snapshot === null) return null;
     const parentId = rows[0]!['parent_id'] ?? null;
     const now = Date.now();
+    // Read the affected rows first, then apply the whole reparent + delete as
+    // one transaction — a folder deletion must never stop halfway up a tree.
     const movedChildren: { entity: SyncEntity; id: string }[] = [];
+    const statements: SqlStatement[] = [];
     for (const [table, entity] of [
       ['places', 'place'],
       ['tracks', 'track'],
@@ -223,28 +240,29 @@ export class AtlasStorage {
       const moved = await this.driver.query(`SELECT id FROM ${table} WHERE collection_id = ?`, [
         id,
       ]);
-      await this.driver.query(
-        `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE collection_id = ?`,
-        [parentId, now, id],
-      );
+      statements.push({
+        sql: `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE collection_id = ?`,
+        params: [parentId, now, id],
+      });
       for (const row of moved) {
-        await this.enqueue(entity, String(row['id']), 'upsert', now);
+        statements.push(this.enqueueStmt(entity, String(row['id']), 'upsert', now));
         movedChildren.push({ entity, id: String(row['id']) });
       }
     }
     const children = await this.driver.query('SELECT id FROM collections WHERE parent_id = ?', [
       id,
     ]);
-    await this.driver.query(
-      'UPDATE collections SET parent_id = ?, updated_at = ? WHERE parent_id = ?',
-      [parentId, now, id],
-    );
+    statements.push({
+      sql: 'UPDATE collections SET parent_id = ?, updated_at = ? WHERE parent_id = ?',
+      params: [parentId, now, id],
+    });
     for (const row of children) {
-      await this.enqueue('collection', String(row['id']), 'upsert', now);
+      statements.push(this.enqueueStmt('collection', String(row['id']), 'upsert', now));
       movedChildren.push({ entity: 'collection', id: String(row['id']) });
     }
-    await this.driver.query('DELETE FROM collections WHERE id = ?', [id]);
-    await this.enqueue('collection', id, 'delete', now);
+    statements.push({ sql: 'DELETE FROM collections WHERE id = ?', params: [id] });
+    statements.push(this.enqueueStmt('collection', id, 'delete', now));
+    await this.driver.batch(statements);
     return { entity: 'collection', id, data: snapshot.data, movedChildren };
   }
 
@@ -274,28 +292,30 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query(
-      `INSERT INTO places (id, name, lat, lng, address, collection_id, notes, tags,
-                           created_at, updated_at, icon, color, visible, sort_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.id,
-        record.name,
-        record.lat,
-        record.lng,
-        record.address,
-        record.collectionId,
-        record.notes,
-        JSON.stringify(record.tags),
-        record.createdAt,
-        record.updatedAt,
-        record.icon,
-        record.color,
-        record.visible ? 1 : 0,
-        record.sortIndex,
-      ],
-    );
-    await this.enqueue('place', record.id, 'upsert', now);
+    await this.driver.batch([
+      {
+        sql: `INSERT INTO places (id, name, lat, lng, address, collection_id, notes, tags,
+                                  created_at, updated_at, icon, color, visible, sort_index)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          record.id,
+          record.name,
+          record.lat,
+          record.lng,
+          record.address,
+          record.collectionId,
+          record.notes,
+          JSON.stringify(record.tags),
+          record.createdAt,
+          record.updatedAt,
+          record.icon,
+          record.color,
+          record.visible ? 1 : 0,
+          record.sortIndex,
+        ],
+      },
+      this.enqueueStmt('place', record.id, 'upsert', now),
+    ]);
     return record;
   }
 
@@ -335,18 +355,24 @@ export class AtlasStorage {
   ): Promise<void> {
     const rows = await this.driver.query(`SELECT id, sort_index FROM ${table}`);
     const current = new Map(rows.map((r) => [String(r['id']), Number(r['sort_index'])]));
+    const statements: SqlStatement[] = [];
+    const now = Date.now();
     for (const [i, id] of orderedIds.entries()) {
       const sortIndex = i + 1;
       if (!current.has(id) || current.get(id) === sortIndex) continue;
-      await this.applyPatch(table, entity, id, { sort_index: sortIndex });
+      statements.push(...this.patchStmts(table, entity, id, { sort_index: sortIndex }, now));
     }
+    // One transaction — a reorder either lands whole or not at all.
+    if (statements.length > 0) await this.driver.batch(statements);
   }
 
   /** Delete a place, returning a snapshot for undo (null when unknown). */
   async deletePlace(id: string): Promise<DeletedRecord | null> {
     const snapshot = await this.readSyncRecord('place', id);
-    await this.driver.query('DELETE FROM places WHERE id = ?', [id]);
-    await this.enqueue('place', id, 'delete', Date.now());
+    await this.driver.batch([
+      { sql: 'DELETE FROM places WHERE id = ?', params: [id] },
+      this.enqueueStmt('place', id, 'delete', Date.now()),
+    ]);
     return snapshot && { entity: 'place', id, data: snapshot.data };
   }
 
@@ -376,24 +402,26 @@ export class AtlasStorage {
       createdAt: now,
       updatedAt: now,
     };
-    await this.driver.query(
-      `INSERT INTO tracks (id, name, gpx, stats, collection_id, notes, tags,
-                           visible, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.id,
-        record.name,
-        input.gpx,
-        JSON.stringify(record.stats),
-        record.collectionId,
-        record.notes,
-        JSON.stringify(record.tags),
-        1,
-        record.createdAt,
-        record.updatedAt,
-      ],
-    );
-    await this.enqueue('track', record.id, 'upsert', now);
+    await this.driver.batch([
+      {
+        sql: `INSERT INTO tracks (id, name, gpx, stats, collection_id, notes, tags,
+                                  visible, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          record.id,
+          record.name,
+          input.gpx,
+          JSON.stringify(record.stats),
+          record.collectionId,
+          record.notes,
+          JSON.stringify(record.tags),
+          1,
+          record.createdAt,
+          record.updatedAt,
+        ],
+      },
+      this.enqueueStmt('track', record.id, 'upsert', now),
+    ]);
     return record;
   }
 
@@ -410,8 +438,10 @@ export class AtlasStorage {
   /** Delete a track, returning a snapshot for undo (null when unknown). */
   async deleteTrack(id: string): Promise<DeletedRecord | null> {
     const snapshot = await this.readSyncRecord('track', id);
-    await this.driver.query('DELETE FROM tracks WHERE id = ?', [id]);
-    await this.enqueue('track', id, 'delete', Date.now());
+    await this.driver.batch([
+      { sql: 'DELETE FROM tracks WHERE id = ?', params: [id] },
+      this.enqueueStmt('track', id, 'delete', Date.now()),
+    ]);
     return snapshot && { entity: 'track', id, data: snapshot.data };
   }
 
@@ -423,29 +453,32 @@ export class AtlasStorage {
    */
   async restore(deleted: DeletedRecord): Promise<void> {
     const now = Date.now();
-    await this.upsertFromRemote({
-      entity: deleted.entity,
-      id: deleted.id,
-      updatedAt: now,
-      deleted: false,
-      data: deleted.data,
-    });
-    await this.enqueue(deleted.entity, deleted.id, 'upsert', now);
+    const statements: SqlStatement[] = [
+      this.upsertStmt({
+        entity: deleted.entity,
+        id: deleted.id,
+        updatedAt: now,
+        deleted: false,
+        data: deleted.data,
+      }),
+      this.enqueueStmt(deleted.entity, deleted.id, 'upsert', now),
+    ];
     for (const child of deleted.movedChildren ?? []) {
       if (child.entity === 'collection') {
-        await this.driver.query(
-          'UPDATE collections SET parent_id = ?, updated_at = ? WHERE id = ?',
-          [deleted.id, now, child.id],
-        );
+        statements.push({
+          sql: 'UPDATE collections SET parent_id = ?, updated_at = ? WHERE id = ?',
+          params: [deleted.id, now, child.id],
+        });
       } else {
         const table = child.entity === 'place' ? 'places' : 'tracks';
-        await this.driver.query(
-          `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE id = ?`,
-          [deleted.id, now, child.id],
-        );
+        statements.push({
+          sql: `UPDATE ${table} SET collection_id = ?, updated_at = ? WHERE id = ?`,
+          params: [deleted.id, now, child.id],
+        });
       }
-      await this.enqueue(child.entity, child.id, 'upsert', now);
+      statements.push(this.enqueueStmt(child.entity, child.id, 'upsert', now));
     }
+    await this.driver.batch(statements);
   }
 
   // ---- settings ----
@@ -457,12 +490,10 @@ export class AtlasStorage {
 
   async setSetting(key: string, value: string): Promise<void> {
     const now = Date.now();
-    await this.driver.query(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      [key, value, now],
-    );
-    if (!key.startsWith(LOCAL_SETTING_PREFIX)) await this.enqueue('setting', key, 'upsert', now);
+    const statements: SqlStatement[] = [this.settingUpsertStmt(key, value, now)];
+    if (!key.startsWith(LOCAL_SETTING_PREFIX))
+      statements.push(this.enqueueStmt('setting', key, 'upsert', now));
+    await this.driver.batch(statements);
   }
 
   // ---- export ----
@@ -504,6 +535,9 @@ export class AtlasStorage {
       tracks: { imported: 0, skipped: 0 },
       settings: { imported: 0, skipped: 0 },
     };
+    // Compare against local state first, then commit every accepted record in
+    // one transaction — a restore lands whole or not at all, never a torn tree.
+    const statements: SqlStatement[] = [];
     const merge = async (
       entity: SyncEntity,
       id: string,
@@ -516,8 +550,8 @@ export class AtlasStorage {
         into.skipped += 1;
         return;
       }
-      await this.upsertFromRemote({ entity, id, updatedAt, deleted: false, data });
-      await this.enqueue(entity, id, 'upsert', updatedAt);
+      statements.push(this.upsertStmt({ entity, id, updatedAt, deleted: false, data }));
+      statements.push(this.enqueueStmt(entity, id, 'upsert', updatedAt));
       into.imported += 1;
     };
     // Folders first, so places and tracks land on a parent that already exists.
@@ -593,9 +627,12 @@ export class AtlasStorage {
         summary.settings.skipped += 1;
         continue;
       }
-      await this.setSetting(key, value);
+      const now = Date.now();
+      statements.push(this.settingUpsertStmt(key, value, now));
+      statements.push(this.enqueueStmt('setting', key, 'upsert', now));
       summary.settings.imported += 1;
     }
+    if (statements.length > 0) await this.driver.batch(statements);
     return summary;
   }
 
@@ -627,13 +664,13 @@ export class AtlasStorage {
    * entry that was overwritten by a newer local change mid-push stays queued.
    */
   async clearOutbox(entries: OutboxEntry[]): Promise<void> {
-    for (const e of entries) {
-      await this.driver.query('DELETE FROM outbox WHERE entity = ? AND id = ? AND updated_at = ?', [
-        e.entity,
-        e.id,
-        e.updatedAt,
-      ]);
-    }
+    if (entries.length === 0) return;
+    await this.driver.batch(
+      entries.map((e) => ({
+        sql: 'DELETE FROM outbox WHERE entity = ? AND id = ? AND updated_at = ?',
+        params: [e.entity, e.id, e.updatedAt],
+      })),
+    );
   }
 
   /**
@@ -720,24 +757,25 @@ export class AtlasStorage {
     if (change.entity === 'setting' && change.id.startsWith(LOCAL_SETTING_PREFIX)) return 'skipped';
     const local = await this.localUpdatedAt(change.entity, change.id);
     if (local !== null && local >= change.updatedAt) return 'skipped';
+    const statements: SqlStatement[] = [];
     if (change.deleted) {
       if (change.entity === 'setting') {
-        await this.driver.query('DELETE FROM settings WHERE key = ?', [change.id]);
+        statements.push({ sql: 'DELETE FROM settings WHERE key = ?', params: [change.id] });
       } else {
         const table = { collection: 'collections', place: 'places', track: 'tracks' }[
           change.entity
         ];
-        await this.driver.query(`DELETE FROM ${table} WHERE id = ?`, [change.id]);
+        statements.push({ sql: `DELETE FROM ${table} WHERE id = ?`, params: [change.id] });
       }
     } else {
       if (change.data === null) return 'skipped';
-      await this.upsertFromRemote(change);
+      statements.push(this.upsertStmt(change));
     }
-    await this.driver.query('DELETE FROM outbox WHERE entity = ? AND id = ? AND updated_at <= ?', [
-      change.entity,
-      change.id,
-      change.updatedAt,
-    ]);
+    statements.push({
+      sql: 'DELETE FROM outbox WHERE entity = ? AND id = ? AND updated_at <= ?',
+      params: [change.entity, change.id, change.updatedAt],
+    });
+    await this.driver.batch(statements);
     return 'applied';
   }
 
@@ -746,23 +784,25 @@ export class AtlasStorage {
    * on data created before login (the outbox may predate the account).
    */
   async enqueueFullState(): Promise<void> {
-    await this.driver.query(
-      `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
-       SELECT 'collection', id, 'upsert', updated_at FROM collections`,
-    );
-    await this.driver.query(
-      `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
-       SELECT 'place', id, 'upsert', updated_at FROM places`,
-    );
-    await this.driver.query(
-      `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
-       SELECT 'track', id, 'upsert', updated_at FROM tracks`,
-    );
-    await this.driver.query(
-      `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
-       SELECT 'setting', key, 'upsert', updated_at FROM settings WHERE key NOT LIKE ?`,
-      [`${LOCAL_SETTING_PREFIX}%`],
-    );
+    await this.driver.batch([
+      {
+        sql: `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
+              SELECT 'collection', id, 'upsert', updated_at FROM collections`,
+      },
+      {
+        sql: `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
+              SELECT 'place', id, 'upsert', updated_at FROM places`,
+      },
+      {
+        sql: `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
+              SELECT 'track', id, 'upsert', updated_at FROM tracks`,
+      },
+      {
+        sql: `INSERT OR REPLACE INTO outbox (entity, id, op, updated_at)
+              SELECT 'setting', key, 'upsert', updated_at FROM settings WHERE key NOT LIKE ?`,
+        params: [`${LOCAL_SETTING_PREFIX}%`],
+      },
+    ]);
   }
 
   private async localUpdatedAt(entity: SyncEntity, id: string): Promise<number | null> {
@@ -778,7 +818,8 @@ export class AtlasStorage {
     return rows.length > 0 ? Number(rows[0]!['updated_at']) : null;
   }
 
-  private async upsertFromRemote(change: SyncChange): Promise<void> {
+  /** The INSERT OR REPLACE statement writing one sync-payload record. */
+  private upsertStmt(change: SyncChange): SqlStatement {
     const d = change.data!;
     const str = (k: string, fallback = ''): string =>
       typeof d[k] === 'string' ? (d[k] as string) : fallback;
@@ -796,11 +837,11 @@ export class AtlasStorage {
     const createdAt = num('createdAt', change.updatedAt);
     switch (change.entity) {
       case 'collection':
-        await this.driver.query(
-          `INSERT OR REPLACE INTO collections
-             (id, name, parent_id, created_at, updated_at, visible, sort_index)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
+        return {
+          sql: `INSERT OR REPLACE INTO collections
+                  (id, name, parent_id, created_at, updated_at, visible, sort_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          params: [
             change.id,
             str('name', '(unnamed)'),
             strOrNull('parentId'),
@@ -809,15 +850,14 @@ export class AtlasStorage {
             d['visible'] === false ? 0 : 1,
             num('sortIndex', createdAt),
           ],
-        );
-        break;
+        };
       case 'place':
-        await this.driver.query(
-          `INSERT OR REPLACE INTO places
-             (id, name, lat, lng, address, collection_id, notes, tags,
-              created_at, updated_at, icon, color, visible, sort_index)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
+        return {
+          sql: `INSERT OR REPLACE INTO places
+                  (id, name, lat, lng, address, collection_id, notes, tags,
+                   created_at, updated_at, icon, color, visible, sort_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [
             change.id,
             str('name', '(unnamed)'),
             num('lat'),
@@ -833,15 +873,14 @@ export class AtlasStorage {
             d['visible'] === false ? 0 : 1,
             num('sortIndex', createdAt),
           ],
-        );
-        break;
+        };
       case 'track':
-        await this.driver.query(
-          `INSERT OR REPLACE INTO tracks
-             (id, name, gpx, stats, collection_id, notes, tags,
-              visible, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
+        return {
+          sql: `INSERT OR REPLACE INTO tracks
+                  (id, name, gpx, stats, collection_id, notes, tags,
+                   visible, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [
             change.id,
             str('name', '(unnamed)'),
             str('gpx'),
@@ -853,28 +892,53 @@ export class AtlasStorage {
             createdAt,
             change.updatedAt,
           ],
-        );
-        break;
+        };
       case 'setting':
-        await this.driver.query(
-          `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-          [change.id, str('value'), change.updatedAt],
-        );
-        break;
+        return this.settingUpsertStmt(change.id, str('value'), change.updatedAt);
     }
   }
 
-  private async enqueue(
+  private settingUpsertStmt(key: string, value: string, updatedAt: number): SqlStatement {
+    return {
+      sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      params: [key, value, updatedAt],
+    };
+  }
+
+  private enqueueStmt(
     entity: SyncEntity,
     id: string,
     op: OutboxEntry['op'],
     updatedAt: number,
-  ): Promise<void> {
-    await this.driver.query(
-      'INSERT OR REPLACE INTO outbox (entity, id, op, updated_at) VALUES (?, ?, ?, ?)',
-      [entity, id, op, updatedAt],
-    );
+  ): SqlStatement {
+    return {
+      sql: 'INSERT OR REPLACE INTO outbox (entity, id, op, updated_at) VALUES (?, ?, ?, ?)',
+      params: [entity, id, op, updatedAt],
+    };
+  }
+
+  /** The UPDATE + outbox statements patching the defined entries of `columns` on one row. */
+  private patchStmts(
+    table: 'places' | 'tracks' | 'collections',
+    entity: SyncEntity,
+    id: string,
+    columns: Record<string, SqlValue | undefined>,
+    now: number,
+  ): SqlStatement[] {
+    const entries = Object.entries(columns).filter(([, v]) => v !== undefined) as [
+      string,
+      SqlValue,
+    ][];
+    if (entries.length === 0) return [];
+    const sets = entries.map(([column]) => `${column} = ?`).join(', ');
+    return [
+      {
+        sql: `UPDATE ${table} SET ${sets}, updated_at = ? WHERE id = ?`,
+        params: [...entries.map(([, v]) => v), now, id],
+      },
+      this.enqueueStmt(entity, id, 'upsert', now),
+    ];
   }
 
   /** UPDATE the defined entries of `columns` on one row, stamping updated_at. */
@@ -884,18 +948,7 @@ export class AtlasStorage {
     id: string,
     columns: Record<string, SqlValue | undefined>,
   ): Promise<void> {
-    const entries = Object.entries(columns).filter(([, v]) => v !== undefined) as [
-      string,
-      SqlValue,
-    ][];
-    if (entries.length === 0) return;
-    const now = Date.now();
-    const sets = entries.map(([column]) => `${column} = ?`).join(', ');
-    await this.driver.query(`UPDATE ${table} SET ${sets}, updated_at = ? WHERE id = ?`, [
-      ...entries.map(([, v]) => v),
-      now,
-      id,
-    ]);
-    await this.enqueue(entity, id, 'upsert', now);
+    const statements = this.patchStmts(table, entity, id, columns, Date.now());
+    if (statements.length > 0) await this.driver.batch(statements);
   }
 }

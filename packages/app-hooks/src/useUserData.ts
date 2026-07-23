@@ -225,6 +225,15 @@ export const sanitizeFileName = (name: string): string =>
   name.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
 
 /**
+ * Serializes the storage lifecycle: each open waits for every previous
+ * instance's close to finish. Module-level because the underlying resource is
+ * too — the web driver takes exclusive OPFS handles, so a remount (StrictMode,
+ * platform change) must not race a new open against a still-closing
+ * predecessor. Never left rejected, so one failed close cannot wedge the app.
+ */
+let storageCloseChain: Promise<unknown> = Promise.resolve();
+
+/**
  * All user data (collections/places/tracks) as React state, with mutations
  * that write through to persistent storage and refresh — every change is
  * saved immediately (auto-save everywhere), there is no explicit save step.
@@ -280,7 +289,8 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
 
   useEffect(() => {
     let cancelled = false;
-    platform.openStorage().then(
+    const opened = storageCloseChain.then(() => platform.openStorage());
+    opened.then(
       async (s) => {
         if (cancelled) return;
         storageRef.current = s;
@@ -302,6 +312,15 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     return () => {
       cancelled = true;
       storageRef.current = null;
+      // Close whatever this effect opened — even when the open resolves after
+      // cleanup, the chained close still releases it (no leaked instance, no
+      // dangling exclusive OPFS handles).
+      storageCloseChain = opened
+        .then(
+          (s) => s.close(),
+          () => undefined,
+        )
+        .catch(() => undefined);
     };
   }, [platform]);
 

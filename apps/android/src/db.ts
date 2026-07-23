@@ -15,6 +15,14 @@ export async function openStorage(): Promise<AtlasStorage> {
     async query(sql, params = []) {
       return db.getAllAsync<SqlRow>(sql, params as SQLiteBindValue[]);
     },
+    async batch(statements) {
+      // Exclusive so no other statement can interleave with the transaction.
+      await db.withExclusiveTransactionAsync(async (txn) => {
+        for (const s of statements) {
+          await txn.runAsync(s.sql, (s.params ?? []) as SQLiteBindValue[]);
+        }
+      });
+    },
     async execScript(sql) {
       await db.execAsync(sql);
     },

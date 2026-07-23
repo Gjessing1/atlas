@@ -1,22 +1,10 @@
-import { DatabaseSync } from 'node:sqlite';
 import { AtlasStorage } from '@atlas/storage';
-import type { SqlDriver, SqlRow, SqlValue, SyncChange } from '@atlas/storage';
+import type { SyncChange } from '@atlas/storage';
+import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { describe, expect, it } from 'vitest';
 import { SYNC_CURSOR_KEY, SyncEngine, SyncError } from './engine.js';
 import type { SyncPullResponse, SyncPushRequest } from './protocol.js';
 import { lwwWins } from './protocol.js';
-
-function createNodeDriver(): SqlDriver {
-  const db = new DatabaseSync(':memory:');
-  return {
-    query: (sql: string, params: SqlValue[] = []) =>
-      Promise.resolve(db.prepare(sql).all(...params) as SqlRow[]),
-    execScript: (sql: string) => {
-      db.exec(sql);
-      return Promise.resolve();
-    },
-  };
-}
 
 /** In-memory model of the backend sync store: LWW rows + a pull sequence. */
 class FakeServer {

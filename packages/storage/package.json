@@ -14,6 +14,10 @@
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
+    },
+    "./node": {
+      "types": "./dist/node-driver.d.ts",
+      "default": "./dist/node-driver.js"
     }
   },
   "scripts": {

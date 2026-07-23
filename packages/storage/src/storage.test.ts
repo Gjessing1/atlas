@@ -1,18 +1,26 @@
-import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { SqlDriver, SqlRow, SqlValue } from './driver.js';
+import type { SqlDriver, SqlStatement } from './driver.js';
+import { migrate } from './migrations.js';
+import { createNodeSqlDriver as createNodeDriver } from './node-driver.js';
 import { AtlasStorage } from './storage.js';
 
-/** Test driver over Node's built-in SQLite; mirrors the web worker driver's contract. */
-function createNodeDriver(): SqlDriver {
-  const db = new DatabaseSync(':memory:');
+/**
+ * Delegate driver that rewrites the first batch statement matching `match`
+ * into invalid SQL, so the failure happens *inside* the transaction — the
+ * statements before it execute and must be rolled back.
+ */
+function sabotageBatch(driver: SqlDriver, match: RegExp): SqlDriver {
+  let armed = true;
   return {
-    query: (sql: string, params: SqlValue[] = []) =>
-      Promise.resolve(db.prepare(sql).all(...params) as SqlRow[]),
-    execScript: (sql: string) => {
-      db.exec(sql);
-      return Promise.resolve();
-    },
+    ...driver,
+    batch: (statements: SqlStatement[]) =>
+      driver.batch(
+        statements.map((s) => {
+          if (!armed || !match.test(s.sql)) return s;
+          armed = false;
+          return { sql: 'INSERT INTO no_such_table DEFAULT VALUES' };
+        }),
+      ),
   };
 }
 
@@ -614,5 +622,116 @@ describe('AtlasStorage', () => {
       await restored.importAll(dump);
       expect(await restored.getSetting('units')).toBe('imperial');
     });
+  });
+
+  describe('atomicity under injected failures', () => {
+    /** Two views over one database: `good` verifies, `flaky` fails mid-transaction. */
+    const split = async (match: RegExp) => {
+      const driver = createNodeDriver();
+      const good = new AtlasStorage(driver);
+      await good.init();
+      return { good, flaky: new AtlasStorage(sabotageBatch(driver, match)) };
+    };
+
+    it('a create whose outbox write fails leaves no record behind', async () => {
+      const { good, flaky } = await split(/INTO outbox/);
+      await expect(flaky.createPlace({ name: 'P', lat: 1, lng: 2 })).rejects.toThrow();
+      expect(await good.listPlaces()).toEqual([]);
+      expect(await good.countOutbox()).toBe(0);
+    });
+
+    it('a delete whose outbox write fails leaves the record in place', async () => {
+      const { good, flaky } = await split(/INTO outbox/);
+      const place = await good.createPlace({ name: 'P', lat: 1, lng: 2 });
+      await expect(flaky.deletePlace(place.id)).rejects.toThrow();
+      expect(await good.listPlaces()).toHaveLength(1);
+      // The original upsert entry is still queued — nothing was half-cleared.
+      expect(await good.listOutbox()).toMatchObject([
+        { entity: 'place', id: place.id, op: 'upsert' },
+      ]);
+    });
+
+    it('a folder delete that fails mid-tree rolls the whole reparent back', async () => {
+      const { good, flaky } = await split(/DELETE FROM collections/);
+      const folder = await good.createCollection('F');
+      const child = await good.createCollection('Child', folder.id);
+      const place = await good.createPlace({ name: 'P', lat: 1, lng: 2, collectionId: folder.id });
+      const outboxBefore = await good.listOutbox();
+
+      await expect(flaky.deleteCollection(folder.id)).rejects.toThrow();
+
+      const collections = await good.listCollections();
+      expect(collections.map((c) => c.id).sort()).toEqual([folder.id, child.id].sort());
+      expect(collections.find((c) => c.id === child.id)!.parentId).toBe(folder.id);
+      expect((await good.listPlaces())[0]!.collectionId).toBe(place.collectionId);
+      expect(await good.listOutbox()).toEqual(outboxBefore);
+    });
+
+    it('a reorder either lands whole or not at all', async () => {
+      const { good, flaky } = await split(/INTO outbox/);
+      const a = await good.createPlace({ name: 'A', lat: 1, lng: 1 });
+      const b = await good.createPlace({ name: 'B', lat: 2, lng: 2 });
+      const before = (await good.listPlaces()).map((p) => p.id);
+
+      await expect(flaky.reorderPlaces([b.id, a.id])).rejects.toThrow();
+      expect((await good.listPlaces()).map((p) => p.id)).toEqual(before);
+    });
+
+    it('a backup restore is all-or-nothing across entity kinds', async () => {
+      const source = new AtlasStorage(createNodeDriver());
+      await source.init();
+      const collection = await source.createCollection('C');
+      await source.createPlace({ name: 'P', lat: 1, lng: 2, collectionId: collection.id });
+      await source.createTrack({ name: 'T', gpx: '<gpx/>' });
+      const dump = await source.exportAll();
+
+      // The track upsert comes after the collection and place statements.
+      const { good: target, flaky } = await split(/INTO tracks/);
+      await expect(flaky.importAll(dump)).rejects.toThrow();
+      expect(await target.listCollections()).toEqual([]);
+      expect(await target.listPlaces()).toEqual([]);
+      expect(await target.countOutbox()).toBe(0);
+    });
+
+    it('a remote change that fails mid-apply neither applies nor clears the outbox', async () => {
+      const { good, flaky } = await split(/DELETE FROM outbox/);
+      const place = await good.createPlace({ name: 'Local', lat: 1, lng: 2 });
+
+      await expect(
+        flaky.applyRemoteChange({
+          entity: 'place',
+          id: place.id,
+          updatedAt: place.updatedAt + 1000,
+          deleted: false,
+          data: { name: 'Remote', lat: 9, lng: 9, createdAt: 1 },
+        }),
+      ).rejects.toThrow();
+      expect((await good.listPlaces())[0]!.name).toBe('Local');
+      expect(await good.listOutbox()).toMatchObject([{ entity: 'place', id: place.id }]);
+    });
+  });
+});
+
+describe('migrate', () => {
+  const userVersion = async (driver: SqlDriver): Promise<number> =>
+    Number((await driver.query('PRAGMA user_version'))[0]!['user_version']);
+
+  it('applies each migration script and its version bump as one transaction', async () => {
+    const driver = createNodeDriver();
+    const first = 'CREATE TABLE a (x INTEGER);';
+    await migrate(driver, [first]);
+    expect(await userVersion(driver)).toBe(1);
+
+    // The second script fails on its second statement (table a already
+    // exists) — its first statement must be rolled back with it.
+    const broken = 'CREATE TABLE b (x INTEGER);\nCREATE TABLE a (x INTEGER);';
+    await expect(migrate(driver, [first, broken])).rejects.toThrow();
+    expect(await userVersion(driver)).toBe(1);
+    expect(await driver.query("SELECT name FROM sqlite_master WHERE name = 'b'")).toEqual([]);
+
+    // A corrected script then applies cleanly on the same database — the
+    // failed attempt left nothing behind that could make it rerun wrongly.
+    await migrate(driver, [first, 'CREATE TABLE b (x INTEGER);']);
+    expect(await userVersion(driver)).toBe(2);
   });
 });

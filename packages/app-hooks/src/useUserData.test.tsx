@@ -1,25 +1,12 @@
 // @vitest-environment jsdom
-import { DatabaseSync } from 'node:sqlite';
 import { AtlasStorage } from '@atlas/storage';
-import type { SqlDriver, SqlRow, SqlValue } from '@atlas/storage';
+import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { parseKmz } from '@atlas/gpx';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { unzipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import type { UserDataPlatform } from './useUserData.js';
 import { useUserData } from './useUserData.js';
-
-function createNodeDriver(): SqlDriver {
-  const db = new DatabaseSync(':memory:');
-  return {
-    query: (sql: string, params: SqlValue[] = []) =>
-      Promise.resolve(db.prepare(sql).all(...params) as SqlRow[]),
-    execScript: (sql: string) => {
-      db.exec(sql);
-      return Promise.resolve();
-    },
-  };
-}
 
 /** Test file type: name + bytes, handed straight through by readFile. */
 interface MemFile {
@@ -449,5 +436,63 @@ describe('useUserData', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(result.current.places.every((p) => !p.visible)).toBe(true);
     expect(result.current.collections.every((c) => !c.visible)).toBe(true);
+  });
+
+  describe('storage lifecycle', () => {
+    it('closes the storage on unmount', async () => {
+      const { storage, platform } = createPlatform();
+      const close = vi.spyOn(storage, 'close');
+      const { result, unmount } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      expect(close).not.toHaveBeenCalled();
+
+      unmount();
+      await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    });
+
+    it('closes an open that resolves only after unmount (no leaked instance)', async () => {
+      const { storage } = createPlatform();
+      const close = vi.spyOn(storage, 'close');
+      let release!: (s: typeof storage) => void;
+      const gate = new Promise<typeof storage>((r) => (release = r));
+      const platform: UserDataPlatform<MemFile> = {
+        openStorage: () => gate,
+        readFile: (file) => Promise.resolve(file),
+        saveTextFile: () => Promise.resolve(),
+      };
+
+      const { result, unmount } = renderHook(() => useUserData(platform));
+      unmount();
+      await storage.init();
+      release(storage);
+      await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+      // The unmounted hook never surfaced the late storage.
+      expect(result.current.status).toBe('loading');
+    });
+
+    it('a remount waits for the previous instance to close before opening', async () => {
+      const order: string[] = [];
+      const { storage } = createPlatform();
+      await storage.init();
+      const platform: UserDataPlatform<MemFile> = {
+        openStorage: () => {
+          order.push('open');
+          return Promise.resolve(storage);
+        },
+        readFile: (file) => Promise.resolve(file),
+        saveTextFile: () => Promise.resolve(),
+      };
+      vi.spyOn(storage, 'close').mockImplementation(async () => {
+        order.push('close');
+      });
+
+      const first = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(first.result.current.status).toBe('ready'));
+      first.unmount();
+      const second = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(second.result.current.status).toBe('ready'));
+      expect(order).toEqual(['open', 'close', 'open']);
+      second.unmount();
+    });
   });
 });

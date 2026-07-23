@@ -1,4 +1,4 @@
-export type { SqlDriver, SqlRow, SqlValue } from './driver.js';
+export type { SqlDriver, SqlRow, SqlStatement, SqlValue } from './driver.js';
 export type {
   CollectionRecord,
   DeletedRecord,
