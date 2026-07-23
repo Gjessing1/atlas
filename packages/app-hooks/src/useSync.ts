@@ -9,6 +9,10 @@ const SYNC_INTERVAL_MS = 60_000;
 /** Quiet period after a local change before pushing it. */
 const DEBOUNCE_MS = 2_500;
 const HEALTH_TIMEOUT_MS = 5_000;
+/** Bound on auth requests, so a half-open connection can't pin buttons busy forever. */
+const AUTH_TIMEOUT_MS = 15_000;
+/** While the capability is unknown (probe unreachable), retry on this backoff. */
+const PROBE_RETRY_MS = [5_000, 15_000, 60_000, 300_000];
 
 export interface SyncSession {
   token: string;
@@ -45,10 +49,28 @@ export type SyncStatus =
   | 'authExpired'
   | 'error';
 
+/**
+ * What the health probe knows about the server's sync capability. `disabled`
+ * is a definitive answer from a healthy server (no accounts configured);
+ * `unreachable` means the capability is *unknown* — timeout, network failure,
+ * error status or a malformed body — and is retried with backoff, on the
+ * platform's reconnect signal, and via `retryProbe`. The two must not be
+ * conflated: "this server has no sync" and "couldn't reach the server just
+ * now" call for entirely different UI.
+ */
+export type SyncAvailability = 'probing' | 'enabled' | 'disabled' | 'unreachable';
+
 export interface SyncState {
-  /** Null while the server capability is still being probed. */
+  /**
+   * Capability as a tri-state, kept for existing call sites: true/false only
+   * on a definitive probe answer; null while probing *and* while unreachable.
+   */
   available: boolean | null;
-  /** Whether this server accepts new accounts; null while probing. */
+  /** The full four-state answer — prefer this in UI. */
+  availability: SyncAvailability;
+  /** Probe the server again now (e.g. a Retry button while unreachable). */
+  retryProbe: () => void;
+  /** Whether this server accepts new accounts; null while not known. */
   registration: RegistrationMode | null;
   /** Local storage and the persisted session have finished opening. */
   ready: boolean;
@@ -106,7 +128,8 @@ export function useSync(
     () => platform.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)),
     [platform.fetchImpl],
   );
-  const [available, setAvailable] = useState<boolean | null>(null);
+  const [availability, setAvailability] = useState<SyncAvailability>('probing');
+  const [probeNonce, setProbeNonce] = useState(0);
   const [registration, setRegistration] = useState<RegistrationMode | null>(null);
   const [session, setSession] = useState<SyncSession | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -120,29 +143,52 @@ export function useSync(
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  // Probe the server's sync capability (the Account UI keys off it).
+  // Probe the server's sync capability (the Account UI keys off it). A failed
+  // probe is *not* an answer: it leaves the capability unknown and retries
+  // with backoff plus the reconnect signal, instead of the old behaviour of
+  // freezing "sync unavailable" for the whole session over one bad request.
   useEffect(() => {
     let cancelled = false;
-    setAvailable(null);
-    fetchImpl(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
-      .then((res) => res.json() as Promise<{ sync?: boolean; registration?: RegistrationMode }>)
-      .then((health) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    const probe = async (): Promise<void> => {
+      try {
+        const res = await fetchImpl(`${baseUrl}/api/health`, {
+          signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+        });
+        if (!res.ok) throw new Error(`health answered ${res.status}`);
+        const health = (await res.json()) as { sync?: boolean; registration?: RegistrationMode };
         if (cancelled) return;
-        setAvailable(health.sync === true);
+        // A healthy answer is definitive either way — no more retries.
+        setAvailability(health.sync === true ? 'enabled' : 'disabled');
         // Older servers don't report the mode; they predate gating, so they
         // are open by definition.
         setRegistration(health.sync === true ? (health.registration ?? 'open') : 'closed');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAvailable(false);
-          setRegistration('closed');
-        }
-      });
+      } catch {
+        if (cancelled) return;
+        setAvailability('unreachable');
+        setRegistration(null);
+        timer = setTimeout(() => void probe(), PROBE_RETRY_MS[attempt] ?? PROBE_RETRY_MS.at(-1)!);
+        attempt += 1;
+      }
+    };
+    setAvailability('probing');
+    setRegistration(null);
+    void probe();
+    // Connectivity coming back is the strongest "try again now" signal there is.
+    const unsubscribe = platform.onReconnect?.(() => {
+      attempt = 0;
+      clearTimeout(timer);
+      void probe();
+    });
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      unsubscribe?.();
     };
-  }, [baseUrl, fetchImpl]);
+  }, [baseUrl, fetchImpl, platform, probeNonce]);
+
+  const retryProbe = useCallback(() => setProbeNonce((n) => n + 1), []);
 
   // Restore the persisted session once storage is open.
   useEffect(() => {
@@ -249,6 +295,8 @@ export function useSync(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email, password, ...(invite ? { invite } : {}) }),
+              // Bounded, so a half-open connection can't pin the form busy forever.
+              signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
             },
           );
         } catch {
@@ -298,6 +346,7 @@ export function useSync(
           method: 'POST',
           headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
           body: JSON.stringify(body),
+          signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
         });
       } catch {
         return { error: 'Server unreachable.' };
@@ -379,7 +428,7 @@ export function useSync(
   }, [changeToken, session, doSync]);
 
   const status: SyncStatus =
-    available === false
+    availability === 'disabled'
       ? 'unavailable'
       : !sessionLoaded || !session
         ? 'signedOut'
@@ -388,7 +437,9 @@ export function useSync(
           : (problem ?? 'idle');
 
   return {
-    available,
+    available: availability === 'enabled' ? true : availability === 'disabled' ? false : null,
+    availability,
+    retryProbe,
     registration,
     ready: storage !== null && sessionLoaded,
     status,

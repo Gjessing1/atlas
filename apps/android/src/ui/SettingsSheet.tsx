@@ -74,8 +74,23 @@ function AccountSection({ sync }: { sync: SyncState }) {
     [sync, email, password],
   );
 
-  if (sync.available === false) {
+  if (sync.availability === 'disabled') {
     return <Text style={styles.muted}>{STATUS_LABEL.unavailable}.</Text>;
+  }
+  // Unknown is not "unavailable": the probe failed (offline, timeout, server
+  // hiccup) and keeps retrying — offer a retry instead of a false verdict.
+  // A signed-in session still works normally, so only signed-out shows it.
+  if (sync.availability === 'unreachable' && !sync.email) {
+    return (
+      <View>
+        <Text style={styles.muted}>Couldn’t reach the server to check sync availability.</Text>
+        <View style={styles.buttonRow}>
+          <Pressable style={styles.button} onPress={sync.retryProbe}>
+            <Text style={styles.buttonText}>Retry</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
   }
   if (sync.email) {
     return (

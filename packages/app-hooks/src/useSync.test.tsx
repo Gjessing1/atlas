@@ -14,6 +14,8 @@ class FakeServer {
   authorized = true;
   /** False makes fetch reject, the way an offline device fails. */
   reachable = true;
+  /** Non-200 makes /api/health answer an error status (server up but broken). */
+  healthStatus = 200;
   registration: 'open' | 'invite' | 'closed' | undefined = 'open';
   password = 'pw';
   deleted = false;
@@ -34,6 +36,9 @@ class FakeServer {
     const url = new URL(String(input), 'http://server');
     if (!this.reachable) return Promise.reject(new TypeError('Failed to fetch'));
     if (url.pathname === '/api/health') {
+      if (this.healthStatus !== 200) {
+        return Promise.resolve(Response.json({ error: 'boom' }, { status: this.healthStatus }));
+      }
       return Promise.resolve(
         Response.json({ status: 'ok', sync: this.syncEnabled, registration: this.registration }),
       );
@@ -159,6 +164,43 @@ describe('useSync', () => {
     const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
     await waitFor(() => expect(result.current.available).toBe(false));
     expect(result.current.status).toBe('unavailable');
+    expect(result.current.availability).toBe('disabled');
+  });
+
+  it('treats a failed probe as unknown, not as "sync unavailable"', async () => {
+    const h = await createHarness();
+    h.server.reachable = false;
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    await waitFor(() => expect(result.current.availability).toBe('unreachable'));
+    // The old bug: this froze available=false ("server has no sync") for the
+    // whole session over one offline moment.
+    expect(result.current.available).toBeNull();
+    expect(result.current.status).not.toBe('unavailable');
+
+    // A manual retry once the server answers reaches the real verdict.
+    h.server.reachable = true;
+    act(() => result.current.retryProbe());
+    await waitFor(() => expect(result.current.availability).toBe('enabled'));
+    expect(result.current.available).toBe(true);
+  });
+
+  it('a health error status is unknown too, and reconnect re-probes', async () => {
+    const h = await createHarness();
+    h.server.healthStatus = 503;
+    let reconnect: (() => void) | undefined;
+    h.platform.onReconnect = (fn) => {
+      reconnect ??= fn;
+      return () => undefined;
+    };
+    const { result } = renderHook(() => useSync(h.storage, h.onPulled, undefined, h.platform));
+    // A 503 with a JSON body used to parse as "sync not configured" — it must
+    // read as unknown instead.
+    await waitFor(() => expect(result.current.availability).toBe('unreachable'));
+
+    h.server.healthStatus = 200;
+    act(() => reconnect?.());
+    await waitFor(() => expect(result.current.availability).toBe('enabled'));
+    expect(result.current.registration).toBe('open');
   });
 
   it('restores a persisted session and syncs on start', async () => {

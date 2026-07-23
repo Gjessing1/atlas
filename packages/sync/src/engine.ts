@@ -49,6 +49,13 @@ export interface SyncEngineOptions {
    * comfortably under the server's body limit (32 MB today).
    */
   maxPushBytes?: number;
+  /**
+   * Per-request bound in milliseconds (default 30 s — generous enough for a
+   * multi-megabyte GPX push on a slow link). Without it, one half-open
+   * connection leaves sync() pending forever: no error, no retry, and the
+   * single-flight guard then blocks every later sync attempt too.
+   */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -74,6 +81,7 @@ export class SyncEngine {
   private readonly fetchFn: typeof fetch;
   private readonly batchSize: number;
   private readonly maxPushBytes: number;
+  private readonly requestTimeoutMs: number;
   private inflight: Promise<SyncResult> | null = null;
 
   constructor(opts: SyncEngineOptions) {
@@ -83,6 +91,7 @@ export class SyncEngine {
     this.fetchFn = opts.fetchFn ?? ((...args) => fetch(...args));
     this.batchSize = opts.batchSize ?? 25;
     this.maxPushBytes = opts.maxPushBytes ?? 8 * 1024 * 1024;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
   }
 
   /**
@@ -254,6 +263,10 @@ export class SyncEngine {
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        // A timed-out request surfaces as 'unavailable' below — an expected,
+        // retryable state — instead of hanging sync() (and, through the
+        // single-flight guard, every later sync) forever.
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
     } catch (err) {
       throw new SyncError('unavailable', `sync server unreachable: ${String(err)}`);

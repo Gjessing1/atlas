@@ -162,11 +162,26 @@ export function AccountPanel({ sync }: { sync: SyncState }) {
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  if (sync.available === null) return null;
-  if (sync.available === false) {
+  if (sync.availability === 'probing') return null;
+  if (sync.availability === 'disabled') {
     return (
       <div className="account-panel">
         <p className="account-note">Sync is not configured on this server — data stays local.</p>
+      </div>
+    );
+  }
+  // Unknown is not "unavailable": the probe failed (offline, timeout, server
+  // hiccup) and keeps retrying — offer a retry instead of a false verdict.
+  // A signed-in session still works normally, so only the signed-out panel
+  // needs the message.
+  if (sync.availability === 'unreachable' && sync.status === 'signedOut') {
+    return (
+      <div className="account-panel">
+        <strong>Sync</strong>
+        <p className="account-note">Couldn’t reach the server to check sync availability.</p>
+        <button type="button" onClick={sync.retryProbe}>
+          Retry
+        </button>
       </div>
     );
   }
