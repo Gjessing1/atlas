@@ -1,7 +1,9 @@
 import {
   coordinateSearchResult,
   parseCoordinateQuery,
+  savedPlaceResults,
   type LatLng,
+  type SearchablePlace,
   type SearchResult,
 } from '@atlas/core';
 import { useEffect, useRef, useState } from 'react';
@@ -11,6 +13,8 @@ interface SearchBoxProps {
   onSelect: (result: SearchResult) => void;
   /** Current map center, used to bias results towards the viewport. */
   getBias: () => LatLng | null;
+  /** The user's saved places, matched locally and offered above geocoder hits. */
+  places: SearchablePlace[];
 }
 
 /** Recently picked results, newest first (device-local, like `atlas.auth`). */
@@ -26,7 +30,7 @@ function loadRecent(): SearchResult[] {
   }
 }
 
-export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
+export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [recent, setRecent] = useState<SearchResult[]>(loadRecent);
@@ -36,6 +40,10 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
   // Picking a result writes its name into the input; that change must not
   // re-trigger a search (which would pop the dropdown right back open).
   const pickedRef = useRef<string | null>(null);
+  // Read when a search runs, not depended on: `places` is a fresh array every
+  // render, and depending on it would restart the debounce forever.
+  const placesRef = useRef(places);
+  placesRef.current = places;
 
   // An empty (or too-short) query shows the recent picks instead of results.
   const showingRecent = query.trim().length < 2;
@@ -59,6 +67,14 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
       setOpen(true);
       return;
     }
+    // The user's own places answer instantly and without a network round-trip:
+    // show them before the debounce, and keep them on top once Photon replies.
+    const saved = savedPlaceResults(placesRef.current, q);
+    if (saved.length > 0) {
+      setResults(saved);
+      setHighlighted(0);
+      setOpen(true);
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     const timer = setTimeout(async () => {
@@ -72,11 +88,11 @@ export function SearchBox({ onSelect, getBias }: SearchBoxProps) {
         const res = await fetch(`/api/search?${params}`, { signal: controller.signal });
         if (!res.ok) return;
         const data = (await res.json()) as { results: SearchResult[] };
-        setResults(data.results);
+        setResults([...saved, ...data.results]);
         setHighlighted(0);
         setOpen(true);
       } catch {
-        // Aborted or offline; keep whatever is shown.
+        // Aborted or offline; the saved matches shown above still stand.
       }
     }, 250);
     return () => {

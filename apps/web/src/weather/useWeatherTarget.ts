@@ -9,6 +9,11 @@ export interface WeatherTargetController {
   toggle: () => void;
   /** Panel button: move the forecast to wherever the map is looking now. */
   retarget: () => void;
+  /**
+   * A pin was dropped, dragged or picked from search: follow it, but only while
+   * the panel is already open — see {@link followPin}.
+   */
+  followPin: (at: LatLng | null) => void;
 }
 
 /**
@@ -32,5 +37,17 @@ export function useWeatherTarget(
     setTarget(center() ?? fallback);
   }, [center, fallback]);
 
-  return { target, setTarget, toggle, retarget };
+  /**
+   * Placing a pin *is* aiming the forecast — with the panel open, dropping a pin
+   * somewhere else and being told the weather at the old spot is just wrong.
+   * This is the one exception to "panning does not move the target": the user
+   * pointed at a place, deliberately. Clearing the pin leaves the panel where it
+   * was rather than closing it; removing a marker is not a request to stop
+   * reading the forecast.
+   */
+  const followPin = useCallback((at: LatLng | null) => {
+    setTarget((cur) => (cur && at ? at : cur));
+  }, []);
+
+  return { target, setTarget, toggle, retarget, followPin };
 }

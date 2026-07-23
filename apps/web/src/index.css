@@ -619,16 +619,27 @@ button {
   font-size: 10px;
 }
 
+/* Also the collapse target, so it is a button styled back down to plain text. */
 .folder-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: none;
+  font: inherit;
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.01em;
   color: var(--text);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.folder-name:hover {
+  text-decoration: underline;
 }
 
 .item-tags {

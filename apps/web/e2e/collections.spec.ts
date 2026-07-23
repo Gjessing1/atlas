@@ -58,8 +58,10 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await page.getByPlaceholder('New folder name').fill('Trips');
   await page.getByPlaceholder('New folder name').press('Enter');
 
-  // Collapsing must not make "+" a dead button: it re-expands and shows the field.
-  await page.getByRole('button', { name: 'Collapse Trips' }).click();
+  // Folders start collapsed, so the chevron offers to expand, not to collapse.
+  await expect(page.getByRole('button', { name: 'Expand Trips' })).toBeVisible();
+  // Being collapsed must not make "+" a dead button: it re-expands and shows
+  // the field rather than rendering it into a hidden subtree.
   await page.getByRole('button', { name: 'New folder inside Trips' }).click();
   await page.getByPlaceholder('New folder name').fill('Autumn');
   await page.getByPlaceholder('New folder name').press('Enter');
@@ -103,5 +105,8 @@ test('a folder can be dragged into another folder', async ({ page }) => {
     .locator(':scope > .item-line')
     .dragTo(target, { targetPosition: { x: box.width / 2, y: box.height / 2 } });
 
+  // Alpha is collapsed like every folder, so open it to see what landed inside.
+  // Clicking the name is the whole target, not just the chevron.
+  await row('Alpha').locator(':scope > .item-line > .folder-name').click();
   await expect(row('Alpha').locator(':scope > .item-list .folder-name')).toHaveText('Beta');
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   coordinateSearchResult,
   matchPlacesByName,
+  savedPlaceResults,
   parseCoordinateQuery,
   photonFeatureToSearchResult,
   type PhotonFeature,
@@ -77,6 +78,34 @@ describe('matchPlacesByName', () => {
   it('returns nothing for an empty query and respects the limit', () => {
     expect(matchPlacesByName(places, '   ')).toEqual([]);
     expect(matchPlacesByName(places, 'o', 2)).toHaveLength(2);
+  });
+});
+
+describe('savedPlaceResults', () => {
+  const places = [
+    { name: 'Bogdan og Ada', lat: 59.91, lng: 10.75, notes: 'Storgata 1, Oslo' },
+    { name: 'Cabin', lat: 60.15, lng: 9.55, notes: '' },
+    { name: 'Dentist', lat: 59.92, lng: 10.71, notes: 'Kirkeveien 12' },
+  ];
+
+  it('finds a saved place by name — the hit no geocoder can produce', () => {
+    expect(savedPlaceResults(places, 'bogdan')).toEqual([
+      { name: 'Bogdan og Ada', label: 'Saved place', position: { lat: 59.91, lng: 10.75 } },
+    ]);
+  });
+
+  it('also matches notes, where addresses get pasted today', () => {
+    expect(savedPlaceResults(places, 'kirkeveien').map((r) => r.name)).toEqual(['Dentist']);
+  });
+
+  it('ranks name matches above notes matches', () => {
+    const withNotesHit = [{ name: 'Ferry', lat: 59, lng: 10, notes: 'near the cabin' }, ...places];
+    expect(savedPlaceResults(withNotesHit, 'cabin').map((r) => r.name)).toEqual(['Cabin', 'Ferry']);
+  });
+
+  it('returns nothing for an empty query and respects the limit', () => {
+    expect(savedPlaceResults(places, '  ')).toEqual([]);
+    expect(savedPlaceResults(places, 'a', 2)).toHaveLength(2);
   });
 });
 

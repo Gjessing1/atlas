@@ -101,7 +101,11 @@ export function Sidebar({
   const [importOpen, setImportOpen] = useState(false);
   const [importTarget, setImportTarget] = useState('root');
   const [importFolderName, setImportFolderName] = useState('');
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
+  // Folders whose contents are showing. Empty by default: a collection with a
+  // dozen folders opened as one long wall of every place at once, and the list
+  // the user came for was somewhere in the middle of it. Session-only — which
+  // folders are open is a view preference, not user data.
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   // Totals from a restored backup — merges by id, so nothing new shows up in
   // the lists to tell the user it worked. Reported explicitly instead.
   const [restored, setRestored] = useState<ImportSummary | null>(null);
@@ -123,7 +127,7 @@ export function Sidebar({
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
   const toggleFolder = (id: string) =>
-    setCollapsedFolders((current) => {
+    setExpandedFolders((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -137,11 +141,9 @@ export function Sidebar({
    */
   const startCreating = (parentId: string | null) => {
     if (parentId !== null) {
-      setCollapsedFolders((current) => {
-        if (!current.has(parentId)) return current;
-        const next = new Set(current);
-        next.delete(parentId);
-        return next;
+      setExpandedFolders((current) => {
+        if (current.has(parentId)) return current;
+        return new Set(current).add(parentId);
       });
     }
     setCreating({ parentId });
@@ -357,7 +359,7 @@ export function Sidebar({
           </li>
         )}
         {folders.map(({ folder }) => {
-          const open = !collapsedFolders.has(folder.id);
+          const open = expandedFolders.has(folder.id);
           return (
             <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
               <div
@@ -394,7 +396,16 @@ export function Sidebar({
                     onCancel={() => setRenaming(null)}
                   />
                 ) : (
-                  <span className="folder-name">{folder.name}</span>
+                  // The name is the obvious thing to click to open a folder;
+                  // making the 16 px chevron the only target was the complaint.
+                  <button
+                    type="button"
+                    className="folder-name"
+                    aria-expanded={open}
+                    onClick={() => toggleFolder(folder.id)}
+                  >
+                    {folder.name}
+                  </button>
                 )}
                 <span className="row-actions">
                   {folder.parentId !== null && (

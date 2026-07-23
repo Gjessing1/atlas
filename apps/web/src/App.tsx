@@ -225,26 +225,37 @@ export function App() {
   const weatherTarget = weatherAt.target;
   const weather = useWeather(weatherTarget);
 
-  // A picked search result becomes a pin plus the same card a POI tap opens.
-  const onSearchSelect = useCallback((result: SearchResult) => {
-    setPin(result.position);
-    setTarget({
-      source: 'search',
-      position: result.position,
-      name: result.name,
-      category: result.label || undefined,
-    });
-    const map = mapRef.current;
-    if (map) {
-      map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
-    }
-  }, []);
+  const { followPin } = weatherAt;
 
-  // Dropping, dragging or removing the pin keeps the card in step with it.
-  const onPinChange = useCallback((next: LatLng | null) => {
-    setPin(next);
-    setTarget(next ? { source: 'pin', position: next } : null);
-  }, []);
+  // A picked search result becomes a pin plus the same card a POI tap opens.
+  const onSearchSelect = useCallback(
+    (result: SearchResult) => {
+      setPin(result.position);
+      setTarget({
+        source: 'search',
+        position: result.position,
+        name: result.name,
+        category: result.label || undefined,
+      });
+      followPin(result.position);
+      const map = mapRef.current;
+      if (map) {
+        map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
+      }
+    },
+    [followPin],
+  );
+
+  // Dropping, dragging or removing the pin keeps the card — and an open weather
+  // panel — in step with it.
+  const onPinChange = useCallback(
+    (next: LatLng | null) => {
+      setPin(next);
+      setTarget(next ? { source: 'pin', position: next } : null);
+      followPin(next);
+    },
+    [followPin],
+  );
 
   // ---- user data on the map ----
 
@@ -439,7 +450,7 @@ export function App() {
       <div
         className={`topbar${nav.phase !== 'idle' && nav.phase !== 'preview' ? ' topbar-nav-hidden' : ''}`}
       >
-        <SearchBox onSelect={onSearchSelect} getBias={getBias} />
+        <SearchBox onSelect={onSearchSelect} getBias={getBias} places={userData.places} />
         <button
           type="button"
           className="sidebar-toggle"

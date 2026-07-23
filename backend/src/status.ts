@@ -19,15 +19,34 @@ interface Probe {
   order: number;
   lastSuccess: number | null;
   lastFailure: number | null;
-  /** null until the first probe; the most recent outcome drives health. */
-  lastOk: boolean | null;
   message: string | null;
   detail: string | null;
 }
 
-function health(p: Probe): UpstreamHealth {
-  if (p.lastOk === null) return 'unknown';
-  if (p.lastOk) return 'ok';
+/**
+ * A failure this close behind a success is one request out of a concurrent
+ * batch, not a state change. A map pans and fires twenty tile requests at once;
+ * if one of them times out and happens to resolve last, "most recent outcome
+ * wins" declares the whole upstream broken while nineteen tiles are drawing on
+ * screen. Judging by timestamps with this grace keeps a lone straggler from
+ * outranking the successes it raced.
+ */
+const BATCH_GRACE_MS = 20_000;
+
+/**
+ * How long a failure keeps describing "now". Probes piggyback on real traffic,
+ * so a source nothing has touched since it blipped would otherwise stay red
+ * forever — the tile proxy in particular serves later views from its disk cache
+ * and never re-probes upstream. After this, an unretried failure reverts to
+ * `unknown` ("not checked recently"), which is what we actually know.
+ */
+const FAILURE_TTL_MS = 30 * 60_000;
+
+function health(p: Probe, now: number): UpstreamHealth {
+  if (p.lastSuccess === null && p.lastFailure === null) return 'unknown';
+  if (p.lastFailure === null) return 'ok';
+  if (p.lastSuccess !== null && p.lastSuccess >= p.lastFailure - BATCH_GRACE_MS) return 'ok';
+  if (now - p.lastFailure > FAILURE_TTL_MS) return 'unknown';
   // A failing source that has succeeded before is degraded (typically serving a
   // cached/stale copy); one that has never worked this run is down.
   return p.lastSuccess === null ? 'down' : 'degraded';
@@ -44,6 +63,13 @@ function worst(healths: UpstreamHealth[]): UpstreamHealth {
 export class StatusRegistry {
   private probes = new Map<string, Probe>();
   private nextOrder = 0;
+
+  /**
+   * `clock` is a seam: health now depends on *when* outcomes happened relative
+   * to each other, and tests have to be able to move time rather than sleep
+   * through a 30-minute TTL.
+   */
+  constructor(private readonly clock: () => number = Date.now) {}
 
   /**
    * Declare a source so it shows as `unknown` before any traffic hits it.
@@ -63,7 +89,6 @@ export class StatusRegistry {
       order: this.nextOrder++,
       lastSuccess: null,
       lastFailure: null,
-      lastOk: null,
       message: null,
       detail: null,
     });
@@ -76,8 +101,7 @@ export class StatusRegistry {
       this.register(id, id, 'Other');
       p = this.probes.get(id)!;
     }
-    const now = Date.now();
-    p.lastOk = ok;
+    const now = this.clock();
     if (ok) {
       p.lastSuccess = now;
       p.message = null;
@@ -94,13 +118,14 @@ export class StatusRegistry {
   }
 
   toStatus(): UpstreamStatus[] {
+    const now = this.clock();
     return [...this.probes.values()]
       .sort((a, b) => a.order - b.order)
       .map((p) => ({
         id: p.id,
         label: p.label,
         group: p.group,
-        health: health(p),
+        health: health(p, now),
         lastSuccess: p.lastSuccess,
         lastFailure: p.lastFailure,
         message: p.message,
@@ -109,6 +134,7 @@ export class StatusRegistry {
   }
 
   overall(): UpstreamHealth {
-    return worst([...this.probes.values()].map(health));
+    const now = this.clock();
+    return worst([...this.probes.values()].map((p) => health(p, now)));
   }
 }

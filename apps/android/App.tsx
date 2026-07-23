@@ -180,6 +180,16 @@ function AppInner() {
   // A pin carried by a launch/deep link opens its card; the camera is already
   // on its way there from the link's own view, so it must not fly again.
   const onLinkPin = useCallback((pin: LatLng) => pickPoint(pin, false), [pickPoint]);
+  // With the weather sheet open, picking or dragging a pin re-aims the forecast.
+  // Placing a pin somewhere is the user pointing at a place; leaving the sheet
+  // describing the previous one is simply the wrong answer. Only while it is
+  // open — this never opens the sheet by itself.
+  const pickedLat = dest.destination?.lat;
+  const pickedLng = dest.destination?.lng;
+  useEffect(() => {
+    if (pickedLat === undefined || pickedLng === undefined) return;
+    setWeatherTarget((cur) => (cur ? { lat: pickedLat, lng: pickedLng } : cur));
+  }, [pickedLat, pickedLng]);
   // Where the map opens, where it is now, and remembering that for next launch.
   const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
@@ -558,6 +568,7 @@ function AppInner() {
       {searchOpen && !navActive && !planning ? (
         <SearchBar
           packs={packs}
+          places={data.places}
           getBias={getBias}
           onPick={dest.pickResult}
           onClose={() => setSearchOpen(false)}

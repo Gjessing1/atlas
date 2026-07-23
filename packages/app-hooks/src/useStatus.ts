@@ -46,10 +46,15 @@ export function statusAge(ts: number, now: number = Date.now()): string {
  */
 export function upstreamDetail(s: UpstreamStatus, now: number = Date.now()): string {
   if (s.health === 'ok' || s.health === 'unknown') {
-    return (
-      s.detail ??
-      (s.lastSuccess ? `checked ${statusAge(s.lastSuccess, now)}` : 'awaiting first use')
-    );
+    if (s.detail) return s.detail;
+    if (s.lastSuccess) return `checked ${statusAge(s.lastSuccess, now)}`;
+    // Unknown with a failure behind it is a stale outcome the server stopped
+    // standing behind — say so rather than "awaiting first use", which would
+    // read as "never tried".
+    if (s.lastFailure) {
+      return `not checked since ${statusAge(s.lastFailure, now)}${s.message ? ` · ${s.message}` : ''}`;
+    }
+    return 'awaiting first use';
   }
   return `${s.message ?? 'failing'} · ${s.lastFailure ? statusAge(s.lastFailure, now) : ''}`.trim();
 }

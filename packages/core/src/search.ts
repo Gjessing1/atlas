@@ -121,3 +121,50 @@ export function matchPlacesByName<T extends { name: string }>(
   }
   return [...prefix, ...rest].slice(0, limit);
 }
+
+/** The minimum a saved place needs to be findable from the search box. */
+export interface SearchablePlace {
+  name: string;
+  lat: number;
+  lng: number;
+  /** Free text the user attached — today that is where they paste addresses. */
+  notes?: string;
+}
+
+/** Label a saved place carries in a result list, so its origin is obvious. */
+export const SAVED_PLACE_LABEL = 'Saved place';
+
+/**
+ * The user's own saved places as search results, for the main search box.
+ *
+ * A geocoder cannot answer "where is that place I saved as *Bogdan og Ada*" —
+ * the name means something to this user and nothing to OSM — so a query that
+ * only ever went to Photon could never find it. Matching locally also means
+ * favourites keep resolving with no network at all.
+ *
+ * Notes are searched after names because that is where addresses currently get
+ * pasted; a name match always outranks a notes match.
+ */
+export function savedPlaceResults<T extends SearchablePlace>(
+  places: T[],
+  query: string,
+  limit = 4,
+): SearchResult[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return [];
+  const byName = matchPlacesByName(places, q, limit);
+  const seen = new Set<T>(byName);
+  const byNotes: T[] = [];
+  if (byName.length < limit) {
+    for (const place of places) {
+      if (seen.has(place)) continue;
+      if (place.notes?.toLowerCase().includes(q)) byNotes.push(place);
+      if (byName.length + byNotes.length === limit) break;
+    }
+  }
+  return [...byName, ...byNotes].map((p) => ({
+    name: p.name,
+    label: SAVED_PLACE_LABEL,
+    position: { lat: p.lat, lng: p.lng },
+  }));
+}

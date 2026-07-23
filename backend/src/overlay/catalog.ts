@@ -137,14 +137,14 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'terrain-contours',
-        rev: 1,
+        rev: 2,
         title: 'Contour lines',
         description: 'Scale-aware elevation contours from Norway’s national topographic map.',
         group: 'Terrain',
         attribution: '© Kartverket',
         metadataUrl: `${KARTKATALOG}h%C3%B8ydekurver`,
         minzoom: 7,
-        maxzoom: 17,
+        maxzoom: 18,
         defaultOpacity: 0.72,
         identify: false,
         profiles: ['hiking', 'ski'],
@@ -153,10 +153,13 @@ export function norwegianLayers(): OverlayLayer[] {
         kind: 'wms',
         url: 'https://wms.geonorge.no/skwms1/wms.topo',
         version: '1.3.0',
-        // The group selects N50/N100/… or detailed FKB contours at the
-        // appropriate scale instead of stretching one dataset across every
-        // zoom.
-        layers: 'kd_hoydekurver',
+        // Two groups, because neither covers the whole zoom range on its own and
+        // their scale windows are disjoint: `kd_hoydekurver` runs N2000…N50 and
+        // stops dead at 1:12000 (~z16), where `fkb_hoydekurver`'s 5 m and 1 m
+        // curves take over. Asking for only the first left the layer switched on
+        // and drawing nothing from z16 in — the "contours disappear when you zoom
+        // in" bug. Requesting both lets the server pick per scale as intended.
+        layers: 'kd_hoydekurver,fkb_hoydekurver',
       },
     },
     {

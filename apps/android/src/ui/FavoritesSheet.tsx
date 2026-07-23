@@ -332,16 +332,21 @@ export function FavoritesSheet({
   const [newFolder, setNewFolder] = useState('');
   // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
-  // Folders whose contents are hidden (the ▾/▸ chevron toggles them). Kept in
-  // memory only — a collapsed folder is a view preference, not user data.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const toggleCollapsed = (id: string) =>
-    setCollapsed((current) => {
+  // Folders whose contents are showing (the ▾/▸ chevron toggles them). Empty by
+  // default: on a phone, expanding everything at once buries the folder list
+  // itself under its contents. Kept in memory only — which folders are open is a
+  // view preference, not user data.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (id: string) =>
+    setExpanded((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  /** Open a folder so something created inside it isn't added out of sight. */
+  const revealFolder = (id: string) =>
+    setExpanded((current) => (current.has(id) ? current : new Set(current).add(id)));
   // A row is being dragged: freeze the sheet's scroll and close any editor so
   // row heights are uniform while the drag measures its way through the list.
   const [dragActive, setDragActive] = useState(false);
@@ -379,6 +384,9 @@ export function FavoritesSheet({
     const name = newFolder.trim();
     if (!name) return;
     onCreateFolder(name, newFolderParent);
+    // A subfolder added into a collapsed parent would land out of sight and read
+    // as "nothing happened", so opening the parent is part of creating into it.
+    if (newFolderParent !== null) revealFolder(newFolderParent);
     setNewFolder('');
     setNewFolderParent(null);
   };
@@ -387,6 +395,9 @@ export function FavoritesSheet({
     for (const [folderId, frame] of folderFrames.current) {
       if (pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
         if (place.collectionId !== folderId) onPatch(place.id, { collectionId: folderId });
+        // Show where it went — dropping into a closed folder otherwise looks
+        // like the place simply vanished from the list.
+        revealFolder(folderId);
         return true;
       }
     }
@@ -498,15 +509,25 @@ export function FavoritesSheet({
                 testID={`folder-row-${folder.id}`}
               >
                 {handle}
+                {/* Chevron and folder icon are one target: the name beside them
+                    is an inline rename field, so tapping *it* has to keep
+                    meaning "rename" — this is the widest tap area that can open
+                    a folder without stealing that. */}
                 <Pressable
                   style={styles.chevronButton}
-                  onPress={() => toggleCollapsed(folder.id)}
-                  accessibilityLabel={`${collapsed.has(folder.id) ? 'Expand' : 'Collapse'} ${folder.name}`}
+                  onPress={() => toggleExpanded(folder.id)}
+                  accessibilityLabel={`${expanded.has(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
                   testID={`folder-collapse-${folder.id}`}
                 >
-                  <Text style={styles.chevronText}>{collapsed.has(folder.id) ? '▸' : '▾'}</Text>
+                  <Text style={styles.chevronText}>{expanded.has(folder.id) ? '▾' : '▸'}</Text>
                 </Pressable>
-                <Text style={styles.folderIcon}>📁</Text>
+                <Pressable
+                  onPress={() => toggleExpanded(folder.id)}
+                  accessibilityLabel={`${expanded.has(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
+                  testID={`folder-icon-${folder.id}`}
+                >
+                  <Text style={styles.folderIcon}>{expanded.has(folder.id) ? '📂' : '📁'}</Text>
+                </Pressable>
                 <TextInput
                   style={styles.folderName}
                   defaultValue={folder.name}
@@ -557,12 +578,12 @@ export function FavoritesSheet({
                   <Text style={styles.buttonQuietText}>Delete</Text>
                 </Pressable>
               </View>
-              {collapsed.has(folder.id) ? null : (
+              {expanded.has(folder.id) ? (
                 <>
                   {renderPlaces(folder.id, true)}
                   {renderFolderLevel(folder.id, depth + 1)}
                 </>
-              )}
+              ) : null}
             </View>
           )}
         />

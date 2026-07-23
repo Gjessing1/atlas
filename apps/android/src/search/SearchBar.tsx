@@ -1,4 +1,4 @@
-import type { SearchResult } from '@atlas/core';
+import { savedPlaceResults, type SearchablePlace, type SearchResult } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -18,6 +18,7 @@ import { parseRecentSearches, pushRecentSearch, RECENT_SEARCHES_SETTING } from '
  */
 export function SearchBar({
   packs,
+  places,
   getBias,
   onPick,
   onClose,
@@ -26,6 +27,8 @@ export function SearchBar({
   setSetting,
 }: {
   packs: LocalPack[];
+  /** The user's saved places, matched locally and offered above geocoder hits. */
+  places: SearchablePlace[];
   /** Current map centre, to bias results towards the viewport (web parity). */
   getBias: SearchBias;
   onPick: (result: SearchResult) => void;
@@ -41,6 +44,9 @@ export function SearchBar({
   const [recent, setRecent] = useState<SearchResult[]>([]);
   const [offline, setOffline] = useState(false);
   const generation = useRef(0);
+  // Read when a search runs rather than depended on — a fresh array each render.
+  const placesRef = useRef(places);
+  placesRef.current = places;
 
   useEffect(() => {
     void getSetting(RECENT_SEARCHES_SETTING).then((raw) => setRecent(parseRecentSearches(raw)));
@@ -53,9 +59,13 @@ export function SearchBar({
         setResults([]);
         return;
       }
+      // The user's own places answer instantly and offline; a geocoder can never
+      // find "Bogdan og Ada", so a query that only went upstream missed them.
+      const saved = savedPlaceResults(placesRef.current, text);
+      if (saved.length > 0 && gen === generation.current) setResults(saved);
       const { results: found, offline: usedOffline } = await geoSearch(packs, text, getBias);
       if (gen === generation.current) {
-        setResults(found);
+        setResults([...saved, ...found]);
         setOffline(usedOffline);
       }
     },
