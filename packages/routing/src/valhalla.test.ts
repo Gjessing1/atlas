@@ -450,6 +450,62 @@ describe('formatExitSign', () => {
     expect(path.instructions![1]!.sign).toBe(-2); // type 15 → left
   });
 
+  it('turns mid-trip leg arrivals into via maneuvers, keeping the final one a destination', () => {
+    const legA: [number, number][] = [
+      [60, 10.0],
+      [60, 10.1],
+    ];
+    const legB: [number, number][] = [
+      [60, 10.1],
+      [60, 10.2],
+    ];
+    const multiStop = {
+      trip: {
+        units: 'kilometers',
+        summary: { length: 20, time: 100 },
+        legs: [
+          {
+            shape: encodeShape(legA),
+            maneuvers: [
+              { type: 1, begin_shape_index: 0, end_shape_index: 1 },
+              // Valhalla ends *every* leg as if it were the destination.
+              {
+                type: 5, // destination-right
+                instruction: 'Your destination is on the right.',
+                verbal_pre_transition_instruction: 'You will arrive at your destination.',
+                begin_shape_index: 1,
+                end_shape_index: 1,
+              },
+            ],
+          },
+          {
+            shape: encodeShape(legB),
+            maneuvers: [
+              { type: 1, begin_shape_index: 0, end_shape_index: 1 },
+              {
+                type: 4,
+                instruction: 'You have arrived at your destination.',
+                begin_shape_index: 1,
+                end_shape_index: 1,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const path = parseValhallaResponse(multiStop).paths[0]!;
+    const via = path.instructions![1]!;
+    // The stop between the legs is a via arrival, not "you have arrived".
+    expect(via.sign).toBe(5);
+    expect(via.text).toBe('Arrive at via point');
+    expect(via.verbal?.pre).toBe('You will arrive at your via point');
+    expect(via.interval).toEqual([1, 1]);
+    // The trip's real end keeps the destination sign and Valhalla's wording.
+    const arrive = path.instructions![3]!;
+    expect(arrive.sign).toBe(4);
+    expect(arrive.text).toBe('You have arrived at your destination.');
+  });
+
   it('maps roundabout maneuvers with an exit number', () => {
     const round = {
       trip: {

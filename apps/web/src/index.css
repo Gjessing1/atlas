@@ -2817,6 +2817,17 @@ button.transit-notice-summary {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+/* An intermediate stop on a multi-stop trip — a dot on the line, quieter
+   than the destination flag. */
+.nav-via-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1557b0;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 /* ---- Map layers panel (Sidebar section) ---- */
 
 .layers-section {

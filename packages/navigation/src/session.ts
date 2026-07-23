@@ -79,6 +79,8 @@ export class NavigationSession {
   private readonly totalM: number;
   private readonly totalTimeMs: number;
   private readonly maneuvers: Maneuver[];
+  /** Along-route positions of the trip's via stops (sign-5 maneuvers), ascending. */
+  private readonly viaAlongM: number[];
   /** suffixTimeMs[i] = total instruction time of maneuvers after i. */
   private readonly suffixTimeMs: number[];
   private readonly opts: Required<NavigationOptions>;
@@ -136,6 +138,9 @@ export class NavigationSession {
       const start = Math.min(Math.max(instruction.interval[0], 0), lastIdx);
       return { instruction, index, alongStartM: this.cum[start]!, timeMs: instruction.timeMs };
     });
+    this.viaAlongM = this.maneuvers
+      .filter((m) => m.instruction.sign === 5)
+      .map((m) => m.alongStartM);
     this.suffixTimeMs = new Array<number>(this.maneuvers.length).fill(0);
     for (let i = this.maneuvers.length - 2; i >= 0; i--) {
       this.suffixTimeMs[i] = this.suffixTimeMs[i + 1]! + this.maneuvers[i + 1]!.timeMs;
@@ -197,6 +202,16 @@ export class NavigationSession {
       };
     }
     return this.lastState;
+  }
+
+  /** How many via stops lie behind `alongM` — passed stops, dropped on reroute. */
+  private viasPassedAt(alongM: number): number {
+    let passed = 0;
+    for (const via of this.viaAlongM) {
+      if (via <= alongM + EPS) passed++;
+      else break;
+    }
+    return passed;
   }
 
   /** What the road data says about being in a tunnel at `alongM`. */
@@ -399,6 +414,7 @@ export class NavigationSession {
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
       departed: this.departed,
+      viasPassed: this.viasPassedAt(alongM),
       courseDeg: shownCourse,
       fix: 'live',
       wrongBranch: false,
@@ -525,6 +541,7 @@ export class NavigationSession {
       speedLimitKph: speedLimitKphAt(this.enrichment, alongM),
       tunnel: this.tunnelState(alongM),
       departed: this.departed,
+      viasPassed: this.viasPassedAt(alongM),
       courseDeg: course,
       fix: 'estimated',
       wrongBranch: this.wrongBranch,
@@ -600,6 +617,7 @@ export class NavigationSession {
       speedLimitKph: speedLimitKphAt(this.enrichment, 0),
       tunnel: this.tunnelState(0),
       departed: this.departed,
+      viasPassed: 0,
       courseDeg: null,
       fix: 'lost',
       wrongBranch: false,

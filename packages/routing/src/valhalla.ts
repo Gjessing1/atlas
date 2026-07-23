@@ -458,7 +458,8 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
   const points: TrackPoint[] = [];
   const instructions: RouteInstruction[] = [];
 
-  for (const leg of legs) {
+  for (let legIndex = 0; legIndex < legs.length; legIndex++) {
+    const leg = legs[legIndex]!;
     if (typeof leg.shape !== 'string') continue;
     const shape = decodePolyline(leg.shape);
     if (shape.length === 0) continue;
@@ -492,6 +493,20 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
       if (exitSign) instruction.exitSign = exitSign;
       const verbal = parseVerbal(m);
       if (verbal) instruction.verbal = verbal;
+      // Valhalla splits a multi-stop trip into legs and ends every leg with a
+      // destination maneuver — worded as *the* destination, because it doesn't
+      // know the trip continues. Mid-trip those are via arrivals: give them
+      // Atlas's via sign (5) and honest wording, or navigation would announce
+      // "you have arrived" at every stop along the way.
+      if (legIndex < legs.length - 1 && (m.type === 4 || m.type === 5 || m.type === 6)) {
+        instruction.sign = 5;
+        instruction.text = 'Arrive at via point';
+        instruction.verbal = {
+          alert: 'You will arrive at your via point',
+          pre: 'You will arrive at your via point',
+          succinct: 'You have arrived at your via point',
+        };
+      }
       const lanes = parseLanes(m.lanes);
       if (lanes) instruction.lanes = lanes;
       if (m.type === 26) {

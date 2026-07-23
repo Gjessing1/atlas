@@ -288,6 +288,45 @@ test('the arrival hatch stays hidden far from the destination', async ({ page })
   await expect(page.getByRole('button', { name: "I've arrived" })).toHaveCount(0);
 });
 
+test('a multi-stop plan is driven through its via stops', async ({ page }) => {
+  await mockRouting(page);
+  const navLocations: number[] = [];
+  await page.route('**/api/route', async (route) => {
+    const body = route.request().postDataJSON() as { locations?: { lat: number }[] };
+    // Guidance requests start from the live fix (lat 59.91); the planner's own
+    // requests start from the plan's first stop and don't count here.
+    if (Math.abs((body.locations?.[0]?.lat ?? 0) - 59.91) < 1e-6) {
+      navLocations.push(body.locations?.length ?? 0);
+    }
+    await route.fallback();
+  });
+  // A four-stop plan restored from the share hash; the two middle stops are
+  // the via points guidance must keep.
+  await page.goto(
+    '/#map=13/59.91/10.75&route=car/59.905,10.745/59.913,10.752/59.916,10.756/59.92,10.76',
+  );
+  await waitForMap(page);
+  await expect(page.locator('.route-stats')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Start navigation' }).click();
+  await expect(page.locator('.nav-preview')).toBeVisible();
+  // Route requests for guidance carry fix + two vias + destination.
+  expect(navLocations.every((n) => n === 4)).toBe(true);
+  expect(navLocations.length).toBeGreaterThan(0);
+  // The via stops show as dots through the preview and the drive; the finish
+  // keeps its flag.
+  await expect(page.locator('.nav-via-marker')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.nav-banner')).toBeVisible();
+  await expect(page.locator('.nav-via-marker')).toHaveCount(2);
+  await expect(page.locator('.nav-dest-marker')).toBeVisible();
+
+  await page.getByRole('button', { name: 'End' }).click();
+  await expect(page.locator('.nav-banner')).toHaveCount(0);
+  await expect(page.locator('.nav-via-marker')).toHaveCount(0);
+});
+
 test('geolocation denied shows an error state, End dismisses it', async ({ page, context }) => {
   await mockRouting(page);
   await context.clearPermissions();

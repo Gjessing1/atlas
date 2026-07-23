@@ -220,10 +220,11 @@ export function RoutePanel({
   /** A "Directions" hand-off is still waiting for the browser's fix. */
   locatingOrigin: boolean;
   /**
-   * Start turn-by-turn to the last stop in the current profile. This panel is
-   * the app's only travel-mode picker, so guidance starts from here.
+   * Start turn-by-turn to the last stop in the current profile, via the plan's
+   * intermediate stops. This panel is the app's only travel-mode picker, so
+   * guidance starts from here.
    */
-  onNavigate: (destination: LatLng) => void;
+  onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -437,7 +438,18 @@ export function RoutePanel({
           Transit has no turn-by-turn — it shows the journey board below instead
           of a button that would promise directions it cannot give. */}
       {!transitMode && destination && (
-        <button type="button" className="route-navigate" onClick={() => onNavigate(destination)}>
+        <button
+          type="button"
+          className="route-navigate"
+          // Guidance replaces the planned origin with the live position, so
+          // the stops between first and last ride along as via points.
+          onClick={() =>
+            onNavigate(
+              destination,
+              route.waypoints.slice(1, -1).map((w) => w.pos),
+            )
+          }
+        >
           Start navigation
         </button>
       )}

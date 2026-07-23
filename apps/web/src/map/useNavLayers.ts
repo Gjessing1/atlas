@@ -339,6 +339,7 @@ export function useNavLayers(
   // ---- location puck (snapped position) + destination flag ----
   const puckRef = useRef<maplibregl.Marker | null>(null);
   const destRef = useRef<maplibregl.Marker | null>(null);
+  const viaMarkersRef = useRef<maplibregl.Marker[]>([]);
   // The compass cone half-angle, quantized so jittery accuracy reports don't
   // rebuild the sector path on every event.
   const coneHalfDeg =
@@ -408,10 +409,28 @@ export function useNavLayers(
     nav.facingDeg,
     coneHalfDeg,
   ]);
+  // Via stops still ahead on a multi-stop trip, as small dots along the line:
+  // each disappears once driven past. Deliberately keyed on the passed-count,
+  // not the fix, so the markers are rebuilt when a stop is reached rather
+  // than at every position update. Few and rarely changing, so rebuilding
+  // wholesale is cheaper than diffing.
+  const viasPassed = nav.state?.viasPassed ?? 0;
+  useEffect(() => {
+    if (!map) return;
+    const vias = active || previewing ? nav.viaPoints.slice(viasPassed) : [];
+    for (const marker of viaMarkersRef.current) marker.remove();
+    viaMarkersRef.current = vias.map((via) => {
+      const el = document.createElement('div');
+      el.className = 'nav-via-marker';
+      return new maplibregl.Marker({ element: el }).setLngLat(via).addTo(map);
+    });
+  }, [map, active, previewing, nav.viaPoints, viasPassed]);
   useEffect(
     () => () => {
       puckRef.current?.remove();
       destRef.current?.remove();
+      for (const marker of viaMarkersRef.current) marker.remove();
+      viaMarkersRef.current = [];
     },
     [map],
   );

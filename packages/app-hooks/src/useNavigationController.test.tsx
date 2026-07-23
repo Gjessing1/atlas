@@ -369,6 +369,104 @@ describe('useNavigationController — rerouting', () => {
   });
 });
 
+/** The `path()` route with a via stop at index 10 (a multi-stop plan). */
+function viaPath(timeMs: number): RoutePath {
+  return {
+    points,
+    distanceM: 1113,
+    timeMs,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [
+      {
+        text: 'Head east',
+        distanceM: 556,
+        timeMs: timeMs / 2,
+        sign: 0,
+        streetName: 'Main',
+        interval: [0, 10],
+      },
+      { text: 'Arrive at via point', distanceM: 0, timeMs: 0, sign: 5, interval: [10, 10] },
+      {
+        text: 'Continue east',
+        distanceM: 557,
+        timeMs: timeMs / 2,
+        sign: 0,
+        streetName: 'Main',
+        interval: [10, 20],
+      },
+      { text: 'Arrive', distanceM: 0, timeMs: 0, sign: 4, interval: [20, 20] },
+    ],
+  };
+}
+
+describe('useNavigationController — via stops', () => {
+  it('routes every request through the vias, in order, and exposes them', async () => {
+    const vias = [points[7]!, points[13]!];
+    const h = harness(() => Promise.resolve({ paths: [viaPath(600_000)] }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => hook.result.current.start(destination, 'car', undefined, vias));
+    expect(hook.result.current.phase).toBe('preview');
+    expect(hook.result.current.viaPoints).toEqual(vias);
+
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+
+    // Both the preview query and Start's position refresh carry the stops.
+    expect(h.route.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const [query] of h.route.mock.calls) {
+      expect(query.points).toHaveLength(4);
+      expect(query.points.slice(1)).toEqual([...vias, destination]);
+    }
+  });
+
+  it('reroutes only through the stops still ahead, dropping passed vias', async () => {
+    const h = harness(() => Promise.resolve({ paths: [viaPath(600_000)] }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'car', undefined, [points[10]!]));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+
+    // Drive past the via stop…
+    act(() => h.emit(onLine(12, { speedMps: 15 })));
+    expect(hook.result.current.state?.viasPassed).toBe(1);
+
+    // …then leave the line beyond it. The recalculated route must go straight
+    // to the destination instead of doubling back to the visited stop.
+    const callsBefore = h.route.mock.calls.length;
+    for (let i = 0; i < 3; i++) {
+      act(() => h.emit({ lat: 60.01, lng: 10.015 + i * 0.0001, accuracyM: 5, speedMps: 15 }));
+    }
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 1));
+    const [rerouteQuery] = h.route.mock.calls.at(-1)!;
+    expect(rerouteQuery.points).toHaveLength(2);
+    expect(rerouteQuery.points[1]).toEqual(destination);
+    await waitFor(() => expect(hook.result.current.viaPoints).toEqual([]));
+  });
+
+  it('keeps an unpassed via through a reroute', async () => {
+    const via = points[15]!;
+    const h = harness(() => Promise.resolve({ paths: [viaPath(600_000)] }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'car', undefined, [via]));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+
+    const callsBefore = h.route.mock.calls.length;
+    // Off the line near the start — the via (counted from the followed path's
+    // sign-5 maneuver at index 10) is still ahead of the snapped position.
+    for (let i = 0; i < 3; i++) {
+      act(() => h.emit({ lat: 60.01, lng: 10.005 + i * 0.0001, accuracyM: 5, speedMps: 15 }));
+    }
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 1));
+    const [rerouteQuery] = h.route.mock.calls.at(-1)!;
+    expect(rerouteQuery.points).toHaveLength(3);
+    expect(rerouteQuery.points[1]).toEqual(via);
+    expect(hook.result.current.viaPoints).toEqual([via]);
+  });
+});
+
 describe('useNavigationController — walking modes', () => {
   /** Start a foot trip and begin guidance. */
   async function walk(h: Harness) {

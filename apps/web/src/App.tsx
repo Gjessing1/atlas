@@ -188,13 +188,13 @@ export function App() {
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
   const onStartNavigation = useCallback(
-    (dest: LatLng) => {
+    (dest: LatLng, viaPoints: LatLng[]) => {
       setPin(null);
       setTarget(null);
       const profile = route.profile;
       const preferences = route.preferences;
       stopRoute(); // navigation owns the map now; a plan would fight it
-      void startNav(dest, profile, preferences);
+      void startNav(dest, profile, preferences, viaPoints);
     },
     [route.profile, route.preferences, startNav, stopRoute],
   );

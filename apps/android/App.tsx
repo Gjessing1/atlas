@@ -384,7 +384,7 @@ function AppInner() {
 
   /** Start guidance to the planner's destination in the chosen road profile. */
   const startNavigation = useCallback(
-    (target: LatLng) => {
+    (target: LatLng, viaPoints: LatLng[]) => {
       // Route selection moves from the planner to Navigation's route-choice
       // preview. Close the planner immediately so it cannot cover that sheet,
       // and so its background route/mode requests are cancelled while
@@ -392,7 +392,7 @@ function AppInner() {
       const profile = route.profile;
       const preferences = route.preferences;
       route.stop();
-      void nav.start(target, profile, preferences);
+      void nav.start(target, profile, preferences, viaPoints);
     },
     [nav, route],
   );

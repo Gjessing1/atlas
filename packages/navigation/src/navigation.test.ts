@@ -354,6 +354,75 @@ describe('NavigationSession voice prompts', () => {
   });
 });
 
+describe('NavigationSession via stops (multi-stop trips)', () => {
+  const viaAlong = routeCum[10]!;
+  const viaRoute: RoutePath = {
+    points: routePoints,
+    distanceM: routeTotal,
+    timeMs: 120_000,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [
+      {
+        text: 'Head east',
+        distanceM: viaAlong,
+        timeMs: 60_000,
+        sign: 0,
+        streetName: 'Main Street',
+        interval: [0, 10],
+      },
+      {
+        text: 'Arrive at via point',
+        distanceM: 0,
+        timeMs: 0,
+        sign: 5,
+        interval: [10, 10],
+        verbal: {
+          alert: 'You will arrive at your via point',
+          pre: 'You will arrive at your via point',
+          succinct: 'You have arrived at your via point',
+        },
+      },
+      {
+        text: 'Continue east',
+        distanceM: routeTotal - viaAlong,
+        timeMs: 60_000,
+        sign: 0,
+        streetName: 'Main Street',
+        interval: [10, 20],
+      },
+      { text: 'Arrive at destination', distanceM: 0, timeMs: 0, sign: 4, interval: [20, 20] },
+    ],
+  };
+
+  it('counts via stops as they are passed — the reroute drop signal', () => {
+    const s = new NavigationSession(viaRoute);
+    expect(s.update(pointAtAlong(routeCum[5]!), 0).state.viasPassed).toBe(0);
+    // Just short of the stop still counts as ahead.
+    expect(s.update(pointAtAlong(viaAlong - 30), 1000).state.viasPassed).toBe(0);
+    expect(s.update(pointAtAlong(routeCum[12]!), 2000).state.viasPassed).toBe(1);
+  });
+
+  it('reads 0 for the whole of an ordinary single-destination trip', () => {
+    const s = new NavigationSession(route());
+    expect(s.update(pointAtAlong(routeCum[15]!), 0).state.viasPassed).toBe(0);
+  });
+
+  it('announces the via arrival through the ordinary prompt phases', () => {
+    const s = new NavigationSession(viaRoute);
+    const approach = s.update(pointAtAlong(viaAlong - 150), 0).prompts;
+    expect(approach).toHaveLength(1);
+    expect(approach[0]!.text).toBe('In 150 meters, You will arrive at your via point');
+    const now = s.update(pointAtAlong(viaAlong - 10), 0).prompts;
+    expect(now).toHaveLength(1);
+    expect(now[0]).toMatchObject({ kind: 'now', text: 'You have arrived at your via point' });
+    // Passing the stop must not end the trip — guidance continues to the end.
+    const after = s.update(pointAtAlong(routeCum[12]!), 0).state;
+    expect(after.status).toBe('navigating');
+    expect(after.upcoming?.instruction.sign).toBe(4);
+  });
+});
+
 describe('NavigationSession snapped state', () => {
   it('hugs the road for a near fix, keeping the raw fix as-is', () => {
     const s = new NavigationSession(route());

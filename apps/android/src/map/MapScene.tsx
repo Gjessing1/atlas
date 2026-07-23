@@ -642,6 +642,15 @@ export function MapScene({
             <View style={styles.regionCorner} />
           </Marker>
         ) : null}
+        {/* Via stops still ahead on a multi-stop trip: dots on the line,
+            quieter than the destination flag; each disappears once passed. */}
+        {nav.destination
+          ? nav.viaPoints.slice(nav.state?.viasPassed ?? 0).map((via, i) => (
+              <Marker key={`nav-via-${i}`} lngLat={[via.lng, via.lat]} anchor="center">
+                <View style={styles.navVia} />
+              </Marker>
+            ))
+          : null}
         {nav.destination ? (
           <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
             <View style={pinScaleStyle}>
@@ -714,6 +723,15 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#fff',
     elevation: 4,
+  },
+  navVia: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#1557b0',
+    borderWidth: 3,
+    borderColor: '#fff',
+    elevation: 3,
   },
   regionCorner: {
     width: 18,

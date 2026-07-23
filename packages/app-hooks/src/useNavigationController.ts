@@ -104,6 +104,13 @@ export interface NavController {
   profile: RoutingProfile;
   /** Where the trip is headed (for the finish marker); null when idle. */
   destination: LatLng | null;
+  /**
+   * Intermediate stops the active route runs through, in visiting order —
+   * the planner's via points on a multi-stop trip. Stops already passed at
+   * the last (re)route are dropped, so for map markers render
+   * `viaPoints.slice(state?.viasPassed ?? 0)`. Empty for ordinary trips.
+   */
+  viaPoints: LatLng[];
   /** Route choices while in the preview phase (fastest first); null otherwise. */
   previewPaths: RoutePath[] | null;
   /** Index into previewPaths of the choice guidance will follow. */
@@ -138,11 +145,17 @@ export interface NavController {
   /** True while off-route but the reroute keeps failing (routing unreachable). */
   rerouteFailed: boolean;
   error: string | null;
-  /** Look up route choices to a destination and enter the preview phase. */
+  /**
+   * Look up route choices to a destination and enter the preview phase.
+   * `vias` are stops to visit on the way (the planner's intermediate
+   * waypoints); guidance announces each and reroutes only through the ones
+   * still ahead.
+   */
   start: (
     destination: LatLng,
     profile?: RoutingProfile,
     preferences?: Partial<RoutePreferences>,
+    vias?: LatLng[],
   ) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
   selectPreview: (index: number) => void;
@@ -193,6 +206,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [activePath, setActivePath] = useState<RoutePath | null>(null);
   const [profile, setProfileState] = useState<RoutingProfile>('car');
   const [destination, setDestination] = useState<LatLng | null>(null);
+  const [viaPoints, setViaPoints] = useState<LatLng[]>([]);
   const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -207,6 +221,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   const sessionRef = useRef<NavigationSession | null>(null);
   const destRef = useRef<LatLng | null>(null);
+  /** Via stops the *current* route still visits; passed ones are dropped on reroute. */
+  const viasRef = useRef<LatLng[]>([]);
   /** The fix the preview was built from: refetch origin, and the seed for Start. */
   const originRef = useRef<NavOriginFix | null>(null);
   /** Guards preview fetches: a late response for an abandoned one is dropped. */
@@ -287,10 +303,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
       prof: RoutingProfile,
       preferences?: Partial<RoutePreferences>,
       headingDeg?: number,
+      vias: LatLng[] = [],
     ): Promise<RoutePath> => {
       const result = await platformRef.current.provider.route({
         profile: prof,
-        points: [origin, dest],
+        points: [origin, ...vias, dest],
         instructions: true,
         ...(preferences ? { preferences } : {}),
         ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
@@ -309,10 +326,13 @@ export function useNavigationController(platform: NavPlatform): NavController {
       dest: LatLng,
       prof: RoutingProfile,
       preferences?: Partial<RoutePreferences>,
+      vias: LatLng[] = [],
     ): Promise<RoutePath[]> => {
+      // With via stops the engine offers no alternates (a Valhalla limit for
+      // multi-point queries), so the preview simply shows the one path.
       const result = await platformRef.current.provider.route({
         profile: prof,
-        points: [origin, dest],
+        points: [origin, ...vias, dest],
         instructions: true,
         alternatives: true,
         ...(preferences ? { preferences } : {}),
@@ -374,6 +394,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
       enrichAbort.current = null;
       sessionRef.current = null;
       destRef.current = null;
+      viasRef.current = [];
+      setViaPoints([]);
       originRef.current = null;
       preferencesRef.current = undefined;
       startInFlight.current = false;
@@ -408,6 +430,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
       clearPreview();
       sessionRef.current = null;
       destRef.current = null;
+      viasRef.current = [];
+      setViaPoints([]);
       originRef.current = null;
       preferencesRef.current = undefined;
       setDestination(null);
@@ -461,12 +485,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // route continues the way the traveller points, not via a U-turn.
         const heading =
           typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
+        // Route through the stops still ahead only — a via already visited
+        // must not pull the recalculated route back to it. The trimmed list
+        // becomes authoritative only if this reroute succeeds; on failure the
+        // old session (and its own passed-count) lives on.
+        const passedVias = lastStateRef.current?.viasPassed ?? 0;
+        const remainingVias = passedVias > 0 ? viasRef.current.slice(passedVias) : viasRef.current;
         const path = await fetchPath(
           from,
           destRef.current,
           profileRef.current,
           preferencesRef.current,
           heading,
+          remainingVias,
         );
         // End, arrival or a whole new trip may have happened during the fetch;
         // applying now would resurrect a dead nav UI with a fresh session.
@@ -484,6 +515,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
         );
         if (previousSession) nextSession.inheritPaceFrom(previousSession);
         sessionRef.current = nextSession;
+        viasRef.current = remainingVias;
+        setViaPoints(remainingVias);
         setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
         setActivePath(path);
         rerouteFailCount.current = 0;
@@ -580,7 +613,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   const start = useCallback(
-    async (dest: LatLng, prof: RoutingProfile = 'car', preferences?: Partial<RoutePreferences>) => {
+    async (
+      dest: LatLng,
+      prof: RoutingProfile = 'car',
+      preferences?: Partial<RoutePreferences>,
+      vias: LatLng[] = [],
+    ) => {
       if (startInFlight.current) return;
       startInFlight.current = true;
       const seq = ++previewSeq.current;
@@ -591,6 +629,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (seq !== previewSeq.current) return;
 
         destRef.current = dest;
+        viasRef.current = vias;
+        setViaPoints(vias);
         originRef.current = origin;
         profileRef.current = prof;
         preferencesRef.current = preferences;
@@ -608,7 +648,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
         // Route choices: the fastest plus up to two alternatives, offered
         // before guidance starts. Selecting nothing keeps the fastest.
-        const paths = await fetchChoices(origin.fix, dest, prof, preferences);
+        const paths = await fetchChoices(origin.fix, dest, prof, preferences, vias);
         if (seq !== previewSeq.current) return;
         setPreviewPaths(paths);
         setPreviewIndex(0);
@@ -636,7 +676,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setPreviewError(null);
       void (async () => {
         try {
-          const paths = await fetchChoices(origin.fix, dest, prof);
+          // The stops are the plan; only the costing changes with the profile.
+          const paths = await fetchChoices(origin.fix, dest, prof, undefined, viasRef.current);
           if (seq !== previewSeq.current) return;
           profileRef.current = prof;
           preferencesRef.current = undefined;
@@ -676,6 +717,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
             dest,
             profileRef.current,
             preferencesRef.current,
+            viasRef.current,
           );
           if (seq !== previewSeq.current) return;
           path = choices[index] ?? choices[0] ?? previewPath;
@@ -838,6 +880,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     activePath,
     profile,
     destination,
+    viaPoints,
     previewPaths,
     previewIndex,
     previewLoading,

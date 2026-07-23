@@ -126,6 +126,13 @@ export interface NavState {
    * so starting guidance from a car park doesn't pretend driving has begun.
    */
   departed: boolean;
+  /**
+   * How many of the trip's via stops (sign-5 maneuvers) lie behind the current
+   * position. A multi-stop reroute must route through the *remaining* stops
+   * only, and this is the counter that says which those are; 0 for the whole
+   * trip on an ordinary single-destination route.
+   */
+  viasPassed: number;
   /** Whether this position is a live fix, an extrapolation, or signal-lost. */
   fix: NavFix;
   /**

@@ -279,11 +279,12 @@ export function RoutePanel({
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
   /**
-   * Start turn-by-turn to the last stop in the current profile. This panel is
-   * the only place a travel mode is chosen, so it is also the only place
-   * guidance starts from — the place card just points here.
+   * Start turn-by-turn to the last stop in the current profile, via the plan's
+   * intermediate stops. This panel is the only place a travel mode is chosen,
+   * so it is also the only place guidance starts from — the place card just
+   * points here.
    */
-  onNavigate: (destination: LatLng) => void;
+  onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
   /** Collapse the planner and frame this selected journey on the map. */
   onShowTransitTrip: (trip: TransitTrip) => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
@@ -688,7 +689,15 @@ export function RoutePanel({
           <Pressable
             style={[styles.navigate, !destination && styles.buttonDisabled]}
             disabled={!destination}
-            onPress={() => destination && onNavigate(destination)}
+            // Guidance replaces the planned origin with the live position, so
+            // the stops between first and last ride along as via points.
+            onPress={() =>
+              destination &&
+              onNavigate(
+                destination,
+                stops.slice(1, -1).map((w) => w.pos),
+              )
+            }
             testID="route-navigate"
           >
             <Text style={styles.navigateText}>Start navigation</Text>
