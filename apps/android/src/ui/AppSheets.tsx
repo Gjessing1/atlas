@@ -2,6 +2,7 @@ import type { LatLng } from '@atlas/core';
 import type { SyncState, ThemeModeController } from '@atlas/app-hooks';
 
 import type { OverlaysController } from '../layers/useOverlays';
+import type { TileSource } from '../map/useTileSource';
 import type { LocalPack } from '../regions/packs';
 import type { ImportOptions, ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
@@ -31,6 +32,8 @@ interface AppSheetsProps {
   overlays: OverlaysController;
   settingsOpen: boolean;
   onCloseSettings: () => void;
+  /** Basemap tile source — Settings owns the "stream tiles anyway" switch. */
+  tiles: TileSource;
   appearance: ThemeModeController;
 
   /** Coords awaiting a name before they're saved as a pin (name-on-save prompt). */
@@ -65,6 +68,7 @@ export function AppSheets({
   overlays,
   settingsOpen,
   onCloseSettings,
+  tiles,
   appearance,
   pendingPin,
   onDismissPendingPin,
@@ -132,6 +136,7 @@ export function AppSheets({
         packs={packs}
         onPacksChanged={onPacksChanged}
         storage={data.storage}
+        tiles={tiles}
         onExportAll={() => void data.exportAll()}
         appearance={appearance}
         bottomInset={bottomInset}

@@ -19,7 +19,6 @@ import {
   BackHandler,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   useColorScheme,
   useWindowDimensions,
@@ -38,6 +37,7 @@ import { useMapPress } from './src/map/useMapPress';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
+import { useTileSource } from './src/map/useTileSource';
 import type { LocalPack } from './src/regions/packs';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
@@ -130,7 +130,6 @@ function AppInner() {
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
-  const [forceOffline, setForceOffline] = useState(false);
   const [navHeight, setNavHeight] = useState(0);
   // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
   const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
@@ -393,11 +392,13 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
 
-  const offlinePack = packs.find((p) => p.manifest.files.basemap);
+  // Downloaded tiles win wherever a pack covers the view (Settings can force
+  // server tiles); everything else — search, routing, weather — stays online-first.
+  const tiles = useTileSource(data, packs, camera.viewCenter);
   const { mapStyle, originReady, useOffline } = useMapStyle(
     data.storage,
-    offlinePack,
-    forceOffline,
+    tiles.coveringPack,
+    tiles.preferOnline,
     mapAppearance,
     refreshPacks,
   );
@@ -538,18 +539,11 @@ function AppInner() {
             { bottom: bottomInset + 116, marginLeft: side.left, marginRight: side.right },
           ]}
         >
-          <Text style={styles.offlineBadgeText}>offline map: {offlinePack?.manifest.name}</Text>
+          <Text style={styles.offlineBadgeText}>
+            offline map: {tiles.coveringPack?.manifest.name}
+          </Text>
         </View>
       ) : null}
-      {packs.length > 0 && showIdleChrome ? (
-        // Stacked above the bottom-right locate button. Hidden mid-trip: the
-        // offline fallback is automatic (useMapStyle), the switch only forces it.
-        <View style={[styles.offlineToggle, { bottom: bottomInset + 84, right: side.right + 12 }]}>
-          <Text style={styles.offlineToggleText}>Offline</Text>
-          <Switch value={forceOffline} onValueChange={setForceOffline} testID="force-offline" />
-        </View>
-      ) : null}
-
       {data.status === 'error' ? (
         <View
           style={[
@@ -659,6 +653,7 @@ function AppInner() {
         layersOpen={layersOpen}
         onCloseLayers={() => setLayersOpen(false)}
         overlays={overlaysCtl}
+        tiles={tiles}
         settingsOpen={settingsOpen}
         onCloseSettings={() => setSettingsOpen(false)}
         appearance={appearance}
@@ -735,19 +730,6 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   offlineBadgeText: { color: theme.text, fontSize: 12 },
-  offlineToggle: {
-    position: 'absolute',
-    bottom: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.surface,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    elevation: 4,
-    gap: 6,
-  },
-  offlineToggleText: { fontSize: 13, color: theme.textMuted },
   banner: {
     position: 'absolute',
     top: 100,

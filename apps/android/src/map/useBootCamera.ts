@@ -36,6 +36,12 @@ export interface BootCamera {
   mapZoom: number;
   /** Snapped viewport key for on-map overlay labels (see labelCellFor). */
   labelCell: string | null;
+  /**
+   * Where the map is looking, rounded to ~1 km. Coarse on purpose: it decides
+   * which offline pack covers the view, and that answer must not re-render the
+   * app on every pixel of a pan.
+   */
+  viewCenter: LatLng | null;
   onViewChange: (view: MapView) => void;
   /** Viewport bias for geocoding (web parity: SearchBox sends lat/lon). */
   getBias: () => Promise<LatLng | null>;
@@ -72,6 +78,7 @@ export function useBootCamera(
   const [initialView, setInitialView] = useState<MapView | null>(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
   const [labelCell, setLabelCell] = useState<string | null>(null);
+  const [viewCenter, setViewCenter] = useState<LatLng | null>(null);
   const viewRef = useRef<MapView | null>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -121,6 +128,9 @@ export function useBootCamera(
       viewRef.current = view;
       setMapZoom(Math.round(view.zoom));
       setLabelCell(labelCellFor(view.center, view.zoom, Dimensions.get('window')));
+      const lat = Math.round(view.center.lat * 100) / 100;
+      const lng = Math.round(view.center.lng * 100) / 100;
+      setViewCenter((prev) => (prev && prev.lat === lat && prev.lng === lng ? prev : { lat, lng }));
       if (persistTimer.current) clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(() => {
         setSetting(
@@ -138,5 +148,5 @@ export function useBootCamera(
 
   const getBias = useCallback(async () => viewRef.current?.center ?? null, []);
 
-  return { initialView, viewRef, mapZoom, labelCell, onViewChange, getBias };
+  return { initialView, viewRef, mapZoom, labelCell, viewCenter, onViewChange, getBias };
 }

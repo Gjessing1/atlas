@@ -14,11 +14,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
+import type { TileSource } from '../map/useTileSource';
 import type { LocalPack } from '../regions/packs';
 import { deletePack, downloadPack, fetchAvailableRegions } from '../regions/packs';
 import { closeEngine } from '../routing/offlineRouting';
@@ -439,6 +441,34 @@ function UpdateSection() {
   );
 }
 
+/**
+ * The tile source, stated plainly and with the one lever that changes it.
+ * Downloaded tiles are the default wherever a pack reaches, so the switch is
+ * the exception — for a pack the user knows has gone stale — not the everyday
+ * control it used to be as a map-view toggle.
+ */
+function TilesSection({ tiles }: { tiles: TileSource }) {
+  return (
+    <View>
+      <View style={styles.switchRow}>
+        <Text style={styles.rowText}>Always stream map tiles</Text>
+        <Switch
+          value={tiles.preferOnline}
+          onValueChange={tiles.setPreferOnline}
+          testID="prefer-online-tiles"
+        />
+      </View>
+      <Text style={styles.muted}>
+        {tiles.preferOnline
+          ? 'Tiles come from the server; downloaded regions are used only when it is unreachable.'
+          : tiles.coveringPack
+            ? `Drawing downloaded tiles from ${tiles.coveringPack.manifest.name}.`
+            : 'Downloaded regions are used automatically wherever they cover the map.'}
+      </Text>
+    </View>
+  );
+}
+
 export function SettingsSheet({
   visible,
   onClose,
@@ -446,6 +476,7 @@ export function SettingsSheet({
   packs,
   onPacksChanged,
   storage,
+  tiles,
   onExportAll,
   appearance,
   bottomInset = 0,
@@ -456,6 +487,8 @@ export function SettingsSheet({
   packs: LocalPack[];
   onPacksChanged: () => void;
   storage: AtlasStorage | null;
+  /** Which basemap tiles are being drawn, and the switch that forces streaming. */
+  tiles: TileSource;
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
   onExportAll: () => void;
   appearance: ThemeModeController;
@@ -496,6 +529,8 @@ export function SettingsSheet({
         <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
         <Text style={styles.heading}>Account</Text>
         <AccountSection sync={sync} />
+        <Text style={styles.heading}>Map tiles</Text>
+        <TilesSection tiles={tiles} />
         <Text style={styles.heading}>Offline regions</Text>
         <RegionsSection packs={packs} onPacksChanged={onPacksChanged} />
         <Text style={styles.heading}>Server</Text>
@@ -546,6 +581,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 8, alignItems: 'center' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   button: {
     backgroundColor: theme.accent,
     borderRadius: 8,

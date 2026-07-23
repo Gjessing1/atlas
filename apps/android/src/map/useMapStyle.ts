@@ -12,17 +12,18 @@ import type { LocalPack } from '../regions/packs';
 import { hydrateServerOrigin, useServerOrigin } from '../serverOrigin';
 
 /**
- * Resolves the style the map should render, offline first: the local pack when
- * the server is unreachable (or offline is forced), otherwise the server-hosted
- * style; the public fallback style keeps the map usable bare. `mapStyle` stays
- * null (and `originReady` false) until the persisted server override has been
- * loaded, so the first health check / style fetch already targets the
- * configured server.
+ * Resolves the style the map should render, offline first: the downloaded pack
+ * whenever one covers the view, otherwise the server-hosted style, with the
+ * public fallback style keeping the map usable bare. `preferOnline` (a Settings
+ * switch, for a pack the user knows is stale) flips that round — but a pack
+ * still takes over when the server can't be reached. `mapStyle` stays null (and
+ * `originReady` false) until the persisted server override has been loaded, so
+ * the first health check / style fetch already targets the configured server.
  */
 export function useMapStyle(
   storage: AtlasStorage | null,
   offlinePack: LocalPack | undefined,
-  forceOffline: boolean,
+  preferOnline: boolean,
   appearance: MapAppearance,
   /** Called once the server origin is ready and on origin changes (pack refresh). */
   onOriginLive: () => void,
@@ -47,7 +48,7 @@ export function useMapStyle(
     onOriginLive();
   }, [originReady, serverOrigin, onOriginLive]);
 
-  const useOffline = Boolean((forceOffline || serverUp === false) && offlinePack && template);
+  const useOffline = Boolean((!preferOnline || serverUp === false) && offlinePack && template);
   const mapStyle = useMemo(() => {
     if (useOffline && offlinePack && template)
       return buildOfflineStyle(template, offlinePack.dir, appearance);
