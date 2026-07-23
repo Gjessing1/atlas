@@ -57,7 +57,7 @@ import { useTransitPlan } from './src/routing/useTransit';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard } from './src/ui/DestinationCard';
 import { useDestination } from './src/ui/useDestination';
-import { CrosshairIcon } from './src/ui/icons';
+import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
 import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
@@ -528,20 +528,24 @@ function AppInner() {
         />
       ) : null}
 
-      {useOffline && showIdleChrome ? (
+      {useOffline && showIdleChrome && tiles.showOfflineBadge ? (
         // Above the scalebar strip (bottom-centre) so the two never overlap.
         // Hidden mid-trip: in landscape the bottom offsets put it across the
         // middle of the map, and which tile source is in use is not something
         // a driver needs told while the banner and road chip own the screen.
+        // Icon only: which pack is drawing is a Settings detail, and the badge
+        // was reading as a label on the map rather than as status.
         <View
           style={[
             styles.offlineBadge,
             { bottom: bottomInset + 116, marginLeft: side.left, marginRight: side.right },
           ]}
+          accessibilityLabel={`Offline map${
+            tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
+          }`}
+          testID="offline-badge"
         >
-          <Text style={styles.offlineBadgeText}>
-            offline map: {tiles.coveringPack?.manifest.name}
-          </Text>
+          <CloudOffIcon />
         </View>
       ) : null}
       {data.status === 'error' ? (
@@ -724,12 +728,13 @@ const styles = StyleSheet.create({
     bottom: 96,
     alignSelf: 'center',
     backgroundColor: theme.surfaceOverlay,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    borderRadius: 15,
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
     elevation: 2,
   },
-  offlineBadgeText: { color: theme.text, fontSize: 12 },
   banner: {
     position: 'absolute',
     top: 100,

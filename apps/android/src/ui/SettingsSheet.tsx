@@ -465,6 +465,17 @@ function TilesSection({ tiles }: { tiles: TileSource }) {
             ? `Drawing downloaded tiles from ${tiles.coveringPack.manifest.name}.`
             : 'Downloaded regions are used automatically wherever they cover the map.'}
       </Text>
+      <View style={styles.switchRow}>
+        <Text style={styles.rowText}>Show offline map badge</Text>
+        <Switch
+          value={tiles.showOfflineBadge}
+          onValueChange={tiles.setShowOfflineBadge}
+          testID="offline-badge-toggle"
+        />
+      </View>
+      <Text style={styles.muted}>
+        A small cloud icon above the scale bar while the map draws from downloaded tiles.
+      </Text>
     </View>
   );
 }

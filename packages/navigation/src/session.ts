@@ -368,7 +368,11 @@ export class NavigationSession {
         displayAlongM = Math.min(this.totalM, alongM + aheadM);
       }
       shown = pointAtDistance(this.points, this.cum, displayAlongM);
-      shownCourse = this.courseAt(displayAlongM, speedMps);
+      // Bearing from where the vehicle actually is, not from the projected
+      // display point: the projection exists to cancel render latency in the
+      // *position*, and letting it drive the bearing too made the course-up
+      // camera start turning while the car was still short of the bend.
+      shownCourse = this.courseAt(alongM, speedMps);
     } else {
       shown = { lat: position.lat, lng: position.lng };
       // Off the line the route tangent is a lie; the GPS course (when moving)
@@ -643,11 +647,26 @@ export class NavigationSession {
    * clamped to 25..60 m — so a fast course-up camera starts leaning into a
    * bend earlier while low-speed turns stay tight.
    */
+  /**
+   * The route's heading *at* a position — the direction the vehicle is
+   * pointing right now, which is what a course-up camera and the puck's
+   * chevron both mean. Deliberately a short window centred on the position
+   * rather than a chord reaching ahead: a forward chord long enough to be
+   * smooth (tens of metres) already spans the next bend while the vehicle is
+   * still on the straight before it, so the map visibly swung round before the
+   * car did. Centred, the bearing only starts to turn as the corner enters the
+   * window, and the camera's own easing carries the rest.
+   */
   private courseAt(alongM: number, speedMps: number | null): number | null {
     if (this.points.length < 2 || this.totalM <= 0) return null;
-    const LOOKAHEAD_M = Math.min(60, Math.max(25, (speedMps ?? 0) * 1.5));
-    const from = Math.min(alongM, Math.max(0, this.totalM - LOOKAHEAD_M));
-    const to = Math.min(this.totalM, from + LOOKAHEAD_M);
+    // A window rather than the raw segment bearing: route polylines have
+    // vertices every few metres, and one short segment's bearing jitters.
+    // Scales gently with speed — a motorway needs more averaging than a
+    // car park — but stays small enough not to anticipate the turn.
+    const SPAN_M = Math.min(30, Math.max(14, (speedMps ?? 0) * 0.8));
+    const half = SPAN_M / 2;
+    const from = Math.min(Math.max(0, alongM - half), Math.max(0, this.totalM - SPAN_M));
+    const to = Math.min(this.totalM, from + SPAN_M);
     if (to <= from) return null;
     return bearingDeg(
       pointAtDistance(this.points, this.cum, from),

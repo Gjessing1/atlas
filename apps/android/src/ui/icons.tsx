@@ -169,6 +169,26 @@ const sStyles = StyleSheet.create({
   },
 });
 
+/**
+ * Cloud with a slash through it — "the map is not coming from the server".
+ * Used as the offline-tiles badge, where the pack's name (which the badge used
+ * to spell out) is a detail for Settings, not for the map.
+ */
+export function CloudOffIcon({ color = theme.icon }: { color?: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M7 18.5h10.3a3.5 3.5 0 0 0 .3-7 5.2 5.2 0 0 0-9.6-1.6 4.2 4.2 0 0 0-2.2.7 4 4 0 0 0 1.2 7.9z"
+        fill="none"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Path d="M4 3.5 20.5 20" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 /** Three-bar hamburger for the bottom-left menu button. */
 export function MenuIcon({ color = theme.icon }: { color?: string }) {
   return (

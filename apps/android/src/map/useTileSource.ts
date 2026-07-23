@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { LocalPack } from '../regions/packs';
 
-/** Device-local preference — `local.` keys never sync (see CLAUDE.md). */
+/** Device-local preferences — `local.` keys never sync (see CLAUDE.md). */
 const ONLINE_TILES_SETTING = 'local.map.online-tiles';
+const OFFLINE_BADGE_SETTING = 'local.map.offline-badge';
 
 export interface TileSourceSettings {
   status: string;
@@ -25,6 +26,13 @@ export interface TileSource {
    */
   preferOnline: boolean;
   setPreferOnline: (value: boolean) => void;
+  /**
+   * Whether the map corner shows the offline-tiles badge. On by default — it
+   * is a small icon, and knowing the map is drawing from disk explains a stale
+   * or label-less basemap — but it is pure status, so it can be switched off.
+   */
+  showOfflineBadge: boolean;
+  setShowOfflineBadge: (value: boolean) => void;
 }
 
 /**
@@ -57,12 +65,16 @@ export function useTileSource(
 ): TileSource {
   const { status, getSetting, setSetting } = settings;
   const [preferOnline, setPreferOnlineState] = useState(false);
+  const [showOfflineBadge, setShowOfflineBadgeState] = useState(true);
 
   useEffect(() => {
     if (status !== 'ready') return;
     let cancelled = false;
     void getSetting(ONLINE_TILES_SETTING).then((raw) => {
       if (!cancelled && raw != null) setPreferOnlineState(raw === 'true');
+    });
+    void getSetting(OFFLINE_BADGE_SETTING).then((raw) => {
+      if (!cancelled && raw != null) setShowOfflineBadgeState(raw !== 'false');
     });
     return () => {
       cancelled = true;
@@ -77,6 +89,14 @@ export function useTileSource(
     [setSetting],
   );
 
+  const setShowOfflineBadge = useCallback(
+    (value: boolean) => {
+      setShowOfflineBadgeState(value);
+      setSetting(OFFLINE_BADGE_SETTING, String(value));
+    },
+    [setSetting],
+  );
+
   const coveringPack = useMemo(() => packCoveringView(packs, center), [packs, center]);
-  return { coveringPack, preferOnline, setPreferOnline };
+  return { coveringPack, preferOnline, setPreferOnline, showOfflineBadge, setShowOfflineBadge };
 }

@@ -639,10 +639,10 @@ describe('NavigationSession wrong-way detection', () => {
 });
 
 // A mini-roundabout: 100 m approach east → a full ring of radius `RA_R` taken
-// counter-clockwise → 100 m exit. `courseAt` reads the route direction from a
-// straight chord 25..60 m ahead, which on a ring this tight cuts clean across
-// the island — so the chord and the kerb the driver is actually following can
-// oppose each other by more than `wrongWayDeg` for several fixes running.
+// counter-clockwise → 100 m exit. The tightest geometry a route course has to
+// survive: the ring is barely longer than `courseAt`'s window, so a window
+// that reached forward instead of sitting centred would cut across the island
+// and read as driving into the traffic.
 const RA_R = 5;
 const RA_APPROACH_M = 100;
 const RA_ARC = 2 * Math.PI;
@@ -740,15 +740,24 @@ describe('NavigationSession wrong-way in a roundabout', () => {
   }
 
   it('does not reroute a driver going correctly round a mini-roundabout', () => {
-    // Without the roundabout sign this exact drive trips off-route (below), so
-    // the ring geometry really does provoke it — the sign is what saves it.
     const seen = drive(roundaboutRoute(6), RA_APPROACH_M, RA_APPROACH_M + RA_RING_M, 4);
     expect(seen).not.toContain('off-route');
   });
 
-  it('the same ring without a roundabout sign is what the fix suppresses', () => {
+  it('holds even unsigned, because the course window no longer cuts the island', () => {
+    // Belt and braces: the roundabout sign suppresses the wrong-way check, but
+    // a centred course window means the ring reads correctly without it too.
     const seen = drive(roundaboutRoute(0), RA_APPROACH_M, RA_APPROACH_M + RA_RING_M, 4);
-    expect(seen).toContain('off-route');
+    expect(seen).not.toContain('off-route');
+  });
+
+  it('reports the kerb heading, not a chord across the ring', () => {
+    const s = new NavigationSession(roundaboutRoute(6), { startDeparted: true });
+    // A quarter of the way round, heading is the tangent there — a forward
+    // chord would have been most of a lap out.
+    const at = raAt(RA_APPROACH_M + RA_RING_M / 4);
+    const course = s.update({ ...at.pos, speedMps: 4, accuracyM: 5 }, 0).state.courseDeg;
+    expect(Math.abs(((course! - at.headingDeg + 540) % 360) - 180)).toBeLessThan(20);
   });
 
   it('still catches a genuine wrong-way drive on the road after the ring', () => {
