@@ -12,6 +12,13 @@ import type { BBox } from './geo.js';
 export interface RegionPackFile {
   path: string;
   bytes: number;
+  /**
+   * Lowercase-hex SHA-256 of the file exactly as served. Written by packs built
+   * after this field was introduced; older manifests omit it, in which case a
+   * client can only size-check. Lets a same-size-but-corrupt download be caught
+   * before it is allowed to replace a known-good pack.
+   */
+  sha256?: string;
 }
 
 export interface RegionPackManifest {

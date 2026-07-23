@@ -2,7 +2,6 @@ import type { NavController, NavFollowMode } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import { navCameraStyle, tunnelChipLabel } from '@atlas/navigation';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
 import { NavArrowIcon } from '../ui/icons';
 import { theme } from '../ui/theme';
@@ -87,29 +86,6 @@ export interface NavChromeProps {
 }
 
 /**
- * The compass uncertainty beam: a sector radiating from the puck, spread to
- * the sensor's own ± accuracy — a cone, not a hard arrow, because the compass
- * deserves exactly as much confidence as it reports. Drawn only while the
- * compass owns the heading (walking modes at walking pace).
- */
-function FacingBeam({ halfDeg }: { halfDeg: number }) {
-  const r = 44;
-  const rad = (halfDeg * Math.PI) / 180;
-  const x = r * Math.sin(rad);
-  const y = r * Math.cos(rad);
-  const large = halfDeg > 90 ? 1 : 0;
-  return (
-    <Svg width={96} height={96} viewBox="0 0 96 96">
-      <Path
-        d={`M48 48 L${48 - x} ${48 - y} A${r} ${r} 0 ${large} 1 ${48 + x} ${48 - y} Z`}
-        fill={theme.accent}
-        fillOpacity={0.22}
-      />
-    </Svg>
-  );
-}
-
-/**
  * The map chrome that belongs to an active trip: the position chevron, the
  * current-road chip and the re-centre pill. The orientation and overview
  * controls live in NavBanner so every control in the guidance rail shares one
@@ -126,16 +102,6 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
           pointerEvents="none"
           style={[styles.navPuckWrap, { top: puck.y - 21, left: puck.x - 21 }]}
         >
-          {nav.facingDeg !== null ? (
-            <View style={[styles.facingBeam, { transform: [{ rotate: `${puck.rotation}deg` }] }]}>
-              <FacingBeam
-                halfDeg={Math.min(
-                  60,
-                  Math.max(15, Math.round((nav.facingAccuracyDeg ?? 30) / 15) * 15),
-                )}
-              />
-            </View>
-          ) : null}
           <View style={{ transform: [{ rotate: `${puck.rotation}deg` }] }}>
             {/* Grey when the GPS signal is lost, so a frozen puck reads as
                 "no signal", not "we're still here". */}
@@ -185,9 +151,6 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
 }
 
 const styles = StyleSheet.create({
-  // 96 px beam centred on the 42 px puck wrap; rotates about its own centre,
-  // which the offsets place exactly on the puck's.
-  facingBeam: { position: 'absolute', top: -27, left: -27, width: 96, height: 96 },
   navPuckWrap: {
     position: 'absolute',
     width: 42,

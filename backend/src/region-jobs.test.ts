@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -104,6 +105,10 @@ describe('custom offline-region jobs', () => {
     expect(job?.manifest?.downloadBase).toBe(`/region-jobs/files/${id}`);
     expect(job?.manifest?.custom).toBe(true);
     expect(job?.manifest?.files.routing?.bytes).toBe(7);
+    // Every file carries a digest so the device can verify before swapping.
+    const digestOf = (s: string) => createHash('sha256').update(s).digest('hex');
+    expect(job?.manifest?.files.basemap?.sha256).toBe(digestOf('custom tiles'));
+    expect(job?.manifest?.files.routing?.sha256).toBe(digestOf('routing'));
 
     const tiles = await app.inject({ url: `/region-jobs/files/${id}/basemap.pmtiles` });
     expect(tiles.statusCode).toBe(200);

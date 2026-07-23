@@ -46,6 +46,7 @@ import { NavBanner } from './nav/NavBanner.js';
 import { RoutePreview } from './nav/RoutePreview.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
+import { getMyLocation } from './routing/geolocate.js';
 import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useDirections } from './routing/useDirections.js';
 import { useRoute } from './routing/useRoute.js';
@@ -737,6 +738,7 @@ export function App() {
             transit={transit}
             places={userData.places}
             getBias={getBias}
+            getMyLocation={getMyLocation}
             locatingOrigin={directions.locatingOrigin}
             onNavigate={onStartNavigation}
           />

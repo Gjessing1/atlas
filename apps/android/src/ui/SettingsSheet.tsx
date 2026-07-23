@@ -41,6 +41,7 @@ import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
+import { ChevronLeftIcon, ChevronRightIcon } from './icons';
 import { LayersContent } from './LayersSheet';
 import { MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
@@ -778,15 +779,22 @@ function ProfileSection({
   );
 }
 
-type SettingsTab = 'map' | 'profiles' | 'navigation' | 'offline' | 'account' | 'system';
+type SettingsSection =
+  'appearance' | 'layers' | 'tiles' | 'profiles' | 'navigation' | 'offline' | 'account' | 'system';
 
-const SETTINGS_TABS: readonly { id: SettingsTab; label: string }[] = [
-  { id: 'map', label: 'Map' },
-  { id: 'profiles', label: 'Profiles' },
-  { id: 'navigation', label: 'Navigation' },
-  { id: 'offline', label: 'Offline' },
-  { id: 'account', label: 'Account' },
-  { id: 'system', label: 'System' },
+const SETTINGS_SECTIONS: readonly {
+  id: SettingsSection;
+  label: string;
+  hint: string;
+}[] = [
+  { id: 'appearance', label: 'Appearance', hint: 'Theme, map colours and label sizes' },
+  { id: 'layers', label: 'Map layers', hint: 'Overlays drawn on top of the map' },
+  { id: 'tiles', label: 'Map tiles', hint: 'Streaming vs. downloaded basemap' },
+  { id: 'profiles', label: 'Activity profiles', hint: 'Switcher activities and their layers' },
+  { id: 'navigation', label: 'Navigation', hint: 'Readouts shown during guidance' },
+  { id: 'offline', label: 'Offline regions', hint: 'Download maps for offline use' },
+  { id: 'account', label: 'Account & data', hint: 'Sign in, sync and export' },
+  { id: 'system', label: 'System', hint: 'Server, status and app updates' },
 ];
 
 export function SettingsSheet({
@@ -828,7 +836,8 @@ export function SettingsSheet({
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
-  const [tab, setTab] = useState<SettingsTab>('map');
+  const [section, setSection] = useState<SettingsSection | null>(null);
+  const active = SETTINGS_SECTIONS.find((s) => s.id === section);
   return (
     <BottomSheet
       visible={visible}
@@ -837,30 +846,41 @@ export function SettingsSheet({
       bottomInset={bottomInset}
       testID="settings-sheet"
     >
-      <Text style={styles.title}>Settings</Text>
-      <ScrollView
-        horizontal
-        style={styles.tabs}
-        contentContainerStyle={styles.tabsContent}
-        showsHorizontalScrollIndicator={false}
-      >
-        {SETTINGS_TABS.map((item) => (
-          <Pressable
-            key={item.id}
-            style={[styles.tab, tab === item.id && styles.tabOn]}
-            onPress={() => setTab(item.id)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: tab === item.id }}
-            testID={`settings-tab-${item.id}`}
-          >
-            <Text style={[styles.tabText, tab === item.id && styles.tabTextOn]}>{item.label}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      {active ? (
+        <Pressable
+          style={styles.sectionHeader}
+          onPress={() => setSection(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Back to settings menu"
+          testID="settings-back"
+        >
+          <ChevronLeftIcon color={theme.accent} />
+          <Text style={[styles.title, styles.headerTitle]}>{active.label}</Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.title}>Settings</Text>
+      )}
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
-        {tab === 'map' ? (
+        {section === null
+          ? SETTINGS_SECTIONS.map((item) => (
+              <Pressable
+                key={item.id}
+                style={styles.menuRow}
+                onPress={() => setSection(item.id)}
+                accessibilityRole="button"
+                testID={`settings-open-${item.id}`}
+              >
+                <View style={styles.menuText}>
+                  <Text style={styles.menuLabel}>{item.label}</Text>
+                  <Text style={styles.menuHint}>{item.hint}</Text>
+                </View>
+                <ChevronRightIcon />
+              </Pressable>
+            ))
+          : null}
+        {section === 'appearance' ? (
           <>
-            <Text style={styles.heading}>Appearance</Text>
+            <Text style={styles.heading}>Theme</Text>
             <View style={styles.themeRow} accessibilityRole="radiogroup">
               {(['system', 'light', 'dark'] as const).map((mode) => (
                 <Pressable
@@ -885,16 +905,14 @@ export function SettingsSheet({
             <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
             <Text style={styles.heading}>Map style</Text>
             <MapStyleSection editor={mapStyleEditor} />
-            <Text style={styles.heading}>Map tiles</Text>
-            <TilesSection tiles={tiles} />
-            <Text style={styles.heading}>Map layers</Text>
-            <LayersContent overlays={overlays} />
           </>
         ) : null}
-        {tab === 'profiles' ? (
+        {section === 'layers' ? <LayersContent overlays={overlays} /> : null}
+        {section === 'tiles' ? <TilesSection tiles={tiles} /> : null}
+        {section === 'profiles' ? (
           <ProfileSection preferences={profilePreferences} overlays={overlays} />
         ) : null}
-        {tab === 'navigation' ? (
+        {section === 'navigation' ? (
           <>
             <Text style={styles.heading}>Navigation widgets</Text>
             <View style={styles.widgetOptions}>
@@ -923,18 +941,15 @@ export function SettingsSheet({
             <Text style={styles.muted}>Choose up to three readouts for active guidance.</Text>
           </>
         ) : null}
-        {tab === 'offline' ? (
-          <>
-            <Text style={styles.heading}>Offline regions</Text>
-            <RegionsSection
-              packs={packs}
-              onPacksChanged={onPacksChanged}
-              jobs={regionJobs}
-              onDrawRegion={onDrawRegion}
-            />
-          </>
+        {section === 'offline' ? (
+          <RegionsSection
+            packs={packs}
+            onPacksChanged={onPacksChanged}
+            jobs={regionJobs}
+            onDrawRegion={onDrawRegion}
+          />
         ) : null}
-        {tab === 'account' ? (
+        {section === 'account' ? (
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
             <AccountSection sync={sync} />
@@ -947,12 +962,12 @@ export function SettingsSheet({
             </View>
           </>
         ) : null}
-        {tab === 'system' ? (
+        {section === 'system' ? (
           <>
             <Text style={styles.heading}>Server</Text>
             <ServerSection storage={storage} />
             <Text style={styles.heading}>Server status</Text>
-            <StatusSection visible={visible && tab === 'system'} />
+            <StatusSection visible={visible && section === 'system'} />
             <Text style={styles.heading}>App</Text>
             <UpdateSection />
           </>
@@ -960,10 +975,10 @@ export function SettingsSheet({
       </ScrollView>
       <Pressable
         style={[styles.button, styles.closeButton]}
-        onPress={onClose}
+        onPress={active ? () => setSection(null) : onClose}
         testID="settings-close"
       >
-        <Text style={styles.buttonText}>Close</Text>
+        <Text style={styles.buttonText}>{active ? 'Back' : 'Close'}</Text>
       </Pressable>
     </BottomSheet>
   );
@@ -972,17 +987,25 @@ export function SettingsSheet({
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   title: { fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 8 },
-  tabs: { flexGrow: 0, marginHorizontal: -2, marginBottom: 4 },
-  tabsContent: { gap: 5, paddingHorizontal: 2 },
-  tab: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 9,
-    backgroundColor: theme.surfaceMuted,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: -6,
+    marginBottom: 8,
   },
-  tabOn: { backgroundColor: theme.surfaceActive, borderWidth: 1, borderColor: theme.accent },
-  tabText: { fontSize: 13, fontWeight: '700', color: theme.textMuted },
-  tabTextOn: { color: theme.accent },
+  headerTitle: { marginBottom: 0 },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.border,
+  },
+  menuText: { flex: 1 },
+  menuLabel: { fontSize: 16, fontWeight: '600', color: theme.text },
+  menuHint: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
   heading: {
     fontSize: 13,
     fontWeight: '700',

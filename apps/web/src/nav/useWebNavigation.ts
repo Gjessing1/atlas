@@ -5,7 +5,7 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import type { Position } from '@atlas/navigation';
-import { httpRouteProvider, httpTraceTransport } from '@atlas/routing';
+import { httpNvdbLimits, httpRouteProvider, httpTraceTransport } from '@atlas/routing';
 import { useMemo } from 'react';
 
 /** Promisified single geolocation fix. */
@@ -98,6 +98,7 @@ export function useWebNavigation(): NavController {
     () => ({
       provider: httpRouteProvider(),
       trace: httpTraceTransport(),
+      nvdbLimits: httpNvdbLimits(),
       currentFix: async (timeoutMs): Promise<NavOriginFix> => {
         const geo = await currentPosition(timeoutMs);
         return { fix: toPosition(geo), atMs: geo.timestamp };

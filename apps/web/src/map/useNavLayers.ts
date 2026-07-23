@@ -340,12 +340,6 @@ export function useNavLayers(
   const puckRef = useRef<maplibregl.Marker | null>(null);
   const destRef = useRef<maplibregl.Marker | null>(null);
   const viaMarkersRef = useRef<maplibregl.Marker[]>([]);
-  // The compass cone half-angle, quantized so jittery accuracy reports don't
-  // rebuild the sector path on every event.
-  const coneHalfDeg =
-    nav.facingDeg === null
-      ? null
-      : Math.min(60, Math.max(15, Math.round((nav.facingAccuracyDeg ?? 30) / 15) * 15));
   useEffect(() => {
     if (!map) return;
     const snapped = active ? nav.state?.snapped : undefined;
@@ -353,33 +347,16 @@ export function useNavLayers(
       if (!puckRef.current) {
         const el = document.createElement('div');
         el.className = 'nav-puck-wrap';
-        // The uncertainty beam sits under the dot and only shows while the
-        // compass owns the heading (walking modes, standing or strolling).
-        const beam = document.createElement('div');
-        beam.className = 'nav-puck-beam';
         const dot = document.createElement('div');
         dot.className = 'nav-puck';
-        el.append(beam, dot);
-        // Map-aligned rotation: the beam points where the walker faces even
-        // when the camera is not north-up.
-        puckRef.current = new maplibregl.Marker({ element: el, rotationAlignment: 'map' });
+        el.append(dot);
+        puckRef.current = new maplibregl.Marker({ element: el });
       }
       puckRef.current.setLngLat(snapped).addTo(map);
       const el = puckRef.current.getElement();
       // Grey when the GPS signal is lost, so a frozen puck reads as
       // "no signal", not "we're still here".
       el.classList.toggle('nav-puck-lost', nav.state?.fix === 'lost');
-      // The walker's facing, drawn as a cone of uncertainty rather than a
-      // hard arrow — the compass deserves exactly as much confidence as its
-      // own accuracy report. Absent (driving, desktop, moving fast) the puck
-      // is the plain dot it always was.
-      el.classList.toggle('nav-puck-facing', coneHalfDeg !== null);
-      if (coneHalfDeg !== null) {
-        el.style.setProperty('--facing-cone', `${coneHalfDeg * 2}deg`);
-        puckRef.current.setRotation(nav.facingDeg ?? 0);
-      } else {
-        puckRef.current.setRotation(0);
-      }
     } else {
       puckRef.current?.remove();
       puckRef.current = null;
@@ -399,16 +376,7 @@ export function useNavLayers(
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [
-    map,
-    active,
-    previewing,
-    nav.state?.snapped,
-    nav.state?.fix,
-    nav.destination,
-    nav.facingDeg,
-    coneHalfDeg,
-  ]);
+  }, [map, active, previewing, nav.state?.snapped, nav.state?.fix, nav.destination]);
   // Via stops still ahead on a multi-stop trip, as small dots along the line:
   // each disappears once driven past. Deliberately keyed on the passed-count,
   // not the fix, so the markers are rebuilt when a stop is reached rather

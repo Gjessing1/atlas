@@ -119,22 +119,36 @@ zipdir "$DATA_DIR/assets" "$OUT/assets.zip" fonts sprites
 echo "==> [$ID] writing pack.json"
 IFS=',' read -r MINLNG MINLAT MAXLNG MAXLAT <<< "$BBOX"
 node -e "
-const { statSync, writeFileSync } = require('node:fs');
+const { statSync, writeFileSync, createReadStream } = require('node:fs');
+const { createHash } = require('node:crypto');
 const out = process.argv[1];
-const file = (p) => ({ path: p, bytes: statSync(out + '/' + p).size });
-writeFileSync(out + '/pack.json', JSON.stringify({
-  id: process.argv[2],
-  name: process.argv[3],
-  bbox: { sw: { lat: $MINLAT, lng: $MINLNG }, ne: { lat: $MAXLAT, lng: $MAXLNG } },
-  version: Math.floor(Date.now() / 1000),
-  builtAt: Date.now(),
-  files: {
-    basemap: file('basemap.pmtiles'),
-    search: file('search.sqlite'),
-    routing: file('valhalla.tar'),
-    assets: file('assets.zip'),
-  },
-}, null, 2));
+// Streamed SHA-256 so the multi-hundred-MB tiles/routing files never load
+// wholesale; the device verifies each file against these digests before it
+// replaces a good pack.
+const sha256 = (p) =>
+  new Promise((res, rej) => {
+    const h = createHash('sha256');
+    createReadStream(out + '/' + p)
+      .on('data', (c) => h.update(c))
+      .on('end', () => res(h.digest('hex')))
+      .on('error', rej);
+  });
+const file = async (p) => ({ path: p, bytes: statSync(out + '/' + p).size, sha256: await sha256(p) });
+(async () => {
+  writeFileSync(out + '/pack.json', JSON.stringify({
+    id: process.argv[2],
+    name: process.argv[3],
+    bbox: { sw: { lat: $MINLAT, lng: $MINLNG }, ne: { lat: $MAXLAT, lng: $MAXLNG } },
+    version: Math.floor(Date.now() / 1000),
+    builtAt: Date.now(),
+    files: {
+      basemap: await file('basemap.pmtiles'),
+      search: await file('search.sqlite'),
+      routing: await file('valhalla.tar'),
+      assets: await file('assets.zip'),
+    },
+  }, null, 2));
+})();
 " "$OUT" "$ID" "$NAME"
 
 echo "==> [$ID] removing stale files"

@@ -435,6 +435,17 @@ describe('NavigationSession snapped state', () => {
     expect(state.offRouteM).toBeLessThan(8);
   });
 
+  it('shows the raw fix when a near fix is too coarse to trust the snap', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    // Same ~5 m offset that hugs the road above, but a coarse fix: its error
+    // circle reaching the line is not proof the traveller is on it, so it must
+    // sit at its own position rather than snap (the "snapped from the garden" bug).
+    const fix = { lat: 60.000045, lng: 10.005, accuracyM: 50 };
+    const state = s.update(fix, 0).state;
+    expect(state.snapped).toEqual({ lat: fix.lat, lng: fix.lng });
+    expect(state.status).toBe('navigating');
+  });
+
   it('shows the raw fix before departure when standing off the road', () => {
     const s = new NavigationSession(route());
     // ~11 m off: driving display would snap this, but the trip has not begun.

@@ -184,6 +184,25 @@ describe('buildValhallaRequest', () => {
     ).toBeUndefined();
   });
 
+  it('sends avoid points as exclude_locations, and nothing when there are none', () => {
+    const closure = { lat: 59.925, lng: 10.75 };
+    const body = buildValhallaRequest({
+      profile: 'car',
+      points: [oslo, sognsvann],
+      excludeLocations: [closure],
+    });
+    expect(body['exclude_locations']).toEqual([{ lat: closure.lat, lon: closure.lng }]);
+    // No avoids given, or an empty list — the key is omitted, not sent empty.
+    expect(
+      buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann] })['exclude_locations'],
+    ).toBeUndefined();
+    expect(
+      buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann], excludeLocations: [] })[
+        'exclude_locations'
+      ],
+    ).toBeUndefined();
+  });
+
   it('puts the travel direction on the first location only', () => {
     const body = buildValhallaRequest({
       profile: 'car',

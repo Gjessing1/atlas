@@ -205,6 +205,38 @@ const mStyles = StyleSheet.create({
   bar: { position: 'absolute', left: 2, width: 20, height: 3, borderRadius: 1.5 },
 });
 
+/** Right-pointing chevron for drill-down menu rows. */
+export function ChevronRightIcon({ color = theme.icon }: { color?: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path
+        d="m9 5 7 7-7 7"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Left-pointing chevron for the "back to menu" header. */
+export function ChevronLeftIcon({ color = theme.icon }: { color?: string }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Path
+        d="m15 5-7 7 7 7"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 const xStyles = StyleSheet.create({
   box: { width: 24, height: 24 },
   ring: {

@@ -19,7 +19,14 @@ export {
   defaultRoutePreferences,
 } from './model.js';
 export { buildValhallaRequest, parseValhallaResponse, roundTripLocations } from './valhalla.js';
-export { fetchRoute, httpTraceTransport, RoutingError, type FetchRouteOptions } from './client.js';
+export {
+  fetchRoute,
+  httpTraceTransport,
+  httpNvdbLimits,
+  RoutingError,
+  type FetchRouteOptions,
+  type NvdbLimitTransport,
+} from './client.js';
 export {
   buildTraceAttributesRequest,
   enrichRoute,
@@ -33,6 +40,13 @@ export {
   type RouteEnrichmentSegment,
   type RouteTunnel,
 } from './enrich.js';
+export {
+  applyNvdbSpeedLimits,
+  nvdbSpeedOverrides,
+  type NvdbSpeedSegment,
+  type NvdbSpeedOptions,
+  type SpeedLimitOverride,
+} from './nvdb.js';
 export {
   httpRouteProvider,
   valhallaRouteProvider,

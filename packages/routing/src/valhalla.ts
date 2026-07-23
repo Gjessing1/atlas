@@ -234,6 +234,14 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   if (Object.keys(costingOptions).length > 0) {
     body['costing_options'] = costingOptions;
   }
+  // Closures (and any other hard avoid) are exclude_locations: Valhalla removes
+  // the edge nearest each point from the graph, so the search routes around a
+  // shut road instead of over it. Distinct from the costing preferences above —
+  // those bias the search, this forbids specific places outright. Empty means
+  // "no avoids", so the key is only emitted when there is something to exclude.
+  if (query.excludeLocations && query.excludeLocations.length > 0) {
+    body['exclude_locations'] = query.excludeLocations.map((p) => ({ lat: p.lat, lon: p.lng }));
+  }
   // Valhalla returns alternates for point-to-point queries only.
   if (!query.roundTrip && query.alternatives && query.points.length === 2) {
     body['alternates'] = 2;

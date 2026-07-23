@@ -67,6 +67,16 @@ export interface RouteQuery {
   headingDeg?: number;
   /** User-facing costing controls, normalised by {@link defaultRoutePreferences}. */
   preferences?: Partial<RoutePreferences>;
+  /**
+   * Points the route must not pass through: Valhalla drops the graph edge
+   * nearest each one before searching, so a route is forced around it. This is
+   * the mechanism road closures use — one point on each closed segment (fed from
+   * the DATEX closure feed, §2.2), independent of any user preference. Ordinary
+   * planning leaves this empty. Valhalla caps the list at its
+   * `max_exclude_locations` (default 50); callers that could exceed that must
+   * trim to the closures near the corridor.
+   */
+  excludeLocations?: LatLng[];
   /** Loop from-and-back-to the single starting point, aiming for the given length. */
   roundTrip?: {
     distanceM: number;

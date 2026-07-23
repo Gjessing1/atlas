@@ -22,9 +22,11 @@ import {
   type Position,
 } from '@atlas/navigation';
 import {
+  applyNvdbSpeedLimits,
   enrichRoute,
   sortRouteChoices,
   viaInsertIndex,
+  type NvdbLimitTransport,
   type RoutePreferences,
   type RoutePath,
   type RouteProvider,
@@ -63,6 +65,13 @@ export interface NavPlatform {
    * platform with no way to ask simply shows no roundel.
    */
   trace?: ValhallaTransport;
+  /**
+   * Authoritative Norwegian speed limits (NVDB) for a route's distance ranges,
+   * layered over `trace`'s tile limits inside Norway (ROADMAP §2.1). Optional
+   * and best-effort: absent, unreachable, or an empty result all just leave the
+   * tile limits standing, so it can never cost a roundel that `trace` produced.
+   */
+  nvdbLimits?: NvdbLimitTransport;
   /**
    * One fix now, for the preview origin. Should reject with a
    * user-presentable message — it becomes the error phase's text — and must
@@ -131,13 +140,15 @@ export interface NavController {
   /** Latest GPS altitude in metres, or null when the platform has none. */
   altitudeM: number | null;
   /**
-   * Which way the traveller faces (deg from north), from the device compass —
-   * only while a walking mode is navigating at walking speed on a platform
-   * with a compass; null otherwise. The *puck* reads this; the camera keeps
-   * `state.courseDeg`, so the map does not spin with every turn of the head.
+   * Which way the traveller faces (deg from north): the device compass while
+   * standing, crossfading to the stable route course as they pick up walking
+   * pace (`FacingBlender`), smoothed so it no longer jitters. Set only while a
+   * walking mode navigates on a platform with a compass; null otherwise (the
+   * puck then falls back to `state.courseDeg`). The *puck* reads this; the
+   * camera keeps `state.courseDeg`, so the map does not spin with the head.
    */
   facingDeg: number | null;
-  /** Sensor-declared ± accuracy of `facingDeg` — widens the uncertainty cone. */
+  /** Sensor-declared ± accuracy of `facingDeg` (deg), or null when unknown. */
   facingAccuracyDeg: number | null;
   /**
    * True while the session is off-route but this mode leaves rerouting to the
@@ -404,7 +415,25 @@ export function useNavigationController(platform: NavPlatform): NavController {
       if (!trace) return;
       const controller = new AbortController();
       enrichAbort.current = controller;
+      const nvdb = platformRef.current.nvdbLimits;
       void enrichRoute(path, profileRef.current, trace, { signal: controller.signal })
+        .then(async (base) => {
+          // Layer NVDB's authoritative Norwegian limits over the tile limits
+          // for a car route. Its own best-effort: a failure (offline, no
+          // dataset, outside Norway) falls back to exactly `base`, so the
+          // roundel never disappears because NVDB was unreachable.
+          if (!nvdb || profileRef.current !== 'car') return base;
+          try {
+            const overrides = await nvdb(
+              path.points.map((p) => ({ lat: p.lat, lng: p.lng })),
+              controller.signal,
+            );
+            return applyNvdbSpeedLimits(base, overrides);
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') throw error;
+            return base;
+          }
+        })
         .then((enrichment) => {
           // A reroute (or End) may have replaced this session mid-request;
           // attributes measured along the old line would mislabel the new one,
@@ -1044,7 +1073,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
     const unsubscribe = watch((deg, accuracyDeg) => {
       const now = Date.now();
       blender.updateCompass(deg, accuracyDeg, now);
-      const sample = blender.current(speedRef.current, now);
+      const sample = blender.current(
+        speedRef.current,
+        lastStateRef.current?.courseDeg ?? null,
+        now,
+      );
       if (!sample) {
         if (lastSetDeg !== null) {
           lastSetDeg = null;
@@ -1067,10 +1100,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
     };
   }, [guiding, walkingProfile, platformRef, speedRef]);
 
-  // Speeding up hands the puck back to the course even between compass events
-  // (a cyclist pushing off from a walk would otherwise keep a stale facing).
+  // Speeding up leans the puck onto the course even between compass events (a
+  // cyclist pushing off from a walk would otherwise keep a stale facing); a
+  // compass that has since gone quiet drops it entirely.
   useEffect(() => {
-    if (facing && facingBlender.current.current(speedMps, Date.now()) === null) setFacing(null);
+    const course = lastStateRef.current?.courseDeg ?? null;
+    if (facing && facingBlender.current.current(speedMps, course, Date.now()) === null) {
+      setFacing(null);
+    }
   }, [speedMps, facing]);
 
   // A navigating device is a dashboard: keep the screen on for the whole trip.

@@ -1,7 +1,7 @@
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type {
   BBox,
@@ -63,6 +63,17 @@ function bboxAreaKm2(bbox: BBox): number {
   const south = (bbox.sw.lat * Math.PI) / 180;
   const north = (bbox.ne.lat * Math.PI) / 180;
   return earthKm * earthKm * Math.abs(Math.sin(north) - Math.sin(south)) * dLng;
+}
+
+/** Streamed lowercase-hex SHA-256 of a file (never loads the whole file). */
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    createReadStream(filePath)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+      .on('error', reject);
+  });
 }
 
 function contains(outer: BBox, inner: BBox): boolean {
@@ -360,13 +371,24 @@ export class RegionJobManager {
         );
       }
       const files: RegionPackManifest['files'] = {};
-      for (const [kind, fileName] of [
-        ['basemap', 'basemap.pmtiles'],
-        ['search', enclosing.manifest.files.search!.path],
-        ['routing', enclosing.manifest.files.routing!.path],
-        ['assets', enclosing.manifest.files.assets!.path],
+      for (const [kind, fileName, reusableSha] of [
+        ['basemap', 'basemap.pmtiles', undefined],
+        ['search', enclosing.manifest.files.search!.path, enclosing.manifest.files.search!.sha256],
+        [
+          'routing',
+          enclosing.manifest.files.routing!.path,
+          enclosing.manifest.files.routing!.sha256,
+        ],
+        ['assets', enclosing.manifest.files.assets!.path, enclosing.manifest.files.assets!.sha256],
       ] as const) {
-        files[kind] = { path: fileName, bytes: (await stat(path.join(stagingDir, fileName))).size };
+        const filePath = path.join(stagingDir, fileName);
+        files[kind] = {
+          path: fileName,
+          bytes: (await stat(filePath)).size,
+          // basemap is freshly extracted here; the others are byte-for-byte
+          // copies, so reuse the enclosing pack's digest when it has one.
+          sha256: reusableSha ?? (await sha256File(filePath)),
+        };
       }
       const builtAt = this.now();
       const manifest: RegionPackManifest = {

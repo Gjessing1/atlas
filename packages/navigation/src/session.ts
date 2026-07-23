@@ -386,10 +386,16 @@ export class NavigationSession {
     // position slightly ahead along the line so the map agrees with the
     // windshield despite GPS + camera-animation latency; guidance math
     // (prompts, distances, off-route) stays on the true position throughout.
+    //
+    // Only an *accurate* fix earns the snap. A coarse fix (standing in the
+    // garden, an urban-canyon bounce) whose error circle happens to reach the
+    // road is not evidence the traveller is on it — gluing there was the "it
+    // snapped when I was nowhere near" bug — so a fuzzy fix shows its own raw
+    // position and lets the puck sit honestly off the line.
     const snapDisplayM = this.departed ? this.opts.snapDisplayMaxM : this.opts.startSnapDisplayMaxM;
     let shown: LatLng;
     let shownCourse: number | null;
-    if (snap.crossTrackM <= snapDisplayM) {
+    if (snap.crossTrackM <= snapDisplayM && accurate) {
       let displayAlongM = alongM;
       if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
         const aheadM = Math.min(60, speedMps * (this.opts.predictAheadMs / 1000));

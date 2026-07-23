@@ -6,14 +6,17 @@ import fastifyStatic from '@fastify/static';
 import {
   APP_NAME,
   photonFeatureToSearchResult,
+  type LatLng,
   type PhotonFeature,
   type SearchResult,
   type SystemStatus,
 } from '@atlas/core';
+import { nvdbSpeedOverrides } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerExploreApi } from './explore-api.js';
 import { registerOverlayApi, type OverlayApiOptions } from './overlay/index.js';
+import { NvdbStore } from './nvdb-db.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
 import type { RegionJobOptions } from './region-jobs.js';
@@ -367,6 +370,52 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.post('/api/route/attributes', (request, reply) =>
     proxyValhalla('/trace_attributes', request, reply),
   );
+
+  // NVDB speed limits: the authoritative Norwegian source, layered over the
+  // tile limits @atlas/routing already returns (ROADMAP §2.1). Given a route
+  // shape, the backend matches it against the shipped NVDB dataset and returns
+  // the distance ranges where NVDB overrides the limit. Not a proxy — the data
+  // is a static SQLite side-table, never a live NVDB call (offline-artefact
+  // rule); the same conflation runs on-device against a pack's own copy.
+  // The dataset is optional: like Postgres, an absent NVDB file is a healthy
+  // config (routes keep their OSM/tile limits), not a failure — so only surface
+  // it as a status source when it actually loaded, rather than recording a
+  // permanent "down" that would drag the health rollup down on every instance
+  // shipping without the Norwegian side-table.
+  const nvdb = NvdbStore.open(opts.dataDir);
+  if (nvdb) {
+    status.register('nvdb', 'NVDB speed limits', 'Routing');
+    status.record('nvdb', true);
+    app.addHook('onClose', () => nvdb.close());
+  }
+  app.post<{ Body: { points?: unknown } }>('/api/route/nvdb-limits', (request, reply) => {
+    const raw = request.body?.points;
+    const points: LatLng[] = Array.isArray(raw)
+      ? raw.filter(
+          (p): p is LatLng =>
+            typeof p === 'object' &&
+            p !== null &&
+            typeof (p as LatLng).lat === 'number' &&
+            typeof (p as LatLng).lng === 'number',
+        )
+      : [];
+    if (!nvdb || points.length < 2) return reply.send({ overrides: [] });
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    for (const p of points) {
+      if (p.lat < minLat) minLat = p.lat;
+      if (p.lat > maxLat) maxLat = p.lat;
+      if (p.lng < minLng) minLng = p.lng;
+      if (p.lng > maxLng) maxLng = p.lng;
+    }
+    const segments = nvdb.querySpeedSegments(
+      { lat: minLat, lng: minLng },
+      { lat: maxLat, lng: maxLng },
+    );
+    return reply.send({ overrides: nvdbSpeedOverrides(points, segments) });
+  });
 
   // Map tiles, two ways:
   // - /api/tiles/<area>/{z}/{x}/{y}.pbf — merged endpoint the map style uses:

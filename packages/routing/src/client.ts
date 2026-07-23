@@ -1,6 +1,37 @@
+import type { LatLng } from '@atlas/core';
+
 import type { RouteQuery, RouteResult } from './model.js';
+import type { SpeedLimitOverride } from './nvdb.js';
 import type { ValhallaTransport } from './provider.js';
 import { buildValhallaRequest, parseValhallaResponse } from './valhalla.js';
+
+/**
+ * Ask the Atlas backend which distance ranges of a route NVDB overrides the
+ * speed limit on. Pair with {@link applyNvdbSpeedLimits}. Returns `[]` — not an
+ * error — when the backend ships no NVDB dataset or the route leaves Norway, so
+ * enrichment simply keeps the tile limits. The Android app produces the same
+ * overrides locally from its pack instead of calling this.
+ */
+export type NvdbLimitTransport = (
+  points: LatLng[],
+  signal?: AbortSignal,
+) => Promise<SpeedLimitOverride[]>;
+
+/** {@link NvdbLimitTransport} backed by the backend's `/api/route/nvdb-limits`. */
+export function httpNvdbLimits(opts: FetchRouteOptions = {}): NvdbLimitTransport {
+  return async (points, signal) => {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const res = await doFetch(`${opts.baseUrl ?? ''}/api/route/nvdb-limits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points }),
+      signal: signal ?? opts.signal,
+    });
+    if (!res.ok) throw new RoutingError(`nvdb limits failed (HTTP ${res.status})`);
+    const json = (await res.json()) as { overrides?: SpeedLimitOverride[] };
+    return json.overrides ?? [];
+  };
+}
 
 /** A routing failure with a user-presentable message (e.g. "point 1 out of bounds"). */
 export class RoutingError extends Error {}
