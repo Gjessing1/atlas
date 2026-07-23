@@ -109,6 +109,8 @@ export function parseGpx(xml: string): TrackData {
     if (point.ele !== undefined) waypoint.ele = point.ele;
     const name = text(wpt['name']);
     if (name !== undefined) waypoint.name = name;
+    const address = text(wpt['desc']);
+    if (address !== undefined) waypoint.address = address;
     data.waypoints.push(waypoint);
   }
 
@@ -145,12 +147,18 @@ function collectKml(node: Node, data: TrackData): void {
 
   for (const placemark of asNodes(node['Placemark'])) {
     const name = text(placemark['name']);
-    collectGeometry(placemark, name, data);
+    const address = text(placemark['address']);
+    collectGeometry(placemark, name, data, address);
   }
 }
 
 /** Extract geometries from a placemark or MultiGeometry node. */
-function collectGeometry(node: Node, name: string | undefined, data: TrackData): void {
+function collectGeometry(
+  node: Node,
+  name: string | undefined,
+  data: TrackData,
+  address?: string,
+): void {
   for (const line of asNodes(node['LineString'])) {
     const points = parseKmlCoordinates(line['coordinates']);
     if (points.length > 0) {
@@ -188,12 +196,13 @@ function collectGeometry(node: Node, name: string | undefined, data: TrackData):
     const waypoint: Waypoint = { lat: p.lat, lng: p.lng };
     if (p.ele !== undefined) waypoint.ele = p.ele;
     if (name !== undefined) waypoint.name = name;
+    if (address !== undefined) waypoint.address = address;
     data.waypoints.push(waypoint);
   }
 
   const multi = node['MultiGeometry'];
   if (typeof multi === 'object' && multi !== null) {
-    collectGeometry(multi as Node, name, data);
+    collectGeometry(multi as Node, name, data, address);
   }
 }
 

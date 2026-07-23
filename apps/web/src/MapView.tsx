@@ -101,6 +101,8 @@ interface MapViewProps {
   profile: string;
   /** User-edited colours and label/POI scale. */
   customStyle: MapStyleOverrides;
+  /** Incremented by the shared control grid to trigger MapLibre geolocation. */
+  locateRequest: number;
 }
 
 export function MapView({
@@ -115,6 +117,7 @@ export function MapView({
   colorScheme,
   profile,
   customStyle,
+  locateRequest,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
@@ -123,6 +126,7 @@ export function MapView({
   onSelectRef.current = onSelect;
   const onUserLocationRef = useRef(onUserLocation);
   onUserLocationRef.current = onUserLocation;
+  const geolocateRef = useRef<maplibregl.GeolocateControl | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -134,16 +138,14 @@ export function MapView({
       center: initialView.center,
       zoom: initialView.zoom,
     });
-    // Every map control lives in one bottom-right column — zoom and locate
-    // here, the activity and layer switches stacked above them in CSS — so the
-    // top of the screen belongs to search and the panels alone.
-    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
     // Location puck + accuracy circle with a locate/recenter button; keeps
     // following until the user pans away (web-nav prerequisite, Android parity).
+    // Its stock button is hidden: App's grid owns the visible placement.
     const geolocate = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true,
     });
+    geolocateRef.current = geolocate;
     // Reported to App so the place card can say how far away a spot is. Only a
     // fix the user asked for counts — Atlas never geolocates on its own.
     geolocate.on('geolocate', (e) => {
@@ -218,11 +220,44 @@ export function MapView({
     // Exposed for end-to-end tests and console debugging.
     (window as unknown as { __atlasMap?: maplibregl.Map }).__atlasMap = map;
     return () => {
+      geolocateRef.current = null;
       setMap(null);
       map.remove();
     };
     // The map is created exactly once; interaction callbacks read refs/props via closures.
   }, []);
+
+  useEffect(() => {
+    if (locateRequest > 0) geolocateRef.current?.trigger();
+  }, [locateRequest]);
+
+  // MapLibre's keyboard handler only hears keys while its canvas is focused.
+  // Keep arrow-key panning available after the user has clicked ordinary map
+  // chrome too, without stealing cursor/navigation keys from real controls.
+  useEffect(() => {
+    if (!map) return;
+    const panByKey: Record<string, [number, number]> = {
+      ArrowLeft: [-100, 0],
+      ArrowRight: [100, 0],
+      ArrowUp: [0, -100],
+      ArrowDown: [0, 100],
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const offset = panByKey[event.key];
+      if (!offset || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.target === map.getCanvas()) return; // MapLibre already handles this case.
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')
+      ) {
+        return;
+      }
+      event.preventDefault();
+      map.panBy(offset, { duration: 300 });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [map]);
 
   // Style swaps are deliberately independent of map construction: choosing a
   // theme or activity keeps the camera and controls in place. Atlas overlay,
@@ -283,6 +318,7 @@ export function MapView({
           source: 'place',
           position: { lat: place.lat, lng: place.lng },
           name: place.name,
+          address: place.address || undefined,
           category: place.notes.split('\n')[0] || undefined,
           placeId: place.id,
         });

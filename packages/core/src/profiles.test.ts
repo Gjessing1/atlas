@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MAP_PROFILE,
+  defaultMapProfilePreferences,
   isMapProfile,
   layerDefaultsOn,
   layerInProfile,
   layersForProfile,
   MAP_PROFILES,
   mapProfile,
+  preferredLayersForProfile,
+  sanitizeMapProfilePreferences,
   type LayerMeta,
 } from './index.js';
 
@@ -78,5 +81,26 @@ describe('map profiles', () => {
     for (const p of MAP_PROFILES) {
       if (p.routing !== null) expect(known).toContain(p.routing);
     }
+  });
+});
+
+describe('map profile preferences', () => {
+  it('sanitizes visible profiles and keeps a recovery profile', () => {
+    expect(
+      sanitizeMapProfilePreferences({
+        visible: ['hike', 'rocket', 'hike'],
+        layers: { hike: ['trails-hiking', 'weather', 'weather'], rocket: ['x'] },
+      }),
+    ).toEqual({
+      visible: ['hike'],
+      layers: { hike: ['trails-hiking', 'weather'] },
+    });
+    expect(sanitizeMapProfilePreferences({ visible: [] }).visible).toEqual(['explore']);
+  });
+
+  it('uses Atlas defaults until a profile has an explicit layer selection', () => {
+    const defaults = defaultMapProfilePreferences();
+    expect(preferredLayersForProfile(defaults, 'hike')).toEqual(['trails-hiking']);
+    expect(preferredLayersForProfile({ ...defaults, layers: { hike: [] } }, 'hike')).toEqual([]);
   });
 });

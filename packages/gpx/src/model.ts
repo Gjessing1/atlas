@@ -16,6 +16,8 @@ export interface Waypoint {
   lng: number;
   ele?: number;
   name?: string;
+  /** Postal/street address for an exported favorite. */
+  address?: string;
 }
 
 /** Parsed contents of a track file, normalized across GPX/KML/KMZ. */

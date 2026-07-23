@@ -61,6 +61,8 @@ export function useDestination(flyTo: (at: LatLng) => void): DestinationControll
         lat: result.position.lat,
         lng: result.position.lng,
         name: result.name || result.label || 'Dropped pin',
+        address: result.address,
+        detail: result.address ? undefined : result.label || undefined,
         canSave: true,
       });
     },

@@ -93,6 +93,17 @@ describe('buildKml', () => {
   });
 });
 
+describe('waypoint addresses', () => {
+  it('round-trips through GPX and KML', () => {
+    const original = {
+      segments: [],
+      waypoints: [{ lat: 59.91, lng: 10.75, name: 'Office', address: 'Karl Johans gate 1' }],
+    };
+    expect(parseGpx(buildGpx(original)).waypoints).toEqual(original.waypoints);
+    expect(parseKml(buildKml(original)).waypoints).toEqual(original.waypoints);
+  });
+});
+
 describe('buildKmlTree', () => {
   it('nests folders and keeps every placemark readable by parseKml', () => {
     const kml = buildKmlTree({

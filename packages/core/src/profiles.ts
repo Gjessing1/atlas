@@ -54,6 +54,73 @@ export const MAP_PROFILES: readonly MapProfile[] = [
 /** The profile Atlas starts in, and the fallback for an unknown stored id. */
 export const DEFAULT_MAP_PROFILE = 'explore';
 
+/**
+ * Account-level profile layout. The active profile remains device-local, but
+ * which shortcuts are offered and which overlays a profile starts with travel
+ * with the user's other Atlas data.
+ */
+export interface MapProfilePreferences {
+  /** Profile ids shown in the one-tap map switcher, in Atlas's curated order. */
+  visible: string[];
+  /**
+   * Preferred overlay ids per profile. A missing profile uses Atlas defaults;
+   * an explicit empty array means that profile starts with no overlays.
+   */
+  layers: Record<string, string[]>;
+}
+
+/** Atlas defaults before the user has customized their profile layout. */
+export function defaultMapProfilePreferences(): MapProfilePreferences {
+  return {
+    visible: MAP_PROFILES.map((profile) => profile.id),
+    layers: {},
+  };
+}
+
+/**
+ * Read profile preferences from storage/sync without trusting hand-edited or
+ * newer-version data. Unknown profile ids are ignored; unknown layer ids stay
+ * because the overlay catalog is server-provided and may be newer than core.
+ */
+export function sanitizeMapProfilePreferences(input: unknown): MapProfilePreferences {
+  const fallback = defaultMapProfilePreferences();
+  if (typeof input !== 'object' || input === null) return fallback;
+  const raw = input as Record<string, unknown>;
+  const known = new Set(MAP_PROFILES.map((profile) => profile.id));
+  const visibleRaw = Array.isArray(raw['visible']) ? raw['visible'] : fallback.visible;
+  const visibleSet = new Set(
+    visibleRaw.filter((id): id is string => typeof id === 'string' && known.has(id)),
+  );
+  // Never let customization remove the switcher completely. Explore is the
+  // neutral recovery choice when a corrupt or hand-edited value hides all.
+  if (visibleSet.size === 0) visibleSet.add(DEFAULT_MAP_PROFILE);
+
+  const layers: Record<string, string[]> = {};
+  const rawLayers = raw['layers'];
+  if (typeof rawLayers === 'object' && rawLayers !== null) {
+    for (const [profileId, ids] of Object.entries(rawLayers as Record<string, unknown>)) {
+      if (!known.has(profileId) || !Array.isArray(ids)) continue;
+      layers[profileId] = [
+        ...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)),
+      ];
+    }
+  }
+  return {
+    visible: MAP_PROFILES.filter((profile) => visibleSet.has(profile.id)).map(
+      (profile) => profile.id,
+    ),
+    layers,
+  };
+}
+
+/** Preferred layer ids for a profile, falling back to Atlas's curated defaults. */
+export function preferredLayersForProfile(
+  preferences: MapProfilePreferences,
+  profileId: string,
+): readonly string[] {
+  return preferences.layers[profileId] ?? mapProfile(profileId).defaultLayers ?? [];
+}
+
 /** Narrow an untrusted string (a stored setting, a share link) to a known profile. */
 export function isMapProfile(value: unknown): value is string {
   return typeof value === 'string' && MAP_PROFILES.some((p) => p.id === value);

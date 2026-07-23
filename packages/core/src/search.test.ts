@@ -25,6 +25,7 @@ describe('photonFeatureToSearchResult', () => {
     expect(photonFeatureToSearchResult(feature)).toEqual({
       name: 'Preikestolen',
       label: 'Strand, Rogaland, Norway',
+      address: 'Strand, Rogaland, Norway',
       position: { lat: 58.99, lng: 6.19 },
       kind: 'tourism/attraction',
     });
@@ -37,6 +38,7 @@ describe('photonFeatureToSearchResult', () => {
     });
     expect(address?.name).toBe('Karl Johans gate 1');
     expect(address?.label).toBe('Oslo');
+    expect(address?.address).toBe('Karl Johans gate 1, Oslo');
   });
 
   it('rejects features without geometry or name', () => {
@@ -96,6 +98,29 @@ describe('savedPlaceResults', () => {
 
   it('also matches notes, where addresses get pasted today', () => {
     expect(savedPlaceResults(places, 'kirkeveien').map((r) => r.name)).toEqual(['Dentist']);
+  });
+
+  it('matches and labels a saved place by its first-class address', () => {
+    const result = savedPlaceResults(
+      [
+        {
+          name: 'Office',
+          address: 'Karl Johans gate 1, Oslo',
+          notes: '',
+          lat: 59.91,
+          lng: 10.75,
+        },
+      ],
+      'johans',
+    );
+    expect(result).toEqual([
+      {
+        name: 'Office',
+        label: 'Karl Johans gate 1, Oslo',
+        address: 'Karl Johans gate 1, Oslo',
+        position: { lat: 59.91, lng: 10.75 },
+      },
+    ]);
   });
 
   it('ranks name matches above notes matches', () => {

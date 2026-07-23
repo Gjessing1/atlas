@@ -53,6 +53,7 @@ export async function mockSearch(page: Page): Promise<void> {
           {
             name: 'Preikestolen',
             label: 'Strand, Rogaland, Norway',
+            address: 'Preikestolvegen 521, 4105 Jørpeland',
             position: { lat: 58.9864, lng: 6.1904 },
             kind: 'tourism/attraction',
           },

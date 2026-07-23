@@ -83,6 +83,11 @@ export const MIGRATIONS: readonly string[] = [
     WHERE c2.name < collections.name OR (c2.name = collections.name AND c2.id < collections.id)
   ) + 1;
   `,
+  // A distinct address survives search-result saves, sync and interoperable
+  // exports without being mixed into free-form notes.
+  `
+  ALTER TABLE places ADD COLUMN address TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 /** Bring the database up to the latest schema version. */

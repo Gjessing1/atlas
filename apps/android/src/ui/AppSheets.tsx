@@ -1,6 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import type {
   MapStyleEditorController,
+  MapProfilePreferencesController,
   RegionPackJobsController,
   SyncState,
   ThemeModeController,
@@ -36,6 +37,7 @@ interface AppSheetsProps {
   onCloseLayers: () => void;
   /** Overlay catalog + per-device state for the Layers sheet. */
   overlays: OverlaysController;
+  profilePreferences: MapProfilePreferencesController;
   settingsOpen: boolean;
   onCloseSettings: () => void;
   /** Basemap tile source — Settings owns the "stream tiles anyway" switch. */
@@ -50,7 +52,6 @@ interface AppSheetsProps {
   pendingPin: LatLng | null;
   onDismissPendingPin: () => void;
 
-  onFlyTo: (p: LatLng) => void;
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
@@ -76,6 +77,7 @@ export function AppSheets({
   layersOpen,
   onCloseLayers,
   overlays,
+  profilePreferences,
   settingsOpen,
   onCloseSettings,
   tiles,
@@ -86,7 +88,6 @@ export function AppSheets({
   onDrawRegion,
   pendingPin,
   onDismissPendingPin,
-  onFlyTo,
   onPickDestination,
   onImportTracks,
 }: AppSheetsProps) {
@@ -98,10 +99,25 @@ export function AppSheets({
         onClose={onCloseFavorites}
         places={data.places}
         collections={data.collections}
-        onFlyTo={onFlyTo}
+        onFlyTo={(place) =>
+          onPickDestination({
+            lat: place.lat,
+            lng: place.lng,
+            name: place.name,
+            address: place.address || undefined,
+            placeId: place.id,
+            canSave: false,
+          })
+        }
         onNavigate={(p) => {
           onCloseFavorites();
-          onPickDestination({ lat: p.lat, lng: p.lng, name: p.name ?? 'Favorite', canSave: false });
+          onPickDestination({
+            lat: p.lat,
+            lng: p.lng,
+            name: p.name ?? 'Favorite',
+            address: p.address || undefined,
+            canSave: false,
+          });
         }}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
@@ -154,6 +170,8 @@ export function AppSheets({
         onExportAll={() => void data.exportAll()}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
+        overlays={overlays}
+        profilePreferences={profilePreferences}
         navPrefs={navPrefs}
         regionJobs={regionJobs}
         onDrawRegion={onDrawRegion}

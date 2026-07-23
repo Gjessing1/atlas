@@ -3,8 +3,6 @@ import { fmtKm } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
-import { LayersPanel } from './layers/LayersPanel.js';
-import type { LayerCatalog } from './layers/useLayerCatalog.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
@@ -13,8 +11,6 @@ import type { ImportOptions, ImportResult, UserData } from './storage/useUserDat
 
 interface SidebarProps {
   data: UserData;
-  layers: LayerCatalog;
-  mapZoom: number;
   selectedTrackId: string | null;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
@@ -87,8 +83,6 @@ function FolderNameInput({
 
 export function Sidebar({
   data,
-  layers,
-  mapZoom,
   selectedTrackId,
   onShowPlace,
   onShowTrack,
@@ -228,6 +222,7 @@ export function Sidebar({
         {expanded === key && (
           <ItemEditor
             name={place.name}
+            address={place.address}
             notes={place.notes}
             tags={place.tags}
             collectionId={place.collectionId}
@@ -582,7 +577,6 @@ export function Sidebar({
           </p>
         )}
         {data.status === 'ready' && branch(null, 0)}
-        <LayersPanel layers={layers} mapZoom={mapZoom} />
       </div>
       {confirm && <ConfirmDialog request={confirm} onCancel={closeConfirm} />}
     </aside>

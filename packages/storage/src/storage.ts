@@ -73,6 +73,7 @@ function rowToPlace(r: SqlRow): PlaceRecord {
     name: String(r['name']),
     lat: Number(r['lat']),
     lng: Number(r['lng']),
+    address: r['address'] == null ? '' : String(r['address']),
     collectionId: r['collection_id'] === null ? null : String(r['collection_id']),
     notes: String(r['notes']),
     tags: parseTags(r['tags']),
@@ -261,6 +262,7 @@ export class AtlasStorage {
       name: input.name,
       lat: input.lat,
       lng: input.lng,
+      address: input.address ?? '',
       collectionId: input.collectionId ?? null,
       notes: input.notes ?? '',
       tags: input.tags ?? [],
@@ -273,14 +275,15 @@ export class AtlasStorage {
       updatedAt: now,
     };
     await this.driver.query(
-      `INSERT INTO places (id, name, lat, lng, collection_id, notes, tags,
+      `INSERT INTO places (id, name, lat, lng, address, collection_id, notes, tags,
                            created_at, updated_at, icon, color, visible, sort_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.name,
         record.lat,
         record.lng,
+        record.address,
         record.collectionId,
         record.notes,
         JSON.stringify(record.tags),
@@ -301,6 +304,7 @@ export class AtlasStorage {
       name: patch.name,
       lat: patch.lat,
       lng: patch.lng,
+      address: patch.address,
       collection_id: patch.collectionId,
       notes: patch.notes,
       tags: patch.tags === undefined ? undefined : JSON.stringify(patch.tags),
@@ -542,6 +546,7 @@ export class AtlasStorage {
           name: p.name,
           lat: p.lat,
           lng: p.lng,
+          address: p.address,
           collectionId: p.collectionId,
           notes: p.notes,
           tags: p.tags,
@@ -676,6 +681,7 @@ export class AtlasStorage {
           name: p.name,
           lat: p.lat,
           lng: p.lng,
+          address: p.address,
           collectionId: p.collectionId,
           notes: p.notes,
           tags: p.tags,
@@ -808,14 +814,15 @@ export class AtlasStorage {
       case 'place':
         await this.driver.query(
           `INSERT OR REPLACE INTO places
-             (id, name, lat, lng, collection_id, notes, tags,
+             (id, name, lat, lng, address, collection_id, notes, tags,
               created_at, updated_at, icon, color, visible, sort_index)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             change.id,
             str('name', '(unnamed)'),
             num('lat'),
             num('lng'),
+            str('address'),
             strOrNull('collectionId'),
             str('notes'),
             json('tags', '[]'),

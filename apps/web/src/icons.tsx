@@ -122,6 +122,21 @@ export function CompassIcon(props: IconProps) {
   );
 }
 
+export function CrosshairIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="12" cy="12" r="5.5" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+      <path
+        d="M12 2v3M12 19v3M2 12h3M19 12h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function SkiIcon(props: IconProps) {
   return (
     <IconFrame {...props}>

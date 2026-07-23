@@ -8,6 +8,92 @@ import { theme } from './theme';
 /** Opacity choices as chips — no native slider dependency, OTA-friendly. */
 const OPACITY_STEPS = [0.25, 0.5, 0.75, 1];
 
+/** Full layer controls without sheet chrome, reused by Settings → Map. */
+export function LayersContent({ overlays }: { overlays: OverlaysController }) {
+  const groups: [string, LayerMeta[]][] = [];
+  for (const meta of overlays.catalog) {
+    const group = groups.find(([name]) => name === meta.group);
+    if (group) group[1].push(meta);
+    else groups.push([meta.group, [meta]]);
+  }
+
+  if (overlays.catalog.length === 0) {
+    return (
+      <Text style={styles.muted}>
+        No layers available — the layer catalog needs a server connection at least once.
+      </Text>
+    );
+  }
+
+  return (
+    <View>
+      {groups.map(([group, metas]) => (
+        <View key={group}>
+          <Text style={styles.groupHeading}>{group}</Text>
+          {metas.map((meta) => {
+            const on = overlays.isOn(meta.id);
+            const opacity = overlays.opacityFor(meta.id);
+            return (
+              <View key={meta.id} style={styles.row}>
+                <Pressable
+                  style={styles.toggleRow}
+                  onPress={() => overlays.toggle(meta.id)}
+                  testID={`layer-toggle-${meta.id}`}
+                >
+                  <View style={[styles.checkbox, on ? styles.checkboxOn : null]}>
+                    {on ? <Text style={styles.checkmark}>✓</Text> : null}
+                  </View>
+                  <Text style={styles.layerTitle}>{meta.title}</Text>
+                </Pressable>
+                <Text style={styles.muted}>
+                  {meta.description}{' '}
+                  {meta.metadataUrl ? (
+                    <Text
+                      style={styles.sourceLink}
+                      onPress={() => void Linking.openURL(meta.metadataUrl!)}
+                    >
+                      source
+                    </Text>
+                  ) : null}
+                </Text>
+                {on && meta.minzoom !== undefined ? (
+                  <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
+                ) : null}
+                {on && meta.coverageNote ? (
+                  <Text style={styles.hint}>{meta.coverageNote}</Text>
+                ) : null}
+                {on ? (
+                  <View style={styles.opacityRow}>
+                    {OPACITY_STEPS.map((step) => (
+                      <Pressable
+                        key={step}
+                        style={[
+                          styles.opacityChip,
+                          Math.abs(opacity - step) < 0.125 ? styles.opacityChipOn : null,
+                        ]}
+                        onPress={() => overlays.setOpacity(meta.id, step)}
+                      >
+                        <Text
+                          style={[
+                            styles.opacityChipText,
+                            Math.abs(opacity - step) < 0.125 ? styles.opacityChipTextOn : null,
+                          ]}
+                        >
+                          {Math.round(step * 100)}%
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 /**
  * Map-layers sheet (☰ → Layers): the curated overlay catalog grouped by
  * theme, with visibility toggles, opacity chips, a source link and honest
@@ -25,13 +111,6 @@ export function LayersSheet({
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
-  const groups: [string, LayerMeta[]][] = [];
-  for (const meta of overlays.catalog) {
-    const group = groups.find(([name]) => name === meta.group);
-    if (group) group[1].push(meta);
-    else groups.push([meta.group, [meta]]);
-  }
-
   return (
     <BottomSheet
       visible={visible}
@@ -41,77 +120,9 @@ export function LayersSheet({
       testID="layers-sheet"
     >
       <Text style={styles.heading}>Map layers</Text>
-      {overlays.catalog.length === 0 ? (
-        <Text style={styles.muted}>
-          No layers available — the layer catalog needs a server connection at least once.
-        </Text>
-      ) : (
-        <ScrollView style={styles.scroll}>
-          {groups.map(([group, metas]) => (
-            <View key={group}>
-              <Text style={styles.groupHeading}>{group}</Text>
-              {metas.map((meta) => {
-                const on = overlays.isOn(meta.id);
-                const opacity = overlays.state[meta.id]?.opacity ?? meta.defaultOpacity;
-                return (
-                  <View key={meta.id} style={styles.row}>
-                    <Pressable
-                      style={styles.toggleRow}
-                      onPress={() => overlays.toggle(meta.id)}
-                      testID={`layer-toggle-${meta.id}`}
-                    >
-                      <View style={[styles.checkbox, on ? styles.checkboxOn : null]}>
-                        {on ? <Text style={styles.checkmark}>✓</Text> : null}
-                      </View>
-                      <Text style={styles.layerTitle}>{meta.title}</Text>
-                    </Pressable>
-                    <Text style={styles.muted}>
-                      {meta.description}{' '}
-                      {meta.metadataUrl ? (
-                        <Text
-                          style={styles.sourceLink}
-                          onPress={() => void Linking.openURL(meta.metadataUrl!)}
-                        >
-                          source
-                        </Text>
-                      ) : null}
-                    </Text>
-                    {on && meta.minzoom !== undefined ? (
-                      <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
-                    ) : null}
-                    {on && meta.coverageNote ? (
-                      <Text style={styles.hint}>{meta.coverageNote}</Text>
-                    ) : null}
-                    {on ? (
-                      <View style={styles.opacityRow}>
-                        {OPACITY_STEPS.map((step) => (
-                          <Pressable
-                            key={step}
-                            style={[
-                              styles.opacityChip,
-                              Math.abs(opacity - step) < 0.125 ? styles.opacityChipOn : null,
-                            ]}
-                            onPress={() => overlays.setOpacity(meta.id, step)}
-                          >
-                            <Text
-                              style={[
-                                styles.opacityChipText,
-                                Math.abs(opacity - step) < 0.125 ? styles.opacityChipTextOn : null,
-                              ]}
-                            >
-                              {Math.round(step * 100)}%
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          ))}
-        </ScrollView>
-      )}
+      <ScrollView style={styles.scroll}>
+        <LayersContent overlays={overlays} />
+      </ScrollView>
       <Pressable style={styles.closeButton} onPress={onClose} testID="layers-close">
         <Text style={styles.closeButtonText}>Close</Text>
       </Pressable>

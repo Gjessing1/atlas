@@ -31,7 +31,7 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
           <div className="layers-group">{group}</div>
           {metas.map((meta) => {
             const on = layers.isOn(meta.id);
-            const opacity = layers.state[meta.id]?.opacity ?? meta.defaultOpacity;
+            const opacity = layers.opacityFor(meta.id);
             return (
               <div key={meta.id} className="layer-row">
                 <label className="layer-toggle">

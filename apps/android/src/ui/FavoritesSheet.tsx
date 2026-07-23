@@ -20,7 +20,7 @@ import { theme } from './theme';
 
 export type EditablePlacePatch = Pick<
   PlacePatch,
-  'name' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
+  'name' | 'address' | 'icon' | 'color' | 'notes' | 'tags' | 'visible' | 'collectionId'
 >;
 
 /**
@@ -51,6 +51,7 @@ function PlaceEditor({
   inset?: boolean;
 }) {
   const [name, setName] = useState(place.name);
+  const [address, setAddress] = useState(place.address);
   const [icon, setIcon] = useState(place.icon);
   const [color, setColor] = useState(place.color);
   const [collectionId, setCollectionId] = useState(place.collectionId);
@@ -63,6 +64,7 @@ function PlaceEditor({
     Keyboard.dismiss();
     onSave({
       name: trimmedName,
+      address: address.trim(),
       icon,
       color,
       collectionId,
@@ -87,6 +89,18 @@ function PlaceEditor({
           returnKeyType="done"
           accessibilityLabel="Name"
           testID={`favorite-name-${place.id}`}
+        />
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Address</Text>
+        <TextInput
+          style={styles.nameInput}
+          value={address}
+          onChangeText={setAddress}
+          placeholder="Street, postcode, city"
+          returnKeyType="done"
+          accessibilityLabel="Address"
+          testID={`favorite-address-${place.id}`}
         />
       </View>
       <Text style={styles.fieldLabel}>Icon</Text>
@@ -427,7 +441,7 @@ export function FavoritesSheet({
             {place.name}
           </Text>
           <Text style={styles.muted}>
-            {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
+            {place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`}
           </Text>
         </Pressable>
         <Pressable

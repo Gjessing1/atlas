@@ -1,9 +1,10 @@
-import { MAP_PROFILES } from '@atlas/core';
+import type { MapProfile } from '@atlas/core';
 import { mapProfileIcon } from '../icons.js';
 
 interface MapProfileSwitchProps {
   /** Id of the active profile. */
   active: string;
+  profiles: readonly MapProfile[];
   /**
    * Pick a profile. App handles it rather than the hook alone, because a pick
    * also moves the route planner's travel mode — an explicit user action, not
@@ -20,10 +21,10 @@ interface MapProfileSwitchProps {
  * reveals that activity's contextual overlays and sets the travel mode new
  * routes start from — see MAP_PROFILES.
  */
-export function MapProfileSwitch({ active, onPick }: MapProfileSwitchProps) {
+export function MapProfileSwitch({ active, profiles, onPick }: MapProfileSwitchProps) {
   return (
     <div className="profile-switch" role="radiogroup" aria-label="Map profile">
-      {MAP_PROFILES.map((p) => {
+      {profiles.map((p) => {
         const on = p.id === active;
         const Icon = mapProfileIcon(p.id);
         return (

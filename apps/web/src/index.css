@@ -1704,24 +1704,31 @@ button.transit-notice-summary {
   background: var(--danger-bg);
 }
 
-/* ---- map-layer quick switcher (bottom-right, above the map controls) ---- */
+/* ---- bottom-right map control grid ---- */
 
-/* Height of MapLibre's own bottom-right column (attribution, zoom, locate),
-   which the Atlas switches stack on top of so every map control reads as one
-   right-hand column. Shrinks on phones, where the zoom buttons are hidden. */
-:root {
-  --map-ctrl-stack: 184px;
+/* The native geolocate control still owns MapLibre's location puck/tracking,
+   but its stock button is replaced by the grid's consistently sized trigger. */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:has(.maplibregl-ctrl-geolocate) {
+  display: none;
 }
 
-/* Line MapLibre's controls up with the Atlas switches' right edge. */
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl {
-  margin-right: 12px;
+.map-control-grid {
+  position: absolute;
+  right: 12px;
+  bottom: 32px;
+  display: grid;
+  grid-template-areas:
+    'profiles layers'
+    'zoom locate';
+  grid-template-columns: minmax(0, auto) 40px;
+  justify-items: end;
+  align-items: end;
+  gap: 6px;
 }
 
 .layer-switch {
-  position: absolute;
-  right: 12px;
-  bottom: var(--map-ctrl-stack);
+  position: relative;
+  grid-area: layers;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1732,7 +1739,10 @@ button.transit-notice-summary {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 7px 10px;
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  padding: 0;
   border: none;
   border-radius: 8px;
   background: var(--surface-overlay);
@@ -1763,6 +1773,9 @@ button.transit-notice-summary {
 }
 
 .layer-switch-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
   display: flex;
   flex-direction: column;
   min-width: 190px;
@@ -1773,6 +1786,49 @@ button.transit-notice-summary {
   border-radius: 8px;
   background: var(--surface-overlay);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.map-zoom-controls {
+  grid-area: zoom;
+  display: flex;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.map-zoom-controls button,
+.map-locate-control {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.map-zoom-controls button {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.map-zoom-controls button + button {
+  border-left: 1px solid var(--border);
+}
+
+.map-zoom-controls button:hover,
+.map-locate-control:hover {
+  background: var(--surface-muted);
+}
+
+.map-locate-control {
+  grid-area: locate;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .layer-switch-item {
@@ -3157,10 +3213,7 @@ button.transit-notice-summary {
   background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  overflow-y: auto;
-  /* Reserve the scrollbar's width so it never overlaps the Refresh link. */
-  scrollbar-gutter: stable;
-  padding: 0 0 10px;
+  overflow: hidden;
 }
 
 .settings-header {
@@ -3173,6 +3226,40 @@ button.transit-notice-summary {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   z-index: 1;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 7px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.settings-tab {
+  flex: 1 0 auto;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-tab-on {
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-tab-body {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-bottom: 10px;
 }
 
 .settings-section {
@@ -3233,6 +3320,66 @@ button.transit-notice-summary {
 
 .nav-widget-options {
   grid-template-columns: repeat(2, 1fr);
+}
+
+.settings-note-leading {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.settings-section .layers-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.profile-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.profile-settings-card {
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.profile-settings-head,
+.profile-settings-name,
+.profile-visible {
+  display: flex;
+  align-items: center;
+}
+
+.profile-settings-head {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-settings-name {
+  gap: 7px;
+}
+
+.profile-visible {
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.profile-layer-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+  margin-top: 8px;
+}
+
+.profile-layer-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 12px;
 }
 
 /* --- Nearby explore panel --- */
@@ -3493,9 +3640,8 @@ button.transit-notice-summary {
 /* Activity switcher — sits directly above the layer quick switch, sharing its
    right edge and plate styling so the two read as one stack of map controls. */
 .profile-switch {
-  position: absolute;
-  right: 12px;
-  bottom: calc(var(--map-ctrl-stack) + 46px);
+  position: static;
+  grid-area: profiles;
   display: flex;
   gap: 2px;
   padding: 3px;
@@ -3567,10 +3713,6 @@ button.transit-notice-summary {
      and the switch stack above drops by the height the buttons freed. */
   .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) {
     display: none;
-  }
-
-  :root {
-    --map-ctrl-stack: 84px;
   }
 
   /* Panels span the viewport instead of floating at a desktop width, and clear

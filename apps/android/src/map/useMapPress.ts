@@ -156,6 +156,7 @@ export function useMapPress({
             lat: best.lat,
             lng: best.lng,
             name: best.name,
+            address: best.address || undefined,
             canSave: false,
             placeId: best.id,
           });

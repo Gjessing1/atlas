@@ -1,5 +1,6 @@
 import {
   useMapProfile,
+  useMapProfilePreferences,
   useRegionPackJobs,
   useMapStyleEditor,
   useNavPrefs,
@@ -126,9 +127,10 @@ function AppInner() {
   const directions = useDirections(route);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
-  // Activity profile + overlay state are device-local and shared by the
-  // one-tap map controls, the route default, and the full Layers sheet.
+  // The active profile and quick overlay state are device-local; the preferred
+  // switcher layout syncs and is shared by Settings and the one-tap controls.
   const profiles = useMapProfile(data);
+  const profilePreferences = useMapProfilePreferences(data);
   const mapAppearance = useMemo<MapAppearance>(
     () => ({
       colorScheme: appearance.colorScheme,
@@ -137,7 +139,12 @@ function AppInner() {
     }),
     [appearance.colorScheme, profiles.profile.id, mapStyleEditor.value],
   );
-  const overlaysCtl = useOverlays(data, profiles.profile.id);
+  const overlaysCtl = useOverlays(
+    data,
+    profiles.profile.id,
+    profilePreferences.preferredLayers(profiles.profile.id),
+    profilePreferences.customizedLayers(profiles.profile.id),
+  );
   const serverOrigin = useServerOrigin();
   const regionJobs = useRegionPackJobs(data, serverOrigin);
 
@@ -301,17 +308,11 @@ function AppInner() {
   const onPickMapProfile = useCallback(
     (id: string) => {
       const next = mapProfile(id);
-      // Selecting an activity applies its signature layers. In particular,
-      // Hike must immediately show Hiking trails, matching the web profile's
-      // default instead of requiring a second trip through Layers.
-      if (id !== profiles.profile.id) {
-        for (const layerId of next.defaultLayers ?? []) overlaysCtl.setOn(layerId, true);
-      }
       profiles.setProfile(id);
       const routing = next.routing;
       if (routing !== null && isRoutingProfile(routing)) route.setProfile(routing);
     },
-    [profiles, overlaysCtl, route],
+    [profiles, route],
   );
 
   // Entering the route-choice preview (or switching choice): fit the whole
@@ -617,6 +618,7 @@ function AppInner() {
       {showIdleChrome ? (
         <MapActivityControls
           profile={profiles}
+          visibleProfiles={profilePreferences.visibleProfiles}
           overlays={overlaysCtl}
           mapZoom={mapZoom}
           // Bottom-edge row, immediately left of the locate button. Menus
@@ -627,23 +629,26 @@ function AppInner() {
       ) : null}
 
       {useOffline && showIdleChrome && tiles.showOfflineBadge ? (
-        // Above the scalebar strip (bottom-centre) so the two never overlap.
-        // Hidden mid-trip: in landscape the bottom offsets put it across the
-        // middle of the map, and which tile source is in use is not something
-        // a driver needs told while the banner and road chip own the screen.
-        // Icon only: which pack is drawing is a Settings detail, and the badge
-        // was reading as a label on the map rather than as status.
+        // The native attribution/contributions button occupies the first cell
+        // of this top-left grid; offline status owns the second. A shared row
+        // prevents the two independent renderers from overlapping.
         <View
           style={[
-            styles.offlineBadge,
-            { bottom: bottomInset + 116, marginLeft: side.left, marginRight: side.right },
+            styles.topLeftStatusGrid,
+            { top: attributionPosition.top, left: attributionPosition.left },
           ]}
-          accessibilityLabel={`Offline map${
-            tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
-          }`}
-          testID="offline-badge"
+          pointerEvents="box-none"
         >
-          <CloudOffIcon />
+          <View style={styles.attributionCell} pointerEvents="none" />
+          <View
+            style={styles.offlineBadge}
+            accessibilityLabel={`Offline map${
+              tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
+            }`}
+            testID="offline-badge"
+          >
+            <CloudOffIcon />
+          </View>
         </View>
       ) : null}
       {data.status === 'error' ? (
@@ -696,6 +701,7 @@ function AppInner() {
                     name: destination.name,
                     lat: destination.lat,
                     lng: destination.lng,
+                    address: destination.address,
                   });
                   dest.clear();
                 }
@@ -770,6 +776,7 @@ function AppInner() {
         layersOpen={layersOpen}
         onCloseLayers={() => setLayersOpen(false)}
         overlays={overlaysCtl}
+        profilePreferences={profilePreferences}
         tiles={tiles}
         settingsOpen={settingsOpen}
         onCloseSettings={() => setSettingsOpen(false)}
@@ -783,7 +790,6 @@ function AppInner() {
         }}
         pendingPin={pendingPin}
         onDismissPendingPin={() => setPendingPin(null)}
-        onFlyTo={flyTo}
         onPickDestination={dest.pick}
         onImportTracks={importTracks}
       />
@@ -858,10 +864,14 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   roundButtonPressed: { backgroundColor: theme.surfaceActive, transform: [{ scale: 0.9 }] },
-  offlineBadge: {
+  topLeftStatusGrid: {
     position: 'absolute',
-    bottom: 96,
-    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  attributionCell: { width: 32, height: 32 },
+  offlineBadge: {
     backgroundColor: theme.surfaceOverlay,
     borderRadius: 15,
     width: 30,

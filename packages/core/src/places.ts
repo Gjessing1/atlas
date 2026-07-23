@@ -123,6 +123,8 @@ export interface PlaceTarget {
   name?: string;
   /** Category or address line shown under the name. */
   category?: string;
+  /** Postal/street address, kept distinct from a POI category. */
+  address?: string;
   /** Set when the target *is* a saved place — the card then offers Edit, not Save. */
   placeId?: string;
 }
@@ -165,6 +167,7 @@ export function placeTargetTitle(target: PlaceTarget): string {
  */
 export function placeTargetSubtitle(target: PlaceTarget, from?: LatLng | null): string {
   const parts: string[] = [];
+  if (target.address) parts.push(target.address);
   if (target.category) parts.push(target.category);
   if (from) parts.push(`${fmtDistanceM(haversineM(from, target.position))} away`);
   return parts.join(' · ');

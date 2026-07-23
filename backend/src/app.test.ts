@@ -156,6 +156,7 @@ describe('search proxy', () => {
         {
           name: 'Oslo',
           label: 'Norway',
+          address: 'Norway',
           position: { lat: 59.91, lng: 10.75 },
           kind: 'place/city',
         },
@@ -198,6 +199,7 @@ describe('reverse geocoding', () => {
       result: {
         name: 'Jernbanetorget',
         label: 'Oslo',
+        address: 'Oslo',
         position: { lat: 59.91, lng: 10.75 },
         kind: 'highway/bus_stop',
       },

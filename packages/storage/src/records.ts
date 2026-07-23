@@ -17,6 +17,8 @@ export interface PlaceRecord {
   name: string;
   lat: number;
   lng: number;
+  /** Human-readable postal/street address, when known. */
+  address: string;
   collectionId: string | null;
   notes: string;
   tags: string[];
@@ -51,6 +53,7 @@ export interface NewPlace {
   name: string;
   lat: number;
   lng: number;
+  address?: string;
   collectionId?: string | null;
   notes?: string;
   tags?: string[];
@@ -72,6 +75,7 @@ export interface PlacePatch {
   name?: string;
   lat?: number;
   lng?: number;
+  address?: string;
   collectionId?: string | null;
   notes?: string;
   tags?: string[];

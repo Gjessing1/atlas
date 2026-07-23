@@ -12,6 +12,8 @@ import type { ActiveOverlay } from '../map/useOverlayLayers.js';
 const STATE_SETTING = 'local.layers.state';
 
 export interface LayerCatalog {
+  /** Full server catalog; profile settings use it to configure inactive profiles. */
+  allCatalog: LayerMeta[];
   /** The catalog for the active profile, in the server's display order. */
   catalog: LayerMeta[];
   /** Per-layer visibility/opacity as persisted. */
@@ -25,6 +27,10 @@ export interface LayerCatalog {
    * than `state[id]?.on` so what they draw matches what the map draws.
    */
   isOn: (id: string) => boolean;
+  opacityFor: (id: string) => number;
+  setOn: (id: string, on: boolean) => void;
+  /** Persist a profile preset choice and clear any stale quick-switch deviation. */
+  setProfileOn: (profileId: string, id: string, on: boolean) => void;
   toggle: (id: string) => void;
   setOpacity: (id: string, opacity: number) => void;
 }
@@ -40,7 +46,12 @@ interface SettingsAccess {
  * persisted per-device panel state. Toggles keep working in-session even when
  * persistent storage is unavailable — they just don't survive a reload.
  */
-export function useLayerCatalog(userData: SettingsAccess, profileId: string): LayerCatalog {
+export function useLayerCatalog(
+  userData: SettingsAccess,
+  profileId: string,
+  preferredLayers: readonly string[] = [],
+  customizedLayers = false,
+): LayerCatalog {
   const [allLayers, setAllLayers] = useState<LayerMeta[]>([]);
   const [state, setState] = useState<OverlayStateMap>({});
   const { status, getSetting, setSetting } = userData;
@@ -83,29 +94,59 @@ export function useLayerCatalog(userData: SettingsAccess, profileId: string): La
     [setSetting],
   );
 
-  // The stored choice, or the profile default when the device has never had an
-  // opinion — the single source of truth for "is this layer on".
+  const stateKey = useCallback((forProfile: string, id: string) => `${forProfile}:${id}`, []);
+
+  // Profile-specific quick choices win. Before a user customizes a profile,
+  // legacy global choices remain valid; afterwards the synced preset becomes
+  // the baseline on every device.
   const isOn = useCallback(
-    (id: string) => state[id]?.on ?? layerDefaultsOn(id, profileId),
-    [state, profileId],
+    (id: string) =>
+      state[stateKey(profileId, id)]?.on ??
+      (customizedLayers
+        ? preferredLayers.includes(id)
+        : (state[id]?.on ?? layerDefaultsOn(id, profileId))),
+    [state, stateKey, profileId, customizedLayers, preferredLayers],
   );
 
-  const toggle = useCallback(
-    (id: string) =>
+  const setOn = useCallback(
+    (id: string, on: boolean) =>
       update((cur) => ({
         ...cur,
-        [id]: { ...cur[id], on: !(cur[id]?.on ?? layerDefaultsOn(id, profileId)) },
+        [stateKey(profileId, id)]: { ...cur[stateKey(profileId, id)], on },
       })),
-    [update, profileId],
+    [update, stateKey, profileId],
   );
+
+  const setProfileOn = useCallback(
+    (forProfile: string, id: string, on: boolean) =>
+      update((cur) => ({
+        ...cur,
+        [stateKey(forProfile, id)]: { ...cur[stateKey(forProfile, id)], on },
+      })),
+    [update, stateKey],
+  );
+
+  const toggle = useCallback((id: string) => setOn(id, !isOn(id)), [setOn, isOn]);
 
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
       update((cur) => ({
         ...cur,
-        [id]: { on: cur[id]?.on ?? layerDefaultsOn(id, profileId), opacity },
+        [stateKey(profileId, id)]: {
+          on: cur[stateKey(profileId, id)]?.on ?? isOn(id),
+          opacity,
+        },
       })),
-    [update, profileId],
+    [update, stateKey, profileId, isOn],
+  );
+
+  const opacityFor = useCallback(
+    (id: string) =>
+      state[stateKey(profileId, id)]?.opacity ??
+      state[id]?.opacity ??
+      allLayers.find((meta) => meta.id === id)?.defaultOpacity ??
+      1,
+    [state, stateKey, profileId, allLayers],
   );
 
   // Contextual layers are hidden outside their profile, so they must stop
@@ -118,9 +159,20 @@ export function useLayerCatalog(userData: SettingsAccess, profileId: string): La
     () =>
       catalog
         .filter((meta) => isOn(meta.id))
-        .map((meta) => ({ meta, opacity: state[meta.id]?.opacity ?? meta.defaultOpacity })),
-    [catalog, state, isOn],
+        .map((meta) => ({ meta, opacity: opacityFor(meta.id) })),
+    [catalog, isOn, opacityFor],
   );
 
-  return { catalog, state, overlays, isOn, toggle, setOpacity };
+  return {
+    allCatalog: allLayers,
+    catalog,
+    state,
+    overlays,
+    isOn,
+    opacityFor,
+    setOn,
+    setProfileOn,
+    toggle,
+    setOpacity,
+  };
 }

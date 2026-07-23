@@ -30,7 +30,12 @@ describe('AtlasStorage', () => {
   });
 
   it('creates, lists, updates and deletes places', async () => {
-    const place = await storage.createPlace({ name: 'Preikestolen', lat: 58.9864, lng: 6.1904 });
+    const place = await storage.createPlace({
+      name: 'Preikestolen',
+      lat: 58.9864,
+      lng: 6.1904,
+      address: 'Preikestolvegen 521, Jørpeland',
+    });
     expect(place.id).toMatch(/[0-9a-f-]{36}/);
     expect(place.tags).toEqual([]);
     // New places get the default icon/colour.
@@ -38,6 +43,7 @@ describe('AtlasStorage', () => {
 
     await storage.updatePlace(place.id, {
       notes: 'Steep!',
+      address: 'Preikestolvegen 519, Jørpeland',
       tags: ['hike', 'view'],
       icon: '🏔️',
       color: '#16a34a',
@@ -46,6 +52,7 @@ describe('AtlasStorage', () => {
     expect(listed).toMatchObject({
       name: 'Preikestolen',
       lat: 58.9864,
+      address: 'Preikestolvegen 519, Jørpeland',
       notes: 'Steep!',
       tags: ['hike', 'view'],
       icon: '🏔️',
@@ -388,11 +395,16 @@ describe('AtlasStorage', () => {
         name: 'Cabin',
         lat: 1,
         lng: 2,
+        address: 'Karl Johans gate 1, Oslo',
         icon: '🏠',
         color: '#2563eb',
       });
       const payload = await storage.readSyncRecord('place', place.id);
-      expect(payload!.data).toMatchObject({ icon: '🏠', color: '#2563eb' });
+      expect(payload!.data).toMatchObject({
+        icon: '🏠',
+        color: '#2563eb',
+        address: 'Karl Johans gate 1, Oslo',
+      });
 
       // A remote change without icon/colour falls back to the defaults.
       await storage.applyRemoteChange({
@@ -403,7 +415,7 @@ describe('AtlasStorage', () => {
         data: { name: 'Legacy', lat: 3, lng: 4, createdAt: 4 },
       });
       const legacy = (await storage.listPlaces()).find((p) => p.id === 'remote-place');
-      expect(legacy).toMatchObject({ icon: '📍', color: '#e11d48' });
+      expect(legacy).toMatchObject({ icon: '📍', color: '#e11d48', address: '' });
     });
 
     it('round-trips place/folder visibility through sync payloads', async () => {
@@ -505,6 +517,7 @@ describe('AtlasStorage', () => {
         lat: 58.9864,
         lng: 6.1904,
         collectionId: collection.id,
+        address: 'Preikestolvegen 521, Jørpeland',
         notes: 'Steep',
         tags: ['hike'],
       });

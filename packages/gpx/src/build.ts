@@ -31,6 +31,7 @@ export function buildGpx(data: TrackData): string {
     lines.push(`  <wpt lat="${coord(w.lat)}" lon="${coord(w.lng)}">`);
     if (w.ele !== undefined) lines.push(`    <ele>${w.ele}</ele>`);
     if (w.name) lines.push(`    <name>${escapeXml(w.name)}</name>`);
+    if (w.address) lines.push(`    <desc>${escapeXml(w.address)}</desc>`);
     lines.push('  </wpt>');
   }
 
@@ -67,6 +68,7 @@ function placemarks(data: TrackData, pad: string): string[] {
   for (const w of data.waypoints) {
     lines.push(`${pad}<Placemark>`);
     if (w.name) lines.push(`${pad}  <name>${escapeXml(w.name)}</name>`);
+    if (w.address) lines.push(`${pad}  <address>${escapeXml(w.address)}</address>`);
     const ele = w.ele !== undefined ? `,${w.ele}` : '';
     lines.push(
       `${pad}  <Point><coordinates>${coord(w.lng)},${coord(w.lat)}${ele}</coordinates></Point>`,

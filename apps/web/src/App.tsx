@@ -14,14 +14,20 @@ import {
   type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
-import { useMapProfile, useMapStyleEditor, useNavPrefs, useThemeMode } from '@atlas/app-hooks';
+import {
+  useMapProfile,
+  useMapProfilePreferences,
+  useMapStyleEditor,
+  useNavPrefs,
+  useThemeMode,
+} from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
-import { CompassIcon, RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
+import { CompassIcon, CrosshairIcon, RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
@@ -99,6 +105,7 @@ export function App() {
   // Only set once the user asks to be located; the card shows distances from it.
   const [userAt, setUserAt] = useState<LatLng | null>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
+  const [locateRequest, setLocateRequest] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
@@ -138,7 +145,13 @@ export function App() {
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
   const profiles = useMapProfile(userData);
-  const layers = useLayerCatalog(userData, profiles.profile.id);
+  const profilePreferences = useMapProfilePreferences(userData);
+  const layers = useLayerCatalog(
+    userData,
+    profiles.profile.id,
+    profilePreferences.preferredLayers(profiles.profile.id),
+    profilePreferences.customizedLayers(profiles.profile.id),
+  );
   // Picking an activity also moves the planner's travel mode, when that
   // activity has one (Explore and Ski express no routing opinion). The planner
   // still offers every mode, so this is a default and not a restriction.
@@ -262,7 +275,8 @@ export function App() {
         source: 'search',
         position: result.position,
         name: result.name,
-        category: result.label || undefined,
+        address: result.address,
+        category: result.address ? undefined : result.label || undefined,
       });
       followPin(result.position);
       const map = mapRef.current;
@@ -317,6 +331,14 @@ export function App() {
   const showPlace = useCallback((place: PlaceRecord) => {
     const map = mapRef.current;
     map?.flyTo({ center: { lat: place.lat, lng: place.lng }, zoom: Math.max(map.getZoom(), 14) });
+    setTarget({
+      source: 'place',
+      position: { lat: place.lat, lng: place.lng },
+      name: place.name,
+      address: place.address || undefined,
+      category: place.notes.split('\n')[0] || undefined,
+      placeId: place.id,
+    });
   }, []);
 
   const showTrack = useCallback(
@@ -363,6 +385,7 @@ export function App() {
       name: placeTargetTitle(target),
       lat: target.position.lat,
       lng: target.position.lng,
+      address: target.source === 'search' ? target.address : undefined,
     });
     // No sidebar pop-open: the button flipping to "★ Saved" is the confirmation,
     // and the sidebar would slide in over the card the user is still reading.
@@ -460,6 +483,7 @@ export function App() {
         colorScheme={appearance.colorScheme}
         profile={profiles.profile.id}
         customStyle={mapStyleEditor.value}
+        locateRequest={locateRequest}
       />
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
           top stays bright) until live GPS returns. */}
@@ -560,12 +584,54 @@ export function App() {
           <SettingsIcon size={18} />
         </button>
       </div>
-      {/* Overlay switcher, hidden mid-trip like the other map chrome — the
-          driving view stays the banner plus the map. */}
+      {/* One real grid for all bottom-right map controls. It owns activity,
+          layers, zoom and location so independent absolute offsets cannot
+          overlap as catalogs/profile choices change. */}
       {nav.phase === 'idle' && (
-        <MapProfileSwitch active={profiles.profile.id} onPick={onPickProfile} />
+        <div className="map-control-grid">
+          <MapProfileSwitch
+            active={profiles.profile.id}
+            profiles={profilePreferences.visibleProfiles}
+            onPick={onPickProfile}
+          />
+          <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
+          <div className="map-zoom-controls" role="group" aria-label="Map view">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              title="Zoom out"
+              onClick={() => map?.zoomOut()}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              title="Zoom in"
+              onClick={() => map?.zoomIn()}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              aria-label="Reset north"
+              title="Reset north"
+              onClick={() => map?.resetNorthPitch()}
+            >
+              <CompassIcon size={18} />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="map-locate-control"
+            aria-label="Find my location"
+            title="Find my location"
+            onClick={() => setLocateRequest((request) => request + 1)}
+          >
+            <CrosshairIcon size={19} />
+          </button>
+        </div>
       )}
-      {nav.phase === 'idle' && <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />}
       {/* One card for pins, saved places, POIs and search hits. Hidden mid-trip
           along with the rest of the map chrome. */}
       {target && nav.phase === 'idle' && (
@@ -641,8 +707,6 @@ export function App() {
         {sidebarOpen && (
           <Sidebar
             data={userData}
-            layers={layers}
-            mapZoom={mapZoom}
             selectedTrackId={selectedTrack?.track.id ?? null}
             onShowPlace={showPlace}
             onShowTrack={showTrack}
@@ -656,6 +720,9 @@ export function App() {
             appearance={appearance}
             mapStyle={mapStyleEditor}
             navPrefs={navPrefs}
+            layers={layers}
+            mapZoom={mapZoom}
+            profilePreferences={profilePreferences}
             onClose={() => setSettingsOpen(false)}
           />
         )}

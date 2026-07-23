@@ -3,11 +3,23 @@ import {
   UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
   useStatus,
-  type ThemeModeController,
+  type MapProfilePreferencesController,
   type MapStyleEditorController,
   type NavPrefsController,
+  type ThemeModeController,
 } from '@atlas/app-hooks';
-import { MAX_NAV_WIDGETS, NAV_WIDGETS, type SystemStatus, type UpstreamStatus } from '@atlas/core';
+import {
+  layersForProfile,
+  MAP_PROFILES,
+  MAX_NAV_WIDGETS,
+  NAV_WIDGETS,
+  type SystemStatus,
+  type UpstreamStatus,
+} from '@atlas/core';
+import { useState } from 'react';
+import { mapProfileIcon } from '../icons.js';
+import { LayersPanel } from '../layers/LayersPanel.js';
+import type { LayerCatalog } from '../layers/useLayerCatalog.js';
 import { AccountPanel } from '../sync/AccountPanel.js';
 import type { SyncState } from '../sync/useSync.js';
 
@@ -16,8 +28,21 @@ interface SettingsPanelProps {
   appearance: ThemeModeController;
   mapStyle: MapStyleEditorController;
   navPrefs: NavPrefsController;
+  layers: LayerCatalog;
+  mapZoom: number;
+  profilePreferences: MapProfilePreferencesController;
   onClose: () => void;
 }
+
+type SettingsTab = 'map' | 'profiles' | 'navigation' | 'account' | 'system';
+
+const TABS: readonly { id: SettingsTab; label: string }[] = [
+  { id: 'map', label: 'Map' },
+  { id: 'profiles', label: 'Profiles' },
+  { id: 'navigation', label: 'Navigation' },
+  { id: 'account', label: 'Account' },
+  { id: 'system', label: 'System' },
+];
 
 const STYLE_COLORS = [
   ['landColor', 'Land', '#f5f3ee'],
@@ -82,9 +107,96 @@ function MapStyleSection({ editor }: { editor: MapStyleEditorController }) {
         Reset map style
       </button>
       <p className="settings-note">
-        Changes stay on this device and apply to every activity profile.
+        Style edits stay on this device and apply to every activity profile.
       </p>
     </div>
+  );
+}
+
+function ProfileSettings({
+  preferences,
+  layers,
+}: {
+  preferences: MapProfilePreferencesController;
+  layers: LayerCatalog;
+}) {
+  return (
+    <>
+      <p className="settings-note settings-note-leading">
+        Choose which activities appear in the map switcher and the layers each one prefers. Profile
+        layouts sync with your account; quick layer changes stay on this device.
+      </p>
+      <div className="profile-settings-list">
+        {MAP_PROFILES.map((profile) => {
+          const Icon = mapProfileIcon(profile.id);
+          const visible = preferences.value.visible.includes(profile.id);
+          const onlyVisible = visible && preferences.value.visible.length === 1;
+          const preferred = new Set(preferences.preferredLayers(profile.id));
+          const offered = layersForProfile(layers.allCatalog, profile.id);
+          return (
+            <section className="profile-settings-card" key={profile.id}>
+              <div className="profile-settings-head">
+                <span className="profile-settings-name">
+                  <Icon size={20} />
+                  <strong>{profile.label}</strong>
+                </span>
+                <label className="profile-visible">
+                  <input
+                    type="checkbox"
+                    checked={visible}
+                    disabled={onlyVisible}
+                    onChange={(event) => preferences.setVisible(profile.id, event.target.checked)}
+                  />
+                  Quick switcher
+                </label>
+              </div>
+              {offered.length > 0 ? (
+                <div className="profile-layer-options">
+                  {offered.map((layer) => {
+                    const on = preferred.has(layer.id);
+                    return (
+                      <label key={layer.id}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={(event) => {
+                            const next = new Set(preferred);
+                            if (event.target.checked) next.add(layer.id);
+                            else next.delete(layer.id);
+                            preferences.setPreferredLayers(profile.id, [...next]);
+                            // Match the device-local quick state to the newly
+                            // chosen baseline immediately, including inactive profiles.
+                            layers.setProfileOn(profile.id, layer.id, event.target.checked);
+                          }}
+                        />
+                        {layer.title}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="settings-note">No overlay layers are available from this server.</p>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className="link-button"
+        onClick={() => {
+          for (const profile of MAP_PROFILES) {
+            const defaults = new Set(profile.defaultLayers ?? []);
+            for (const layer of layersForProfile(layers.allCatalog, profile.id)) {
+              layers.setProfileOn(profile.id, layer.id, defaults.has(layer.id));
+            }
+          }
+          preferences.reset();
+        }}
+      >
+        Reset profile layout
+      </button>
+    </>
   );
 }
 
@@ -125,20 +237,20 @@ function StatusSection({ data }: { data: SystemStatus }) {
   );
 }
 
-/**
- * Dedicated Settings home: server/upstream status (§N7), the account/sync
- * panel (moved out of the Collections sidebar footer), and build info. The status
- * answers "why is this overlay blank?" without leaving the app.
- */
+/** Settings grouped by task so map, profile, navigation and account controls do not mix. */
 export function SettingsPanel({
   sync,
   appearance,
   mapStyle,
   navPrefs,
+  layers,
+  mapZoom,
+  profilePreferences,
   onClose,
 }: SettingsPanelProps) {
-  // Served by the backend itself, so status lives at a relative path.
-  const status = useStatus('', true);
+  const [tab, setTab] = useState<SettingsTab>('map');
+  // Do not wake every upstream status row until the user opens System.
+  const status = useStatus('', tab === 'system');
 
   return (
     <aside className="settings-panel" aria-label="Settings">
@@ -148,80 +260,117 @@ export function SettingsPanel({
           ✕
         </button>
       </div>
-
-      <div className="settings-section">
-        <h3>Appearance</h3>
-        <div className="theme-options" role="radiogroup" aria-label="Theme">
-          {(['system', 'light', 'dark'] as const).map((mode) => (
-            <button
-              type="button"
-              role="radio"
-              aria-checked={appearance.mode === mode}
-              className={appearance.mode === mode ? 'theme-option theme-option-on' : 'theme-option'}
-              onClick={() => appearance.setMode(mode)}
-              key={mode}
-            >
-              {mode[0]!.toUpperCase() + mode.slice(1)}
-            </button>
-          ))}
-        </div>
-        <p className="settings-note">System follows this device’s light or dark setting.</p>
-        <MapStyleSection editor={mapStyle} />
-      </div>
-
-      <div className="settings-section">
-        <h3>Navigation widgets</h3>
-        <div
-          className="theme-options nav-widget-options"
-          role="group"
-          aria-label="Navigation widgets"
-        >
-          {NAV_WIDGETS.map((widget) => {
-            const selected = navPrefs.widgets.includes(widget.id);
-            const full = navPrefs.widgets.length >= MAX_NAV_WIDGETS;
-            return (
-              <button
-                type="button"
-                aria-pressed={selected}
-                className={selected ? 'theme-option theme-option-on' : 'theme-option'}
-                disabled={!selected && full}
-                onClick={() => navPrefs.toggleWidget(widget.id)}
-                key={widget.id}
-              >
-                {widget.label}
-              </button>
-            );
-          })}
-        </div>
-        <p className="settings-note">Choose up to three readouts for active guidance.</p>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-section-head">
-          <h3>Server status</h3>
+      <div className="settings-tabs" role="tablist" aria-label="Settings areas">
+        {TABS.map((item) => (
           <button
             type="button"
-            className="link-button"
-            onClick={status.refresh}
-            disabled={status.loading}
+            role="tab"
+            aria-selected={tab === item.id}
+            className={tab === item.id ? 'settings-tab settings-tab-on' : 'settings-tab'}
+            onClick={() => setTab(item.id)}
+            key={item.id}
           >
-            {status.loading ? 'Checking…' : 'Refresh'}
+            {item.label}
           </button>
-        </div>
-        {status.error && !status.data && (
-          <p className="settings-note settings-error">Status unavailable — {status.error}.</p>
-        )}
-        {!status.data && !status.error && <p className="settings-note">Loading…</p>}
-        {status.data && <StatusSection data={status.data} />}
-        <p className="settings-note">
-          Checks reflect real usage: a source stays “not checked” until the app has used it this
-          session.
-        </p>
+        ))}
       </div>
 
-      <div className="settings-section">
-        <h3>Account &amp; sync</h3>
-        <AccountPanel sync={sync} />
+      <div className="settings-tab-body">
+        {tab === 'map' && (
+          <>
+            <div className="settings-section">
+              <h3>Appearance</h3>
+              <div className="theme-options" role="radiogroup" aria-label="Theme">
+                {(['system', 'light', 'dark'] as const).map((mode) => (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={appearance.mode === mode}
+                    className={
+                      appearance.mode === mode ? 'theme-option theme-option-on' : 'theme-option'
+                    }
+                    onClick={() => appearance.setMode(mode)}
+                    key={mode}
+                  >
+                    {mode[0]!.toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <p className="settings-note">System follows this device’s light or dark setting.</p>
+              <MapStyleSection editor={mapStyle} />
+            </div>
+            <div className="settings-section">
+              <LayersPanel layers={layers} mapZoom={mapZoom} />
+            </div>
+          </>
+        )}
+
+        {tab === 'profiles' && (
+          <div className="settings-section">
+            <ProfileSettings preferences={profilePreferences} layers={layers} />
+          </div>
+        )}
+
+        {tab === 'navigation' && (
+          <div className="settings-section">
+            <h3>Navigation widgets</h3>
+            <div
+              className="theme-options nav-widget-options"
+              role="group"
+              aria-label="Navigation widgets"
+            >
+              {NAV_WIDGETS.map((widget) => {
+                const selected = navPrefs.widgets.includes(widget.id);
+                const full = navPrefs.widgets.length >= MAX_NAV_WIDGETS;
+                return (
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    className={selected ? 'theme-option theme-option-on' : 'theme-option'}
+                    disabled={!selected && full}
+                    onClick={() => navPrefs.toggleWidget(widget.id)}
+                    key={widget.id}
+                  >
+                    {widget.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="settings-note">Choose up to three readouts for active guidance.</p>
+          </div>
+        )}
+
+        {tab === 'account' && (
+          <div className="settings-section">
+            <h3>Account &amp; sync</h3>
+            <AccountPanel sync={sync} />
+          </div>
+        )}
+
+        {tab === 'system' && (
+          <div className="settings-section">
+            <div className="settings-section-head">
+              <h3>Server status</h3>
+              <button
+                type="button"
+                className="link-button"
+                onClick={status.refresh}
+                disabled={status.loading}
+              >
+                {status.loading ? 'Checking…' : 'Refresh'}
+              </button>
+            </div>
+            {status.error && !status.data && (
+              <p className="settings-note settings-error">Status unavailable — {status.error}.</p>
+            )}
+            {!status.data && !status.error && <p className="settings-note">Loading…</p>}
+            {status.data && <StatusSection data={status.data} />}
+            <p className="settings-note">
+              Checks reflect real usage: a source stays “not checked” until the app has used it this
+              session.
+            </p>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -9,6 +9,8 @@ export interface SearchResult {
   name: string;
   /** Disambiguation line: street, city, region, country. */
   label: string;
+  /** Full address suitable for saving separately from the display name. */
+  address?: string;
   position: LatLng;
   /** OSM key/value, e.g. "tourism/attraction" — drives result icons later. */
   kind?: string;
@@ -92,10 +94,15 @@ export function photonFeatureToSearchResult(feature: PhotonFeature): SearchResul
   for (const part of [street, p.city, p.state, p.country]) {
     if (part && part !== name && !labelParts.includes(part)) labelParts.push(part);
   }
+  const addressParts: string[] = [];
+  for (const part of [street, p.postcode, p.city, p.state, p.country]) {
+    if (part && !addressParts.includes(part)) addressParts.push(part);
+  }
 
   return {
     name,
     label: labelParts.join(', '),
+    ...(addressParts.length > 0 ? { address: addressParts.join(', ') } : {}),
     position: { lat, lng },
     kind: p.osm_key && p.osm_value ? `${p.osm_key}/${p.osm_value}` : undefined,
   };
@@ -129,7 +136,9 @@ export interface SearchablePlace {
   name: string;
   lat: number;
   lng: number;
-  /** Free text the user attached — today that is where they paste addresses. */
+  /** First-class address captured from search or edited later. */
+  address?: string;
+  /** Free text the user attached. */
   notes?: string;
 }
 
@@ -144,8 +153,7 @@ export const SAVED_PLACE_LABEL = 'Saved place';
  * only ever went to Photon could never find it. Matching locally also means
  * favourites keep resolving with no network at all.
  *
- * Notes are searched after names because that is where addresses currently get
- * pasted; a name match always outranks a notes match.
+ * Address and notes are searched after names; a name match always ranks first.
  */
 export function savedPlaceResults<T extends SearchablePlace>(
   places: T[],
@@ -156,17 +164,29 @@ export function savedPlaceResults<T extends SearchablePlace>(
   if (q.length === 0) return [];
   const byName = matchPlacesByName(places, q, limit);
   const seen = new Set<T>(byName);
+  const byAddress: T[] = [];
   const byNotes: T[] = [];
   if (byName.length < limit) {
     for (const place of places) {
       if (seen.has(place)) continue;
-      if (place.notes?.toLowerCase().includes(q)) byNotes.push(place);
-      if (byName.length + byNotes.length === limit) break;
+      if (place.address?.toLowerCase().includes(q)) {
+        byAddress.push(place);
+        seen.add(place);
+      }
+      if (byName.length + byAddress.length === limit) break;
     }
   }
-  return [...byName, ...byNotes].map((p) => ({
+  if (byName.length + byAddress.length < limit) {
+    for (const place of places) {
+      if (seen.has(place)) continue;
+      if (place.notes?.toLowerCase().includes(q)) byNotes.push(place);
+      if (byName.length + byAddress.length + byNotes.length === limit) break;
+    }
+  }
+  return [...byName, ...byAddress, ...byNotes].map((p) => ({
     name: p.name,
-    label: SAVED_PLACE_LABEL,
+    label: p.address || SAVED_PLACE_LABEL,
+    ...(p.address ? { address: p.address } : {}),
     position: { lat: p.lat, lng: p.lng },
   }));
 }

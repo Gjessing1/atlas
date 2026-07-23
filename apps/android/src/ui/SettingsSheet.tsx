@@ -1,4 +1,11 @@
-import { fmtClock, MAX_NAV_WIDGETS, NAV_WIDGETS, type RegionPackManifest } from '@atlas/core';
+import {
+  fmtClock,
+  layersForProfile,
+  MAP_PROFILES,
+  MAX_NAV_WIDGETS,
+  NAV_WIDGETS,
+  type RegionPackManifest,
+} from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
 import {
   groupUpstreams,
@@ -6,6 +13,7 @@ import {
   upstreamDetail,
   useStatus,
   type MapStyleEditorController,
+  type MapProfilePreferencesController,
   type NavPrefsController,
   type RegionPackJobsController,
   type ThemeModeController,
@@ -24,6 +32,7 @@ import {
 } from 'react-native';
 
 import type { TileSource } from '../map/useTileSource';
+import type { OverlaysController } from '../layers/useOverlays';
 import type { LocalPack } from '../regions/packs';
 import { deletePack, downloadPack, fetchAvailableRegions } from '../regions/packs';
 import { closeEngine } from '../routing/offlineRouting';
@@ -32,6 +41,8 @@ import type { SyncState } from '../sync/useSync';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
+import { LayersContent } from './LayersSheet';
+import { MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
 
 const STATUS_LABEL: Record<SyncState['status'], string> = {
@@ -519,7 +530,7 @@ function TilesSection({ tiles }: { tiles: TileSource }) {
         />
       </View>
       <Text style={styles.muted}>
-        A small cloud icon above the scale bar while the map draws from downloaded tiles.
+        A small cloud icon beside map contributions while downloaded tiles are in use.
       </Text>
     </View>
   );
@@ -530,6 +541,25 @@ const STYLE_COLORS = [
   ['waterColor', 'Water'],
   ['roadColor', 'Roads'],
   ['pathColor', 'Paths & tracks'],
+] as const;
+
+const MAP_COLOR_SWATCHES = [
+  '#f5f3ee',
+  '#d8d2c4',
+  '#abc9dc',
+  '#65a9d0',
+  '#d49b5f',
+  '#a94f4b',
+  '#e11d48',
+  '#f97316',
+  '#f59e0b',
+  '#16a34a',
+  '#0d9488',
+  '#2563eb',
+  '#7c3aed',
+  '#475569',
+  '#262b31',
+  '#eef2f5',
 ] as const;
 
 function StyleColorInput({
@@ -551,21 +581,55 @@ function StyleColorInput({
     else setDraft(current);
   };
   return (
-    <View style={styles.styleColorRow}>
-      <Text style={styles.rowText}>{label}</Text>
-      <TextInput
-        style={[styles.input, styles.styleColorInput]}
-        value={draft}
-        onChangeText={setDraft}
-        onEndEditing={commit}
-        onSubmitEditing={commit}
-        placeholder="Atlas default"
-        placeholderTextColor={theme.textMuted}
-        autoCapitalize="none"
-        autoCorrect={false}
-        maxLength={7}
-        testID={`style-${colorKey}`}
-      />
+    <View style={styles.styleColorBlock}>
+      <View style={styles.styleColorRow}>
+        <Text style={styles.rowText}>{label}</Text>
+        <View style={styles.styleColorValue}>
+          <View
+            style={[
+              styles.styleColorPreview,
+              { backgroundColor: current || MAP_COLOR_SWATCHES[0] },
+            ]}
+          />
+          <TextInput
+            style={[styles.input, styles.styleColorInput]}
+            value={draft}
+            onChangeText={setDraft}
+            onEndEditing={commit}
+            onSubmitEditing={commit}
+            placeholder="Atlas default"
+            placeholderTextColor={theme.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={7}
+            testID={`style-${colorKey}`}
+          />
+        </View>
+      </View>
+      <View style={styles.mapColorPalette}>
+        {MAP_COLOR_SWATCHES.map((candidate) => (
+          <Pressable
+            key={candidate}
+            style={[
+              styles.mapColorSwatch,
+              { backgroundColor: candidate },
+              current === candidate && styles.mapColorSwatchOn,
+            ]}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: current === candidate }}
+            accessibilityLabel={`${label} ${candidate}`}
+            onPress={() => editor.setColor(colorKey, candidate)}
+            testID={`style-${colorKey}-${candidate}`}
+          />
+        ))}
+        <Pressable
+          style={[styles.mapColorDefault, !current && styles.mapColorDefaultOn]}
+          onPress={() => editor.setColor(colorKey, null)}
+          testID={`style-${colorKey}-default`}
+        >
+          <Text style={styles.mapColorDefaultText}>Default</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -604,9 +668,7 @@ function ScaleChoices({
 function MapStyleSection({ editor }: { editor: MapStyleEditorController }) {
   return (
     <View>
-      <Text style={styles.muted}>
-        Enter #RRGGBB colours, or leave a field empty for the Atlas default.
-      </Text>
+      <Text style={styles.muted}>Pick a swatch or enter any #RRGGBB colour.</Text>
       {STYLE_COLORS.map(([key, label]) => (
         <StyleColorInput key={key} editor={editor} colorKey={key} label={label} />
       ))}
@@ -631,6 +693,102 @@ function MapStyleSection({ editor }: { editor: MapStyleEditorController }) {
   );
 }
 
+function ProfileSection({
+  preferences,
+  overlays,
+}: {
+  preferences: MapProfilePreferencesController;
+  overlays: OverlaysController;
+}) {
+  return (
+    <View>
+      <Text style={styles.muted}>
+        Choose the activities in the map switcher and the layers each one prefers. These choices
+        sync with your account; quick layer changes stay on this device.
+      </Text>
+      {MAP_PROFILES.map((profile) => {
+        const Icon = MAP_PROFILE_ICON[profile.id]!;
+        const visible = preferences.value.visible.includes(profile.id);
+        const onlyVisible = visible && preferences.value.visible.length === 1;
+        const preferred = new Set(preferences.preferredLayers(profile.id));
+        const offered = layersForProfile(overlays.allCatalog, profile.id);
+        return (
+          <View style={styles.profileCard} key={profile.id}>
+            <View style={styles.profileHead}>
+              <View style={styles.profileName}>
+                <Icon color={theme.icon} size={21} />
+                <Text style={styles.rowText}>{profile.label}</Text>
+              </View>
+              <View style={styles.profileVisible}>
+                <Text style={styles.muted}>Quick switcher</Text>
+                <Switch
+                  value={visible}
+                  disabled={onlyVisible}
+                  onValueChange={(on) => preferences.setVisible(profile.id, on)}
+                  testID={`profile-visible-${profile.id}`}
+                />
+              </View>
+            </View>
+            <View style={styles.profileLayers}>
+              {offered.map((layer) => {
+                const on = preferred.has(layer.id);
+                return (
+                  <Pressable
+                    key={layer.id}
+                    style={[styles.profileLayer, on && styles.profileLayerOn]}
+                    onPress={() => {
+                      const next = new Set(preferred);
+                      if (on) next.delete(layer.id);
+                      else next.add(layer.id);
+                      preferences.setPreferredLayers(profile.id, [...next]);
+                      overlays.setProfileOn(profile.id, layer.id, !on);
+                    }}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                    testID={`profile-layer-${profile.id}-${layer.id}`}
+                  >
+                    <Text style={[styles.themeOptionText, on && styles.themeOptionTextOn]}>
+                      {on ? '✓ ' : ''}
+                      {layer.title}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        );
+      })}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          onPress={() => {
+            for (const profile of MAP_PROFILES) {
+              const defaults = new Set(profile.defaultLayers ?? []);
+              for (const layer of layersForProfile(overlays.allCatalog, profile.id)) {
+                overlays.setProfileOn(profile.id, layer.id, defaults.has(layer.id));
+              }
+            }
+            preferences.reset();
+          }}
+        >
+          <Text style={styles.buttonQuietText}>Reset profile layout</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+type SettingsTab = 'map' | 'profiles' | 'navigation' | 'offline' | 'account' | 'system';
+
+const SETTINGS_TABS: readonly { id: SettingsTab; label: string }[] = [
+  { id: 'map', label: 'Map' },
+  { id: 'profiles', label: 'Profiles' },
+  { id: 'navigation', label: 'Navigation' },
+  { id: 'offline', label: 'Offline' },
+  { id: 'account', label: 'Account' },
+  { id: 'system', label: 'System' },
+];
+
 export function SettingsSheet({
   visible,
   onClose,
@@ -642,6 +800,8 @@ export function SettingsSheet({
   onExportAll,
   appearance,
   mapStyleEditor,
+  overlays,
+  profilePreferences,
   navPrefs,
   regionJobs,
   onDrawRegion,
@@ -659,6 +819,8 @@ export function SettingsSheet({
   onExportAll: () => void;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
+  overlays: OverlaysController;
+  profilePreferences: MapProfilePreferencesController;
   navPrefs: NavPrefsController;
   regionJobs: RegionPackJobsController;
   /** Close Settings and let the user select two corners on the map. */
@@ -666,6 +828,7 @@ export function SettingsSheet({
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
+  const [tab, setTab] = useState<SettingsTab>('map');
   return (
     <BottomSheet
       visible={visible}
@@ -674,81 +837,126 @@ export function SettingsSheet({
       bottomInset={bottomInset}
       testID="settings-sheet"
     >
-      <ScrollView style={styles.scroll}>
-        <Text style={styles.heading}>Appearance</Text>
-        <View style={styles.themeRow} accessibilityRole="radiogroup">
-          {(['system', 'light', 'dark'] as const).map((mode) => (
-            <Pressable
-              key={mode}
-              style={[styles.themeOption, appearance.mode === mode && styles.themeOptionOn]}
-              onPress={() => appearance.setMode(mode)}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: appearance.mode === mode }}
-              testID={`theme-${mode}`}
-            >
-              <Text
-                style={[
-                  styles.themeOptionText,
-                  appearance.mode === mode && styles.themeOptionTextOn,
-                ]}
-              >
-                {mode[0].toUpperCase() + mode.slice(1)}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
-        <Text style={styles.heading}>Map style</Text>
-        <MapStyleSection editor={mapStyleEditor} />
-        <Text style={styles.heading}>Navigation widgets</Text>
-        <View style={styles.widgetOptions}>
-          {NAV_WIDGETS.map((widget) => {
-            const selected = navPrefs.widgets.includes(widget.id);
-            return (
-              <Pressable
-                key={widget.id}
-                style={[styles.themeOption, selected && styles.themeOptionOn]}
-                disabled={!selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS}
-                onPress={() => navPrefs.toggleWidget(widget.id)}
-                accessibilityRole="checkbox"
-                accessibilityState={{
-                  checked: selected,
-                  disabled: !selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS,
-                }}
-                testID={`nav-widget-${widget.id}`}
-              >
-                <Text style={[styles.themeOptionText, selected && styles.themeOptionTextOn]}>
-                  {widget.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={styles.muted}>Choose up to three readouts for active guidance.</Text>
-        <Text style={styles.heading}>Account</Text>
-        <AccountSection sync={sync} />
-        <Text style={styles.heading}>Map tiles</Text>
-        <TilesSection tiles={tiles} />
-        <Text style={styles.heading}>Offline regions</Text>
-        <RegionsSection
-          packs={packs}
-          onPacksChanged={onPacksChanged}
-          jobs={regionJobs}
-          onDrawRegion={onDrawRegion}
-        />
-        <Text style={styles.heading}>Server</Text>
-        <ServerSection storage={storage} />
-        <Text style={styles.heading}>Server status</Text>
-        <StatusSection visible={visible} />
-        <Text style={styles.heading}>App</Text>
-        <UpdateSection />
-        <Text style={styles.heading}>Your data</Text>
-        <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
-        <View style={styles.buttonRow}>
-          <Pressable style={styles.button} onPress={onExportAll} testID="export-all">
-            <Text style={styles.buttonText}>Export all data</Text>
+      <Text style={styles.title}>Settings</Text>
+      <ScrollView
+        horizontal
+        style={styles.tabs}
+        contentContainerStyle={styles.tabsContent}
+        showsHorizontalScrollIndicator={false}
+      >
+        {SETTINGS_TABS.map((item) => (
+          <Pressable
+            key={item.id}
+            style={[styles.tab, tab === item.id && styles.tabOn]}
+            onPress={() => setTab(item.id)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === item.id }}
+            testID={`settings-tab-${item.id}`}
+          >
+            <Text style={[styles.tabText, tab === item.id && styles.tabTextOn]}>{item.label}</Text>
           </Pressable>
-        </View>
+        ))}
+      </ScrollView>
+      <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
+        {tab === 'map' ? (
+          <>
+            <Text style={styles.heading}>Appearance</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(['system', 'light', 'dark'] as const).map((mode) => (
+                <Pressable
+                  key={mode}
+                  style={[styles.themeOption, appearance.mode === mode && styles.themeOptionOn]}
+                  onPress={() => appearance.setMode(mode)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: appearance.mode === mode }}
+                  testID={`theme-${mode}`}
+                >
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      appearance.mode === mode && styles.themeOptionTextOn,
+                    ]}
+                  >
+                    {mode[0].toUpperCase() + mode.slice(1)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
+            <Text style={styles.heading}>Map style</Text>
+            <MapStyleSection editor={mapStyleEditor} />
+            <Text style={styles.heading}>Map tiles</Text>
+            <TilesSection tiles={tiles} />
+            <Text style={styles.heading}>Map layers</Text>
+            <LayersContent overlays={overlays} />
+          </>
+        ) : null}
+        {tab === 'profiles' ? (
+          <ProfileSection preferences={profilePreferences} overlays={overlays} />
+        ) : null}
+        {tab === 'navigation' ? (
+          <>
+            <Text style={styles.heading}>Navigation widgets</Text>
+            <View style={styles.widgetOptions}>
+              {NAV_WIDGETS.map((widget) => {
+                const selected = navPrefs.widgets.includes(widget.id);
+                return (
+                  <Pressable
+                    key={widget.id}
+                    style={[styles.themeOption, selected && styles.themeOptionOn]}
+                    disabled={!selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS}
+                    onPress={() => navPrefs.toggleWidget(widget.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{
+                      checked: selected,
+                      disabled: !selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS,
+                    }}
+                    testID={`nav-widget-${widget.id}`}
+                  >
+                    <Text style={[styles.themeOptionText, selected && styles.themeOptionTextOn]}>
+                      {widget.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.muted}>Choose up to three readouts for active guidance.</Text>
+          </>
+        ) : null}
+        {tab === 'offline' ? (
+          <>
+            <Text style={styles.heading}>Offline regions</Text>
+            <RegionsSection
+              packs={packs}
+              onPacksChanged={onPacksChanged}
+              jobs={regionJobs}
+              onDrawRegion={onDrawRegion}
+            />
+          </>
+        ) : null}
+        {tab === 'account' ? (
+          <>
+            <Text style={styles.heading}>Account &amp; sync</Text>
+            <AccountSection sync={sync} />
+            <Text style={styles.heading}>Your data</Text>
+            <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
+            <View style={styles.buttonRow}>
+              <Pressable style={styles.button} onPress={onExportAll} testID="export-all">
+                <Text style={styles.buttonText}>Export all data</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+        {tab === 'system' ? (
+          <>
+            <Text style={styles.heading}>Server</Text>
+            <ServerSection storage={storage} />
+            <Text style={styles.heading}>Server status</Text>
+            <StatusSection visible={visible && tab === 'system'} />
+            <Text style={styles.heading}>App</Text>
+            <UpdateSection />
+          </>
+        ) : null}
       </ScrollView>
       <Pressable
         style={[styles.button, styles.closeButton]}
@@ -763,6 +971,18 @@ export function SettingsSheet({
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
+  title: { fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 8 },
+  tabs: { flexGrow: 0, marginHorizontal: -2, marginBottom: 4 },
+  tabsContent: { gap: 5, paddingHorizontal: 2 },
+  tab: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 9,
+    backgroundColor: theme.surfaceMuted,
+  },
+  tabOn: { backgroundColor: theme.surfaceActive, borderWidth: 1, borderColor: theme.accent },
+  tabText: { fontSize: 13, fontWeight: '700', color: theme.textMuted },
+  tabTextOn: { color: theme.accent },
   heading: {
     fontSize: 13,
     fontWeight: '700',
@@ -809,14 +1029,42 @@ const styles = StyleSheet.create({
   themeOptionOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   themeOptionText: { color: theme.text, fontSize: 13, fontWeight: '600' },
   themeOptionTextOn: { color: theme.accent },
+  styleColorBlock: { marginTop: 12, gap: 7 },
   styleColorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginTop: 8,
   },
-  styleColorInput: { width: 132, marginBottom: 0, fontFamily: 'monospace' },
+  styleColorValue: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  styleColorPreview: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  styleColorInput: { width: 124, marginBottom: 0, fontFamily: 'monospace' },
+  mapColorPalette: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  mapColorSwatch: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  mapColorSwatchOn: { borderWidth: 3, borderColor: theme.accent },
+  mapColorDefault: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  mapColorDefaultOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  mapColorDefaultText: { fontSize: 12, fontWeight: '700', color: theme.text },
   styleScale: { gap: 6, marginTop: 12 },
   styleScaleOption: {
     flex: 1,
@@ -827,6 +1075,31 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     backgroundColor: theme.surfaceMuted,
   },
+  profileCard: {
+    marginTop: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+  },
+  profileHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  profileName: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  profileVisible: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  profileLayers: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  profileLayer: {
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  profileLayerOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   regionRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -25,13 +25,17 @@ export interface ActiveOverlay {
 }
 
 export interface OverlaysController {
+  /** Full cached/live catalog; profile settings configure inactive profiles from it. */
+  allCatalog: LayerMeta[];
   /** The catalog narrowed to the active map profile. */
   catalog: LayerMeta[];
   state: OverlayStateMap;
   overlays: ActiveOverlay[];
   /** Resolve an explicit choice against the active profile's default. */
   isOn: (id: string) => boolean;
+  opacityFor: (id: string) => number;
   setOn: (id: string, on: boolean) => void;
+  setProfileOn: (profileId: string, id: string, on: boolean) => void;
   toggle: (id: string) => void;
   setOpacity: (id: string, opacity: number) => void;
 }
@@ -42,7 +46,12 @@ export interface OverlaysController {
  * local setting — offline-first: the last-seen catalog keeps the sheet and any
  * cached tiles usable without connectivity.
  */
-export function useOverlays(data: UserData, profileId: string): OverlaysController {
+export function useOverlays(
+  data: UserData,
+  profileId: string,
+  preferredLayers: readonly string[] = [],
+  customizedLayers = false,
+): OverlaysController {
   const origin = useServerOrigin();
   const [allLayers, setAllLayers] = useState<LayerMeta[]>([]);
   const [state, setState] = useState<OverlayStateMap>({});
@@ -103,36 +112,56 @@ export function useOverlays(data: UserData, profileId: string): OverlaysControll
     [setSetting],
   );
 
-  const toggle = useCallback(
-    (id: string) =>
-      update((cur) => ({
-        ...cur,
-        [id]: { ...cur[id], on: !(cur[id]?.on ?? layerDefaultsOn(id, profileId)) },
-      })),
-    [update, profileId],
-  );
+  const stateKey = useCallback((forProfile: string, id: string) => `${forProfile}:${id}`, []);
 
   const setOn = useCallback(
     (id: string, on: boolean) =>
       update((cur) => ({
         ...cur,
-        [id]: { ...cur[id], on },
+        [stateKey(profileId, id)]: { ...cur[stateKey(profileId, id)], on },
       })),
-    [update],
+    [update, stateKey, profileId],
+  );
+
+  const setProfileOn = useCallback(
+    (forProfile: string, id: string, on: boolean) =>
+      update((cur) => ({
+        ...cur,
+        [stateKey(forProfile, id)]: { ...cur[stateKey(forProfile, id)], on },
+      })),
+    [update, stateKey],
   );
 
   const isOn = useCallback(
-    (id: string) => state[id]?.on ?? layerDefaultsOn(id, profileId),
-    [state, profileId],
+    (id: string) =>
+      state[stateKey(profileId, id)]?.on ??
+      (customizedLayers
+        ? preferredLayers.includes(id)
+        : (state[id]?.on ?? layerDefaultsOn(id, profileId))),
+    [state, stateKey, profileId, customizedLayers, preferredLayers],
   );
+
+  const toggle = useCallback((id: string) => setOn(id, !isOn(id)), [setOn, isOn]);
 
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
       update((cur) => ({
         ...cur,
-        [id]: { on: cur[id]?.on ?? layerDefaultsOn(id, profileId), opacity },
+        [stateKey(profileId, id)]: {
+          on: cur[stateKey(profileId, id)]?.on ?? isOn(id),
+          opacity,
+        },
       })),
-    [update, profileId],
+    [update, stateKey, profileId, isOn],
+  );
+
+  const opacityFor = useCallback(
+    (id: string) =>
+      state[stateKey(profileId, id)]?.opacity ??
+      state[id]?.opacity ??
+      allLayers.find((meta) => meta.id === id)?.defaultOpacity ??
+      1,
+    [state, stateKey, profileId, allLayers],
   );
 
   // A contextual layer must stop drawing outside its profile; its explicit
@@ -145,11 +174,22 @@ export function useOverlays(data: UserData, profileId: string): OverlaysControll
         .filter((meta) => isOn(meta.id))
         .map((meta) => ({
           meta,
-          opacity: state[meta.id]?.opacity ?? meta.defaultOpacity,
+          opacity: opacityFor(meta.id),
           tileUrlTemplate: overlayTileUrl(origin, meta),
         })),
-    [catalog, state, origin, isOn],
+    [catalog, origin, isOn, opacityFor],
   );
 
-  return { catalog, state, overlays, isOn, setOn, toggle, setOpacity };
+  return {
+    allCatalog: allLayers,
+    catalog,
+    state,
+    overlays,
+    isOn,
+    opacityFor,
+    setOn,
+    setProfileOn,
+    toggle,
+    setOpacity,
+  };
 }

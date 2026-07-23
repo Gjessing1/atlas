@@ -19,6 +19,11 @@ export {
   type MapProfileController,
   type MapProfileSettings,
 } from './useMapProfile.js';
+export {
+  useMapProfilePreferences,
+  type MapProfilePreferencesController,
+  type MapProfilePreferenceSettings,
+} from './useMapProfilePreferences.js';
 export { useThemeMode, type ThemeModeController, type ThemeModeSettings } from './useThemeMode.js';
 export {
   useMapStyleEditor,

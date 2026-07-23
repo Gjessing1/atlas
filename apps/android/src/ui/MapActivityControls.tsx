@@ -1,5 +1,5 @@
 import type { MapProfileController } from '@atlas/app-hooks';
-import { MAP_PROFILES } from '@atlas/core';
+import type { MapProfile } from '@atlas/core';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
@@ -16,12 +16,14 @@ import { theme } from './theme';
  */
 export function MapActivityControls({
   profile,
+  visibleProfiles,
   overlays,
   mapZoom,
   bottom,
   onPickProfile,
 }: {
   profile: MapProfileController;
+  visibleProfiles: readonly MapProfile[];
   overlays: OverlaysController;
   mapZoom: number;
   /** Already includes the system navigation-bar inset. */
@@ -60,7 +62,7 @@ export function MapActivityControls({
           style={[styles.profileMenu, { bottom: bottom + 52, right }]}
           accessibilityLabel="Map profile"
         >
-          {MAP_PROFILES.map((item) => {
+          {visibleProfiles.map((item) => {
             const active = item.id === activeProfile.id;
             const Icon = MAP_PROFILE_ICON[item.id]!;
             return (

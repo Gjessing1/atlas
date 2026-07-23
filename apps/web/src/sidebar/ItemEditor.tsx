@@ -3,12 +3,15 @@ import type { CollectionRecord } from '@atlas/storage';
 
 interface EditorProps {
   name: string;
+  /** Present for places; tracks have no address field. */
+  address?: string;
   notes: string;
   tags: string[];
   collectionId: string | null;
   collections: CollectionRecord[];
   onPatch: (patch: {
     name?: string;
+    address?: string;
     notes?: string;
     tags?: string[];
     collectionId?: string | null;
@@ -25,6 +28,7 @@ interface EditorProps {
 /** Inline detail editor shared by places and tracks; every change auto-saves. */
 export function ItemEditor({
   name,
+  address,
   notes,
   tags,
   collectionId,
@@ -91,6 +95,18 @@ export function ItemEditor({
           ))}
         </select>
       </label>
+      {address !== undefined && (
+        <label>
+          Address
+          <input
+            defaultValue={address}
+            placeholder="Street, postcode, city"
+            onBlur={(e) => {
+              if (e.target.value !== address) onPatch({ address: e.target.value });
+            }}
+          />
+        </label>
+      )}
       <label>
         Tags
         <input

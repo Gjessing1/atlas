@@ -15,6 +15,8 @@ export interface DestinationTarget {
   name: string;
   /** Secondary line, e.g. a tapped POI's category ("cafe · restaurant"). */
   detail?: string;
+  /** Postal/street address for search hits and saved places. */
+  address?: string;
   /** Search results / long-press points can be saved as a pin; saved places can't. */
   canSave?: boolean;
   /** Set when the target is a saved place — enables the Edit action. */
@@ -110,6 +112,11 @@ export function DestinationCard({
           {target.detail ? (
             <Text style={styles.detail} numberOfLines={1}>
               {target.detail}
+            </Text>
+          ) : null}
+          {target.address ? (
+            <Text style={styles.detail} numberOfLines={2}>
+              {target.address}
             </Text>
           ) : null}
         </View>

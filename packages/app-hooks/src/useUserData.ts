@@ -64,7 +64,7 @@ function buildLibraryKmz(dump: ExportedData): Uint8Array {
     const items: TrackData[] = [];
     const waypoints = dump.places
       .filter(inFolder)
-      .map((p) => ({ lat: p.lat, lng: p.lng, name: p.name }));
+      .map((p) => ({ lat: p.lat, lng: p.lng, name: p.name, address: p.address || undefined }));
     if (waypoints.length > 0) items.push({ segments: [], waypoints });
     for (const track of dump.tracks.filter(inFolder)) {
       try {
@@ -448,6 +448,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
                   name: w.name ?? `${w.lat.toFixed(5)}, ${w.lng.toFixed(5)}`,
                   lat: w.lat,
                   lng: w.lng,
+                  address: w.address,
                   collectionId: await resolveTargetCollection(),
                 }),
               );
@@ -630,7 +631,12 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         buildGpx({
           name: 'Atlas places',
           segments: [],
-          waypoints: dump.places.map((p) => ({ lat: p.lat, lng: p.lng, name: p.name })),
+          waypoints: dump.places.map((p) => ({
+            lat: p.lat,
+            lng: p.lng,
+            name: p.name,
+            address: p.address || undefined,
+          })),
         }),
       );
     }
