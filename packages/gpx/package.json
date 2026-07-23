@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@atlas/core": "*",
-    "fast-xml-parser": "^5.2.0",
+    "fast-xml-parser": "^5.10.1",
     "fflate": "^0.8.2"
   }
 }
