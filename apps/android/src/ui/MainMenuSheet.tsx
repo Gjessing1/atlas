@@ -17,6 +17,7 @@ export function MainMenuSheet({
   onOpenFavorites,
   onOpenTracks,
   onOpenLayers,
+  onOpenExplore,
   onOpenSettings,
   bottomInset,
 }: {
@@ -25,10 +26,17 @@ export function MainMenuSheet({
   onOpenFavorites: () => void;
   onOpenTracks: () => void;
   onOpenLayers: () => void;
+  onOpenExplore: () => void;
   onOpenSettings: () => void;
   bottomInset: number;
 }) {
   const items: MenuItem[] = [
+    {
+      label: 'Explore',
+      detail: 'Nearby places by category',
+      testID: 'open-explore',
+      onPress: onOpenExplore,
+    },
     {
       label: 'Collections',
       detail: 'Saved places and folders',
@@ -61,7 +69,7 @@ export function MainMenuSheet({
       mode="map"
       onClose={onClose}
       initialSnap="peek"
-      peekHeight={206}
+      peekHeight={286}
       bottomInset={bottomInset}
       testID="main-menu-sheet"
     >

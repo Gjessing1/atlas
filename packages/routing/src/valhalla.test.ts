@@ -120,6 +120,37 @@ describe('buildValhallaRequest', () => {
     expect(hike['costing_options']).toEqual({
       pedestrian: { use_ferry: 0, max_hiking_difficulty: 6 },
     });
+    const run = buildValhallaRequest({ profile: 'run', points: [oslo, sognsvann] });
+    expect(run['costing']).toBe('pedestrian');
+    expect(run['costing_options']).toEqual({
+      pedestrian: { use_ferry: 0, walking_speed: 10 },
+    });
+  });
+
+  it('maps curated custom preferences onto legal costing options', () => {
+    expect(
+      buildValhallaRequest({
+        profile: 'car',
+        points: [oslo, sognsvann],
+        preferences: { avoidHighways: true, avoidTolls: true, avoidFerries: true },
+      })['costing_options'],
+    ).toEqual({ auto: { use_ferry: 0, use_highways: 0, use_tolls: 0 } });
+
+    expect(
+      buildValhallaRequest({
+        profile: 'bike',
+        points: [oslo, sognsvann],
+        preferences: { avoidFerries: false, avoidHills: true, preferTrails: true },
+      })['costing_options'],
+    ).toEqual({
+      bicycle: {
+        use_ferry: 0.5,
+        use_hills: 0,
+        bicycle_type: 'mountain',
+        use_roads: 0.1,
+        avoid_bad_surfaces: 0,
+      },
+    });
   });
 
   it('keeps ferries off walking and cycling routes, but not driving ones', () => {

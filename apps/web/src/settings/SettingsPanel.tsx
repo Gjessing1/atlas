@@ -5,8 +5,9 @@ import {
   useStatus,
   type ThemeModeController,
   type MapStyleEditorController,
+  type NavPrefsController,
 } from '@atlas/app-hooks';
-import type { SystemStatus, UpstreamStatus } from '@atlas/core';
+import { MAX_NAV_WIDGETS, NAV_WIDGETS, type SystemStatus, type UpstreamStatus } from '@atlas/core';
 import { AccountPanel } from '../sync/AccountPanel.js';
 import type { SyncState } from '../sync/useSync.js';
 
@@ -14,6 +15,7 @@ interface SettingsPanelProps {
   sync: SyncState;
   appearance: ThemeModeController;
   mapStyle: MapStyleEditorController;
+  navPrefs: NavPrefsController;
   onClose: () => void;
 }
 
@@ -128,7 +130,13 @@ function StatusSection({ data }: { data: SystemStatus }) {
  * panel (moved out of the Collections sidebar footer), and build info. The status
  * answers "why is this overlay blank?" without leaving the app.
  */
-export function SettingsPanel({ sync, appearance, mapStyle, onClose }: SettingsPanelProps) {
+export function SettingsPanel({
+  sync,
+  appearance,
+  mapStyle,
+  navPrefs,
+  onClose,
+}: SettingsPanelProps) {
   // Served by the backend itself, so status lives at a relative path.
   const status = useStatus('', true);
 
@@ -159,6 +167,33 @@ export function SettingsPanel({ sync, appearance, mapStyle, onClose }: SettingsP
         </div>
         <p className="settings-note">System follows this device’s light or dark setting.</p>
         <MapStyleSection editor={mapStyle} />
+      </div>
+
+      <div className="settings-section">
+        <h3>Navigation widgets</h3>
+        <div
+          className="theme-options nav-widget-options"
+          role="group"
+          aria-label="Navigation widgets"
+        >
+          {NAV_WIDGETS.map((widget) => {
+            const selected = navPrefs.widgets.includes(widget.id);
+            const full = navPrefs.widgets.length >= MAX_NAV_WIDGETS;
+            return (
+              <button
+                type="button"
+                aria-pressed={selected}
+                className={selected ? 'theme-option theme-option-on' : 'theme-option'}
+                disabled={!selected && full}
+                onClick={() => navPrefs.toggleWidget(widget.id)}
+                key={widget.id}
+              >
+                {widget.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="settings-note">Choose up to three readouts for active guidance.</p>
       </div>
 
       <div className="settings-section">

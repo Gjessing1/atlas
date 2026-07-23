@@ -4,6 +4,7 @@ import type {
   RegionPackJobsController,
   SyncState,
   ThemeModeController,
+  NavPrefsController,
 } from '@atlas/app-hooks';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -41,6 +42,7 @@ interface AppSheetsProps {
   tiles: TileSource;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
+  navPrefs: NavPrefsController;
   regionJobs: RegionPackJobsController;
   onDrawRegion: () => void;
 
@@ -79,6 +81,7 @@ export function AppSheets({
   tiles,
   appearance,
   mapStyleEditor,
+  navPrefs,
   regionJobs,
   onDrawRegion,
   pendingPin,
@@ -151,6 +154,7 @@ export function AppSheets({
         onExportAll={() => void data.exportAll()}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
+        navPrefs={navPrefs}
         regionJobs={regionJobs}
         onDrawRegion={onDrawRegion}
         bottomInset={bottomInset}

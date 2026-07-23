@@ -36,7 +36,7 @@ describe('useNavPrefs', () => {
     const store = settings({ 'local.nav.follow': 'sideways' });
     const { result } = renderHook(() => useNavPrefs(store, { muted: false, setMuted: vi.fn() }));
 
-    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(3));
     expect(result.current.followMode).toBe('course');
   });
 
@@ -66,15 +66,32 @@ describe('useNavPrefs', () => {
     expect(store.setSetting).toHaveBeenCalledWith('local.nav.muted', 'true');
   });
 
+  it('restores and persists a capped widget selection', async () => {
+    const store = settings({
+      'local.nav.widgets': '["altitude","next-turn","remaining","speed"]',
+    });
+    const { result } = renderHook(() => useNavPrefs(store, { muted: false, setMuted: vi.fn() }));
+    await waitFor(() =>
+      expect(result.current.widgets).toEqual(['altitude', 'next-turn', 'remaining']),
+    );
+
+    act(() => result.current.toggleWidget('altitude'));
+    expect(result.current.widgets).toEqual(['next-turn', 'remaining']);
+    expect(store.setSetting).toHaveBeenLastCalledWith(
+      'local.nav.widgets',
+      '["next-turn","remaining"]',
+    );
+  });
+
   it('does not re-read when the controller hands out a new setMuted each render', async () => {
     const store = settings({ 'local.nav.muted': 'true' });
     const { rerender } = renderHook(() =>
       useNavPrefs(store, { muted: false, setMuted: () => undefined }),
     );
-    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(3));
 
     rerender();
     rerender();
-    expect(store.getSetting).toHaveBeenCalledTimes(2);
+    expect(store.getSetting).toHaveBeenCalledTimes(3);
   });
 });

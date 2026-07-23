@@ -1,6 +1,7 @@
 export type {
   RoutingProfile,
   RoutingProfileInfo,
+  RoutePreferences,
   RouteQuery,
   RoutePath,
   RouteResult,
@@ -15,6 +16,7 @@ export {
   ROUTING_PROFILES,
   routePathToTrackData,
   formatExitSign,
+  defaultRoutePreferences,
 } from './model.js';
 export { buildValhallaRequest, parseValhallaResponse, roundTripLocations } from './valhalla.js';
 export { fetchRoute, httpTraceTransport, RoutingError, type FetchRouteOptions } from './client.js';

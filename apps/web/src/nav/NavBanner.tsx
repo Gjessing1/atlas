@@ -1,5 +1,5 @@
 import type { NavController } from '@atlas/app-hooks';
-import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
+import { fmtClock, fmtDistanceM, fmtDuration, fmtKm, type NavWidgetId } from '@atlas/core';
 import { laneGlyphs, laneLabel, shortManeuverText, tunnelChipLabel } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
 import { TurnIcon } from './TurnIcon.js';
@@ -8,6 +8,28 @@ import { TurnIcon } from './TurnIcon.js';
 function speedKph(speedMps: number | null): number | null {
   if (speedMps == null || speedMps < 0.5) return null;
   return Math.round(speedMps * 3.6);
+}
+
+function widgetValue(widget: NavWidgetId, nav: NavController): { value: string; unit: string } {
+  switch (widget) {
+    case 'speed':
+      return { value: String(speedKph(nav.speedMps) ?? 0), unit: 'km/h' };
+    case 'altitude':
+      return {
+        value: nav.altitudeM === null ? '—' : String(Math.round(nav.altitudeM)),
+        unit: 'altitude m',
+      };
+    case 'next-turn':
+      return {
+        value: nav.state?.upcoming ? fmtDistanceM(nav.state.upcoming.distanceToM) : '—',
+        unit: 'next turn',
+      };
+    case 'remaining':
+      return {
+        value: nav.state ? fmtDistanceM(nav.state.distanceRemainingM) : '—',
+        unit: 'remaining',
+      };
+  }
 }
 
 function LaneRow({ lanes }: { lanes: RouteLane[] }) {
@@ -83,6 +105,7 @@ export function NavBanner({
   onToggleFollowMode,
   overview,
   onToggleOverview,
+  widgets,
 }: {
   nav: NavController;
   followPaused: boolean;
@@ -91,13 +114,13 @@ export function NavBanner({
   onToggleFollowMode: () => void;
   overview: boolean;
   onToggleOverview: () => void;
+  widgets: NavWidgetId[];
 }) {
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
   const { state } = nav;
   const maneuver = state?.upcoming;
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const speed = speedKph(nav.speedMps);
   const sustain = moving ? (state?.sustain ?? null) : null;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — or the distant maneuver demoted below a long-road sustain cue.
@@ -214,11 +237,16 @@ export function NavBanner({
         </div>
         <div className={`nav-actions${canDeclareArrival ? ' nav-actions-arrival' : ''}`}>
           {moving ? (
-            <div className="nav-speed-group" aria-label={`Current speed ${speed ?? 0} km/h`}>
-              <span className="nav-speed">
-                <strong>{speed ?? 0}</strong>
-                <small>km/h</small>
-              </span>
+            <div className="nav-widgets" aria-label="Navigation widgets">
+              {widgets.map((widget) => {
+                const display = widgetValue(widget, nav);
+                return (
+                  <span className="nav-widget" key={widget}>
+                    <strong>{display.value}</strong>
+                    <small>{display.unit}</small>
+                  </span>
+                );
+              })}
               {/* Absent wherever the map data has no limit — an honest gap
                   beats a stale number the driver might trust. */}
               {speedLimit != null ? (

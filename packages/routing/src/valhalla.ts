@@ -1,6 +1,8 @@
 import { decodePolyline, haversineM, type LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
+import { defaultRoutePreferences } from './model.js';
 import type {
+  RoutePreferences,
   LaneDirection,
   RouteLane,
   ExitSign,
@@ -38,6 +40,7 @@ function costingFor(profile: RoutingProfile): string {
       return 'bicycle';
     case 'foot':
     case 'hike':
+    case 'run':
       return 'pedestrian';
   }
 }
@@ -188,11 +191,41 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   //
   // Driving keeps ferries at Valhalla's default: in Norway they are part of the
   // road network, sign-posted as such, and E39 is unusable without them.
-  const ferryless = query.profile !== 'car';
+  const defaults = defaultRoutePreferences(query.profile);
+  const preferences: RoutePreferences = { ...defaults, ...query.preferences };
   const costingOptions: Record<string, Record<string, unknown>> = {};
-  if (ferryless) {
-    const key = query.profile === 'bike' ? 'bicycle' : 'pedestrian';
-    costingOptions[key] = { use_ferry: 0 };
+  const costing = costingFor(query.profile);
+  if (preferences.avoidFerries) {
+    costingOptions[costing] = { use_ferry: 0 };
+  } else if (query.profile !== 'car' && query.preferences?.avoidFerries === false) {
+    // Non-car Atlas defaults avoid ferries; an explicit custom-profile choice
+    // restores Valhalla's ordinary willingness instead of merely removing a key
+    // that the defaulting layer would add again.
+    costingOptions[costing] = { use_ferry: 0.5 };
+  }
+  if (query.profile === 'car') {
+    if (preferences.avoidHighways || preferences.avoidTolls) {
+      costingOptions['auto'] = {
+        ...costingOptions['auto'],
+        ...(preferences.avoidHighways ? { use_highways: 0 } : {}),
+        ...(preferences.avoidTolls ? { use_tolls: 0 } : {}),
+      };
+    }
+  } else if (query.profile === 'bike') {
+    costingOptions['bicycle'] = {
+      ...costingOptions['bicycle'],
+      ...(preferences.avoidHills ? { use_hills: 0 } : {}),
+      ...(preferences.preferTrails
+        ? { bicycle_type: 'mountain', use_roads: 0.1, avoid_bad_surfaces: 0 }
+        : {}),
+    };
+  } else {
+    costingOptions['pedestrian'] = {
+      ...costingOptions['pedestrian'],
+      ...(query.profile === 'run' ? { walking_speed: 10 } : {}),
+      ...(preferences.avoidHills ? { use_hills: 0 } : {}),
+      ...(preferences.preferTrails ? { use_tracks: 1, walkway_factor: 0.8 } : {}),
+    };
   }
   // `hike` is pedestrian costing that also allows mountain hiking paths (sac_scale).
   if (query.profile === 'hike') {

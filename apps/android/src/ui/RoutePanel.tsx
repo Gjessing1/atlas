@@ -17,6 +17,7 @@ import {
   ROUTING_PROFILES,
   routePathToTrackData,
   type RoutePath,
+  type RoutePreferences,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
@@ -229,6 +230,22 @@ function AlongRouteSearch({
   );
 }
 
+const CUSTOM_OPTIONS: readonly {
+  key: keyof RoutePreferences;
+  label: string;
+  profiles: readonly string[];
+}[] = [
+  {
+    key: 'avoidFerries',
+    label: 'Avoid ferries',
+    profiles: ['car', 'bike', 'foot', 'hike', 'run'],
+  },
+  { key: 'avoidHighways', label: 'Avoid highways', profiles: ['car'] },
+  { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },
+  { key: 'avoidHills', label: 'Flatter ways', profiles: ['bike', 'foot', 'hike', 'run'] },
+  { key: 'preferTrails', label: 'Prefer trails', profiles: ['bike', 'hike', 'run'] },
+];
+
 /**
  * Route-planning panel — the mobile counterpart of the web RoutePanel
  * (apps/web/src/routing/RoutePanel.tsx). Bottom-docked (not modal) so the map
@@ -294,6 +311,7 @@ export function RoutePanel({
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   // Server routes carry elevation (DEM); offline-pack routes don't — no chart then.
   const hasElevation = path?.points.some((p) => p.ele !== undefined) ?? false;
   const profileData = useMemo(
@@ -452,6 +470,42 @@ export function RoutePanel({
             </Pressable>
           ) : null}
         </View>
+
+        {!transitMode ? (
+          <>
+            <Pressable
+              style={[styles.customToggle, customOpen && styles.chipSelected]}
+              onPress={() => setCustomOpen((open) => !open)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: customOpen }}
+              testID="route-customize"
+            >
+              <Text style={styles.chipText}>
+                Customize {ROUTING_PROFILES.find((p) => p.id === route.profile)?.label}
+              </Text>
+            </Pressable>
+            {customOpen ? (
+              <View style={styles.customOptions}>
+                {CUSTOM_OPTIONS.filter((option) => option.profiles.includes(route.profile)).map(
+                  (option) => (
+                    <Pressable
+                      key={option.key}
+                      style={[styles.chip, route.preferences[option.key] && styles.chipSelected]}
+                      onPress={() =>
+                        route.setPreference(option.key, !route.preferences[option.key])
+                      }
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: route.preferences[option.key] }}
+                      testID={`route-option-${option.key}`}
+                    >
+                      <Text style={styles.chipText}>{option.label}</Text>
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            ) : null}
+          </>
+        ) : null}
 
         <View style={styles.roundRow}>
           {/* A timetable has no notion of a loop, so the whole round-trip control
@@ -749,6 +803,16 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
+  customToggle: {
+    alignSelf: 'flex-start',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  customOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   // Icon-only mode picker: equal-width tabs under a shared rule, with the
   // selected one underlined rather than filled — a filled pill at this size
   // fights the line badges further down the panel for attention.

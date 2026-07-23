@@ -88,6 +88,22 @@ export function WalkIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   );
 }
 
+export function RunIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={14.8} cy={4.1} r={1.9} fill={color} />
+      <Path
+        d="M13.8 8.1l-3.5 2.2 2.8 2.1 2-1.2 2.6 2.1M13.1 12.4l-3 3.1-3.2 1.1M14.5 12l1 4 3.2 2.1"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /**
  * Hiking: an evergreen, which is what "hike" means here — the profile prefers
  * trails and terrain, not a different gait. A boot would collide with the walk
@@ -370,6 +386,7 @@ export const PROFILE_ICON: Record<RoutingProfile, ModeIcon> = {
   bike: BicycleIcon,
   foot: WalkIcon,
   hike: HikeIcon,
+  run: RunIcon,
 };
 
 /** Activity profiles, including the non-routing Explore and Ski modes. */
@@ -378,6 +395,7 @@ export const MAP_PROFILE_ICON: Record<string, ModeIcon> = {
   drive: CarIcon,
   bike: BicycleIcon,
   hike: HikeIcon,
+  run: RunIcon,
   ski: SkiIcon,
 };
 

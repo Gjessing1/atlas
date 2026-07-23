@@ -47,6 +47,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     layerTags: ['hiking'],
     defaultLayers: ['trails-hiking'],
   },
+  { id: 'run', label: 'Run', routing: 'run', layerTags: ['running', 'hiking'] },
   { id: 'ski', label: 'Ski', routing: null, layerTags: ['ski'] },
 ];
 

@@ -31,6 +31,9 @@ function toPosition(geo: GeolocationPosition): Position {
     fix.headingDeg = coords.heading;
   }
   if (typeof coords.speed === 'number' && coords.speed >= 0) fix.speedMps = coords.speed;
+  if (typeof coords.altitude === 'number' && Number.isFinite(coords.altitude)) {
+    fix.altitudeM = coords.altitude;
+  }
   return fix;
 }
 

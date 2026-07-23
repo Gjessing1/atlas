@@ -68,6 +68,7 @@ import { useRoute } from './src/routing/useRoute';
 import { useTransitPlan } from './src/routing/useTransit';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard } from './src/ui/DestinationCard';
+import { ExploreSheet } from './src/ui/ExploreSheet';
 import { useDestination } from './src/ui/useDestination';
 import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
 import { useSideInsets } from './src/ui/insets';
@@ -144,6 +145,7 @@ function AppInner() {
   const [menuOpen, setMenuOpen] = useState(false);
   // The expanded search overlay (the 🔍 button in the bottom-left cluster opens it).
   const [searchOpen, setSearchOpen] = useState(false);
+  const [exploreOpen, setExploreOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -238,7 +240,7 @@ function AppInner() {
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
   const idleSheetOpen =
-    searchOpen || menuOpen || dest.destination !== null || offlineRegion !== null;
+    searchOpen || exploreOpen || menuOpen || dest.destination !== null || offlineRegion !== null;
   // Landscape is short, so several pieces of chrome move into the leading
   // guidance rail and route fits get a narrower bottom pad.
 
@@ -386,8 +388,10 @@ function AppInner() {
       // preview. Close the planner immediately so it cannot cover that sheet,
       // and so its background route/mode requests are cancelled while
       // Navigation obtains a current-position route exactly once.
+      const profile = route.profile;
+      const preferences = route.preferences;
       route.stop();
-      void nav.start(target, route.profile);
+      void nav.start(target, profile, preferences);
     },
     [nav, route],
   );
@@ -551,6 +555,7 @@ function AppInner() {
         navCam={navCam}
         followMode={navPrefs.followMode}
         onToggleFollowMode={navPrefs.toggleFollowMode}
+        widgets={navPrefs.widgets}
         onHeight={setNavHeight}
       />
 
@@ -671,6 +676,7 @@ function AppInner() {
         onOpenFavorites={() => setFavoritesOpen(true)}
         onOpenTracks={() => setTracksOpen(true)}
         onOpenLayers={() => setLayersOpen(true)}
+        onOpenExplore={() => setExploreOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         bottomInset={bottomInset}
       />
@@ -678,6 +684,7 @@ function AppInner() {
       {destination && !planning && !navActive ? (
         <DestinationCard
           target={destination}
+          packs={packs}
           onDirections={() => {
             dest.clear();
             directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);
@@ -726,6 +733,19 @@ function AppInner() {
         bottomInset={bottomInset}
       />
 
+      <ExploreSheet
+        visible={exploreOpen && !planning && !navActive}
+        packs={packs}
+        getCenter={getBias}
+        zoom={mapZoom}
+        onPick={(result) => {
+          setExploreOpen(false);
+          dest.pickResult(result);
+        }}
+        onClose={() => setExploreOpen(false)}
+        bottomInset={bottomInset}
+      />
+
       <ShareSheet
         target={shareTarget}
         zoom={viewRef.current?.zoom ?? 14}
@@ -755,6 +775,7 @@ function AppInner() {
         onCloseSettings={() => setSettingsOpen(false)}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
+        navPrefs={navPrefs}
         regionJobs={regionJobs}
         onDrawRegion={() => {
           setSettingsOpen(false);

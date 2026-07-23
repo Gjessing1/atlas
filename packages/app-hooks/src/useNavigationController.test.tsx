@@ -244,6 +244,25 @@ function goOffRoute(h: Harness) {
 }
 
 describe('useNavigationController — rerouting', () => {
+  it('keeps planner preferences through preview, Start refresh and rerouting', async () => {
+    const h = harness();
+    const hook = renderHook(() => useNavigationController(h.platform));
+    const preferences = { avoidTolls: true, avoidHighways: true };
+
+    await act(() => hook.result.current.start(destination, 'car', preferences));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+    h.route.mockResolvedValueOnce({ paths: [path(300_000, 0.002)] });
+
+    goOffRoute(h);
+
+    await waitFor(() => expect(hook.result.current.activePath?.timeMs).toBe(300_000));
+    expect(h.route.mock.calls).toHaveLength(3);
+    for (const [query] of h.route.mock.calls) {
+      expect(query).toMatchObject({ profile: 'car', preferences });
+    }
+  });
+
   it('replaces the followed path when the traveller leaves the line', async () => {
     const h = harness();
     const { result } = await drive(h);

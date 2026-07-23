@@ -10,6 +10,7 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
 import { useElevation } from './useElevation.js';
+import { usePlaceContent } from './usePlaceContent.js';
 
 interface PlaceCardProps {
   target: PlaceTarget;
@@ -108,6 +109,7 @@ export function PlaceCard({
   const showCoords = title !== coords;
 
   const elevation = useElevation(target.position);
+  const placeContent = usePlaceContent(target.name, target.position);
   // Sun times are pure local maths (no network, no coverage limits), so unlike
   // elevation they are always available — recomputed per position, and per day
   // only in the sense that the card is short-lived.
@@ -151,6 +153,20 @@ export function PlaceCard({
           </div>
         )}
       </dl>
+      {placeContent.status === 'loading' && target.name ? (
+        <div className="place-card-content place-card-content-loading">Looking up local guide…</div>
+      ) : null}
+      {placeContent.content.map((article) => (
+        <section className="place-card-content" key={`${article.source}/${article.url}`}>
+          <div className="place-card-content-head">
+            <strong>{article.source === 'wikipedia' ? 'Wikipedia' : 'Wikivoyage'}</strong>
+            <a href={article.url} target="_blank" rel="noreferrer">
+              Read article
+            </a>
+          </div>
+          <p>{article.extract}</p>
+        </section>
+      ))}
       <div className="place-card-actions">
         <button type="button" className="primary" onClick={onDirections}>
           Directions

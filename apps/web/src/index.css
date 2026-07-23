@@ -181,6 +181,8 @@ button {
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   padding: 10px 12px;
+  max-height: min(76vh, 620px);
+  overflow-y: auto;
 }
 
 .place-card-shifted {
@@ -242,6 +244,36 @@ button {
 .place-card-facts dd {
   margin: 0;
   min-width: 0;
+}
+
+.place-card-content {
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.place-card-content-loading {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.place-card-content-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.place-card-content-head a {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.place-card-content p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .place-card-actions {
@@ -918,11 +950,12 @@ button {
 
 .route-profiles {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
 .route-profiles button {
-  flex: 1;
+  flex: 1 1 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -935,6 +968,32 @@ button {
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.route-custom {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.route-custom summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.route-custom-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  margin-top: 7px;
+}
+
+.route-custom-options label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .route-profiles button[aria-pressed='true'] {
@@ -2404,12 +2463,14 @@ button.transit-notice-summary {
 }
 
 /* The driver's own speed: a round dial mirroring the posted-limit sign. */
-.nav-speed {
+.nav-speed,
+.nav-widget {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  min-width: 46px;
+  padding: 0 7px;
   height: 46px;
   border-radius: 50%;
   background: var(--surface-overlay);
@@ -2420,12 +2481,14 @@ button.transit-notice-summary {
   line-height: 1;
 }
 
-.nav-speed strong {
+.nav-speed strong,
+.nav-widget strong {
   font-size: 18px;
   font-weight: 780;
 }
 
-.nav-speed small {
+.nav-speed small,
+.nav-widget small {
   color: var(--text-muted);
   font-size: 9px;
   font-weight: 750;
@@ -2434,13 +2497,20 @@ button.transit-notice-summary {
   text-transform: uppercase;
 }
 
-.nav-speed-group {
+.nav-widgets {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.nav-actions-arrival .nav-speed-group {
+.nav-widgets::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-actions-arrival .nav-widgets {
   display: none;
 }
 
@@ -3093,6 +3163,117 @@ button.transit-notice-summary {
   color: var(--text-muted);
 }
 
+.nav-widget-options {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* --- Nearby explore panel --- */
+
+.explore-panel {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100% - 72px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.explore-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.explore-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.explore-head span,
+.explore-status,
+.explore-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.explore-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.explore-categories button {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explore-categories button.selected {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.explore-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.explore-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.explore-results li {
+  border-top: 1px solid var(--border);
+}
+
+.explore-results li > button {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 3px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explore-results li > button > span:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explore-results small,
+.explore-distance {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.explore-distance {
+  white-space: nowrap;
+}
+
 .map-style-editor {
   display: grid;
   gap: 12px;
@@ -3328,6 +3509,7 @@ button.transit-notice-summary {
      the now two-row topbar. */
   .sidebar,
   .settings-panel,
+  .explore-panel,
   .route-panel {
     left: 8px;
     right: 8px;

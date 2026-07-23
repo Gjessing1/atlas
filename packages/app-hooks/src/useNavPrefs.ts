@@ -1,3 +1,4 @@
+import { MAX_NAV_WIDGETS, parseNavWidgets, type NavWidgetId } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -7,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 const MUTED_SETTING = 'local.nav.muted';
 const FOLLOW_SETTING = 'local.nav.follow';
+const WIDGETS_SETTING = 'local.nav.widgets';
 
 export type NavFollowMode = 'course' | 'north';
 
@@ -27,6 +29,9 @@ export interface NavPrefsController {
   followMode: NavFollowMode;
   setFollowMode: (mode: NavFollowMode) => void;
   toggleFollowMode: () => void;
+  /** Curated readouts shown during guidance, in display order. */
+  widgets: NavWidgetId[];
+  toggleWidget: (widget: NavWidgetId) => void;
 }
 
 /**
@@ -41,6 +46,7 @@ export interface NavPrefsController {
 export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): NavPrefsController {
   const { status, getSetting, setSetting } = settings;
   const [followMode, setFollowModeState] = useState<NavFollowMode>('course');
+  const [widgets, setWidgets] = useState<NavWidgetId[]>(() => parseNavWidgets(null));
 
   // Read through a ref: a controller that hands out a fresh setMuted each
   // render would otherwise re-run the load effect and clobber a live toggle.
@@ -55,6 +61,9 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     });
     void getSetting(FOLLOW_SETTING).then((raw) => {
       if (!cancelled && (raw === 'north' || raw === 'course')) setFollowModeState(raw);
+    });
+    void getSetting(WIDGETS_SETTING).then((raw) => {
+      if (!cancelled) setWidgets(parseNavWidgets(raw));
     });
     return () => {
       cancelled = true;
@@ -77,6 +86,21 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     });
   }, [setSetting]);
 
+  const toggleWidget = useCallback(
+    (widget: NavWidgetId) => {
+      setWidgets((current) => {
+        const next = current.includes(widget)
+          ? current.filter((item) => item !== widget)
+          : current.length < MAX_NAV_WIDGETS
+            ? [...current, widget]
+            : current;
+        setSetting(WIDGETS_SETTING, JSON.stringify(next));
+        return next;
+      });
+    },
+    [setSetting],
+  );
+
   // Mute is toggled through the controller (banner button); persist the result
   // rather than wrapping every caller. Skip the initial value so a restored
   // preference isn't immediately written back over itself.
@@ -87,5 +111,5 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     if (status === 'ready') setSetting(MUTED_SETTING, String(nav.muted));
   }, [nav.muted, status, setSetting]);
 
-  return { followMode, setFollowMode, toggleFollowMode };
+  return { followMode, setFollowMode, toggleFollowMode, widgets, toggleWidget };
 }

@@ -64,6 +64,7 @@ docker run --rm "${LIMITS[@]}" -v "$WORK:/work" iboates/osmium:latest \
   export --overwrite -f geojsonseq -i "sparse_file_array,/work/$ID.nodeidx" \
   -o "/work/$ID.geojsonseq" "/work/$ID.osm.pbf"
 node "$SCRIPT_DIR/build-search-db.mjs" "$OUT/search.sqlite" "$NAME" < "$WORK/$ID.geojsonseq"
+node "$SCRIPT_DIR/enrich-place-content.mjs" "$OUT/search.sqlite"
 rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
 
 echo "==> [$ID] building Valhalla routing tiles"

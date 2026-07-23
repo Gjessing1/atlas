@@ -12,6 +12,8 @@ export interface SearchResult {
   position: LatLng;
   /** OSM key/value, e.g. "tourism/attraction" — drives result icons later. */
   kind?: string;
+  /** Distance from a browse/explore centre; ordinary text search leaves it absent. */
+  distanceM?: number;
 }
 
 /**

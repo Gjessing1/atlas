@@ -74,7 +74,7 @@ describe('map profiles', () => {
   it('only names travel modes the routing package actually knows', () => {
     // A profile whose `routing` drifts from ROUTING_PROFILES would silently
     // fail at request time; core can't import routing, so assert the ids here.
-    const known = ['car', 'bike', 'foot', 'hike'];
+    const known = ['car', 'bike', 'foot', 'hike', 'run'];
     for (const p of MAP_PROFILES) {
       if (p.routing !== null) expect(known).toContain(p.routing);
     }

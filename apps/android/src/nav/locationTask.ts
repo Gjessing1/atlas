@@ -25,6 +25,7 @@ export function toPosition(pos: Location.LocationObject): Position {
   if (typeof c.accuracy === 'number' && c.accuracy >= 0) fix.accuracyM = c.accuracy;
   if (typeof c.heading === 'number' && c.heading >= 0) fix.headingDeg = c.heading;
   if (typeof c.speed === 'number' && c.speed >= 0) fix.speedMps = c.speed;
+  if (typeof c.altitude === 'number' && Number.isFinite(c.altitude)) fix.altitudeM = c.altitude;
   return fix;
 }
 

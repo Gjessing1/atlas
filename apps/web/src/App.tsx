@@ -1,6 +1,7 @@
 import {
   atlasShareUrl,
   decodeMapHash,
+  haversineM,
   mapProfile,
   placeIsVisible,
   placeTargetTitle,
@@ -20,7 +21,8 @@ import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
-import { RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
+import { CompassIcon, RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
+import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
@@ -99,6 +101,7 @@ export function App() {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exploreOpen, setExploreOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
     data: TrackData;
@@ -175,10 +178,12 @@ export function App() {
     (dest: LatLng) => {
       setPin(null);
       setTarget(null);
+      const profile = route.profile;
+      const preferences = route.preferences;
       stopRoute(); // navigation owns the map now; a plan would fight it
-      void startNav(dest);
+      void startNav(dest, profile, preferences);
     },
-    [startNav, stopRoute],
+    [route.profile, route.preferences, startNav, stopRoute],
   );
   // "Directions" on the place card opens the planner with that point as the
   // destination (Android parity): the planner is the one travel-mode picker, so
@@ -219,6 +224,27 @@ export function App() {
     return center ? { lat: center.lat, lng: center.lng } : null;
   }, []);
 
+  const getExploreArea = useCallback((): ExploreArea => {
+    const current = mapRef.current;
+    if (!current) return { center: DEFAULT_VIEW.center, radiusM: 5_000 };
+    const center = current.getCenter();
+    const bounds = current.getBounds();
+    const northEast = bounds.getNorthEast();
+    return {
+      center: { lat: center.lat, lng: center.lng },
+      radiusM: Math.min(
+        50_000,
+        Math.max(
+          500,
+          haversineM(
+            { lat: center.lat, lng: center.lng },
+            { lat: northEast.lat, lng: northEast.lng },
+          ),
+        ),
+      ),
+    };
+  }, []);
+
   // ---- weather & conditions ----
 
   const weatherAt = useWeatherTarget(pin, getBias, DEFAULT_VIEW.center);
@@ -230,6 +256,7 @@ export function App() {
   // A picked search result becomes a pin plus the same card a POI tap opens.
   const onSearchSelect = useCallback(
     (result: SearchResult) => {
+      setExploreOpen(false);
       setPin(result.position);
       setTarget({
         source: 'search',
@@ -445,6 +472,7 @@ export function App() {
         onToggleFollowMode={navPrefs.toggleFollowMode}
         overview={follow.overview}
         onToggleOverview={follow.toggleOverview}
+        widgets={navPrefs.widgets}
       />
       <RoutePreview nav={nav} />
       <div
@@ -454,10 +482,28 @@ export function App() {
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Explore nearby places"
+          title="Explore"
+          aria-expanded={exploreOpen}
+          onClick={() => {
+            setExploreOpen((open) => !open);
+            setTarget(null);
+            setSidebarOpen(false);
+            setSettingsOpen(false);
+          }}
+        >
+          <CompassIcon size={18} />
+        </button>
+        <button
+          type="button"
+          className="sidebar-toggle"
           aria-label="Collections"
           title="Collections"
           aria-expanded={sidebarOpen}
-          onClick={() => setSidebarOpen((open) => !open)}
+          onClick={() => {
+            setExploreOpen(false);
+            setSidebarOpen((open) => !open);
+          }}
         >
           <StarIcon size={18} />
         </button>
@@ -468,6 +514,7 @@ export function App() {
           title="Route"
           aria-pressed={route.active}
           onClick={() => {
+            setExploreOpen(false);
             // Starting from a dropped pin routes "from here".
             if (route.active) {
               route.stop();
@@ -492,7 +539,10 @@ export function App() {
           aria-label="Weather"
           title="Weather"
           aria-pressed={weatherTarget !== null}
-          onClick={weatherAt.toggle}
+          onClick={() => {
+            setExploreOpen(false);
+            weatherAt.toggle();
+          }}
         >
           <SunIcon size={18} />
         </button>
@@ -502,7 +552,10 @@ export function App() {
           aria-label="Settings"
           title="Settings"
           aria-expanded={settingsOpen}
-          onClick={() => setSettingsOpen((open) => !open)}
+          onClick={() => {
+            setExploreOpen(false);
+            setSettingsOpen((open) => !open);
+          }}
         >
           <SettingsIcon size={18} />
         </button>
@@ -534,6 +587,16 @@ export function App() {
           onWeather={() => weatherAt.setTarget(target.position)}
           onRemovePin={() => onPinChange(null)}
           onClose={() => setTarget(null)}
+        />
+      )}
+      {exploreOpen && nav.phase === 'idle' && (
+        <ExplorePanel
+          getArea={getExploreArea}
+          onPick={(result) => {
+            setExploreOpen(false);
+            onSearchSelect(result);
+          }}
+          onClose={() => setExploreOpen(false)}
         />
       )}
       {writeError && (
@@ -592,6 +655,7 @@ export function App() {
             sync={sync}
             appearance={appearance}
             mapStyle={mapStyleEditor}
+            navPrefs={navPrefs}
             onClose={() => setSettingsOpen(false)}
           />
         )}

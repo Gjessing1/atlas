@@ -18,6 +18,7 @@ import {
   ROUTING_PROFILES,
   routePathToTrackData,
   type RoutePath,
+  type RoutePreferences,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -184,6 +185,22 @@ function AlongRouteSearch({
   );
 }
 
+const CUSTOM_OPTIONS: readonly {
+  key: keyof RoutePreferences;
+  label: string;
+  profiles: readonly string[];
+}[] = [
+  {
+    key: 'avoidFerries',
+    label: 'Avoid ferries',
+    profiles: ['car', 'bike', 'foot', 'hike', 'run'],
+  },
+  { key: 'avoidHighways', label: 'Avoid highways', profiles: ['car'] },
+  { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },
+  { key: 'avoidHills', label: 'Prefer flatter ways', profiles: ['bike', 'foot', 'hike', 'run'] },
+  { key: 'preferTrails', label: 'Prefer trails', profiles: ['bike', 'hike', 'run'] },
+];
+
 /** Route-planning panel: profile, stops, round trip, result stats, GPX export. */
 export function RoutePanel({
   route,
@@ -304,6 +321,28 @@ export function RoutePanel({
           </button>
         )}
       </div>
+
+      {!transitMode && (
+        <details className="route-custom">
+          <summary>Customize {ROUTING_PROFILES.find((p) => p.id === route.profile)?.label}</summary>
+          <div className="route-custom-options">
+            {CUSTOM_OPTIONS.filter((option) => option.profiles.includes(route.profile)).map(
+              (option) => (
+                <label key={option.key}>
+                  <input
+                    type="checkbox"
+                    checked={route.preferences[option.key]}
+                    onChange={(event) =>
+                      route.setPreference(option.key, event.currentTarget.checked)
+                    }
+                  />
+                  {option.label}
+                </label>
+              ),
+            )}
+          </div>
+        </details>
+      )}
 
       <div className="route-roundtrip" hidden={transitMode}>
         <label>

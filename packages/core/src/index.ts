@@ -13,11 +13,14 @@ export const APP_NAME = 'Atlas';
 
 export * from './api.js';
 export * from './format.js';
+export * from './explore.js';
 export * from './geo.js';
 export * from './layers.js';
 export * from './maphash.js';
+export * from './nav-widgets.js';
 export * from './packs.js';
 export * from './places.js';
+export * from './place-content.js';
 export * from './profiles.js';
 export * from './routelabels.js';
 export * from './search.js';

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Build an offline search database from an OSM extract: a SQLite file with an
-// FTS5 `places` table (name, label, lat, lng) the Android app queries when
-// the server's /api/search is unreachable (apps/android/src/search).
+// FTS5 `places` table the Android app queries when the server is unreachable.
+// Principal OSM kind powers category browse; Wikipedia/Wikivoyage refs are
+// enriched into `place_content` by enrich-place-content.mjs.
 //
 // Input: GeoJSONSeq (one feature per line) produced by `osmium export` from a
 // regional .osm.pbf — see build-pack.sh, which pipes it in. Only named
@@ -24,8 +25,18 @@ if (existsSync(out)) unlinkSync(out);
 const db = new DatabaseSync(out);
 db.exec(`
   CREATE VIRTUAL TABLE places USING fts5(
-    name, label, lat UNINDEXED, lng UNINDEXED,
+    name, label, lat UNINDEXED, lng UNINDEXED, kind UNINDEXED,
+    wikipedia UNINDEXED, wikivoyage UNINDEXED,
     tokenize = 'unicode61 remove_diacritics 2'
+  );
+  CREATE TABLE place_content (
+    place_rowid INTEGER NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('wikipedia', 'wikivoyage')),
+    language TEXT NOT NULL,
+    title TEXT NOT NULL,
+    extract TEXT NOT NULL,
+    url TEXT NOT NULL,
+    PRIMARY KEY (place_rowid, source)
   );
 `);
 
@@ -47,7 +58,9 @@ function centroid(geometry) {
   }
 }
 
-const insert = db.prepare('INSERT INTO places (name, label, lat, lng) VALUES (?, ?, ?, ?)');
+const insert = db.prepare(
+  'INSERT INTO places (name, label, lat, lng, kind, wikipedia, wikivoyage) VALUES (?, ?, ?, ?, ?, ?, ?)',
+);
 let count = 0;
 db.exec('BEGIN');
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -70,7 +83,17 @@ rl.on('line', (line) => {
   if (!point) return;
   const [lng, lat] = point;
   const labelParts = [kind, regionLabel].filter(Boolean);
-  insert.run(String(name), labelParts.join(', '), lat, lng);
+  const principal = KEYS.find((key) => props[key]);
+  const kindTag = principal ? `${principal}/${props[principal]}` : '';
+  insert.run(
+    String(name),
+    labelParts.join(', '),
+    lat,
+    lng,
+    kindTag,
+    typeof props.wikipedia === 'string' ? props.wikipedia : '',
+    typeof props.wikivoyage === 'string' ? props.wikivoyage : '',
+  );
   count++;
 });
 rl.on('close', () => {

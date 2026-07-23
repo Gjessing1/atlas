@@ -1,4 +1,4 @@
-import { fmtClock, type RegionPackManifest } from '@atlas/core';
+import { fmtClock, MAX_NAV_WIDGETS, NAV_WIDGETS, type RegionPackManifest } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
 import {
   groupUpstreams,
@@ -6,6 +6,7 @@ import {
   upstreamDetail,
   useStatus,
   type MapStyleEditorController,
+  type NavPrefsController,
   type RegionPackJobsController,
   type ThemeModeController,
 } from '@atlas/app-hooks';
@@ -641,6 +642,7 @@ export function SettingsSheet({
   onExportAll,
   appearance,
   mapStyleEditor,
+  navPrefs,
   regionJobs,
   onDrawRegion,
   bottomInset = 0,
@@ -657,6 +659,7 @@ export function SettingsSheet({
   onExportAll: () => void;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
+  navPrefs: NavPrefsController;
   regionJobs: RegionPackJobsController;
   /** Close Settings and let the user select two corners on the map. */
   onDrawRegion: () => void;
@@ -697,6 +700,31 @@ export function SettingsSheet({
         <Text style={styles.muted}>System follows this device’s light or dark setting.</Text>
         <Text style={styles.heading}>Map style</Text>
         <MapStyleSection editor={mapStyleEditor} />
+        <Text style={styles.heading}>Navigation widgets</Text>
+        <View style={styles.widgetOptions}>
+          {NAV_WIDGETS.map((widget) => {
+            const selected = navPrefs.widgets.includes(widget.id);
+            return (
+              <Pressable
+                key={widget.id}
+                style={[styles.themeOption, selected && styles.themeOptionOn]}
+                disabled={!selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS}
+                onPress={() => navPrefs.toggleWidget(widget.id)}
+                accessibilityRole="checkbox"
+                accessibilityState={{
+                  checked: selected,
+                  disabled: !selected && navPrefs.widgets.length >= MAX_NAV_WIDGETS,
+                }}
+                testID={`nav-widget-${widget.id}`}
+              >
+                <Text style={[styles.themeOptionText, selected && styles.themeOptionTextOn]}>
+                  {widget.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.muted}>Choose up to three readouts for active guidance.</Text>
         <Text style={styles.heading}>Account</Text>
         <AccountSection sync={sync} />
         <Text style={styles.heading}>Map tiles</Text>
@@ -768,6 +796,7 @@ const styles = StyleSheet.create({
   buttonQuiet: { backgroundColor: theme.surfaceMuted },
   buttonQuietText: { color: theme.text, fontWeight: '600' },
   themeRow: { flexDirection: 'row', gap: 6 },
+  widgetOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   themeOption: {
     flex: 1,
     alignItems: 'center',

@@ -23,6 +23,7 @@ import {
 import {
   enrichRoute,
   sortRouteChoices,
+  type RoutePreferences,
   type RoutePath,
   type RouteProvider,
   type RoutingProfile,
@@ -101,6 +102,8 @@ export interface NavController {
   previewError: string | null;
   /** Latest ground speed in m/s, or null when unknown/stationary. */
   speedMps: number | null;
+  /** Latest GPS altitude in metres, or null when the platform has none. */
+  altitudeM: number | null;
   /** Whether voice prompts are muted. */
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
@@ -109,7 +112,11 @@ export interface NavController {
   rerouteFailed: boolean;
   error: string | null;
   /** Look up route choices to a destination and enter the preview phase. */
-  start: (destination: LatLng, profile?: RoutingProfile) => Promise<void>;
+  start: (
+    destination: LatLng,
+    profile?: RoutingProfile,
+    preferences?: Partial<RoutePreferences>,
+  ) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
   selectPreview: (index: number) => void;
   /** Switch profile and refetch the preview choices (preview phase only). */
@@ -162,6 +169,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
+  const [altitudeM, setAltitudeM] = useState<number | null>(null);
   const [muted, setMutedState] = useState(false);
   const [tripSummary, setTripSummary] = useState<NavTripSummary | null>(null);
   const [rerouteFailed, setRerouteFailed] = useState(false);
@@ -184,6 +192,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
   /** Prevents a quick double tap from starting two location/route requests. */
   const startInFlight = useRef(false);
   const profileRef = useRef<RoutingProfile>('car');
+  /** Planner preferences survive preview refreshes and every mid-trip reroute. */
+  const preferencesRef = useRef<Partial<RoutePreferences> | undefined>(undefined);
   const rerouteInFlight = useRef(false);
   /** Earliest time (epoch ms) a failed reroute may be retried (backoff). */
   const rerouteBackoffUntil = useRef(0);
@@ -239,12 +249,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
       origin: LatLng,
       dest: LatLng,
       prof: RoutingProfile,
+      preferences?: Partial<RoutePreferences>,
       headingDeg?: number,
     ): Promise<RoutePath> => {
       const result = await platformRef.current.provider.route({
         profile: prof,
         points: [origin, dest],
         instructions: true,
+        ...(preferences ? { preferences } : {}),
         ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
       });
       const path = result.paths[0];
@@ -256,12 +268,18 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   /** The fastest route plus up to two alternatives, for the preview card. */
   const fetchChoices = useCallback(
-    async (origin: LatLng, dest: LatLng, prof: RoutingProfile): Promise<RoutePath[]> => {
+    async (
+      origin: LatLng,
+      dest: LatLng,
+      prof: RoutingProfile,
+      preferences?: Partial<RoutePreferences>,
+    ): Promise<RoutePath[]> => {
       const result = await platformRef.current.provider.route({
         profile: prof,
         points: [origin, dest],
         instructions: true,
         alternatives: true,
+        ...(preferences ? { preferences } : {}),
       });
       if (result.paths.length === 0) throw new Error('no route found');
       return sortRouteChoices(result.paths);
@@ -321,6 +339,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       sessionRef.current = null;
       destRef.current = null;
       originRef.current = null;
+      preferencesRef.current = undefined;
       startInFlight.current = false;
       rerouteInFlight.current = false;
       rerouteBackoffUntil.current = 0;
@@ -329,6 +348,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setRouteCoords([]);
       setActivePath(null);
       setSpeedMps(null);
+      setAltitudeM(null);
       if (!arrived) {
         setState(null);
         setDestination(null);
@@ -349,6 +369,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       sessionRef.current = null;
       destRef.current = null;
       originRef.current = null;
+      preferencesRef.current = undefined;
       setDestination(null);
       setError(message(err));
       setPhase('error');
@@ -400,7 +421,13 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // route continues the way the traveller points, not via a U-turn.
         const heading =
           typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
-        const path = await fetchPath(from, destRef.current, profileRef.current, heading);
+        const path = await fetchPath(
+          from,
+          destRef.current,
+          profileRef.current,
+          preferencesRef.current,
+          heading,
+        );
         // End, arrival or a whole new trip may have happened during the fetch;
         // applying now would resurrect a dead nav UI with a fresh session.
         if (trip !== tripSeq.current || !destRef.current) return;
@@ -452,6 +479,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
       const session = sessionRef.current;
       if (!session) return;
       setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
+      setAltitudeM(
+        typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
+      );
       // Runs on every GPS fix (incl. Android's headless background task); an
       // uncaught throw here would take the whole app down in a release build.
       try {
@@ -475,7 +505,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   const start = useCallback(
-    async (dest: LatLng, prof: RoutingProfile = 'car') => {
+    async (dest: LatLng, prof: RoutingProfile = 'car', preferences?: Partial<RoutePreferences>) => {
       if (startInFlight.current) return;
       startInFlight.current = true;
       const seq = ++previewSeq.current;
@@ -488,9 +518,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
         destRef.current = dest;
         originRef.current = origin;
         profileRef.current = prof;
+        preferencesRef.current = preferences;
         setProfileState(prof);
         setDestination(dest);
         setSpeedMps(null);
+        setAltitudeM(null);
         setState(null);
         setTripSummary(null);
         setRouteCoords([]);
@@ -501,7 +533,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
         // Route choices: the fastest plus up to two alternatives, offered
         // before guidance starts. Selecting nothing keeps the fastest.
-        const paths = await fetchChoices(origin.fix, dest, prof);
+        const paths = await fetchChoices(origin.fix, dest, prof, preferences);
         if (seq !== previewSeq.current) return;
         setPreviewPaths(paths);
         setPreviewIndex(0);
@@ -532,6 +564,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           const paths = await fetchChoices(origin.fix, dest, prof);
           if (seq !== previewSeq.current) return;
           profileRef.current = prof;
+          preferencesRef.current = undefined;
           setProfileState(prof);
           setPreviewPaths(paths);
           setPreviewIndex(0);
@@ -563,7 +596,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // refresh was briefly unavailable.
         try {
           const fresh = await platformRef.current.currentFix(GO_FIX_TIMEOUT_MS);
-          const choices = await fetchChoices(fresh.fix, dest, profileRef.current);
+          const choices = await fetchChoices(
+            fresh.fix,
+            dest,
+            profileRef.current,
+            preferencesRef.current,
+          );
           if (seq !== previewSeq.current) return;
           path = choices[index] ?? choices[0] ?? previewPath;
           origin = fresh;
@@ -680,6 +718,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     previewLoading,
     previewError,
     speedMps,
+    altitudeM,
     muted,
     tripSummary,
     rerouteFailed,

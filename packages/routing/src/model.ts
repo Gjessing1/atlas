@@ -2,7 +2,7 @@ import type { BBox, LatLng } from '@atlas/core';
 import type { TrackData, TrackPoint } from '@atlas/gpx';
 
 /** Routing profiles, mapped to Valhalla costing models in the adapter. */
-export type RoutingProfile = 'car' | 'bike' | 'foot' | 'hike';
+export type RoutingProfile = 'car' | 'bike' | 'foot' | 'hike' | 'run';
 
 export interface RoutingProfileInfo {
   id: RoutingProfile;
@@ -15,7 +15,32 @@ export const ROUTING_PROFILES: readonly RoutingProfileInfo[] = [
   { id: 'bike', label: 'Cycle' },
   { id: 'foot', label: 'Walk' },
   { id: 'hike', label: 'Hike' },
+  { id: 'run', label: 'Run' },
 ];
+
+/**
+ * Curated Valhalla costing controls. These are route-planning preferences, not
+ * raw engine JSON: every app can safely expose the same small set, and the
+ * adapter remains responsible for legal values and profile applicability.
+ */
+export interface RoutePreferences {
+  avoidFerries: boolean;
+  avoidHighways: boolean;
+  avoidTolls: boolean;
+  avoidHills: boolean;
+  preferTrails: boolean;
+}
+
+/** Atlas defaults, including the long-standing ferry avoidance off the road network. */
+export function defaultRoutePreferences(profile: RoutingProfile): RoutePreferences {
+  return {
+    avoidFerries: profile !== 'car',
+    avoidHighways: false,
+    avoidTolls: false,
+    avoidHills: false,
+    preferTrails: false,
+  };
+}
 
 /**
  * Narrow an untrusted string (a share link's hash, a restored setting) to a
@@ -40,6 +65,8 @@ export interface RouteQuery {
    * vehicle is already pointing instead of proposing a U-turn.
    */
   headingDeg?: number;
+  /** User-facing costing controls, normalised by {@link defaultRoutePreferences}. */
+  preferences?: Partial<RoutePreferences>;
   /** Loop from-and-back-to the single starting point, aiming for the given length. */
   roundTrip?: {
     distanceM: number;

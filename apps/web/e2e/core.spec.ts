@@ -107,14 +107,16 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
   await page.reload();
   await waitForMap(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  expect(
-    await page.evaluate(
-      () =>
-        window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'background')?.paint?.[
-          'background-color'
-        ],
-    ),
-  ).toBe('#123456');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__atlasMap!.getStyle().layers?.find((layer) => layer.id === 'background')?.paint?.[
+            'background-color'
+          ],
+      ),
+    )
+    .toBe('#123456');
   await page.getByRole('radio', { name: 'Hike' }).click();
   await expect
     .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
@@ -228,6 +230,54 @@ test('search result flies the camera and drops the pin', async ({ page }) => {
     .toBeCloseTo(58.9864, 1);
 });
 
+test('Explore browses the map view by category and opens place guide content', async ({ page }) => {
+  await page.route('**/api/explore**', (route) =>
+    route.fulfill({
+      json: {
+        results: [
+          {
+            name: 'Fuglen',
+            label: 'Cafe, Oslo',
+            position: { lat: 59.9161, lng: 10.746 },
+            kind: 'amenity/cafe',
+            distanceM: 420,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/place-content**', (route) =>
+    route.fulfill({
+      json: {
+        content: [
+          {
+            source: 'wikipedia',
+            language: 'en',
+            title: 'Fuglen',
+            extract: 'A coffee bar and design shop in central Oslo.',
+            url: 'https://en.wikipedia.org/wiki/Fuglen',
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto('/');
+  await waitForMap(page);
+
+  await page.getByRole('button', { name: 'Explore nearby places' }).click();
+  const explore = page.getByRole('complementary', { name: 'Explore nearby places' });
+  await explore.getByRole('tab', { name: 'Coffee' }).click();
+  await expect(explore).toContainText('Fuglen');
+  await explore.getByRole('button', { name: /Fuglen/ }).click();
+
+  const card = page.locator('.place-card');
+  await expect(card).toContainText('A coffee bar and design shop in central Oslo.');
+  await expect(card.getByRole('link', { name: 'Read article' })).toHaveAttribute(
+    'href',
+    'https://en.wikipedia.org/wiki/Fuglen',
+  );
+});
+
 test('route planning: two map clicks produce a route with stats', async ({ page }) => {
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');
@@ -242,6 +292,36 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
     Boolean(window.__atlasMap!.getSource('atlas-route')),
   );
   expect(hasRouteSource).toBe(true);
+});
+
+test('running and custom trail preferences reach the routing engine', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=12/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Route' }).click();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await page.getByText('Customize Run').click();
+  await page.getByRole('checkbox', { name: 'Prefer trails' }).check();
+
+  const customizedRequest = page.waitForRequest((request) => {
+    if (!request.url().endsWith('/api/route') || request.method() !== 'POST') return false;
+    const body = request.postDataJSON() as {
+      costing?: string;
+      costing_options?: { pedestrian?: Record<string, unknown> };
+    };
+    return (
+      body.costing === 'pedestrian' &&
+      body.costing_options?.pedestrian?.['walking_speed'] === 10 &&
+      body.costing_options.pedestrian['use_tracks'] === 1
+    );
+  });
+  const [x1, y1] = await project(page, 59.905, 10.74);
+  const [x2, y2] = await project(page, 59.915, 10.76);
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+
+  await customizedRequest;
+  await expect(page.locator('.route-stats')).toContainText('km');
 });
 
 test('search along a route shows detour cost and inserts the stop in order', async ({ page }) => {

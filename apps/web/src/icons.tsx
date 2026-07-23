@@ -78,6 +78,21 @@ export function WalkIcon(props: IconProps) {
   );
 }
 
+export function RunIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="14.8" cy="4.1" r="1.9" fill="currentColor" />
+      <path
+        d="M13.8 8.1l-3.5 2.2 2.8 2.1 2-1.2 2.6 2.1M13.1 12.4l-3 3.1-3.2 1.1M14.5 12l1 4 3.2 2.1"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function HikeIcon(props: IconProps) {
   return (
     <IconFrame {...props}>
@@ -251,6 +266,7 @@ export const ROUTING_ICON: Record<RoutingProfile, IconComponent> = {
   bike: BicycleIcon,
   foot: WalkIcon,
   hike: HikeIcon,
+  run: RunIcon,
 };
 
 const MAP_PROFILE_ICON: Record<string, IconComponent> = {
@@ -258,6 +274,7 @@ const MAP_PROFILE_ICON: Record<string, IconComponent> = {
   drive: CarIcon,
   bike: BicycleIcon,
   hike: HikeIcon,
+  run: RunIcon,
   ski: SkiIcon,
 };
 

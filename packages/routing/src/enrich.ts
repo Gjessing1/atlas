@@ -55,6 +55,7 @@ function costingFor(profile: RoutingProfile): string {
       return 'bicycle';
     case 'foot':
     case 'hike':
+    case 'run':
       return 'pedestrian';
   }
 }

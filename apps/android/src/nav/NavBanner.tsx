@@ -1,4 +1,5 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
+import { fmtDistanceM, type NavWidgetId } from '@atlas/core';
 import { fmtClock } from '@atlas/core';
 import { laneGlyphs, laneLabel, shortManeuverText } from '@atlas/navigation';
 import { formatExitSign, type RouteLane } from '@atlas/routing';
@@ -29,6 +30,28 @@ const formatEta = fmtClock;
 function speedKph(speedMps: number | null): number | null {
   if (speedMps == null || speedMps < 0.5) return null;
   return Math.round(speedMps * 3.6);
+}
+
+function widgetValue(widget: NavWidgetId, nav: NavController): { value: string; unit: string } {
+  switch (widget) {
+    case 'speed':
+      return { value: String(speedKph(nav.speedMps) ?? 0), unit: 'km/h' };
+    case 'altitude':
+      return {
+        value: nav.altitudeM === null ? '—' : String(Math.round(nav.altitudeM)),
+        unit: 'altitude m',
+      };
+    case 'next-turn':
+      return {
+        value: nav.state?.upcoming ? fmtDistanceM(nav.state.upcoming.distanceToM) : '—',
+        unit: 'next turn',
+      };
+    case 'remaining':
+      return {
+        value: nav.state ? fmtDistanceM(nav.state.distanceRemainingM) : '—',
+        unit: 'remaining',
+      };
+  }
 }
 
 function LaneRow({ lanes, compact }: { lanes: RouteLane[]; compact: boolean }) {
@@ -116,6 +139,7 @@ export function NavBanner({
   navCam,
   followMode,
   onToggleFollowMode,
+  widgets,
   onHeight,
 }: {
   nav: NavController;
@@ -125,6 +149,7 @@ export function NavBanner({
   navCam: NavCameraControls;
   followMode: NavFollowMode;
   onToggleFollowMode: () => void;
+  widgets: NavWidgetId[];
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
@@ -136,7 +161,6 @@ export function NavBanner({
 
   const { state } = nav;
   const maneuver = state?.upcoming;
-  const speed = speedKph(nav.speedMps);
   const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const sustain = moving ? (state?.sustain ?? null) : null;
   const speedLimit = moving ? (state?.speedLimitKph ?? null) : null;
@@ -335,14 +359,16 @@ export function NavBanner({
 
       <View style={[styles.actionRow, landscape && styles.actionRowLandscape]}>
         {moving && !canDeclareArrival ? (
-          <View
-            style={styles.speedGroup}
-            accessibilityLabel={`Current speed ${speed ?? 0} kilometers per hour`}
-          >
-            <View style={styles.speedDial}>
-              <Text style={styles.speedValue}>{speed ?? 0}</Text>
-              <Text style={styles.speedUnit}>km/h</Text>
-            </View>
+          <View style={styles.speedGroup} accessibilityLabel="Navigation widgets">
+            {widgets.map((widget) => {
+              const display = widgetValue(widget, nav);
+              return (
+                <View style={styles.speedDial} key={widget}>
+                  <Text style={styles.speedValue}>{display.value}</Text>
+                  <Text style={styles.speedUnit}>{display.unit}</Text>
+                </View>
+              );
+            })}
             {/* Absent wherever the map data has no limit — an honest gap beats
                 a stale number the driver might trust. */}
             {speedLimit != null ? (

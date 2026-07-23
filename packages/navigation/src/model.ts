@@ -9,6 +9,8 @@ export interface Position {
   headingDeg?: number;
   /** Ground speed in m/s, if known (used only for display). */
   speedMps?: number;
+  /** Elevation above mean sea level in metres, if the device reports it. */
+  altitudeM?: number;
   /** Horizontal accuracy radius (m), if the device reports it. */
   accuracyM?: number;
 }

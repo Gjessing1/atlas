@@ -158,12 +158,12 @@ describe('useRoute', () => {
     expect(result.current.modeTimes.hike).toBe('none'); // rejection → no time to show
 
     // The background pass is lightweight — no alternatives, no instructions —
-    // and covers all four road profiles once.
+    // and covers all five road profiles once.
     const bgProfiles = route.mock.calls
       .filter(([q]) => q.alternatives === false && q.instructions === false)
       .map(([q]) => q.profile)
       .sort();
-    expect(bgProfiles).toEqual(['bike', 'car', 'foot', 'hike']);
+    expect(bgProfiles).toEqual(['bike', 'car', 'foot', 'hike', 'run']);
 
     // A loop is not comparable across modes, so the times stand down.
     act(() => result.current.setRoundTrip(true));
@@ -317,10 +317,12 @@ describe('useRoute', () => {
     act(() => result.current.start(A, 'Home'));
     act(() => void result.current.addWaypoint(B));
     act(() => result.current.setProfile('bike'));
+    act(() => result.current.setPreference('preferTrails', true));
 
     expect(result.current.plan).toEqual({
       profile: 'bike',
       waypoints: [{ pos: A, name: 'Home' }, { pos: B }],
+      preferences: { preferTrails: true },
     });
 
     // A fresh planner (the reload) comes back to the same stops and profile.
@@ -328,12 +330,23 @@ describe('useRoute', () => {
     act(() => reloaded.result.current.restore(result.current.plan!));
     expect(reloaded.result.current.active).toBe(true);
     expect(reloaded.result.current.profile).toBe('bike');
+    expect(reloaded.result.current.preferences.preferTrails).toBe(true);
     expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
     expect(reloaded.result.current.waypoints[0]!.name).toBe('Home');
     // Restored stops still get distinct ids, so markers and rows stay keyed.
     expect(reloaded.result.current.waypoints[0]!.id).not.toBe(
       reloaded.result.current.waypoints[1]!.id,
     );
+
+    // A legacy/default plan must not inherit a customization from the plan
+    // that happened to be open before it.
+    act(() =>
+      reloaded.result.current.restore({
+        profile: 'bike',
+        waypoints: [{ pos: A }, { pos: C }],
+      }),
+    );
+    expect(reloaded.result.current.preferences.preferTrails).toBe(false);
   });
 
   it('round-trips a loop plan, and keeps only its anchor', () => {

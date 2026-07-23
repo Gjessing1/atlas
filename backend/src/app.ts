@@ -12,8 +12,10 @@ import {
 } from '@atlas/core';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
+import { registerExploreApi } from './explore-api.js';
 import { registerOverlayApi, type OverlayApiOptions } from './overlay/index.js';
 import { registerPacksApi } from './packs-api.js';
+import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
 import type { RegionJobOptions } from './region-jobs.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
@@ -69,6 +71,8 @@ export interface AppOptions {
   transitApi?: TransitApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
+  /** Test seam for Wikimedia place summaries. */
+  placeContentApi?: PlaceContentApiOptions;
   /** Test/deployment seams for custom offline-region extraction. */
   regionJobs?: RegionJobOptions;
   /** Test seam: inject stores directly instead of via databaseUrl. */
@@ -200,6 +204,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Geocoding: thin proxy over the self-hosted Photon service so the client
   // never talks to it directly (single origin, no CORS, URL stays private).
   const photonUrl = opts.photonUrl ?? process.env.PHOTON_URL ?? 'http://127.0.0.1:2322';
+  registerExploreApi(app, photonUrl, status);
+  registerPlaceContentApi(app, opts.placeContentApi);
   app.get<{
     Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };
   }>('/api/search', async (request, reply) => {
