@@ -53,8 +53,25 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     layerTags: ['hiking'],
     defaultLayers: ['trails-hiking'],
   },
-  { id: 'run', label: 'Run', routing: 'run', layerTags: ['running', 'hiking'] },
-  { id: 'ski', label: 'Ski', routing: null, layerTags: ['ski'] },
+  {
+    id: 'run',
+    label: 'Run',
+    routing: 'run',
+    layerTags: ['running', 'hiking'],
+    // Runners want the marked-trail network there without a second tap, same as
+    // Hike — Run carries the `hiking` tag, so `trails-hiking` is already offered.
+    defaultLayers: ['trails-hiking'],
+  },
+  {
+    id: 'ski',
+    label: 'Ski',
+    routing: null,
+    layerTags: ['ski'],
+    // The ski-track and avalanche-steepness layers already exist and are
+    // ski-tagged; starting them on is the whole point of the Ski preset
+    // (`terrain-slope` is the "avalanche steepness" surface, not a new layer).
+    defaultLayers: ['trails-ski', 'terrain-slope'],
+  },
   {
     // Fish & Hunt expresses no travel mode (`routing: null`, like Ski/Explore) —
     // it is a cartography + overlay preset, not a costing. Its default overlays

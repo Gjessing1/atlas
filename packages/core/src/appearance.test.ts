@@ -93,6 +93,39 @@ describe('map appearance', () => {
     ).toEqual(['interpolate', ['linear'], ['zoom'], 8, 0.56, 20, 14.560000000000002]);
   });
 
+  it('emphasizes the foot network and splits stairs off for Run', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'run' }));
+    expect(
+      result.find((layer) => layer.id === 'road_path_pedestrian')?.paint['line-width'],
+    ).toEqual(['interpolate', ['linear'], ['zoom'], 14, 1.4, 20, 11.2]);
+    expect(result.find((layer) => layer.id === 'road_path_pedestrian')?.minzoom).toBe(12);
+    // Car roads recede so the run reads as the primary line.
+    expect(
+      result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-opacity'],
+    ).toBe(0.72);
+    const stairs = result.find((layer) => layer.id === 'atlas-road_path_pedestrian-stairs');
+    expect(stairs?.paint['line-dasharray']).toEqual([0.5, 0.8]);
+    expect(stairs?.filter).toEqual(['==', ['get', 'subclass'], 'steps']);
+  });
+
+  it('paints frozen-lake winter cartography for Ski', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'ski' }));
+    const water = result.find((layer) => layer.id === 'water')?.paint;
+    expect(water?.['fill-color']).toBe('#eaf1f6');
+    expect(water?.['fill-outline-color']).toBe('#b7d0e0');
+    expect(result.find((layer) => layer.id === 'background')?.paint['background-color']).toBe(
+      '#eef2f2',
+    );
+  });
+
+  it('recedes minor traffic and lifts POIs for Explore', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'explore' }));
+    expect(
+      result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-opacity'],
+    ).toBe(0.7);
+    expect(result.find((layer) => layer.id === 'poi_r1')?.paint['text-opacity']).toBe(0.92);
+  });
+
   it('applies sanitized user edits after the curated theme/profile', () => {
     const result = layers(
       applyMapAppearance(style, {

@@ -9,7 +9,7 @@ export function isThemeMode(value: unknown): value is ThemeMode {
 
 export interface MapAppearance {
   colorScheme: ColorScheme;
-  /** One of Atlas's curated activity profile ids. Unknown ids degrade to Explore. */
+  /** One of Atlas's curated activity profile ids. Unknown ids degrade to the neutral base. */
   profile: string;
   /** Optional per-device edits applied after Atlas's theme/profile tuning. */
   custom?: MapStyleOverrides;
@@ -106,6 +106,15 @@ function multiplyPaint(layer: StyleLayer, property: string, factor: number): voi
       ),
     );
   }
+}
+
+/** A drivable-road line layer — excludes the shared path/track and helper strokes. */
+function isCarRoad(layer: StyleLayer): boolean {
+  return (
+    layer.type === 'line' &&
+    /^road_/.test(layer.id) &&
+    !/(path_pedestrian|service_track|_casing|_hatching)$/.test(layer.id)
+  );
 }
 
 function multiplyStyleValue(value: unknown, factor: number): unknown {
@@ -265,6 +274,34 @@ function tuneDarkLayer(layer: StyleLayer): void {
 }
 
 /**
+ * Ski's winter palette: snow-covered ground recedes to pale cool tones, and
+ * lakes read as *traversable* frozen terrain (near-white fill + pale-blue
+ * outline) rather than the blue barriers the base style paints. Applied on top
+ * of the light/dark tune, so it wins for the handful of layers it touches.
+ */
+function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
+  if (layer.type === 'background') {
+    paint(layer, 'background-color', dark ? '#20282b' : '#eef2f2');
+  }
+  if (layer.id === 'water') {
+    paint(layer, 'fill-color', dark ? '#3f515c' : '#eaf1f6');
+    paint(layer, 'fill-outline-color', dark ? '#5d7686' : '#b7d0e0');
+  }
+  if (layer.type === 'line' && /^waterway_/.test(layer.id)) {
+    paint(layer, 'line-color', dark ? '#5d7686' : '#a9c4d6');
+  }
+  const landcover: Record<string, string> = dark
+    ? { landcover_wood: '#2f3d3f', landcover_grass: '#33403f', park: '#2c3a38' }
+    : { landcover_wood: '#e2eaec', landcover_grass: '#e8eeec', park: '#e6eeeb' };
+  const fill = landcover[layer.id];
+  if (fill) {
+    delete layer.paint?.['fill-pattern'];
+    paint(layer, 'fill-color', fill);
+    paint(layer, 'fill-opacity', dark ? 0.7 : 0.5);
+  }
+}
+
+/**
  * Apply Atlas's restrained cartography, dark palette and activity emphasis to
  * the same source style on web and Android. The source URLs and asset paths are
  * untouched, so online templates and downloaded packs remain interchangeable.
@@ -280,11 +317,16 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   }
   const style = parsed as MapStyleDocument;
   const dark = appearance.colorScheme === 'dark';
-  const profile = ['drive', 'bike', 'hike', 'ski'].includes(appearance.profile)
+  // Profiles with bespoke cartography. Anything else (Fish & Hunt, an unknown
+  // stored id) falls back to `neutral` — the untouched restrained base, which is
+  // what those wilderness/general presets want (roads and terrain fully visible).
+  const profile = ['drive', 'bike', 'hike', 'ski', 'run', 'explore'].includes(appearance.profile)
     ? appearance.profile
-    : 'explore';
+    : 'neutral';
 
-  const trackContrastLayers: StyleLayer[] = [];
+  // Exact-class clone layers (dashed tracks, hatched stairs) to splice in right
+  // after the shared base layer they refine.
+  const insertAfterBase: { layer: StyleLayer; baseId: string }[] = [];
   for (const layer of style.layers) {
     tuneLightLayer(layer);
     if (dark) tuneDarkLayer(layer);
@@ -302,7 +344,25 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       paint(layer, 'line-dasharray', [2, 1.35]);
       paint(layer, 'line-opacity', profile === 'drive' ? 0.62 : 0.95);
       if (profile === 'hike' || profile === 'bike') multiplyPaint(layer, 'line-width', 1.22);
-      if (profile === 'hike') layer.minzoom = Math.min(layer.minzoom ?? 14, 12);
+      if (profile === 'explore') multiplyPaint(layer, 'line-width', 1.12);
+      // Run leans harder on the foot network than Hike, and reveals it as early.
+      if (profile === 'run') multiplyPaint(layer, 'line-width', 1.4);
+      if (profile === 'hike' || profile === 'run')
+        layer.minzoom = Math.min(layer.minzoom ?? 14, 12);
+
+      // Stairs are a genuine hazard/landmark on a run — split them off the shared
+      // path layer with a tight crosshatch dash once the width is decided.
+      if (profile === 'run') {
+        const stairs = JSON.parse(JSON.stringify(layer)) as StyleLayer;
+        stairs.id = `atlas-${layer.id}-stairs`;
+        stairs.filter = layer.filter
+          ? ['all', layer.filter, ['==', ['get', 'subclass'], 'steps']]
+          : ['==', ['get', 'subclass'], 'steps'];
+        paint(stairs, 'line-color', dark ? '#e8a17f' : '#9a5a2f');
+        paint(stairs, 'line-dasharray', [0.5, 0.8]);
+        paint(stairs, 'line-opacity', 1);
+        insertAfterBase.push({ layer: stairs, baseId: layer.id });
+      }
     }
     if (/service_track$/.test(layer.id)) {
       paint(layer, 'line-color', [
@@ -313,6 +373,7 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         dark ? '#596268' : '#f9f7f2',
       ]);
       if (profile === 'hike' || profile === 'bike') multiplyPaint(layer, 'line-width', 1.12);
+      if (profile === 'run') multiplyPaint(layer, 'line-width', 1.2);
 
       // line-dasharray is not data-driven in every MapLibre renderer. Overlay
       // an exact-class clone so tracks are genuinely dashed while service
@@ -325,7 +386,7 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       paint(track, 'line-color', dark ? '#c69b68' : '#815f37');
       paint(track, 'line-dasharray', [2.4, 1.4]);
       paint(track, 'line-opacity', 1);
-      trackContrastLayers.push(track);
+      insertAfterBase.push({ layer: track, baseId: layer.id });
     }
 
     if (profile === 'drive') {
@@ -338,7 +399,12 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       }
     } else if (profile === 'bike' && /path_pedestrian$/.test(layer.id)) {
       paint(layer, 'line-color', dark ? '#65c5bd' : '#227b75');
+    } else if (profile === 'run') {
+      // Foot network already emphasized above; here we mildly recede the car
+      // roads it crosses so the run reads as the primary line.
+      if (isCarRoad(layer)) paint(layer, 'line-opacity', 0.72);
     } else if (profile === 'ski') {
+      tuneWinterLayer(layer, dark);
       if (layer.type === 'line' && /^road_/.test(layer.id)) {
         paint(layer, 'line-opacity', 0.62);
       }
@@ -346,13 +412,22 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         paint(layer, 'text-opacity', 0.55);
         paint(layer, 'icon-opacity', 0.5);
       }
+    } else if (profile === 'explore') {
+      // Urban signature: minor traffic recedes (majors stay legible), POIs and
+      // pedestrian streets carry the map.
+      if (isCarRoad(layer) && /(secondary_tertiary|minor|street|service)/.test(layer.id)) {
+        paint(layer, 'line-opacity', 0.7);
+      }
+      if (/^poi_/.test(layer.id)) {
+        paint(layer, 'text-opacity', 0.92);
+        paint(layer, 'icon-opacity', 0.9);
+      }
     }
   }
 
-  for (const track of trackContrastLayers) {
-    const baseId = track.id.replace(/^atlas-/, '').replace(/-track-contrast$/, '');
-    const baseIndex = style.layers.findIndex((layer) => layer.id === baseId);
-    style.layers.splice(baseIndex + 1, 0, track);
+  for (const { layer, baseId } of insertAfterBase) {
+    const baseIndex = style.layers.findIndex((l) => l.id === baseId);
+    style.layers.splice(baseIndex + 1, 0, layer);
   }
 
   if (appearance.custom) {
