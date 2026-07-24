@@ -141,8 +141,12 @@ export function registerInaturApi(app: FastifyInstance, opts: InaturApiOptions =
       if (!area) {
         return reply.code(404).send({ error: 'no published boundary for that offer' });
       }
-      // Boundaries change when a season's offers are re-drawn; a day is plenty.
-      return reply.header('cache-control', 'public, max-age=86400').send(area);
+      // Never client-cacheable. This used to be `public, max-age=86400`, which
+      // meant a wrong boundary (v0.86.0's dropped permit holes) survived both
+      // the fix and the obvious user response to it — deleting the area and
+      // pasting the link again just replayed the stored body. Resolving is a
+      // rare, hand-triggered action, so going upstream every time costs nothing.
+      return reply.header('cache-control', 'no-store').send(area);
     } catch (err) {
       request.log.warn({ err, offerId }, 'inatur resolve upstream failed');
       status?.record(PROBE, false, 'unreachable');

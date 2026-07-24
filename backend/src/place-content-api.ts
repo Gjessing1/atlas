@@ -1,4 +1,9 @@
-import { bestMediaWikiPlacePage, type MediaWikiPlacePage, type PlaceContent } from '@atlas/core';
+import {
+  bestMediaWikiPlacePage,
+  mediaWikiThumbnail,
+  type MediaWikiPlacePage,
+  type PlaceContent,
+} from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
 
 export interface PlaceContentApiOptions {
@@ -66,11 +71,18 @@ export function registerPlaceContentApi(
         ggscoord: `${lat}|${lon}`,
         ggsradius: '5000',
         ggslimit: '12',
-        prop: 'coordinates|extracts|info',
+        prop: 'coordinates|extracts|info|pageimages',
         exintro: '1',
         explaintext: '1',
         exchars: '700',
         inprop: 'url',
+        // The article's lead photo, in one round trip with the text. 640 px
+        // covers a retina card without pulling the full-resolution original,
+        // and pageimages' default `pilicense=free` keeps it to freely licensed
+        // media — Wikimedia serves these straight to the client, so nothing
+        // here has to be proxied.
+        piprop: 'thumbnail',
+        pithumbsize: '640',
       })) {
         url.searchParams.set(key, value);
       }
@@ -92,6 +104,7 @@ export function registerPlaceContentApi(
           extract: page.extract,
           url: page.fullurl,
           language: contentLanguage,
+          image: mediaWikiThumbnail(page),
         };
       } catch {
         return null;

@@ -5,6 +5,7 @@ import {
   placeTargetSubtitle,
   placeTargetTitle,
   type LatLng,
+  type PlaceContent,
   type PlaceTarget,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
@@ -61,6 +62,40 @@ function describeLight(sun: SunDay): string {
   const hours = Math.floor(sun.daylightMs / 3600000);
   const minutes = Math.round((sun.daylightMs % 3600000) / 60000);
   return `↑ ${fmtClock(sun.sunrise.valueOf())} · ↓ ${fmtClock(sun.sunset.valueOf())} · ${hours} h ${minutes} min of daylight`;
+}
+
+/**
+ * The article's lead photo, linked to the article like the "Read article" line
+ * beside it — a photo is how you recognise a place, so the Wikipedia block is
+ * not text-only when we are online.
+ *
+ * It reserves its aspect ratio up front (no reflow when the image lands) and
+ * removes itself if the file fails to load: a broken-image glyph in the middle
+ * of a card is worse than no photo at all, and Commons files do get renamed.
+ */
+function ArticleImage({ article }: { article: PlaceContent }) {
+  const [failed, setFailed] = useState(false);
+  const image = article.image;
+  // Reset when the card moves on to a different article.
+  useEffect(() => setFailed(false), [image?.url]);
+  if (!image || failed) return null;
+  return (
+    <a
+      className="place-card-content-image"
+      href={article.url}
+      target="_blank"
+      rel="noreferrer"
+      style={{ aspectRatio: `${image.width} / ${image.height}` }}
+    >
+      <img
+        src={image.url}
+        alt={article.title}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    </a>
+  );
 }
 
 /**
@@ -164,6 +199,7 @@ export function PlaceCard({
               Read article
             </a>
           </div>
+          <ArticleImage article={article} />
           <p>{article.extract}</p>
         </section>
       ))}

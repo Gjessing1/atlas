@@ -11,6 +11,8 @@
  * parser both the client and the route use.
  */
 
+import type { LatLng } from './geo.js';
+
 /** Pull a 24-hex iNatur offer id out of a raw id or a pasted offer URL. */
 export function parseOfferId(input: string): string | undefined {
   const m = input.match(/[0-9a-f]{24}/i);
@@ -38,4 +40,53 @@ export interface InaturArea {
 /** GET /api/inatur/resolve?offer=<id|url> — an InaturArea, or 404 when unknown. */
 export function inaturResolveUrl(origin: string, offer: string): string {
   return `${origin}/api/inatur/resolve?offer=${encodeURIComponent(offer)}`;
+}
+
+/** The three ways a resolve can fail, phrased for the person who pasted a link. */
+export const INATUR_BAD_INPUT = 'Paste an iNatur offer link or its 24-character id.';
+export const INATUR_NO_BOUNDARY = 'No boundary is published for that offer.';
+export const INATUR_UNAVAILABLE = 'iNatur is unavailable right now. Try again later.';
+
+/**
+ * Resolve an offer link/id to its boundary, throwing one of the messages above.
+ * Shared by both clients so they cannot drift — and so the *cache rule* lives in
+ * one place.
+ *
+ * Resolving is a deliberate user action ("draw me this permit"), so it must
+ * never be served from an HTTP cache: a stored body outlives the fix that
+ * corrected it, and re-pasting the link — the one thing a user does when an area
+ * looks wrong — would hand back the same wrong boundary. That is exactly how
+ * v0.86.0's permit-hole fix stayed invisible behind a day-old cached response.
+ */
+export async function resolveInaturOffer(
+  origin: string,
+  offer: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<InaturArea> {
+  const raw = offer.trim();
+  if (!parseOfferId(raw)) throw new Error(INATUR_BAD_INPUT);
+  let res: Response;
+  try {
+    res = await fetchImpl(inaturResolveUrl(origin, raw), {
+      // `cache` covers browsers; React Native's fetch ignores it, so the request
+      // header is what makes Android's OkHttp cache stand aside.
+      cache: 'no-store',
+      headers: { 'cache-control': 'no-cache' },
+    });
+  } catch {
+    throw new Error(INATUR_UNAVAILABLE);
+  }
+  if (res.status === 404) throw new Error(INATUR_NO_BOUNDARY);
+  if (!res.ok) throw new Error(INATUR_UNAVAILABLE);
+  return (await res.json()) as InaturArea;
+}
+
+/** Track name for a saved permit: its sub-area name, else the offer's tail. */
+export function inaturTrackName(area: InaturArea): string {
+  return area.name ? `iNatur – ${area.name}` : `iNatur permit ${area.offerId.slice(-6)}`;
+}
+
+/** The boundary as track segments — one closed loop per ring, holes included. */
+export function inaturSegments(area: InaturArea): LatLng[][] {
+  return area.rings.map((ring) => ring.map(([lng, lat]) => ({ lat, lng })));
 }

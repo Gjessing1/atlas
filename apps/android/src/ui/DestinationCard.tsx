@@ -1,6 +1,6 @@
 import type { OverlayIdentifyGroup } from '@atlas/core';
 import { useEffect, useRef } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { usePlaceContent } from '../place/usePlaceContent';
 import type { LocalPack } from '../regions/packs';
@@ -73,6 +73,7 @@ export function DestinationCard({
 }) {
   const identify = target.identify ?? [];
   const content = usePlaceContent(packs, target.name, { lat: target.lat, lng: target.lng });
+  const hasArticleImage = content.content.some((article) => article.image);
   // A single tap on Directions/Save/Edit hands the point off and closes the
   // card, but a fast second tap arrives before the card unmounts and used to
   // fire the action twice — adding the same stop, or saving the same pin,
@@ -98,9 +99,12 @@ export function DestinationCard({
       mode="map"
       onClose={onCancel}
       initialSnap="peek"
-      // Overlay answers need room of their own; without them the card keeps its
-      // three action rows exactly as before.
-      peekHeight={identify.length > 0 || content.content.length > 0 ? 380 : 218}
+      // Overlay answers need room of their own, and an article photo needs more
+      // still; without either the card keeps its three action rows exactly as
+      // before.
+      peekHeight={
+        hasArticleImage ? 470 : identify.length > 0 || content.content.length > 0 ? 380 : 218
+      }
       bottomInset={bottomInset}
       testID="destination-sheet"
     >
@@ -153,7 +157,13 @@ export function DestinationCard({
         <Text style={styles.contentLoading}>Looking up local guide…</Text>
       ) : null}
       {content.content.length > 0 ? (
-        <ScrollView style={styles.content} bounces={false} testID="destination-content">
+        <ScrollView
+          // A photo needs room the text-only card never had, so the article
+          // area grows only when one is actually there.
+          style={[styles.content, hasArticleImage && styles.contentWithImage]}
+          bounces={false}
+          testID="destination-content"
+        >
           {content.content.map((article) => (
             <View key={`${article.source}/${article.url}`} style={styles.article}>
               <View style={styles.articleHead}>
@@ -165,6 +175,16 @@ export function DestinationCard({
                   <Text style={styles.articleLink}>Read article</Text>
                 </Pressable>
               </View>
+              {article.image ? (
+                <Pressable onPress={() => void Linking.openURL(article.url)}>
+                  <Image
+                    source={{ uri: article.image.url }}
+                    style={styles.articleImage}
+                    resizeMode="cover"
+                    accessibilityLabel={article.title}
+                  />
+                </Pressable>
+              ) : null}
               <Text style={styles.articleText}>{article.extract}</Text>
             </View>
           ))}
@@ -231,10 +251,18 @@ const styles = StyleSheet.create({
   identifyValue: { flex: 1, fontSize: 13, color: theme.text, fontWeight: '600' },
   contentLoading: { marginTop: 12, color: theme.textMuted, fontSize: 13 },
   content: { maxHeight: 150, marginTop: 12 },
+  contentWithImage: { maxHeight: 280 },
   article: { marginBottom: 10 },
   articleHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   articleSource: { color: theme.textMuted, fontWeight: '800', fontSize: 12 },
   articleLink: { color: theme.accent, fontWeight: '700', fontSize: 12 },
+  articleImage: {
+    width: '100%',
+    height: 130,
+    borderRadius: 8,
+    marginTop: 6,
+    backgroundColor: theme.border,
+  },
   articleText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {

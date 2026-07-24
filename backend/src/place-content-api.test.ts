@@ -48,6 +48,73 @@ describe('place content API', () => {
     await app.close();
   });
 
+  it('asks for a card-sized lead photo and passes it through', async () => {
+    const requested: URL[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      requested.push(url);
+      if (url.hostname.includes('wikivoyage')) return new Response('{}');
+      return new Response(
+        JSON.stringify({
+          query: {
+            pages: [
+              {
+                title: 'Nidarosdomen',
+                extract: 'The cathedral in Trondheim.',
+                fullurl: 'https://no.wikipedia.org/wiki/Nidarosdomen',
+                coordinates: [{ lat: 63.4267, lon: 10.3969 }],
+                thumbnail: {
+                  source: 'https://upload.wikimedia.org/a/b.jpg',
+                  width: 640,
+                  height: 747,
+                },
+              },
+            ],
+          },
+        }),
+      );
+    });
+    const app = Fastify();
+    registerPlaceContentApi(app, { fetchImpl });
+    const response = await app.inject({
+      url: '/api/place-content?name=Nidarosdomen&lat=63.4267&lon=10.3969&lang=no',
+    });
+    expect(response.json().content[0].image).toEqual({
+      url: 'https://upload.wikimedia.org/a/b.jpg',
+      width: 640,
+      height: 747,
+    });
+    expect(requested[0]!.searchParams.get('prop')).toContain('pageimages');
+    expect(requested[0]!.searchParams.get('pithumbsize')).toBe('640');
+    await app.close();
+  });
+
+  it('leaves the image out when the article has none', async () => {
+    const app = Fastify();
+    registerPlaceContentApi(app, {
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            query: {
+              pages: [
+                {
+                  title: 'Trolltunga',
+                  extract: 'A rock formation.',
+                  fullurl: 'https://en.wikipedia.org/wiki/Trolltunga',
+                  coordinates: [{ lat: 60.124, lon: 6.74 }],
+                },
+              ],
+            },
+          }),
+        ),
+    });
+    const response = await app.inject({
+      url: '/api/place-content?name=Trolltunga&lat=60.124&lon=6.74',
+    });
+    expect(response.json().content[0]).not.toHaveProperty('image');
+    await app.close();
+  });
+
   it('treats missing upstream articles as an empty normal response', async () => {
     const app = Fastify();
     registerPlaceContentApi(app, { fetchImpl: async () => new Response('{}') });

@@ -1,5 +1,11 @@
 import { promoteParentId, useCollectionTree } from '@atlas/app-hooks';
-import { fmtKm, inaturResolveUrl, parseOfferId, type InaturArea } from '@atlas/core';
+import {
+  fmtKm,
+  inaturSegments,
+  inaturTrackName,
+  resolveInaturOffer,
+  INATUR_UNAVAILABLE,
+} from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useRef, useState } from 'react';
@@ -190,26 +196,13 @@ export function Sidebar({
   const onResolveInatur = async () => {
     const raw = inaturInput.trim();
     if (!raw) return;
-    if (!parseOfferId(raw)) {
-      setInaturError('Paste an iNatur offer link or its 24-character id.');
-      return;
-    }
     setInaturBusy(true);
     setInaturError(null);
     try {
-      const res = await fetch(inaturResolveUrl('', raw));
-      if (res.status === 404) {
-        setInaturError('No boundary is published for that offer.');
-        return;
-      }
-      if (!res.ok) {
-        setInaturError('iNatur is unavailable right now. Try again later.');
-        return;
-      }
-      const area = (await res.json()) as InaturArea;
+      const area = await resolveInaturOffer('', raw);
       const gpx = buildGpx({
-        name: area.name ? `iNatur – ${area.name}` : `iNatur permit ${area.offerId.slice(-6)}`,
-        segments: area.rings.map((ring) => ring.map(([lng, lat]) => ({ lat, lng }))),
+        name: inaturTrackName(area),
+        segments: inaturSegments(area),
         waypoints: [],
       });
       const file = new File([gpx], `inatur-${area.offerId}.gpx`, { type: 'application/gpx+xml' });
@@ -218,8 +211,8 @@ export function Sidebar({
       onImported(result);
       setInaturInput('');
       setInaturOpen(false);
-    } catch {
-      setInaturError('iNatur is unavailable right now. Try again later.');
+    } catch (err) {
+      setInaturError(err instanceof Error ? err.message : INATUR_UNAVAILABLE);
     } finally {
       setInaturBusy(false);
     }

@@ -119,6 +119,9 @@ describe('GET /api/inatur/resolve', () => {
     // The id is lower-cased into the SQL literal, queried in 4326.
     expect(requests[0]!.searchParams.get('where')).toBe(`tilbudsid='${ID}'`);
     expect(requests[0]!.searchParams.get('outSR')).toBe('4326');
+    // Never client-cacheable: re-pasting a link is how a user asks for a
+    // corrected boundary, so a stored body must not be able to answer.
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('404s a well-formed id that no layer carries (after trying every layer)', async () => {

@@ -1,5 +1,18 @@
 import { haversineM, type LatLng } from './geo.js';
 
+/**
+ * The article's lead image, when the proxy found one online.
+ *
+ * Absent for offline pack articles: region packs carry text only (photos would
+ * multiply their size for something the reader can live without), so the card
+ * must render fine either way.
+ */
+export interface PlaceContentImage {
+  url: string;
+  width: number;
+  height: number;
+}
+
 /** A short, attributed article attached to a place card. */
 export interface PlaceContent {
   source: 'wikipedia' | 'wikivoyage';
@@ -7,6 +20,8 @@ export interface PlaceContent {
   extract: string;
   url: string;
   language: string;
+  /** Lead image of the article, sized for a card. Online lookups only. */
+  image?: PlaceContentImage;
   /** True when the article came from a downloaded Android region pack. */
   offline?: boolean;
 }
@@ -17,6 +32,15 @@ export interface MediaWikiPlacePage {
   extract?: string;
   fullurl?: string;
   coordinates?: { lat?: number; lon?: number; primary?: string }[];
+  /** `prop=pageimages` lead thumbnail, at the size the proxy asked for. */
+  thumbnail?: { source?: string; width?: number; height?: number };
+}
+
+/** A page's lead thumbnail, dropped unless it is complete and https. */
+export function mediaWikiThumbnail(page: MediaWikiPlacePage): PlaceContentImage | undefined {
+  const { source, width, height } = page.thumbnail ?? {};
+  if (!source?.startsWith('https://') || !width || !height) return undefined;
+  return { url: source, width, height };
 }
 
 function normaliseName(value: string): string {
