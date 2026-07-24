@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   bboxContains,
+  circleFeature,
+  destinationPoint,
+  haversineM,
   markerScaleForZoom,
   metersPerPixel,
+  pathLengthM,
   scaleBarFor,
   type BBox,
+  type LatLng,
 } from './index.js';
+
+const oslo: LatLng = { lat: 59.91, lng: 10.75 };
 
 describe('bboxContains', () => {
   const norway: BBox = { sw: { lat: 57.9, lng: 4.5 }, ne: { lat: 71.2, lng: 31.2 } };
@@ -20,6 +27,51 @@ describe('bboxContains', () => {
 
   it('includes the boundary', () => {
     expect(bboxContains(norway, { lat: 57.9, lng: 4.5 })).toBe(true);
+  });
+});
+
+describe('pathLengthM', () => {
+  it('is zero for fewer than two points', () => {
+    expect(pathLengthM([])).toBe(0);
+    expect(pathLengthM([oslo])).toBe(0);
+  });
+
+  it('sums the segments of a polyline', () => {
+    const b = { lat: 59.92, lng: 10.75 };
+    const c = { lat: 59.92, lng: 10.77 };
+    const expected = haversineM(oslo, b) + haversineM(b, c);
+    expect(pathLengthM([oslo, b, c])).toBeCloseTo(expected, 6);
+  });
+});
+
+describe('destinationPoint', () => {
+  it('lands the requested distance away', () => {
+    const p = destinationPoint(oslo, 90, 1000);
+    expect(haversineM(oslo, p)).toBeCloseTo(1000, 1);
+  });
+
+  it('heads north / east in the right direction', () => {
+    expect(destinationPoint(oslo, 0, 500).lat).toBeGreaterThan(oslo.lat);
+    expect(destinationPoint(oslo, 90, 500).lng).toBeGreaterThan(oslo.lng);
+    expect(destinationPoint(oslo, 180, 500).lat).toBeLessThan(oslo.lat);
+    expect(destinationPoint(oslo, 270, 500).lng).toBeLessThan(oslo.lng);
+  });
+});
+
+describe('circleFeature', () => {
+  it('is a closed polygon of the requested resolution', () => {
+    const f = circleFeature(oslo, 200, { radiusM: 200 }, 32);
+    const ring = f.geometry.coordinates[0]!;
+    expect(ring).toHaveLength(33); // steps + closing vertex
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    expect(f.properties).toEqual({ radiusM: 200 });
+  });
+
+  it('keeps every vertex ~radius from the centre', () => {
+    const f = circleFeature(oslo, 150, {}, 16);
+    for (const [lng, lat] of f.geometry.coordinates[0]!.slice(0, -1)) {
+      expect(haversineM(oslo, { lat: lat!, lng: lng! })).toBeCloseTo(150, 0);
+    }
   });
 });
 

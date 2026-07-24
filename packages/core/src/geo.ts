@@ -28,6 +28,61 @@ export function haversineM(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/** Cumulative great-circle length of a polyline in meters (0 for < 2 points). */
+export function pathLengthM(points: LatLng[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1]!, points[i]!);
+  return total;
+}
+
+/**
+ * The point reached by travelling `distanceM` metres from `from` along an
+ * initial `bearingDeg` (clockwise from north). Spherical model, matching
+ * {@link haversineM}; used to draw radius rings and range circles.
+ */
+export function destinationPoint(from: LatLng, bearingDeg: number, distanceM: number): LatLng {
+  const R = 6371008.8;
+  const toRad = Math.PI / 180;
+  const d = distanceM / R;
+  const brng = bearingDeg * toRad;
+  const lat1 = from.lat * toRad;
+  const lng1 = from.lng * toRad;
+  const sinLat2 = Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng);
+  const lat2 = Math.asin(sinLat2);
+  const lng2 =
+    lng1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+      Math.cos(d) - Math.sin(lat1) * sinLat2,
+    );
+  return { lat: lat2 / toRad, lng: ((lng2 / toRad + 540) % 360) - 180 };
+}
+
+/**
+ * A geodesic circle of `radiusM` around `center`, as a closed GeoJSON Polygon
+ * feature (`steps` vertices). Shared by the web and native measure tools so a
+ * radius ring is the same shape on both — no Turf dependency, same spherical
+ * model as the rest of this module.
+ */
+export function circleFeature(
+  center: LatLng,
+  radiusM: number,
+  properties: GeoJSON.GeoJsonProperties = {},
+  steps = 64,
+): GeoJSON.Feature<GeoJSON.Polygon> {
+  const ring: number[][] = [];
+  for (let i = 0; i < steps; i++) {
+    const p = destinationPoint(center, (i / steps) * 360, radiusM);
+    ring.push([p.lng, p.lat]);
+  }
+  ring.push(ring[0]!); // close the ring
+  return {
+    type: 'Feature',
+    properties,
+    geometry: { type: 'Polygon', coordinates: [ring] },
+  };
+}
+
 /** Whether a point lies inside a bounding box (inclusive). Does not handle antimeridian-crossing boxes. */
 export function bboxContains(bbox: BBox, point: LatLng): boolean {
   return (

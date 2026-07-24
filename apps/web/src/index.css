@@ -1776,6 +1776,7 @@ button.transit-notice-summary {
   display: grid;
   grid-template-areas:
     'profiles layers'
+    '. measure'
     'zoom locate';
   grid-template-columns: minmax(0, auto) 40px;
   justify-items: end;
@@ -1886,6 +1887,169 @@ button.transit-notice-summary {
   border-radius: 8px;
   background: var(--surface-overlay);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.map-measure-control {
+  grid-area: measure;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.map-measure-control:hover {
+  background: var(--surface-muted);
+}
+
+.map-measure-control.on {
+  color: var(--accent);
+}
+
+/* Radius / measure tool panel — bottom-left, out of the way of the control grid. */
+.measure-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 32px;
+  z-index: 5;
+  width: 208px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  background: var(--surface-overlay);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.measure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.measure-head strong {
+  font-size: 14px;
+}
+
+.measure-head button {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.measure-head button:hover {
+  color: var(--text);
+}
+
+.measure-modes {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  margin-bottom: 8px;
+}
+
+.measure-modes button {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.measure-modes button[aria-pressed='true'] {
+  background: var(--surface-overlay);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.measure-body {
+  min-height: 40px;
+}
+
+.measure-readout {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.measure-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.measure-hint {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.measure-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.measure-chip {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.measure-chip.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.measure-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.measure-actions button {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.measure-actions button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.measure-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .layer-switch-item {

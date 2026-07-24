@@ -45,6 +45,8 @@ export function useRouteLayers(
    * plan's endpoints whichever mode is answering.
    */
   hideLine = false,
+  /** While `.current` is true (e.g. the measure tool is open), route-mode clicks yield. */
+  suppressClicks?: { readonly current: boolean },
 ): void {
   // Handlers are registered once per map; latest state flows through a ref.
   const routeRef = useRef(route);
@@ -165,6 +167,7 @@ export function useRouteLayers(
   useEffect(() => {
     if (!map) return;
     const onClick = (e: maplibregl.MapMouseEvent) => {
+      if (suppressClicks?.current) return;
       const r = routeRef.current;
       if (!r.active) return;
       const present = ROUTE_LAYERS.filter((id) => map.getLayer(id));

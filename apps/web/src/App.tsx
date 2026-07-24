@@ -29,7 +29,16 @@ import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView } from './MapView.js';
-import { CompassIcon, CrosshairIcon, RouteIcon, SettingsIcon, StarIcon, SunIcon } from './icons.js';
+import { MeasureTool } from './MeasureTool.js';
+import {
+  CompassIcon,
+  CrosshairIcon,
+  RouteIcon,
+  RulerIcon,
+  SettingsIcon,
+  StarIcon,
+  SunIcon,
+} from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
@@ -138,15 +147,21 @@ export function App() {
   const transit = useTransitPlan(route);
   // The place card's hand-off into the planner (seeds "My location" as start).
   const directions = useDirections(route);
-  useRouteLayers(map, route, transit.enabled);
+
+  // The radius / measure tool (§4.7b): while open it owns map clicks.
+  const [measureOpen, setMeasureOpen] = useState(false);
+  const measuringRef = useRef(measureOpen);
+  measuringRef.current = measureOpen;
+  // Route mode or the measure tool own map clicks; identify + POI popups and
+  // the route-click handler read this ref to yield.
+  const blockPassiveClicksRef = useRef(false);
+  blockPassiveClicksRef.current = route.active || measureOpen;
+
+  useRouteLayers(map, route, transit.enabled, measuringRef);
   useTransitLayers(map, transit.enabled ? transit.trip : null);
   // The plan survives a reload, and rides along in the shareable URL hash.
   useRoutePlanPersistence(route, userData, linkedPlan);
   useShareHash(map, pin, route.plan);
-
-  // Route mode owns map clicks; identify + POI popups read this ref to yield.
-  const routeActiveRef = useRef(route.active);
-  routeActiveRef.current = route.active;
 
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
@@ -171,10 +186,10 @@ export function App() {
   );
   useOverlayLayers(map, layers.overlays);
   useOverlayLabels(map, layers.overlays);
-  useOverlayIdentify(map, layers.overlays, routeActiveRef);
+  useOverlayIdentify(map, layers.overlays, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
-  useSpeedCameraLayer(map, layers.overlays, routeActiveRef);
-  useHuntingFieldsLayer(map, layers.overlays, routeActiveRef);
+  useSpeedCameraLayer(map, layers.overlays, blockPassiveClicksRef);
+  useHuntingFieldsLayer(map, layers.overlays, blockPassiveClicksRef);
   // Rounded zoom for the panel's live "zoom in to z14+" hints.
   const [mapZoom, setMapZoom] = useState(Math.round(initialView.zoom));
   useEffect(() => {
@@ -503,7 +518,7 @@ export function App() {
           mapRef.current = m;
           setMap(m);
         }}
-        suppressPoiClicks={routeActiveRef}
+        suppressPoiClicks={blockPassiveClicksRef}
         colorScheme={appearance.colorScheme}
         profile={profiles.profile.id}
         customStyle={mapStyleEditor.value}
@@ -638,6 +653,16 @@ export function App() {
             onPick={onPickProfile}
           />
           <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
+          <button
+            type="button"
+            className={`map-measure-control${measureOpen ? ' on' : ''}`}
+            aria-label="Measure distance and radius"
+            title="Measure"
+            aria-pressed={measureOpen}
+            onClick={() => setMeasureOpen((open) => !open)}
+          >
+            <RulerIcon size={19} />
+          </button>
           <div className="map-zoom-controls" role="group" aria-label="Map view">
             <button
               type="button"
@@ -674,6 +699,9 @@ export function App() {
             <CrosshairIcon size={19} />
           </button>
         </div>
+      )}
+      {map && measureOpen && nav.phase === 'idle' && (
+        <MeasureTool map={map} onClose={() => setMeasureOpen(false)} />
       )}
       {/* One card for pins, saved places, POIs and search hits. Hidden mid-trip
           along with the rest of the map chrome. */}

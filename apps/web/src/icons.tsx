@@ -255,6 +255,26 @@ export function LayersIcon(props: IconProps) {
   );
 }
 
+/** Ruler glyph for the measure tool (distance ruler + radius circles). */
+export function RulerIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M3.8 14.7l10.9-10.9a1 1 0 0 1 1.4 0l4.1 4.1a1 1 0 0 1 0 1.4L9.3 20.2a1 1 0 0 1-1.4 0l-4.1-4.1a1 1 0 0 1 0-1.4z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 10.5l1.8 1.8M11 7.5l2.6 2.6M14 4.5l1.8 1.8"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
 /** Folder glyph for collection rows — open when the folder is expanded. */
 export function FolderIcon({ open = false, ...props }: IconProps & { open?: boolean }) {
   return (
