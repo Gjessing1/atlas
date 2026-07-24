@@ -30,7 +30,11 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
     const sync = () => {
       if (cancelled || !map.isStyleLoaded()) return; // re-runs on style.load/idle
       const style = map.getStyle();
-      const wanted = new Map(overlays.map((o) => [ID_PREFIX + o.meta.id, o]));
+      // Vector overlays are drawn by their own hooks (useSpeedCameraLayer) —
+      // requesting raster tiles for them would only 404.
+      const wanted = new Map(
+        overlays.filter((o) => !o.meta.vector).map((o) => [ID_PREFIX + o.meta.id, o]),
+      );
       for (const layer of style.layers ?? []) {
         if (layer.id.startsWith(ID_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
       }

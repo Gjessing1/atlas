@@ -164,9 +164,18 @@ export function useOverlays(
     [state, stateKey, profileId, allLayers],
   );
 
+  // Vector overlays (LayerMeta.vector — the speed-camera layer) are dropped
+  // from everything Android offers until MapScene grows a GeoJSON overlay
+  // renderer: a toggle that draws nothing is worse than not offering it. The
+  // *stored* catalog cache stays raw, so parity later needs no migration.
+  const rasterLayers = useMemo(() => allLayers.filter((meta) => !meta.vector), [allLayers]);
+
   // A contextual layer must stop drawing outside its profile; its explicit
   // state stays stored, so switching back restores the user's choice.
-  const catalog = useMemo(() => layersForProfile(allLayers, profileId), [allLayers, profileId]);
+  const catalog = useMemo(
+    () => layersForProfile(rasterLayers, profileId),
+    [rasterLayers, profileId],
+  );
 
   const overlays = useMemo(
     () =>
@@ -181,7 +190,7 @@ export function useOverlays(
   );
 
   return {
-    allCatalog: allLayers,
+    allCatalog: rasterLayers,
     catalog,
     state,
     overlays,

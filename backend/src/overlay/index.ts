@@ -21,7 +21,7 @@ import { registerTileRoute } from './tiles.js';
 
 export type { OverlayApiOptions } from './context.js';
 export type { OverlayLayer } from './catalog.js';
-export { norwegianLayers } from './catalog.js';
+export { norwegianLayers, speedCameraLayerMeta } from './catalog.js';
 
 export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions): void {
   const env = opts.env ?? process.env;
@@ -48,14 +48,18 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
 
   // Public catalog: LayerMeta only — never the upstream config. `labels` is
   // derived from the upstream here rather than duplicated in `meta`, so a layer
-  // can never advertise labels it has no source for.
+  // can never advertise labels it has no source for. Vector extras (opts.extraMeta)
+  // ride along at the end — panel display order puts the curated rasters first.
   app.get('/api/layers', () => ({
-    layers: layers.map((l) => {
-      const labels = l.upstream.kind === 'wms' ? l.upstream.labels : undefined;
-      return labels
-        ? { ...l.meta, labels: { minzoom: labels.minzoom, unit: labels.unit } }
-        : l.meta;
-    }),
+    layers: [
+      ...layers.map((l) => {
+        const labels = l.upstream.kind === 'wms' ? l.upstream.labels : undefined;
+        return labels
+          ? { ...l.meta, labels: { minzoom: labels.minzoom, unit: labels.unit } }
+          : l.meta;
+      }),
+      ...(opts.extraMeta ?? []),
+    ],
   }));
 
   registerTileRoute(ctx);

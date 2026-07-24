@@ -158,3 +158,65 @@ describe('/api/route/nvdb-cameras', () => {
     expect(res.json()).toEqual({ cameras: { points: [], sections: [] } });
   });
 });
+
+describe('speed-camera map layer', () => {
+  it('lists the vector layer and serves the whole dataset as GeoJSON', async () => {
+    const dataDir = await tempDataDir();
+    await mkdir(path.join(dataDir, 'nvdb'), { recursive: true });
+    const db = new DatabaseSync(path.join(dataDir, 'nvdb', 'nvdb.sqlite'));
+    createSpeedTables(db);
+    createCameraTables(db);
+    db.prepare('INSERT INTO camera_point VALUES (1, ?, 0, ?, 10)').run('Fossen', latAt(10));
+    db.prepare('INSERT INTO camera_point_rtree VALUES (1, 10, 10, ?, ?)').run(latAt(10), latAt(10));
+    db.prepare('INSERT INTO camera_section VALUES (1, ?, ?)').run('S-ATK', lineGeom(20, 50));
+    db.prepare('INSERT INTO camera_section_rtree VALUES (1, 10, 10, ?, ?)').run(
+      latAt(20),
+      latAt(50),
+    );
+    db.close();
+
+    const app = await bootApp(dataDir);
+    const catalog = await app.inject({ method: 'GET', url: '/api/layers' });
+    const meta = catalog
+      .json()
+      .layers.find((l: { id: string }) => l.id === 'speed-cameras') as Record<string, unknown>;
+    expect(meta).toBeDefined();
+    expect(meta['vector']).toBe(true);
+    expect(meta['profiles']).toEqual(['driving']);
+
+    const res = await app.inject({ method: 'GET', url: '/api/overlay/speed-cameras/features' });
+    expect(res.statusCode).toBe(200);
+    const fc = res.json();
+    expect(fc.type).toBe('FeatureCollection');
+    const kinds = fc.features.map((f: { properties: { kind: string } }) => f.properties.kind);
+    expect(kinds.sort()).toEqual(['point', 'section']);
+    const point = fc.features.find(
+      (f: { properties: { kind: string } }) => f.properties.kind === 'point',
+    );
+    expect(point.properties.name).toBe('Fossen');
+    expect(point.geometry.coordinates).toEqual([10, latAt(10)]);
+    const section = fc.features.find(
+      (f: { properties: { kind: string } }) => f.properties.kind === 'section',
+    );
+    expect(section.geometry.type).toBe('LineString');
+    expect(section.geometry.coordinates).toHaveLength(31);
+  });
+
+  it('hides the layer and answers an empty collection without camera tables', async () => {
+    const dataDir = await tempDataDir();
+    await mkdir(path.join(dataDir, 'nvdb'), { recursive: true });
+    const db = new DatabaseSync(path.join(dataDir, 'nvdb', 'nvdb.sqlite'));
+    createSpeedTables(db);
+    db.close();
+
+    const app = await bootApp(dataDir);
+    const catalog = await app.inject({ method: 'GET', url: '/api/layers' });
+    const ids = catalog.json().layers.map((l: { id: string }) => l.id);
+    expect(ids).not.toContain('speed-cameras');
+    // The route still answers (a cached client may hold the old catalog) —
+    // empty is the normal NVDB answer, never an error.
+    const res = await app.inject({ method: 'GET', url: '/api/overlay/speed-cameras/features' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ type: 'FeatureCollection', features: [] });
+  });
+});

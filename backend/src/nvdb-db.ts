@@ -58,6 +58,11 @@ export class NvdbStore {
     return new NvdbStore(db, hasCameras);
   }
 
+  /** Whether this dataset build carries the ATK camera tables at all. */
+  get hasCameraData(): boolean {
+    return this.hasCameras;
+  }
+
   /**
    * Speed stretches whose bounding box intersects `[sw, ne]` padded by
    * `padDeg`. The pad matters: a stretch just outside the route's own bbox can

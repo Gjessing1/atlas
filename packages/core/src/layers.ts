@@ -54,6 +54,16 @@ export interface LayerMeta {
   /** Activity profiles this layer belongs to (absent = general purpose). */
   profiles?: string[];
   /**
+   * Present when the layer is vector data rather than raster tiles: clients
+   * fetch its whole coverage once as GeoJSON from `/api/overlay/:id/features`
+   * (see overlayFeaturesUrl) and style it client-side, keyed on the layer id.
+   * Raster-only clients must not request tiles for these entries. Deployed
+   * pre-vector bundles are safe by construction rather than by checking this
+   * field: every vector layer is profile-tagged, and no profile in their core
+   * carries those tags, so the entry never surfaces there.
+   */
+  vector?: boolean;
+  /**
    * Present when `/api/overlay/:id/labels` can draw a number directly on the
    * map for this layer — the value a raster tile cannot show because it lives
    * in the upstream's attributes rather than its symbology (a lake's maximum
@@ -80,6 +90,19 @@ export function overlayTileUrl(origin: string, meta: Pick<LayerMeta, 'id' | 'rev
   const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
   return (
     `${origin}/api/overlay/${encodeURIComponent(meta.id)}/{z}/{x}/{y}.png` +
+    `?v=${encodeURIComponent(String(rev))}`
+  );
+}
+
+/**
+ * Cache-revisioned GeoJSON URL for a vector overlay (`LayerMeta.vector`).
+ * The whole coverage in one response — the vector layers are curated small
+ * (hundreds of features), so viewport tiling would only add moving parts.
+ */
+export function overlayFeaturesUrl(origin: string, meta: Pick<LayerMeta, 'id' | 'rev'>): string {
+  const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/features` +
     `?v=${encodeURIComponent(String(rev))}`
   );
 }

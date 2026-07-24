@@ -38,7 +38,13 @@ export interface MapProfile {
 
 export const MAP_PROFILES: readonly MapProfile[] = [
   { id: 'explore', label: 'Explore', routing: null, layerTags: [] },
-  { id: 'drive', label: 'Drive', routing: 'car', layerTags: [] },
+  {
+    id: 'drive',
+    label: 'Drive',
+    routing: 'car',
+    layerTags: ['driving'],
+    defaultLayers: ['speed-cameras'],
+  },
   { id: 'bike', label: 'Cycle', routing: 'bike', layerTags: ['bike'] },
   {
     id: 'hike',

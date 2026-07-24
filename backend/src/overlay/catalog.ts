@@ -87,6 +87,31 @@ export interface OverlayLayer {
 
 const KARTKATALOG = 'https://kartkatalog.geonorge.no/search?text=';
 
+/**
+ * The ATK speed-camera layer: vector, not raster — the data is the NVDB
+ * side-table the backend already ships for navigation warnings, so the layer
+ * only exists when that dataset (with camera tables) is present. Served via
+ * /api/overlay/speed-cameras/features beside the other NVDB routes; listed in
+ * the catalog through `OverlayApiOptions.extraMeta`.
+ */
+export function speedCameraLayerMeta(): LayerMeta {
+  return {
+    id: 'speed-cameras',
+    rev: 1,
+    title: 'Speed cameras',
+    description: 'ATK speed cameras: fixed point cameras and average-speed sections.',
+    group: 'Driving',
+    attribution: '© Statens vegvesen',
+    metadataUrl: 'https://vegkart.atlas.vegvesen.no/',
+    maxzoom: 18,
+    defaultOpacity: 1,
+    identify: false,
+    coverageNote: 'Norwegian ATK only — other countries have no camera data yet.',
+    profiles: ['driving'],
+    vector: true,
+  };
+}
+
 /** The curated Norwegian catalog (docs/DATA-SOURCES.md is the reference). */
 export function norwegianLayers(): OverlayLayer[] {
   return [

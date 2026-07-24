@@ -15,7 +15,11 @@ import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerExploreApi } from './explore-api.js';
-import { registerOverlayApi, type OverlayApiOptions } from './overlay/index.js';
+import {
+  registerOverlayApi,
+  speedCameraLayerMeta,
+  type OverlayApiOptions,
+} from './overlay/index.js';
 import { NvdbStore } from './nvdb-db.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
@@ -439,6 +443,48 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     return reply.send({ cameras });
   });
 
+  // The same cameras as a map layer (LayerMeta.vector, catalog id
+  // `speed-cameras`): the whole country in one GeoJSON response — 446 points
+  // and 73 sections, small enough that viewport tiling would only add moving
+  // parts. Empty without the dataset, like every other NVDB answer; the
+  // catalog only lists the layer when the camera tables exist, so nothing
+  // links here in that case.
+  const WORLD = { sw: { lat: -90, lng: -180 }, ne: { lat: 90, lng: 180 } };
+  /** ~1.1 m — plenty for a map dot, and it nearly halves the payload. */
+  const round5 = (n: number): number => Math.round(n * 1e5) / 1e5;
+  app.get('/api/overlay/speed-cameras/features', (_request, reply) => {
+    const features: object[] = [];
+    if (nvdb?.hasCameraData) {
+      for (const p of nvdb.queryCameraPoints(WORLD.sw, WORLD.ne)) {
+        features.push({
+          type: 'Feature',
+          properties: {
+            kind: 'point',
+            name: p.name,
+            // Whole degrees: it orients an arrow at most, and the raw
+            // veglenke-derived value carries meaningless double precision.
+            bearingDeg: p.bearingDeg === null ? null : Math.round(p.bearingDeg),
+          },
+          geometry: { type: 'Point', coordinates: [round5(p.lng), round5(p.lat)] },
+        });
+      }
+      for (const s of nvdb.queryCameraSections(WORLD.sw, WORLD.ne)) {
+        features.push({
+          type: 'Feature',
+          properties: { kind: 'section', name: s.name },
+          geometry: {
+            type: 'LineString',
+            coordinates: s.points.map((p) => [round5(p.lng), round5(p.lat)]),
+          },
+        });
+      }
+    }
+    // Static per dataset build; the catalog `rev` in the URL busts this when
+    // the layer's shape ever changes.
+    void reply.header('cache-control', 'public, max-age=3600');
+    return reply.send({ type: 'FeatureCollection', features });
+  });
+
   // Map tiles, two ways:
   // - /api/tiles/<area>/{z}/{x}/{y}.pbf — merged endpoint the map style uses:
   //   local archive tiles where available, streamed from an upstream world
@@ -469,6 +515,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   registerOverlayApi(app, {
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
     status,
+    // The camera layer is data-gated, not config-gated: it appears exactly
+    // when the NVDB dataset on this instance carries the camera tables.
+    ...(nvdb?.hasCameraData ? { extraMeta: [speedCameraLayerMeta()] } : {}),
     ...opts.overlayApi,
   });
 
