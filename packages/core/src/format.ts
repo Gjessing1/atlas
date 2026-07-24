@@ -46,6 +46,23 @@ export function fmtWhenClock(epochMs: number, nowMs = Date.now()): string {
   return sameDay ? fmtClock(epochMs) : fmtDayClock(epochMs);
 }
 
+/**
+ * A calendar-day heading: "Today" / "Tomorrow" for the two nearest days,
+ * otherwise short weekday plus day-of-month ("Sat 26"). For forecast/agenda
+ * sections that span several days. Like {@link fmtDayClock}, the weekday word
+ * stays locale-derived (it is translatable); the day number is pinned.
+ */
+export function fmtDayLabel(epochMs: number, nowMs = Date.now()): string {
+  const d = new Date(epochMs);
+  const now = new Date(nowMs);
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 86_400_000);
+  if (dayDiff === 0) return 'Today';
+  if (dayDiff === 1) return 'Tomorrow';
+  const weekday = d.toLocaleDateString([], { weekday: 'short' });
+  return `${weekday} ${d.getDate()}`;
+}
+
 /** Coordinates as a fixed 5-decimal (~1 m) "lat, lng" string. */
 export function fmtCoords(p: LatLng): string {
   return `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;

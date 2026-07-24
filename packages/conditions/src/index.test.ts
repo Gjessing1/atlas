@@ -5,9 +5,11 @@ import {
   bestWindows,
   buildPlanner,
   compass16,
+  forecastTable,
   pressureTrend,
   sunDay,
   sunPosition,
+  windArrow,
   type ConditionAssessment,
   type PlannerHour,
   type WeatherForecast,
@@ -247,5 +249,92 @@ describe('bestWindows', () => {
 
   it('ignores unassessed rows', () => {
     expect(bestWindows([row(0, undefined), row(1, undefined)])).toEqual([]);
+  });
+});
+
+describe('windArrow', () => {
+  it('points where the wind blows (FROM + 180°), snapped to 8', () => {
+    expect(windArrow(0)).toBe('↓'); // FROM north → blows south
+    expect(windArrow(90)).toBe('←'); // FROM east → blows west
+    expect(windArrow(180)).toBe('↑'); // FROM south → blows north
+    expect(windArrow(270)).toBe('→'); // FROM west → blows east
+  });
+  it('wraps and rounds to the nearest octant', () => {
+    expect(windArrow(360)).toBe('↓');
+    expect(windArrow(-45)).toBe(windArrow(315));
+    expect(windArrow(22)).toBe('↓'); // within 22.5° of N-from
+    expect(windArrow(23)).toBe('↙'); // past the midpoint → NE-from
+  });
+});
+
+describe('forecastTable', () => {
+  // Local-time constructor so period grouping holds in any suite timezone.
+  const at = (day: number, hour: number) => new Date(2026, 6, day, hour, 0).getTime();
+  const hour = (day: number, h: number, o: Partial<WeatherPoint> = {}): PlannerHour => ({
+    point: mkPoint({ time: new Date(at(day, h)).toISOString(), ...o }),
+    timeMs: at(day, h),
+    sunAltitudeDeg: 0,
+    pressureTrendHpa: null,
+  });
+
+  it('groups a day into its four six-hour periods', () => {
+    const rows = Array.from({ length: 24 }, (_, h) => hour(20, h));
+    const table = forecastTable(rows);
+    expect(table).toHaveLength(1);
+    expect(table[0]!.periods.map((p) => p.label)).toEqual([
+      'Night',
+      'Morning',
+      'Afternoon',
+      'Evening',
+    ]);
+    expect(table[0]!.periods.map((p) => p.hoursLabel)).toEqual([
+      '00–06',
+      '06–12',
+      '12–18',
+      '18–24',
+    ]);
+    // 06:00 counts as Morning (the later period), so Night is hours 0–5.
+    expect(table[0]!.periods[0]!.hours).toHaveLength(6);
+    expect(table[0]!.periods[1]!.hours[0]!.timeMs).toBe(at(20, 6));
+  });
+
+  it('summarises temp range, precip total, and peak wind + its direction', () => {
+    const rows = [
+      hour(20, 6, { temp: 8, windSpeed: 3, windFromDir: 90, windGust: 5, precip: 0.4 }),
+      hour(20, 7, { temp: 12, windSpeed: 9, windFromDir: 200, windGust: 14, precip: 1.1 }),
+      hour(20, 8, { temp: 10, windSpeed: 6, windFromDir: 270, windGust: 8, precip: 0 }),
+    ];
+    const cell = forecastTable(rows)[0]!.periods[0]!;
+    expect(cell.tempMin).toBe(8);
+    expect(cell.tempMax).toBe(12);
+    expect(cell.precipMm).toBeCloseTo(1.5, 5);
+    expect(cell.windMax).toBe(9);
+    expect(cell.gustMax).toBe(14);
+    expect(cell.windFromDir).toBe(200); // direction at the windiest hour
+  });
+
+  it('picks the wettest hour as representative and selects it', () => {
+    const rows = [
+      hour(20, 12, { symbol: 'clearsky_day', precip: 0 }),
+      hour(20, 13, { symbol: 'heavyrain', precip: 3 }),
+      hour(20, 14, { symbol: 'cloudy', precip: 0.2 }),
+    ];
+    const cell = forecastTable(rows)[0]!.periods[0]!;
+    expect(cell.symbol).toBe('heavyrain');
+    expect(cell.selectIndex).toBe(1); // flat index of the wettest hour
+  });
+
+  it('keeps precip null when no step carried an amount', () => {
+    const cell = forecastTable([hour(20, 1, { precip: null, windGust: null })])[0]!.periods[0]!;
+    expect(cell.precipMm).toBeNull();
+    expect(cell.gustMax).toBeNull();
+  });
+
+  it('omits absent periods and spans multiple days in order', () => {
+    const rows = [hour(20, 20), hour(21, 8), hour(21, 9)];
+    const table = forecastTable(rows);
+    expect(table.map((d) => d.dateMs)).toEqual([at(20, 0), at(21, 0)]);
+    expect(table[0]!.periods.map((p) => p.label)).toEqual(['Evening']);
+    expect(table[1]!.periods.map((p) => p.label)).toEqual(['Morning']);
   });
 });

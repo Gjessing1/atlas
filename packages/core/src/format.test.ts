@@ -3,6 +3,7 @@ import {
   fmtClock,
   fmtCoords,
   fmtDayClock,
+  fmtDayLabel,
   fmtDistanceM,
   fmtDuration,
   fmtEta,
@@ -50,6 +51,29 @@ describe('fmtWhenClock', () => {
   it('compares calendar days, not elapsed hours', () => {
     // 23:30 and 00:30 are an hour apart and still different days.
     expect(fmtWhenClock(on(21, 0, 30), on(20, 23, 30))).toBe(fmtDayClock(on(21, 0, 30)));
+  });
+});
+
+describe('fmtDayLabel', () => {
+  const on = (day: number, h: number) => new Date(2026, 6, day, h, 0).getTime();
+  const now = on(20, 12);
+
+  it('names today and tomorrow', () => {
+    expect(fmtDayLabel(on(20, 3), now)).toBe('Today');
+    expect(fmtDayLabel(on(20, 23), now)).toBe('Today');
+    expect(fmtDayLabel(on(21, 0), now)).toBe('Tomorrow');
+  });
+
+  it('uses weekday + day number further out', () => {
+    // 2026-07-22 is a Wednesday.
+    expect(fmtDayLabel(on(22, 9), now)).toBe(
+      `${new Date(on(22, 9)).toLocaleDateString([], { weekday: 'short' })} 22`,
+    );
+  });
+
+  it('compares calendar days, not elapsed hours', () => {
+    // 23:00 → 01:00 is two hours but a day apart.
+    expect(fmtDayLabel(on(21, 1), on(20, 23))).toBe('Tomorrow');
   });
 });
 

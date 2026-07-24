@@ -2,12 +2,15 @@ import {
   bestWindows,
   buildPlanner,
   compass16,
+  forecastTable,
   sunDay,
   symbolEmoji,
+  windArrow,
   type ConditionsKind,
+  type ForecastPeriodCell,
   type PlannerHour,
 } from '@atlas/conditions';
-import { fmtClock, fmtDayClock, type LatLng } from '@atlas/core';
+import { fmtClock, fmtDayClock, fmtDayLabel, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { WeatherState } from './useWeather.js';
 
@@ -73,9 +76,166 @@ function WeatherFacts({ row }: { row: PlannerHour }) {
   );
 }
 
+/** Precipitation cell text — millimetres when wet, an em-dash when dry/unknown. */
+function precipText(mm: number | null): string {
+  return mm != null && mm > 0 ? `${mm.toFixed(mm < 1 ? 1 : 0)}` : '–';
+}
+
+/** The wind cell: arrow (blowing direction) + sustained speed, gust muted. */
+function WindCell({
+  fromDir,
+  speed,
+  gust,
+}: {
+  fromDir: number;
+  speed: number;
+  gust: number | null;
+}) {
+  return (
+    <span
+      className="wx-wind"
+      title={`${Math.round(speed)}${gust != null ? ` (${Math.round(gust)})` : ''} m/s from ${compass16(fromDir)}`}
+    >
+      <span className="wx-arrow" aria-hidden="true">
+        {windArrow(fromDir)}
+      </span>
+      {Math.round(speed)}
+      {gust != null && <span className="wx-gust">({Math.round(gust)})</span>}
+    </span>
+  );
+}
+
+/** One period row plus, when expanded, its hourly breakdown. */
+function PeriodRow({
+  cell,
+  expanded,
+  selectedMs,
+  onToggle,
+  onPickHour,
+}: {
+  cell: ForecastPeriodCell;
+  expanded: boolean;
+  selectedMs: number;
+  onToggle: () => void;
+  onPickHour: (row: PlannerHour) => void;
+}) {
+  const first = cell.hours[0]!.timeMs;
+  const last = cell.hours[cell.hours.length - 1]!.timeMs;
+  const active = selectedMs >= first && selectedMs <= last;
+  const tempSpan = Math.round(cell.tempMin) !== Math.round(cell.tempMax);
+  return (
+    <>
+      <button
+        type="button"
+        className={`wx-row wx-period${active ? ' wx-active' : ''}`}
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <span className="wx-when">
+          <span className="wx-period-name">{cell.label}</span>
+          <span className="wx-hours">{cell.hoursLabel}</span>
+        </span>
+        <span className="wx-sym" aria-hidden="true">
+          {symbolEmoji(cell.symbol)}
+        </span>
+        <span className="wx-temp">
+          {Math.round(cell.tempMax)}°
+          {tempSpan && <span className="wx-temp-lo">{Math.round(cell.tempMin)}°</span>}
+        </span>
+        <span className={`wx-precip${cell.precipMm && cell.precipMm > 0 ? ' wx-wet' : ''}`}>
+          {precipText(cell.precipMm)}
+        </span>
+        <WindCell fromDir={cell.windFromDir} speed={cell.windMax} gust={cell.gustMax} />
+        <span className="wx-chevron" aria-hidden="true">
+          {expanded ? '⌄' : '›'}
+        </span>
+      </button>
+      {expanded &&
+        cell.hours.map((h) => {
+          const p = h.point;
+          const hActive = h.timeMs === selectedMs;
+          return (
+            <button
+              key={p.time}
+              type="button"
+              className={`wx-row wx-hour${hActive ? ' wx-active' : ''}`}
+              onClick={() => onPickHour(h)}
+            >
+              <span className="wx-when">{fmtClock(h.timeMs)}</span>
+              <span className="wx-sym" aria-hidden="true">
+                {symbolEmoji(p.symbol)}
+              </span>
+              <span className="wx-temp">{Math.round(p.temp)}°</span>
+              <span className={`wx-precip${p.precip && p.precip > 0 ? ' wx-wet' : ''}`}>
+                {precipText(p.precip)}
+              </span>
+              <WindCell fromDir={p.windFromDir} speed={p.windSpeed} gust={p.windGust} />
+              <span className="wx-chevron" />
+            </button>
+          );
+        })}
+    </>
+  );
+}
+
 /**
- * The weather & conditions planner: a time scrubber over the proxied met.no
- * forecast with sunrise/sunset, plain weather first, and an optional
+ * The browsable forecast: a yr.no-style table where a whole day reads at a
+ * glance — a row per Night/Morning/Afternoon/Evening with symbol, temperature,
+ * precipitation and wind, expandable to the hours behind it. Selecting any row
+ * drives the same scrubber selection the map-side conditions layer follows.
+ */
+function WeatherTable({
+  rows,
+  selected,
+  onSelect,
+}: {
+  rows: PlannerHour[];
+  selected: number;
+  onSelect: (idx: number) => void;
+}) {
+  const days = useMemo(() => forecastTable(rows), [rows]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const selectedMs = rows[selected]?.timeMs ?? -1;
+  const pickHour = (row: PlannerHour) => {
+    const idx = rows.indexOf(row);
+    if (idx >= 0) onSelect(idx);
+  };
+  return (
+    <div className="wx-table">
+      {days.map((day) => (
+        <section key={day.dateMs} className="wx-day">
+          <h4 className="wx-day-label">{fmtDayLabel(day.dateMs)}</h4>
+          {day.periods.map((cell) => {
+            const key = `${day.dateMs}-${cell.period}`;
+            return (
+              <PeriodRow
+                key={key}
+                cell={cell}
+                expanded={expanded.has(key)}
+                selectedMs={selectedMs}
+                onToggle={() => {
+                  onSelect(cell.selectIndex);
+                  setExpanded((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  });
+                }}
+                onPickHour={pickHour}
+              />
+            );
+          })}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The weather & conditions planner: a browsable yr.no-style day table over the
+ * proxied met.no forecast (the default reading surface), backed by a time
+ * scrubber that drives the map-side conditions layer, plus an optional
  * transparent fishing/hunting conditions layer (score + why + best windows).
  */
 export function WeatherPanel({
@@ -266,6 +426,8 @@ export function WeatherPanel({
               </ul>
             </div>
           )}
+
+          <WeatherTable rows={rows} selected={selected} onSelect={setSelected} />
 
           {weather.forecast && (
             <p className="weather-attribution">

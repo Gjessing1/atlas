@@ -38,3 +38,17 @@ export function symbolEmoji(symbol: string): string {
   if (base.includes('thunder')) return '⛈️';
   return '🌡️';
 }
+
+// Arrows point the way the wind BLOWS (i.e. FROM-direction + 180°), the yr.no
+// convention: a north wind (FROM 0°) blows south, so it reads as ↓.
+const WIND_ARROWS = ['↓', '↙', '←', '↖', '↑', '↗', '→', '↘'] as const;
+
+/**
+ * A single arrow glyph for a wind `FROM` bearing, pointing where the wind is
+ * going. Snapped to the nearest of eight directions — enough to read a table
+ * cell at a glance without a rotated icon.
+ */
+export function windArrow(windFromDir: number): string {
+  const idx = Math.round((((windFromDir % 360) + 360) % 360) / 45) % 8;
+  return WIND_ARROWS[idx]!;
+}

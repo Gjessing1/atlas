@@ -2,13 +2,16 @@ import {
   bestWindows,
   buildPlanner,
   compass16,
+  forecastTable,
   sunDay,
   symbolEmoji,
+  windArrow,
   type ConditionsKind,
   type FactorRating,
+  type ForecastPeriodCell,
   type PlannerHour,
 } from '@atlas/conditions';
-import { fmtClock, fmtDayClock, type LatLng } from '@atlas/core';
+import { fmtClock, fmtDayClock, fmtDayLabel, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -271,6 +274,8 @@ export function WeatherSheet({
             </View>
           ) : null}
 
+          <WeatherTable rows={rows} selected={idx} onSelect={setSelected} />
+
           {weather.forecast ? (
             <Text
               style={styles.attribution}
@@ -317,6 +322,145 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
           </Text>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+/** Precipitation cell text — millimetres when wet, an em-dash when dry/unknown. */
+function precipText(mm: number | null): string {
+  return mm != null && mm > 0 ? `${mm.toFixed(mm < 1 ? 1 : 0)}` : '–';
+}
+
+/** The wind cell: arrow (blowing direction) + sustained speed, gust muted. */
+function WindCell({
+  fromDir,
+  speed,
+  gust,
+}: {
+  fromDir: number;
+  speed: number;
+  gust: number | null;
+}): React.JSX.Element {
+  return (
+    <View style={styles.wxWind}>
+      <Text style={styles.wxArrow}>{windArrow(fromDir)}</Text>
+      <Text style={styles.wxWindSpeed}>{Math.round(speed)}</Text>
+      {gust != null ? <Text style={styles.wxGust}>({Math.round(gust)})</Text> : null}
+    </View>
+  );
+}
+
+/** One period row plus, when expanded, its hourly breakdown (Android twin). */
+function PeriodRow({
+  cell,
+  expanded,
+  selectedMs,
+  onToggle,
+  onPickHour,
+}: {
+  cell: ForecastPeriodCell;
+  expanded: boolean;
+  selectedMs: number;
+  onToggle: () => void;
+  onPickHour: (row: PlannerHour) => void;
+}): React.JSX.Element {
+  const first = cell.hours[0]!.timeMs;
+  const last = cell.hours[cell.hours.length - 1]!.timeMs;
+  const active = selectedMs >= first && selectedMs <= last;
+  const tempSpan = Math.round(cell.tempMin) !== Math.round(cell.tempMax);
+  return (
+    <>
+      <Pressable style={[styles.wxRow, active ? styles.wxRowActive : null]} onPress={onToggle}>
+        <View style={styles.wxWhen}>
+          <Text style={styles.wxPeriodName}>{cell.label}</Text>
+          <Text style={styles.wxHours}>{cell.hoursLabel}</Text>
+        </View>
+        <Text style={styles.wxSym}>{symbolEmoji(cell.symbol)}</Text>
+        <Text style={styles.wxTemp}>
+          {Math.round(cell.tempMax)}°
+          {tempSpan ? <Text style={styles.wxTempLo}> {Math.round(cell.tempMin)}°</Text> : null}
+        </Text>
+        <Text style={[styles.wxPrecip, cell.precipMm && cell.precipMm > 0 ? styles.wxWet : null]}>
+          {precipText(cell.precipMm)}
+        </Text>
+        <WindCell fromDir={cell.windFromDir} speed={cell.windMax} gust={cell.gustMax} />
+        <Text style={styles.wxChevron}>{expanded ? '⌄' : '›'}</Text>
+      </Pressable>
+      {expanded
+        ? cell.hours.map((h) => {
+            const p = h.point;
+            return (
+              <Pressable
+                key={p.time}
+                style={[styles.wxRow, h.timeMs === selectedMs ? styles.wxRowActive : null]}
+                onPress={() => onPickHour(h)}
+              >
+                <Text style={[styles.wxWhen, styles.wxHourTime]}>{fmtTime(h.timeMs)}</Text>
+                <Text style={styles.wxSym}>{symbolEmoji(p.symbol)}</Text>
+                <Text style={styles.wxTemp}>{Math.round(p.temp)}°</Text>
+                <Text style={[styles.wxPrecip, p.precip && p.precip > 0 ? styles.wxWet : null]}>
+                  {precipText(p.precip)}
+                </Text>
+                <WindCell fromDir={p.windFromDir} speed={p.windSpeed} gust={p.windGust} />
+                <Text style={styles.wxChevron} />
+              </Pressable>
+            );
+          })
+        : null}
+    </>
+  );
+}
+
+/**
+ * The browsable forecast: a yr.no-style table where a whole day reads at a
+ * glance — a row per Night/Morning/Afternoon/Evening with symbol, temperature,
+ * precipitation and wind, expandable to the hours behind it. Selecting any row
+ * drives the same hour selection the scrubber/conditions layer follows.
+ */
+function WeatherTable({
+  rows,
+  selected,
+  onSelect,
+}: {
+  rows: PlannerHour[];
+  selected: number;
+  onSelect: (idx: number) => void;
+}): React.JSX.Element {
+  const days = useMemo(() => forecastTable(rows), [rows]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const selectedMs = rows[selected]?.timeMs ?? -1;
+  const pickHour = (row: PlannerHour): void => {
+    const i = rows.indexOf(row);
+    if (i >= 0) onSelect(i);
+  };
+  return (
+    <View style={styles.wxTable}>
+      {days.map((day) => (
+        <View key={day.dateMs} style={styles.wxDay}>
+          <Text style={styles.wxDayLabel}>{fmtDayLabel(day.dateMs)}</Text>
+          {day.periods.map((cell) => {
+            const key = `${day.dateMs}-${cell.period}`;
+            return (
+              <PeriodRow
+                key={key}
+                cell={cell}
+                expanded={expanded.has(key)}
+                selectedMs={selectedMs}
+                onToggle={() => {
+                  onSelect(cell.selectIndex);
+                  setExpanded((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  });
+                }}
+                onPickHour={pickHour}
+              />
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -424,4 +568,51 @@ const styles = StyleSheet.create({
   factorDetail: { fontSize: 13, lineHeight: 18, color: theme.textMuted, marginTop: 1 },
 
   attribution: { fontSize: 11, color: theme.textMuted, marginTop: 14 },
+
+  // Browsable forecast table (yr.no-style day/period reading surface).
+  wxTable: { marginTop: 14, gap: 10 },
+  wxDay: { gap: 1 },
+  wxDayLabel: { fontSize: 13, fontWeight: '700', color: theme.text, marginBottom: 3 },
+  wxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+  },
+  wxRowActive: { backgroundColor: theme.surfaceActive },
+  wxWhen: { flex: 1, flexDirection: 'row', alignItems: 'baseline', gap: 6 },
+  wxHourTime: { paddingLeft: 10, fontSize: 12, color: theme.textMuted },
+  wxPeriodName: { fontSize: 13, fontWeight: '600', color: theme.text },
+  wxHours: { fontSize: 10, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+  wxSym: { width: 22, textAlign: 'center', fontSize: 15 },
+  wxTemp: {
+    width: 52,
+    textAlign: 'right',
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.text,
+    fontVariant: ['tabular-nums'],
+  },
+  wxTempLo: { fontSize: 10, fontWeight: '400', color: theme.textMuted },
+  wxPrecip: {
+    width: 30,
+    textAlign: 'right',
+    fontSize: 12,
+    color: theme.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  wxWet: { color: theme.accent, fontWeight: '700' },
+  wxWind: {
+    width: 58,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
+  wxArrow: { fontSize: 13, color: theme.accent },
+  wxWindSpeed: { fontSize: 12, color: theme.text, fontVariant: ['tabular-nums'] },
+  wxGust: { fontSize: 10, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+  wxChevron: { width: 12, textAlign: 'center', fontSize: 11, color: theme.textMuted },
 });
