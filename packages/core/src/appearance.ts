@@ -108,11 +108,17 @@ function multiplyPaint(layer: StyleLayer, property: string, factor: number): voi
   }
 }
 
-/** A drivable-road line layer — excludes the shared path/track and helper strokes. */
+/**
+ * A drivable-road line layer — excludes the shared path/track and helper
+ * strokes. Bridges and tunnels are the *same* road: Liberty splits every class
+ * into `road_` / `bridge_` / `tunnel_` layers, so matching only `road_` made a
+ * receded or widened road snap back to base styling wherever it crossed a
+ * bridge or entered a tunnel.
+ */
 function isCarRoad(layer: StyleLayer): boolean {
   return (
     layer.type === 'line' &&
-    /^road_/.test(layer.id) &&
+    /^(road|bridge|tunnel)_/.test(layer.id) &&
     !/(path_pedestrian|service_track|_casing|_hatching)$/.test(layer.id)
   );
 }
@@ -142,12 +148,7 @@ function applyCustomStyle(layer: StyleLayer, custom: MapStyleOverrides): void {
     if (layer.id === 'water') paint(layer, 'fill-color', custom.waterColor);
     if (/^waterway_/.test(layer.id)) paint(layer, 'line-color', custom.waterColor);
   }
-  if (
-    custom.roadColor &&
-    layer.type === 'line' &&
-    /^road_/.test(layer.id) &&
-    !/(path_pedestrian|service_track|_casing|_hatching)$/.test(layer.id)
-  ) {
+  if (custom.roadColor && isCarRoad(layer)) {
     paint(layer, 'line-color', custom.roadColor);
   }
   if (custom.pathColor && /(path_pedestrian|service_track|-track-contrast)$/.test(layer.id)) {
@@ -335,6 +336,90 @@ function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
 }
 
 /**
+ * Re-assert the bridge/underpass reading after the theme and profile passes.
+ *
+ * The *z-order* was never the problem: Liberty already stacks the whole tunnel
+ * group below the surface roads and the whole bridge group above them, so a
+ * path genuinely draws under the E-road that flies over it. What Atlas lost was
+ * the **appearance** signal at the crossing — the shared `path_pedestrian$` /
+ * `service_track$` overrides paint the road, bridge and tunnel variants of a
+ * layer identically, and the dark tune flattened every `_casing` to one colour,
+ * so the base style's two cues (a tunnel's dashed, lighter casing; a bridge's
+ * solid one) were painted away. Two lines crossing then read as a junction.
+ *
+ * So: a tunnelled line is drawn weaker and keeps a dashed casing, and a bridge
+ * casing is darkened into a real deck edge that separates it from whatever
+ * passes underneath. Opacity is multiplied, not set, so a profile that already
+ * receded the road keeps its emphasis.
+ */
+function tuneBrunnel(layer: StyleLayer, dark: boolean): void {
+  if (layer.type !== 'line') return;
+  const isCasing = /_casing$/.test(layer.id);
+  if (/^tunnel_/.test(layer.id)) {
+    if (isCasing) {
+      paint(layer, 'line-color', dark ? '#3b464d' : '#c2beb6');
+      if (layer.paint?.['line-dasharray'] === undefined) {
+        paint(layer, 'line-dasharray', [0.5, 0.25]);
+      }
+      return;
+    }
+    const current = layer.paint?.['line-opacity'];
+    paint(layer, 'line-opacity', typeof current === 'number' ? current * 0.72 : 0.72);
+  } else if (/^bridge_/.test(layer.id) && isCasing) {
+    paint(layer, 'line-color', dark ? '#12191d' : '#8e887e');
+  }
+}
+
+/**
+ * Profiles whose users are actually on the ground, where asphalt versus gravel
+ * changes the plan. Drive/Explore/Ski deliberately stay out of it — surface is
+ * noise on a car map, and Ski's own winter palette owns those colours.
+ */
+const SURFACE_AWARE_PROFILES = ['run', 'hike', 'bike'];
+
+/**
+ * Split paved from unpaved on the classes where it matters.
+ *
+ * The basemap normalises OSM's long tail of surface tags down to `paved` |
+ * `unpaved` (verified against norway.pmtiles), and simply **omits** the
+ * attribute where OSM says nothing — roughly a quarter of the urban foot
+ * network. Only `unpaved` is ever asserted here: an unsurveyed way renders
+ * exactly as it did before rather than being claimed as either, which is the
+ * same "absent, not 'no data'" rule the Norwegian layers follow.
+ *
+ * Paths are already dashed, so there is no dash left to vary — they take a
+ * colour split. Road lines are solid, so gravel roads take a dash instead;
+ * since `line-dasharray` is not data-driven in every MapLibre renderer, that
+ * means an exact-surface clone drawn over the asphalt line, the same mechanism
+ * as the dashed-track and stairs clones.
+ */
+function tuneSurface(
+  layer: StyleLayer,
+  dark: boolean,
+  clones: { layer: StyleLayer; baseId: string }[],
+): void {
+  const gravel = dark ? '#c9a06a' : '#8d6435';
+  if (/path_pedestrian$/.test(layer.id)) {
+    const current = layer.paint?.['line-color'];
+    if (current === undefined) return;
+    paint(layer, 'line-color', ['match', ['get', 'surface'], 'unpaved', gravel, current]);
+    return;
+  }
+  if (!isCarRoad(layer) || !/(secondary_tertiary|minor|street)/.test(layer.id)) return;
+  const unpaved = JSON.parse(JSON.stringify(layer)) as StyleLayer;
+  unpaved.id = `atlas-${layer.id}-unpaved`;
+  unpaved.filter = layer.filter
+    ? ['all', layer.filter, ['==', ['get', 'surface'], 'unpaved']]
+    : ['==', ['get', 'surface'], 'unpaved'];
+  paint(unpaved, 'line-color', gravel);
+  paint(unpaved, 'line-dasharray', [2.2, 1.3]);
+  // Narrower than the road it covers, so the asphalt line still shows as an
+  // edge and the gravel reads as a treatment rather than a different road.
+  multiplyPaint(unpaved, 'line-width', 0.8);
+  clones.push({ layer: unpaved, baseId: layer.id });
+}
+
+/**
  * Apply Atlas's restrained cartography, dark palette and activity emphasis to
  * the same source style on web and Android. The source URLs and asset paths are
  * untouched, so online templates and downloaded packs remain interchangeable.
@@ -357,9 +442,20 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     ? appearance.profile
     : 'neutral';
 
-  // Exact-class clone layers (dashed tracks, hatched stairs) to splice in right
-  // after the shared base layer they refine.
+  // Exact-class clone layers (dashed tracks, hatched stairs, gravel roads) to
+  // splice in right after the shared base layer they refine.
   const insertAfterBase: { layer: StyleLayer; baseId: string }[] = [];
+  // How hard this profile leans on the foot network. Kept in one place because
+  // a bridge's path casing has to be widened by the same factor as the path it
+  // carries, or the deck stops containing the line.
+  const pathWidthFactor =
+    profile === 'run'
+      ? 1.4
+      : profile === 'hike' || profile === 'bike'
+        ? 1.22
+        : profile === 'explore'
+          ? 1.12
+          : 1;
   for (const layer of style.layers) {
     tuneLightLayer(layer);
     if (dark) tuneDarkLayer(layer);
@@ -376,10 +472,8 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       ]);
       paint(layer, 'line-dasharray', [2, 1.35]);
       paint(layer, 'line-opacity', profile === 'drive' ? 0.62 : 0.95);
-      if (profile === 'hike' || profile === 'bike') multiplyPaint(layer, 'line-width', 1.22);
-      if (profile === 'explore') multiplyPaint(layer, 'line-width', 1.12);
       // Run leans harder on the foot network than Hike, and reveals it as early.
-      if (profile === 'run') multiplyPaint(layer, 'line-width', 1.4);
+      if (pathWidthFactor !== 1) multiplyPaint(layer, 'line-width', pathWidthFactor);
       if (profile === 'hike' || profile === 'run')
         layer.minzoom = Math.min(layer.minzoom ?? 14, 12);
 
@@ -397,12 +491,20 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         insertAfterBase.push({ layer: stairs, baseId: layer.id });
       }
     }
+    if (/path_pedestrian_casing$/.test(layer.id) && pathWidthFactor !== 1) {
+      // Only bridges carry a path casing (the deck edge). Widen it with the
+      // line it contains, or an emphasized path overflows its own bridge.
+      multiplyPaint(layer, 'line-width', pathWidthFactor);
+    }
     if (/service_track$/.test(layer.id)) {
+      // The dashed clone spliced in below carries the track's strong brown, so
+      // this base layer has to render the *gaps* — painting the same solid
+      // brown underneath filled them in and the dash never actually read.
       paint(layer, 'line-color', [
         'match',
         ['get', 'class'],
         'track',
-        dark ? '#c69b68' : '#815f37',
+        dark ? '#5b4b39' : '#dcc9ac',
         dark ? '#596268' : '#f9f7f2',
       ]);
       if (profile === 'hike' || profile === 'bike') multiplyPaint(layer, 'line-width', 1.12);
@@ -438,7 +540,7 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       if (isCarRoad(layer)) paint(layer, 'line-opacity', 0.72);
     } else if (profile === 'ski') {
       tuneWinterLayer(layer, dark);
-      if (layer.type === 'line' && /^road_/.test(layer.id)) {
+      if (layer.type === 'line' && /^(road|bridge|tunnel)_/.test(layer.id)) {
         paint(layer, 'line-opacity', 0.62);
       }
       if (/^poi_/.test(layer.id)) {
@@ -488,6 +590,13 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         }
       }
     }
+
+    // Both run after the profile branch: the brunnel pass multiplies the
+    // opacity a profile may already have receded a road to, and the surface
+    // split then wraps whatever colour the layer settled on — in that order, so
+    // a gravel clone taken off a tunnelled road inherits the tunnel's dimming.
+    tuneBrunnel(layer, dark);
+    if (SURFACE_AWARE_PROFILES.includes(profile)) tuneSurface(layer, dark, insertAfterBase);
   }
 
   for (const { layer, baseId } of insertAfterBase) {
