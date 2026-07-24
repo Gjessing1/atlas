@@ -172,7 +172,10 @@ export function norwegianLayers(): OverlayLayer[] {
         maxzoom: 18,
         defaultOpacity: 0.72,
         identify: false,
-        profiles: ['hiking', 'ski'],
+        // Contours read the land: slope and basins matter as much to hunting
+        // terrain and lake fishing as to hiking, so this is offered (and
+        // default-on) in Fish & Hunt too, not just hike/ski.
+        profiles: ['hiking', 'ski', 'fishing', 'hunting'],
       },
       upstream: {
         kind: 'wms',

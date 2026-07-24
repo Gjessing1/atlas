@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
+import { layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { norwegianLayers, registerOverlayApi, type OverlayLayer } from './index.js';
 
 const PNG_BYTES = Buffer.from(
@@ -162,6 +163,27 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('offers every profile default layer in that profile', () => {
+    // A profile listing a `defaultLayers` id that its `layerTags` do not
+    // surface is a silent no-op: `layerInProfile` filters the tagged layer
+    // out of the panel, so it can never turn on. This checks the two
+    // vocabularies against the *real* catalog (a synthetic meta in the core
+    // test cannot — it doesn't know a layer's actual tags). The speed-cameras
+    // vector layer is catalog-injected, not in `norwegianLayers`, so allow it.
+    const byId = new Map(norwegianLayers().map((l) => [l.meta.id, l.meta]));
+    for (const profile of MAP_PROFILES) {
+      for (const id of profile.defaultLayers ?? []) {
+        if (id === 'speed-cameras') continue;
+        const meta = byId.get(id);
+        expect(meta, `${profile.id} default layer ${id} missing from catalog`).toBeDefined();
+        expect(
+          layerInProfile(meta!, profile.id),
+          `${profile.id} default layer ${id} is not offered in that profile`,
+        ).toBe(true);
+      }
+    }
   });
 });
 

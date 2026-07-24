@@ -55,6 +55,20 @@ export const MAP_PROFILES: readonly MapProfile[] = [
   },
   { id: 'run', label: 'Run', routing: 'run', layerTags: ['running', 'hiking'] },
   { id: 'ski', label: 'Ski', routing: null, layerTags: ['ski'] },
+  {
+    // Fish & Hunt expresses no travel mode (`routing: null`, like Ski/Explore) —
+    // it is a cartography + overlay preset, not a costing. Its default overlays
+    // are the untagged general-purpose Norwegian layers, which are already
+    // *offered* everywhere; listing them here just starts them on. Outside
+    // Norway those layers are absent and the map falls back to the OSM basemap.
+    // The `fishing`/`hunting` layer tags surface the future scoring overlays
+    // (N4/N5) and any fish/hunt-specific vector layers as they are built.
+    id: 'fishhunt',
+    label: 'Fish & Hunt',
+    routing: null,
+    layerTags: ['fishing', 'hunting'],
+    defaultLayers: ['property', 'lake-depth', 'sea-depth', 'hillshade', 'terrain-contours'],
+  },
 ];
 
 /** The profile Atlas starts in, and the fallback for an unknown stored id. */

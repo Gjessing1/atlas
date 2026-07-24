@@ -157,6 +157,23 @@ export function SkiIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   );
 }
 
+/** Fish & Hunt: a barbed fish hook — eye loop, shaft and bend. */
+export function FishHuntIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={12} cy={4.3} r={1.8} stroke={color} strokeWidth={1.6} fill="none" />
+      <Path
+        d="M12 6.1V13.5C12 17.5 6.5 17.8 7.2 13M7.2 13l-1.4 1M7.2 13l1.2 1"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Stacked map sheets: the compact overlay-catalog control. */
 export function LayersIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
   return (
@@ -397,6 +414,7 @@ export const MAP_PROFILE_ICON: Record<string, ModeIcon> = {
   hike: HikeIcon,
   run: RunIcon,
   ski: SkiIcon,
+  fishhunt: FishHuntIcon,
 };
 
 /**

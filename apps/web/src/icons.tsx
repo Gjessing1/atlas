@@ -151,6 +151,23 @@ export function SkiIcon(props: IconProps) {
   );
 }
 
+export function FishHuntIcon(props: IconProps) {
+  // A fish hook: eye loop, straight shaft, and a barbed bend — the clearest
+  // single glyph for the angling/outdoors profile at the 20 px switch size.
+  return (
+    <IconFrame {...props}>
+      <circle cx="12" cy="4.3" r="1.8" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M12 6.1V13.5C12 17.5 6.5 17.8 7.2 13M7.2 13l-1.4 1M7.2 13l1.2 1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function TrainIcon(props: IconProps) {
   return (
     <IconFrame {...props}>
@@ -291,6 +308,7 @@ const MAP_PROFILE_ICON: Record<string, IconComponent> = {
   hike: HikeIcon,
   run: RunIcon,
   ski: SkiIcon,
+  fishhunt: FishHuntIcon,
 };
 
 export function mapProfileIcon(id: string): IconComponent {

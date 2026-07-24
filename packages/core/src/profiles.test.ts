@@ -74,6 +74,26 @@ describe('map profiles', () => {
     }
   });
 
+  it('offers Fish & Hunt as a non-routing preset over general-purpose layers', () => {
+    const fishhunt = mapProfile('fishhunt');
+    expect(fishhunt.routing).toBeNull();
+    // Its defaults are the untagged general-purpose Norwegian layers, so they
+    // are offered in every profile and merely start on here — no fish/hunt tag
+    // is needed for them, and outside Norway they are simply absent.
+    expect(fishhunt.defaultLayers).toEqual([
+      'property',
+      'lake-depth',
+      'sea-depth',
+      'hillshade',
+      'terrain-contours',
+    ]);
+    for (const id of fishhunt.defaultLayers!) {
+      expect(layerInProfile(meta(id), 'fishhunt')).toBe(true);
+      expect(layerDefaultsOn(id, 'fishhunt')).toBe(true);
+      expect(layerDefaultsOn(id, 'explore')).toBe(false);
+    }
+  });
+
   it('only names travel modes the routing package actually knows', () => {
     // A profile whose `routing` drifts from ROUTING_PROFILES would silently
     // fail at request time; core can't import routing, so assert the ids here.
