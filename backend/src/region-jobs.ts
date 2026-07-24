@@ -366,7 +366,12 @@ export class RegionJobManager {
       // absent for a region with no NVDB clip and no OSM cameras. When present,
       // reuse it whole: it's clipped to the enclosing region (a superset of this
       // custom bbox), and the on-device conflation bbox-filters it anyway.
-      const reusedKinds = (['search', 'routing', 'assets', 'nvdb'] as const).filter(
+      //
+      // The outdoor overlay (§4.1) is reused rather than re-extracted for the
+      // same reason plus one of its own: the whole national archive is under
+      // 7 MB, so a bbox extract would cost a second Docker round-trip to save
+      // kilobytes. MapLibre only ever draws the tiles in view.
+      const reusedKinds = (['search', 'routing', 'assets', 'nvdb', 'outdoor'] as const).filter(
         (kind) => enclosing.manifest.files[kind],
       );
       for (const kind of reusedKinds) {

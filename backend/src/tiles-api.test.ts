@@ -112,6 +112,27 @@ describe('/api/tiles', () => {
     expect(gunzipSync(res.rawPayload)).toEqual(LOCAL_TILE);
   });
 
+  it('serves an overlay archive locally at low zoom instead of upstream', async () => {
+    const fetchImpl = fakeUpstream();
+    const localOutdoor: LocalTileReader = (area) =>
+      Promise.resolve(area === 'outdoor' ? new Uint8Array(LOCAL_TILE) : null);
+    await build({ fetchImpl, localTiles: localOutdoor });
+    const res = await get('/api/tiles/outdoor/4/8/4.pbf');
+    expect(res.statusCode).toBe(200);
+    expect(gunzipSync(res.rawPayload)).toEqual(LOCAL_TILE);
+    expect(fetchImpl.mock.calls.filter(([u]) => String(u) !== TILEJSON_URL)).toHaveLength(0);
+  });
+
+  it('answers an absent overlay tile with 204 rather than proxying the basemap', async () => {
+    const fetchImpl = fakeUpstream();
+    await build({ fetchImpl });
+    const res = await get('/api/tiles/outdoor/12/1/1.pbf');
+    // A client whose archive has not been built yet must see nothing, never
+    // basemap tiles under the overlay's source.
+    expect(res.statusCode).toBe(204);
+    expect(fetchImpl.mock.calls.filter(([u]) => String(u) !== TILEJSON_URL)).toHaveLength(0);
+  });
+
   it('caches upstream tiles (one fetch for repeated requests)', async () => {
     const fetchImpl = fakeUpstream();
     await build({ fetchImpl });

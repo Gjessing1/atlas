@@ -332,7 +332,7 @@ describe('map appearance', () => {
     expect(barriers?.paint['circle-color']).toEqual([
       'match',
       ['get', 'class'],
-      'lift_gate',
+      ['lift_gate', 'swing_gate'],
       '#c0392b',
       '#c8801c',
     ]);
@@ -390,6 +390,112 @@ describe('map appearance', () => {
       ['>=', ['get', 'rank'], 1],
       ['!', ['match', ['get', 'subclass'], expect.arrayContaining(['shelter']), true, false]],
     ]);
+  });
+
+  it('binds the outdoor layers to the overlay archive when one is supplied', () => {
+    const parsed = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        outdoorTiles: 'https://atlas.example/api/tiles/outdoor/{z}/{x}/{y}.pbf',
+      }),
+    ) as { layers: TestLayer[]; sources: Record<string, Record<string, unknown>> };
+
+    expect(parsed.sources['atlas-outdoor']).toEqual({
+      type: 'vector',
+      tiles: ['https://atlas.example/api/tiles/outdoor/{z}/{x}/{y}.pbf'],
+      minzoom: 0,
+      maxzoom: 14,
+      attribution: expect.stringContaining('OpenStreetMap'),
+    });
+
+    const outdoor = parsed.layers.find((layer) => layer.id === 'atlas-outdoor-poi');
+    expect(outdoor?.source).toBe('atlas-outdoor');
+    expect(outdoor?.['source-layer']).toBe('outdoor');
+    // The whole point of the archive: three zooms earlier than the basemap can
+    // emit these at all.
+    expect(outdoor?.minzoom).toBe(11);
+    // The overlay's own flat vocabulary, including the classes OpenMapTiles
+    // does not carry.
+    const filter = JSON.stringify(outdoor?.filter);
+    expect(filter).toContain('wilderness_hut');
+    expect(filter).toContain('slipway');
+    expect(filter).toContain('boatyard');
+    expect(filter).not.toContain('subclass');
+    // Icons are remapped because `class` no longer means what the base style
+    // assumed — but every target is a sprite that already ships.
+    expect(JSON.stringify(outdoor?.layout?.['icon-image'])).toContain('lodging');
+    // Text plumbing still comes from the base style (the clone only replaces
+    // the icon), so the two paths cannot drift apart visually.
+    expect(outdoor?.layout?.['text-size']).toBe(12);
+
+    const barriers = parsed.layers.find((layer) => layer.id === 'atlas-barriers');
+    expect(barriers?.source).toBe('atlas-outdoor');
+    expect(barriers?.minzoom).toBe(11);
+    expect(JSON.stringify(barriers?.filter)).toContain('swing_gate');
+  });
+
+  it('splits staffed from self-service cabins only where the overlay can tell them apart', () => {
+    const withOverlay = layers(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        outdoorTiles: 'pmtiles://file:///data/packs/oslo/outdoor.pmtiles',
+      }),
+    );
+    const ring = withOverlay.find((layer) => layer.id === 'atlas-outdoor-hut');
+    expect(ring?.type).toBe('circle');
+    // A ring, not a disc: the cabin icon has to stay readable inside it.
+    expect(ring?.paint['circle-opacity']).toBe(0);
+    expect(ring?.paint['circle-stroke-width']).toBe(2);
+    expect(JSON.stringify(ring?.paint['circle-stroke-color'])).toContain('wilderness_hut');
+    // Drawn under the icons it encircles.
+    const ids = withOverlay.map((layer) => layer.id);
+    expect(ids.indexOf('atlas-outdoor-hut')).toBeLessThan(ids.indexOf('atlas-outdoor-poi'));
+
+    // Without the archive there is no `wilderness_hut` in the data at all, so
+    // the split would be a lie rather than a missing feature.
+    const withoutOverlay = layers(
+      applyMapAppearance(style, { colorScheme: 'light', profile: 'hike' }),
+    ).map((layer) => layer.id);
+    expect(withoutOverlay).not.toContain('atlas-outdoor-hut');
+  });
+
+  it('reads an offline pack archive as a pmtiles url, not a tile template', () => {
+    const parsed = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'fishhunt',
+        outdoorTiles: 'pmtiles://file:///data/packs/oslo/outdoor.pmtiles',
+      }),
+    ) as { sources: Record<string, Record<string, unknown>> };
+    expect(parsed.sources['atlas-outdoor']?.['url']).toBe(
+      'pmtiles://file:///data/packs/oslo/outdoor.pmtiles',
+    );
+    expect(parsed.sources['atlas-outdoor']?.['tiles']).toBeUndefined();
+  });
+
+  it('never opens the overlay source for a profile that draws none of its layers', () => {
+    for (const profile of ['drive', 'explore', 'run', 'ski']) {
+      const parsed = JSON.parse(
+        applyMapAppearance(style, {
+          colorScheme: 'light',
+          profile,
+          outdoorTiles: 'https://atlas.example/api/tiles/outdoor/{z}/{x}/{y}.pbf',
+        }),
+      ) as { sources?: Record<string, unknown> };
+      expect(parsed.sources?.['atlas-outdoor']).toBeUndefined();
+    }
+  });
+
+  it('keeps the basemap-cloned layers when no overlay archive is supplied', () => {
+    const parsed = JSON.parse(
+      applyMapAppearance(style, { colorScheme: 'light', profile: 'hike' }),
+    ) as { layers: TestLayer[]; sources?: Record<string, unknown> };
+    expect(parsed.sources?.['atlas-outdoor']).toBeUndefined();
+    const outdoor = parsed.layers.find((layer) => layer.id === 'atlas-outdoor-poi');
+    expect(outdoor?.source).toBe('openmaptiles');
+    expect(outdoor?.minzoom).toBe(14);
   });
 
   it('recedes urban POIs but not the outdoor ones on Fish & Hunt', () => {

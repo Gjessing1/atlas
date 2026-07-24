@@ -18,11 +18,28 @@ import { PMTiles, type RangeResponse, type Source } from 'pmtiles';
  * The upstream (WORLD_TILES_URL) is either a `{z}/{x}/{y}` URL template or a
  * TileJSON URL to resolve one from; the default is OpenFreeMap's planet
  * TileJSON, whose tile URLs are versioned — hence the hourly re-resolve.
+ *
+ * Overlay archives (`OVERLAY_AREAS`) are the exception to both rules: they are
+ * our own schema, so an upstream basemap tile is not a substitute for a missing
+ * one — it is a different map. They are served local-only, at every zoom.
  */
 
 const DEFAULT_WORLD_TILES_URL = 'https://tiles.openfreemap.org/planet';
 /** Below this zoom the (region-clipped) local tiles look broken; use upstream. */
 const LOCAL_PREFERRED_MIN_ZOOM = 10;
+
+/**
+ * Areas that are Atlas-built overlays rather than basemap coverage.
+ *
+ * `outdoor` carries the outdoor POIs and barriers the OpenMapTiles basemap
+ * drops or hides until z14 (infrastructure/tiles/outdoor-schema.yml). Its layer
+ * and attribute names are ours, so the world upstream can never stand in for
+ * it: proxying would answer with basemap tiles the outdoor layers cannot read,
+ * and would hammer the upstream for every tile of an archive we may not have
+ * built yet. A missing overlay tile is simply empty — which is exactly how a
+ * client without the archive is meant to degrade.
+ */
+const OVERLAY_AREAS = new Set(['outdoor']);
 const TILEJSON_TTL_MS = 60 * 60 * 1000;
 const TILEJSON_RETRY_MS = 60 * 1000;
 const CACHE_BUDGET_BYTES = 64 * 1024 * 1024;
@@ -241,13 +258,16 @@ export function registerTilesApi(app: FastifyInstance, opts: TilesApiOptions): v
           return null;
         });
 
-      const localFirst = z >= LOCAL_PREFERRED_MIN_ZOOM;
+      // An overlay archive has no upstream equivalent, so it is read locally at
+      // every zoom and never proxied.
+      const overlay = OVERLAY_AREAS.has(area.toLowerCase());
+      const localFirst = overlay || z >= LOCAL_PREFERRED_MIN_ZOOM;
       let plain: Uint8Array | null = null; // uncompressed MVT (local path)
       let gzipped: Buffer | null = null; // gzipped MVT (upstream path)
       let upstreamFailed = false;
 
       if (localFirst) plain = await readLocal();
-      if (!plain) {
+      if (!plain && !overlay) {
         const upstream = await fetchUpstream(z, x, y);
         if (upstream.kind === 'hit') gzipped = upstream.gzipped;
         else {

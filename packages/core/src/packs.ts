@@ -54,6 +54,14 @@ export interface RegionPackManifest {
      * network. Absent on older packs (and where a region has neither dataset).
      */
     nvdb?: RegionPackFile;
+    /**
+     * Outdoor overlay archive (ROADMAP §4.1/§4.4): a .pmtiles carrying the
+     * cabins, gates, ramps and shelters the basemap either drops entirely or
+     * hides until z14 (infrastructure/tiles/outdoor-schema.yml). Read in place
+     * like the basemap, and clipped to the same bbox. Absent on packs built
+     * before it existed, which simply render the basemap-only outdoor layers.
+     */
+    outdoor?: RegionPackFile;
   };
 }
 

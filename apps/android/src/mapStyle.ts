@@ -1,4 +1,9 @@
-import { applyMapAppearance, resolveStyleTemplate, type MapAppearance } from '@atlas/core';
+import {
+  applyMapAppearance,
+  outdoorTilesUrl,
+  resolveStyleTemplate,
+  type MapAppearance,
+} from '@atlas/core';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { getServerOrigin } from './serverOrigin';
@@ -40,7 +45,11 @@ export async function loadStyleTemplate(): Promise<string | null> {
 
 /** Online style: template with {origin} pointed at the Atlas server. */
 export function buildOnlineStyle(template: string, appearance: MapAppearance): string {
-  return applyMapAppearance(resolveStyleTemplate(template, getServerOrigin()), appearance);
+  const origin = getServerOrigin();
+  return applyMapAppearance(resolveStyleTemplate(template, origin), {
+    ...appearance,
+    outdoorTiles: outdoorTilesUrl(origin),
+  });
 }
 
 /**
@@ -53,6 +62,13 @@ export function buildOfflineStyle(
   template: string,
   packDir: string,
   appearance: MapAppearance,
+  /**
+   * Whether this pack carries the outdoor overlay archive. Packs built before
+   * it existed do not, and pointing MapLibre at a file that is not there is a
+   * load error rather than an empty layer — so the caller reads pack.json and
+   * tells us, instead of us guessing from the directory.
+   */
+  hasOutdoor = false,
 ): string {
   // packDir is a file:// URI (expo-file-system documentDirectory-based).
   const dir = packDir.replace(/\/+$/, '');
@@ -74,5 +90,9 @@ export function buildOfflineStyle(
   // the server's /assets layout so the template paths keep working.
   style.glyphs = `${dir}/assets/fonts/{fontstack}/{range}.pbf`;
   style.sprite = `${dir}/assets/sprites/ofm`;
-  return applyMapAppearance(JSON.stringify(style), appearance);
+  return applyMapAppearance(JSON.stringify(style), {
+    ...appearance,
+    // The overlay is a second archive in the same directory, read the same way.
+    ...(hasOutdoor ? { outdoorTiles: `pmtiles://${dir}/outdoor.pmtiles` } : {}),
+  });
 }

@@ -13,6 +13,15 @@ export interface MapAppearance {
   profile: string;
   /** Optional per-device edits applied after Atlas's theme/profile tuning. */
   custom?: MapStyleOverrides;
+  /**
+   * Resolved location of the Atlas outdoor overlay archive — either a
+   * `{z}/{x}/{y}` tile URL (the backend's endpoint) or a `pmtiles://` URL (an
+   * offline pack's local file). Supplying it upgrades the outdoor POI and
+   * barrier layers onto that source; leaving it out keeps them on the basemap,
+   * which is a strictly poorer but perfectly valid map. See
+   * infrastructure/tiles/outdoor-schema.yml.
+   */
+  outdoorTiles?: string;
 }
 
 /** The deliberately small, portable style-editor surface shared by both maps. */
@@ -422,6 +431,94 @@ const OUTDOOR_POI_SUBCLASSES = [
   'drinking_water',
 ];
 
+/**
+ * The Atlas outdoor overlay: a second, small vector archive built beside the
+ * basemap (infrastructure/tiles/outdoor-schema.yml, 6.7 MB for all of Norway).
+ *
+ * It exists because the basemap cannot answer two questions its schema simply
+ * does not carry: *where are the self-service cabins, ramps and boatyards*
+ * (`wilderness_hut`, `slipway` and `waterway=boatyard` are absent from
+ * OpenMapTiles entirely), and *what is out there while I am still planning*
+ * (POIs are only emitted from z14). Both were verified by decoding
+ * norway.pmtiles, not assumed.
+ *
+ * Binding to it is optional throughout: a client whose server has no archive,
+ * or an offline pack built before this existed, keeps the basemap-cloned layers
+ * below. That is the same rule the Norwegian overlays follow — absent, never
+ * "no data".
+ */
+const OUTDOOR_SOURCE_ID = 'atlas-outdoor';
+const OUTDOOR_SOURCE_LAYER = 'outdoor';
+/** The archive's own max zoom; MapLibre overzooms past it, as with the basemap. */
+const OUTDOOR_MAXZOOM = 14;
+/**
+ * Three zooms earlier than the basemap can manage — the whole point of the
+ * archive. This is the zoom at which you are choosing which side of the gate to
+ * park on, or which cabin to aim for.
+ */
+const OUTDOOR_MINZOOM = 11;
+
+/** Barrier classes in the overlay. `swing_gate` is a third *bom* form OpenMapTiles drops. */
+const OUTDOOR_BARRIER_CLASSES = ['gate', 'lift_gate', 'swing_gate'];
+
+/** Everything the overlay draws as an icon — its own flat vocabulary, not the basemap's. */
+const OUTDOOR_POI_CLASSES = [
+  'wilderness_hut',
+  'alpine_hut',
+  'chalet',
+  'shelter',
+  'viewpoint',
+  'camp_site',
+  'picnic_site',
+  'drinking_water',
+  'slipway',
+  'boatyard',
+];
+
+/**
+ * A cabin you must bring your own food to, versus one with a warden.
+ *
+ * This is the distinction §4.4 could not draw at all while `wilderness_hut` was
+ * missing from the tiles. The palette is **Atlas's own** — deliberately not a
+ * claim to reproduce DNT's official cabin colour coding, which covers
+ * categories (betjent/selvbetjent/ubetjent) that OSM's three tags do not map
+ * onto cleanly.
+ */
+const SELF_SERVICE_HUT = 'wilderness_hut';
+const HUT_CLASSES = [SELF_SERVICE_HUT, 'alpine_hut', 'chalet'];
+
+/**
+ * Overlay class → sprite, since the overlay's `class` values are ours and the
+ * cloned template's `icon-image` expression reads the basemap's schema.
+ *
+ * Every target already exists in the OFM sheet, so no new image assets ship and
+ * Android renders it identically. `harbor` is the closest thing the sheet has
+ * to a launching ramp; `lodging` (a bed) covers all three cabin classes, which
+ * is why the hut ring below carries the staffed/self-service split instead of
+ * two icons that do not exist.
+ */
+const OUTDOOR_ICON_IMAGE = [
+  'match',
+  ['get', 'class'],
+  ['wilderness_hut', 'alpine_hut', 'chalet'],
+  'lodging',
+  'shelter',
+  'shelter',
+  'viewpoint',
+  'attraction',
+  'camp_site',
+  'campsite',
+  'picnic_site',
+  'picnic_site',
+  'drinking_water',
+  'drinking_water',
+  ['slipway', 'boatyard'],
+  'harbor',
+  // Unreachable — the layer filter admits only the classes above — but MapLibre
+  // requires a default, and a real sprite name keeps it from ever warning.
+  'attraction',
+];
+
 function matchesAny(property: string, values: string[]): unknown {
   return ['match', ['get', property], values, true, false];
 }
@@ -464,28 +561,71 @@ const BARRIER_MINZOOM = 14;
  * symbol one: it needs no sprite, so web and Android render it identically
  * without shipping new image assets.
  */
-function barrierLayer(template: StyleLayer, dark: boolean): StyleLayer {
+function barrierLayer(template: StyleLayer, dark: boolean, outdoor: boolean): StyleLayer {
   return {
     id: 'atlas-barriers',
     type: 'circle',
-    source: template.source,
-    'source-layer': template['source-layer'],
-    minzoom: BARRIER_MINZOOM,
-    filter: matchesAny('class', BARRIER_CLASSES),
+    source: outdoor ? OUTDOOR_SOURCE_ID : template.source,
+    'source-layer': outdoor ? OUTDOOR_SOURCE_LAYER : template['source-layer'],
+    minzoom: outdoor ? OUTDOOR_MINZOOM : BARRIER_MINZOOM,
+    filter: matchesAny('class', outdoor ? OUTDOOR_BARRIER_CLASSES : BARRIER_CLASSES),
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 3, 18, 6.5],
-      // A lift gate is the classic locked *bom*; a plain gate is more often
-      // openable, so it reads as a warning rather than a stop.
+      // The z11 stop only bites on the overlay; the basemap layer starts at 14
+      // and MapLibre clamps to the first stop anyway.
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.2, 14, 3.2, 18, 6.5],
+      // A lift or swing gate is the classic locked *bom*; a plain gate is more
+      // often openable, so it reads as a warning rather than a stop.
       'circle-color': [
         'match',
         ['get', 'class'],
-        'lift_gate',
+        ['lift_gate', 'swing_gate'],
         dark ? '#f2705f' : '#c0392b',
         dark ? '#f0b357' : '#c8801c',
       ],
       'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.6],
       'circle-stroke-color': dark ? '#12191d' : '#ffffff',
       'circle-opacity': 0.95,
+    },
+  };
+}
+
+/**
+ * The staffed / self-service cabin split, drawn as a ring around the icon.
+ *
+ * A ring rather than a second icon because the sprite sheet has exactly one
+ * cabin glyph (`lodging`) and shipping new image assets would break the rule
+ * that web and Android render from the same style with no extra payload. A ring
+ * rather than a filled disc because the icon has to stay readable inside it:
+ * the fill is left fully transparent and only the stroke is drawn.
+ *
+ * Overlay-only, and unavoidably so — `wilderness_hut` does not exist in the
+ * basemap, so on a client without the archive there is nothing to split.
+ */
+function outdoorHutLayer(dark: boolean): StyleLayer {
+  return {
+    id: 'atlas-outdoor-hut',
+    type: 'circle',
+    source: OUTDOOR_SOURCE_ID,
+    'source-layer': OUTDOOR_SOURCE_LAYER,
+    minzoom: OUTDOOR_MINZOOM,
+    filter: matchesAny('class', HUT_CLASSES),
+    paint: {
+      // Must clear the sprite, which is 21 px square at *every* zoom (icon-size
+      // is 1 throughout): a radius under ~11 draws the ring inside the icon,
+      // where it is invisible until you are zoomed right in. Verified on the
+      // real map rather than reasoned about — the first attempt used 7.
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 11.5, 16, 13.5],
+      'circle-color': 'rgba(0, 0, 0, 0)',
+      'circle-opacity': 0,
+      'circle-stroke-width': 2,
+      'circle-stroke-color': [
+        'match',
+        ['get', 'class'],
+        SELF_SERVICE_HUT,
+        dark ? '#7fb4dd' : '#2f6f9f',
+        dark ? '#f0907f' : '#b0463a',
+      ],
+      'circle-stroke-opacity': 0.9,
     },
   };
 }
@@ -500,19 +640,30 @@ function barrierLayer(template: StyleLayer, dark: boolean): StyleLayer {
  * in the sheet. The matching subclasses are filtered *out* of the base POI
  * layers by the caller, so nothing draws twice.
  *
- * Known gap, verified against norway.pmtiles rather than assumed: the basemap
- * has no `wilderness_hut` at all — OpenMapTiles maps only `alpine_hut`,
- * `chalet` and the commercial lodging tags into `class=lodging`. That is
- * precisely the DNT *self-service* cabin, so the staffed/unstaffed distinction
- * cannot be drawn from the basemap and needs its own source (§4.4).
+ * With the outdoor overlay bound (`outdoor`), the same clone is re-pointed at
+ * that archive: `wilderness_hut`, `slipway` and `boatyard` appear at all, the
+ * reveal drops to z11, and `icon-image` is replaced because the overlay's
+ * `class` vocabulary is ours rather than OpenMapTiles'. Everything else — the
+ * name expression, font, offsets, halo — still comes from the base style, so
+ * the two paths cannot drift apart visually.
+ *
+ * Without it, the known gap stands, verified against norway.pmtiles rather than
+ * assumed: the basemap has no `wilderness_hut` at all — OpenMapTiles maps only
+ * `alpine_hut`, `chalet` and the commercial lodging tags into `class=lodging`.
  */
-function outdoorPoiLayer(template: StyleLayer, dark: boolean): StyleLayer {
+function outdoorPoiLayer(template: StyleLayer, dark: boolean, outdoor: boolean): StyleLayer {
   const layer = JSON.parse(JSON.stringify(template)) as StyleLayer;
   layer.id = OUTDOOR_POI_LAYER_ID;
-  // One zoom earlier than the base layer's z15 — and z14 is as early as it can
-  // go, because that is where the basemap starts emitting these POIs at all
-  // (see BARRIER_MINZOOM).
-  layer.minzoom = BARRIER_MINZOOM;
+  // One zoom earlier than the base layer's z15 — and z14 is as early as the
+  // basemap can go, because that is where it starts emitting these POIs at all
+  // (see BARRIER_MINZOOM). The overlay was built precisely to beat that.
+  layer.minzoom = outdoor ? OUTDOOR_MINZOOM : BARRIER_MINZOOM;
+  if (outdoor) {
+    layer.source = OUTDOOR_SOURCE_ID;
+    layer['source-layer'] = OUTDOOR_SOURCE_LAYER;
+    layer.layout ??= {};
+    layer.layout['icon-image'] = OUTDOOR_ICON_IMAGE;
+  }
   // The template is snapshotted before the theme pass touches it, so the clone
   // still carries Liberty's own `#666` label on a white halo — invisible on the
   // dark basemap. Run the same label tuning the real layers got.
@@ -523,7 +674,12 @@ function outdoorPoiLayer(template: StyleLayer, dark: boolean): StyleLayer {
   layer.filter = [
     'all',
     ['match', ['geometry-type'], ['MultiPoint', 'Point'], true, false],
-    matchesAny('subclass', OUTDOOR_POI_SUBCLASSES),
+    // The overlay is a flat `class` vocabulary of its own; the basemap needs
+    // `subclass`, because its classes are far too broad (`lodging` is mostly
+    // hotels, `attraction` mostly not a viewpoint).
+    outdoor
+      ? matchesAny('class', OUTDOOR_POI_CLASSES)
+      : matchesAny('subclass', OUTDOOR_POI_SUBCLASSES),
   ];
   // Set rather than multiplied: a profile that recedes the urban POI layers
   // (Fish & Hunt does) must not drag these down with them — the contrast
@@ -601,6 +757,13 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     : 'neutral';
   const wantsBarriers = BARRIER_PROFILES.includes(profile);
   const wantsOutdoorPoi = OUTDOOR_POI_PROFILES.includes(profile);
+  // Bind the overlay archive only where a layer will actually read it, so Drive
+  // and Explore never open a source they have no use for.
+  const outdoorTiles =
+    typeof appearance.outdoorTiles === 'string' && appearance.outdoorTiles.length > 0
+      ? appearance.outdoorTiles
+      : undefined;
+  const useOutdoor = outdoorTiles !== undefined && (wantsBarriers || wantsOutdoorPoi);
 
   // Exact-class clone layers (dashed tracks, hatched stairs, gravel roads) to
   // splice in right after the shared base layer they refine.
@@ -811,11 +974,43 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   // a cabin label is never obscured by the gate beside it.
   if (poiTemplate && lastPoiId) {
     if (wantsOutdoorPoi) {
-      insertAfterBase.push({ layer: outdoorPoiLayer(poiTemplate, dark), baseId: lastPoiId });
+      insertAfterBase.push({
+        layer: outdoorPoiLayer(poiTemplate, dark, useOutdoor),
+        baseId: lastPoiId,
+      });
+      // Between the icons and the barriers: the ring belongs to the cabin it
+      // encircles, and must not sit on top of that cabin's own label.
+      if (useOutdoor) {
+        insertAfterBase.push({ layer: outdoorHutLayer(dark), baseId: lastPoiId });
+      }
     }
     if (wantsBarriers) {
-      insertAfterBase.push({ layer: barrierLayer(poiTemplate, dark), baseId: lastPoiId });
+      insertAfterBase.push({
+        layer: barrierLayer(poiTemplate, dark, useOutdoor),
+        baseId: lastPoiId,
+      });
     }
+  }
+
+  // Declared last, and only once a layer above actually referenced it — an
+  // unused source would still cost MapLibre a round of tile requests.
+  if (useOutdoor && outdoorTiles !== undefined) {
+    const sources =
+      style['sources'] && typeof style['sources'] === 'object'
+        ? (style['sources'] as Record<string, unknown>)
+        : ((style['sources'] = {}) as Record<string, unknown>);
+    sources[OUTDOOR_SOURCE_ID] = {
+      type: 'vector',
+      // A `pmtiles://` archive is opened directly by the renderer (an offline
+      // pack's local file, which MapLibre Native reads without a local server);
+      // anything else is the backend's z/x/y endpoint.
+      ...(outdoorTiles.startsWith('pmtiles://')
+        ? { url: outdoorTiles }
+        : { tiles: [outdoorTiles] }),
+      minzoom: 0,
+      maxzoom: OUTDOOR_MAXZOOM,
+      attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>',
+    };
   }
 
   for (const { layer, baseId } of insertAfterBase) {

@@ -1,6 +1,7 @@
 import {
   applyMapAppearance,
   markerScaleForZoom,
+  outdoorTilesUrl,
   POI_LAYER_IDS,
   poiCategoryLabel,
   resolveStyleTemplate,
@@ -41,9 +42,17 @@ async function loadStyle(
       return res.text();
     });
     const template = await templatePromise;
-    const resolved = resolveStyleTemplate(template, window.location.origin);
+    const origin = window.location.origin;
+    const resolved = resolveStyleTemplate(template, origin);
     return JSON.parse(
-      applyMapAppearance(resolved, { colorScheme, profile, custom }),
+      applyMapAppearance(resolved, {
+        colorScheme,
+        profile,
+        custom,
+        // Unconditional: only the outdoor profiles bind it, and a server with
+        // no archive answers empty rather than wrong (see outdoorTilesUrl).
+        outdoorTiles: outdoorTilesUrl(origin),
+      }),
     ) as StyleSpecification;
   } catch (err) {
     templatePromise = null;

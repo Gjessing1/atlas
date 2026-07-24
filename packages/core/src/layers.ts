@@ -6,8 +6,14 @@ import type { LatLng } from './geo.js';
  * Layer ids of the OpenFreeMap Liberty style that render the OpenMapTiles
  * `poi` source layer — the tap/click targets for POI info popups. Shared so
  * web and Android query the same set (see infrastructure/tiles/fetch-map-assets.sh).
+ *
+ * `atlas-outdoor-poi` is Atlas's own layer (`applyMapAppearance`), included
+ * because the cabins, shelters and ramps it draws are *handed over* to it — the
+ * base layers filter those subclasses out, so without this a cabin would be the
+ * one POI on the map you could see but not tap. It only exists on the outdoor
+ * profiles; both call sites tolerate an absent layer id.
  */
-export const POI_LAYER_IDS = ['poi_r20', 'poi_r7', 'poi_r1', 'poi_transit'];
+export const POI_LAYER_IDS = ['poi_r20', 'poi_r7', 'poi_r1', 'poi_transit', 'atlas-outdoor-poi'];
 
 /**
  * Substitute the `{origin}` placeholders in a self-hosted map style template
@@ -16,6 +22,19 @@ export const POI_LAYER_IDS = ['poi_r20', 'poi_r7', 'poi_r1', 'poi_transit'];
  */
 export function resolveStyleTemplate(template: string, origin: string): string {
   return template.replaceAll('{origin}', origin);
+}
+
+/**
+ * Where the backend serves the outdoor overlay archive
+ * (infrastructure/tiles/outdoor-schema.yml), as a MapLibre tile template.
+ *
+ * Safe to hand to `applyMapAppearance` unconditionally: the route answers 204
+ * for an archive that has not been built, and never falls back to basemap
+ * tiles (`OVERLAY_AREAS` in backend/src/tiles-api.ts), so a server without one
+ * simply renders no outdoor overlay.
+ */
+export function outdoorTilesUrl(origin: string): string {
+  return `${origin}/api/tiles/outdoor/{z}/{x}/{y}.pbf`;
 }
 
 /**

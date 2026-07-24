@@ -1,0 +1,230 @@
+# Atlas outdoor overlay — a second, small vector source beside the basemap.
+#
+# WHY THIS EXISTS (see docs/ROADMAP.md §4.1/§4.4): three separate map-profile
+# items are blocked on the same two limits of the OpenMapTiles basemap, both
+# verified by decoding norway.pmtiles rather than assumed:
+#
+#   1. POIs are only emitted from z14, so a gate or a cabin cannot be shown
+#      while you are still planning the trip at z11-z13.
+#   2. Some tags are not in the schema at all — `wilderness_hut` (the DNT
+#      self-service cabin, i.e. most of them), `leisure=slipway` and
+#      `waterway=boatyard`.
+#
+# Rather than fork the OpenMapTiles profile — which would put the whole Liberty
+# schema on us — this builds a *separate* archive holding only the handful of
+# outdoor classes that matter, from z11. The basemap stays stock and
+# interchangeable; this overlay is additive and optional, so a client without it
+# renders exactly as before (see `applyMapAppearance`).
+#
+# Norway-only, like the other outdoor data: the archive covers the Norway
+# extract, and outside it the layers are simply absent — never "no data".
+#
+# Build with infrastructure/tiles/build-outdoor.sh.
+
+schema_name: Atlas Outdoor
+schema_description: Outdoor POIs and barriers, revealed earlier than the basemap emits them
+attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>
+
+# Norway is hardcoded rather than parameterised: this archive exists to carry
+# Norwegian outdoor data (§2.1's two-tier policy), and Planetiler 0.10.3 does
+# not interpolate args into a source url anyway — both `${args.area}` and
+# `${area}` fail to resolve at parse time.
+#
+# `local_path` is the OSM extract build-basemap.sh has already downloaded into
+# the shared Planetiler cache (mounted at /data by build-outdoor.sh), so the two
+# builds share one 1.4 GB file instead of fetching it twice; `url` is the
+# fallback for a first run against a cold cache.
+sources:
+  osm:
+    type: osm
+    url: geofabrik:norway
+    local_path: /data/sources/norway.osm.pbf
+
+layers:
+  - id: outdoor
+    features:
+      # --- Barriers ------------------------------------------------------
+      # Norway's *bom*. A locked gate across a forest road is the difference
+      # between driving to the lake and walking the last ten kilometres, so it
+      # is worth seeing from the zoom you plan at. Nodes only: `barrier=gate` on
+      # a way is a fence, not a crossing point.
+      #
+      # Bollards and cycle barriers are deliberately excluded — urban clutter at
+      # this scale, and never the thing that ruins a trip.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          barrier: [gate, lift_gate, swing_gate]
+        attributes:
+          - key: class
+            tag_value: barrier
+          - key: name
+          # Only ever present when OSM actually restricts the way, which is the
+          # signal the cartography keys on. An absent value means "unsurveyed",
+          # and must keep rendering as an ordinary gate.
+          - key: access
+          - key: locked
+
+      # --- Cabins and shelters -------------------------------------------
+      # `wilderness_hut` is the whole reason for this archive: it is the DNT
+      # self-service cabin and OpenMapTiles drops it entirely, so staffed vs
+      # unstaffed could not be drawn from the basemap at all.
+      #
+      # `operator` rides along so a DNT-only filter is possible later without a
+      # rebuild; it costs one short string on a few thousand features.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          tourism: [wilderness_hut, alpine_hut, chalet]
+        attributes:
+          - key: class
+            tag_value: tourism
+          - key: name
+          - key: operator
+          - key: ele
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          tourism: [wilderness_hut, alpine_hut, chalet]
+        attributes:
+          - key: class
+            tag_value: tourism
+          - key: name
+          - key: operator
+          - key: ele
+
+      # A gapahuk / lean-to. Excluded where the feature is already one of the
+      # cabin classes above, so a hut tagged with both does not draw twice.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          amenity: [shelter]
+        exclude_when:
+          tourism: [wilderness_hut, alpine_hut, chalet]
+        attributes:
+          - key: class
+            value: shelter
+          - key: name
+          - key: shelter_type
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          amenity: [shelter]
+        exclude_when:
+          tourism: [wilderness_hut, alpine_hut, chalet]
+        attributes:
+          - key: class
+            value: shelter
+          - key: name
+          - key: shelter_type
+
+      # --- Water access ---------------------------------------------------
+      # Neither tag exists in the basemap: across a 441-tile z14 sample of
+      # Norwegian coast and lakes there was no `slipway` and no `boatyard` at
+      # all. Launching a small boat is a Fish & Hunt primitive, so they come in
+      # here instead.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          leisure: [slipway]
+        attributes:
+          - key: class
+            value: slipway
+          - key: name
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          leisure: [slipway]
+        attributes:
+          - key: class
+            value: slipway
+          - key: name
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          waterway: [boatyard]
+        attributes:
+          - key: class
+            value: boatyard
+          - key: name
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          waterway: [boatyard]
+        attributes:
+          - key: class
+            value: boatyard
+          - key: name
+
+      # --- Camping ---------------------------------------------------------
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          tourism: [camp_site]
+        attributes:
+          - key: class
+            value: camp_site
+          - key: name
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          tourism: [camp_site]
+        attributes:
+          - key: class
+            value: camp_site
+          - key: name
+
+      # --- Viewpoints ------------------------------------------------------
+      # A zoom later than the cabins: plentiful, and not what a trip is planned
+      # around.
+      - source: osm
+        geometry: point
+        min_zoom: 12
+        include_when:
+          tourism: [viewpoint]
+        attributes:
+          - key: class
+            value: viewpoint
+          - key: name
+
+      # --- Local detail ----------------------------------------------------
+      # High counts and only useful once you are there, so these stay near the
+      # basemap's own reveal zoom and never bloat the planning zooms.
+      - source: osm
+        geometry: point
+        min_zoom: 13
+        include_when:
+          tourism: [picnic_site]
+        attributes:
+          - key: class
+            value: picnic_site
+          - key: name
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 13
+        include_when:
+          tourism: [picnic_site]
+        attributes:
+          - key: class
+            value: picnic_site
+          - key: name
+      - source: osm
+        geometry: point
+        min_zoom: 13
+        include_when:
+          amenity: [drinking_water]
+        attributes:
+          - key: class
+            value: drinking_water
+          - key: name

@@ -6,6 +6,9 @@
 #
 # Produces <DATA_DIR>/packs/<id>/ containing:
 #   basemap.pmtiles   extracted from the master basemap (tiles/norway.pmtiles)
+#   outdoor.pmtiles   extracted from the outdoor overlay (tiles/outdoor.pmtiles) —
+#                     cabins, gates, ramps and shelters the basemap drops or
+#                     hides until z14; absent if that archive hasn't been built
 #   search.sqlite     FTS5 index of named OSM features (build-search-db.mjs)
 #   valhalla.tar      Valhalla tile extract for the region (offline routing —
 #                     the same engine version the server runs, so offline and
@@ -38,6 +41,7 @@ fi
 
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 MASTER_PMTILES="$DATA_DIR/tiles/norway.pmtiles"
+MASTER_OUTDOOR="$DATA_DIR/tiles/outdoor.pmtiles"
 MASTER_PBF="$DATA_DIR/valhalla/norway.osm.pbf"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -52,6 +56,18 @@ mkdir -p "$OUT" "$WORK"
 echo "==> [$ID] extracting basemap from $(basename "$MASTER_PMTILES")"
 docker run --rm "${LIMITS[@]}" -v "$DATA_DIR/tiles:/tiles" -v "$OUT:/out" protomaps/go-pmtiles:latest \
   extract "/tiles/$(basename "$MASTER_PMTILES")" /out/basemap.pmtiles --bbox="$BBOX"
+
+# Optional, and deliberately so: a host that has never run build-outdoor.sh
+# still produces a complete, working pack — the app falls back to the
+# basemap-only outdoor layers exactly as it does online (ROADMAP §4.1).
+rm -f "$OUT/outdoor.pmtiles"
+if [[ -f "$MASTER_OUTDOOR" ]]; then
+  echo "==> [$ID] extracting outdoor overlay"
+  docker run --rm "${LIMITS[@]}" -v "$DATA_DIR/tiles:/tiles" -v "$OUT:/out" protomaps/go-pmtiles:latest \
+    extract "/tiles/$(basename "$MASTER_OUTDOOR")" /out/outdoor.pmtiles --bbox="$BBOX"
+else
+  echo "==> [$ID] no $MASTER_OUTDOOR — skipping outdoor overlay"
+fi
 
 echo "==> [$ID] extracting region .osm.pbf"
 docker run --rm "${LIMITS[@]}" -v "$(dirname "$MASTER_PBF"):/in" -v "$WORK:/work" iboates/osmium:latest \
@@ -153,6 +169,8 @@ const file = async (p) => ({ path: p, bytes: statSync(out + '/' + p).size, sha25
   };
   // Optional: build-pack-nvdb.mjs writes this only when the region has road data.
   if (existsSync(out + '/nvdb.sqlite')) files.nvdb = await file('nvdb.sqlite');
+  // Optional: only present once tiles/outdoor.pmtiles has been built.
+  if (existsSync(out + '/outdoor.pmtiles')) files.outdoor = await file('outdoor.pmtiles');
   writeFileSync(out + '/pack.json', JSON.stringify({
     id: process.argv[2],
     name: process.argv[3],
@@ -169,7 +187,7 @@ echo "==> [$ID] removing stale files"
 # so the pack dir only ever holds what pack.json references.
 for f in "$OUT"/*; do
   case "$(basename "$f")" in
-    basemap.pmtiles | search.sqlite | valhalla.tar | assets.zip | nvdb.sqlite | pack.json) ;;
+    basemap.pmtiles | outdoor.pmtiles | search.sqlite | valhalla.tar | assets.zip | nvdb.sqlite | pack.json) ;;
     *)
       echo "    removing stale $(basename "$f")"
       rm -rf "$f"

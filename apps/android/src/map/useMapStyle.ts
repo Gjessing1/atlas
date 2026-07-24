@@ -51,7 +51,12 @@ export function useMapStyle(
   const useOffline = Boolean((!preferOnline || serverUp === false) && offlinePack && template);
   const mapStyle = useMemo(() => {
     if (useOffline && offlinePack && template)
-      return buildOfflineStyle(template, offlinePack.dir, appearance);
+      return buildOfflineStyle(
+        template,
+        offlinePack.dir,
+        appearance,
+        Boolean(offlinePack.manifest.files.outdoor),
+      );
     if (template) return buildOnlineStyle(template, appearance);
     return serverUp === null ? null : FALLBACK_STYLE_URL;
   }, [useOffline, offlinePack, template, serverUp, appearance]);
