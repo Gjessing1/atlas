@@ -158,7 +158,9 @@ function applyCustomStyle(layer: StyleLayer, custom: MapStyleOverrides): void {
   if (custom.labelScale !== 1 && layer.layout?.['text-size'] !== undefined) {
     layer.layout['text-size'] = multiplyStyleValue(layer.layout['text-size'], custom.labelScale);
   }
-  if (/^poi_/.test(layer.id) && custom.poiScale !== 1) {
+  // The appended outdoor-POI layer is a POI layer as far as the user's slider
+  // is concerned — leaving it out would let cabin icons ignore "smaller POIs".
+  if ((/^poi_/.test(layer.id) || layer.id === OUTDOOR_POI_LAYER_ID) && custom.poiScale !== 1) {
     if (layer.layout?.['text-size'] !== undefined) {
       layer.layout['text-size'] = multiplyStyleValue(layer.layout['text-size'], custom.poiScale);
     }
@@ -375,7 +377,161 @@ function tuneBrunnel(layer: StyleLayer, dark: boolean): void {
  * changes the plan. Drive/Explore/Ski deliberately stay out of it — surface is
  * noise on a car map, and Ski's own winter palette owns those colours.
  */
-const SURFACE_AWARE_PROFILES = ['run', 'hike', 'bike'];
+const SURFACE_AWARE_PROFILES = ['run', 'hike', 'fishhunt', 'bike'];
+
+/**
+ * Profiles that ask "can I actually get through here?" — a gate across a forest
+ * road is the difference between driving to the lake and walking the last ten
+ * kilometres. Kept off Drive and Explore, where the same tags are mostly urban
+ * street furniture.
+ */
+const BARRIER_PROFILES = ['fishhunt', 'hike', 'bike'];
+
+/** Profiles where the outdoor POIs are the point of the map, not background. */
+const OUTDOOR_POI_PROFILES = ['fishhunt', 'hike'];
+
+/** Named, because the user's POI-size setting has to reach this layer too. */
+const OUTDOOR_POI_LAYER_ID = 'atlas-outdoor-poi';
+
+/**
+ * The barrier classes that stop a vehicle, as the basemap spells them.
+ *
+ * Norway's *bom* is usually `barrier=lift_gate`, occasionally `barrier=gate`;
+ * both survive into the tiles' `poi` layer as a `class`. Bollards and cycle
+ * barriers are deliberately excluded — they are urban clutter at this scale and
+ * never the thing that ruins a trip.
+ */
+const BARRIER_CLASSES = ['gate', 'lift_gate'];
+
+/**
+ * Outdoor POI subclasses worth lifting out of the generic POI soup.
+ *
+ * Matched on `subclass`, not `class`, because the classes are too broad: the
+ * `lodging` class is mostly hotels, and `attraction` is mostly not a viewpoint.
+ * `wilderness_hut` is listed for the day the tile build carries it — see the
+ * note on `outdoorPoiLayer`.
+ */
+const OUTDOOR_POI_SUBCLASSES = [
+  'alpine_hut',
+  'wilderness_hut',
+  'chalet',
+  'shelter',
+  'viewpoint',
+  'camp_site',
+  'picnic_site',
+  'drinking_water',
+];
+
+function matchesAny(property: string, values: string[]): unknown {
+  return ['match', ['get', property], values, true, false];
+}
+
+/**
+ * "Exists, but you may not take it" — swap a colour for a muted one wherever
+ * the way is access-restricted.
+ *
+ * The basemap only emits `access` when OSM actually restricts the way (`no` for
+ * `access=no` / `access=private`, and it carries the same signal for
+ * `motor_vehicle=no` tracks), so an absent attribute keeps the normal colour.
+ * That is the same "absent, not 'no data'" rule the surface split follows: a
+ * track nobody has surveyed is drawn as an ordinary track, never as forbidden.
+ * The line is dimmed rather than dropped — a barred forest road is still a
+ * landmark, and usually still walkable.
+ */
+function restricted(normal: unknown, muted: string): unknown {
+  return ['case', ['==', ['get', 'access'], 'no'], muted, normal];
+}
+
+/**
+ * The zoom the basemap starts emitting these POIs at, and therefore the floor
+ * for both layers below — a *data* limit, not a styling choice. Below z14 only
+ * a handful of high-rank POIs are in the tiles at all (28 features in the z12
+ * tile over Østmarka, none of them a gate); the full set appears at z14. So an
+ * earlier reveal — a gate visible while you are still choosing which side of it
+ * to park on — needs the POI zoom raised in the tile build, and asking for it
+ * here would only look like it worked.
+ */
+const BARRIER_MINZOOM = 14;
+
+/**
+ * A point layer for gates and barriers, which the base style draws as *nothing*.
+ *
+ * The tiles carry them (≈1200 gate/lift_gate points across a 3900-tile sample of
+ * Norwegian mountain terrain), and Liberty's POI layers do try to render them —
+ * but their `icon-image` resolves to the feature's class, and the sprite sheet
+ * has no `gate` or `lift_gate` image, so every one of them silently drew no icon
+ * and no label (they have no name either). Hence a `circle` layer rather than a
+ * symbol one: it needs no sprite, so web and Android render it identically
+ * without shipping new image assets.
+ */
+function barrierLayer(template: StyleLayer, dark: boolean): StyleLayer {
+  return {
+    id: 'atlas-barriers',
+    type: 'circle',
+    source: template.source,
+    'source-layer': template['source-layer'],
+    minzoom: BARRIER_MINZOOM,
+    filter: matchesAny('class', BARRIER_CLASSES),
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 3, 18, 6.5],
+      // A lift gate is the classic locked *bom*; a plain gate is more often
+      // openable, so it reads as a warning rather than a stop.
+      'circle-color': [
+        'match',
+        ['get', 'class'],
+        'lift_gate',
+        dark ? '#f2705f' : '#c0392b',
+        dark ? '#f0b357' : '#c8801c',
+      ],
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.6],
+      'circle-stroke-color': dark ? '#12191d' : '#ffffff',
+      'circle-opacity': 0.95,
+    },
+  };
+}
+
+/**
+ * Cabins, shelters, viewpoints and water, revealed early and at full strength.
+ *
+ * Cloned from the base style's own low-rank POI layer so it inherits the
+ * icon/text plumbing (`icon-image` off the class, the name expression, the
+ * font) and therefore keeps using sprites that already exist — `shelter`,
+ * `lodging`, `attraction`, `campsite`, `picnic_site`, `drinking_water` are all
+ * in the sheet. The matching subclasses are filtered *out* of the base POI
+ * layers by the caller, so nothing draws twice.
+ *
+ * Known gap, verified against norway.pmtiles rather than assumed: the basemap
+ * has no `wilderness_hut` at all — OpenMapTiles maps only `alpine_hut`,
+ * `chalet` and the commercial lodging tags into `class=lodging`. That is
+ * precisely the DNT *self-service* cabin, so the staffed/unstaffed distinction
+ * cannot be drawn from the basemap and needs its own source (§4.4).
+ */
+function outdoorPoiLayer(template: StyleLayer, dark: boolean): StyleLayer {
+  const layer = JSON.parse(JSON.stringify(template)) as StyleLayer;
+  layer.id = OUTDOOR_POI_LAYER_ID;
+  // One zoom earlier than the base layer's z15 — and z14 is as early as it can
+  // go, because that is where the basemap starts emitting these POIs at all
+  // (see BARRIER_MINZOOM).
+  layer.minzoom = BARRIER_MINZOOM;
+  // The template is snapshotted before the theme pass touches it, so the clone
+  // still carries Liberty's own `#666` label on a white halo — invisible on the
+  // dark basemap. Run the same label tuning the real layers got.
+  tuneLabels(layer, dark);
+  // Replaces the template's filter outright rather than extending it: the base
+  // layer's rank window is exactly what we are overriding, and these features
+  // must appear whichever rank bucket they fell into.
+  layer.filter = [
+    'all',
+    ['match', ['geometry-type'], ['MultiPoint', 'Point'], true, false],
+    matchesAny('subclass', OUTDOOR_POI_SUBCLASSES),
+  ];
+  // Set rather than multiplied: a profile that recedes the urban POI layers
+  // (Fish & Hunt does) must not drag these down with them — the contrast
+  // between the two is the whole point.
+  paint(layer, 'text-opacity', 1);
+  paint(layer, 'icon-opacity', 1);
+  return layer;
+}
 
 /**
  * Split paved from unpaved on the classes where it matters.
@@ -435,12 +591,16 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   }
   const style = parsed as MapStyleDocument;
   const dark = appearance.colorScheme === 'dark';
-  // Profiles with bespoke cartography. Anything else (Fish & Hunt, an unknown
-  // stored id) falls back to `neutral` — the untouched restrained base, which is
-  // what those wilderness/general presets want (roads and terrain fully visible).
-  const profile = ['drive', 'bike', 'hike', 'ski', 'run', 'explore'].includes(appearance.profile)
+  // Profiles with bespoke cartography. An unknown stored id falls back to
+  // `neutral` — the untouched restrained base, which is what a general preset
+  // wants (roads and terrain fully visible).
+  const profile = ['drive', 'bike', 'hike', 'ski', 'run', 'explore', 'fishhunt'].includes(
+    appearance.profile,
+  )
     ? appearance.profile
     : 'neutral';
+  const wantsBarriers = BARRIER_PROFILES.includes(profile);
+  const wantsOutdoorPoi = OUTDOOR_POI_PROFILES.includes(profile);
 
   // Exact-class clone layers (dashed tracks, hatched stairs, gravel roads) to
   // splice in right after the shared base layer they refine.
@@ -453,9 +613,21 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       ? 1.4
       : profile === 'hike' || profile === 'bike'
         ? 1.22
-        : profile === 'explore'
-          ? 1.12
-          : 1;
+        : profile === 'fishhunt'
+          ? 1.15
+          : profile === 'explore'
+            ? 1.12
+            : 1;
+  // The base style's own POI layer, used as the template for the outdoor-POI
+  // clone and for the barrier layer's source binding — so the source name and
+  // the whole icon/text layout come from the style rather than being restated
+  // here. A style with no POI layer simply gets neither of the new layers.
+  // Snapshotted *before* the loop, which rewrites the real layer's filter to
+  // hand the outdoor subclasses over — cloning it afterwards would inherit that
+  // exclusion and the new layer would draw nothing.
+  const found = style.layers.find((l) => l.type === 'symbol' && l['source-layer'] === 'poi');
+  const poiTemplate = found ? (JSON.parse(JSON.stringify(found)) as StyleLayer) : undefined;
+  const lastPoiId = [...style.layers].reverse().find((l) => l['source-layer'] === 'poi')?.id;
   for (const layer of style.layers) {
     tuneLightLayer(layer);
     if (dark) tuneDarkLayer(layer);
@@ -500,15 +672,28 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       // The dashed clone spliced in below carries the track's strong brown, so
       // this base layer has to render the *gaps* — painting the same solid
       // brown underneath filled them in and the dash never actually read.
-      paint(layer, 'line-color', [
-        'match',
-        ['get', 'class'],
-        'track',
-        dark ? '#5b4b39' : '#dcc9ac',
-        dark ? '#596268' : '#f9f7f2',
-      ]);
+      paint(
+        layer,
+        'line-color',
+        restricted(
+          [
+            'match',
+            ['get', 'class'],
+            'track',
+            dark ? '#5b4b39' : '#dcc9ac',
+            dark ? '#596268' : '#f9f7f2',
+          ],
+          dark ? '#3f4348' : '#e4e0d8',
+        ),
+      );
       if (profile === 'hike' || profile === 'bike') multiplyPaint(layer, 'line-width', 1.12);
       if (profile === 'run') multiplyPaint(layer, 'line-width', 1.2);
+      if (profile === 'fishhunt') {
+        // The forest road *is* the network here — it is how you get to the
+        // water, so it is revealed as early as the paths and drawn heaviest.
+        multiplyPaint(layer, 'line-width', 1.25);
+        layer.minzoom = Math.min(layer.minzoom ?? 14, 12);
+      }
 
       // line-dasharray is not data-driven in every MapLibre renderer. Overlay
       // an exact-class clone so tracks are genuinely dashed while service
@@ -518,7 +703,11 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       track.filter = layer.filter
         ? ['all', layer.filter, ['==', ['get', 'class'], 'track']]
         : ['==', ['get', 'class'], 'track'];
-      paint(track, 'line-color', dark ? '#c69b68' : '#815f37');
+      paint(
+        track,
+        'line-color',
+        restricted(dark ? '#c69b68' : '#815f37', dark ? '#6b6257' : '#b6ada0'),
+      );
       paint(track, 'line-dasharray', [2.4, 1.4]);
       paint(track, 'line-opacity', 1);
       insertAfterBase.push({ layer: track, baseId: layer.id });
@@ -538,6 +727,16 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       // Foot network already emphasized above; here we mildly recede the car
       // roads it crosses so the run reads as the primary line.
       if (isCarRoad(layer)) paint(layer, 'line-opacity', 0.72);
+    } else if (profile === 'fishhunt') {
+      // Wilderness access map: the forest-road network (widened above) and the
+      // water carry it, so the through-roads recede a little and the urban POI
+      // soup drops well back — the outdoor POI layer appended below is what
+      // should catch the eye instead.
+      if (isCarRoad(layer)) paint(layer, 'line-opacity', 0.8);
+      if (/^poi_/.test(layer.id)) {
+        paint(layer, 'text-opacity', 0.55);
+        paint(layer, 'icon-opacity', 0.5);
+      }
     } else if (profile === 'ski') {
       tuneWinterLayer(layer, dark);
       if (layer.type === 'line' && /^(road|bridge|tunnel)_/.test(layer.id)) {
@@ -591,12 +790,32 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       }
     }
 
+    // Hand the outdoor subclasses over to the dedicated layer appended below,
+    // so they are not drawn twice (and fighting each other for label space)
+    // once the base POI layers switch on at their own zooms.
+    if (wantsOutdoorPoi && /^poi_/.test(layer.id)) {
+      const notOutdoor = ['!', matchesAny('subclass', OUTDOOR_POI_SUBCLASSES)];
+      layer.filter = layer.filter ? ['all', layer.filter, notOutdoor] : notOutdoor;
+    }
+
     // Both run after the profile branch: the brunnel pass multiplies the
     // opacity a profile may already have receded a road to, and the surface
     // split then wraps whatever colour the layer settled on — in that order, so
     // a gravel clone taken off a tunnelled road inherits the tunnel's dimming.
     tuneBrunnel(layer, dark);
     if (SURFACE_AWARE_PROFILES.includes(profile)) tuneSurface(layer, dark, insertAfterBase);
+  }
+
+  // Appended above the base POI layers (pushed in reverse, since each splice
+  // lands directly after the same anchor): barriers below the outdoor icons, so
+  // a cabin label is never obscured by the gate beside it.
+  if (poiTemplate && lastPoiId) {
+    if (wantsOutdoorPoi) {
+      insertAfterBase.push({ layer: outdoorPoiLayer(poiTemplate, dark), baseId: lastPoiId });
+    }
+    if (wantsBarriers) {
+      insertAfterBase.push({ layer: barrierLayer(poiTemplate, dark), baseId: lastPoiId });
+    }
   }
 
   for (const { layer, baseId } of insertAfterBase) {

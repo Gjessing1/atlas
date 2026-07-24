@@ -84,18 +84,37 @@ const style = JSON.stringify({
     {
       id: 'poi_r1',
       type: 'symbol',
-      layout: { 'text-size': 12, 'icon-size': 1 },
+      source: 'openmaptiles',
+      'source-layer': 'poi',
+      minzoom: 15,
+      filter: ['>=', ['get', 'rank'], 1],
+      layout: { 'text-size': 12, 'icon-size': 1, 'icon-image': ['get', 'class'] },
+      paint: { 'text-color': '#000' },
+    },
+    {
+      id: 'poi_transit',
+      type: 'symbol',
+      source: 'openmaptiles',
+      'source-layer': 'poi',
+      layout: { 'text-size': 12 },
       paint: { 'text-color': '#000' },
     },
   ],
 });
 
-function layers(result: string) {
-  return (
-    JSON.parse(result) as {
-      layers: Array<{ id: string; minzoom?: number; paint: Record<string, unknown> }>;
-    }
-  ).layers;
+interface TestLayer {
+  id: string;
+  type?: string;
+  minzoom?: number;
+  filter?: unknown;
+  source?: string;
+  'source-layer'?: string;
+  layout?: Record<string, unknown>;
+  paint: Record<string, unknown>;
+}
+
+function layers(result: string): TestLayer[] {
+  return (JSON.parse(result) as { layers: TestLayer[] }).layers;
 }
 
 describe('map appearance', () => {
@@ -109,16 +128,22 @@ describe('map appearance', () => {
     ).toEqual(['match', ['get', 'class'], 'path', '#a94f4b', '#b67870']);
     // The base layer renders the dash *gaps* — a solid brown underneath the
     // clone would fill them in and the track would read as an unbroken line.
+    // Wrapped in the access case, so a barred forest road is muted while an
+    // unrestricted one keeps the class colours.
     expect(result.find((layer) => layer.id === 'road_service_track')?.paint['line-color']).toEqual([
-      'match',
-      ['get', 'class'],
-      'track',
-      '#dcc9ac',
-      '#f9f7f2',
+      'case',
+      ['==', ['get', 'access'], 'no'],
+      '#e4e0d8',
+      ['match', ['get', 'class'], 'track', '#dcc9ac', '#f9f7f2'],
     ]);
     const track = result.find((layer) => layer.id === 'atlas-road_service_track-track-contrast');
     expect(track?.paint['line-dasharray']).toEqual([2.4, 1.4]);
-    expect(track?.paint['line-color']).toBe('#815f37');
+    expect(track?.paint['line-color']).toEqual([
+      'case',
+      ['==', ['get', 'access'], 'no'],
+      '#b6ada0',
+      '#815f37',
+    ]);
   });
 
   it('uses a dark basemap and lets Hike reveal and emphasize paths earlier', () => {
@@ -285,6 +310,118 @@ describe('map appearance', () => {
     );
   });
 
+  it('draws gates and lift gates as a sprite-free point layer for access profiles', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'fishhunt' }));
+    const barriers = result.find((layer) => layer.id === 'atlas-barriers');
+    // A circle, not a symbol: the sprite sheet has no gate image, which is why
+    // the base style rendered these features as nothing at all.
+    expect(barriers?.type).toBe('circle');
+    expect(barriers?.['source-layer']).toBe('poi');
+    expect(barriers?.source).toBe('openmaptiles');
+    // The data's floor, not a styling choice: the basemap emits the low-rank
+    // POIs only from z14, so asking for an earlier reveal would be a no-op.
+    expect(barriers?.minzoom).toBe(14);
+    expect(barriers?.filter).toEqual([
+      'match',
+      ['get', 'class'],
+      ['gate', 'lift_gate'],
+      true,
+      false,
+    ]);
+    // The locked bom reads differently from an openable field gate.
+    expect(barriers?.paint['circle-color']).toEqual([
+      'match',
+      ['get', 'class'],
+      'lift_gate',
+      '#c0392b',
+      '#c8801c',
+    ]);
+    // Above the base POI layers, and below the outdoor icons.
+    const ids = result.map((layer) => layer.id);
+    expect(ids.indexOf('atlas-barriers')).toBeGreaterThan(ids.indexOf('poi_transit'));
+    expect(ids.indexOf('atlas-barriers')).toBeLessThan(ids.indexOf('atlas-outdoor-poi'));
+  });
+
+  it('leaves barriers and outdoor POIs out of the profiles they would clutter', () => {
+    for (const profile of ['drive', 'explore', 'run', 'ski']) {
+      const ids = layers(applyMapAppearance(style, { colorScheme: 'light', profile })).map(
+        (layer) => layer.id,
+      );
+      expect(ids).not.toContain('atlas-barriers');
+      expect(ids).not.toContain('atlas-outdoor-poi');
+    }
+    // Cycling wants the gates (they stop a bike too) but not the cabin icons.
+    const bike = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'bike' })).map(
+      (layer) => layer.id,
+    );
+    expect(bike).toContain('atlas-barriers');
+    expect(bike).not.toContain('atlas-outdoor-poi');
+  });
+
+  it('lifts cabins and shelters into their own layer, and off the base POI layers', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'hike' }));
+    const outdoor = result.find((layer) => layer.id === 'atlas-outdoor-poi');
+    expect(outdoor?.type).toBe('symbol');
+    // Cloned from the base layer, so it keeps the icon/text plumbing and the
+    // sprites that already exist — but revealed two zooms earlier.
+    expect(outdoor?.layout?.['icon-image']).toEqual(['get', 'class']);
+    expect(outdoor?.minzoom).toBe(14);
+    expect(outdoor?.minzoom).toBeLessThan(15); // earlier than the base poi_r1
+    // Not the base layer's rank window: these must show whichever bucket they
+    // landed in.
+    expect(JSON.stringify(outdoor?.filter)).not.toContain('rank');
+    expect(JSON.stringify(outdoor?.filter)).toContain('alpine_hut');
+    // Full strength even where the profile recedes the urban POI soup.
+    expect(outdoor?.paint['text-opacity']).toBe(1);
+    expect(outdoor?.paint['icon-opacity']).toBe(1);
+    // The template is snapshotted before the theme pass, so the clone has to be
+    // label-tuned itself — otherwise it keeps the source style's dark-on-white
+    // label, which is invisible on the dark basemap.
+    const dark = layers(applyMapAppearance(style, { colorScheme: 'dark', profile: 'hike' })).find(
+      (layer) => layer.id === 'atlas-outdoor-poi',
+    );
+    expect(dark?.paint['text-color']).toBe('#aeb6bc');
+    expect(dark?.paint['text-halo-color']).toBe('#182024');
+    // The base layers hand those subclasses over, so nothing draws twice.
+    const base = result.find((layer) => layer.id === 'poi_r1');
+    expect(JSON.stringify(base?.filter)).toContain('alpine_hut');
+    expect(base?.filter).toEqual([
+      'all',
+      ['>=', ['get', 'rank'], 1],
+      ['!', ['match', ['get', 'subclass'], expect.arrayContaining(['shelter']), true, false]],
+    ]);
+  });
+
+  it('recedes urban POIs but not the outdoor ones on Fish & Hunt', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'fishhunt' }));
+    expect(result.find((layer) => layer.id === 'poi_r1')?.paint['icon-opacity']).toBe(0.5);
+    expect(result.find((layer) => layer.id === 'atlas-outdoor-poi')?.paint['icon-opacity']).toBe(1);
+    // Forest roads are the network: widened, and revealed with the paths.
+    const track = result.find((layer) => layer.id === 'road_service_track');
+    expect(track?.paint['line-width']).toBe(2 * 1.25);
+    expect(track?.minzoom).toBe(12);
+    expect(
+      result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-opacity'],
+    ).toBe(0.8);
+  });
+
+  it('mutes access-restricted tracks on every profile without asserting the unsurveyed ones', () => {
+    for (const profile of ['drive', 'fishhunt']) {
+      const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile }));
+      const dashed = result.find((layer) => layer.id === 'atlas-road_service_track-track-contrast');
+      // A `case`, so a way with no `access` attribute keeps the normal colour —
+      // absent is not "forbidden", the same rule the surface split follows.
+      expect(dashed?.paint['line-color']).toEqual([
+        'case',
+        ['==', ['get', 'access'], 'no'],
+        '#b6ada0',
+        '#815f37',
+      ]);
+      const base = result.find((layer) => layer.id === 'road_service_track');
+      expect((base?.paint['line-color'] as unknown[])[0]).toBe('case');
+    }
+  });
+
   it('applies sanitized user edits after the curated theme/profile', () => {
     const result = layers(
       applyMapAppearance(style, {
@@ -311,6 +448,10 @@ describe('map appearance', () => {
       '#00aa77',
     );
     expect(result.find((layer) => layer.id === 'poi_r1')?.paint['text-opacity']).toBe(1);
+    // The appended outdoor layer is a POI layer as far as the slider goes.
+    expect(
+      result.find((layer) => layer.id === 'atlas-outdoor-poi')?.layout?.['text-size'],
+    ).toBeCloseTo(12 * 1.25 * 1.5);
   });
 });
 
