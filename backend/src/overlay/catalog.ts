@@ -74,9 +74,36 @@ export interface XyzUpstream {
   template: string;
 }
 
+/**
+ * A vector overlay drawn from an ArcGIS REST feature layer rather than proxied
+ * raster tiles (`LayerMeta.vector`). The backend pulls the whole coverage once
+ * as GeoJSON, disk-caches it, and serves it at `/api/overlay/:id/features`; the
+ * client renders and hit-tests it directly (the speed-camera pattern, but
+ * generic and sourced from an upstream). The reusable §4.7a enabler — Statskog
+ * jaktfelt is the first user, the NVE river network the next.
+ */
+export interface ArcGisVectorUpstream {
+  kind: 'arcgis-vector';
+  /** The layer query endpoint, e.g. `…/MapServer/4/query`. */
+  url: string;
+  /** Attributes to keep on each feature (comma-separated `outFields`). */
+  outFields: string;
+  /**
+   * `maxAllowableOffset` for the query, **in degrees** (we ask for WGS84 out) —
+   * mandatory server-side generalization. A national polygon set is enormous at
+   * full precision: Statskog's 922 hunting fields are 60 MB raw but 4.4 MB at
+   * ~11 m (0.0001°), which reads identically at overlay zoom. Same unit trap as
+   * `ArcGisLabelSource.simplifyDeg`: the value is read in `outSR` units, so a
+   * metres-intended number here silently collapses every ring to one vertex.
+   */
+  simplifyDeg: number;
+  /** `where` clause; defaults to `1=1` (the whole layer). */
+  where?: string;
+}
+
 export interface OverlayLayer {
   meta: LayerMeta;
-  upstream: WmsUpstream | XyzUpstream;
+  upstream: WmsUpstream | XyzUpstream | ArcGisVectorUpstream;
   /**
    * Env var that must be set for this layer to exist (tokened sources).
    * Unset ⇒ the layer silently drops out of the catalog — no broken entries,
@@ -325,6 +352,44 @@ export function norwegianLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'eiendomsgrense',
         identifyLayers: 'teig',
+      },
+    },
+    {
+      // Statskog storviltjaktfelt — the state-forest big-game hunting fields:
+      // field boundaries and the species each is opened for (elg/hjort/rein).
+      // A PLANNING overlay for where you may hunt on state land, not a record
+      // of sightings or fellings. The whole national set (922 polygons) is one
+      // simplified GeoJSON fetch, disk-cached and hit-tested client-side — the
+      // first user of the generic `arcgis-vector` kind (§4.7a). Identify is a
+      // local hit-test against the rendered features, so `identify:false` keeps
+      // it out of the WMS GetFeatureInfo path.
+      meta: {
+        id: 'statskog-jaktfelt',
+        rev: 1,
+        title: 'Hunting fields (Statskog)',
+        description:
+          'State-forest big-game hunting fields (storviltjaktfelt): boundaries and the species ' +
+          'each field is opened for. Tap a field for its name, species and remarks.',
+        group: 'Hunting',
+        attribution: '© Statskog',
+        metadataUrl:
+          'https://kartkatalog.geonorge.no/metadata/uuid/c23c14c6-63c4-40f4-bae4-2d40198a2f40',
+        maxzoom: 18,
+        defaultOpacity: 0.85,
+        identify: false,
+        coverageNote: 'State-owned (Statskog) land only — private hunting grounds are not covered.',
+        profiles: ['hunting'],
+        vector: true,
+      },
+      upstream: {
+        kind: 'arcgis-vector',
+        // Year-versioned service name (`Storvilt_2024`) — expect an annual
+        // rename (DATA-SOURCES.md); a new season is a one-line url + rev bump.
+        url: 'https://kartportal.statskog.no/server/rest/services/Storvilt_2024/Storvilt_app_innsyn/MapServer/4/query',
+        outFields: 'Feltnavn,Art,Merknad',
+        // ~11 m — hunting fields are large; boundaries stay faithful, payload
+        // drops from 60 MB to ~4.4 MB (measured 2026-07-24).
+        simplifyDeg: 0.0001,
       },
     },
     {

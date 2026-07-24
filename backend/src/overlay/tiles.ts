@@ -43,6 +43,12 @@ export function registerTileRoute(ctx: OverlayContext): void {
     async (request, reply) => {
       const layer = byId.get(request.params.id);
       if (!layer) return reply.code(404).send({ error: 'unknown layer' });
+      // Vector layers (arcgis-vector) have no raster tiles — they answer at
+      // `/features`. Clients that honour `LayerMeta.vector` never ask here; this
+      // just refuses a hand-typed tile URL rather than mis-reading the upstream.
+      if (layer.upstream.kind !== 'wms' && layer.upstream.kind !== 'xyz') {
+        return reply.code(404).send({ error: 'layer has no raster tiles' });
+      }
       const z = Number(request.params.z);
       const x = Number(request.params.x);
       const y = Number(request.params.y);

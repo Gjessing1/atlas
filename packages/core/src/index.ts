@@ -15,6 +15,7 @@ export * from './api.js';
 export * from './format.js';
 export * from './explore.js';
 export * from './geo.js';
+export * from './inatur.js';
 export * from './layers.js';
 export * from './maphash.js';
 export * from './nav-widgets.js';

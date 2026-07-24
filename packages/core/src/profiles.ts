@@ -67,7 +67,14 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     label: 'Fish & Hunt',
     routing: null,
     layerTags: ['fishing', 'hunting'],
-    defaultLayers: ['property', 'lake-depth', 'sea-depth', 'hillshade', 'terrain-contours'],
+    defaultLayers: [
+      'property',
+      'lake-depth',
+      'sea-depth',
+      'hillshade',
+      'terrain-contours',
+      'statskog-jaktfelt',
+    ],
   },
 ];
 

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { norwegianLayers } from './catalog.js';
 import type { OverlayApiOptions, OverlayContext } from './context.js';
+import { registerFeaturesRoute } from './features.js';
 import { registerIdentifyRoute } from './identify.js';
 import { registerLabelsRoute } from './labels.js';
 import { registerTileRoute } from './tiles.js';
@@ -14,6 +15,7 @@ import { registerTileRoute } from './tiles.js';
  * - `tiles.ts`    /api/overlay/:id/:z/:x/:y.png and the disk cache
  * - `identify.ts` /api/overlay/:id/identify and the response parsers
  * - `labels.ts`   /api/overlay/:id/labels and the ArcGIS attribute fetch
+ * - `features.ts` /api/overlay/:id/features — arcgis-vector GeoJSON (§4.7a)
  *
  * `registerOverlayApi` is the only entry point the app uses; everything else is
  * exported for tests.
@@ -65,4 +67,5 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
   registerTileRoute(ctx);
   registerIdentifyRoute(ctx);
   registerLabelsRoute(ctx);
+  registerFeaturesRoute(ctx);
 }

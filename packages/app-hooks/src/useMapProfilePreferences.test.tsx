@@ -38,7 +38,7 @@ describe('useMapProfilePreferences', () => {
     const store = settings(null);
     const { result } = renderHook(() => useMapProfilePreferences(store));
 
-    for (const id of ['drive', 'bike', 'hike', 'run', 'ski']) {
+    for (const id of ['drive', 'bike', 'hike', 'run', 'ski', 'fishhunt']) {
       act(() => result.current.setVisible(id, false));
     }
     act(() => result.current.setVisible('explore', false));

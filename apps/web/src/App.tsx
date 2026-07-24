@@ -37,6 +37,7 @@ import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
+import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTransitLayers } from './map/useTransitLayers.js';
@@ -173,6 +174,7 @@ export function App() {
   useOverlayIdentify(map, layers.overlays, routeActiveRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
   useSpeedCameraLayer(map, layers.overlays, routeActiveRef);
+  useHuntingFieldsLayer(map, layers.overlays, routeActiveRef);
   // Rounded zoom for the panel's live "zoom in to z14+" hints.
   const [mapZoom, setMapZoom] = useState(Math.round(initialView.zoom));
   useEffect(() => {

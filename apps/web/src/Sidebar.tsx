@@ -1,5 +1,6 @@
 import { promoteParentId, useCollectionTree } from '@atlas/app-hooks';
-import { fmtKm } from '@atlas/core';
+import { fmtKm, inaturResolveUrl, parseOfferId, type InaturArea } from '@atlas/core';
+import { buildGpx } from '@atlas/gpx';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
@@ -95,6 +96,12 @@ export function Sidebar({
   const [importOpen, setImportOpen] = useState(false);
   const [importTarget, setImportTarget] = useState('root');
   const [importFolderName, setImportFolderName] = useState('');
+  // iNatur permit-boundary tool: paste an offer link/id, get its area as a
+  // track. Its own toggle so the hunting workflow doesn't crowd the GPX import.
+  const [inaturOpen, setInaturOpen] = useState(false);
+  const [inaturInput, setInaturInput] = useState('');
+  const [inaturBusy, setInaturBusy] = useState(false);
+  const [inaturError, setInaturError] = useState<string | null>(null);
   // Folders whose contents are showing. Empty by default: a collection with a
   // dozen folders opened as one long wall of every place at once, and the list
   // the user came for was somewhere in the middle of it. Session-only — which
@@ -155,15 +162,17 @@ export function Sidebar({
   const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);
   const hasItems = data.places.length + data.collections.length > 0;
 
+  // Where an import lands, shared by the file import and the iNatur tool.
+  const importOptions = (): ImportOptions =>
+    importTarget === 'new'
+      ? { newCollection: { name: importFolderName.trim() } }
+      : { collectionId: importTarget === 'root' ? null : importTarget };
+
   const onImportFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setImporting(true);
     try {
-      const options: ImportOptions =
-        importTarget === 'new'
-          ? { newCollection: { name: importFolderName.trim() } }
-          : { collectionId: importTarget === 'root' ? null : importTarget };
-      const result = await data.importFiles([...files], options);
+      const result = await data.importFiles([...files], importOptions());
       setImportErrors(result.errors);
       setRestored(result.restored);
       onImported(result);
@@ -172,6 +181,47 @@ export function Sidebar({
       setImportOpen(false);
       setImportFolderName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Resolve an iNatur offer link/id to its boundary and drop it as a track —
+  // GPX under the hood, so it draws, exports and syncs like any other track
+  // ("everything exportable"). The permit's sub-areas become track segments.
+  const onResolveInatur = async () => {
+    const raw = inaturInput.trim();
+    if (!raw) return;
+    if (!parseOfferId(raw)) {
+      setInaturError('Paste an iNatur offer link or its 24-character id.');
+      return;
+    }
+    setInaturBusy(true);
+    setInaturError(null);
+    try {
+      const res = await fetch(inaturResolveUrl('', raw));
+      if (res.status === 404) {
+        setInaturError('No boundary is published for that offer.');
+        return;
+      }
+      if (!res.ok) {
+        setInaturError('iNatur is unavailable right now. Try again later.');
+        return;
+      }
+      const area = (await res.json()) as InaturArea;
+      const gpx = buildGpx({
+        name: area.name ? `iNatur – ${area.name}` : `iNatur permit ${area.offerId.slice(-6)}`,
+        segments: area.rings.map((ring) => ring.map(([lng, lat]) => ({ lat, lng }))),
+        waypoints: [],
+      });
+      const file = new File([gpx], `inatur-${area.offerId}.gpx`, { type: 'application/gpx+xml' });
+      const result = await data.importFiles([file], importOptions());
+      setImportErrors(result.errors);
+      onImported(result);
+      setInaturInput('');
+      setInaturOpen(false);
+    } catch {
+      setInaturError('iNatur is unavailable right now. Try again later.');
+    } finally {
+      setInaturBusy(false);
     }
   };
 
@@ -485,6 +535,18 @@ export function Sidebar({
           </button>
           <button
             type="button"
+            onClick={() => {
+              setInaturOpen((open) => !open);
+              setInaturError(null);
+            }}
+            disabled={data.status !== 'ready'}
+            title="Turn an iNatur hunting/fishing permit into a saved area (paste its offer link)"
+            aria-expanded={inaturOpen}
+          >
+            iNatur permit
+          </button>
+          <button
+            type="button"
             onClick={() => void data.exportAll()}
             disabled={data.status !== 'ready'}
           >
@@ -550,6 +612,62 @@ export function Sidebar({
           <small>
             GPX, KML and KMZ tracks or waypoints use this folder. Atlas JSON/ZIP backups keep their
             original folders.
+          </small>
+        </div>
+      )}
+      {inaturOpen && (
+        <div className="sidebar-import">
+          <label>
+            iNatur offer link or id
+            <input
+              value={inaturInput}
+              onChange={(event) => {
+                setInaturInput(event.target.value);
+                setInaturError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void onResolveInatur();
+              }}
+              placeholder="https://www.inatur.no/jakt/…"
+              aria-label="iNatur offer link or id"
+              autoFocus
+            />
+          </label>
+          <label>
+            Save into
+            <select value={importTarget} onChange={(event) => setImportTarget(event.target.value)}>
+              <option value="root">No folder</option>
+              {data.collections.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+              <option value="new">Create new folder…</option>
+            </select>
+          </label>
+          {importTarget === 'new' && (
+            <input
+              value={importFolderName}
+              onChange={(event) => setImportFolderName(event.target.value)}
+              placeholder="New folder name"
+              aria-label="New folder name"
+            />
+          )}
+          <button
+            type="button"
+            disabled={
+              inaturBusy ||
+              !inaturInput.trim() ||
+              (importTarget === 'new' && !importFolderName.trim())
+            }
+            onClick={() => void onResolveInatur()}
+          >
+            {inaturBusy ? 'Resolving…' : 'Add permit area'}
+          </button>
+          {inaturError && <small className="sidebar-import-error">{inaturError}</small>}
+          <small>
+            Paste the link (or id) of an iNatur hunting or fishing offer to save its exact boundary
+            as a track you can see on the map.
           </small>
         </div>
       )}

@@ -77,15 +77,17 @@ describe('map profiles', () => {
   it('offers Fish & Hunt as a non-routing preset over general-purpose layers', () => {
     const fishhunt = mapProfile('fishhunt');
     expect(fishhunt.routing).toBeNull();
-    // Its defaults are the untagged general-purpose Norwegian layers, so they
-    // are offered in every profile and merely start on here — no fish/hunt tag
-    // is needed for them, and outside Norway they are simply absent.
+    // Most defaults are untagged general-purpose Norwegian layers, offered in
+    // every profile and merely started on here; `statskog-jaktfelt` is the one
+    // hunting-tagged default (surfaced because this profile carries `hunting`).
+    // Outside Norway they are simply absent.
     expect(fishhunt.defaultLayers).toEqual([
       'property',
       'lake-depth',
       'sea-depth',
       'hillshade',
       'terrain-contours',
+      'statskog-jaktfelt',
     ]);
     for (const id of fishhunt.defaultLayers!) {
       expect(layerInProfile(meta(id), 'fishhunt')).toBe(true);

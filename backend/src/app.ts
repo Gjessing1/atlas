@@ -27,6 +27,7 @@ import type { RegionJobOptions } from './region-jobs.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
+import { registerInaturApi, type InaturApiOptions } from './inatur-api.js';
 import { registerTransitApi, type TransitApiOptions } from './transit-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
@@ -76,6 +77,8 @@ export interface AppOptions {
   weatherApi?: WeatherApiOptions;
   /** Test seams for the Entur public-transport proxy. */
   transitApi?: TransitApiOptions;
+  /** Test seams for the iNatur permit-boundary resolver. */
+  inaturApi?: InaturApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam for Wikimedia place summaries. */
@@ -528,6 +531,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Public transport: Entur journey planner proxy (transit-api.ts — mandatory
   // ET-Client-Name header, Norway-only coverage check, Atlas trip model out).
   registerTransitApi(app, { status, ...opts.transitApi });
+
+  // iNatur permit-boundary resolver: paste an offer link, get its exact area
+  // (inatur-api.ts — 24-hex id parsing, Open-Inatur ArcGIS fan-out).
+  registerInaturApi(app, { status, ...opts.inaturApi });
 
   // Point elevation: Kartverket Høydedata proxy (enriches tapped points /
   // saved places with a terrain height — no raster pipeline).
