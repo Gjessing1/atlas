@@ -25,7 +25,11 @@ export interface InaturArea {
   name?: string;
   /** [w,s,e,n] spanning every sub-area. */
   bbox: [number, number, number, number];
-  /** Exterior boundary rings, one per sub-area polygon, as [lng,lat] pairs. */
+  /**
+   * All boundary rings across the offer's sub-areas, as [lng,lat] pairs — the
+   * exterior outline of each polygon *and* any interior rings (holes: ground the
+   * permit excludes). Each ring is closed; a client draws each as its own loop.
+   */
   rings: [number, number][][];
   /** How many delområde polygons the offer resolved to. */
   subAreas: number;

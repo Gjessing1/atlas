@@ -39,6 +39,29 @@ const RING: [number, number][] = [
 ];
 
 describe('toInaturArea', () => {
+  it('keeps interior rings (permit holes) alongside the exterior outline', () => {
+    // [exterior, hole] — an un-permitted island carved out of the area.
+    const hole: [number, number][] = [
+      [10.05, 60.05],
+      [10.15, 60.05],
+      [10.15, 60.15],
+      [10.05, 60.05],
+    ];
+    const area = toInaturArea(ID, [
+      {
+        type: 'Feature',
+        properties: { tekst: 'Sleikebekk' },
+        geometry: { type: 'Polygon', coordinates: [RING, hole] },
+      },
+    ]);
+    expect(area).not.toBeNull();
+    // Both rings survive; the hole sits inside so it never widens the bbox.
+    expect(area!.rings).toHaveLength(2);
+    expect(area!.rings[1]).toEqual(hole);
+    expect(area!.bbox).toEqual([10, 60, 10.2, 60.2]);
+    expect(area!.subAreas).toBe(1);
+  });
+
   it('collects exterior rings and the spanning bbox from Polygon + MultiPolygon', () => {
     const area = toInaturArea(ID, [
       polygon('Vest', RING),

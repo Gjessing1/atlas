@@ -46,15 +46,20 @@ interface GeoJsonFeature {
 
 type Ring = [number, number][];
 
-/** Exterior ring of every polygon in a Polygon/MultiPolygon geometry. */
-function exteriorRings(geom: GeoJsonFeature['geometry']): Ring[] {
+/**
+ * Every ring of a Polygon/MultiPolygon geometry — exterior *and* interior. An
+ * offer can carve an un-permitted island out of its area (a hole in the polygon:
+ * inatur.no draws it as a gap in the shading); each hole is an interior ring we
+ * must keep, or Atlas would paint straight over the excluded ground. Each ring
+ * is closed, so drawn as a GPX segment it renders as its own loop.
+ */
+function allRings(geom: GeoJsonFeature['geometry']): Ring[] {
   if (!geom?.coordinates) return [];
   if (geom.type === 'Polygon') {
-    const first = (geom.coordinates as Ring[])[0];
-    return first ? [first] : [];
+    return (geom.coordinates as Ring[]).filter((r): r is Ring => !!r);
   }
   if (geom.type === 'MultiPolygon') {
-    return (geom.coordinates as Ring[][]).map((poly) => poly[0]).filter((r): r is Ring => !!r);
+    return (geom.coordinates as Ring[][]).flat().filter((r): r is Ring => !!r);
   }
   return [];
 }
@@ -77,7 +82,7 @@ export function toInaturArea(offerId: string, features: GeoJsonFeature[]): Inatu
   let e = -Infinity;
   let n = -Infinity;
   for (const f of features) {
-    for (const ring of exteriorRings(f.geometry)) {
+    for (const ring of allRings(f.geometry)) {
       if (ring.length < 3) continue;
       rings.push(ring);
       for (const [lng, lat] of ring) {
