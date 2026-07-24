@@ -67,10 +67,11 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     label: 'Ski',
     routing: null,
     layerTags: ['ski'],
-    // The ski-track and avalanche-steepness layers already exist and are
-    // ski-tagged; starting them on is the whole point of the Ski preset
-    // (`terrain-slope` is the "avalanche steepness" surface, not a new layer).
-    defaultLayers: ['trails-ski', 'terrain-slope'],
+    // Groomed ski tracks are what the Ski preset is for, so start them on.
+    // `terrain-slope` (the avalanche-steepness surface) stays *offered* but off
+    // by default — it is visually noisy and only wanted when investigating a
+    // slope for avalanche risk, not as a permanent basemap.
+    defaultLayers: ['trails-ski'],
   },
   {
     // Fish & Hunt expresses no travel mode (`routing: null`, like Ski/Explore) —

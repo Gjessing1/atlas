@@ -76,12 +76,13 @@ describe('map profiles', () => {
 
   it('starts the trail and terrain overlays on for Run and Ski', () => {
     expect(mapProfile('run').defaultLayers).toEqual(['trails-hiking']);
-    expect(mapProfile('ski').defaultLayers).toEqual(['trails-ski', 'terrain-slope']);
+    expect(mapProfile('ski').defaultLayers).toEqual(['trails-ski']);
     expect(layerDefaultsOn('trails-hiking', 'run')).toBe(true);
     expect(layerDefaultsOn('trails-ski', 'ski')).toBe(true);
-    expect(layerDefaultsOn('terrain-slope', 'ski')).toBe(true);
-    // Each default is genuinely offered in its own profile (Run reaches the
-    // hiking trails through its `hiking` tag; the ski layers are ski-tagged).
+    // terrain-slope is noisy, so it is offered in Ski but not started on.
+    expect(layerDefaultsOn('terrain-slope', 'ski')).toBe(false);
+    // Each default/offer is genuinely surfaced in its own profile (Run reaches
+    // the hiking trails through its `hiking` tag; the ski layers are ski-tagged).
     expect(layerInProfile(meta('trails-hiking', ['hiking']), 'run')).toBe(true);
     expect(layerInProfile(meta('terrain-slope', ['hiking', 'ski']), 'ski')).toBe(true);
   });

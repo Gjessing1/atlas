@@ -7,6 +7,8 @@ const style = JSON.stringify({
   layers: [
     { id: 'background', type: 'background', paint: { 'background-color': '#fff' } },
     { id: 'water', type: 'fill', paint: { 'fill-color': '#00f' } },
+    { id: 'landcover_wood', type: 'fill', paint: { 'fill-color': '#0f0' } },
+    { id: 'landuse_residential', type: 'fill', paint: { 'fill-color': '#eee' } },
     {
       id: 'road_path_pedestrian',
       type: 'line',
@@ -115,6 +117,13 @@ describe('map appearance', () => {
     expect(water?.['fill-outline-color']).toBe('#b7d0e0');
     expect(result.find((layer) => layer.id === 'background')?.paint['background-color']).toBe(
       '#eef2f2',
+    );
+    // Forest and neighbourhoods must stay legible against the snow, not wash out.
+    const wood = result.find((layer) => layer.id === 'landcover_wood')?.paint;
+    expect(wood?.['fill-color']).toBe('#c7ddc4');
+    expect(wood?.['fill-opacity']).toBe(0.85);
+    expect(result.find((layer) => layer.id === 'landuse_residential')?.paint['fill-color']).toBe(
+      '#e5e2e6',
     );
   });
 

@@ -274,9 +274,12 @@ function tuneDarkLayer(layer: StyleLayer): void {
 }
 
 /**
- * Ski's winter palette: snow-covered ground recedes to pale cool tones, and
- * lakes read as *traversable* frozen terrain (near-white fill + pale-blue
- * outline) rather than the blue barriers the base style paints. Applied on top
+ * Ski's winter palette: open ground whites out to snow, and lakes read as
+ * *traversable* frozen terrain (near-white fill + pale-blue outline) rather
+ * than the blue barriers the base style paints. But forest and built-up blocks
+ * must stay legible — the treeline and neighbourhoods are exactly what a ski
+ * map navigates by — so wood keeps a clear cool green and residential/buildings
+ * keep contrast against the snow rather than washing to white. Applied on top
  * of the light/dark tune, so it wins for the handful of layers it touches.
  */
 function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
@@ -290,14 +293,28 @@ function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
   if (layer.type === 'line' && /^waterway_/.test(layer.id)) {
     paint(layer, 'line-color', dark ? '#5d7686' : '#a9c4d6');
   }
-  const landcover: Record<string, string> = dark
-    ? { landcover_wood: '#2f3d3f', landcover_grass: '#33403f', park: '#2c3a38' }
-    : { landcover_wood: '#e2eaec', landcover_grass: '#e8eeec', park: '#e6eeeb' };
-  const fill = landcover[layer.id];
+  const fills: Record<string, { color: string; opacity: number }> = dark
+    ? {
+        landcover_wood: { color: '#2b3d31', opacity: 0.82 },
+        landcover_grass: { color: '#2f3d33', opacity: 0.6 },
+        park: { color: '#2a3a30', opacity: 0.7 },
+        landuse_residential: { color: '#2b3236', opacity: 1 },
+      }
+    : {
+        landcover_wood: { color: '#c7ddc4', opacity: 0.85 },
+        landcover_grass: { color: '#d8e6d3', opacity: 0.55 },
+        park: { color: '#d0e3cd', opacity: 0.7 },
+        landuse_residential: { color: '#e5e2e6', opacity: 1 },
+      };
+  const fill = fills[layer.id];
   if (fill) {
     delete layer.paint?.['fill-pattern'];
-    paint(layer, 'fill-color', fill);
-    paint(layer, 'fill-opacity', dark ? 0.7 : 0.5);
+    paint(layer, 'fill-color', fill.color);
+    paint(layer, 'fill-opacity', fill.opacity);
+  }
+  if (layer.id === 'building') {
+    paint(layer, 'fill-color', dark ? '#3a4145' : '#d5d0ca');
+    paint(layer, 'fill-outline-color', dark ? '#4b5257' : '#b0aaa2');
   }
 }
 
