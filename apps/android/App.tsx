@@ -49,6 +49,7 @@ import {
 import { MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
+import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -63,6 +64,7 @@ import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
+import { inaturOfferToFile } from './src/inatur';
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
@@ -207,6 +209,9 @@ function AppInner() {
   const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
   const overlayLabels = useOverlayLabels(overlaysCtl.overlays, camera.labelCell);
+  // The Statskog jaktfelt vector overlay's coverage (one GeoJSON fetch), drawn
+  // by MapScene while the overlay is on — the Fish & Hunt signature layer.
+  const huntingFields = useHuntingFields(overlaysCtl.overlays, serverOrigin);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -459,6 +464,17 @@ function AppInner() {
     [data],
   );
 
+  // Resolve an iNatur permit link/id to its boundary and import it as a track
+  // (GPX under the hood, so it draws/exports/syncs). Throws a user-facing
+  // message on failure; TracksSheet's own try/catch surfaces it.
+  const importInatur = useCallback(
+    async (input: string, options?: ImportOptions) => {
+      const file = await inaturOfferToFile(serverOrigin, input);
+      return data.importFiles([file], options);
+    },
+    [serverOrigin, data],
+  );
+
   // Recentre on the user's position. While navigating this re-engages the
   // follow camera after a manual pan; when idle it's a one-shot fly-to that
   // also reveals the location puck.
@@ -526,6 +542,7 @@ function AppInner() {
         packs={packs}
         overlays={overlaysCtl.overlays}
         overlayLabels={overlayLabels}
+        huntingFields={huntingFields}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}
@@ -832,6 +849,7 @@ function AppInner() {
         onDismissPendingPin={() => setPendingPin(null)}
         onPickDestination={dest.pick}
         onImportTracks={importTracks}
+        onImportInatur={importInatur}
       />
       <PromptModal
         visible={pendingRegion !== null}

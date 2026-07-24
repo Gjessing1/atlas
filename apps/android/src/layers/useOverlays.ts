@@ -11,6 +11,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useServerOrigin } from '../serverOrigin';
 import type { UserData } from '../useUserData';
 
+// Vector overlay ids MapScene knows how to draw as GeoJSON. Any vector layer
+// outside this set is hidden from the panel until its renderer lands (see the
+// `renderableLayers` filter below). Kept as an explicit id set rather than a
+// clever heuristic — the two vector layers genuinely differ in what drawing
+// them means (polygons vs. per-camera nav warnings).
+const RENDERABLE_VECTOR_IDS = new Set(['statskog-jaktfelt']);
+
 // Visibility/opacity are device-local preferences (`local.` keys never sync).
 const STATE_SETTING = 'local.layers.state';
 // Last-seen catalog, so the panel works offline with known layers.
@@ -164,17 +171,22 @@ export function useOverlays(
     [state, stateKey, profileId, allLayers],
   );
 
-  // Vector overlays (LayerMeta.vector — the speed-camera layer) are dropped
-  // from everything Android offers until MapScene grows a GeoJSON overlay
-  // renderer: a toggle that draws nothing is worse than not offering it. The
-  // *stored* catalog cache stays raw, so parity later needs no migration.
-  const rasterLayers = useMemo(() => allLayers.filter((meta) => !meta.vector), [allLayers]);
+  // Vector overlays are only offered once MapScene can draw them. The Statskog
+  // jaktfelt polygons now render as a GeoJSON overlay (see useHuntingFields +
+  // MapScene), so that one is kept; the speed-camera vector layer stays dropped
+  // until its on-map warnings exist here — a toggle that draws nothing is worse
+  // than not offering it. The *stored* catalog cache stays raw, so widening this
+  // set later needs no migration.
+  const renderableLayers = useMemo(
+    () => allLayers.filter((meta) => !meta.vector || RENDERABLE_VECTOR_IDS.has(meta.id)),
+    [allLayers],
+  );
 
   // A contextual layer must stop drawing outside its profile; its explicit
   // state stays stored, so switching back restores the user's choice.
   const catalog = useMemo(
-    () => layersForProfile(rasterLayers, profileId),
-    [rasterLayers, profileId],
+    () => layersForProfile(renderableLayers, profileId),
+    [renderableLayers, profileId],
   );
 
   const overlays = useMemo(
@@ -190,7 +202,7 @@ export function useOverlays(
   );
 
   return {
-    allCatalog: rasterLayers,
+    allCatalog: renderableLayers,
     catalog,
     state,
     overlays,

@@ -44,6 +44,7 @@ export function TracksSheet({
   onExport,
   onDelete,
   onImport,
+  onImportInatur,
   onLoadTrackData,
   bottomInset = 0,
 }: {
@@ -58,6 +59,8 @@ export function TracksSheet({
   onDelete: (id: string) => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
   onImport: (options?: ImportOptions) => Promise<ImportResult | null>;
+  /** Resolve an iNatur permit link/id and import its boundary as a track. */
+  onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
   /** Parsed geometry for the elevation profile (cached by the shared hook). */
   onLoadTrackData: (id: string) => Promise<TrackData | null>;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
@@ -68,6 +71,10 @@ export function TracksSheet({
   // Import destination: a folder id, 'root' for no folder, or 'new' (named below).
   const [target, setTarget] = useState('root');
   const [newFolder, setNewFolder] = useState('');
+  // iNatur permit-boundary tool: paste an offer link/id, get its area as a
+  // track saved into the same destination folder as a file import.
+  const [inaturInput, setInaturInput] = useState('');
+  const [inaturBusy, setInaturBusy] = useState(false);
   // Track whose elevation profile is expanded, and its lazily-loaded geometry
   // (null = still loading; the wrapper marks "loaded but unparseable" apart).
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -90,38 +97,70 @@ export function TracksSheet({
 
   const folders = useMemo(() => flattenFolders(collections), [collections]);
   const importDisabled = importing || (target === 'new' && !newFolder.trim());
+  // The new-folder guard also blocks the iNatur add, which shares the folder row.
+  const inaturDisabled =
+    inaturBusy || !inaturInput.trim() || (target === 'new' && !newFolder.trim());
+
+  // The chosen destination folder for both the file import and the iNatur tool.
+  const importOptions = (): ImportOptions =>
+    target === 'new'
+      ? { newCollection: { name: newFolder.trim() } }
+      : { collectionId: target === 'root' ? null : target };
+
+  // After a folder-creating import the folder is now a normal chip — drop back
+  // to the default so a second import doesn't make a duplicate of the same name.
+  const resetTargetAfterImport = () => {
+    setNewFolder('');
+    if (target === 'new') setTarget('root');
+  };
+
+  // Turn an import summary into the one-line status shown under the controls.
+  const summarize = (result: ImportResult): string => {
+    const bits: string[] = [];
+    if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
+    if (result.places.length) bits.push(`${result.places.length} place(s)`);
+    // A restored backup merges by id, so it adds nothing to tracks/places —
+    // without this a successful restore would report "nothing importable".
+    const restored = result.restored;
+    if (restored) {
+      const n = importedCount(restored);
+      bits.push(n > 0 ? `${n} record(s) from backup` : 'a backup (already up to date)');
+    }
+    let text = bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing importable found.';
+    if (result.errors.length) text = `${text} ${result.errors[0]}`.trim();
+    return text;
+  };
 
   const runImport = async () => {
     setImporting(true);
     setMessage(null);
     try {
-      const options: ImportOptions =
-        target === 'new'
-          ? { newCollection: { name: newFolder.trim() } }
-          : { collectionId: target === 'root' ? null : target };
-      const result = await onImport(options);
+      const result = await onImport(importOptions());
       if (result) {
-        // The new folder now exists as a normal chip — drop back to the default
-        // rather than silently creating a second folder of the same name.
-        setNewFolder('');
-        if (target === 'new') setTarget('root');
-        const bits: string[] = [];
-        if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
-        if (result.places.length) bits.push(`${result.places.length} place(s)`);
-        // A restored backup merges by id, so it adds nothing to tracks/places —
-        // without this a successful restore would report "nothing importable".
-        const restored = result.restored;
-        if (restored) {
-          const n = importedCount(restored);
-          bits.push(n > 0 ? `${n} record(s) from backup` : 'a backup (already up to date)');
-        }
-        setMessage(bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing importable found.');
-        if (result.errors.length) setMessage((m) => `${m ?? ''} ${result.errors[0]}`.trim());
+        resetTargetAfterImport();
+        setMessage(summarize(result));
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
+    }
+  };
+
+  const runInatur = async () => {
+    setInaturBusy(true);
+    setMessage(null);
+    try {
+      const result = await onImportInatur(inaturInput.trim(), importOptions());
+      if (result) {
+        setInaturInput('');
+        resetTargetAfterImport();
+        setMessage(summarize(result));
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInaturBusy(false);
     }
   };
 
@@ -190,6 +229,37 @@ export function TracksSheet({
           testID="import-folder-name"
         />
       ) : null}
+      {/* iNatur permit → boundary: paste an offer link/id and save its exact
+          area into the folder chosen above, as a track. */}
+      <Text style={styles.fieldLabel}>iNatur permit</Text>
+      <View style={styles.inaturRow}>
+        <TextInput
+          style={[styles.nameInput, styles.inaturInput]}
+          value={inaturInput}
+          onChangeText={setInaturInput}
+          placeholder="Offer link or id"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="go"
+          onSubmitEditing={() => {
+            if (!inaturDisabled) void runInatur();
+          }}
+          accessibilityLabel="iNatur offer link or id"
+          testID="inatur-input"
+        />
+        <Pressable
+          style={[styles.button, inaturDisabled ? styles.buttonDisabled : null]}
+          disabled={inaturDisabled}
+          onPress={() => void runInatur()}
+          testID="inatur-add"
+        >
+          {inaturBusy ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Add area</Text>
+          )}
+        </Pressable>
+      </View>
       {message ? <Text style={styles.muted}>{message}</Text> : null}
 
       {tracks.length === 0 ? (
@@ -301,6 +371,8 @@ const styles = StyleSheet.create({
   },
   actionRow: { flexDirection: 'row', gap: 8 },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted, marginTop: 8 },
+  inaturRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  inaturInput: { flex: 1 },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
   folderChip: {
     borderWidth: 1,

@@ -55,6 +55,8 @@ interface AppSheetsProps {
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
+  /** Resolve an iNatur permit link/id and import its boundary as a track. */
+  onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
 }
 
 /**
@@ -90,6 +92,7 @@ export function AppSheets({
   onDismissPendingPin,
   onPickDestination,
   onImportTracks,
+  onImportInatur,
 }: AppSheetsProps) {
   const editPlace = data.places.find((place) => place.id === editPlaceId) ?? null;
   return (
@@ -150,6 +153,7 @@ export function AppSheets({
         onDelete={(id) => void data.deleteTrack(id)}
         collections={data.collections}
         onImport={onImportTracks}
+        onImportInatur={onImportInatur}
         onLoadTrackData={(id) => data.getTrackData(id)}
         bottomInset={bottomInset}
       />

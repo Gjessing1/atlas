@@ -23,6 +23,7 @@ import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
@@ -70,6 +71,9 @@ function selectedRegionGeoJSON(bbox: BBox) {
 
 /** Layer id of the planned-route line — App hit-tests taps on it to insert vias. */
 export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
+
+/** Fill layer of the Statskog jaktfelt overlay — tapped for the field's identify card. */
+export const HUNT_FIELDS_FILL_LAYER_ID = 'atlas-jaktfelt-fill';
 
 /** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
 export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
@@ -150,6 +154,8 @@ interface MapSceneProps {
   overlays: ActiveOverlay[];
   /** Per-overlay label GeoJSON for the current viewport (see useOverlayLabels). */
   overlayLabels: OverlayLabelData;
+  /** Statskog hunting-fields coverage to draw (null = overlay off / not loaded). */
+  huntingFields: HuntingFields | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   /** First corner and completed rectangle while drawing a custom offline region. */
@@ -200,6 +206,7 @@ export function MapScene({
   packs,
   overlays,
   overlayLabels,
+  huntingFields,
   trackGeo,
   offlineRegionCorner,
   offlineRegionBbox,
@@ -319,24 +326,27 @@ export function MapScene({
         {/* Catalog overlays (hillshade, depths, trails, …): mounted first so
           they sit under every Atlas line/marker layer. maxzoom from the
           catalog caps requests — the map overzooms beyond it instead of
-          hammering limited-depth upstreams. */}
-        {overlays.map((overlay) => (
-          <RasterSource
-            key={overlay.meta.id}
-            id={`atlas-overlay-${overlay.meta.id}`}
-            tiles={[overlay.tileUrlTemplate]}
-            tileSize={256}
-            maxzoom={overlay.meta.maxzoom}
-            minzoom={overlay.meta.minzoom ?? 0}
-            attribution={overlay.meta.attribution}
-          >
-            <Layer
-              type="raster"
-              id={`atlas-overlay-${overlay.meta.id}-layer`}
-              paint={{ 'raster-opacity': overlay.opacity }}
-            />
-          </RasterSource>
-        ))}
+          hammering limited-depth upstreams. Vector overlays (the jaktfelt
+          polygons) draw as their own GeoJSON source below, not as rasters. */}
+        {overlays
+          .filter((overlay) => !overlay.meta.vector)
+          .map((overlay) => (
+            <RasterSource
+              key={overlay.meta.id}
+              id={`atlas-overlay-${overlay.meta.id}`}
+              tiles={[overlay.tileUrlTemplate]}
+              tileSize={256}
+              maxzoom={overlay.meta.maxzoom}
+              minzoom={overlay.meta.minzoom ?? 0}
+              attribution={overlay.meta.attribution}
+            >
+              <Layer
+                type="raster"
+                id={`atlas-overlay-${overlay.meta.id}-layer`}
+                paint={{ 'raster-opacity': overlay.opacity }}
+              />
+            </RasterSource>
+          ))}
         {/* Attribute labels drawn over the raster — the number a tile can't
           carry (a surveyed lake's max depth). Mounted after the rasters so
           they read on top, and only while the overlay itself is on. */}
@@ -376,6 +386,48 @@ export function MapScene({
             </GeoJSONSource>
           );
         })}
+        {/* Statskog storviltjaktfelt: state-forest big-game hunting fields as a
+          faint rust fill with a firmer outline and the field name at closer
+          zooms, the Fish & Hunt signature overlay. Drawn above the rasters but
+          under the tracks/routes; a tap on the fill opens the field's identify
+          card (see useMapPress → HUNT_FIELDS_FILL_LAYER_ID). */}
+        {huntingFields ? (
+          <GeoJSONSource id="atlas-jaktfelt" data={huntingFields.data}>
+            <Layer
+              type="fill"
+              id={HUNT_FIELDS_FILL_LAYER_ID}
+              paint={{ 'fill-color': '#c2410c', 'fill-opacity': 0.12 * huntingFields.opacity }}
+            />
+            <Layer
+              type="line"
+              id="atlas-jaktfelt-outline"
+              layout={{ 'line-join': 'round' }}
+              paint={{
+                'line-color': '#c2410c',
+                'line-width': ['interpolate', ['linear'], ['zoom'], 7, 1, 12, 2],
+                'line-opacity': 0.9 * huntingFields.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-jaktfelt-label"
+              minzoom={9}
+              layout={{
+                'text-field': ['get', 'Feltnavn'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12,
+                'text-max-width': 8,
+                'text-optional': true,
+              }}
+              paint={{
+                'text-color': '#7c2d12',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.4,
+                'text-opacity': huntingFields.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
         {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
         {packs.length > 0 ? (
           <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>

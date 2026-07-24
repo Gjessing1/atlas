@@ -12,10 +12,11 @@ import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useRef } from 'react';
 import type { RefObject } from 'react';
 
+import { STATSKOG_JAKTFELT_ID } from '../layers/useHuntingFields';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
-import { NAV_PREVIEW_LAYER_IDS, PLAN_LINE_LAYER_ID } from './MapScene';
+import { HUNT_FIELDS_FILL_LAYER_ID, NAV_PREVIEW_LAYER_IDS, PLAN_LINE_LAYER_ID } from './MapScene';
 
 /** Finger-sized query box for layer hit-tests (a 1 px point is too strict). */
 const TAP_PADDING_PX = 12;
@@ -49,6 +50,27 @@ export interface MapPressOptions {
 }
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
+
+type QueriedFeature = { properties?: Record<string, unknown> | null };
+
+/**
+ * A tapped Statskog jaktfelt polygon as an identify group for the card: the
+ * field name is the heading, the species it is opened for and Statskog's
+ * remarks are the rows (web parity with useHuntingFieldsLayer's popup). Local
+ * hit-test, not a server round trip — the coverage is already on the client.
+ */
+function huntingFieldGroup(hits: QueriedFeature[] | undefined): OverlayIdentifyGroup | null {
+  const props = hits?.[0]?.properties;
+  if (!props) return null;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const name = str(props['Feltnavn']);
+  const properties: Record<string, string> = {};
+  const species = str(props['Art']);
+  const remarks = str(props['Merknad']);
+  if (species) properties['Species'] = species;
+  if (remarks) properties['Remarks'] = remarks;
+  return { title: name ?? 'Hunting field', properties };
+}
 
 const boxAround = ({ x, y }: Pixel): PixelBounds => [
   [x - TAP_PADDING_PX, y - TAP_PADDING_PX],
@@ -135,14 +157,30 @@ export function useMapPress({
         const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
         const tap = ++tapSeq.current;
         if (!guiding) {
-          void identifyOverlays(
-            origin,
-            overlays.map((o) => o.meta),
-            { lat, lng },
-            zoom,
-          ).then((groups) => {
+          // The jaktfelt overlay answers locally (its polygons are drawn on the
+          // client), everything else via the backend identify. Asked together so
+          // a single tap that lands on both shows both, in one card.
+          const huntActive = overlays.some(
+            (o) => o.meta.id === STATSKOG_JAKTFELT_ID && o.meta.vector,
+          );
+          void (async () => {
+            const [serverGroups, huntHits] = await Promise.all([
+              identifyOverlays(
+                origin,
+                overlays.map((o) => o.meta),
+                { lat, lng },
+                zoom,
+              ),
+              huntActive
+                ? mapRef.current
+                    ?.queryRenderedFeatures(pixelBounds, { layers: [HUNT_FIELDS_FILL_LAYER_ID] })
+                    .catch(() => undefined)
+                : undefined,
+            ]);
+            const huntGroup = huntingFieldGroup(huntHits);
+            const groups = huntGroup ? [huntGroup, ...serverGroups] : serverGroups;
             if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
-          });
+          })();
         }
         // Ground size of one screen pixel at this zoom (512px tiles) makes the
         // tap tolerance a constant ~36 px at any zoom level.
