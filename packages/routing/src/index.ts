@@ -39,6 +39,7 @@ export {
   type RouteCameraSection,
   type RouteCameras,
 } from './cameras.js';
+export { osmCameraFromTags, parseOsmCameraDirection, type OsmTags } from './osmCameras.js';
 export {
   buildTraceAttributesRequest,
   enrichRoute,

@@ -65,6 +65,16 @@ docker run --rm "${LIMITS[@]}" -v "$WORK:/work" iboates/osmium:latest \
   -o "/work/$ID.geojsonseq" "/work/$ID.osm.pbf"
 node "$SCRIPT_DIR/build-search-db.mjs" "$OUT/search.sqlite" "$NAME" < "$WORK/$ID.geojsonseq"
 node "$SCRIPT_DIR/enrich-place-content.mjs" "$OUT/search.sqlite"
+
+echo "==> [$ID] building nvdb.sqlite (speed limits + cameras)"
+# Offline road data (ROADMAP §2.1): NVDB speed limits + ATK cameras clipped from
+# the national master, plus OSM speed cameras read from the same region extract
+# for coverage outside Norway. Reuses the search stream, so it must run before
+# the geojsonseq is removed. The script deletes its output when the region has
+# no road data, so a missing file below simply means "nothing to ship".
+rm -f "$OUT/nvdb.sqlite"
+node "$SCRIPT_DIR/build-pack-nvdb.mjs" "$OUT/nvdb.sqlite" "$BBOX" "$DATA_DIR/nvdb/nvdb.sqlite" \
+  < "$WORK/$ID.geojsonseq"
 rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
 
 echo "==> [$ID] building Valhalla routing tiles"
@@ -119,7 +129,7 @@ zipdir "$DATA_DIR/assets" "$OUT/assets.zip" fonts sprites
 echo "==> [$ID] writing pack.json"
 IFS=',' read -r MINLNG MINLAT MAXLNG MAXLAT <<< "$BBOX"
 node -e "
-const { statSync, writeFileSync, createReadStream } = require('node:fs');
+const { statSync, writeFileSync, createReadStream, existsSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const out = process.argv[1];
 // Streamed SHA-256 so the multi-hundred-MB tiles/routing files never load
@@ -135,18 +145,21 @@ const sha256 = (p) =>
   });
 const file = async (p) => ({ path: p, bytes: statSync(out + '/' + p).size, sha256: await sha256(p) });
 (async () => {
+  const files = {
+    basemap: await file('basemap.pmtiles'),
+    search: await file('search.sqlite'),
+    routing: await file('valhalla.tar'),
+    assets: await file('assets.zip'),
+  };
+  // Optional: build-pack-nvdb.mjs writes this only when the region has road data.
+  if (existsSync(out + '/nvdb.sqlite')) files.nvdb = await file('nvdb.sqlite');
   writeFileSync(out + '/pack.json', JSON.stringify({
     id: process.argv[2],
     name: process.argv[3],
     bbox: { sw: { lat: $MINLAT, lng: $MINLNG }, ne: { lat: $MAXLAT, lng: $MAXLNG } },
     version: Math.floor(Date.now() / 1000),
     builtAt: Date.now(),
-    files: {
-      basemap: await file('basemap.pmtiles'),
-      search: await file('search.sqlite'),
-      routing: await file('valhalla.tar'),
-      assets: await file('assets.zip'),
-    },
+    files,
   }, null, 2));
 })();
 " "$OUT" "$ID" "$NAME"
@@ -156,7 +169,7 @@ echo "==> [$ID] removing stale files"
 # so the pack dir only ever holds what pack.json references.
 for f in "$OUT"/*; do
   case "$(basename "$f")" in
-    basemap.pmtiles | search.sqlite | valhalla.tar | assets.zip | pack.json) ;;
+    basemap.pmtiles | search.sqlite | valhalla.tar | assets.zip | nvdb.sqlite | pack.json) ;;
     *)
       echo "    removing stale $(basename "$f")"
       rm -rf "$f"

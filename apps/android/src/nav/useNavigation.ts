@@ -5,7 +5,6 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
-import { httpNvdbCameras, httpNvdbLimits } from '@atlas/routing';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -13,6 +12,7 @@ import * as Speech from 'expo-speech';
 import { useMemo } from 'react';
 
 import { AudioFocus } from '../../modules/audiofocus';
+import { makeNvdbCameraTransport, makeNvdbLimitTransport } from '../routing/offlineNvdb';
 import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { NAV_LOCATION_TASK, setLocationHandler, toPosition } from './locationTask';
@@ -194,12 +194,13 @@ export function useNavigation(): NavController {
     () => ({
       provider: makeRouteProvider(serverOrigin),
       trace: makeTraceTransport(serverOrigin),
-      // NVDB limits + ATK cameras over the server for now — best-effort, so an
-      // offline drive simply keeps the tile limits and gets no camera guidance.
-      // The §2.1 end state is the same conflation against a pack-local copy of
-      // the dataset; that lands when packs actually ship the NVDB SQLite.
-      nvdbLimits: httpNvdbLimits({ baseUrl: serverOrigin }),
-      nvdbCameras: httpNvdbCameras({ baseUrl: serverOrigin }),
+      // NVDB speed limits + ATK/OSM cameras, offline-first (ROADMAP §2.1): a
+      // downloaded pack that ships nvdb.sqlite answers from its own copy of the
+      // dataset with the same conflation the server runs; otherwise these fall
+      // back to the server, and an offline drive with no such pack simply keeps
+      // the tile limits and gets no camera guidance.
+      nvdbLimits: makeNvdbLimitTransport(serverOrigin),
+      nvdbCameras: makeNvdbCameraTransport(serverOrigin),
       currentFix,
       watchFixes,
       speak,

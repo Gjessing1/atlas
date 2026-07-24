@@ -362,7 +362,14 @@ export class RegionJobManager {
         progress: 0.65,
         detail: `Adding routing and search from ${enclosing.manifest.name}`,
       });
-      for (const kind of ['search', 'routing', 'assets'] as const) {
+      // The enclosing pack's road-data dataset (ROADMAP §2.1) is optional — it's
+      // absent for a region with no NVDB clip and no OSM cameras. When present,
+      // reuse it whole: it's clipped to the enclosing region (a superset of this
+      // custom bbox), and the on-device conflation bbox-filters it anyway.
+      const reusedKinds = (['search', 'routing', 'assets', 'nvdb'] as const).filter(
+        (kind) => enclosing.manifest.files[kind],
+      );
+      for (const kind of reusedKinds) {
         const file = enclosing.manifest.files[kind]!;
         await copyFile(
           path.join(enclosing.dir, file.path),
@@ -373,13 +380,14 @@ export class RegionJobManager {
       const files: RegionPackManifest['files'] = {};
       for (const [kind, fileName, reusableSha] of [
         ['basemap', 'basemap.pmtiles', undefined],
-        ['search', enclosing.manifest.files.search!.path, enclosing.manifest.files.search!.sha256],
-        [
-          'routing',
-          enclosing.manifest.files.routing!.path,
-          enclosing.manifest.files.routing!.sha256,
-        ],
-        ['assets', enclosing.manifest.files.assets!.path, enclosing.manifest.files.assets!.sha256],
+        ...reusedKinds.map(
+          (kind) =>
+            [
+              kind,
+              enclosing.manifest.files[kind]!.path,
+              enclosing.manifest.files[kind]!.sha256,
+            ] as const,
+        ),
       ] as const) {
         const filePath = path.join(stagingDir, fileName);
         files[kind] = {
