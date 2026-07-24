@@ -455,6 +455,38 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         paint(layer, 'text-opacity', 0.92);
         paint(layer, 'icon-opacity', 0.9);
       }
+      // Transit lines the basemap already carries: the `transportation` layer
+      // splits `class == rail` (mainline) from `class == transit` (tram/subway/
+      // light rail), drawn flat grey and only from ~z14. Explore is the urban
+      // profile, so lift them into coloured lines — mainline rail a steel blue
+      // revealed earlier, transit an amber accent that fades in only when
+      // zoomed in, so the minor lines drop out when zoomed out. The bridge/
+      // tunnel and hatching (rail-tie) clones are recoloured to match, so the
+      // whole line reads as one colour rather than grey ties over a tint. This
+      // is a `match`-free set of plain paints, so it renders on Android too.
+      if (layer.type === 'line' && /(major_rail|transit_rail)(_hatching)?$/.test(layer.id)) {
+        const isTransit = /transit_rail(_hatching)?$/.test(layer.id);
+        const color = isTransit ? (dark ? '#e6a760' : '#c67a1e') : dark ? '#7f93ab' : '#5f7186';
+        paint(layer, 'line-color', color);
+        // The hatching clone keeps its own dash/width (the ties); only its
+        // colour changes. The solid base line gets the zoom fade + width.
+        if (!/_hatching$/.test(layer.id)) {
+          paint(
+            layer,
+            'line-opacity',
+            isTransit
+              ? ['interpolate', ['linear'], ['zoom'], 11.5, 0, 13, 0.85]
+              : ['interpolate', ['linear'], ['zoom'], 9.5, 0, 11, 0.9],
+          );
+          paint(
+            layer,
+            'line-width',
+            isTransit
+              ? ['interpolate', ['exponential', 1.4], ['zoom'], 13, 0.6, 15, 1.1, 20, 2.4]
+              : ['interpolate', ['exponential', 1.4], ['zoom'], 11, 0.5, 15, 1.2, 20, 2.6],
+          );
+        }
+      }
     }
   }
 

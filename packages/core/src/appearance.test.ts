@@ -31,6 +31,27 @@ const style = JSON.stringify({
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 20, 13],
       },
     },
+    {
+      id: 'road_major_rail',
+      type: 'line',
+      paint: {
+        'line-color': '#bbb',
+        'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 14, 0.4, 20, 2],
+      },
+    },
+    {
+      id: 'road_transit_rail',
+      type: 'line',
+      paint: {
+        'line-color': '#bbb',
+        'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 14, 0.4, 20, 2],
+      },
+    },
+    {
+      id: 'road_transit_rail_hatching',
+      type: 'line',
+      paint: { 'line-color': '#bbb', 'line-dasharray': [0.2, 8], 'line-width': 3 },
+    },
     { id: 'label_city', type: 'symbol', paint: { 'text-color': '#000' } },
     {
       id: 'poi_r1',
@@ -147,6 +168,33 @@ describe('map appearance', () => {
       result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-opacity'],
     ).toBe(0.7);
     expect(result.find((layer) => layer.id === 'poi_r1')?.paint['text-opacity']).toBe(0.92);
+    // Transit signature: mainline rail steel-blue and revealed earlier, tram/
+    // subway amber and fading in only when zoomed in (minor lines drop out).
+    const rail = result.find((layer) => layer.id === 'road_major_rail')?.paint;
+    expect(rail?.['line-color']).toBe('#5f7186');
+    expect(rail?.['line-opacity']).toEqual(['interpolate', ['linear'], ['zoom'], 9.5, 0, 11, 0.9]);
+    const transit = result.find((layer) => layer.id === 'road_transit_rail')?.paint;
+    expect(transit?.['line-color']).toBe('#c67a1e');
+    expect(transit?.['line-opacity']).toEqual([
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      11.5,
+      0,
+      13,
+      0.85,
+    ]);
+    // The hatching (rail-tie) clone is recoloured to match but keeps its dash.
+    const hatch = result.find((layer) => layer.id === 'road_transit_rail_hatching')?.paint;
+    expect(hatch?.['line-color']).toBe('#c67a1e');
+    expect(hatch?.['line-dasharray']).toEqual([0.2, 8]);
+  });
+
+  it('leaves rail flat grey outside the Explore profile', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'hike' }));
+    expect(result.find((layer) => layer.id === 'road_major_rail')?.paint['line-color']).toBe(
+      '#bbb',
+    );
   });
 
   it('applies sanitized user edits after the curated theme/profile', () => {
