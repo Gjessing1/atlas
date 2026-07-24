@@ -14,9 +14,15 @@ import type { RefObject } from 'react';
 
 import { STATSKOG_JAKTFELT_ID } from '../layers/useHuntingFields';
 import type { ActiveOverlay } from '../layers/useOverlays';
+import { SPEED_CAMERAS_ID } from '../layers/useSpeedCameras';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
-import { HUNT_FIELDS_FILL_LAYER_ID, NAV_PREVIEW_LAYER_IDS, PLAN_LINE_LAYER_ID } from './MapScene';
+import {
+  HUNT_FIELDS_FILL_LAYER_ID,
+  NAV_PREVIEW_LAYER_IDS,
+  PLAN_LINE_LAYER_ID,
+  SPEED_CAMERA_LAYER_IDS,
+} from './MapScene';
 
 /** Finger-sized query box for layer hit-tests (a 1 px point is too strict). */
 const TAP_PADDING_PX = 12;
@@ -70,6 +76,25 @@ function huntingFieldGroup(hits: QueriedFeature[] | undefined): OverlayIdentifyG
   if (species) properties['Species'] = species;
   if (remarks) properties['Remarks'] = remarks;
   return { title: name ?? 'Hunting field', properties };
+}
+
+/**
+ * A tapped ATK camera as an identify group (web parity with
+ * useSpeedCameraLayer's popup): the heading says *which kind* of enforcement it
+ * is, because a fixed camera and an average-speed section are driven
+ * differently, and the row is Vegvesen's own name for it. Also a local
+ * hit-test — the coverage is on the client already.
+ */
+function speedCameraGroup(hits: QueriedFeature[] | undefined): OverlayIdentifyGroup | null {
+  const props = hits?.[0]?.properties;
+  if (!props) return null;
+  const point = props['kind'] === 'point';
+  const name =
+    typeof props['name'] === 'string' && props['name'].trim() ? props['name'].trim() : null;
+  return {
+    title: point ? 'Speed camera' : 'Average speed control',
+    properties: name ? { Name: name } : {},
+  };
 }
 
 const boxAround = ({ x, y }: Pixel): PixelBounds => [
@@ -157,28 +182,34 @@ export function useMapPress({
         const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
         const tap = ++tapSeq.current;
         if (!guiding) {
-          // The jaktfelt overlay answers locally (its polygons are drawn on the
+          // The vector overlays answer locally (their features are drawn on the
           // client), everything else via the backend identify. Asked together so
-          // a single tap that lands on both shows both, in one card.
-          const huntActive = overlays.some(
-            (o) => o.meta.id === STATSKOG_JAKTFELT_ID && o.meta.vector,
-          );
+          // a single tap that lands on several shows them all, in one card.
+          const vectorOn = (id: string) => overlays.some((o) => o.meta.id === id && o.meta.vector);
+          const query = (active: boolean, layers: string[]) =>
+            active
+              ? mapRef.current
+                  ?.queryRenderedFeatures(pixelBounds, { layers })
+                  .catch(() => undefined)
+              : undefined;
           void (async () => {
-            const [serverGroups, huntHits] = await Promise.all([
+            const [serverGroups, huntHits, cameraHits] = await Promise.all([
               identifyOverlays(
                 origin,
                 overlays.map((o) => o.meta),
                 { lat, lng },
                 zoom,
               ),
-              huntActive
-                ? mapRef.current
-                    ?.queryRenderedFeatures(pixelBounds, { layers: [HUNT_FIELDS_FILL_LAYER_ID] })
-                    .catch(() => undefined)
-                : undefined,
+              query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
+              query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
             ]);
-            const huntGroup = huntingFieldGroup(huntHits);
-            const groups = huntGroup ? [huntGroup, ...serverGroups] : serverGroups;
+            // Local groups lead: they are what the user aimed at, and the
+            // server rows are ambient context for the same point.
+            const groups = [
+              speedCameraGroup(cameraHits),
+              huntingFieldGroup(huntHits),
+              ...serverGroups,
+            ].filter((group): group is OverlayIdentifyGroup => group !== null);
             if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
           })();
         }

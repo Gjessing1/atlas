@@ -26,6 +26,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
+import type { SpeedCameras } from '../layers/useSpeedCameras';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
@@ -74,6 +75,18 @@ export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
 
 /** Fill layer of the Statskog jaktfelt overlay — tapped for the field's identify card. */
 export const HUNT_FIELDS_FILL_LAYER_ID = 'atlas-jaktfelt-fill';
+
+/**
+ * Layers of the ATK speed-camera overlay a tap can land on — the dot and the
+ * average-speed line (its white casing is the wider target, so it is listed
+ * too). Order matters: a point camera sitting on a section should identify as
+ * the camera.
+ */
+export const SPEED_CAMERA_LAYER_IDS = [
+  'atlas-cameras-point',
+  'atlas-cameras-section',
+  'atlas-cameras-section-casing',
+];
 
 /** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
 export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
@@ -156,6 +169,8 @@ interface MapSceneProps {
   overlayLabels: OverlayLabelData;
   /** Statskog hunting-fields coverage to draw (null = overlay off / not loaded). */
   huntingFields: HuntingFields | null;
+  /** ATK speed-camera coverage to draw (null = overlay off / not loaded). */
+  speedCameras: SpeedCameras | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   /** First corner and completed rectangle while drawing a custom offline region. */
@@ -207,6 +222,7 @@ export function MapScene({
   overlays,
   overlayLabels,
   huntingFields,
+  speedCameras,
   trackGeo,
   offlineRegionCorner,
   offlineRegionBbox,
@@ -424,6 +440,91 @@ export function MapScene({
                 'text-halo-color': '#ffffff',
                 'text-halo-width': 1.4,
                 'text-opacity': huntingFields.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* ATK speed cameras (web useSpeedCameraLayer's twin, same enforcement
+          amber): fixed point cameras as dots, average-speed sections as lines
+          with a white casing so they read over any road colour, names once
+          zoomed in enough to be worth reading. This is the *map* layer — the
+          spoken/visual warnings while navigating come from the pack's own
+          camera tables (offlineNvdb) and work with no network. A tap on either
+          opens the identify card (see useMapPress → SPEED_CAMERA_LAYER_IDS). */}
+        {speedCameras ? (
+          <GeoJSONSource id="atlas-cameras" data={speedCameras.data}>
+            <Layer
+              type="line"
+              id="atlas-cameras-section-casing"
+              filter={['==', ['get', 'kind'], 'section']}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{
+                'line-color': '#ffffff',
+                'line-width': 7,
+                'line-opacity': 0.85 * speedCameras.opacity,
+              }}
+            />
+            <Layer
+              type="line"
+              id="atlas-cameras-section"
+              filter={['==', ['get', 'kind'], 'section']}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{
+                'line-color': '#d97706',
+                'line-width': 4,
+                'line-opacity': speedCameras.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-cameras-section-label"
+              filter={['==', ['get', 'kind'], 'section']}
+              minzoom={9}
+              layout={{
+                'symbol-placement': 'line',
+                'text-field': ['coalesce', ['get', 'name'], 'Average speed control'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12,
+                'text-offset': [0, 1],
+              }}
+              paint={{
+                'text-color': '#8a4b04',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.4,
+                'text-opacity': speedCameras.opacity,
+              }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-cameras-point"
+              filter={['==', ['get', 'kind'], 'point']}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 10, 6, 14, 8],
+                'circle-color': '#d97706',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff',
+                'circle-opacity': speedCameras.opacity,
+                'circle-stroke-opacity': speedCameras.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-cameras-point-label"
+              filter={['==', ['get', 'kind'], 'point']}
+              minzoom={11}
+              layout={{
+                'text-field': ['get', 'name'],
+                'text-font': ['Noto Sans Regular'],
+                'text-size': 11.5,
+                'text-offset': [0, 1.1],
+                'text-anchor': 'top',
+                'text-optional': true,
+              }}
+              paint={{
+                'text-color': '#8a4b04',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.4,
+                'text-opacity': speedCameras.opacity,
               }}
             />
           </GeoJSONSource>

@@ -50,6 +50,7 @@ import { MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
+import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -212,6 +213,10 @@ function AppInner() {
   // The Statskog jaktfelt vector overlay's coverage (one GeoJSON fetch), drawn
   // by MapScene while the overlay is on — the Fish & Hunt signature layer.
   const huntingFields = useHuntingFields(overlaysCtl.overlays, serverOrigin);
+  // The ATK speed cameras as a map layer (the Drive signature overlay). The
+  // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
+  // is only the drawn layer.
+  const speedCameras = useSpeedCameras(overlaysCtl.overlays, serverOrigin);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -543,6 +548,7 @@ function AppInner() {
         overlays={overlaysCtl.overlays}
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
+        speedCameras={speedCameras}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}

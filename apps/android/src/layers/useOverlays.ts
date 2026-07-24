@@ -14,9 +14,9 @@ import type { UserData } from '../useUserData';
 // Vector overlay ids MapScene knows how to draw as GeoJSON. Any vector layer
 // outside this set is hidden from the panel until its renderer lands (see the
 // `renderableLayers` filter below). Kept as an explicit id set rather than a
-// clever heuristic — the two vector layers genuinely differ in what drawing
-// them means (polygons vs. per-camera nav warnings).
-const RENDERABLE_VECTOR_IDS = new Set(['statskog-jaktfelt']);
+// clever heuristic — the vector layers genuinely differ in what drawing them
+// means (hunting-field polygons vs. camera dots and average-speed lines).
+const RENDERABLE_VECTOR_IDS = new Set(['statskog-jaktfelt', 'speed-cameras']);
 
 // Visibility/opacity are device-local preferences (`local.` keys never sync).
 const STATE_SETTING = 'local.layers.state';
@@ -171,12 +171,11 @@ export function useOverlays(
     [state, stateKey, profileId, allLayers],
   );
 
-  // Vector overlays are only offered once MapScene can draw them. The Statskog
-  // jaktfelt polygons now render as a GeoJSON overlay (see useHuntingFields +
-  // MapScene), so that one is kept; the speed-camera vector layer stays dropped
-  // until its on-map warnings exist here — a toggle that draws nothing is worse
-  // than not offering it. The *stored* catalog cache stays raw, so widening this
-  // set later needs no migration.
+  // Vector overlays are only offered once MapScene can draw them — a toggle
+  // that draws nothing is worse than not offering it. Both current ones do:
+  // the Statskog jaktfelt polygons (useHuntingFields) and the ATK cameras
+  // (useSpeedCameras), each a GeoJSON overlay MapScene paints. The *stored*
+  // catalog cache stays raw, so widening this set needs no migration.
   const renderableLayers = useMemo(
     () => allLayers.filter((meta) => !meta.vector || RENDERABLE_VECTOR_IDS.has(meta.id)),
     [allLayers],
