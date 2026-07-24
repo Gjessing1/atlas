@@ -276,9 +276,12 @@ function tuneDarkLayer(layer: StyleLayer): void {
 /**
  * Ski's winter palette: open ground whites out to snow, and lakes read as
  * *traversable* frozen terrain (near-white fill + pale-blue outline) rather
- * than the blue barriers the base style paints. But forest and built-up blocks
- * must stay legible — the treeline and neighbourhoods are exactly what a ski
- * map navigates by — so wood keeps a clear cool green and residential/buildings
+ * than the blue barriers the base style paints. The sea is the exception:
+ * salt water rarely freezes solid, so `class == ocean` keeps a real, bluer
+ * water colour — a barrier, not a surface to ski onto — while inland lakes
+ * and rivers get the frozen wash. But forest and built-up blocks must stay
+ * legible — the treeline and neighbourhoods are exactly what a ski map
+ * navigates by — so wood keeps a clear cool green and residential/buildings
  * keep contrast against the snow rather than washing to white. Applied on top
  * of the light/dark tune, so it wins for the handful of layers it touches.
  */
@@ -287,8 +290,21 @@ function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
     paint(layer, 'background-color', dark ? '#20282b' : '#eef2f2');
   }
   if (layer.id === 'water') {
-    paint(layer, 'fill-color', dark ? '#3f515c' : '#eaf1f6');
-    paint(layer, 'fill-outline-color', dark ? '#5d7686' : '#b7d0e0');
+    // Data-driven on the OpenMapTiles `water` class: sea stays open water,
+    // everything inland reads as frozen-traversable. `match` on a colour is
+    // already used elsewhere in this file, so it renders on Android too.
+    const frozenFill = dark ? '#3f515c' : '#eaf1f6';
+    const seaFill = dark ? '#264352' : '#b9d4e6';
+    const frozenOutline = dark ? '#5d7686' : '#b7d0e0';
+    const seaOutline = dark ? '#3d6076' : '#8fb8d0';
+    paint(layer, 'fill-color', ['match', ['get', 'class'], 'ocean', seaFill, frozenFill]);
+    paint(layer, 'fill-outline-color', [
+      'match',
+      ['get', 'class'],
+      'ocean',
+      seaOutline,
+      frozenOutline,
+    ]);
   }
   if (layer.type === 'line' && /^waterway_/.test(layer.id)) {
     paint(layer, 'line-color', dark ? '#5d7686' : '#a9c4d6');

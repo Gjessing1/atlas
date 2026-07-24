@@ -416,7 +416,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'trails-ski',
-        rev: 1,
+        rev: 2,
         title: 'Ski tracks',
         description: 'Marked cross-country ski routes (Skiløype).',
         group: 'Trails',
@@ -431,7 +431,10 @@ export function norwegianLayers(): OverlayLayer[] {
         kind: 'wms',
         url: 'https://wms.geonorge.no/skwms1/wms.friluftsruter2',
         version: '1.3.0',
-        layers: 'Skiløype',
+        // The WMS layer is named without the ø (GetCapabilities: "Skiloype").
+        // "Skiløype" returns a LayerNotDefined fault, i.e. an always-empty
+        // overlay — not a seasonal gap. Kartverket's route DB is year-round.
+        layers: 'Skiloype',
       },
     },
     {

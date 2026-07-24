@@ -3,7 +3,7 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.89.0",
+    "version": "0.90.0",
     "runtimeVersion": "5",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",

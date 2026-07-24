@@ -113,8 +113,22 @@ describe('map appearance', () => {
   it('paints frozen-lake winter cartography for Ski', () => {
     const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'ski' }));
     const water = result.find((layer) => layer.id === 'water')?.paint;
-    expect(water?.['fill-color']).toBe('#eaf1f6');
-    expect(water?.['fill-outline-color']).toBe('#b7d0e0');
+    // Inland water freezes and reads as traversable snow; the sea keeps a
+    // bluer open-water colour because salt water rarely freezes solid.
+    expect(water?.['fill-color']).toEqual([
+      'match',
+      ['get', 'class'],
+      'ocean',
+      '#b9d4e6',
+      '#eaf1f6',
+    ]);
+    expect(water?.['fill-outline-color']).toEqual([
+      'match',
+      ['get', 'class'],
+      'ocean',
+      '#8fb8d0',
+      '#b7d0e0',
+    ]);
     expect(result.find((layer) => layer.id === 'background')?.paint['background-color']).toBe(
       '#eef2f2',
     );
