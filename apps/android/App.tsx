@@ -66,6 +66,7 @@ import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
+import { usePackFreshness } from './src/regions/usePackFreshness';
 import { inaturOfferToFile } from './src/inatur';
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
@@ -549,6 +550,10 @@ function AppInner() {
   // Downloaded tiles win wherever a pack covers the view (Settings can force
   // server tiles); everything else — search, routing, weather — stays online-first.
   const tiles = useTileSource(data, packs, camera.viewCenter);
+  // Whether the pack currently drawing the map has been rebuilt on the server.
+  const stalePacks = usePackFreshness(packs);
+  const packStale =
+    tiles.coveringPack !== undefined && stalePacks.has(tiles.coveringPack.manifest.id);
   const { mapStyle, originReady, useOffline } = useMapStyle(
     data.storage,
     tiles.coveringPack,
@@ -718,14 +723,19 @@ function AppInner() {
           pointerEvents="box-none"
         >
           <View style={styles.attributionCell} pointerEvents="none" />
+          {/* The badge says the map is coming from disk. When the server has
+              since rebuilt that region it also says *that*, because otherwise a
+              months-old download keeps drawing months-old data and the reader
+              blames the app rather than the pack. Settings does the updating. */}
           <View
-            style={styles.offlineBadge}
+            style={[styles.offlineBadge, packStale && styles.offlineBadgeStale]}
             accessibilityLabel={`Offline map${
               tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
-            }`}
+            }${packStale ? ' · update available in Settings' : ''}`}
             testID="offline-badge"
           >
-            <CloudOffIcon />
+            <CloudOffIcon color={packStale ? theme.warning : undefined} />
+            {packStale ? <Text style={styles.offlineBadgeStaleText}>Update</Text> : null}
           </View>
         </View>
       ) : null}
@@ -978,6 +988,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 2,
   },
+  // Wider when it has a word to say, so the glyph is not squeezed by the label.
+  offlineBadgeStale: {
+    flexDirection: 'row',
+    gap: 5,
+    width: 'auto',
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: theme.warning,
+  },
+  offlineBadgeStaleText: { color: theme.warning, fontSize: 11, fontWeight: '800' },
   banner: {
     position: 'absolute',
     top: 100,

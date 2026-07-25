@@ -79,9 +79,11 @@ async function offlineNearby(packs: LocalPack[], at: LatLng): Promise<NearbyPlac
  * Described places around this point — what the card's own name lookup cannot
  * answer, since most POIs are not themselves the subject of an article.
  *
- * Pack first, network second (the same order as the article lookup), and only
- * once the section is opened: it is a second round trip on a card that is
- * usually opened to get directions.
+ * The pack answers first so the list is instant and works offline, and the
+ * online answer then *replaces* it: packs carry no thumbnails and a pack is
+ * only as fresh as the day it was downloaded, so a connected phone should never
+ * be shown the poorer list. Fetched only once the section is opened — it is a
+ * second round trip on a card that is usually opened to get directions.
  */
 export function useNearbyPlaces(
   packs: LocalPack[],
@@ -101,10 +103,7 @@ export function useNearbyPlaces(
     void (async () => {
       const local = await offlineNearby(packs, { lat, lng });
       if (cancelled) return;
-      if (local.length > 0) {
-        setState({ status: 'ready', places: local });
-        return;
-      }
+      if (local.length > 0) setState({ status: 'ready', places: local });
       try {
         const params = new URLSearchParams({
           lat: String(lat),
@@ -117,9 +116,12 @@ export function useNearbyPlaces(
         const places = response.ok
           ? ((await response.json()) as { places: NearbyPlaceArticle[] }).places
           : [];
-        if (!cancelled) setState({ status: 'ready', places });
+        // Keep the pack list rather than emptying a list that had rows in it.
+        if (!cancelled && (places.length > 0 || local.length === 0)) {
+          setState({ status: 'ready', places });
+        }
       } catch {
-        if (!cancelled) setState({ status: 'ready', places: [] });
+        if (!cancelled && local.length === 0) setState({ status: 'ready', places: [] });
       }
     })();
     return () => {

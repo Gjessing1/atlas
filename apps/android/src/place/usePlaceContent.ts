@@ -48,7 +48,16 @@ async function offlineContent(
   return [];
 }
 
-/** Offline pack first, Wikimedia proxy second. */
+/**
+ * Pack article first so something shows instantly and offline — then the online
+ * lookup *upgrades* it.
+ *
+ * The pack used to win outright, which quietly meant a downloaded region turned
+ * photos off: packs carry article text only (by design — images would multiply
+ * their size), so a phone with a region downloaded over Asker showed the same
+ * card it would have shown on a plane, with the network sitting right there.
+ * Offline the pack answer stands; online the richer answer replaces it.
+ */
 export function usePlaceContent(
   packs: LocalPack[],
   name: string | undefined,
@@ -66,10 +75,8 @@ export function usePlaceContent(
     void (async () => {
       const local = await offlineContent(packs, name, at);
       if (cancelled) return;
-      if (local.length > 0) {
-        setState({ status: 'ready', content: local });
-        return;
-      }
+      // Shown while the network is asked, not instead of asking it.
+      if (local.length > 0) setState({ status: 'ready', content: local });
       try {
         const params = new URLSearchParams({
           name,
@@ -82,9 +89,14 @@ export function usePlaceContent(
         const content = response.ok
           ? ((await response.json()) as { content: PlaceContent[] }).content
           : [];
-        if (!cancelled) setState({ status: 'ready', content });
+        // An empty online answer must not wipe a pack article that *did* match:
+        // the pack's name index is exact, so where it matched it is right.
+        if (!cancelled && (content.length > 0 || local.length === 0)) {
+          setState({ status: 'ready', content });
+        }
       } catch {
-        if (!cancelled) setState({ status: 'ready', content: [] });
+        // Offline (or a slow upstream): the pack article stands.
+        if (!cancelled && local.length === 0) setState({ status: 'ready', content: [] });
       }
     })();
     return () => {
