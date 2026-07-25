@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanProps,
+  keepsIdentify,
   parseEsriXmlInfo,
   parseGeojsonInfo,
   parseGmlInfo,
@@ -41,6 +42,43 @@ describe('cleanProps', () => {
 
   it('caps a runaway value rather than shipping it to the client', () => {
     expect(cleanProps({ merknad: 'x'.repeat(500) }).merknad).toHaveLength(200);
+  });
+});
+
+describe('keepsIdentify', () => {
+  const keep = { field: 'LTEMA', values: ['3211'] };
+
+  it('drops a feature the map does not draw', () => {
+    // Verbatim shape of a real tap in the middle of Vansjø: NVE answers with
+    // the lake through-flow centreline, which the river SLD filters out of the
+    // tile — so the card would name a river over water showing no river at all.
+    expect(keepsIdentify(keep, { elvenavn: 'Mossevassdraget', Strahler: '6', LTEMA: '3103' })).toBe(
+      false,
+    );
+    expect(keepsIdentify(keep, { elvenavn: 'Glomma', LTEMA: '3211' })).toBe(true);
+  });
+
+  it('survives cleanProps, which is the only reason it can filter at all', () => {
+    // `ltema` used to be in NOISE_KEYS. It is scrubbed *before* any filter runs,
+    // so listing it there deleted the evidence and every lake centreline came
+    // straight back through as a confident answer.
+    const cleaned = cleanProps({ LTEMA: '3103', elvenavn: 'Mossevassdraget', OBJECTID: 1 });
+    expect(cleaned.LTEMA).toBe('3103');
+    expect(keepsIdentify(keep, cleaned)).toBe(false);
+  });
+
+  it('matches the field name case-insensitively', () => {
+    // `ltema` over the REST service, `LTEMA` in ESRI's identify dialect.
+    expect(keepsIdentify(keep, { ltema: '3211' })).toBe(true);
+    expect(keepsIdentify(keep, { ltema: '3299' })).toBe(false);
+  });
+
+  it('keeps everything when unset, empty, or the field is absent', () => {
+    expect(keepsIdentify(undefined, { LTEMA: '3103' })).toBe(true);
+    expect(keepsIdentify({ field: 'LTEMA', values: [] }, { LTEMA: '3103' })).toBe(true);
+    // Missing field ⇒ keep: the filter exists to match the map, not to hide
+    // answers it cannot classify (same rule as optionKeeps).
+    expect(keepsIdentify(keep, { elvenavn: 'Glomma' })).toBe(true);
   });
 });
 

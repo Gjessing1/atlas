@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeLayerOptions } from '@atlas/core';
-import { artfunksjonSld, norwegianLayers, type WmsUpstream } from './catalog.js';
+import { artfunksjonSld, elvenettSld, norwegianLayers, type WmsUpstream } from './catalog.js';
 import { optionGetMapParams } from './options.js';
 import { substituteEnv, tileBbox3857, tileCoords, wmsBaseParams } from './wms.js';
 
@@ -121,6 +121,84 @@ describe('artfunksjonSld', () => {
       }
       expect(url.toString().length, `${choice.value} request URL`).toBeLessThan(2000);
     }
+  });
+});
+
+describe('elvenettSld', () => {
+  it('filters every rule to real channels, never lakes or fictitious lines', () => {
+    // The whole point of the style: the network is routed *through* lakes
+    // (665 093 centreline segments) and carries 21 255 imaginary connectors, so
+    // a rule that forgets the class test draws rivers across open water.
+    const sld = elvenettSld(1);
+    const rules = sld.split('<Rule>').slice(1);
+    expect(rules).toHaveLength(4);
+    for (const rule of rules) {
+      expect(rule).toContain('<ogc:PropertyName>ltema</ogc:PropertyName>');
+      expect(rule).toContain('<ogc:Literal>3211</ogc:Literal>');
+    }
+  });
+
+  it('filters on the database field name, not the identify alias', () => {
+    // GetMap filters on `elveordenstrahler`; GetFeatureInfo *answers* with the
+    // alias `Strahler`. Swapping them fails silently — the filter matches
+    // nothing and the layer simply draws blank.
+    const sld = elvenettSld(1);
+    expect(sld).toContain('<ogc:PropertyName>elveordenstrahler</ogc:PropertyName>');
+    expect(sld).not.toContain('>Strahler<');
+  });
+
+  it('drops the bands below the requested order and widens the survivors’ floor', () => {
+    const main = elvenettSld(3);
+    expect(main.split('<Rule>').slice(1)).toHaveLength(3);
+    // The 2–3 band survives as 3–3 rather than being dropped or left at 2.
+    expect(main).toContain(
+      '<ogc:PropertyIsGreaterThanOrEqualTo><ogc:PropertyName>elveordenstrahler</ogc:PropertyName>' +
+        '<ogc:Literal>3</ogc:Literal></ogc:PropertyIsGreaterThanOrEqualTo>',
+    );
+    expect(main).not.toContain('<ogc:Literal>1</ogc:Literal>');
+  });
+
+  it('never emits a single-operand And', () => {
+    // The Naturbase service silently ignores a one-child `<ogc:Or>` and draws
+    // everything; nothing says ArcGIS treats `<ogc:And>` better, so every
+    // filter here must carry the class test plus at least one bound.
+    for (const min of [1, 3]) {
+      for (const rule of elvenettSld(min).split('<Rule>').slice(1)) {
+        const operands = [...rule.matchAll(/<ogc:PropertyIs/g)].length;
+        expect(operands).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+
+  it('keeps every river GetMap request inside NVE’s ~10 kB URL cap', () => {
+    // Measured 2026-07-25: 10 083 chars answered, 11 083 did not — and it fails
+    // by *dropping the connection*, not with a fault body, so an over-long
+    // request surfaces as "upstream unreachable" rather than anything that
+    // points at the URL. Five times Naturbase's ~2 kB, hence its own guard.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'rivers')!;
+    const upstream = layer.upstream as WmsUpstream;
+    for (const choice of layer.meta.options![0]!.choices) {
+      const chosen = normalizeLayerOptions(layer.meta.options, { streams: choice.value });
+      const url = wmsBaseParams(upstream, 13, 4340, 2378);
+      url.searchParams.set('REQUEST', 'GetMap');
+      for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
+        url.searchParams.set(key, value);
+      }
+      expect(url.toString().length, `${choice.value} request URL`).toBeLessThan(10_000);
+    }
+  });
+
+  it('mirrors the draw filter on the identify side, in the alias spelling', () => {
+    // The two halves are spelled differently on purpose (field name vs alias),
+    // which is exactly how they drift apart unnoticed.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'rivers')!;
+    const upstream = layer.upstream as WmsUpstream;
+    expect(upstream.identifyKeep).toEqual({ field: 'LTEMA', values: ['3211'] });
+    expect(upstream.optionFilter!.field).toBe('Strahler');
+    // "All streams" keeps everything; "Rivers only" keeps exactly the orders the
+    // SLD still draws — anything else and a tap answers for an invisible brook.
+    expect(upstream.optionFilter!.values.streams!.all).toEqual([]);
+    expect(upstream.optionFilter!.values.streams!.main).toEqual(['3', '4', '5', '6', '7', '8']);
   });
 });
 

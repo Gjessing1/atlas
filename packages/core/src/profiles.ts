@@ -107,6 +107,10 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       // z14, and a hiker reading a valley at z12 would just see an empty
       // switched-on layer.
       'land-cover',
+      // The stream network is what a fishing map is read for, so it starts on.
+      // Same z13 caveat as land cover above, and the same answer: the layer
+      // declares its floor and the panel shows a zoom hint rather than a blank.
+      'rivers',
     ],
     // Norway has no national hunting-rights dataset: Statskog covers state land
     // only and Hjorteviltregisteret has no API, so on the private ground where

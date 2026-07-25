@@ -67,6 +67,19 @@ export interface WmsUpstream {
    */
   optionFilter?: { field: string; values: Record<string, Record<string, string[]>> };
   /**
+   * `optionFilter`'s always-on sibling: keep only identify results whose `field`
+   * holds one of these values, whatever the user has selected.
+   *
+   * For the layers that draw a *subset* of what they query. The river network is
+   * the motivating case: the SLD draws only real channels, but GetFeatureInfo
+   * still answers from the lake through-flow centrelines underneath, so a tap on
+   * open water returns a river the map is not drawing — a confident answer about
+   * nothing visible. A feature missing the field is kept (same rule as
+   * `optionFilter`): this exists to match the map, not to hide what it cannot
+   * classify.
+   */
+  identifyKeep?: { field: string; values: string[] };
+  /**
    * Render GetMap tiles at this multiple of 256 px (with a matching DPI hint),
    * so fine linework and labels stay crisp on high-density phone screens
    * instead of being drawn at 256 px and stretched. 1 (or unset) = plain 256 px.
@@ -214,6 +227,131 @@ const artfunksjonOptionParams = () => {
     byChoice[choice] = { SLD_BODY: artfunksjonSld(species) };
   }
   return { species: byChoice };
+};
+
+/**
+ * `ltema` is the clean classifier that `objekttype` is not (measured against the
+ * live layer 2, 2026-07-25). The free-text `objekttype` carries 25 spellings for
+ * ~6 classes — `ElvBekkMidtlije`, `FiltivElv`, `InnsjøMidtloinje`, a literal
+ * `"20.08.2014"` — so DATA-SOURCES.md rules out matching it by equality, and an
+ * SLD cannot do prefix normalisation. `ltema` partitions all 1 954 539 segments
+ * into three integers, and disagrees with the objekttype prefix on **191 rows,
+ * i.e. 0.01 %**:
+ *
+ * - `3211` real channel (1 268 181) — the only class worth drawing
+ * - `3103` lake through-flow centreline (665 093) — the network is routed
+ *   *through* lakes, so drawing these paints rivers straight across every lake
+ * - `3299` fictitious connector (21 255) — imaginary water
+ *
+ * Filtering on one integer instead of 25 strings is also what keeps the request
+ * inside the URL budget (see `elvenettSld`).
+ */
+const ELVENETT_REAL_CHANNEL = '3211';
+
+/**
+ * Line weight by Strahler order — the per-segment size proxy, and the one field
+ * here that behaves (`arealregineenhet_km2` is *not* catchment area: it reads
+ * 1.16 km² on the Strahler-8 Snåsavassdraget, so as a size proxy it ranks a
+ * major river below a ditch). Segment counts on real channels, probed
+ * 2026-07-25: order 1 = 689 360, 2 = 306 007, 3 = 150 517, 4 = 76 202,
+ * 5 = 29 929, 6 = 10 395, 7 = 4 303, 8 = 1 468.
+ *
+ * Bands rather than a continuous ramp because SLD has no data-driven width —
+ * every distinct weight costs a Rule, and a Rule costs URL budget.
+ */
+const ELVENETT_BANDS: readonly { min: number; max?: number; width: number; color: string }[] = [
+  { min: 6, width: 3.4, color: '#1d4ed8' },
+  { min: 4, max: 5, width: 2.4, color: '#2563eb' },
+  { min: 2, max: 3, width: 1.5, color: '#3b82f6' },
+  { min: 1, max: 1, width: 0.9, color: '#60a5fa' },
+];
+
+/**
+ * A Strahler-graduated style for NVE's `elvenett`, filtered to real channels.
+ *
+ * NVE ships this layer as a flat 1 px `rgb(80,140,255)` line with no size
+ * distinction and every lake centreline drawn, so the default rendering is both
+ * uninformative and actively wrong over water — the whole value of the overlay
+ * is in this document.
+ *
+ * Measured on the live service 2026-07-25, three things that differ from the
+ * Naturbase SLD next door and would otherwise be guessed wrong:
+ *
+ * - **The URL ceiling is ~10 kB here, not ~2 kB** (10 083 chars answered,
+ *   11 083 did not) — and it fails as a *dropped connection*, not a 404, so a
+ *   too-long request surfaces as "upstream unreachable". The four-band document
+ *   builds a ~4.1 kB request, comfortably inside; `wms.test.ts` guards it.
+ * - **`PropertyName` is the database field (`ltema`, `elveordenstrahler`), not
+ *   the alias.** GetMap filters on field names while GetFeatureInfo *answers*
+ *   with aliases (`LTEMA`, `Strahler`) — which is why the identify-side filters
+ *   in the catalog entry are spelled differently from the ones here.
+ * - **Directional-flow arrows are not reachable through this service.** A
+ *   `GraphicStroke`/`shape://oarrow` symbolizer returns HTTP 200 and renders the
+ *   geometry as a plain *black* 1 px line: ArcGIS ignores the graphic and falls
+ *   back to a default stroke, so the failure looks like a successful render with
+ *   the styling silently dropped. Rule-level `MinScaleDenominator`/
+ *   `MaxScaleDenominator` *are* honoured, if a future zoom-staged style needs it.
+ */
+export function elvenettSld(minStrahler: number): string {
+  const eq = (field: string, value: string | number) =>
+    `<ogc:PropertyIsEqualTo><ogc:PropertyName>${field}</ogc:PropertyName>` +
+    `<ogc:Literal>${value}</ogc:Literal></ogc:PropertyIsEqualTo>`;
+  const cmp = (op: string, value: number) =>
+    `<ogc:PropertyIs${op}><ogc:PropertyName>elveordenstrahler</ogc:PropertyName>` +
+    `<ogc:Literal>${value}</ogc:Literal></ogc:PropertyIs${op}>`;
+
+  const rules = ELVENETT_BANDS.filter((band) => band.max === undefined || band.max >= minStrahler)
+    .map((band) => {
+      const low = Math.max(band.min, minStrahler);
+      // Every filter has at least two operands (the class test plus one bound),
+      // so the single-operand trap that silently voids an `<ogc:Or>` on the
+      // Naturbase service cannot bite an `<ogc:And>` here.
+      const terms =
+        eq('ltema', ELVENETT_REAL_CHANNEL) +
+        cmp('GreaterThanOrEqualTo', low) +
+        (band.max === undefined ? '' : cmp('LessThanOrEqualTo', band.max));
+      return (
+        `<Rule><ogc:Filter><ogc:And>${terms}</ogc:And></ogc:Filter>` +
+        `<LineSymbolizer><Stroke>` +
+        `<CssParameter name="stroke">${band.color}</CssParameter>` +
+        `<CssParameter name="stroke-width">${band.width}</CssParameter>` +
+        `</Stroke></LineSymbolizer></Rule>`
+      );
+    })
+    .join('');
+
+  return (
+    '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" ' +
+    'xmlns:ogc="http://www.opengis.net/ogc"><NamedLayer><Name>elvenett</Name>' +
+    `<UserStyle><FeatureTypeStyle>${rules}</FeatureTypeStyle></UserStyle>` +
+    '</NamedLayer></StyledLayerDescriptor>'
+  );
+}
+
+/**
+ * The `streams` option: how far down the network to draw. Values are the lowest
+ * Strahler order kept, and the identify side mirrors them (see `optionFilter`)
+ * so a tap can never answer from a brook the map is not drawing.
+ */
+const ELVENETT_MIN_STRAHLER: Record<string, number> = { all: 1, main: 3 };
+
+const elvenettOptionParams = () => {
+  const byChoice: Record<string, Record<string, string>> = {};
+  for (const [choice, min] of Object.entries(ELVENETT_MIN_STRAHLER)) {
+    byChoice[choice] = { SLD_BODY: elvenettSld(min) };
+  }
+  return { streams: byChoice };
+};
+
+/** The identify-side twin of `ELVENETT_MIN_STRAHLER` — orders kept, as strings. */
+const elvenettOptionFilter = () => {
+  const byChoice: Record<string, string[]> = {};
+  for (const [choice, min] of Object.entries(ELVENETT_MIN_STRAHLER)) {
+    // An empty list means "keep everything", which is exactly right for the
+    // unfiltered choice and saves listing all eight orders.
+    byChoice[choice] = min <= 1 ? [] : Array.from({ length: 9 - min }, (_, i) => String(min + i));
+  }
+  return { field: 'Strahler', values: { streams: byChoice } };
 };
 
 /**
@@ -411,6 +549,102 @@ export function norwegianLayers(): OverlayLayer[] {
           // ~55 m — enough detail for a centroid, a fraction of the payload.
           simplifyDeg: 0.0005,
         },
+      },
+    },
+    {
+      // NVE Elvenett1 (ELVIS) — the national stream network, 1 954 539 segments.
+      // The layer a fishing map is really built on: the basemap draws the water
+      // it has, this draws every mapped channel *and* ranks it by size, which is
+      // what tells a river from the ditch beside it.
+      //
+      // Raster with an SLD, not `arcgis-vector` as ROADMAP §4.1 pencilled in:
+      // the whole coverage is three orders of magnitude past the ~10³-feature
+      // ceiling that pattern has (the weakened-ice row measured where it
+      // breaks), and NVE's own scale staging — `elvenett` refuses to draw above
+      // 1:100 000 — is a property of the service that only a raster request
+      // inherits.
+      meta: {
+        id: 'rivers',
+        rev: 1,
+        title: 'Rivers & streams',
+        description:
+          'The full mapped stream network, drawn thicker as the water grows. Tap for the ' +
+          'watercourse name and its stream order.',
+        group: 'Water & depth',
+        attribution: '© NVE',
+        metadataUrl: `${KARTKATALOG}elvenett`,
+        // Measured 2026-07-25: z11 and z12 tiles come back empty — NVE caps the
+        // full network at 1:100 000 and the z13 tile (1:68 247) is the first one
+        // inside it. Without this floor the layer would read as switched on and
+        // broken for two whole zoom levels.
+        minzoom: 13,
+        maxzoom: 16,
+        // Linework, not a wash: it has to stay legible over the hillshade and
+        // land cover this profile also runs, but it is never hiding them.
+        defaultOpacity: 0.9,
+        identify: true,
+        coverageNote:
+          'Lake through-flow lines are not drawn: the network is routed through lakes, and drawing ' +
+          'those paints a river straight across open water. A lake’s inlets and outlet are still ' +
+          'mapped right up to the shore.',
+        profiles: ['fishing', 'hunting'],
+        options: [
+          {
+            key: 'streams',
+            label: 'Detail',
+            defaultValue: 'all',
+            choices: [
+              {
+                value: 'all',
+                label: 'All streams',
+                caption: 'Every mapped channel, down to the smallest brook',
+              },
+              {
+                value: 'main',
+                label: 'Rivers only',
+                caption: 'Drops the headwater brooks — about four in five segments',
+              },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/Elvenett1/MapServer/WMSServer',
+        version: '1.3.0',
+        // `elvenett` alone. The service also publishes `hovedelv` (6 279 main
+        // rivers, z9+) and `oversikt`, but they carry neither `elveordenstrahler`
+        // nor `ltema` — so they can be neither graded nor filtered — and they
+        // keep drawing at z13+, where they would double-stroke every main stem
+        // this layer already draws properly.
+        layers: 'elvenett',
+        identifyLayers: 'elvenett',
+        optionParams: elvenettOptionParams(),
+        // The tap must answer for what is actually drawn. Without this, tapping
+        // the middle of Vansjø answers "Mossevassdraget, order 6" from the
+        // invisible lake centreline underneath — an answer about a feature the
+        // map deliberately does not draw, on water it draws nothing at all.
+        // ArcGIS rejects SLD_BODY on GetFeatureInfo ("Can't parse XML request",
+        // same as Naturbase), so this cannot ride along on the tile filter.
+        identifyKeep: { field: 'LTEMA', values: [ELVENETT_REAL_CHANNEL] },
+        optionFilter: elvenettOptionFilter(),
+        // Keys are ArcGIS *aliases* — the text/xml identify answers `Strahler`
+        // and `elvehierarki`, not `elveordenstrahler` and `elvenavnhierarki`.
+        //
+        // `arealRegine` is deliberately absent, and this is the layer where that
+        // matters most: it looks exactly like a catchment area and is not one
+        // (1.16 km² on a Strahler-8 river), so showing it beside a stream order
+        // would invite precisely the wrong reading.
+        identifyFields: ['elvenavn', 'elvehierarki', 'Strahler', 'lengde_m', 'vassdragNr'],
+        identifyLabels: {
+          elvenavn: 'River',
+          elvehierarki: 'Watercourse',
+          Strahler: 'Stream order (Strahler)',
+          lengde_m: 'Segment length (m)',
+          vassdragNr: 'Watercourse no.',
+        },
+        // No `identifyValues`: Strahler order has no upstream legend to quote,
+        // and this field is for the source's own wording, not our gloss on it.
       },
     },
     {

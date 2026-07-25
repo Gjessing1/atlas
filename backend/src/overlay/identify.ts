@@ -11,9 +11,19 @@ import { tileCoords, wmsBaseParams } from './wms.js';
  * functions over a response body — testable without booting Fastify.
  */
 
-/** Upstream attribute keys that are noise, not information. */
+/**
+ * Upstream attribute keys that are noise, not information.
+ *
+ * `ltema` is deliberately *not* here, though it is pure bookkeeping to a reader:
+ * on NVE's river network it is the only field that separates a real channel from
+ * the lake centreline drawn through the same water, so `identifyKeep` has to be
+ * able to see it. Hiding a code from the *card* is `identifyFields`' job — this
+ * list runs first and would delete the evidence before anything can filter on
+ * it. Every layer that identifies and could return `ltema` carries an
+ * `identifyFields` allow-list, so nothing shows it.
+ */
 const NOISE_KEYS =
-  /^(objectid|objtype|fid|gml_id|globalid|boundedby|bbox|styleurl|se_anno_cad_data|shape([._].*)?|geometri.*|symbol.*|ltema|opphav|kopidato|oppdateringsdato|datauttaksdato|malemetode|noyaktighet)$/i;
+  /^(objectid|objtype|fid|gml_id|globalid|boundedby|bbox|styleurl|se_anno_cad_data|shape([._].*)?|geometri.*|symbol.*|opphav|kopidato|oppdateringsdato|datauttaksdato|malemetode|noyaktighet)$/i;
 
 /**
  * `-1` is the "not measured" sentinel across NVE's depth attributes (a lake with
@@ -94,6 +104,21 @@ export function presentFields(
     out[labelBy.get(k) ?? key] = decoded;
   }
   return out;
+}
+
+/**
+ * Whether an identify result is one of the features the layer actually draws
+ * (see `identifyKeep`). Matched case-insensitively on the field name — the same
+ * attribute is `ltema` over the REST service and `LTEMA` in ESRI's identify —
+ * and exactly on the value, since these are codes.
+ */
+export function keepsIdentify(
+  keep: { field: string; values: string[] } | undefined,
+  props: Record<string, string>,
+): boolean {
+  if (!keep || keep.values.length === 0) return true;
+  const hit = Object.entries(props).find(([key]) => key.toLowerCase() === keep.field.toLowerCase());
+  return hit ? keep.values.includes(hit[1]) : true;
 }
 
 export function parseGeojsonInfo(body: string): Record<string, string>[] | null {
@@ -237,11 +262,13 @@ export function registerIdentifyRoute(ctx: OverlayContext): void {
         const results = parse(body);
         if (results === null) continue; // unparseable in this format
         ctx.record(layer.meta.id, true);
-        // The option filter runs on the *raw* attributes, before the allow-
-        // list narrows them: the field it matches on (the species name) is
-        // usually one a reader wants shown anyway, but it must not have to be.
+        // Both filters run on the *raw* attributes, before the allow-list
+        // narrows them: the field they match on (the species name, the river
+        // network's class code) may be one a reader wants shown, but it must
+        // not have to be — `ltema` is filtered on and never displayed.
         const chosen = resolveOptions(layer, request.query);
         const selected = results
+          .filter((r) => keepsIdentify(wms.identifyKeep, r))
           .filter((r) => optionKeeps(layer, chosen, r))
           .map((r) => selectFields(r, wms.identifyFields))
           .filter((r) => Object.keys(r).length > 0)
