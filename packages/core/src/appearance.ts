@@ -266,6 +266,11 @@ function tuneDarkLayer(layer: StyleLayer): void {
       paint(layer, 'fill-opacity', 0.72);
     if (layer.id === 'building') paint(layer, 'fill-outline-color', '#454b4f');
   }
+  // Liberty draws every footprint twice: the flat `building` fill above, and
+  // from z15 a `building-3d` extrusion on top of it. Recolouring only the fill
+  // left dark mode with near-white blocks the moment the extrusions appeared —
+  // the whole city lit up while the basemap under it stayed dark.
+  if (layer.id === 'building-3d') paint(layer, 'fill-extrusion-color', fillColors['building']!);
 
   if (layer.type === 'line') {
     if (/^waterway_/.test(layer.id)) paint(layer, 'line-color', '#477b98');
@@ -344,6 +349,45 @@ function tuneWinterLayer(layer: StyleLayer, dark: boolean): void {
     paint(layer, 'fill-color', dark ? '#3a4145' : '#d5d0ca');
     paint(layer, 'fill-outline-color', dark ? '#4b5257' : '#b0aaa2');
   }
+}
+
+/**
+ * Explore's city green: the greenery is a *destination* on a walk-around map.
+ *
+ * The shared light/dark tune paints parks and grass as a faint wash, which is
+ * right for a driving or hiking map (there, green is the background the route
+ * crosses). Someone browsing a city is looking for the park to sit in, so on
+ * this profile the same polygons get a saturated fill at a much higher opacity,
+ * and the park edge becomes a real green outline instead of the base style's
+ * near-white dashes. Pitches count too — the football field is a landmark.
+ *
+ * Applied after the theme pass, so these colours win for the handful of layers
+ * they name and everything else keeps Atlas's restrained palette.
+ */
+function tuneCityGreens(layer: StyleLayer, dark: boolean): void {
+  const fills: Record<string, { color: string; opacity: number }> = dark
+    ? {
+        park: { color: '#2f4a37', opacity: 0.92 },
+        landcover_grass: { color: '#31462f', opacity: 0.8 },
+        landcover_wood: { color: '#2c4433', opacity: 0.85 },
+        landuse_pitch: { color: '#345239', opacity: 0.9 },
+      }
+    : {
+        park: { color: '#c2e3b0', opacity: 0.8 },
+        landcover_grass: { color: '#cbe7b6', opacity: 0.62 },
+        landcover_wood: { color: '#bfdcb0', opacity: 0.6 },
+        landuse_pitch: { color: '#b7dea4', opacity: 0.85 },
+      };
+  const fill = fills[layer.id];
+  if (fill) {
+    delete layer.paint?.['fill-pattern'];
+    paint(layer, 'fill-color', fill.color);
+    paint(layer, 'fill-opacity', fill.opacity);
+    if (layer.id === 'park') paint(layer, 'fill-outline-color', dark ? '#4d7357' : '#7fb073');
+  }
+  // Liberty draws the park boundary as a near-white dashed line, which vanishes
+  // once the fill is this green. Keep the dash, give it a colour.
+  if (layer.id === 'park_outline') paint(layer, 'line-color', dark ? '#527a5c' : '#7cae70');
 }
 
 /**
@@ -911,10 +955,12 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       }
     } else if (profile === 'explore') {
       // Urban signature: minor traffic recedes (majors stay legible), POIs and
-      // pedestrian streets carry the map.
+      // pedestrian streets carry the map, and the city's parks and lawns read
+      // as green things worth walking to.
       if (isCarRoad(layer) && /(secondary_tertiary|minor|street|service)/.test(layer.id)) {
         paint(layer, 'line-opacity', 0.7);
       }
+      tuneCityGreens(layer, dark);
       if (/^poi_/.test(layer.id)) {
         paint(layer, 'text-opacity', 0.92);
         paint(layer, 'icon-opacity', 0.9);

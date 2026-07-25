@@ -186,8 +186,20 @@ function AppInner() {
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
 
-  const flyTo = useCallback((p: LatLng) => {
-    cameraRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 14, duration: 900 });
+  // Bring a picked point into view. `minZoom` is a floor, never a target: with
+  // it, a place picked from a search or a list is guaranteed to be readable;
+  // without it the zoom is left exactly where the user set it (see pickOnMap —
+  // a long-press used to snap the whole map to z14 under the user's finger).
+  const flyTo = useCallback((p: LatLng, minZoom?: number) => {
+    void (async () => {
+      const current = minZoom === undefined ? undefined : await mapRef.current?.getZoom();
+      cameraRef.current?.flyTo({
+        center: [p.lng, p.lat],
+        duration: 900,
+        // Omitted entirely (not `undefined`) so the native stop keeps the zoom.
+        ...(minZoom === undefined ? {} : { zoom: Math.max(minZoom, current ?? minZoom) }),
+      });
+    })();
   }, []);
 
   // Every picked point — map tap, long-press, search hit, favorite, link pin.
@@ -275,11 +287,12 @@ function AppInner() {
   // guidance rail and route fits get a narrower bottom pad.
 
   // Mid-trip taps must not fly the camera away from the follow view — the
-  // card opens where the puck already is.
+  // card opens where the puck already is. Idle, the point is panned clear of
+  // the card at the zoom the user is already on (pickOnMap).
   const pickPressTarget = useCallback(
     (target: DestinationTarget) => {
       if (following) dest.pickQuiet(target);
-      else dest.pick(target);
+      else dest.pickOnMap(target);
     },
     [following, dest],
   );
@@ -565,6 +578,7 @@ function AppInner() {
         // already is, not back at the persisted launch view — otherwise a theme
         // toggle jumps the map. viewRef holds the latest settled camera.
         initialView={viewRef.current ?? initialView}
+        showIdleChrome={showIdleChrome}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
         onViewChange={camera.onViewChange}

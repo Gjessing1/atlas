@@ -8,7 +8,21 @@ const style = JSON.stringify({
     { id: 'background', type: 'background', paint: { 'background-color': '#fff' } },
     { id: 'water', type: 'fill', paint: { 'fill-color': '#00f' } },
     { id: 'landcover_wood', type: 'fill', paint: { 'fill-color': '#0f0' } },
+    { id: 'landcover_grass', type: 'fill', paint: { 'fill-color': '#0f0' } },
+    { id: 'park', type: 'fill', paint: { 'fill-color': '#0f0', 'fill-opacity': 0.7 } },
+    {
+      id: 'park_outline',
+      type: 'line',
+      paint: { 'line-color': '#eee', 'line-dasharray': [1, 1.5] },
+    },
+    { id: 'landuse_pitch', type: 'fill', paint: { 'fill-color': '#0f0' } },
     { id: 'landuse_residential', type: 'fill', paint: { 'fill-color': '#eee' } },
+    { id: 'building', type: 'fill', paint: { 'fill-color': '#ddd' } },
+    {
+      id: 'building-3d',
+      type: 'fill-extrusion',
+      paint: { 'fill-extrusion-color': '#ddd', 'fill-extrusion-opacity': 0.8 },
+    },
     {
       id: 'road_path_pedestrian',
       type: 'line',
@@ -301,6 +315,52 @@ describe('map appearance', () => {
     const hatch = result.find((layer) => layer.id === 'road_transit_rail_hatching')?.paint;
     expect(hatch?.['line-color']).toBe('#c67a1e');
     expect(hatch?.['line-dasharray']).toEqual([0.2, 8]);
+  });
+
+  it('darkens the 3D building extrusions with the flat footprints', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'dark', profile: 'explore' }));
+    // Both layers draw the same footprints; the extrusion takes over at z15, so
+    // leaving it behind lit the whole city white over a dark basemap.
+    expect(result.find((layer) => layer.id === 'building')?.paint['fill-color']).toBe('#363b3e');
+    expect(result.find((layer) => layer.id === 'building-3d')?.paint['fill-extrusion-color']).toBe(
+      '#363b3e',
+    );
+    const light = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'explore' }));
+    expect(light.find((layer) => layer.id === 'building-3d')?.paint['fill-extrusion-color']).toBe(
+      '#ddd',
+    );
+  });
+
+  it('paints the city greens as findable green on Explore', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'explore' }));
+    const park = result.find((layer) => layer.id === 'park')?.paint;
+    expect(park?.['fill-color']).toBe('#c2e3b0');
+    // Well above the 0.55 wash the shared light tune leaves parks at.
+    expect(park?.['fill-opacity']).toBe(0.8);
+    expect(park?.['fill-outline-color']).toBe('#7fb073');
+    const grass = result.find((layer) => layer.id === 'landcover_grass')?.paint;
+    expect(grass?.['fill-color']).toBe('#cbe7b6');
+    expect(grass?.['fill-opacity']).toBe(0.62);
+    expect(result.find((layer) => layer.id === 'landuse_pitch')?.paint['fill-color']).toBe(
+      '#b7dea4',
+    );
+    // The boundary dash survives; only its (invisible) colour changes.
+    const outline = result.find((layer) => layer.id === 'park_outline')?.paint;
+    expect(outline?.['line-color']).toBe('#7cae70');
+    expect(outline?.['line-dasharray']).toEqual([1, 1.5]);
+
+    const dark = layers(applyMapAppearance(style, { colorScheme: 'dark', profile: 'explore' }));
+    expect(dark.find((layer) => layer.id === 'park')?.paint['fill-color']).toBe('#2f4a37');
+  });
+
+  it('leaves the city greens as a quiet wash outside Explore', () => {
+    for (const profile of ['drive', 'hike', 'neutral']) {
+      const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile }));
+      expect(result.find((layer) => layer.id === 'park')?.paint['fill-color']).toBe('#dce8d4');
+      expect(result.find((layer) => layer.id === 'landcover_grass')?.paint['fill-opacity']).toBe(
+        0.28,
+      );
+    }
   });
 
   it('leaves rail flat grey outside the Explore profile', () => {

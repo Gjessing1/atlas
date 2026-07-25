@@ -34,6 +34,7 @@ import type { TransitPlan } from '../routing/useTransit';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import { PlacePin } from '../ui/icons';
 import { useSideInsets } from '../ui/insets';
+import { MapCompass } from './MapCompass';
 import { ScaleBar } from './ScaleBar';
 import type { TrackGeometry } from '../useTrackGeometry';
 
@@ -195,6 +196,12 @@ interface MapSceneProps {
   navDot: LatLng | null;
   /** Boot camera (persisted last view, falling back to DEFAULT_VIEW). */
   initialView: { center: LatLng; zoom: number };
+  /**
+   * Whether the idle map chrome (locate, map setup row) is showing. The
+   * reset-to-north compass joins that stack, so it comes and goes with it —
+   * during navigation the guidance rail owns map orientation instead.
+   */
+  showIdleChrome: boolean;
   /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
   onMapPress: (point: LatLng, pixel: { x: number; y: number }) => void;
   /** Long-press outside route planning: pick the point as a destination. */
@@ -235,6 +242,7 @@ export function MapScene({
   suppressPuck,
   navDot,
   initialView,
+  showIdleChrome,
   onMapPress,
   onPickPoint,
   onViewChange,
@@ -281,13 +289,33 @@ export function MapScene({
   // bar length only changes at whole steps anyway) and latitude to 1°, across
   // which cos(lat) moves well under a percent.
   const [scaleAt, setScaleAt] = useState({ lat: DEFAULT_VIEW.center.lat, zoom: 10 });
-  const onRegionChange = useCallback((zoom: number, lat: number) => {
+  // Which way the camera faces, for the reset-to-north compass. Quantized to
+  // 2°, like the values above, so a rotate gesture re-renders the scene a few
+  // times instead of on every frame; below 2° the map reads as north-up and the
+  // compass takes itself away.
+  const [bearing, setBearing] = useState(0);
+  const onRegionChange = useCallback((zoom: number, lat: number, mapBearing: number) => {
     setMarkerScale(Math.round(markerScaleForZoom(zoom) * 20) / 20);
     setScaleAt((cur) => {
       const next = { lat: Math.round(lat), zoom: Math.round(zoom * 4) / 4 };
       return next.lat === cur.lat && next.zoom === cur.zoom ? cur : next;
     });
+    setBearing((cur) => {
+      const next = (Math.round(mapBearing / 2) * 2 + 360) % 360;
+      return next === cur ? cur : next;
+    });
   }, []);
+  // Reset to north, keeping the view otherwise exactly as it is: the centre is
+  // read back and handed to the same centre-anchored camera stop the locate
+  // button uses (a stop with no centre at all is a less-travelled path in the
+  // native camera queue, and this control must not move the map sideways).
+  const faceNorth = useCallback(() => {
+    void (async () => {
+      const center = await mapRef.current?.getCenter().catch(() => undefined);
+      if (!center) return;
+      cameraRef.current?.easeTo({ center, bearing: 0, pitch: 0, duration: 400 });
+    })();
+  }, [cameraRef, mapRef]);
   // Scaling about the bottom-centre keeps the tail tip on the anchored coordinate.
   const pinScaleStyle = useMemo(
     () => ({ transform: [{ scale: markerScale }], transformOrigin: '50% 100%' }),
@@ -308,12 +336,12 @@ export function MapScene({
         // Track the zoom for zoom-proportional pin sizes; a user-driven move
         // additionally pauses the nav follow camera (free look-around).
         onRegionIsChanging={(e) => {
-          onRegionChange(e.nativeEvent.zoom, e.nativeEvent.center[1]);
+          onRegionChange(e.nativeEvent.zoom, e.nativeEvent.center[1], e.nativeEvent.bearing);
           if (e.nativeEvent.userInteraction) onUserGesture();
         }}
         onRegionDidChange={(e) => {
           const [lng, lat] = e.nativeEvent.center;
-          onRegionChange(e.nativeEvent.zoom, lat);
+          onRegionChange(e.nativeEvent.zoom, lat, e.nativeEvent.bearing);
           onViewChange({ center: { lat, lng }, zoom: e.nativeEvent.zoom });
         }}
         // The native ScaleBarPlugin is off for good: it reads metric vs imperial
@@ -321,6 +349,11 @@ export function MapScene({
         // an en-US phone showed feet. Atlas draws its own metric bar instead —
         // see ScaleBar below, positioned where this one used to sit.
         scaleBar={false}
+        // The native compass ornament is off for the same kind of reason: it
+        // only appears in a screen corner (top-right by default, i.e. behind
+        // the navigation banner for a whole trip) and is drawn from a fixed
+        // bitmap that ignores light/dark. MapCompass below is the Atlas one.
+        compass={false}
         // While planning a route, a tap drops a stop; otherwise a tap dismisses
         // the ☰ menu or picks a saved pin (see App.onMapPress). Long-press picks
         // any point as a destination. Both gestures add a stop in plan mode so it
@@ -849,6 +882,18 @@ export function MapScene({
           zoom={scaleAt.zoom}
           bottom={bottomInset + 88}
           left={side.left + 20}
+        />
+      ) : null}
+
+      {/* Directly above App's locate button (bottom + 24, height 44), sharing
+          its right edge — one bottom-right stack rather than a control that
+          floats mid-map. */}
+      {showIdleChrome && bearing !== 0 ? (
+        <MapCompass
+          bearing={bearing}
+          bottom={bottomInset + 78}
+          right={side.right + 12}
+          onPress={faceNorth}
         />
       ) : null}
     </View>
