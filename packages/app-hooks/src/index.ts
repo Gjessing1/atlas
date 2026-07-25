@@ -8,7 +8,6 @@ export {
 export {
   useRoute,
   type RouteFn,
-  type RouteDetourEstimate,
   type RoutePlanner,
   type RouteWaypoint,
   type StoredRoutePlan,
@@ -68,13 +67,19 @@ export {
 export { useTransitBoard, type TransitBoard, type TransitTiming } from './useTransitBoard.js';
 export {
   useStopSearch,
-  useAlongRouteSearch,
-  type AlongRouteSearch,
   type StopGeocodeFn,
   type StopGeocodeQuery,
   type StopSearch,
   type StopSearchPlace,
 } from './useStopSearch.js';
+export {
+  useRouteStops,
+  routeStopCategories,
+  routeSampleCircles,
+  spreadAlongRoute,
+  type RouteStopHit,
+  type RouteStops,
+} from './useRouteStops.js';
 export {
   useCollectionTree,
   buildCollectionTree,

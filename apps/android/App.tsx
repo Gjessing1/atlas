@@ -261,9 +261,10 @@ function AppInner() {
   const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, navHeight);
   const navPuck = useNavPuck(nav, navCam, navPrefs.followMode, viewport);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
-  // Mid-drive "add a stop": category candidates via the online explore
-  // endpoint with the downloaded pack index as fallback (geoExplore), filtered
-  // to what is still ahead on the route (rules in @atlas/app-hooks).
+  // Category candidates via the online explore endpoint with the downloaded
+  // pack index as fallback (geoExplore) — shared by the mid-drive "add a stop"
+  // panel (what is still ahead) and the planner's "stops along route" browse
+  // (the whole route). Both sets of rules live in @atlas/app-hooks.
   const fetchNearbyStops = useCallback<FetchNearbyFn>(
     async (category, center, radiusM) =>
       (await geoExplore(packs, category, center, radiusM)).results,
@@ -893,6 +894,7 @@ function AppInner() {
           packs={packs}
           places={data.places}
           getBias={getBias}
+          fetchNearby={fetchNearbyStops}
           onExport={exportRoute}
           onNavigate={startNavigation}
           onShowTransitTrip={showTransitTrip}

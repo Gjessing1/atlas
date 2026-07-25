@@ -324,9 +324,11 @@ test('running and custom trail preferences reach the routing engine', async ({ p
   await expect(page.locator('.route-stats')).toContainText('km');
 });
 
-test('search along a route shows detour cost and inserts the stop in order', async ({ page }) => {
+test('stops along a route are browsed by category and insert in order', async ({ page }) => {
   await mockRouting(page);
-  await page.route('**/api/search**', (route) =>
+  const categories: string[] = [];
+  await page.route('**/api/explore**', (route) => {
+    categories.push(new URL(route.request().url()).searchParams.get('category') ?? '');
     route.fulfill({
       json: {
         results: [
@@ -338,8 +340,8 @@ test('search along a route shows detour cost and inserts the stop in order', asy
           },
         ],
       },
-    }),
-  );
+    });
+  });
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
   await page.getByRole('button', { name: 'Route' }).click();
@@ -349,12 +351,17 @@ test('search along a route shows detour cost and inserts the stop in order', asy
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Search along route' }).click();
-  await page.getByPlaceholder('Fuel, food, or a saved place…').fill('cafe');
+  await page.getByRole('button', { name: 'Stops along route' }).click();
+  // Driving opens on fuel; the category chips are the whole search.
+  await expect.poll(() => categories).toContain('fuel');
+  await page.getByRole('tab', { name: 'Coffee' }).click();
+  await expect.poll(() => categories).toContain('coffee');
+
   const hit = page.locator('.route-along-search').getByRole('button', {
-    name: /Corridor café.*detour/,
+    name: /Corridor café/,
   });
-  await expect(hit).toContainText('+<1 min detour');
+  // Measured against the route, not against the query text.
+  await expect(hit).toContainText('at ');
   await hit.click();
 
   await expect(page.locator('.route-waypoints li')).toHaveCount(3);

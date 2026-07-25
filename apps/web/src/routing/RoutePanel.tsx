@@ -1,18 +1,24 @@
 import {
   altChipLabel,
-  detourLabel,
+  fmtDistanceM,
   fmtDuration,
   fmtEta,
   fmtKm,
   modeTimeLabel,
-  stopHitKey,
+  stopAlongLabel,
   stopRole,
   stopTitle,
   waypointLabel,
   type LatLng,
   type SearchResult,
 } from '@atlas/core';
-import { useAlongRouteSearch, useStopSearch, type StopGeocodeFn } from '@atlas/app-hooks';
+import {
+  routeStopCategories,
+  useRouteStops,
+  useStopSearch,
+  type FetchNearbyFn,
+  type StopGeocodeFn,
+} from '@atlas/app-hooks';
 import { buildGpx } from '@atlas/gpx';
 import {
   pathViaLabels,
@@ -39,10 +45,10 @@ function downloadText(fileName: string, text: string, type: string): void {
 }
 
 /**
- * Geocoding for the stop searches: the same-origin Photon proxy. Viewport bias
- * applies only to the free stop search — an along-route search is already
- * constrained by the route's bounding box, and biasing it towards the map
- * centre would fight that.
+ * Geocoding for the stop search: the same-origin Photon proxy, biased towards
+ * the current viewport so a typed street resolves near where the user is
+ * looking. Browsing for stops *on the route* does not come through here — it is
+ * a category query against the explore endpoint (see AlongRouteStops).
  */
 function useGeocode(getBias: () => LatLng | null): StopGeocodeFn {
   return useCallback(
@@ -141,26 +147,31 @@ function StopSearch({
   );
 }
 
-/** POI/saved-place search constrained to the selected route, ranked by detour. */
-function AlongRouteSearch({
+/**
+ * Stops on the route, browsed by category — the planner's twin of the mid-drive
+ * "add a stop" panel (rules in `useRouteStops`). One tap per category, results
+ * in route order with how far along and how far off each one is; picking one
+ * inserts it into the right leg.
+ */
+function AlongRouteStops({
   route,
   path,
-  places,
-  geocode,
+  fetchNearby,
 }: {
   route: RoutePlanner;
   path: RoutePath;
-  places: PlaceRecord[];
-  geocode: StopGeocodeFn;
+  fetchNearby: FetchNearbyFn;
 }) {
   const [open, setOpen] = useState(false);
-  const { query, setQuery, hits, loading, reset } = useAlongRouteSearch({
-    geocode,
-    places,
+  const waypoints = useMemo(() => route.waypoints.map((w) => w.pos), [route.waypoints]);
+  const { category, setCategory, hits, status } = useRouteStops({
     path,
-    estimateDetours: route.estimateDetours,
+    waypoints,
+    profile: route.profile,
     active: open,
+    fetchNearby,
   });
+  const categories = routeStopCategories(route.profile);
 
   return (
     <div className="route-along-search">
@@ -170,41 +181,46 @@ function AlongRouteSearch({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        Search along route
+        Stops along route
       </button>
       {open && (
         <>
-          <input
-            type="search"
-            autoFocus
-            placeholder="Fuel, food, or a saved place…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search along route"
-          />
-          {loading && <p className="route-hint">Finding the smallest detours…</p>}
-          {!loading && query.trim().length >= 2 && hits.length === 0 && (
-            <p className="route-hint">No matches near this route.</p>
+          <div className="route-along-categories" role="tablist" aria-label="Stop category">
+            {categories.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={category === item.id}
+                className={`route-along-category${category === item.id ? ' on' : ''}`}
+                onClick={() => setCategory(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {status === 'loading' && <p className="route-hint">Looking along the route…</p>}
+          {status === 'error' && <p className="route-hint">Search unavailable right now.</p>}
+          {status === 'ready' && hits.length === 0 && (
+            <p className="route-hint">Nothing in this category along this route.</p>
           )}
           {hits.length > 0 && (
             <ul>
               {hits.map((hit) => (
-                <li key={stopHitKey(hit)}>
+                <li key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}>
                   <button
                     type="button"
                     onClick={() => {
                       route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
                       setOpen(false);
-                      reset();
                     }}
                   >
-                    <span className="result-name">
-                      {hit.saved ? '★ ' : ''}
-                      {hit.name}
-                    </span>
+                    <span className="result-name">{hit.name}</span>
                     <span className="result-label">
-                      {hit.label ? `${hit.label} · ` : ''}
-                      <strong>{detourLabel(hit.extraTimeMs)}</strong> detour
+                      <strong>{stopAlongLabel(hit.alongM)}</strong>
+                      {/* Only worth saying when it is a real detour. */}
+                      {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
+                      {hit.label ? ` · ${hit.label}` : ''}
                     </span>
                   </button>
                 </li>
@@ -241,6 +257,7 @@ export function RoutePanel({
   getBias,
   getMyLocation,
   locatingOrigin,
+  fetchNearby,
   onNavigate,
 }: {
   route: RoutePlanner;
@@ -254,6 +271,8 @@ export function RoutePanel({
   getMyLocation: () => Promise<LatLng | null>;
   /** A "Directions" hand-off is still waiting for the browser's fix. */
   locatingOrigin: boolean;
+  /** Category POIs near a point — the same explore seam the mid-drive panel uses. */
+  fetchNearby: FetchNearbyFn;
   /**
    * Start turn-by-turn to the last stop in the current profile, via the plan's
    * intermediate stops. This panel is the app's only travel-mode picker, so
@@ -503,7 +522,7 @@ export function RoutePanel({
         )}
 
         {!route.roundTrip && !transitMode && path && route.waypoints.length >= 2 && (
-          <AlongRouteSearch route={route} path={path} places={places} geocode={geocode} />
+          <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />
         )}
 
         {route.waypoints.length > 0 ? (

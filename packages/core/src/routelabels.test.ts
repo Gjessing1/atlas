@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   altChipLabel,
-  detourLabel,
   modeTimeLabel,
-  stopHitKey,
+  stopAlongLabel,
   stopRole,
   stopTitle,
   waypointLabel,
-  type StopHit,
 } from './routelabels.js';
 
 describe('altChipLabel', () => {
@@ -77,26 +75,10 @@ describe('stopTitle', () => {
   });
 });
 
-describe('detourLabel', () => {
-  it('rounds to minutes, and never to zero', () => {
-    expect(detourLabel(59_000)).toBe('+<1 min');
-    expect(detourLabel(200_000)).toBe('+3 min');
-  });
-});
-
-describe('stopHitKey', () => {
-  const hit = (lat: number, lng: number): StopHit => ({
-    name: 'x',
-    label: '',
-    position: { lat, lng },
-    saved: false,
-  });
-
-  it('treats a saved place and a geocoder row for the same door as one stop', () => {
-    expect(stopHitKey(hit(59.913911, 10.752201))).toBe(stopHitKey(hit(59.913913, 10.752198)));
-  });
-
-  it('keeps neighbouring doors distinct', () => {
-    expect(stopHitKey(hit(59.9139, 10.7522))).not.toBe(stopHitKey(hit(59.914, 10.7522)));
+describe('stopAlongLabel', () => {
+  it('names the start instead of rounding a distance to zero', () => {
+    expect(stopAlongLabel(0)).toBe('at the start');
+    expect(stopAlongLabel(60)).toBe('at the start');
+    expect(stopAlongLabel(42_400)).toBe('at 42.4 km');
   });
 });

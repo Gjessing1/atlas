@@ -206,8 +206,9 @@ export function App() {
 
   const nav = useWebNavigation();
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
-  // Mid-drive "add a stop": category candidates from the explore endpoint,
-  // filtered to what is still ahead on the route (rules in @atlas/app-hooks).
+  // Category candidates from the explore endpoint, shared by the mid-drive
+  // "add a stop" panel (what is still ahead) and the planner's "stops along
+  // route" browse (the whole route). Both sets of rules live in @atlas/app-hooks.
   const fetchNearbyStops = useCallback<FetchNearbyFn>(async (category, center, radiusM, signal) => {
     const params = new URLSearchParams({
       category,
@@ -773,6 +774,7 @@ export function App() {
             getBias={getBias}
             getMyLocation={getMyLocation}
             locatingOrigin={directions.locatingOrigin}
+            fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
           />
         )}

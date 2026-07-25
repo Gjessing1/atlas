@@ -1,17 +1,23 @@
 import {
   altChipLabel,
-  detourLabel,
+  fmtDistanceM,
   fmtDuration,
   fmtEta,
   fmtKm,
   modeTimeLabel,
-  stopHitKey,
+  stopAlongLabel,
   stopRole,
   stopTitle,
   waypointLabel,
   type LatLng,
 } from '@atlas/core';
-import { useAlongRouteSearch, useStopSearch, type StopGeocodeFn } from '@atlas/app-hooks';
+import {
+  routeStopCategories,
+  useRouteStops,
+  useStopSearch,
+  type FetchNearbyFn,
+  type StopGeocodeFn,
+} from '@atlas/app-hooks';
 import {
   pathViaLabels,
   ROUTING_PROFILES,
@@ -149,27 +155,32 @@ function StopSearch({
   );
 }
 
-/** Offline-capable POI/saved-place search constrained to the selected route. */
-function AlongRouteSearch({
+/**
+ * Stops on the route, browsed by category — the planner's twin of the mid-drive
+ * AddStopSheet (rules in `useRouteStops`). Chips instead of a text box: a
+ * geocoder ranking names had no idea what a route was, so "cafe" returned
+ * whatever happened to share the letters, while what a planner wants is the
+ * category laid out in route order with the detour spelled out.
+ */
+function AlongRouteStops({
   route,
   path,
-  places,
-  geocode,
+  fetchNearby,
 }: {
   route: RoutePlanner;
   path: RoutePath;
-  places: PlaceRecord[];
-  geocode: StopGeocodeFn;
+  fetchNearby: FetchNearbyFn;
 }) {
   const [open, setOpen] = useState(false);
-  const { query, setQuery, hits, loading, reset } = useAlongRouteSearch({
-    geocode,
-    places,
+  const waypoints = useMemo(() => route.waypoints.map((w) => w.pos), [route.waypoints]);
+  const { category, setCategory, hits, status } = useRouteStops({
     path,
-    estimateDetours: route.estimateDetours,
+    waypoints,
+    profile: route.profile,
     active: open,
-    debounceMs: 300,
+    fetchNearby,
   });
+  const categories = routeStopCategories(route.profile);
 
   return (
     <View style={styles.alongSearch}>
@@ -180,45 +191,52 @@ function AlongRouteSearch({
         accessibilityState={{ expanded: open }}
         testID="route-along-toggle"
       >
-        <Text style={styles.alongToggleText}>Search along route</Text>
+        <Text style={styles.alongToggleText}>Stops along route</Text>
       </Pressable>
       {open ? (
         <>
-          <TextInput
-            style={styles.stopInput}
-            placeholder="Fuel, food, or a saved place…"
-            value={query}
-            onChangeText={setQuery}
-            autoCorrect={false}
-            disableFullscreenUI
-            autoFocus
-            testID="route-along-search"
-          />
-          {loading ? <Text style={styles.hint}>Finding the smallest detours…</Text> : null}
-          {!loading && query.trim().length >= 2 && hits.length === 0 ? (
-            <Text style={styles.hint}>No matches near this route.</Text>
+          <View style={styles.alongCategories}>
+            {categories.map((item) => (
+              <Pressable
+                key={item.id}
+                style={[styles.alongCategory, category === item.id && styles.alongCategoryOn]}
+                onPress={() => setCategory(item.id)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: category === item.id }}
+                testID={`route-along-${item.id}`}
+              >
+                <Text style={styles.alongCategoryText}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {status === 'loading' ? <Text style={styles.hint}>Looking along the route…</Text> : null}
+          {status === 'error' ? (
+            <Text style={styles.hint}>Search unavailable right now.</Text>
+          ) : null}
+          {status === 'ready' && hits.length === 0 ? (
+            <Text style={styles.hint}>Nothing in this category along this route.</Text>
           ) : null}
           {hits.length > 0 ? (
             <View style={styles.stopResults}>
               {hits.map((hit, index) => (
                 <Pressable
-                  key={stopHitKey(hit)}
+                  key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}
                   style={styles.stopResult}
                   testID={`route-along-result-${index}`}
                   onPress={() => {
                     Keyboard.dismiss();
                     route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
                     setOpen(false);
-                    reset();
                   }}
                 >
                   <Text style={styles.stopResultName} numberOfLines={1}>
-                    {hit.saved ? '★ ' : ''}
                     {hit.name}
                   </Text>
                   <Text style={styles.stopResultLabel} numberOfLines={1}>
-                    {hit.label ? `${hit.label} · ` : ''}
-                    {detourLabel(hit.extraTimeMs)} detour
+                    {stopAlongLabel(hit.alongM)}
+                    {/* Only worth saying when it is a real detour. */}
+                    {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
+                    {hit.label ? ` · ${hit.label}` : ''}
                   </Text>
                 </Pressable>
               ))}
@@ -260,6 +278,7 @@ export function RoutePanel({
   packs,
   places,
   getBias,
+  fetchNearby,
   onExport,
   onNavigate,
   onShowTransitTrip,
@@ -276,6 +295,8 @@ export function RoutePanel({
   places: PlaceRecord[];
   /** Current map centre, to bias the stop search towards the viewport. */
   getBias: SearchBias;
+  /** Category POIs near a point — the same explore seam the mid-drive panel uses. */
+  fetchNearby: FetchNearbyFn;
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
   /**
@@ -560,7 +581,7 @@ export function RoutePanel({
         ) : null}
 
         {!route.roundTrip && !transitMode && path && stops.length >= 2 ? (
-          <AlongRouteSearch route={route} path={path} places={places} geocode={geocode} />
+          <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />
         ) : null}
 
         <View style={styles.sourceRow}>
@@ -937,6 +958,17 @@ const styles = StyleSheet.create({
   stopResultName: { fontSize: 14, color: theme.text, fontWeight: '600' },
   stopResultLabel: { fontSize: 11, color: theme.textMuted },
   alongSearch: { alignItems: 'stretch', gap: 4 },
+  alongCategories: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  alongCategory: {
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  alongCategoryOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  alongCategoryText: { fontSize: 12, color: theme.text, fontWeight: '600' },
   alongToggle: {
     alignSelf: 'flex-start',
     borderRadius: 16,

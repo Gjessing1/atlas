@@ -173,35 +173,6 @@ describe('useRoute', () => {
     expect(result.current.modeTimes).toEqual({});
   });
 
-  it('estimates searched stops through the active routing provider', async () => {
-    const route = vi.fn<RouteFn>((q) =>
-      Promise.resolve({
-        paths: [
-          {
-            points: q.points.map((p) => ({ ...p })),
-            distanceM: q.points.length === 2 ? 100_000 : 112_000,
-            timeMs: q.points.length === 2 ? 3_600_000 : 4_020_000,
-            ascentM: 0,
-            descentM: 0,
-          },
-        ],
-      }),
-    );
-    const { result } = renderHook(() => useRoute(route));
-    act(() => result.current.start(A));
-    act(() => result.current.addWaypoint(B));
-    await settle();
-
-    const controller = new AbortController();
-    const estimates = await result.current.estimateDetours([C], controller.signal);
-    expect(estimates).toEqual([{ insertIndex: 1, extraTimeMs: 420_000, extraDistanceM: 12_000 }]);
-    expect(
-      route.mock.calls.some(
-        ([q]) => q.points.length === 3 && q.alternatives === false && q.instructions === false,
-      ),
-    ).toBe(true);
-  });
-
   it('does not churn when handed a fresh route callback on every render', async () => {
     const impl = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
     // A brand-new closure each render — the identity the hook must not react to.

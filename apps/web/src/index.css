@@ -2387,6 +2387,34 @@ button.transit-notice-summary {
   border-color: var(--accent);
 }
 
+/* One tap per category — the same chip row as the mid-drive add-a-stop panel. */
+.route-along-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.route-along-category {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.route-along-category:hover {
+  border-color: var(--accent);
+}
+
+.route-along-category.on {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  font-weight: 600;
+}
+
 .route-along-search .route-hint {
   margin: 1px 2px;
 }
