@@ -12,6 +12,8 @@ import type { ActiveOverlay } from '../map/useOverlayLayers.js';
 const STATE_SETTING = 'local.layers.state';
 
 export interface LayerCatalog {
+  /** The active map profile, so panels can show its standing caveat. */
+  profileId: string;
   /** Full server catalog; profile settings use it to configure inactive profiles. */
   allCatalog: LayerMeta[];
   /** The catalog for the active profile, in the server's display order. */
@@ -164,6 +166,7 @@ export function useLayerCatalog(
   );
 
   return {
+    profileId,
     allCatalog: allLayers,
     catalog,
     state,

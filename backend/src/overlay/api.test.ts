@@ -79,6 +79,31 @@ function testLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'coded',
+        rev: 1,
+        title: 'Coded',
+        description: 'WMS layer whose identify answers in codes',
+        group: 'Misc',
+        attribution: '© Test',
+        maxzoom: 15,
+        defaultOpacity: 1,
+        identify: true,
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://upstream.example/wms',
+        version: '1.3.0',
+        layers: 'Ice',
+        identifyLayers: 'Ice',
+        identifyFields: ['navn', 'vurdert'],
+        identifyLabels: { navn: 'Lake', vurdert: 'Ice conditions' },
+        identifyValues: {
+          vurdert: { '1': 'Substantially weakened ice', '2': 'Often dangerous ice conditions' },
+        },
+      },
+    },
+    {
+      meta: {
         id: 'ortho',
         rev: 1,
         title: 'Ortho',
@@ -140,7 +165,7 @@ describe('layer catalog', () => {
     const res = await app.inject({ url: '/api/layers' });
     expect(res.statusCode).toBe(200);
     const { layers } = res.json() as { layers: Record<string, unknown>[] };
-    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy']);
+    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy', 'coded']);
     expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
 
@@ -162,7 +187,30 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-slope');
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
+    expect(ids).toContain('ice-weak');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('only annotates identify keys the layer actually shows', () => {
+    // `identifyLabels`/`identifyValues` are matched against what survives
+    // `identifyFields`, so a mapping for a key that was filtered out (or
+    // misspelled) is dead weight that fails silently — the raw code reaches the
+    // user and nothing anywhere says why.
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms') continue;
+      const { identifyFields, identifyLabels, identifyValues } = layer.upstream;
+      const shown = new Set((identifyFields ?? []).map((f) => f.toLowerCase()));
+      if (shown.size === 0) continue; // no allow-list: everything passes through
+      for (const key of [
+        ...Object.keys(identifyLabels ?? {}),
+        ...Object.keys(identifyValues ?? {}),
+      ]) {
+        expect(
+          shown.has(key.toLowerCase()),
+          `${layer.meta.id}: ${key} is not in identifyFields`,
+        ).toBe(true);
+      }
+    }
   });
 
   it('offers every profile default layer in that profile', () => {
@@ -334,6 +382,25 @@ describe('identify proxy', () => {
     expect(only).toEqual({ navn: 'Verkensvannet', maksdyp: '21.5' });
     // Order is the configured one, not the upstream's.
     expect(Object.keys(only!)).toEqual(['navn', 'maksdyp']);
+  });
+
+  it('renames identify keys and decodes coded values for display', async () => {
+    // NVE's weakened ice answers `vurdert=2`, which on a frozen lake means
+    // "often dangerous ice conditions" and on its own means nothing at all.
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        features: [{ properties: { vurdert: 2, navn: 'Evangervatnet', kommune: 'Voss' } }],
+      }),
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/coded/identify?lat=60.6&lng=6.1&zoom=13' });
+    expect(res.statusCode).toBe(200);
+    const [only] = (res.json() as { results: Record<string, string>[] }).results;
+    expect(only).toEqual({
+      Lake: 'Evangervatnet',
+      'Ice conditions': 'Often dangerous ice conditions',
+    });
   });
 
   it('drops a feature whose every attribute was filtered out', async () => {

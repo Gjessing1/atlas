@@ -3547,6 +3547,19 @@ button.transit-notice-summary {
   margin-bottom: 4px;
 }
 
+/* The profile's standing caveat (MapProfile.note) — sits above the whole list,
+   so it reads as being about the activity rather than about one layer. */
+.layers-profile-note {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 4px 4px 0;
+  background: var(--warning-bg);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--warning);
+}
+
 .layers-group {
   margin-top: 8px;
   font-size: 11px;

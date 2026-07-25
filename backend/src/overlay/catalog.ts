@@ -27,6 +27,22 @@ export interface WmsUpstream {
    */
   identifyFields?: string[];
   /**
+   * Display names for identify keys, matched case-insensitively. Both clients
+   * render the attributes as plain `key: value` rows, so without this a tap
+   * answers in the upstream's database spelling — `vurdert`, `hrv`. Units
+   * belong in the label ("Regulated high water (m)"): the value is a bare
+   * number and there is no unit machinery to invent for a handful of layers.
+   */
+  identifyLabels?: Record<string, string>;
+  /**
+   * Per-field code → meaning, matched case-insensitively on the field name and
+   * exactly on the value. Government layers encode their most important
+   * attribute as a small integer — NVE's weakened ice is `vurdert` 0/1/2/3, and
+   * "Ice conditions: 2" tells a reader on a frozen lake precisely nothing. The
+   * mappings are the upstream's own legend, not our interpretation.
+   */
+  identifyValues?: Record<string, Record<string, string>>;
+  /**
    * Optional ArcGIS REST source for map labels — a number the raster tile can
    * never show because it lives in the upstream's *attributes*, not its
    * symbology. NVE's lake bathymetry is the motivating case: a surveyed lake
@@ -329,6 +345,85 @@ export function norwegianLayers(): OverlayLayer[] {
         url: 'https://wms.geonorge.no/skwms1/wms.dybdedata2',
         version: '1.3.0',
         layers: 'Dybdedata2',
+      },
+    },
+    {
+      // Weakened ice on regulated watercourses (NVE SvekketIs1): 6 161 areas +
+      // 2 770 river stretches, national. A *safety* layer — ice fishing is
+      // mainstream here and regulated lakes drown people every winter — and the
+      // one overlay in the catalog where a wrong reading is measured in lives,
+      // so both the panel note and the identify wording say what blank means.
+      //
+      // Raster, not `arcgis-vector`, despite ROADMAP §4.1 pencilling in the
+      // latter: measured 2026-07-25, the whole coverage as GeoJSON is 17.8 MB
+      // even server-simplified to ~5 m (4.6 MB gzipped) — 4× the Statskog set
+      // that pattern was built for, and a per-session download on a phone. The
+      // WMS also honours NVE's own scale ranges, switching to the generalized
+      // `*_N1000` pair below 1:320 000, which a flat vector pull cannot do.
+      meta: {
+        id: 'ice-weak',
+        rev: 1,
+        title: 'Weakened ice',
+        description:
+          'Ice weakened by hydropower regulation: known unsafe areas on lakes and river stretches.',
+        group: 'Water & depth',
+        attribution: '© NVE',
+        metadataUrl: `${KARTKATALOG}svekket%20is`,
+        // NVE draws nothing above 1:2.56 M — roughly a z8 tile. Below that the
+        // layer would be silently empty rather than "no weakened ice here".
+        minzoom: 8,
+        maxzoom: 16,
+        // NVE ships this as a flat opaque red fill covering the whole affected
+        // basin, so at full strength it erases the water — and the lake-depth
+        // overlay under it, which is default-on in the same profile. Half
+        // opacity still reads unmistakably as a hazard while leaving the lake
+        // legible; the panel slider goes back up for anyone who wants it loud.
+        defaultOpacity: 0.5,
+        identify: true,
+        coverageNote:
+          'Known weakened ice, mapped from local knowledge — never a live ice report. Blank water ' +
+          'means unmapped or unassessed, not safe.',
+        // Offered in Ski as well: a winter tour crossing a regulated lake is the
+        // same hazard, and this is the only layer that answers for it.
+        profiles: ['fishing', 'hunting', 'ski'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/SvekketIs1/MapServer/WMSServer',
+        version: '1.3.0',
+        // Drawn bottom-up: the not-assessed backdrop first, then the two
+        // generalized N1000 layers (they own 1:2.56 M–1:320 k and are invisible
+        // closer in), then the surveyed detail, with the river stretches last so
+        // a thin line is never buried under a polygon.
+        layers:
+          'SvekketIsIkkeVurdert,OppsprukketIsLangsLand_N1000,SvekketIs_N1000,' +
+          'OppsprukketIsLangsLand,SvekketIs,SvekketIsElv',
+        // Most specific first: an assessed area outranks the not-assessed
+        // envelope it sits inside, which otherwise answers for every tap.
+        identifyLayers: 'SvekketIs,SvekketIsElv,OppsprukketIsLangsLand,SvekketIsIkkeVurdert',
+        // `hoyde` and the digitizing bookkeeping are dropped: elevation is on the
+        // map already, and `hrv`/`lrv` are the numbers that explain *why* the ice
+        // here is bad — the reservoir's drawdown range in metres above sea level.
+        identifyFields: ['navn', 'vurdert', 'hrv', 'lrv', 'areal_km2', 'vassdragnr'],
+        identifyLabels: {
+          navn: 'Lake',
+          vurdert: 'Ice conditions',
+          hrv: 'Regulated high water (m)',
+          lrv: 'Regulated low water (m)',
+          areal_km2: 'Area (km²)',
+          vassdragnr: 'Watercourse no.',
+        },
+        // NVE's own legend, verbatim in translation (MapServer/legend?f=json):
+        // the code is the only thing distinguishing the four hazard classes,
+        // since `objektType` is "SvekketIsAktsomhetsområde" on nearly all of them.
+        identifyValues: {
+          vurdert: {
+            '0': 'Not assessed — no conclusion either way',
+            '1': 'Substantially weakened ice',
+            '2': 'Often dangerous ice conditions',
+            '3': 'Cracked ice along the shore',
+          },
+        },
       },
     },
     {

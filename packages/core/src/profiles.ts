@@ -34,6 +34,14 @@ export interface MapProfile {
    * always respected, so this never fights the user's own choice.
    */
   defaultLayers?: string[];
+  /**
+   * A standing caveat about what this profile's map can and cannot tell you,
+   * shown above its layer list. Not a coverage note (that belongs on the layer
+   * that has the gap) but a statement about the *domain* — the case it exists
+   * for is Fish & Hunt, where the honest thing to say is that no map grants
+   * permission to hunt or fish.
+   */
+  note?: string;
 }
 
 export const MAP_PROFILES: readonly MapProfile[] = [
@@ -92,7 +100,17 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       'hillshade',
       'terrain-contours',
       'statskog-jaktfelt',
+      'ice-weak',
     ],
+    // Norway has no national hunting-rights dataset: Statskog covers state land
+    // only and Hjorteviltregisteret has no API, so on the private ground where
+    // most hunting happens Atlas can draw the *property* but never the rights.
+    // Said plainly here so a Statskog-shaped hole cannot read as "no data = free
+    // to hunt" — the one way this profile could actively mislead someone.
+    note:
+      'The map is never permission. Hunting and inland fishing in Norway need the landowner’s ' +
+      'consent or a valid card, and no national rights layer exists — Statskog’s fields are ' +
+      'state land only.',
   },
 ];
 

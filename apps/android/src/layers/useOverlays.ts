@@ -32,6 +32,8 @@ export interface ActiveOverlay {
 }
 
 export interface OverlaysController {
+  /** The active map profile, so the sheet can show its standing caveat. */
+  profileId: string;
   /** Full cached/live catalog; profile settings configure inactive profiles from it. */
   allCatalog: LayerMeta[];
   /** The catalog narrowed to the active map profile. */
@@ -201,6 +203,7 @@ export function useOverlays(
   );
 
   return {
+    profileId,
     allCatalog: renderableLayers,
     catalog,
     state,

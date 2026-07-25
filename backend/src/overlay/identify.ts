@@ -56,6 +56,38 @@ export function selectFields(
   return out;
 }
 
+/**
+ * Turn the upstream's database spelling into something readable: decode coded
+ * values first, then rename the keys (see `identifyLabels`/`identifyValues`).
+ *
+ * Runs after `selectFields`, so it only ever sees the handful of attributes a
+ * layer chose to show. A field with no mapping passes through untouched — the
+ * catalog names what it knows how to translate and stays silent about the rest,
+ * which is what keeps an unannotated layer working exactly as before.
+ */
+export function presentFields(
+  props: Record<string, string>,
+  labels: Record<string, string> | undefined,
+  values: Record<string, Record<string, string>> | undefined,
+): Record<string, string> {
+  if (!labels && !values) return props;
+  const lower = <T>(map: Record<string, T> | undefined) =>
+    new Map(Object.entries(map ?? {}).map(([k, v]) => [k.toLowerCase(), v] as const));
+  const labelBy = lower(labels);
+  const valueBy = lower(values);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(props)) {
+    const k = key.toLowerCase();
+    // Numbers arrive as "1" or "1.0" depending on the identify dialect, so a
+    // code lookup that missed by a trailing ".0" would silently show the raw
+    // number — the exact failure this exists to prevent.
+    const codes = valueBy.get(k);
+    const decoded = codes?.[value] ?? codes?.[value.replace(/\.0+$/, '')] ?? value;
+    out[labelBy.get(k) ?? key] = decoded;
+  }
+  return out;
+}
+
 export function parseGeojsonInfo(body: string): Record<string, string>[] | null {
   try {
     const json = JSON.parse(body) as { features?: { properties?: Record<string, unknown> }[] };
@@ -176,7 +208,8 @@ export function registerIdentifyRoute(ctx: OverlayContext): void {
           ctx.record(layer.meta.id, true);
           const selected = results
             .map((r) => selectFields(r, wms.identifyFields))
-            .filter((r) => Object.keys(r).length > 0);
+            .filter((r) => Object.keys(r).length > 0)
+            .map((r) => presentFields(r, wms.identifyLabels, wms.identifyValues));
           return { results: selected.slice(0, 8) };
         } catch (err) {
           request.log.warn({ err, layer: layer.meta.id, format }, 'identify upstream failed');

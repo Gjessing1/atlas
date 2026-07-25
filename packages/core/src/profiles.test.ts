@@ -101,12 +101,24 @@ describe('map profiles', () => {
       'hillshade',
       'terrain-contours',
       'statskog-jaktfelt',
+      'ice-weak',
     ]);
     for (const id of fishhunt.defaultLayers!) {
       expect(layerInProfile(meta(id), 'fishhunt')).toBe(true);
       expect(layerDefaultsOn(id, 'fishhunt')).toBe(true);
       expect(layerDefaultsOn(id, 'explore')).toBe(false);
     }
+  });
+
+  it('states plainly that no Fish & Hunt layer grants permission', () => {
+    // The one way this profile could actively mislead: Statskog covers state
+    // land only, so a blank private forest must never read as "free to hunt".
+    // Both panels render `note`, so the guarantee is that it exists and says so.
+    const note = mapProfile('fishhunt').note ?? '';
+    expect(note).toContain('never permission');
+    expect(note).toContain('landowner');
+    // Nobody else claims one — a note on every profile would be wallpaper.
+    expect(MAP_PROFILES.filter((p) => p.note).map((p) => p.id)).toEqual(['fishhunt']);
   });
 
   it('only names travel modes the routing package actually knows', () => {

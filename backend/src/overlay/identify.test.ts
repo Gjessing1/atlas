@@ -5,6 +5,7 @@ import {
   parseGeojsonInfo,
   parseGmlInfo,
   parseTextInfo,
+  presentFields,
   selectFields,
 } from './identify.js';
 
@@ -63,6 +64,44 @@ describe('selectFields', () => {
 
   it('yields nothing when no listed field is present', () => {
     expect(selectFields({ pdf1: 'x.pdf' }, ['navn', 'maksdyp'])).toEqual({});
+  });
+});
+
+describe('presentFields', () => {
+  const labels = { navn: 'Lake', vurdert: 'Ice conditions', hrv: 'Regulated high water (m)' };
+  const values = { vurdert: { '0': 'Not assessed', '2': 'Often dangerous ice conditions' } };
+
+  it('renames keys and decodes coded values, keeping the reading order', () => {
+    const out = presentFields(
+      { navn: 'Evangervatnet', VURDERT: '2', hrv: '251.5' },
+      labels,
+      values,
+    );
+    expect(out).toEqual({
+      Lake: 'Evangervatnet',
+      'Ice conditions': 'Often dangerous ice conditions',
+      'Regulated high water (m)': '251.5',
+    });
+    expect(Object.keys(out)[0]).toBe('Lake');
+  });
+
+  it('decodes a code that arrived as a float, not just as an integer', () => {
+    // The identify dialects disagree: ESRI text/xml answers "2", geo+json "2.0".
+    // Missing by a trailing zero would show the raw code, the exact failure the
+    // mapping exists to prevent.
+    expect(presentFields({ vurdert: '2.0' }, labels, values)).toEqual({
+      'Ice conditions': 'Often dangerous ice conditions',
+    });
+  });
+
+  it('passes through anything the catalog does not claim to translate', () => {
+    expect(presentFields({ vurdert: '9', kommune: 'Voss' }, labels, values)).toEqual({
+      'Ice conditions': '9',
+      kommune: 'Voss',
+    });
+    // An unannotated layer must behave exactly as before.
+    const raw = { navn: 'Verkensvannet', maksdyp: '21.5' };
+    expect(presentFields(raw, undefined, undefined)).toBe(raw);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { LayerMeta } from '@atlas/core';
+import { mapProfile, type LayerMeta } from '@atlas/core';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -25,8 +25,11 @@ export function LayersContent({ overlays }: { overlays: OverlaysController }) {
     );
   }
 
+  const note = mapProfile(overlays.profileId).note;
+
   return (
     <View>
+      {note ? <Text style={styles.profileNote}>{note}</Text> : null}
       {groups.map(([group, metas]) => (
         <View key={group}>
           <Text style={styles.groupHeading}>{group}</Text>
@@ -140,6 +143,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
     color: theme.textMuted,
+  },
+  // The profile's standing caveat (MapProfile.note), above the whole list so it
+  // reads as being about the activity rather than about one layer.
+  profileNote: {
+    borderLeftWidth: 3,
+    borderLeftColor: theme.warning,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.warning,
   },
   row: { paddingVertical: 8 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },

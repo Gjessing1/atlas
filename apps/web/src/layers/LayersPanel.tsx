@@ -1,4 +1,4 @@
-import type { LayerMeta } from '@atlas/core';
+import { mapProfile, type LayerMeta } from '@atlas/core';
 import type { LayerCatalog } from './useLayerCatalog.js';
 
 interface LayersPanelProps {
@@ -23,9 +23,12 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
     else groups.push([meta.group, [meta]]);
   }
 
+  const note = mapProfile(layers.profileId).note;
+
   return (
     <section className="layers-section" aria-label="Map layers">
       <div className="layers-title">Map layers</div>
+      {note && <p className="layers-profile-note">{note}</p>}
       {groups.map(([group, metas]) => (
         <div key={group}>
           <div className="layers-group">{group}</div>
