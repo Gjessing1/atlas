@@ -6,19 +6,22 @@ import { pipCardMetrics, pipGuidance } from './pipGuidance';
 import { TurnIcon } from './TurnIcon';
 
 /**
- * Navigation at picture-in-picture size: the turn arrow, how far to it, what it
- * is, and the arrival clock — filling the window, on its own background.
+ * Navigation at picture-in-picture size: the live map, with a guidance strip
+ * along the bottom carrying the turn arrow, how far to it, what it is, and the
+ * arrival clock.
  *
- * The map is deliberately *not* in here. It used to be: the window showed the
- * live map with a thin guidance strip along the bottom, and at 150 dp tall that
- * meant a postage stamp of road, framed on wherever the camera happened to be
- * rather than on anything the driver needed. Every navigator that does this well
- * shows the maneuver instead, because a glance at a floating window is a glance
- * for one fact: which way, and how far. The map is one tap away, full size,
- * where it is worth looking at.
+ * The map is back in here, and it is the point. It briefly wasn't: the window
+ * showed a large maneuver card over an opaque background, on the argument that
+ * a glance at a floating window is a glance for one fact. In a car that turned
+ * out to be exactly wrong — above 10 km the distance reads in whole kilometres
+ * and the clock in whole minutes, so on a motorway the entire window can sit
+ * unchanged for the better part of a minute and reads as frozen guidance. A map
+ * moving under the puck is unmistakably live, and it answers the question the
+ * card could not: not "which way", but "where am I".
  *
- * It also scales: the window is resizable, so the arrow and the distance grow
- * with it instead of leaving a large window mostly empty.
+ * The strip still scales: the window is resizable, so type and arrow grow with
+ * it, and the strip's own height is what the follow camera is told to keep
+ * clear (App's `navViewport`), so the puck never sits behind it.
  *
  * Deliberately not interactive: at this size every control is a mis-tap, and the
  * one gesture that matters (tap to expand) belongs to the system.
@@ -29,36 +32,24 @@ export function NavPipCard({ nav }: { nav: NavController }) {
   const size = pipCardMetrics(win.width, win.height);
   return (
     <View
-      style={[styles.wrap, { padding: size.padding, gap: size.gap }]}
+      style={[
+        styles.strip,
+        { minHeight: size.height, paddingHorizontal: size.padding, gap: size.gap },
+      ]}
       pointerEvents="none"
       testID="nav-pip-card"
     >
-      <View style={styles.row}>
-        {guidance.instruction ? (
-          <View
-            style={[
-              styles.turn,
-              { width: size.icon, height: size.icon, borderRadius: Math.round(size.icon / 4) },
-            ]}
-          >
-            <TurnIcon
-              instruction={guidance.instruction}
-              size={Math.round(size.icon * 0.78)}
-              color="#fff"
-            />
-          </View>
-        ) : null}
-        <View style={styles.text}>
-          <Text style={[styles.headline, { fontSize: size.headline }]} numberOfLines={1}>
-            {guidance.headline}
-          </Text>
-          {guidance.detail ? (
-            <Text style={[styles.detail, { fontSize: size.detail }]} numberOfLines={2}>
-              {guidance.detail}
-            </Text>
-          ) : null}
-        </View>
-      </View>
+      {guidance.instruction ? (
+        <TurnIcon instruction={guidance.instruction} size={size.icon} color={theme.accent} />
+      ) : null}
+      <Text style={[styles.headline, { fontSize: size.headline }]} numberOfLines={1}>
+        {guidance.headline}
+      </Text>
+      {guidance.detail ? (
+        <Text style={[styles.detail, { fontSize: size.detail }]} numberOfLines={1}>
+          {guidance.detail}
+        </Text>
+      ) : null}
       {guidance.footer && size.showFooter ? (
         <Text style={[styles.footer, { fontSize: size.footer }]} numberOfLines={1}>
           {guidance.footer}
@@ -69,25 +60,19 @@ export function NavPipCard({ nav }: { nav: NavController }) {
 }
 
 const styles = StyleSheet.create({
-  // Opaque and edge to edge: the window is the card, not an overlay on a map
-  // the driver cannot read anyway.
-  wrap: {
+  // Opaque rather than translucent: this sits over moving map, and guidance
+  // that has to be read at a glance may not depend on what is under it.
+  strip: {
     position: 'absolute',
-    top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: theme.surface,
-    justifyContent: 'center',
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  turn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.accent,
+    backgroundColor: theme.surface,
   },
-  text: { flex: 1 },
   headline: { color: theme.text, fontWeight: '800' },
-  detail: { color: theme.textMuted, fontWeight: '600' },
+  // The maneuver takes whatever room the fixed-width distance and clock leave.
+  detail: { color: theme.textMuted, fontWeight: '600', flex: 1 },
   footer: { color: theme.text, fontWeight: '700' },
 });

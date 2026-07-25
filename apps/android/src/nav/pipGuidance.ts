@@ -17,7 +17,7 @@ export interface PipGuidance {
   ended: boolean;
 }
 
-/** How big the mini window's parts are drawn at the size the system gave it. */
+/** How big the mini window's guidance strip is drawn at the size the system gave it. */
 export interface PipCardMetrics {
   /** Turn arrow edge length. */
   icon: number;
@@ -25,46 +25,52 @@ export interface PipCardMetrics {
   headline: number;
   /** Street/maneuver line. */
   detail: number;
-  /** ETA row. */
+  /** Arrival clock. */
   footer: number;
   padding: number;
   gap: number;
-  /** False in the shortest windows, where the ETA row costs the street name. */
+  /** Height (dp) the strip occupies along the bottom of the window. */
+  height: number;
+  /** False in the narrowest windows, where the clock costs the street name. */
   showFooter: boolean;
 }
 
 /**
- * Type and spacing for a mini window of the given size (dp).
+ * Type and spacing for the guidance strip of a mini window of the given size (dp).
  *
- * The user resizes this window — pinch it larger and the card has to use the
- * room rather than float a 17 px line in the middle of it, which is what a
- * fixed-size strip did. Everything scales off the window's *height*, since a
- * PiP window keeps its aspect ratio: width follows, and height is what decides
- * whether a second line fits at all.
+ * The user resizes this window — pinch it larger and the strip has to use the
+ * room rather than float a 12 px line along the bottom of it. Everything scales
+ * off the window's *height*, since a PiP window keeps its aspect ratio: width
+ * follows, and height is what decides how much of it guidance may take before
+ * the map underneath stops being a map.
  */
 export function pipCardMetrics(width: number, height: number): PipCardMetrics {
   // 0 at a ~90 dp-tall window, 1 at ~220 dp — the range Android's PiP allows.
   const room = Math.max(0, Math.min(1, (Math.min(height, width * 0.75) - 90) / 130));
   const at = (small: number, large: number) => Math.round(small + (large - small) * room);
   return {
-    icon: at(38, 76),
-    headline: at(26, 48),
-    detail: at(13, 20),
-    footer: at(12, 17),
-    padding: at(10, 18),
-    gap: at(10, 18),
-    showFooter: height >= 104,
+    icon: at(22, 34),
+    headline: at(15, 24),
+    detail: at(11, 15),
+    footer: at(10, 13),
+    padding: at(8, 12),
+    gap: at(8, 12),
+    height: at(40, 66),
+    // The clock is the first thing to go: it is the one line the driver can
+    // reconstruct, and a cramped row that truncates the street name is worse.
+    showFooter: width >= 240,
   };
 }
 
 /**
- * The guidance that fits a picture-in-picture window: the turn arrow, how far to
- * it, and what it is. No lanes, no widgets, no speed roundel, no controls — at
- * ~150 dp tall anything more is unreadable, and a control that small is one the
- * driver would hit by accident.
+ * The guidance that fits the strip along the bottom of a picture-in-picture
+ * window: the turn arrow, how far to it, what it is, and the arrival clock. No
+ * lanes, no widgets, no speed roundel, no controls — at ~150 dp tall anything
+ * more is unreadable, and a control that small is one the driver would hit by
+ * accident.
  *
  * A trip that ends while the window is up says so: an "arrived" or "stopped"
- * card is honest, where a frozen last maneuver would read as live guidance.
+ * strip is honest, where a frozen last maneuver would read as live guidance.
  */
 export function pipGuidance(
   nav: Pick<NavController, 'phase' | 'state' | 'tripSummary' | 'error'>,

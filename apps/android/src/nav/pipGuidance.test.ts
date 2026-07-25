@@ -88,12 +88,13 @@ describe('pipGuidance', () => {
 });
 
 describe('pipCardMetrics', () => {
-  it('grows the card with the window the user resized it to', () => {
+  it('grows the strip with the window the user resized it to', () => {
     const small = pipCardMetrics(240, 135);
     const large = pipCardMetrics(400, 225);
 
     expect(large.icon).toBeGreaterThan(small.icon);
     expect(large.headline).toBeGreaterThan(small.headline);
+    expect(large.height).toBeGreaterThan(small.height);
     expect(large.padding).toBeGreaterThanOrEqual(small.padding);
   });
 
@@ -101,13 +102,24 @@ describe('pipCardMetrics', () => {
     const tiny = pipCardMetrics(120, 68);
     const huge = pipCardMetrics(1200, 675);
 
-    expect(tiny.icon).toBe(38);
-    expect(tiny.headline).toBe(26);
-    expect(huge.icon).toBe(76);
-    expect(huge.headline).toBe(48);
+    expect(tiny.icon).toBe(22);
+    expect(tiny.headline).toBe(15);
+    expect(huge.icon).toBe(34);
+    expect(huge.headline).toBe(24);
   });
 
-  it('drops the arrival row in a window too short to hold it', () => {
+  it('always leaves most of the window to the map', () => {
+    for (const [w, h] of [
+      [160, 90],
+      [240, 135],
+      [400, 225],
+      [1200, 675],
+    ]) {
+      expect(pipCardMetrics(w!, h!).height).toBeLessThan(h! / 2);
+    }
+  });
+
+  it('drops the arrival clock in a window too narrow to hold it', () => {
     expect(pipCardMetrics(160, 90).showFooter).toBe(false);
     expect(pipCardMetrics(240, 135).showFooter).toBe(true);
   });

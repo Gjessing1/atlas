@@ -79,6 +79,11 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // pedestrian can actually see the turn from.
     approachThresholdsM: [100, 30],
     approachLeadTimesS: [60, 20],
+    // Two cues per turn, not three. 100/30/10 m is barely a minute of walking,
+    // and hearing the same turn announced three times inside it is nagging
+    // rather than guidance; this drops the middle cue (30 m sits only 20 m
+    // from the 10 m one) and leaves "in 100 metres, turn right" + "turn right".
+    minPromptSpacingM: 45,
     nowThresholdM: 10,
     nowLeadTimeS: 7,
     farApproachM: 0,
@@ -123,6 +128,7 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     arrivalLoiterMaxSpeedMps: 0.3,
     approachThresholdsM: [100, 30],
     approachLeadTimesS: [60, 20],
+    minPromptSpacingM: 45, // same two-cues-per-turn rule as foot
     nowThresholdM: 10,
     nowLeadTimeS: 7,
     farApproachM: 0,

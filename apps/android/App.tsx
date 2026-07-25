@@ -63,6 +63,7 @@ import { NavResumeCard } from './src/nav/NavResumeCard';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
 import { NavPipCard } from './src/nav/NavPipCard';
+import { pipCardMetrics } from './src/nav/pipGuidance';
 import { navViewport } from './src/nav/navViewport';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
@@ -114,8 +115,6 @@ const STATUS_BAR_FALLBACK = 28;
 
 /** A picture-in-picture window has no system bars to clear. */
 const NO_SIDE_INSETS = { left: 0, right: 0 };
-/** Bottom strip the compact PiP guidance card occupies (NavPipCard). */
-const PIP_CARD_HEIGHT = 46;
 
 function AppInner() {
   const insets = useSafeAreaInsets();
@@ -270,7 +269,16 @@ function AppInner() {
   const viewport = useMemo(
     () =>
       inPip
-        ? navViewport(win.width, win.height, NO_SIDE_INSETS, 0, PIP_CARD_HEIGHT, true)
+        ? navViewport(
+            win.width,
+            win.height,
+            NO_SIDE_INSETS,
+            0,
+            // Keep the puck clear of the guidance strip, whose height is the
+            // window's own (NavPipCard scales with the size the user gave it).
+            pipCardMetrics(win.width, win.height).height,
+            true,
+          )
         : navViewport(win.width, win.height, side, topInset, bottomInset),
     [win.width, win.height, side, topInset, bottomInset, inPip],
   );
@@ -292,6 +300,14 @@ function AppInner() {
   // The follow camera uses the same responsive viewport as the visible puck:
   // centred in portrait, or in the unobstructed right pane in landscape.
   const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, inPip ? 0 : navHeight);
+  // Shrinking into the mini window re-engages the follow camera. A map left
+  // panned aside or in route overview would otherwise fold into a floating
+  // window that never moves — the one thing that window exists to show — and
+  // at that size there is no re-centre control to get it back.
+  const { resumeFollow } = navCam;
+  useEffect(() => {
+    if (inPip) resumeFollow();
+  }, [inPip, resumeFollow]);
   const navPuck = useNavPuck(nav, navCam, navPrefs.followMode, viewport);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Category candidates via the online explore endpoint with the downloaded
@@ -546,7 +562,6 @@ function AppInner() {
   // Recentre on the user's position. While navigating this re-engages the
   // follow camera after a manual pan; when idle it's a one-shot fly-to that
   // also reveals the location puck.
-  const { resumeFollow } = navCam;
   const locate = useCallback(async () => {
     if (following) {
       resumeFollow();
@@ -646,13 +661,15 @@ function AppInner() {
         onUserGesture={navCam.onUserGesture}
         onDestinationMoved={dest.onMoved}
       />
-      {/* In the mini window the maneuver is the whole point: the guidance card
-          covers the map and replaces every piece of normal chrome, and no
-          sheet, banner or control is rendered at a size where it could only be
-          mis-tapped. A postage stamp of map is not something anyone can read at
-          a glance; which way and how far is. Expanding restores all of it — the
-          same trip, camera and follow mode, because MapScene and the navigation
-          session were never unmounted. */}
+      {/* In the mini window the map keeps running under a compact guidance
+          strip, and that strip replaces every other piece of chrome: no sheet,
+          banner or control is rendered at a size where it could only be
+          mis-tapped. The map is what makes the window read as live — the
+          distance and clock in the strip change only every whole kilometre and
+          whole minute, so on a motorway they can sit still for the better part
+          of a minute. Expanding restores everything else — the same trip,
+          camera and follow mode, because MapScene and the navigation session
+          were never unmounted. */}
       {inPip ? (
         <NavPipCard nav={nav} />
       ) : (

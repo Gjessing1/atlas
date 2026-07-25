@@ -37,4 +37,23 @@ describe('roundaboutGlyph', () => {
     // Still drawn on the side it turns towards.
     expect(back.head.x).toBeGreaterThan(ROUNDABOUT_RING.cx);
   });
+
+  it('draws one stub per exit passed, and none for the first exit', () => {
+    expect(roundaboutGlyph(90, 1).passed).toHaveLength(0);
+    expect(roundaboutGlyph(0, undefined).passed).toHaveLength(0);
+    expect(roundaboutGlyph(0, 2).passed).toHaveLength(1);
+    expect(roundaboutGlyph(-90, 3).passed).toHaveLength(2);
+    // A count no ring could really have is left undrawn rather than fanned out.
+    expect(roundaboutGlyph(0, 12).passed).toHaveLength(0);
+  });
+
+  it('spreads the passed exits across the arc actually driven', () => {
+    // The textbook four-arm ring: 3rd exit turning left puts the two passed
+    // exits at right (90°) and straight on (0°).
+    const [first, second] = roundaboutGlyph(-90, 3).passed;
+    const { cx, cy, r } = ROUNDABOUT_RING;
+    // Each stub starts on the ring at its own angle: right, then straight up.
+    expect(first).toContain(`M${(cx + r).toFixed(1)} ${cy.toFixed(1)}`);
+    expect(second).toContain(`M${cx.toFixed(0)} ${(cy - r).toFixed(1)}`);
+  });
 });

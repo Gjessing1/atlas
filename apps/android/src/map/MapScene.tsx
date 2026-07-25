@@ -264,8 +264,9 @@ export function MapScene({
   // The trip isn't over until the traveller taps Done: the arrival card stays
   // up while they finish the last few metres on foot or hunt for the entrance,
   // and a position marker that vanishes the moment we say "you have arrived"
-  // is exactly when it is missed. The native puck keeps updating on its own
-  // location feed, so it tracks them without the trip's GPS watch running.
+  // is exactly when it is missed. The trip's own fix watch stays up through
+  // arrival too, so `navDot` normally carries this and the native puck is only
+  // the fallback for a trip that never got a position at all.
   const locating = following || showPuck || nav.phase === 'arrived';
 
   // On-map turn arrows for the active route; turns already passed are hidden

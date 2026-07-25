@@ -103,10 +103,21 @@ export function TurnIcon({
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
-    const ring = roundaboutGlyph(instruction.exitAngleDeg);
+    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber);
     return (
       <View style={styles.box}>
         <Svg width={size} height={size} viewBox="0 0 24 24">
+          {/* The exits counted off on the way, faint like a fork's ghost road. */}
+          {ring.passed.map((d) => (
+            <Path
+              key={d}
+              d={d}
+              stroke={color}
+              strokeWidth={2}
+              strokeLinecap="round"
+              opacity={0.35}
+            />
+          ))}
           <Circle
             cx={ROUNDABOUT_RING.cx}
             cy={ROUNDABOUT_RING.cy}

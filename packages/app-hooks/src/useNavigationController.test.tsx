@@ -203,7 +203,7 @@ describe('useNavigationController — guidance', () => {
     expect(h.platform.stopSpeaking).toHaveBeenCalled();
   });
 
-  it('ends as arrived with a distance/time summary and drops the watch', async () => {
+  it('ends as arrived with a distance/time summary, keeping the watch until Done', async () => {
     const h = harness();
     const { result } = await drive(h);
 
@@ -212,8 +212,21 @@ describe('useNavigationController — guidance', () => {
     await waitFor(() => expect(result.current.phase).toBe('arrived'));
     expect(result.current.tripSummary).not.toBeNull();
     expect(result.current.tripSummary!.distanceM).toBeGreaterThan(0);
-    expect(h.watchStopped()).toBe(1);
     expect(result.current.destination).toEqual(destination);
+    // The last stretch to the door is walked with the arrival card up, so the
+    // fixes keep coming — and keep moving the position — until Done.
+    expect(h.watchStopped()).toBe(0);
+    const arrivedAt = result.current.state!.snapped;
+    // Walking away from the kerb to the door: well off the line, so the puck
+    // shows the fix itself rather than staying glued to where the trip ended.
+    act(() => h.emit({ lat: 60.0006, lng: 10.02, accuracyM: 5, speedMps: 1 }));
+    expect(result.current.state!.snapped).not.toEqual(arrivedAt);
+    expect(result.current.phase).toBe('arrived');
+    // …and arrival is announced and summarised exactly once, not per fix.
+    expect(h.spoken.filter((t) => /arriv/i.test(t))).toHaveLength(1);
+
+    act(() => result.current.stop());
+    expect(h.watchStopped()).toBe(1);
   });
 
   it('ends as arrived on the traveller’s say-so', async () => {

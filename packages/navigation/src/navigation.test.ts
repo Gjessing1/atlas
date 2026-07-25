@@ -459,7 +459,9 @@ describe('NavigationSession snapped state', () => {
     const s = new NavigationSession(route());
     const rolling = s.update({ ...pointAtAlong(100), speedMps: 8 }, 0).state;
     expect(rolling.departed).toBe(true);
-    const state = s.update({ lat: 60.0001, lng: 10.007, speedMps: 1 }, 1000).state;
+    // 40 s later: the second fix is ~290 m further along, which at 8 m/s the
+    // matcher's travel bound only allows this much time to cover.
+    const state = s.update({ lat: 60.0001, lng: 10.007, speedMps: 1 }, 40_000).state;
     expect(state.departed).toBe(true);
     expect(state.snapped.lat).toBeCloseTo(60, 5);
   });
@@ -1672,5 +1674,190 @@ describe('navOptionsForProfile', () => {
     const drive = new NavigationSession(route(), { startDeparted: true });
     for (let t = 0; t < 2; t++) drive.update(far, t * 1000);
     expect(drive.update(far, 2000).state.status).toBe('off-route');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Roundabouts: the ring stays on screen while the vehicle is inside it.
+// ---------------------------------------------------------------------------
+
+/** The straight route, re-signed as approach → ring → exit → arrive. */
+function ringRoute(): RoutePath {
+  return {
+    points: routePoints,
+    distanceM: routeTotal,
+    timeMs: 120_000,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [
+      {
+        text: 'Head east',
+        distanceM: routeCum[8]!,
+        timeMs: 60_000,
+        sign: 0,
+        streetName: 'Main Street',
+        interval: [0, 8],
+      },
+      {
+        text: 'Enter the roundabout and take the 3rd exit onto Elm Street',
+        distanceM: routeCum[10]! - routeCum[8]!,
+        timeMs: 5_000,
+        sign: 6,
+        exitNumber: 3,
+        exitAngleDeg: -80,
+        interval: [8, 10],
+      },
+      {
+        text: 'Exit the roundabout onto Elm Street',
+        distanceM: routeCum[12]! - routeCum[10]!,
+        timeMs: 5_000,
+        sign: 6,
+        exitAngleDeg: -80,
+        streetName: 'Elm Street',
+        verbal: { pre: 'Exit the roundabout onto Elm Street', succinct: 'Exit the roundabout' },
+        interval: [10, 12],
+      },
+      { text: 'Arrive at destination', distanceM: 0, timeMs: 0, sign: 4, interval: [20, 20] },
+    ],
+  };
+}
+
+describe('NavigationSession roundabout display', () => {
+  const enterM = routeCum[8]!;
+  const leaveM = routeCum[10]!;
+
+  it('keeps the exit to count on screen until the route leaves the ring', () => {
+    const s = new NavigationSession(ringRoute(), { startDeparted: true });
+
+    const approaching = s.update({ ...pointAtAlong(400), speedMps: 5 }, 0).state;
+    expect(approaching.upcoming?.instruction.exitNumber).toBe(3);
+    expect(approaching.upcoming!.distanceToM).toBeCloseTo(enterM - 400, 0);
+    // Not the ring's own exit half: a second, numberless roundabout icon in
+    // the "then" row says nothing the row above hasn't already said.
+    expect(approaching.then?.instruction.text).toBe('Arrive at destination');
+
+    // Inside the ring the maneuver list has moved on to "exit the roundabout",
+    // which knows nothing about *which* exit — the banner must not.
+    const inside = s.update({ ...pointAtAlong(500), speedMps: 5 }, 25_000).state;
+    expect(inside.upcoming?.instruction.exitNumber).toBe(3);
+    expect(inside.upcoming?.instruction.sign).toBe(6);
+    // …and it now counts down to where the route actually leaves the ring.
+    expect(inside.upcoming!.distanceToM).toBeCloseTo(leaveM - 500, 0);
+    expect(inside.then?.instruction.text).toBe('Arrive at destination');
+
+    const after = s.update({ ...pointAtAlong(620), speedMps: 5 }, 50_000).state;
+    expect(after.upcoming?.instruction.text).toBe('Arrive at destination');
+    expect(after.then).toBeNull();
+  });
+
+  it('still speaks the exit cue while the ring is being shown', () => {
+    const s = new NavigationSession(ringRoute(), { startDeparted: true });
+    s.update({ ...pointAtAlong(400), speedMps: 5 }, 0);
+    const { prompts } = s.update({ ...pointAtAlong(500), speedMps: 5 }, 25_000);
+    // Voice follows the real maneuver list: "exit the roundabout onto Elm
+    // Street" is the right thing to say inside the ring, even though the
+    // numberless ring icon is the wrong thing to draw.
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toContain('Exit the roundabout onto Elm Street');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Junction behaviour: not committing to the next road before turning onto it.
+// ---------------------------------------------------------------------------
+
+// 111 m east, then 111 m north — one right-angle junction at (60, 10.002).
+const cornerPoints: LatLng[] = [
+  { lat: 60, lng: 10 },
+  { lat: 60, lng: 10.002 },
+  { lat: 60.001, lng: 10.002 },
+];
+const cornerCum = cumulativeDistances(cornerPoints);
+const cornerM = cornerCum[1]!;
+
+function cornerRoute(): RoutePath {
+  return {
+    points: cornerPoints,
+    distanceM: cornerCum[2]!,
+    timeMs: 20_000,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [
+      {
+        text: 'Head east',
+        distanceM: cornerM,
+        timeMs: 10_000,
+        sign: 0,
+        streetName: 'Main Street',
+        interval: [0, 1],
+      },
+      {
+        text: 'Turn left onto Elm Street',
+        distanceM: cornerCum[2]! - cornerM,
+        timeMs: 10_000,
+        sign: -2,
+        streetName: 'Elm Street',
+        interval: [1, 2],
+      },
+      { text: 'Arrive at destination', distanceM: 0, timeMs: 0, sign: 4, interval: [2, 2] },
+    ],
+  };
+}
+
+describe('map matching at a junction', () => {
+  it('will not put a car on the crossing road it is still driving towards', () => {
+    // 2 m short of the corner and 20 m north of the road being driven: nearer
+    // the crossing road by a long way, but travelling east, which no vehicle
+    // on a northbound road can be doing.
+    const noisy = { lat: 60 + 20 / 111_320, lng: 10.002 - 2 / 55_660 };
+    const snap = snapToRoute(noisy, cornerPoints, cornerCum, {
+      prevAlongM: cornerM - 10,
+      headingDeg: 90,
+      maxAdvanceM: 40,
+    });
+    expect(snap.alongM).toBeLessThan(cornerM);
+  });
+
+  it('never projects the displayed position around the corner ahead of the car', () => {
+    const s = new NavigationSession(cornerRoute(), { startDeparted: true });
+    // 10 m short of the turn at 15 m/s: a full second of look-ahead would put
+    // the puck 5 m up the northbound road — on a road the car has not turned
+    // onto, with the course-up camera swinging to match.
+    const before = pointAtDistance(cornerPoints, cornerCum, cornerM - 10);
+    const state = s.update({ ...before, speedMps: 15, headingDeg: 90 }, 0).state;
+    expect(state.traveledM).toBeCloseTo(cornerM - 10, 0);
+    expect(state.snapped.lat).toBeCloseTo(60, 6);
+    expect(state.snapped.lng).toBeLessThanOrEqual(10.002 + 1e-9);
+  });
+});
+
+describe('walking voice prompts', () => {
+  /** Every prompt fired while walking the last 130 m to the turn. */
+  function walkToTurn(options: Parameters<typeof navOptionsForProfile>[1]): string[] {
+    const s = new NavigationSession(
+      route(),
+      navOptionsForProfile('foot', { startDeparted: true, ...options }),
+    );
+    const turnM = routeCum[10]!;
+    const spoken: string[] = [];
+    for (let d = 130; d >= 2; d -= 5) {
+      const { prompts } = s.update(
+        { ...pointAtAlong(turnM - d), speedMps: 1.4, accuracyM: 5 },
+        ((130 - d) / 1.4) * 1000,
+      );
+      spoken.push(...prompts.map((p) => p.kind));
+    }
+    return spoken;
+  }
+
+  it('announces a turn twice on foot, not three times', () => {
+    // 100/30/10 m is barely a minute of walking; three announcements inside it
+    // is nagging. The cue nearest the turn always survives, plus the one far
+    // enough away to still be worth hearing.
+    expect(walkToTurn({})).toEqual(['approach', 'now']);
+  });
+
+  it('keeps all three phases where they are genuinely far apart', () => {
+    expect(walkToTurn({ minPromptSpacingM: 0 })).toEqual(['approach', 'approach', 'now']);
   });
 });

@@ -104,10 +104,23 @@ export interface SnapHint {
   prevAlongM?: number | null;
   /**
    * GPS travel direction (deg, 0 = north). Pass only when actually moving —
-   * a wrong-way segment (parallel carriageway, the other side of a divided
-   * road) then costs as much as ~30 m of cross-track distance.
+   * a segment pointing somewhere the traveller demonstrably is not going
+   * (the far carriageway, the road they have not turned onto yet) then costs
+   * up to `HEADING_PENALTY_MAX_M` of equivalent cross-track distance.
    */
   headingDeg?: number | null;
+  /**
+   * How much farther along the route the traveller could plausibly have got
+   * since `prevAlongM` — speed × elapsed time, with margin. Beyond it a
+   * candidate is not merely unlikely but physically impossible, and is
+   * penalized far harder than the generic ahead-slack.
+   *
+   * This is what stops the classic junction jump: waiting to turn off a road,
+   * the fix sits metres from the road being turned *onto*, and without a
+   * travel bound the match slid around the corner — drawing the puck on the
+   * far road, pointing the wrong way, before the car had moved at all.
+   */
+  maxAdvanceM?: number | null;
 }
 
 // Scoring weights: penalties are expressed in metres of equivalent
@@ -116,6 +129,19 @@ export interface SnapHint {
 const BACKTRACK_PENALTY_PER_M = 0.15;
 const AHEAD_SLACK_M = 250;
 const AHEAD_PENALTY_PER_M = 0.05;
+/**
+ * Cost per metre of advance the traveller could not physically have made —
+ * an order of magnitude steeper than the generic ahead-slack, because the
+ * bound it applies past already carries a 60 % speed margin and a fixed slack
+ * for GPS wander. Below 1 on purpose all the same: it is one argument among
+ * several, and it must never overrule geometry that is not close.
+ */
+const IMPOSSIBLE_ADVANCE_PENALTY_PER_M = 0.8;
+/**
+ * Cost of a fully opposed segment. Left where it is on purpose: geometry must
+ * still win when it is unambiguous — a heading may not drag the match tens of
+ * metres sideways onto a road the fix is demonstrably not near.
+ */
 const HEADING_PENALTY_MAX_M = 30;
 
 /**
@@ -144,6 +170,7 @@ export function snapToRoute(
 
   const prevAlongM = hint.prevAlongM ?? null;
   const headingRad = hint.headingDeg != null ? (hint.headingDeg * Math.PI) / 180 : null;
+  const maxAdvanceM = hint.maxAdvanceM != null && hint.maxAdvanceM >= 0 ? hint.maxAdvanceM : null;
 
   let best: Snap | null = null;
   let bestScore = Infinity;
@@ -166,11 +193,20 @@ export function snapToRoute(
     if (prevAlongM !== null) {
       score += BACKTRACK_PENALTY_PER_M * Math.max(0, prevAlongM - alongM);
       score += AHEAD_PENALTY_PER_M * Math.max(0, alongM - prevAlongM - AHEAD_SLACK_M);
+      if (maxAdvanceM !== null) {
+        score += IMPOSSIBLE_ADVANCE_PENALTY_PER_M * Math.max(0, alongM - prevAlongM - maxAdvanceM);
+      }
     }
     if (headingRad !== null && len2 > 0) {
       // 0 when aligned with the segment, HEADING_PENALTY_MAX_M when opposed.
+      // |sin(Δ/2)| rather than sin²: the squared curve barely charged for a
+      // crossing road (half the cost at a right angle), which is exactly the
+      // ambiguity that matters — a car still short of its turn sits metres
+      // from the road it is about to turn onto, and that road runs across its
+      // travel direction, not against it. This shape roughly doubles the cost
+      // there while leaving the fully-opposed case unchanged.
       const segRad = Math.atan2(bx, by);
-      score += ((1 - Math.cos(headingRad - segRad)) / 2) * HEADING_PENALTY_MAX_M;
+      score += Math.sqrt((1 - Math.cos(headingRad - segRad)) / 2) * HEADING_PENALTY_MAX_M;
     }
     if (score < bestScore) {
       bestScore = score;

@@ -351,6 +351,13 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const enrichAbort = useRef<AbortController | null>(null);
   /** Teardown for the active fix watch, if any. */
   const watchStopRef = useRef<(() => void) | null>(null);
+  /**
+   * True from the moment the trip is declared arrived until it is released.
+   * Fixes keep arriving through the arrival card (see `stop`), and every one
+   * of them still reports `arrived` — this is what keeps that from being
+   * announced, summarised and re-summarised once a second.
+   */
+  const arrivedRef = useRef(false);
   // The preview selection is read inside `go`, which must stay identity-stable.
   const previewPathsRef = useLatest(previewPaths);
   const previewIndexRef = useLatest(previewIndex);
@@ -523,11 +530,22 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const stop = useCallback(
     (arrived = false) => {
       tripSeq.current++;
-      stopWatch();
+      // Arrival is not the end of needing a position. The last hundred metres
+      // are on foot — across a car park, round a courtyard, looking for the
+      // door — and that is exactly where an accurate, live puck earns its
+      // keep, so the fix watch and the session stay up while the arrival card
+      // is on screen. The session is already `arrived`: it keeps producing
+      // positions and stops producing guidance, prompts and reroutes. Done
+      // (`stop(false)`) is what releases both, which is what the traveller
+      // means by pressing it.
+      if (!arrived) {
+        stopWatch();
+        sessionRef.current = null;
+        arrivedRef.current = false;
+      }
       clearPreview();
       enrichAbort.current?.abort();
       enrichAbort.current = null;
-      sessionRef.current = null;
       destRef.current = null;
       viasRef.current = [];
       setViaPoints([]);
@@ -568,6 +586,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       stopWatch();
       clearPreview();
       sessionRef.current = null;
+      arrivedRef.current = false;
       destRef.current = null;
       viasRef.current = [];
       setViaPoints([]);
@@ -582,9 +601,15 @@ export function useNavigationController(platform: NavPlatform): NavController {
     [stopWatch, clearPreview, clearFasterOffer],
   );
 
-  /** End the trip with an arrival: summary, spoken confirmation, `arrived`. */
+  /**
+   * End the trip with an arrival: summary, spoken confirmation, `arrived`.
+   * Fires once — fixes keep flowing through the arrival card, and each one
+   * still reports `arrived`, which must not re-announce it every second.
+   */
   const finishArrived = useCallback(
     (session: NavigationSession, traveledM: number) => {
+      if (arrivedRef.current) return;
+      arrivedRef.current = true;
       speak(session.arrivalText());
       setTripSummary({
         distanceM: traveledBaseRef.current + traveledM,
@@ -991,6 +1016,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
       offRouteSpokenRef.current = false;
+      arrivedRef.current = false;
       enrich(session, path);
       tripStartRef.current = Date.now();
       traveledBaseRef.current = 0;

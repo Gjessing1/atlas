@@ -342,7 +342,9 @@ export function useNavLayers(
   const viaMarkersRef = useRef<maplibregl.Marker[]>([]);
   useEffect(() => {
     if (!map) return;
-    const snapped = active ? nav.state?.snapped : undefined;
+    // Arrival keeps the fix watch running until Done, so the puck stays too:
+    // the last stretch to the door is exactly where it is being watched.
+    const snapped = active || nav.phase === 'arrived' ? nav.state?.snapped : undefined;
     if (snapped) {
       if (!puckRef.current) {
         const el = document.createElement('div');
@@ -376,7 +378,7 @@ export function useNavLayers(
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [map, active, previewing, nav.state?.snapped, nav.state?.fix, nav.destination]);
+  }, [map, active, previewing, nav.phase, nav.state?.snapped, nav.state?.fix, nav.destination]);
   // Via stops still ahead on a multi-stop trip, as small dots along the line:
   // each disappears once driven past. Deliberately keyed on the passed-count,
   // not the fix, so the markers are rebuilt when a stop is reached rather

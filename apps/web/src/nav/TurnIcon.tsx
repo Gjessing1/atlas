@@ -96,10 +96,21 @@ export function TurnIcon({
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
-    const ring = roundaboutGlyph(instruction.exitAngleDeg);
+    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber);
     return (
       <span className="nav-turn">
         <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+          {/* The exits counted off on the way, faint like a fork's ghost road. */}
+          {ring.passed.map((d) => (
+            <path
+              key={d}
+              d={d}
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              opacity="0.35"
+            />
+          ))}
           <circle
             cx={ROUNDABOUT_RING.cx}
             cy={ROUNDABOUT_RING.cy}

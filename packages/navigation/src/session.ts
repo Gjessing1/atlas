@@ -64,6 +64,12 @@ const CAMERA_ALERT_LEAD_S = 20;
 /** Shortest sample (m / s) inside a section before the average is worth showing. */
 const SECTION_AVG_MIN_M = 100;
 const SECTION_AVG_MIN_S = 5;
+/** How long a moving fix's heading still describes a now-crawling vehicle. */
+const HEADING_MEMORY_MS = 15_000;
+/** Speed allowance for the matcher's travel bound: acceleration plus GPS slop. */
+const ADVANCE_SPEED_MARGIN = 1.6;
+/** Advance always allowed regardless of speed — a stationary fix still wanders. */
+const ADVANCE_SLACK_M = 20;
 
 /** A time-derived warning distance, never tighter than the tuned fallback. */
 function leadDistanceM(fallbackM: number, leadTimeS: number, speedMps: number | null): number {
@@ -100,6 +106,15 @@ export class NavigationSession {
   private readonly maneuvers: Maneuver[];
   /** Along-route positions of the trip's via stops (sign-5 maneuvers), ascending. */
   private readonly viaAlongM: number[];
+  /**
+   * Roundabouts, as the pair of maneuvers the router splits each one into:
+   * entry index → exit index. The entry carries the exit to count ("3rd exit")
+   * and the angle the ring turns through; the exit carries only "leave the
+   * roundabout". Pairing them lets the display keep the ring on screen for the
+   * whole time the vehicle is inside it (see {@link displayUpcoming}).
+   */
+  private readonly ringExitByEntry = new Map<number, number>();
+  private readonly ringEntryByExit = new Map<number, number>();
   /** suffixTimeMs[i] = total instruction time of maneuvers after i. */
   private readonly suffixTimeMs: number[];
   private readonly opts: Required<NavigationOptions>;
@@ -119,6 +134,16 @@ export class NavigationSession {
   private lastPromptManeuverIndex: number | null = null;
   /** alongM of the previous snap — continuity hint for the map matcher. */
   private lastAlongM: number | null = null;
+  /**
+   * The last travel direction a moving fix reported, and when. A vehicle
+   * waiting to turn still points where it pointed a moment ago, but reports no
+   * usable GPS course at a crawl — so the matcher keeps the last one briefly,
+   * which is exactly the situation ("about to turn off") where losing it let
+   * the snap slide onto the road not yet taken. Map matching only: wrong-way
+   * detection needs live evidence and keeps using the fix's own heading.
+   */
+  private lastHeadingDeg: number | null = null;
+  private lastHeadingMs = 0;
   /** Timestamp / along-route anchor / speed of the last accepted fix. */
   private lastFixMs: number | null = null;
   private alongAtFixM: number | null = null;
@@ -177,6 +202,18 @@ export class NavigationSession {
     this.suffixTimeMs = new Array<number>(this.maneuvers.length).fill(0);
     for (let i = this.maneuvers.length - 2; i >= 0; i--) {
       this.suffixTimeMs[i] = this.suffixTimeMs[i + 1]! + this.maneuvers[i + 1]!.timeMs;
+    }
+    // Valhalla emits a roundabout as enter-then-exit, always adjacent; consume
+    // them in pairs so two rings in a row can't be mistaken for one long one.
+    for (let i = 0; i < this.maneuvers.length - 1; i++) {
+      if (
+        this.maneuvers[i]!.instruction.sign === ROUNDABOUT_SIGN &&
+        this.maneuvers[i + 1]!.instruction.sign === ROUNDABOUT_SIGN
+      ) {
+        this.ringExitByEntry.set(i, i + 1);
+        this.ringEntryByExit.set(i + 1, i);
+        i++;
+      }
     }
   }
 
@@ -470,10 +507,17 @@ export class NavigationSession {
       moving && typeof position.headingDeg === 'number' && position.headingDeg >= 0
         ? position.headingDeg
         : null;
+    if (headingDeg !== null) {
+      this.lastHeadingDeg = headingDeg;
+      this.lastHeadingMs = nowMs;
+    }
+    const matchHeadingDeg =
+      headingDeg ?? (nowMs - this.lastHeadingMs <= HEADING_MEMORY_MS ? this.lastHeadingDeg : null);
     const prevAlongM = this.lastAlongM;
     const snap = snapToRoute(position, this.points, this.cum, {
       prevAlongM: this.lastAlongM,
-      headingDeg,
+      headingDeg: matchHeadingDeg,
+      maxAdvanceM: this.plausibleAdvanceM(nowMs, speedMps),
     });
     this.lastAlongM = snap.alongM;
     const alongM = snap.alongM;
@@ -562,8 +606,11 @@ export class NavigationSession {
     this.wrongBranchAnnounced = false;
     this.wrongBranchTicks = 0;
 
-    const [upcoming, then] = this.arrived ? [null, null] : this.findUpcoming(alongM);
-    const prompts = this.arrived || offRoute ? [] : this.collectPrompts(alongM, upcoming, speedMps);
+    const [upcoming, then] = this.arrived ? [null, null] : this.displayUpcoming(alongM);
+    const prompts =
+      this.arrived || offRoute
+        ? []
+        : this.collectPrompts(alongM, this.findUpcoming(alongM), speedMps);
     if (!this.arrived && !offRoute) prompts.push(...this.cameraPrompts(alongM, speedMps));
 
     // Display position: glue to the route only while the fix is genuinely
@@ -585,7 +632,14 @@ export class NavigationSession {
       let displayAlongM = alongM;
       if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
         const aheadM = Math.min(60, speedMps * (this.opts.predictAheadMs / 1000));
-        displayAlongM = Math.min(this.totalM, alongM + aheadM);
+        // Never project across the next maneuver. The projection exists to
+        // cancel latency along the road being driven; carried round a corner
+        // it draws the vehicle on a road it has not turned onto yet — which,
+        // with the course-up camera swinging to match, reads as being on the
+        // wrong road facing the wrong way.
+        const nextIdx = this.nextManeuverIndex(alongM);
+        const turnM = nextIdx >= 0 ? this.maneuvers[nextIdx]!.alongStartM : this.totalM;
+        displayAlongM = Math.min(this.totalM, turnM, alongM + aheadM);
       }
       shown = pointAtDistance(this.points, this.cum, displayAlongM);
       // Bearing from where the vehicle actually is, not from the projected
@@ -698,8 +752,8 @@ export class NavigationSession {
     this.lastAlongM = alongM; // keep the matcher's continuity hint moving too
     this.trackSection(prevAlongM, alongM, nowMs);
     const distanceRemainingM = Math.max(0, this.totalM - alongM);
-    const [upcoming, then] = this.findUpcoming(alongM);
-    const prompts = this.collectPrompts(alongM, upcoming, speed);
+    const [upcoming, then] = this.displayUpcoming(alongM);
+    const prompts = this.collectPrompts(alongM, this.findUpcoming(alongM), speed);
     // A camera does not stop existing because GPS did — Norwegian tunnels have
     // ATK too, and the reckoned position is exactly what the alert needs.
     prompts.push(...this.cameraPrompts(alongM, speed));
@@ -812,7 +866,7 @@ export class NavigationSession {
    * the first, so a garbage cold-start fix never anchors guidance.
    */
   private provisionalState(position: Position, nowMs: number): NavState {
-    const [upcoming, then] = this.findUpcoming(0);
+    const [upcoming, then] = this.displayUpcoming(0);
     return {
       status: 'navigating',
       snapped: { lat: position.lat, lng: position.lng },
@@ -840,19 +894,56 @@ export class NavigationSession {
     };
   }
 
-  /** The maneuver being approached (first strictly ahead of `alongM`) plus the one after it. */
-  private findUpcoming(alongM: number): [UpcomingManeuver | null, UpcomingManeuver | null] {
+  /** Index of the first maneuver strictly ahead of `alongM`, or -1 past the last. */
+  private nextManeuverIndex(alongM: number): number {
     for (let i = 0; i < this.maneuvers.length; i++) {
-      const m = this.maneuvers[i]!;
-      if (m.alongStartM > alongM + EPS) {
-        const next = this.maneuvers[i + 1];
-        return [
-          { instruction: m.instruction, distanceToM: m.alongStartM - alongM },
-          next ? { instruction: next.instruction, distanceToM: next.alongStartM - alongM } : null,
-        ];
-      }
+      if (this.maneuvers[i]!.alongStartM > alongM + EPS) return i;
     }
-    return [null, null];
+    return -1;
+  }
+
+  /**
+   * The maneuver being approached — the first one strictly ahead. This is the
+   * one voice guidance is about: every cue belongs to the maneuver the
+   * traveller is actually heading for, including "exit the roundabout".
+   */
+  private findUpcoming(alongM: number): UpcomingManeuver | null {
+    const i = this.nextManeuverIndex(alongM);
+    const m = this.maneuvers[i];
+    return m ? { instruction: m.instruction, distanceToM: m.alongStartM - alongM } : null;
+  }
+
+  /**
+   * The maneuver a banner should *show*, plus the one after it — which is not
+   * always the next one in the list.
+   *
+   * A roundabout is two maneuvers: "enter the roundabout and take the 3rd
+   * exit" and, once inside the ring, "exit the roundabout". The moment the
+   * wheels crossed the give-way line the banner therefore lost the one number
+   * the driver still needed — the exit to count — precisely while counting
+   * them off. So the entry maneuver stays on screen for the whole ring, its
+   * distance now counting down to the point where the route actually leaves
+   * it. The same pairing keeps the "then" slot useful in both directions: it
+   * shows what follows the roundabout, never a second, numberless ring icon
+   * for the exit half of the one already being shown.
+   *
+   * Voice is deliberately untouched (see {@link findUpcoming}): "exit the
+   * roundabout onto Kirkeveien" is exactly the right thing to say inside the
+   * ring, even though it is the wrong thing to draw.
+   */
+  private displayUpcoming(alongM: number): [UpcomingManeuver | null, UpcomingManeuver | null] {
+    const next = this.nextManeuverIndex(alongM);
+    if (next < 0) return [null, null];
+    const shown = this.ringEntryByExit.get(next) ?? next;
+    const afterIdx = (this.ringExitByEntry.get(shown) ?? shown) + 1;
+    const after = this.maneuvers[afterIdx];
+    return [
+      {
+        instruction: this.maneuvers[shown]!.instruction,
+        distanceToM: this.maneuvers[next]!.alongStartM - alongM,
+      },
+      after ? { instruction: after.instruction, distanceToM: after.alongStartM - alongM } : null,
+    ];
   }
 
   /** Lane arrows become useful at the same moment ordinary approach guidance does. */
@@ -959,6 +1050,24 @@ export class NavigationSession {
       this.promptSpeed(speedMps),
     );
     return remainingM > handoverM ? { road, distanceRemainingM: remainingM } : null;
+  }
+
+  /**
+   * How far along the route the traveller could plausibly have got since the
+   * previous snap — the faster of the last and current speeds over the elapsed
+   * interval, with margin for acceleration and a floor for GPS wander. Null
+   * before the first fix has anchored a time and a position, where there is
+   * nothing to reason from and the matcher keeps its plain ahead-slack.
+   */
+  private plausibleAdvanceM(nowMs: number, speedMps: number | null): number | null {
+    if (this.lastFixMs === null || this.lastAlongM === null) return null;
+    const dtS = (nowMs - this.lastFixMs) / 1000;
+    if (!Number.isFinite(dtS) || dtS < 0) return null;
+    // No speed anywhere means no bound: some devices report none at all, and
+    // an invented one would hold the match back on a road being driven fast.
+    if (speedMps === null && this.lastSpeedMps === null) return null;
+    const speed = Math.max(speedMps ?? 0, this.lastSpeedMps ?? 0);
+    return speed * dtS * ADVANCE_SPEED_MARGIN + ADVANCE_SLACK_M;
   }
 
   /** Clamp only prompt timing; map matching and speed display keep the real fix. */
@@ -1090,6 +1199,14 @@ export class NavigationSession {
       this.opts.nowLeadTimeS,
       promptSpeedMps,
     );
+    // Collapse phases that would land on top of each other. Counted outward
+    // from the maneuver, so what survives is the cue closest to the turn plus
+    // whichever earlier one is far enough away to be worth hearing — three
+    // announcements inside a hundred metres of walking is nagging, not
+    // guidance. Zero spacing (every driving profile) keeps all three.
+    const spacingM = this.opts.minPromptSpacingM;
+    const preActive = preThresholdM - nowThresholdM >= spacingM;
+    const alertActive = alertThresholdM - (preActive ? preThresholdM : nowThresholdM) >= spacingM;
 
     if (d <= nowThresholdM) {
       const key = `${idx}:now`;
@@ -1101,7 +1218,7 @@ export class NavigationSession {
       return [{ text: this.cueText(idx, 'now'), kind: 'now', maneuverIndex: idx, thresholdM: 0 }];
     }
 
-    if (d <= preThresholdM) {
+    if (preActive && d <= preThresholdM) {
       const key = `${idx}:pre`;
       if (this.firedPrompts.has(key)) return [];
       // A coarse fix can jump over the alert band; do not replay it later.
@@ -1117,7 +1234,7 @@ export class NavigationSession {
       ];
     }
 
-    if (d <= alertThresholdM) {
+    if (alertActive && d <= alertThresholdM) {
       const key = `${idx}:alert`;
       if (this.firedPrompts.has(key)) return [];
       this.firedPrompts.add(key);

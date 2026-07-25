@@ -52,6 +52,11 @@ export function useNavPuck(
   viewport: NavViewport,
 ): NavPuck {
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  // Arrival keeps the trip's own BestForNavigation watch running until Done,
+  // so it keeps the trip's own marker too. Handing the last hundred metres —
+  // across the car park, round the courtyard — back to the native puck's fuzzy
+  // accuracy blob would drop precision exactly where it is wanted most.
+  const live = following || nav.phase === 'arrived';
   const courseUp = followMode === 'course';
   // Walking modes keep a flat, centred camera even course-up (useNavCamera);
   // only the pitched driving frame bottom-anchors the puck.
@@ -60,8 +65,8 @@ export function useNavPuck(
   const anchor = bottomAnchored ? viewport.courseAnchor : viewport.flatAnchor;
   return {
     visible,
-    dot: following && nav.state !== null && !visible ? nav.state.snapped : null,
-    suppressNative: following && nav.state !== null,
+    dot: live && nav.state !== null && !visible ? nav.state.snapped : null,
+    suppressNative: live && nav.state !== null,
     // Anchor point of the follow camera (see useNavCamera): course-up puts it
     // low for look-ahead; north-up centres it vertically. Landscape centres
     // both in the unobstructed right map pane. Track the exact same geometry so

@@ -261,6 +261,17 @@ export interface NavigationOptions {
   approachThresholdsM?: number[];
   /** Lead times corresponding to `approachThresholdsM` (seconds). */
   approachLeadTimesS?: number[];
+  /**
+   * Shortest distance (m) that may separate two spoken cues for the *same*
+   * maneuver. The three-phase ladder (far alert → pre-turn → now) was tuned
+   * for a car, where the phases are hundreds of metres apart; at walking pace
+   * the whole approach fits inside a hundred metres, so the same ladder
+   * announced one turn three times in about a minute. Where two phases fall
+   * closer together than this, the earlier one is dropped — counting outward
+   * from the maneuver, so the cue that survives is always the most useful one.
+   * 0 disables the collapsing entirely (every phase fires).
+   */
+  minPromptSpacingM?: number;
   /** Minimum/fallback distance (m) for the immediate maneuver cue. */
   nowThresholdM?: number;
   /** Desired lead time (seconds) for the immediate maneuver cue. */
@@ -356,6 +367,10 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   arrivalLoiterMaxSpeedMps: 1.4, // walking pace: the car has stopped being driven
   approachThresholdsM: [400, 200],
   approachLeadTimesS: [45, 15],
+  // A car's phases are 160–200 m apart at any speed the fallbacks allow, so
+  // the driving ladder is never collapsed; the knob exists for travellers
+  // whose whole approach is shorter than one of a car's gaps.
+  minPromptSpacingM: 0,
   nowThresholdM: 40,
   nowLeadTimeS: 4,
   farApproachM: 800,
