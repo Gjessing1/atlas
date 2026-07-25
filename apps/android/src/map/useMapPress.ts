@@ -199,6 +199,9 @@ export function useMapPress({
                 overlays.map((o) => o.meta),
                 { lat, lng },
                 zoom,
+                // Same variant the tiles are drawn with, so a species-filtered
+                // layer never answers with what it is not drawing.
+                (meta) => overlays.find((o) => o.meta.id === meta.id)?.options,
               ),
               query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
               query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),

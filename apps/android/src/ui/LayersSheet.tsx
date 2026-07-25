@@ -1,4 +1,4 @@
-import { mapProfile, type LayerMeta } from '@atlas/core';
+import { mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -7,6 +7,46 @@ import { theme } from './theme';
 
 /** Opacity choices as chips — no native slider dependency, OTA-friendly. */
 const OPACITY_STEPS = [0.25, 0.5, 0.75, 1];
+
+/**
+ * A layer's variant picker (`LayerMeta.options`) — the web LayersPanel's twin.
+ * The caption under the chips carries what the choice tunes; a filtered layer
+ * is meaningless without it.
+ */
+function LayerOptionChips({
+  overlays,
+  meta,
+  option,
+}: {
+  overlays: OverlaysController;
+  meta: LayerMeta;
+  option: LayerOption;
+}) {
+  const selected = overlays.optionsFor(meta)[option.key];
+  const caption = option.choices.find((choice) => choice.value === selected)?.caption;
+  return (
+    <View>
+      <View style={styles.opacityRow}>
+        {option.choices.map((choice) => {
+          const on = choice.value === selected;
+          return (
+            <Pressable
+              key={choice.value}
+              style={[styles.opacityChip, on ? styles.opacityChipOn : null]}
+              onPress={() => overlays.setOption(meta, option.key, choice.value)}
+              testID={`layer-option-${meta.id}-${option.key}-${choice.value}`}
+            >
+              <Text style={[styles.opacityChipText, on ? styles.opacityChipTextOn : null]}>
+                {choice.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {caption ? <Text style={styles.muted}>{caption}</Text> : null}
+    </View>
+  );
+}
 
 /** Full layer controls without sheet chrome, reused by Settings → Map. */
 export function LayersContent({ overlays }: { overlays: OverlaysController }) {
@@ -59,6 +99,16 @@ export function LayersContent({ overlays }: { overlays: OverlaysController }) {
                     </Text>
                   ) : null}
                 </Text>
+                {on
+                  ? meta.options?.map((option) => (
+                      <LayerOptionChips
+                        key={option.key}
+                        overlays={overlays}
+                        meta={meta}
+                        option={option}
+                      />
+                    ))
+                  : null}
                 {on && meta.minzoom !== undefined ? (
                   <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
                 ) : null}

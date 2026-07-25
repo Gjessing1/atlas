@@ -94,6 +94,22 @@ describe('presentFields', () => {
     });
   });
 
+  it('drops a row a mapping decodes to nothing', () => {
+    // AR5 answers `Ikke relevant` for tree species and site quality on every
+    // lake, bog and field — three rows of "not relevant" is what an identify
+    // card looks like when nobody read one. Mapping to '' removes the row.
+    expect(
+      presentFields(
+        { artype_beskrivelse: 'Myr', artreslag_beskrivelse: 'Ikke relevant' },
+        { artype_beskrivelse: 'Land cover', artreslag_beskrivelse: 'Tree species' },
+        {
+          artype_beskrivelse: { Myr: 'Bog / marsh' },
+          artreslag_beskrivelse: { 'Ikke relevant': '' },
+        },
+      ),
+    ).toEqual({ 'Land cover': 'Bog / marsh' });
+  });
+
   it('passes through anything the catalog does not claim to translate', () => {
     expect(presentFields({ vurdert: '9', kommune: 'Voss' }, labels, values)).toEqual({
       'Ice conditions': '9',
@@ -151,6 +167,29 @@ describe('parseEsriXmlInfo', () => {
     expect(parseEsriXmlInfo(esri)).toEqual([
       { navn: 'Tyrifjorden', dybde_m: '180' },
       { navn: 'Steinsfjorden', dybde_m: '22' },
+    ]);
+  });
+
+  it('reads a FIELDS element that is closed with a tag instead of self-closed', () => {
+    // Verbatim from Naturbase artfunksjon (probed 2026-07-25). Same WMS
+    // version as NVE, different closing style and Norwegian attribute names —
+    // and this parser owns the format, so getting either wrong means the tap
+    // silently answers "nothing here" instead of falling through.
+    const esri = `<?xml version="1.0" encoding="UTF-8"?>
+      <FeatureInfoResponse xmlns="http://www.esri.com/wms">
+        <FIELDS Områdenavn="" Kommune="Overhalla (5047)" Verdi="Svært viktig" Årstid="vinter"
+          Norsknavn="Elg" Funksjon="beiteområde" Rødlistestatus="Null" Punkt="0"
+          Shape="Polygon" SHAPE.STArea="62315,17658"></FIELDS>
+      </FeatureInfoResponse>`;
+    expect(parseEsriXmlInfo(esri)).toEqual([
+      {
+        Kommune: 'Overhalla (5047)',
+        Verdi: 'Svært viktig',
+        Årstid: 'vinter',
+        Norsknavn: 'Elg',
+        Funksjon: 'beiteområde',
+        Punkt: '0',
+      },
     ]);
   });
 

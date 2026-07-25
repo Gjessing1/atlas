@@ -1,5 +1,44 @@
-import { mapProfile, type LayerMeta } from '@atlas/core';
+import { mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
 import type { LayerCatalog } from './useLayerCatalog.js';
+
+/**
+ * A layer's variant picker (`LayerMeta.options`) — which species a wildlife
+ * layer draws today, and the target a derived surface is tuned for next.
+ *
+ * The caption under the row is the point, not decoration: a surface or a
+ * filtered layer is meaningless without knowing what it is tuned for, so the
+ * picker is the one place that can teach it.
+ */
+function LayerOptionChips({
+  layers,
+  meta,
+  option,
+}: {
+  layers: LayerCatalog;
+  meta: LayerMeta;
+  option: LayerOption;
+}) {
+  const selected = layers.optionsFor(meta)[option.key];
+  const caption = option.choices.find((choice) => choice.value === selected)?.caption;
+  return (
+    <div className="layer-options">
+      <div className="layer-options-row" role="group" aria-label={`${meta.title} ${option.label}`}>
+        {option.choices.map((choice) => (
+          <button
+            key={choice.value}
+            type="button"
+            className={choice.value === selected ? 'layer-chip layer-chip-on' : 'layer-chip'}
+            aria-pressed={choice.value === selected}
+            onClick={() => layers.setOption(meta, option.key, choice.value)}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </div>
+      {caption && <div className="layer-desc">{caption}</div>}
+    </div>
+  );
+}
 
 interface LayersPanelProps {
   layers: LayerCatalog;
@@ -61,6 +100,15 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
                     </a>
                   )}
                 </div>
+                {on &&
+                  meta.options?.map((option) => (
+                    <LayerOptionChips
+                      key={option.key}
+                      layers={layers}
+                      meta={meta}
+                      option={option}
+                    />
+                  ))}
                 {on && meta.minzoom !== undefined && mapZoom < meta.minzoom && (
                   <div className="layer-hint">Zoom in to z{meta.minzoom}+ to see this layer.</div>
                 )}

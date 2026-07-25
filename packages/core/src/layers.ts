@@ -37,6 +37,72 @@ export function outdoorTilesUrl(origin: string): string {
   return `${origin}/api/tiles/outdoor/{z}/{x}/{y}.pbf`;
 }
 
+/** One selectable value of a `LayerOption`. */
+export interface LayerOptionChoice {
+  /** Stored and sent to the backend. Restricted to `[a-z0-9-]` (see LayerOption). */
+  value: string;
+  label: string;
+  /**
+   * One line saying what picking this actually changes. The picker is the only
+   * place a layer can teach what it is tuned for, so a choice that needs no
+   * explanation is a sign the option itself is unclear.
+   */
+  caption?: string;
+}
+
+/**
+ * A per-layer variant the user picks in the panel — the species a wildlife
+ * layer draws, and (next) the target a derived potential surface is tuned for.
+ *
+ * Generic on purpose: options are declared as data in the backend catalog,
+ * carried in the tile URL, and rendered as chips by both clients, so the next
+ * layer that needs a variant needs no second mechanism. The client never
+ * invents a value: everything it can send is listed here, which is also what
+ * makes the value safe to use in a cache path (see `layerOptionSignature`).
+ */
+export interface LayerOption {
+  /** Query-parameter and setting key, e.g. `species`. `[a-z0-9-]` only. */
+  key: string;
+  label: string;
+  /** Used when the device has never chosen, and for any value not listed. */
+  defaultValue: string;
+  choices: LayerOptionChoice[];
+}
+
+/**
+ * Resolve a device's stored choices against a layer's declared options: one
+ * entry per option, unknown keys dropped and unknown values replaced by the
+ * default. Both clients and the backend run untrusted input through this, so
+ * the result only ever contains values the catalog itself declared.
+ */
+export function normalizeLayerOptions(
+  options: readonly LayerOption[] | undefined,
+  chosen: Readonly<Record<string, string | undefined>> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const option of options ?? []) {
+    const want = chosen?.[option.key];
+    out[option.key] = option.choices.some((c) => c.value === want) ? want! : option.defaultValue;
+  }
+  return out;
+}
+
+/**
+ * A short, stable string identifying a set of resolved option values — used as
+ * a disk-cache path segment on the backend and as part of the map source id on
+ * both clients, so switching species swaps the source instead of quietly
+ * reusing the old tiles.
+ *
+ * Safe as a path segment only because `normalizeLayerOptions` has already
+ * reduced the values to declared choices; never build one from raw query input.
+ */
+export function layerOptionSignature(values: Readonly<Record<string, string>>): string {
+  return Object.keys(values)
+    .sort()
+    .map((key) => `${key}-${values[key]}`)
+    .join('_');
+}
+
 /**
  * One overlay layer as the client sees it. This is the *stripped* public
  * shape: upstream URLs, WMS layer names, versions and tokens stay on the
@@ -95,6 +161,12 @@ export interface LayerMeta {
     /** Unit suffix to draw after the number, e.g. "m". */
     unit: string;
   };
+  /**
+   * Variants the user picks per device (see `LayerOption`). A layer without
+   * options behaves exactly as before — every helper here no-ops on `undefined`,
+   * so an older client simply gets the layer's default variant.
+   */
+  options?: LayerOption[];
 }
 
 /** GET /api/layers */
@@ -102,14 +174,29 @@ export interface LayersResponse {
   layers: LayerMeta[];
 }
 
+/** The `&key=value` tail a layer's resolved options add to a proxy URL. */
+function optionQuery(
+  meta: Pick<LayerMeta, 'options'>,
+  chosen: Readonly<Record<string, string | undefined>> | undefined,
+): string {
+  const values = normalizeLayerOptions(meta.options, chosen);
+  return Object.entries(values)
+    .map(([key, value]) => `&${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('');
+}
+
 /** Cache-revisioned raster URL used by web and Android. */
-export function overlayTileUrl(origin: string, meta: Pick<LayerMeta, 'id' | 'rev'>): string {
+export function overlayTileUrl(
+  origin: string,
+  meta: Pick<LayerMeta, 'id' | 'rev' | 'options'>,
+  chosen?: Readonly<Record<string, string | undefined>>,
+): string {
   // `rev ?? 1` keeps an Android client's last cached pre-revision catalog
   // usable during an offline start immediately after upgrading.
   const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
   return (
     `${origin}/api/overlay/${encodeURIComponent(meta.id)}/{z}/{x}/{y}.png` +
-    `?v=${encodeURIComponent(String(rev))}`
+    `?v=${encodeURIComponent(String(rev))}${optionQuery(meta, chosen)}`
   );
 }
 
@@ -142,11 +229,23 @@ export interface OverlayIdentifyGroup {
   properties: Record<string, string>;
 }
 
-/** The identify endpoint for one overlay at one point. `origin` is '' on the web. */
-export function overlayIdentifyUrl(origin: string, id: string, at: LatLng, zoom: number): string {
+/**
+ * The identify endpoint for one overlay at one point. `origin` is '' on the web.
+ *
+ * The layer's options ride along so a tap answers for what is actually drawn:
+ * a wildlife layer filtered to big game must not answer with the seabird area
+ * underneath, or the filter reads as a lie.
+ */
+export function overlayIdentifyUrl(
+  origin: string,
+  meta: Pick<LayerMeta, 'id' | 'options'>,
+  at: LatLng,
+  zoom: number,
+  chosen?: Readonly<Record<string, string | undefined>>,
+): string {
   return (
-    `${origin}/api/overlay/${encodeURIComponent(id)}/identify` +
-    `?lat=${at.lat}&lng=${at.lng}&zoom=${Math.round(zoom)}`
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/identify` +
+    `?lat=${at.lat}&lng=${at.lng}&zoom=${Math.round(zoom)}${optionQuery(meta, chosen)}`
   );
 }
 
@@ -164,12 +263,14 @@ export async function identifyOverlays(
   visible: readonly LayerMeta[],
   at: LatLng,
   zoom: number,
+  /** The device's chosen options per layer id, for layers that declare any. */
+  optionsFor?: (meta: LayerMeta) => Record<string, string> | undefined,
 ): Promise<OverlayIdentifyGroup[]> {
   const targets = visible.filter((meta) => meta.identify);
   if (targets.length === 0) return [];
   const settled = await Promise.allSettled(
     targets.map(async (meta): Promise<OverlayIdentifyGroup[]> => {
-      const res = await fetch(overlayIdentifyUrl(origin, meta.id, at, zoom));
+      const res = await fetch(overlayIdentifyUrl(origin, meta, at, zoom, optionsFor?.(meta)));
       if (!res.ok) return [];
       const body = (await res.json()) as OverlayIdentifyResponse;
       return body.results.map((properties) => ({ title: meta.title, properties }));
@@ -203,5 +304,16 @@ export interface OverlayLabelsResponse {
 /**
  * Per-device overlay panel state, stored as JSON under the device-local
  * setting `local.layers.state` (never syncs — like all `local.` keys).
+ *
+ * Every field is optional because the map records only what the user has
+ * actually said. Visibility and opacity are keyed per profile
+ * (`<profile>:<layer>`) while a layer's `options` are keyed by the bare layer
+ * id — a variant belongs to the layer, not to the activity you view it in — so
+ * an entry can genuinely carry a chosen species and nothing else. Writing a
+ * fabricated `on: false` alongside it would switch the layer off in any profile
+ * that has it on by default.
  */
-export type OverlayStateMap = Record<string, { on: boolean; opacity?: number }>;
+export type OverlayStateMap = Record<
+  string,
+  { on?: boolean; opacity?: number; options?: Record<string, string> }
+>;

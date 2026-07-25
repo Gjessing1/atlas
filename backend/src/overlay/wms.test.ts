@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { WmsUpstream } from './catalog.js';
+import { normalizeLayerOptions } from '@atlas/core';
+import { artfunksjonSld, norwegianLayers, type WmsUpstream } from './catalog.js';
+import { optionGetMapParams } from './options.js';
 import { substituteEnv, tileBbox3857, tileCoords, wmsBaseParams } from './wms.js';
 
 const EXTENT = 20037508.342789244;
@@ -81,6 +83,44 @@ describe('wmsBaseParams', () => {
     ).searchParams;
     expect(params.get('map')).toBe('/etc/depth.map');
     expect(params.get('SERVICE')).toBe('WMS');
+  });
+});
+
+describe('artfunksjonSld', () => {
+  it('emits a bare comparison for one species, never a single-operand Or', () => {
+    // Measured against the live service: ArcGIS silently *ignores* an
+    // `<ogc:Or>` with one child and draws every species, so a one-name choice
+    // built the obvious way looks like it works and filters nothing.
+    const sld = artfunksjonSld(['Elg']);
+    expect(sld).not.toContain('<ogc:Or>');
+    expect(sld).toContain('<ogc:Literal>Elg</ogc:Literal>');
+  });
+
+  it('combines several species with Or', () => {
+    const sld = artfunksjonSld(['Elg', 'Hjort']);
+    expect(sld).toContain('<ogc:Or>');
+    expect(sld).toContain('<ogc:Literal>Hjort</ogc:Literal>');
+  });
+
+  it('omits the filter entirely for the unfiltered choice', () => {
+    expect(artfunksjonSld([])).not.toContain('ogc:Filter');
+  });
+
+  it('keeps every wildlife GetMap request inside the upstream’s ~2 kB URL cap', () => {
+    // The cap is a hard 404, not a fault body: 2 095 chars answered and 2 145
+    // did not. A fifth species on a chip would cross it, so this fails loudly
+    // in CI instead of blanking the layer for whoever picked that chip.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'wildlife-areas')!;
+    const upstream = layer.upstream as WmsUpstream;
+    for (const choice of layer.meta.options![0]!.choices) {
+      const chosen = normalizeLayerOptions(layer.meta.options, { species: choice.value });
+      const url = wmsBaseParams(upstream, 14, 8694, 4724);
+      url.searchParams.set('REQUEST', 'GetMap');
+      for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
+        url.searchParams.set(key, value);
+      }
+      expect(url.toString().length, `${choice.value} request URL`).toBeLessThan(2000);
+    }
   });
 });
 

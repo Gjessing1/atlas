@@ -392,8 +392,11 @@ export function MapScene({
           .filter((overlay) => !overlay.meta.vector)
           .map((overlay) => (
             <RasterSource
-              key={overlay.meta.id}
-              id={`atlas-overlay-${overlay.meta.id}`}
+              // Keyed on the *variant* id, not the layer id: switching species
+              // has to remount the source, or the native source keeps serving
+              // the tiles it already loaded under the old filter.
+              key={overlay.sourceId}
+              id={overlay.sourceId}
               tiles={[overlay.tileUrlTemplate]}
               tileSize={256}
               maxzoom={overlay.meta.maxzoom}
@@ -402,7 +405,7 @@ export function MapScene({
             >
               <Layer
                 type="raster"
-                id={`atlas-overlay-${overlay.meta.id}-layer`}
+                id={`${overlay.sourceId}-layer`}
                 paint={{ 'raster-opacity': overlay.opacity }}
               />
             </RasterSource>

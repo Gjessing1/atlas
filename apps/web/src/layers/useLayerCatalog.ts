@@ -1,6 +1,7 @@
 import {
   layerDefaultsOn,
   layersForProfile,
+  normalizeLayerOptions,
   type LayerMeta,
   type LayersResponse,
   type OverlayStateMap,
@@ -30,6 +31,12 @@ export interface LayerCatalog {
    */
   isOn: (id: string) => boolean;
   opacityFor: (id: string) => number;
+  /**
+   * The layer's resolved variant (see `LayerMeta.options`) — always complete,
+   * so callers never have to know a layer's defaults.
+   */
+  optionsFor: (meta: LayerMeta) => Record<string, string>;
+  setOption: (meta: LayerMeta, key: string, value: string) => void;
   setOn: (id: string, on: boolean) => void;
   /** Persist a profile preset choice and clear any stale quick-switch deviation. */
   setProfileOn: (profileId: string, id: string, on: boolean) => void;
@@ -151,6 +158,29 @@ export function useLayerCatalog(
     [state, stateKey, profileId, allLayers],
   );
 
+  // A variant is a property of the layer, not of the profile it is viewed in:
+  // the species you hunt does not change because you switched to Hike, so this
+  // is stored under the plain layer id rather than the profile-scoped key.
+  const optionsFor = useCallback(
+    (meta: LayerMeta) => normalizeLayerOptions(meta.options, state[meta.id]?.options),
+    [state],
+  );
+
+  const setOption = useCallback(
+    (meta: LayerMeta, key: string, value: string) =>
+      update((cur) => ({
+        ...cur,
+        [meta.id]: {
+          ...cur[meta.id],
+          options: normalizeLayerOptions(meta.options, {
+            ...cur[meta.id]?.options,
+            [key]: value,
+          }),
+        },
+      })),
+    [update],
+  );
+
   // Contextual layers are hidden outside their profile, so they must stop
   // drawing too — an overlay on the map that the panel doesn't list is an
   // overlay the user can't switch off. The on-state survives in `state`, so
@@ -161,8 +191,8 @@ export function useLayerCatalog(
     () =>
       catalog
         .filter((meta) => isOn(meta.id))
-        .map((meta) => ({ meta, opacity: opacityFor(meta.id) })),
-    [catalog, isOn, opacityFor],
+        .map((meta) => ({ meta, opacity: opacityFor(meta.id), options: optionsFor(meta) })),
+    [catalog, isOn, opacityFor, optionsFor],
   );
 
   return {
@@ -173,6 +203,8 @@ export function useLayerCatalog(
     overlays,
     isOn,
     opacityFor,
+    optionsFor,
+    setOption,
     setOn,
     setProfileOn,
     toggle,

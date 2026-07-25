@@ -101,6 +101,12 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       'terrain-contours',
       'statskog-jaktfelt',
       'ice-weak',
+      // Land cover is the ground-reading layer of this profile — myr, forest
+      // and its species, clear-cut — so it starts on here and nowhere else. It
+      // is offered in Hike but off by default: NIBIO refuses to draw it below
+      // z14, and a hiker reading a valley at z12 would just see an empty
+      // switched-on layer.
+      'land-cover',
     ],
     // Norway has no national hunting-rights dataset: Statskog covers state land
     // only and Hjorteviltregisteret has no API, so on the private ground where

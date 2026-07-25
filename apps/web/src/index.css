@@ -3606,6 +3606,40 @@ button.transit-notice-summary {
   color: var(--warning);
 }
 
+/* Per-layer variant chips (LayerMeta.options): which species the wildlife
+   layer draws, and next the target a derived surface is tuned for. */
+.layer-options {
+  margin: 4px 0 2px;
+}
+
+.layer-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 22px;
+}
+
+.layer-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.layer-chip:hover {
+  border-color: var(--accent);
+}
+
+.layer-chip-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ---- Overlay identify popup (tap lake → depth, tap parcel → gnr/bnr) ---- */
 
 .identify-popup {

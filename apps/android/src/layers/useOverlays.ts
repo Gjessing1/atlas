@@ -1,6 +1,8 @@
 import {
   layerDefaultsOn,
+  layerOptionSignature,
   layersForProfile,
+  normalizeLayerOptions,
   overlayTileUrl,
   type LayerMeta,
   type LayersResponse,
@@ -29,6 +31,13 @@ export interface ActiveOverlay {
   opacity: number;
   /** Absolute {z}/{x}/{y} template on the current server origin. */
   tileUrlTemplate: string;
+  /** The layer's resolved options, for the layers that declare any. */
+  options: Record<string, string>;
+  /**
+   * Source id, carrying the option variant so that picking a different species
+   * remounts the source instead of leaving the old tiles in place.
+   */
+  sourceId: string;
 }
 
 export interface OverlaysController {
@@ -43,6 +52,9 @@ export interface OverlaysController {
   /** Resolve an explicit choice against the active profile's default. */
   isOn: (id: string) => boolean;
   opacityFor: (id: string) => number;
+  /** The layer's resolved variant (see `LayerMeta.options`), defaults filled in. */
+  optionsFor: (meta: LayerMeta) => Record<string, string>;
+  setOption: (meta: LayerMeta, key: string, value: string) => void;
   setOn: (id: string, on: boolean) => void;
   setProfileOn: (profileId: string, id: string, on: boolean) => void;
   toggle: (id: string) => void;
@@ -173,6 +185,29 @@ export function useOverlays(
     [state, stateKey, profileId, allLayers],
   );
 
+  // A variant belongs to the layer, not to the profile it is viewed in — the
+  // species you hunt does not change because you switched to Hike — so it is
+  // stored under the plain layer id, unlike on/off and opacity.
+  const optionsFor = useCallback(
+    (meta: LayerMeta) => normalizeLayerOptions(meta.options, state[meta.id]?.options),
+    [state],
+  );
+
+  const setOption = useCallback(
+    (meta: LayerMeta, key: string, value: string) =>
+      update((cur) => ({
+        ...cur,
+        [meta.id]: {
+          ...cur[meta.id],
+          options: normalizeLayerOptions(meta.options, {
+            ...cur[meta.id]?.options,
+            [key]: value,
+          }),
+        },
+      })),
+    [update],
+  );
+
   // Vector overlays are only offered once MapScene can draw them — a toggle
   // that draws nothing is worse than not offering it. Both current ones do:
   // the Statskog jaktfelt polygons (useHuntingFields) and the ATK cameras
@@ -194,12 +229,18 @@ export function useOverlays(
     () =>
       catalog
         .filter((meta) => isOn(meta.id))
-        .map((meta) => ({
-          meta,
-          opacity: opacityFor(meta.id),
-          tileUrlTemplate: overlayTileUrl(origin, meta),
-        })),
-    [catalog, origin, isOn, opacityFor],
+        .map((meta) => {
+          const options = optionsFor(meta);
+          const signature = layerOptionSignature(options);
+          return {
+            meta,
+            opacity: opacityFor(meta.id),
+            tileUrlTemplate: overlayTileUrl(origin, meta, options),
+            options,
+            sourceId: `atlas-overlay-${meta.id}${signature ? `--${signature}` : ''}`,
+          };
+        }),
+    [catalog, origin, isOn, opacityFor, optionsFor],
   );
 
   return {
@@ -210,6 +251,8 @@ export function useOverlays(
     overlays,
     isOn,
     opacityFor,
+    optionsFor,
+    setOption,
     setOn,
     setProfileOn,
     toggle,

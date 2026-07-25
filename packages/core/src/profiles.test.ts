@@ -92,8 +92,9 @@ describe('map profiles', () => {
     expect(fishhunt.routing).toBeNull();
     // Most defaults are untagged general-purpose Norwegian layers, offered in
     // every profile and merely started on here; `statskog-jaktfelt` is the one
-    // hunting-tagged default (surfaced because this profile carries `hunting`).
-    // Outside Norway they are simply absent.
+    // hunting-tagged default (surfaced because this profile carries `hunting`),
+    // and `land-cover` is tagged for the outdoor profiles but only *starts on*
+    // here. Outside Norway they are simply absent.
     expect(fishhunt.defaultLayers).toEqual([
       'property',
       'lake-depth',
@@ -102,6 +103,7 @@ describe('map profiles', () => {
       'terrain-contours',
       'statskog-jaktfelt',
       'ice-weak',
+      'land-cover',
     ]);
     for (const id of fishhunt.defaultLayers!) {
       expect(layerInProfile(meta(id), 'fishhunt')).toBe(true);

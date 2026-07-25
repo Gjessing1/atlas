@@ -104,6 +104,41 @@ function testLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'filtered',
+        rev: 1,
+        title: 'Filtered',
+        description: 'WMS layer with a user-picked variant',
+        group: 'Misc',
+        attribution: '© Test',
+        maxzoom: 15,
+        defaultOpacity: 1,
+        identify: true,
+        options: [
+          {
+            key: 'species',
+            label: 'Species',
+            defaultValue: 'game',
+            choices: [
+              { value: 'game', label: 'Game' },
+              { value: 'all', label: 'All species' },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://upstream.example/wms',
+        version: '1.3.0',
+        layers: 'Areas',
+        identifyLayers: 'Areas',
+        optionParams: {
+          species: { game: { SLD_BODY: '<sld>game</sld>' }, all: { SLD_BODY: '<sld>all</sld>' } },
+        },
+        optionFilter: { field: 'Norsknavn', values: { species: { game: ['Elg'], all: [] } } },
+      },
+    },
+    {
+      meta: {
         id: 'ortho',
         rev: 1,
         title: 'Ortho',
@@ -165,7 +200,7 @@ describe('layer catalog', () => {
     const res = await app.inject({ url: '/api/layers' });
     expect(res.statusCode).toBe(200);
     const { layers } = res.json() as { layers: Record<string, unknown>[] };
-    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy', 'coded']);
+    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy', 'coded', 'filtered']);
     expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
 
@@ -295,6 +330,43 @@ describe('overlay tile proxy', () => {
     ).toBe(true);
   });
 
+  it('sends the selected option upstream and caches each variant separately', async () => {
+    const { app, cacheDir, requests } = await build(() => ({ body: PNG_BYTES }));
+    track(app, cacheDir);
+    // No option given: the layer's own default, not an unfiltered request.
+    await app.inject({ url: '/api/overlay/filtered/1/1/0.png' });
+    expect(requests[0]!.searchParams.get('SLD_BODY')).toBe('<sld>game</sld>');
+
+    await app.inject({ url: '/api/overlay/filtered/1/1/0.png?species=all' });
+    expect(requests[1]!.searchParams.get('SLD_BODY')).toBe('<sld>all</sld>');
+
+    // The variant is part of the cache path, so switching back is a cache hit
+    // rather than the *other* species' tiles served under the same URL — the
+    // whole failure this signature exists to prevent.
+    await app.inject({ url: '/api/overlay/filtered/1/1/0.png' });
+    expect(requests).toHaveLength(2);
+    expect(
+      (
+        await readFile(path.join(cacheDir, 'filtered', 'v1', 'species-all', '1', '1', '0.png'))
+      ).equals(PNG_BYTES),
+    ).toBe(true);
+  });
+
+  it('falls back to the default choice instead of trusting the query', async () => {
+    const { app, cacheDir, requests } = await build(() => ({ body: PNG_BYTES }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/filtered/1/1/0.png?species=../../etc' });
+    expect(res.statusCode).toBe(200);
+    // Both halves matter: the upstream gets a declared style, and nothing from
+    // the query reaches the cache path.
+    expect(requests[0]!.searchParams.get('SLD_BODY')).toBe('<sld>game</sld>');
+    expect(
+      (
+        await readFile(path.join(cacheDir, 'filtered', 'v1', 'species-game', '1', '1', '0.png'))
+      ).equals(PNG_BYTES),
+    ).toBe(true);
+  });
+
   it('substitutes env tokens into xyz templates', async () => {
     const { app, cacheDir, requests } = await build(() => ({ body: PNG_BYTES }), {
       env: { ORTHO_TOKEN: 'secret' },
@@ -411,6 +483,32 @@ describe('identify proxy', () => {
     track(app, cacheDir);
     const res = await app.inject({ url: '/api/overlay/hidpi/identify?lat=59.8&lng=10.4&zoom=13' });
     expect(res.json()).toEqual({ results: [] });
+  });
+
+  it('answers only for the species the layer is currently drawing', async () => {
+    // ArcGIS rejects SLD_BODY on GetFeatureInfo, so the upstream keeps
+    // answering for everything under the tap; the filter has to be applied
+    // here or the map and the tap disagree.
+    const features = [
+      { properties: { Norsknavn: 'Ærfugl', Funksjon: 'yngleområde' } },
+      { properties: { Norsknavn: 'Elg', Funksjon: 'beiteområde' } },
+    ];
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ features }),
+    }));
+    track(app, cacheDir);
+    const filtered = await app.inject({
+      url: '/api/overlay/filtered/identify?lat=60&lng=11&zoom=14',
+    });
+    expect(filtered.json()).toEqual({
+      results: [{ Norsknavn: 'Elg', Funksjon: 'beiteområde' }],
+    });
+
+    const all = await app.inject({
+      url: '/api/overlay/filtered/identify?lat=60&lng=11&zoom=14&species=all',
+    });
+    expect((all.json() as { results: unknown[] }).results).toHaveLength(2);
   });
 
   it('falls back from an exception body to GML, then text/plain', async () => {

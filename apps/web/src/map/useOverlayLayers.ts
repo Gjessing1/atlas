@@ -1,4 +1,4 @@
-import { identifyOverlays, overlayTileUrl, snapLabelBbox } from '@atlas/core';
+import { identifyOverlays, layerOptionSignature, overlayTileUrl, snapLabelBbox } from '@atlas/core';
 import type { LayerMeta, OverlayLabelsResponse } from '@atlas/core';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
@@ -10,9 +10,22 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', feature
 export interface ActiveOverlay {
   meta: LayerMeta;
   opacity: number;
+  /** The layer's resolved options, for the layers that declare any. */
+  options?: Record<string, string>;
 }
 
 const ID_PREFIX = 'atlas-overlay-';
+
+/**
+ * The map source id for an overlay. A layer with options carries its variant in
+ * the id, so picking a different species removes the old source and adds a new
+ * one through the diff below — swapping only the URL under a live raster source
+ * leaves its already-loaded tiles on screen.
+ */
+function sourceId(overlay: ActiveOverlay): string {
+  const signature = layerOptionSignature(overlay.options ?? {});
+  return ID_PREFIX + overlay.meta.id + (signature ? `--${signature}` : '');
+}
 
 /**
  * Renders the enabled catalog overlays as raster layers over the basemap.
@@ -32,9 +45,7 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
       const style = map.getStyle();
       // Vector overlays are drawn by their own hooks (useSpeedCameraLayer) —
       // requesting raster tiles for them would only 404.
-      const wanted = new Map(
-        overlays.filter((o) => !o.meta.vector).map((o) => [ID_PREFIX + o.meta.id, o]),
-      );
+      const wanted = new Map(overlays.filter((o) => !o.meta.vector).map((o) => [sourceId(o), o]));
       for (const layer of style.layers ?? []) {
         if (layer.id.startsWith(ID_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
       }
@@ -47,7 +58,7 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
         if (!map.getSource(id)) {
           map.addSource(id, {
             type: 'raster',
-            tiles: [overlayTileUrl(location.origin, overlay.meta)],
+            tiles: [overlayTileUrl(location.origin, overlay.meta, overlay.options)],
             tileSize: 256,
             maxzoom: overlay.meta.maxzoom,
             ...(overlay.meta.minzoom !== undefined ? { minzoom: overlay.meta.minzoom } : {}),
@@ -242,12 +253,14 @@ export function useOverlayIdentify(
     if (!map) return;
     const onClick = async (e: maplibregl.MapMouseEvent) => {
       if (suppress?.current) return;
-      // Served same-origin, so the shared helper needs no origin prefix.
+      // Served same-origin, so the shared helper needs no origin prefix. The
+      // options ride along so a filtered layer answers for what it draws.
       const results = await identifyOverlays(
         '',
         overlaysRef.current.map((o) => o.meta),
         e.lngLat,
         map.getZoom(),
+        (meta) => overlaysRef.current.find((o) => o.meta.id === meta.id)?.options,
       );
       if (results.length === 0) return;
 

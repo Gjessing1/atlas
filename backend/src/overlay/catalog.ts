@@ -53,6 +53,20 @@ export interface WmsUpstream {
   labels?: ArcGisLabelSource;
   styles?: string;
   /**
+   * Extra GetMap parameters contributed by a selected layer option
+   * (`LayerMeta.options` → option key → choice value → params). Data, not code,
+   * so the whole variant surface of a layer is readable in one place and
+   * testable without a server.
+   */
+  optionParams?: Record<string, Record<string, Record<string, string>>>;
+  /**
+   * The identify-side twin of `optionParams`, for upstreams that cannot apply
+   * the same filter to GetFeatureInfo — ArcGIS accepts `SLD_BODY` on GetMap and
+   * faults on it for identify, so the tap is filtered here instead. Keep only
+   * features whose `field` is in the choice's list; an empty list keeps all.
+   */
+  optionFilter?: { field: string; values: Record<string, Record<string, string[]>> };
+  /**
    * Render GetMap tiles at this multiple of 256 px (with a matching DPI hint),
    * so fine linework and labels stay crisp on high-density phone screens
    * instead of being drawn at 256 px and stretched. 1 (or unset) = plain 256 px.
@@ -129,6 +143,78 @@ export interface OverlayLayer {
 }
 
 const KARTKATALOG = 'https://kartkatalog.geonorge.no/search?text=';
+
+/**
+ * Species sets behind the wildlife layer's chips. Names are Naturbase's own
+ * `norskNavn` values, and the counts (probed 2026-07-25) are why the layer is
+ * filtered at all: the full layer is 75 702 areas over 225 species,
+ * overwhelmingly seabirds, bats and amphibians, so drawn whole in a hunting
+ * profile it is mostly noise. An empty set means "no filter".
+ */
+const ARTFUNKSJON_SPECIES: Record<string, string[]> = {
+  // Elg 5 921 · Hjort 2 907 · Rådyr 2 735.
+  biggame: ['Elg', 'Hjort', 'Rådyr'],
+  // Storfugl 4 829 · Orrfugl 4 356 · Jerpe 914.
+  forestbirds: ['Storfugl', 'Orrfugl', 'Jerpe'],
+  // Lirype 899 · Fjellrype 350.
+  ptarmigan: ['Lirype', 'Fjellrype'],
+  all: [],
+};
+
+/** XML text escape — the species names are our own constants, but the SLD is a document. */
+const xml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * A species-filtered style for the Naturbase `artfunksjon` WMS.
+ *
+ * ArcGIS honours `SLD_BODY` on GetMap, which is the only filtering this service
+ * offers — the WMS exposes one unsplittable layer, and the ~10³-feature ceiling
+ * on whole-coverage vector pulls (see the weakened-ice row) rules out doing it
+ * client-side. Three things measured on the live service shape this string, and
+ * each fails *silently* if ignored:
+ *
+ * - **A single-operand `<ogc:Or>` is ignored**, and the tile comes back with
+ *   every species drawn rather than the one asked for. One name must therefore
+ *   be emitted as a bare `PropertyIsEqualTo`.
+ * - **The request URL must stay under ~2 kB** (2 095 chars answered, 2 145 gave
+ *   a bare 404), so the document is written compact and without an XML
+ *   declaration, and `wms.test.ts` guards the built URL length per choice.
+ * - **A `PolygonSymbolizer` alone is right**, counter-intuitively: the layer's
+ *   point and line features (leks, migration corridors) are stored as rings
+ *   too, so adding point/line symbolizers only spends URL budget.
+ */
+export function artfunksjonSld(species: readonly string[]): string {
+  const eq = (name: string) =>
+    `<ogc:PropertyIsEqualTo><ogc:PropertyName>norskNavn</ogc:PropertyName>` +
+    `<ogc:Literal>${xml(name)}</ogc:Literal></ogc:PropertyIsEqualTo>`;
+  const terms = species.map(eq).join('');
+  const filter =
+    species.length === 0
+      ? ''
+      : `<ogc:Filter>${species.length === 1 ? terms : `<ogc:Or>${terms}</ogc:Or>`}</ogc:Filter>`;
+  return (
+    '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" ' +
+    'xmlns:ogc="http://www.opengis.net/ogc"><NamedLayer><Name>art_funksjonsomrade</Name>' +
+    `<UserStyle><FeatureTypeStyle><Rule>${filter}<PolygonSymbolizer><Fill>` +
+    '<CssParameter name="fill">#b45309</CssParameter>' +
+    // Functional areas overlap heavily (winter grazing under a migration
+    // corridor under a lek), so the fill stays light and the edge carries the
+    // shape; the panel's opacity slider scales both.
+    '<CssParameter name="fill-opacity">0.3</CssParameter></Fill><Stroke>' +
+    '<CssParameter name="stroke">#7c2d12</CssParameter>' +
+    '<CssParameter name="stroke-width">1.2</CssParameter></Stroke></PolygonSymbolizer>' +
+    '</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>'
+  );
+}
+
+const artfunksjonOptionParams = () => {
+  const byChoice: Record<string, Record<string, string>> = {};
+  for (const [choice, species] of Object.entries(ARTFUNKSJON_SPECIES)) {
+    byChoice[choice] = { SLD_BODY: artfunksjonSld(species) };
+  }
+  return { species: byChoice };
+};
 
 /**
  * The ATK speed-camera layer: vector, not raster — the data is the NVDB
@@ -422,6 +508,232 @@ export function norwegianLayers(): OverlayLayer[] {
             '1': 'Substantially weakened ice',
             '2': 'Often dangerous ice conditions',
             '3': 'Cracked ice along the shore',
+          },
+        },
+      },
+    },
+    {
+      // NIBIO AR5 land cover — the authoritative answer to "what am I standing
+      // in": myr, forest (and its species), open ground, farmland, water. The
+      // layer the outdoor profiles were missing, and an N5 model input.
+      meta: {
+        id: 'land-cover',
+        rev: 1,
+        title: 'Land cover (AR5)',
+        description:
+          'Bog, forest, open ground, farmland and water from NIBIO’s AR5 classification. ' +
+          'Tap for tree species and site quality.',
+        group: 'Terrain',
+        attribution: '© NIBIO',
+        metadataUrl: `${KARTKATALOG}ar5`,
+        // Measured 2026-07-25: the sub-layers carry MaxScaleDenominator 50 000,
+        // so a z13 tile comes back as a 334-byte empty PNG. Not a coverage hole
+        // and not a broken request — the service refuses to draw. Without this
+        // the layer would read as "switched on, no data anywhere".
+        minzoom: 14,
+        maxzoom: 17,
+        // Fully opaque classification: at full strength it erases the basemap,
+        // the hillshade and the contours that the outdoor profiles run with.
+        defaultOpacity: 0.45,
+        identify: true,
+        coverageNote:
+          'Drawn from zoom 14 only (NIBIO caps it at 1:50 000). AR5 stops at the tree line — ' +
+          'bare mountain reads as “not mapped”, which is not the same as “nothing there”.',
+        profiles: ['hiking', 'fishing', 'hunting'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.nibio.no/cgi-bin/ar5',
+        version: '1.3.0',
+        layers: 'Arealtype',
+        identifyLayers: 'Arealtype',
+        // The polygon carries the whole AR5 record, so a tap answers far more
+        // than the colour does — tree species and site quality are exactly what
+        // a hunter reads a forest for, and are why N5 takes them from AR5
+        // rather than from SR16. Only the `*_beskrivelse` twins are listed: the
+        // bare codes (`artype` 30, `arskogbon` 13) are the same information in
+        // a spelling no reader can use, and unlike a code the text degrades
+        // into readable Norwegian if NIBIO ever adds a class we don't know.
+        identifyFields: [
+          'artype_beskrivelse',
+          'artreslag_beskrivelse',
+          'arskogbon_beskrivelse',
+          'argrunnf_beskrivelse',
+          'verifiseringsdato',
+        ],
+        identifyLabels: {
+          artype_beskrivelse: 'Land cover',
+          artreslag_beskrivelse: 'Tree species',
+          arskogbon_beskrivelse: 'Site quality',
+          argrunnf_beskrivelse: 'Ground',
+          verifiseringsdato: 'Verified',
+        },
+        // NIBIO's own class names, translated. The empty strings are load-
+        // bearing: `98`/`99` ("not relevant", "not recorded") are on nearly
+        // every non-forest polygon, and three rows of "Tree species: not
+        // relevant" is what an identify card looks like when nobody read one.
+        identifyValues: {
+          artype_beskrivelse: {
+            Bebygd: 'Built-up',
+            Samferdsel: 'Roads & transport',
+            'Fulldyrka jord': 'Cultivated land',
+            'Overflatedyrka jord': 'Surface-cultivated land',
+            Innmarksbeite: 'Pasture',
+            Skog: 'Forest',
+            'Åpen fastmark': 'Open firm ground',
+            Myr: 'Bog / marsh',
+            Snøisbre: 'Snow & glacier',
+            Ferskvann: 'Fresh water',
+            Hav: 'Sea',
+            'Ikke kartlagt': 'Not mapped (AR5 stops at the tree line)',
+          },
+          artreslag_beskrivelse: {
+            Barskog: 'Conifer',
+            Lauvskog: 'Deciduous',
+            Blandingsskog: 'Mixed',
+            'Ikke tresatt': 'Treeless',
+            'Ikke relevant': '',
+            'Ikke registrert': '',
+          },
+          arskogbon_beskrivelse: {
+            'Særs høy': 'Very high',
+            Høy: 'High',
+            Middels: 'Medium',
+            Lav: 'Low',
+            Impediment: 'Unproductive',
+            'Ikke relevant': '',
+            'Ikke registrert': '',
+          },
+          argrunnf_beskrivelse: {
+            'Fjell i dagen': 'Bare rock',
+            Blokkmark: 'Boulder field',
+            Grunnlendt: 'Shallow soil',
+            Jorddekt: 'Soil-covered',
+            'Organiske jordlag': 'Organic soil (peat)',
+            'Ikke relevant': '',
+            'Ikke registrert': '',
+          },
+        },
+      },
+    },
+    {
+      // Naturbase artfunksjon — officially surveyed wildlife functional areas:
+      // winter grazing, calving, migration corridors and capercaillie leks.
+      //
+      // PRESENCE-ONLY, and the coverage note has to carry that: a blank area
+      // means nobody surveyed it, never "no animals here". It is the one thing
+      // this layer could be read to say that would be wrong.
+      meta: {
+        id: 'wildlife-areas',
+        rev: 1,
+        title: 'Wildlife areas',
+        description:
+          'Surveyed functional areas — winter grazing, calving, migration routes and display ' +
+          'grounds. Pick which species to draw.',
+        group: 'Hunting',
+        attribution: '© Miljødirektoratet',
+        metadataUrl: `${KARTKATALOG}arter%20funksjonsomr%C3%A5de`,
+        maxzoom: 16,
+        defaultOpacity: 0.85,
+        identify: true,
+        coverageNote:
+          'Presence only: blank ground means it has not been surveyed, not that there are no ' +
+          'animals. Display and lek sites are mapped as ~10 m circles — zoom past 15 to see them.',
+        profiles: ['hunting'],
+        options: [
+          {
+            key: 'species',
+            label: 'Species',
+            defaultValue: 'biggame',
+            choices: [
+              { value: 'biggame', label: 'Big game', caption: 'Elg, hjort and rådyr' },
+              {
+                value: 'forestbirds',
+                label: 'Forest birds',
+                caption: 'Storfugl, orrfugl and jerpe — leks included',
+              },
+              { value: 'ptarmigan', label: 'Ptarmigan', caption: 'Lirype and fjellrype' },
+              {
+                value: 'all',
+                label: 'All species',
+                caption: 'Everything surveyed — mostly seabirds, bats and amphibians',
+              },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.miljodirektoratet.no/arcgis/services/artfunksjon/MapServer/WMSServer',
+        version: '1.3.0',
+        layers: 'art_funksjonsomrade',
+        identifyLayers: 'art_funksjonsomrade',
+        optionParams: artfunksjonOptionParams(),
+        // ArcGIS faults on SLD_BODY for GetFeatureInfo ("Can't parse XML
+        // request"), so the species filter cannot ride along on the tap the way
+        // it does on the tile. Without this, filtering to big game and tapping
+        // a moose area would just as happily answer "Ærfugl" from the seabird
+        // polygon underneath — the filter would read as a lie.
+        optionFilter: { field: 'Norsknavn', values: { species: ARTFUNKSJON_SPECIES } },
+        // ESRI's text/xml identify already resolves the coded domains
+        // (`funksjon` 1 → "beiteområde …", `verdi` "A" → "Svært viktig"), so
+        // unlike the weakened-ice layer there are no integers to decode — only
+        // Norwegian to translate. Keys are the ArcGIS *aliases*, which is what
+        // that dialect emits.
+        identifyFields: [
+          'Norsknavn',
+          'Funksjon',
+          'Årstid',
+          'Verdi',
+          'Områdenavn',
+          'Kommune',
+          'Datafangstdato',
+        ],
+        identifyLabels: {
+          Norsknavn: 'Species',
+          Funksjon: 'Function',
+          Årstid: 'Season',
+          Verdi: 'Importance',
+          Områdenavn: 'Area',
+          Kommune: 'Municipality',
+          Datafangstdato: 'Surveyed',
+        },
+        identifyValues: {
+          Funksjon: {
+            'beiteområde (Behavior: feeding, Activity: Foraging)': 'Grazing / feeding area',
+            'trekkvei (Behavior: moving, Activity: Flying overhead)': 'Migration route',
+            'hiområde (Behavior: reproductive, Activity: Breeding)': 'Denning area',
+            'myte/hårfellingsområde (Behavior: stationary, Activity: Stationary)': 'Moulting area',
+            'overnattingsområde (Behavior: stationary, Activity: Stationary)': 'Roosting area',
+            'rasteområde (Behavior: feeding, Activity: Staging)': 'Staging area',
+            'spill/parringsområde (Behavior: reproductive, Activity: Display/song)':
+              'Display / lek ground',
+            'yngleområde (Behavior: reproductive, Activity: Breeding)': 'Breeding area',
+            'leveområde (Behavior: stationary, Activity: Permanent territory)':
+              'Year-round habitat',
+          },
+          Verdi: {
+            'Svært viktig': 'Very important',
+            Viktig: 'Important',
+            Registrert: 'Recorded',
+            'Ikke verdisatt': 'Not rated',
+          },
+          Årstid: {
+            vår: 'Spring',
+            sommer: 'Summer',
+            høst: 'Autumn',
+            vinter: 'Winter',
+            'vår/sommer': 'Spring–summer',
+            'vår/høst': 'Spring & autumn',
+            'vår/vinter': 'Spring & winter',
+            'sommer/høst': 'Summer–autumn',
+            'sommer/vinter': 'Summer & winter',
+            'høst/vinter': 'Autumn–winter',
+            'hele året': 'All year',
+            'vår/sommer/høst': 'Spring–autumn',
+            'vår/sommer/vinter': 'All but autumn',
+            'sommer/høst/vinter': 'Summer–winter',
+            'vår/høst/vinter': 'All but summer',
           },
         },
       },
