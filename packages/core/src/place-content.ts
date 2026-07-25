@@ -36,6 +36,64 @@ export interface MediaWikiPlacePage {
   thumbnail?: { source?: string; width?: number; height?: number };
 }
 
+/**
+ * A described place near the selected point: an article that exists *around
+ * here*, rather than one matched to a name.
+ *
+ * This is the answer to "what is worth knowing about nearby?" — the question a
+ * name lookup cannot answer at all, because most POIs are not the subject of an
+ * article while standing a few hundred metres from three places that are.
+ */
+export interface NearbyPlaceArticle {
+  title: string;
+  /** A sentence or two — enough to decide whether to open it. */
+  extract: string;
+  url: string;
+  language: string;
+  /** The article's own coordinate, so the card can be re-aimed at it. */
+  position: LatLng;
+  distanceM: number;
+  /** Row thumbnail; absent for offline pack articles and image-less pages. */
+  image?: PlaceContentImage;
+  /** True when the row came from a downloaded region pack. */
+  offline?: boolean;
+}
+
+/** The part of a Commons `File:` page Atlas reads for the nearby-photo strip. */
+export interface MediaWikiImagePage {
+  title?: string;
+  coordinates?: { lat?: number; lon?: number }[];
+  imageinfo?: {
+    thumburl?: string;
+    thumbwidth?: number;
+    thumbheight?: number;
+    descriptionurl?: string;
+    extmetadata?: Record<string, { value?: unknown } | undefined>;
+  }[];
+}
+
+/**
+ * A geotagged Wikimedia Commons photo taken near the selected point.
+ *
+ * Deliberately *not* presented as a photo of the place: most places have no
+ * article and therefore no lead image, but somebody has usually photographed
+ * the street corner. The strip is labelled as nearby photos so a picture of the
+ * station across the road is useful context rather than a wrong caption.
+ */
+export interface PlacePhoto {
+  /** Commons file title, minus the `File:` prefix — the strip's alt text. */
+  title: string;
+  /** Thumbnail URL at the width the proxy asked for. */
+  url: string;
+  width: number;
+  height: number;
+  /** Commons file page, where the full licence and author live. */
+  pageUrl: string;
+  distanceM: number | null;
+  /** Author/licence one-liner when Commons supplied one. */
+  credit?: string;
+}
+
 /** A page's lead thumbnail, dropped unless it is complete and https. */
 export function mediaWikiThumbnail(page: MediaWikiPlacePage): PlaceContentImage | undefined {
   const { source, width, height } = page.thumbnail ?? {};
@@ -97,4 +155,90 @@ export function bestMediaWikiPlacePage(
     if (!best || score > best.score) best = { page, score };
   }
   return best?.page ?? null;
+}
+
+/**
+ * Rank the geosearch answer into a nearby-articles list.
+ *
+ * Pages without an extract or a coordinate are dropped rather than shown as
+ * empty rows, and everything is ordered by distance: "what is near me" is a
+ * distance question, and MediaWiki's own ordering is not guaranteed to survive
+ * a generator query.
+ */
+export function nearbyMediaWikiPlaces(
+  at: LatLng,
+  pages: readonly MediaWikiPlacePage[],
+  limit = 12,
+): NearbyPlaceArticle[] {
+  const places: NearbyPlaceArticle[] = [];
+  for (const page of pages) {
+    const coordinate = page.coordinates?.[0];
+    if (!page.title?.trim() || !page.extract?.trim() || !page.fullurl) continue;
+    if (typeof coordinate?.lat !== 'number' || typeof coordinate.lon !== 'number') continue;
+    const position = { lat: coordinate.lat, lng: coordinate.lon };
+    const image = mediaWikiThumbnail(page);
+    places.push({
+      title: page.title,
+      extract: page.extract,
+      url: page.fullurl,
+      language: '',
+      position,
+      distanceM: Math.round(haversineM(at, position)),
+      ...(image ? { image } : {}),
+    });
+  }
+  return places.sort((a, b) => a.distanceM - b.distanceM).slice(0, limit);
+}
+
+/** Plain-text value of a Commons extmetadata field, HTML tags stripped. */
+function metadataText(field: { value?: unknown } | undefined): string | undefined {
+  const raw = field?.value;
+  if (typeof raw !== 'string') return undefined;
+  const text = raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 0 ? text.slice(0, 120) : undefined;
+}
+
+/**
+ * Commons `File:` pages as a photo strip: thumbnail, file page and a short
+ * credit. Files without a usable https thumbnail are dropped — a broken tile in
+ * a photo row is worse than a shorter row.
+ */
+export function commonsPlacePhotos(
+  at: LatLng,
+  pages: readonly MediaWikiImagePage[],
+  limit = 8,
+): PlacePhoto[] {
+  const photos: PlacePhoto[] = [];
+  for (const page of pages) {
+    const info = page.imageinfo?.[0];
+    if (!info) continue;
+    const url = info.thumburl;
+    if (!url?.startsWith('https://') || !info.thumbwidth || !info.thumbheight) continue;
+    const coordinate = page.coordinates?.[0];
+    const distanceM =
+      typeof coordinate?.lat === 'number' && typeof coordinate.lon === 'number'
+        ? Math.round(haversineM(at, { lat: coordinate.lat, lng: coordinate.lon }))
+        : null;
+    const credit =
+      metadataText(info.extmetadata?.['Artist']) ?? metadataText(info.extmetadata?.['Credit']);
+    const licence = metadataText(info.extmetadata?.['LicenseShortName']);
+    photos.push({
+      title: (page.title ?? '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, ''),
+      url,
+      width: info.thumbwidth,
+      height: info.thumbheight,
+      pageUrl: info.descriptionurl ?? url,
+      distanceM,
+      ...(credit || licence
+        ? { credit: [credit, licence].filter((part) => part).join(' · ') }
+        : {}),
+    });
+  }
+  // Nearest first where Commons gave a coordinate; the rest keep their order.
+  return photos
+    .sort((a, b) => (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity))
+    .slice(0, limit);
 }

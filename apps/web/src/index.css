@@ -297,6 +297,151 @@ button {
   object-fit: cover;
 }
 
+/* The Wikipedia mark, on the article head and on every nearby row. */
+.wiki-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-right: 5px;
+  border-radius: 3px;
+  background: var(--text-muted);
+  color: var(--surface);
+  font-size: 10px;
+  font-weight: 800;
+  font-family: Georgia, 'Times New Roman', serif;
+  vertical-align: -2px;
+}
+
+/* Photos taken near the spot: a horizontal strip, each tile linking to its
+   Commons file page. Scrolls on its own so a wide strip never widens the card. */
+.place-card-photos {
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.place-card-photo-strip {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.place-card-photo-strip a {
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.place-card-photo-strip img {
+  display: block;
+  width: 116px;
+  height: 84px;
+  object-fit: cover;
+}
+
+/* The distance rides on the tile: the nearest photo may be of the building
+   across the road, and the card should say so rather than imply otherwise. */
+.place-card-photo-strip span {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.place-card-nearby {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.place-card-nearby-toggle {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.place-card-nearby-toggle[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.place-card-nearby ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.place-card-nearby li button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.place-card-nearby li button:hover {
+  background: var(--surface-selected);
+}
+
+.place-card-nearby-thumb {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-muted);
+}
+
+.place-card-nearby-thumb-empty {
+  display: grid;
+  place-items: center;
+}
+
+.place-card-nearby-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.place-card-nearby-text strong {
+  font-size: 13px;
+}
+
+/* Two lines of the extract is a preview; the article itself is one tap away. */
+.place-card-nearby-text span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .place-card-actions {
   display: flex;
   flex-wrap: wrap;

@@ -14,6 +14,7 @@ import {
   type BBox,
   type LatLng,
   type MapAppearance,
+  type NearbyPlaceArticle,
   type VisibilityFolder,
 } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
@@ -347,6 +348,22 @@ function AppInner() {
       onRegularPickPoint(point);
     },
     [offlineRegion, onRegularPickPoint, selectOfflineRegionPoint],
+  );
+
+  // A described place picked from the card's nearby list becomes the card's new
+  // subject — the same treatment as a search hit, so the article, its photo and
+  // the actions all follow it. Panned into view without changing the zoom, like
+  // every other pick that comes from the map surface.
+  const onPickNearbyPlace = useCallback(
+    (place: NearbyPlaceArticle) => {
+      dest.pickOnMap({
+        lat: place.position.lat,
+        lng: place.position.lng,
+        name: place.title,
+        canSave: true,
+      });
+    },
+    [dest],
   );
 
   // Picking an activity also chooses the route planner's starting mode where
@@ -768,6 +785,7 @@ function AppInner() {
         <DestinationCard
           target={destination}
           packs={packs}
+          onPickNearby={onPickNearbyPlace}
           onDirections={() => {
             dest.clear();
             directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);

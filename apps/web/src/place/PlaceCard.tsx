@@ -2,15 +2,19 @@ import { sunDay, type SunDay } from '@atlas/conditions';
 import {
   fmtClock,
   fmtCoords,
+  fmtDistanceM,
   placeTargetSubtitle,
   placeTargetTitle,
   type LatLng,
+  type NearbyPlaceArticle,
   type PlaceContent,
+  type PlacePhoto,
   type PlaceTarget,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
 import { useElevation } from './useElevation.js';
+import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
 import { usePlaceContent } from './usePlaceContent.js';
 
 interface PlaceCardProps {
@@ -40,6 +44,8 @@ interface PlaceCardProps {
   onWeather: () => void;
   /** Remove the dropped pin (pin targets only). */
   onRemovePin: () => void;
+  /** Re-aim the card at a described place picked from the nearby list. */
+  onShowNearby: (place: NearbyPlaceArticle) => void;
   onClose: () => void;
 }
 
@@ -99,6 +105,121 @@ function ArticleImage({ article }: { article: PlaceContent }) {
 }
 
 /**
+ * The Wikipedia "W" — the same mark on the article head and on every nearby row,
+ * so "there is something to read here" is one recognisable thing across the card
+ * (and, in the nearby list, tells the described places from the rest at a glance).
+ */
+function WikiBadge() {
+  return (
+    <span className="wiki-badge" aria-hidden="true">
+      W
+    </span>
+  );
+}
+
+/**
+ * Photos taken *near* this spot, from Wikimedia Commons.
+ *
+ * Most places are not the subject of an article and so have no lead image —
+ * which is why a town hall could show nothing at all — but somebody has usually
+ * photographed the street. The heading says "nearby" and every tile carries its
+ * distance, because the nearest photo may well be of the building opposite;
+ * clicking through goes to the Commons file page with the full licence.
+ */
+function NearbyPhotos({ photos }: { photos: PlacePhoto[] }) {
+  if (photos.length === 0) return null;
+  return (
+    <section className="place-card-photos">
+      <div className="place-card-content-head">
+        <strong>Photos nearby</strong>
+        <a href="https://commons.wikimedia.org" target="_blank" rel="noreferrer">
+          Wikimedia Commons
+        </a>
+      </div>
+      <div className="place-card-photo-strip">
+        {photos.map((photo) => (
+          <a
+            key={photo.pageUrl}
+            href={photo.pageUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={[photo.title, photo.credit].filter(Boolean).join(' — ')}
+          >
+            <img src={photo.url} alt={photo.title} loading="lazy" referrerPolicy="no-referrer" />
+            {photo.distanceM !== null && <span>{fmtDistanceM(photo.distanceM)}</span>}
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Described places around this spot, each opening as a card of its own.
+ *
+ * Collapsed by default and fetched only when opened — one more Wikimedia round
+ * trip per card, on a card that is usually opened to get directions.
+ */
+function NearbyArticles({
+  at,
+  onShowNearby,
+}: {
+  at: LatLng;
+  onShowNearby: (place: NearbyPlaceArticle) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const nearby = useNearbyPlaces(at, open);
+
+  return (
+    <section className="place-card-nearby">
+      <button
+        type="button"
+        className="place-card-nearby-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <WikiBadge />
+        Nearby places
+      </button>
+      {open && nearby.status === 'loading' && <p className="place-card-sub">Looking around…</p>}
+      {open && nearby.status === 'ready' && nearby.places.length === 0 && (
+        <p className="place-card-sub">Nothing described within a couple of kilometres.</p>
+      )}
+      {open && nearby.places.length > 0 && (
+        <ul>
+          {nearby.places.map((place) => (
+            <li key={place.url}>
+              <button type="button" onClick={() => onShowNearby(place)}>
+                {place.image ? (
+                  <img
+                    src={place.image.url}
+                    alt=""
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="place-card-nearby-thumb"
+                  />
+                ) : (
+                  <span className="place-card-nearby-thumb place-card-nearby-thumb-empty" />
+                )}
+                <span className="place-card-nearby-text">
+                  <strong>
+                    <WikiBadge />
+                    {place.title}
+                  </strong>
+                  <span>
+                    {fmtDistanceM(place.distanceM)} away · {place.extract}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
  * One card for every way of pointing at a spot: a dropped pin, a saved place, a
  * POI tapped on the map, a picked search result.
  *
@@ -127,6 +248,7 @@ export function PlaceCard({
   onShare,
   onWeather,
   onRemovePin,
+  onShowNearby,
   onClose,
 }: PlaceCardProps) {
   const [copied, setCopied] = useState<'coords' | 'link' | null>(null);
@@ -145,6 +267,10 @@ export function PlaceCard({
 
   const elevation = useElevation(target.position);
   const placeContent = usePlaceContent(target.name, target.position);
+  const hasArticleImage = placeContent.content.some((article) => article.image);
+  // Asked as the card opens, and dropped as soon as the article's own lead
+  // photo lands — a card shows one photo block, never two.
+  const photos = useNearbyPhotos(target.position, !hasArticleImage);
   // Sun times are pure local maths (no network, no coverage limits), so unlike
   // elevation they are always available — recomputed per position, and per day
   // only in the sense that the card is short-lived.
@@ -194,7 +320,10 @@ export function PlaceCard({
       {placeContent.content.map((article) => (
         <section className="place-card-content" key={`${article.source}/${article.url}`}>
           <div className="place-card-content-head">
-            <strong>{article.source === 'wikipedia' ? 'Wikipedia' : 'Wikivoyage'}</strong>
+            <strong>
+              <WikiBadge />
+              {article.source === 'wikipedia' ? 'Wikipedia' : 'Wikivoyage'}
+            </strong>
             <a href={article.url} target="_blank" rel="noreferrer">
               Read article
             </a>
@@ -203,6 +332,10 @@ export function PlaceCard({
           <p>{article.extract}</p>
         </section>
       ))}
+      {/* Only when the article did not bring its own photo — one photo block
+          per card, and the article's own picture is the better one. */}
+      {!hasArticleImage && <NearbyPhotos photos={photos.photos} />}
+      <NearbyArticles at={target.position} onShowNearby={onShowNearby} />
       <div className="place-card-actions">
         <button type="button" className="primary" onClick={onDirections}>
           Directions

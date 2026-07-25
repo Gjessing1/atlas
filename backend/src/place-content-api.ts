@@ -1,6 +1,9 @@
 import {
   bestMediaWikiPlacePage,
+  commonsPlacePhotos,
   mediaWikiThumbnail,
+  nearbyMediaWikiPlaces,
+  type MediaWikiImagePage,
   type MediaWikiPlacePage,
   type PlaceContent,
 } from '@atlas/core';
@@ -15,6 +18,25 @@ interface MediaWikiResponse {
   query?: { pages?: MediaWikiPlacePage[] | Record<string, MediaWikiPlacePage> };
 }
 
+interface MediaWikiImageResponse {
+  query?: { pages?: MediaWikiImagePage[] | Record<string, MediaWikiImagePage> };
+}
+
+/** Coordinates a request has to carry, or 400. */
+function coordinateOf(query: { lat?: string; lon?: string }): { lat: number; lon: number } | null {
+  const lat = Number(query.lat);
+  const lon = Number(query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+/** Bounded radius (m) for the nearby lookups; Wikimedia's own ceiling is 10 km. */
+function safeRadius(value: string | undefined, fallback: number): number {
+  const radius = Number(value);
+  return Number.isFinite(radius) ? Math.min(10_000, Math.max(100, radius)) : fallback;
+}
+
 const DEFAULT_USER_AGENT =
   'Atlas place content (self-hosted; https://git.gjessing.io/gjessing1/atlas)';
 
@@ -25,6 +47,12 @@ function safeLanguage(value: string | undefined): string {
 }
 
 function pagesOf(response: MediaWikiResponse): MediaWikiPlacePage[] {
+  const pages = response.query?.pages;
+  if (!pages) return [];
+  return Array.isArray(pages) ? pages : Object.values(pages);
+}
+
+function imagePagesOf(response: MediaWikiImageResponse): MediaWikiImagePage[] {
   const pages = response.query?.pages;
   if (!pages) return [];
   return Array.isArray(pages) ? pages : Object.values(pages);
@@ -122,5 +150,121 @@ export function registerPlaceContentApi(
       await Promise.all([load('wikipedia', 'wikipedia'), load('wikivoyage', 'wikivoyage')])
     ).filter((item): item is PlaceContent => item !== null);
     return { content };
+  });
+
+  /**
+   * Described places *around* a point, whether or not anything is named like
+   * the selected POI. The card's own lookup can only answer "is this thing
+   * itself an article?", which for most POIs is no — while three articles sit
+   * within a few hundred metres. This is that list.
+   */
+  app.get<{
+    Querystring: { lat?: string; lon?: string; lang?: string; radius?: string; limit?: string };
+  }>('/api/place-content/nearby', async (request, reply) => {
+    const at = coordinateOf(request.query);
+    if (!at) return reply.code(400).send({ error: 'lat and lon are required' });
+    const language = safeLanguage(request.query.lang);
+    const radiusM = safeRadius(request.query.radius, 2_000);
+    const limit = Math.min(20, Math.max(1, Number(request.query.limit) || 12));
+    reply.header('Cache-Control', 'public, max-age=86400');
+
+    const loadLanguage = async (contentLanguage: string) => {
+      const url = new URL(`https://${contentLanguage}.wikipedia.org/w/api.php`);
+      for (const [key, value] of Object.entries({
+        action: 'query',
+        format: 'json',
+        formatversion: '2',
+        generator: 'geosearch',
+        ggscoord: `${at.lat}|${at.lon}`,
+        ggsradius: String(Math.round(radiusM)),
+        // Ask for more than we show: pages without an extract or coordinate are
+        // dropped, and the list should still be full after that.
+        ggslimit: String(Math.min(50, limit * 2)),
+        prop: 'coordinates|extracts|info|pageimages',
+        exintro: '1',
+        explaintext: '1',
+        // A row, not an article: two sentences is enough to choose from.
+        exchars: '220',
+        inprop: 'url',
+        piprop: 'thumbnail',
+        pithumbsize: '160',
+      })) {
+        url.searchParams.set(key, value);
+      }
+      try {
+        const response = await fetchImpl(url, {
+          headers: { 'User-Agent': userAgent, 'Api-User-Agent': userAgent },
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!response.ok) return [];
+        const places = nearbyMediaWikiPlaces(
+          { lat: at.lat, lng: at.lon },
+          pagesOf((await response.json()) as MediaWikiResponse),
+          limit,
+        );
+        return places.map((place) => ({ ...place, language: contentLanguage }));
+      } catch {
+        return [];
+      }
+    };
+
+    // The reader's own language first; English is the fallback everywhere the
+    // local Wikipedia has not described the area.
+    const local = await loadLanguage(language);
+    if (local.length > 0 || language === 'en') return { places: local };
+    return { places: await loadLanguage('en') };
+  });
+
+  /**
+   * Geotagged Commons photos near a point — what a place *looks* like when it
+   * has no article of its own (the common case, and the reason a town hall
+   * showed nothing at all). Presented as nearby photos, never as the place's
+   * own picture: the nearest photo may well be of the building across the road.
+   */
+  app.get<{
+    Querystring: { lat?: string; lon?: string; radius?: string; limit?: string };
+  }>('/api/place-photos', async (request, reply) => {
+    const at = coordinateOf(request.query);
+    if (!at) return reply.code(400).send({ error: 'lat and lon are required' });
+    const radiusM = safeRadius(request.query.radius, 400);
+    const limit = Math.min(12, Math.max(1, Number(request.query.limit) || 8));
+    reply.header('Cache-Control', 'public, max-age=86400');
+
+    const url = new URL('https://commons.wikimedia.org/w/api.php');
+    for (const [key, value] of Object.entries({
+      action: 'query',
+      format: 'json',
+      formatversion: '2',
+      generator: 'geosearch',
+      // Namespace 6 is File: — the photos themselves, not the pages using them.
+      ggsnamespace: '6',
+      ggscoord: `${at.lat}|${at.lon}`,
+      ggsradius: String(Math.round(radiusM)),
+      ggslimit: String(Math.min(30, limit * 3)),
+      prop: 'coordinates|imageinfo',
+      iiprop: 'url|extmetadata',
+      // Commons renders the thumbnail for us; the originals are often 10 MB+.
+      iiurlwidth: '480',
+      iiextmetadatafilter: 'Artist|Credit|LicenseShortName',
+    })) {
+      url.searchParams.set(key, value);
+    }
+    try {
+      const response = await fetchImpl(url, {
+        headers: { 'User-Agent': userAgent, 'Api-User-Agent': userAgent },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) return { photos: [] };
+      return {
+        photos: commonsPlacePhotos(
+          { lat: at.lat, lng: at.lon },
+          imagePagesOf((await response.json()) as MediaWikiImageResponse),
+          limit,
+        ),
+      };
+    } catch {
+      // Commons unreachable: a card without photos, not a card with an error.
+      return { photos: [] };
+    }
   });
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { bestMediaWikiPlacePage } from './place-content.js';
+import {
+  bestMediaWikiPlacePage,
+  commonsPlacePhotos,
+  nearbyMediaWikiPlaces,
+} from './place-content.js';
 
 const at = { lat: 59.911, lng: 10.752 };
 
@@ -48,5 +52,88 @@ describe('bestMediaWikiPlacePage', () => {
         },
       ]),
     ).toBeNull();
+  });
+});
+
+describe('nearbyMediaWikiPlaces', () => {
+  const page = (title: string, lat: number, lng: number, extract = 'Something to read.') => ({
+    title,
+    extract,
+    fullurl: `https://no.wikipedia.org/wiki/${title}`,
+    coordinates: [{ lat, lon: lng }],
+  });
+
+  it('orders described places by distance and measures each one', () => {
+    const places = nearbyMediaWikiPlaces(at, [
+      page('Far', 59.925, 10.752),
+      page('Near', 59.9115, 10.752),
+    ]);
+    expect(places.map((p) => p.title)).toEqual(['Near', 'Far']);
+    expect(places[0]!.distanceM).toBeLessThan(places[1]!.distanceM);
+    expect(places[0]!.position).toEqual({ lat: 59.9115, lng: 10.752 });
+  });
+
+  it('drops pages with nothing to read or nowhere to be', () => {
+    const places = nearbyMediaWikiPlaces(at, [
+      { title: 'No extract', fullurl: 'https://x', coordinates: [{ lat: 59.91, lon: 10.75 }] },
+      { title: 'No coordinate', extract: 'Text.', fullurl: 'https://x' },
+      page('Good', 59.912, 10.752),
+    ]);
+    expect(places.map((p) => p.title)).toEqual(['Good']);
+  });
+
+  it('keeps the row thumbnail when the page has one', () => {
+    const [place] = nearbyMediaWikiPlaces(at, [
+      {
+        ...page('Illustrated', 59.912, 10.752),
+        thumbnail: { source: 'https://upload.example/t.jpg', width: 160, height: 90 },
+      },
+    ]);
+    expect(place!.image).toEqual({ url: 'https://upload.example/t.jpg', width: 160, height: 90 });
+  });
+});
+
+describe('commonsPlacePhotos', () => {
+  const file = (title: string, lat?: number, lng?: number) => ({
+    title,
+    ...(lat !== undefined && lng !== undefined ? { coordinates: [{ lat, lon: lng }] } : {}),
+    imageinfo: [
+      {
+        thumburl: `https://upload.example/${title}.jpg`,
+        thumbwidth: 480,
+        thumbheight: 320,
+        descriptionurl: `https://commons.example/${title}`,
+        extmetadata: {
+          Artist: { value: '<a href="/wiki/User:X">Kari</a>' },
+          LicenseShortName: { value: 'CC BY 4.0' },
+        },
+      },
+    ],
+  });
+
+  it('strips the File: prefix and extension, and credits the photographer', () => {
+    const [photo] = commonsPlacePhotos(at, [file('File:Oslo domkirke.jpg', 59.9128, 10.7476)]);
+    expect(photo!.title).toBe('Oslo domkirke');
+    expect(photo!.credit).toBe('Kari · CC BY 4.0');
+    expect(photo!.pageUrl).toBe('https://commons.example/File:Oslo domkirke.jpg');
+    expect(photo!.distanceM).toBeGreaterThan(0);
+  });
+
+  it('drops files without a usable https thumbnail', () => {
+    expect(
+      commonsPlacePhotos(at, [
+        { title: 'File:Broken.jpg', imageinfo: [{ descriptionurl: 'https://x' }] },
+        { title: 'File:Nothing.jpg' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('puts photos with no coordinate last rather than dropping them', () => {
+    const photos = commonsPlacePhotos(at, [
+      file('File:Unplaced.jpg'),
+      file('File:Right here.jpg', 59.9111, 10.7521),
+    ]);
+    expect(photos.map((p) => p.title)).toEqual(['Right here', 'Unplaced']);
+    expect(photos[1]!.distanceM).toBeNull();
   });
 });

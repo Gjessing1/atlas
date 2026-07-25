@@ -161,6 +161,64 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   await expect(page.locator('.place-card')).toHaveCount(0);
 });
 
+test('a place with no article of its own shows nearby photos and places', async ({ page }) => {
+  // The user's own case: a town hall Wikipedia has never written about.
+  await page.route('**/api/place-content?**', (route) => route.fulfill({ json: { content: [] } }));
+  await page.route('**/api/place-photos**', (route) =>
+    route.fulfill({
+      json: {
+        photos: [
+          {
+            title: 'Torvveien 9',
+            url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+            width: 480,
+            height: 320,
+            pageUrl: 'https://commons.example/Torvveien',
+            distanceM: 39,
+            credit: 'Ssu · CC BY-SA 4.0',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/place-content/nearby**', (route) =>
+    route.fulfill({
+      json: {
+        places: [
+          {
+            title: 'Asker station',
+            extract: 'A railway station in downtown Asker.',
+            url: 'https://no.wikipedia.org/wiki/Asker_stasjon',
+            language: 'no',
+            position: { lat: 59.8336, lng: 10.4344 },
+            distanceM: 23,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto('/#map=17/59.83365/10.43485');
+  await waitForMap(page);
+  const box = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+  const card = page.locator('.place-card');
+
+  // Photos of the area stand in for the picture the place itself does not have,
+  // and each tile says how far off it was taken.
+  await expect(card.locator('.place-card-photo-strip a')).toHaveCount(1);
+  await expect(card.locator('.place-card-photos')).toContainText('39 m');
+
+  // The nearby list is behind its own toggle — one round trip, on request.
+  await card.getByRole('button', { name: /Nearby places/ }).click();
+  const row = card.locator('.place-card-nearby li button').first();
+  await expect(row).toContainText('Asker station');
+  await expect(row).toContainText('23 m away');
+
+  // Picking one re-aims the whole card at that place.
+  await row.click();
+  await expect(card.locator('.place-card-titles strong')).toHaveText('Asker station');
+});
+
 test('saving from the place card flips the button and lists the place', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);

@@ -10,6 +10,7 @@ import {
   type ColorScheme,
   type LatLng,
   type MapViewState,
+  type NearbyPlaceArticle,
   type PlaceTarget,
   type SearchResult,
   type VisibilityFolder,
@@ -323,6 +324,21 @@ export function App() {
       if (map) {
         map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
       }
+    },
+    [followPin],
+  );
+
+  // A described place picked from the card's nearby list becomes the card's
+  // new subject: same treatment as a search hit (pin, card, camera), so the
+  // article, its photo and the actions all follow. The card then looks the
+  // place up by name, which for a title that came *from* Wikipedia matches.
+  const onShowNearbyPlace = useCallback(
+    (place: NearbyPlaceArticle) => {
+      setPin(place.position);
+      setTarget({ source: 'search', position: place.position, name: place.title });
+      followPin(place.position);
+      const map = mapRef.current;
+      if (map) map.flyTo({ center: place.position, zoom: Math.max(map.getZoom(), 15) });
     },
     [followPin],
   );
@@ -724,6 +740,7 @@ export function App() {
           onShare={onShareTarget}
           onWeather={() => weatherAt.setTarget(target.position)}
           onRemovePin={() => onPinChange(null)}
+          onShowNearby={onShowNearbyPlace}
           onClose={() => setTarget(null)}
         />
       )}
