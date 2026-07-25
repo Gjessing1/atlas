@@ -1,0 +1,23 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'io.gjessing.atlas'
+version = '0.1.0'
+
+android {
+  namespace = 'io.gjessing.atlas.pip'
+
+  defaultConfig {
+    minSdkVersion 24
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // ComponentActivity.addOnPictureInPictureModeChangedListener — the supported
+  // way to hear about PiP transitions without touching the generated
+  // MainActivity. Already on the app's classpath via appcompat; declared so this
+  // module compiles on its own.
+  implementation 'androidx.activity:activity:1.9.3'
+}

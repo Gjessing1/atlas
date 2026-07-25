@@ -10,7 +10,10 @@ import type {
 
 import type { OverlaysController } from '../layers/useOverlays';
 import type { TileSource } from '../map/useTileSource';
+import type { NavPipController } from '../nav/useNavigationPip';
 import type { LocalPack } from '../regions/packs';
+import type { OfflinePrefsController } from '../regions/useOfflinePrefs';
+import type { PackDownloadsController } from '../regions/usePackDownloads';
 import type { ImportOptions, ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
@@ -45,7 +48,11 @@ interface AppSheetsProps {
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   navPrefs: NavPrefsController;
+  pip: NavPipController;
   regionJobs: RegionPackJobsController;
+  /** Background pack downloads (progress, resume, cancel) and their preferences. */
+  downloads: PackDownloadsController;
+  offlinePrefs: OfflinePrefsController;
   onDrawRegion: () => void;
 
   /** Coords awaiting a name before they're saved as a pin (name-on-save prompt). */
@@ -86,7 +93,10 @@ export function AppSheets({
   appearance,
   mapStyleEditor,
   navPrefs,
+  pip,
   regionJobs,
+  downloads,
+  offlinePrefs,
   onDrawRegion,
   pendingPin,
   onDismissPendingPin,
@@ -177,7 +187,10 @@ export function AppSheets({
         overlays={overlays}
         profilePreferences={profilePreferences}
         navPrefs={navPrefs}
+        pip={pip}
         regionJobs={regionJobs}
+        downloads={downloads}
+        offlinePrefs={offlinePrefs}
         onDrawRegion={onDrawRegion}
         bottomInset={bottomInset}
       />

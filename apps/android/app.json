@@ -3,8 +3,8 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.99.1",
-    "runtimeVersion": "5",
+    "version": "0.100.0",
+    "runtimeVersion": "6",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",
       "enabled": true,
@@ -16,7 +16,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 17,
+      "versionCode": 18,
       "permissions": ["android.permission.RECEIVE_BOOT_COMPLETED"],
       "adaptiveIcon": {
         "backgroundColor": "#2563eb",
@@ -29,6 +29,7 @@
     "plugins": [
       "./plugins/withReleaseSigning.js",
       "./plugins/withAndroidAbis.js",
+      "./plugins/withPictureInPicture.js",
       "expo-dev-client",
       "expo-sqlite",
       "@maplibre/maplibre-react-native",

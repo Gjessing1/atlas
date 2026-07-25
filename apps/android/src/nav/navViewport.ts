@@ -35,8 +35,13 @@ export function navViewport(
   side: SideInsets,
   topInset: number,
   bottomInset: number,
+  compact = false,
 ): NavViewport {
-  const landscape = width > height;
+  // A picture-in-picture window is wider than it is tall, but it is not a
+  // landscape *screen*: there is no room beside the map for a guidance rail, so
+  // splitting the window in two would leave the camera pointing at the wrong
+  // half of a very small map.
+  const landscape = !compact && width > height;
   const guidanceLeft = side.left + EDGE_GAP;
   const guidanceWidth = landscape
     ? Math.min(360, Math.round(width * 0.42))

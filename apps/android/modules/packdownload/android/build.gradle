@@ -1,0 +1,22 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'io.gjessing.atlas'
+version = '0.1.0'
+
+android {
+  namespace = 'io.gjessing.atlas.packdownload'
+
+  defaultConfig {
+    minSdkVersion 24
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // The download itself runs as WorkManager work with a foreground service, so
+  // it survives switching apps and is rescheduled (and resumed) by the system
+  // after a process death or a lost network.
+  implementation 'androidx.work:work-runtime-ktx:2.10.0'
+}

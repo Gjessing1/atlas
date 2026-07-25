@@ -169,9 +169,21 @@ const h = vi.hoisted(() => {
 vi.mock('expo-file-system/legacy', () => h.FileSystem);
 vi.mock('react-native-zip-archive', () => ({ unzip: h.unzipFn }));
 vi.mock('../serverOrigin', () => ({ getServerOrigin: () => 'http://test' }));
+// No native digest off-device, which is also the fallback these tests cover.
+vi.mock('../../modules/packdownload', () => ({ nativeSha256: async () => null }));
 
 import { base64ToBytes, createSha256 } from './sha256';
-import { deletePack, downloadPack, listLocalPacks, packDir, validatePackManifest } from './packs';
+import {
+  deletePack,
+  downloadPack,
+  listLocalPacks,
+  packDir,
+  pendingPackFiles,
+  pendingStagingPacks,
+  prepareStaging,
+  stagingDir,
+  validatePackManifest,
+} from './packs';
 
 /** Build a manifest whose file digests match freshly generated random content. */
 function makeManifest(
@@ -367,6 +379,55 @@ describe('downloadPack', () => {
     await downloadPack(makeManifest('oslo', 2), () => {});
     // The v2 install must not have inherited the v1 orphan.
     expect(h.memfs.has(`${packDir('oslo')}/orphan.tmp`)).toBe(false);
+  });
+});
+
+describe('resuming an interrupted download', () => {
+  it('records the manifest in staging so a later run can finish the install', async () => {
+    const manifest = makeManifest('oslo', 4);
+    await prepareStaging(stagingDir('oslo'), manifest);
+
+    expect(await pendingStagingPacks()).toEqual([manifest]);
+  });
+
+  it('ignores a staging dir with no recorded manifest, and installed packs', async () => {
+    h.memfs.writeBytes(`${stagingDir('bergen')}/.staging.json`, jsonBytes({ version: 1 }));
+    seedLivePack('trondheim');
+
+    expect(await pendingStagingPacks()).toEqual([]);
+  });
+
+  it('asks only for the files still missing, skipping finished and unpacked ones', async () => {
+    const manifest = makeManifest();
+    const staging = stagingDir('oslo');
+    await prepareStaging(staging, manifest);
+    // basemap already complete, search half-written, assets already unpacked.
+    h.memfs.writeBytes(`${staging}/basemap.pmtiles`, h.content.get('basemap.pmtiles')!);
+    h.memfs.writeBytes(`${staging}/search.sqlite`, new Uint8Array(60));
+    h.memfs.writeBytes(`${staging}/assets/.unzip-complete`, new Uint8Array(0));
+
+    expect(await pendingPackFiles(manifest)).toEqual([
+      { url: 'http://test/packs/oslo/search.sqlite', path: 'search.sqlite', bytes: 120 },
+      { url: 'http://test/packs/oslo/valhalla.tar', path: 'valhalla.tar', bytes: 200 },
+    ]);
+  });
+
+  it('finishes a pack whose files a background download already fetched', async () => {
+    const manifest = makeManifest();
+    const staging = stagingDir('oslo');
+    await prepareStaging(staging, manifest);
+    for (const name of ['basemap.pmtiles', 'search.sqlite', 'valhalla.tar', 'assets.zip']) {
+      h.memfs.writeBytes(`${staging}/${name}`, h.content.get(name)!);
+    }
+    expect(await pendingPackFiles(manifest)).toEqual([]);
+
+    // Nothing left to fetch: downloadPack only verifies, unpacks and swaps.
+    h.download.behavior.set('basemap.pmtiles', 'throw');
+    const pack = await downloadPack(manifest, () => {});
+
+    expect(pack.dir).toBe(packDir('oslo'));
+    expect(h.memfs.has(`${packDir('oslo')}/assets/fonts/glyph.pbf`)).toBe(true);
+    expect(await readJson(`${packDir('oslo')}/pack.json`)).toEqual(manifest);
   });
 });
 

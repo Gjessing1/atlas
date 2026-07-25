@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bestMediaWikiPlacePage,
   commonsPlacePhotos,
+  mergeNearbyMediaWikiPlaces,
   nearbyMediaWikiPlaces,
 } from './place-content.js';
 
@@ -90,6 +91,40 @@ describe('nearbyMediaWikiPlaces', () => {
       },
     ]);
     expect(place!.image).toEqual({ url: 'https://upload.example/t.jpg', width: 160, height: 90 });
+  });
+});
+
+describe('mergeNearbyMediaWikiPlaces', () => {
+  const page = (title: string, lat: number, lng: number, langlinks?: { title: string }[]) => ({
+    title,
+    extract: 'Something to read.',
+    fullurl: `https://x/${title}`,
+    coordinates: [{ lat, lon: lng }],
+    ...(langlinks ? { langlinks: langlinks.map((link) => ({ lang: 'en', ...link })) } : {}),
+  });
+
+  it('drops the local article that the leading edition already listed', () => {
+    const places = mergeNearbyMediaWikiPlaces({ lat: 59.911, lng: 10.752 }, [
+      { language: 'en', pages: [page('Oslo Cathedral', 59.9128, 10.7476)] },
+      {
+        language: 'no',
+        pages: [
+          page('Oslo domkirke', 59.9128, 10.7476, [{ title: 'Oslo Cathedral' }]),
+          page('Kirkeristen', 59.9126, 10.7489),
+        ],
+      },
+    ]);
+    // Nearest first, as always — the cathedral is listed once, in English.
+    expect(places.map((place) => place.title)).toEqual(['Kirkeristen', 'Oslo Cathedral']);
+    expect(places.map((place) => place.language)).toEqual(['no', 'en']);
+  });
+
+  it('orders the merged list by distance, not by edition', () => {
+    const places = mergeNearbyMediaWikiPlaces({ lat: 59.911, lng: 10.752 }, [
+      { language: 'en', pages: [page('Far', 59.925, 10.752)] },
+      { language: 'no', pages: [page('Nær', 59.9115, 10.752)] },
+    ]);
+    expect(places.map((place) => place.title)).toEqual(['Nær', 'Far']);
   });
 });
 

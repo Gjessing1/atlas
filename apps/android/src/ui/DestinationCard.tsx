@@ -1,13 +1,30 @@
-import { fmtDistanceM, type NearbyPlaceArticle, type OverlayIdentifyGroup } from '@atlas/core';
+import {
+  fmtDistanceM,
+  WIKIMEDIA_USER_AGENT,
+  type NearbyPlaceArticle,
+  type OverlayIdentifyGroup,
+} from '@atlas/core';
 import { useEffect, useRef, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useNearbyPhotos, useNearbyPlaces } from '../place/useNearbyPlaces';
 import { usePlaceContent } from '../place/usePlaceContent';
 import type { LocalPack } from '../regions/packs';
-import { BottomSheet } from './BottomSheet';
+import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { WeatherIcon } from './icons';
 import { theme } from './theme';
+
+/**
+ * A Wikimedia image, asked for the way Wikimedia requires.
+ *
+ * `upload.wikimedia.org` rejects the image loader's stock `okhttp/…` user
+ * agent with 403, which is why every Wikipedia thumbnail on Android rendered
+ * as a black rectangle. The array form of `source` is deliberate: React
+ * Native only forwards `headers` to the native loader for source *lists*.
+ */
+function wikimediaSource(uri: string) {
+  return [{ uri, headers: { 'User-Agent': WIKIMEDIA_USER_AGENT } }];
+}
 
 export interface DestinationTarget {
   lat: number;
@@ -102,6 +119,17 @@ export function DestinationCard({
   useEffect(() => {
     setNearbyOpen(false);
   }, [target.lat, target.lng]);
+  /**
+   * Reading is a bigger sheet than tapping "Directions".
+   *
+   * The card opens peeked, which is right for a pin you tapped to route to —
+   * but the moment the point is one the user is *reading about*, a peeked sheet
+   * is a keyhole: opening the nearby list pushed the actions off it, and
+   * picking a place from that list replaced the card with an article whose
+   * first line was all that fit. Both gestures now raise the sheet themselves.
+   */
+  const sheet = useRef<BottomSheetHandle>(null);
+  const expand = () => sheet.current?.snapTo('half');
   // A single tap on Directions/Save/Edit hands the point off and closes the
   // card, but a fast second tap arrives before the card unmounts and used to
   // fire the action twice — adding the same stop, or saving the same pin,
@@ -123,6 +151,7 @@ export function DestinationCard({
     // Weather, Save/Edit and Share stay inside the sheet and above Android's
     // gesture or three-button navigation area.
     <BottomSheet
+      ref={sheet}
       visible
       mode="map"
       onClose={onCancel}
@@ -213,7 +242,7 @@ export function DestinationCard({
               {article.image ? (
                 <Pressable onPress={() => void Linking.openURL(article.url)}>
                   <Image
-                    source={{ uri: article.image.url }}
+                    source={wikimediaSource(article.image.url)}
                     style={styles.articleImage}
                     resizeMode="cover"
                     accessibilityLabel={article.title}
@@ -239,7 +268,11 @@ export function DestinationCard({
                 style={styles.photoTile}
                 accessibilityLabel={`${photo.title}${photo.credit ? `, ${photo.credit}` : ''}`}
               >
-                <Image source={{ uri: photo.url }} style={styles.photo} resizeMode="cover" />
+                <Image
+                  source={wikimediaSource(photo.url)}
+                  style={styles.photo}
+                  resizeMode="cover"
+                />
                 {photo.distanceM !== null ? (
                   <Text style={styles.photoDistance}>{fmtDistanceM(photo.distanceM)}</Text>
                 ) : null}
@@ -253,7 +286,11 @@ export function DestinationCard({
           answer, since most POIs have no article of their own. */}
       <Pressable
         style={[styles.nearbyToggle, nearbyOpen && styles.nearbyToggleOpen]}
-        onPress={() => setNearbyOpen((open) => !open)}
+        onPress={() => {
+          const opening = !nearbyOpen;
+          setNearbyOpen(opening);
+          if (opening) expand();
+        }}
         accessibilityRole="button"
         accessibilityState={{ expanded: nearbyOpen }}
         testID="destination-nearby-toggle"
@@ -274,12 +311,15 @@ export function DestinationCard({
               <Pressable
                 key={place.url}
                 style={styles.nearbyRow}
-                onPress={() => onPickNearby(place)}
+                onPress={() => {
+                  onPickNearby(place);
+                  expand();
+                }}
                 testID={`destination-nearby-${index}`}
               >
                 {place.image ? (
                   <Image
-                    source={{ uri: place.image.url }}
+                    source={wikimediaSource(place.image.url)}
                     style={styles.nearbyThumb}
                     resizeMode="cover"
                   />
@@ -381,7 +421,9 @@ const styles = StyleSheet.create({
   photos: { marginTop: 12 },
   photoStrip: { marginTop: 6 },
   photoTile: { marginRight: 6, borderRadius: 8, overflow: 'hidden' },
-  photo: { width: 116, height: 84, backgroundColor: theme.border },
+  // A muted surface, never `border` (which is the *foreground* colour): an
+  // image still loading should read as an empty slot, not a black hole.
+  photo: { width: 116, height: 84, backgroundColor: theme.surfaceMuted },
   photoDistance: {
     position: 'absolute',
     right: 3,
@@ -422,7 +464,7 @@ const styles = StyleSheet.create({
     height: 130,
     borderRadius: 8,
     marginTop: 6,
-    backgroundColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
   },
   articleText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },

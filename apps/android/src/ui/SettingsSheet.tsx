@@ -33,8 +33,12 @@ import {
 
 import type { TileSource } from '../map/useTileSource';
 import type { OverlaysController } from '../layers/useOverlays';
+import { packJobAction, packJobLabel } from '../regions/downloads';
 import type { LocalPack } from '../regions/packs';
-import { deletePack, downloadPack, fetchAvailableRegions } from '../regions/packs';
+import { deletePack, fetchAvailableRegions } from '../regions/packs';
+import type { NavPipController } from '../nav/useNavigationPip';
+import type { OfflinePrefsController } from '../regions/useOfflinePrefs';
+import type { PackDownloadsController } from '../regions/usePackDownloads';
 import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
@@ -164,16 +168,19 @@ function RegionsSection({
   packs,
   onPacksChanged,
   jobs,
+  downloads,
+  offlinePrefs,
   onDrawRegion,
 }: {
   packs: LocalPack[];
   onPacksChanged: () => void;
   jobs: RegionPackJobsController;
+  downloads: PackDownloadsController;
+  offlinePrefs: OfflinePrefsController;
   onDrawRegion: () => void;
 }) {
   const [regions, setRegions] = useState<RegionPackManifest[] | null>(null);
   const [regionsError, setRegionsError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -189,41 +196,18 @@ function RegionsSection({
     };
   }, []);
 
-  const download = useCallback(
-    async (manifest: RegionPackManifest) => {
-      setProgress((p) => ({ ...p, [manifest.id]: 0 }));
-      setRegionsError(null);
-      try {
-        // Updating an installed pack replaces files the routing engine may
-        // hold open (mmap) — release it first, same as on delete. A failed
-        // close would leave the old files pinned, so it must surface too.
-        await closeEngine();
-        await downloadPack(manifest, (fraction) =>
-          setProgress((p) => ({ ...p, [manifest.id]: fraction })),
-        );
-      } catch (err) {
-        setRegionsError(
-          `Download of ${manifest.name} failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      } finally {
-        setProgress((p) => {
-          const { [manifest.id]: _done, ...rest } = p;
-          return rest;
-        });
-        onPacksChanged();
-      }
-    },
-    [onPacksChanged],
-  );
-
   const remove = useCallback(
     async (id: string) => {
       setRegionsError(null);
       try {
+        // A download still running for this pack would keep writing into the
+        // staging directory we are about to remove.
+        downloads.cancel(id);
         // The routing engine may hold this pack's tile extract open (mmap) —
         // release it before deleting the files under it.
         await closeEngine();
         await deletePack(id);
+        downloads.dismiss(id);
       } catch (err) {
         setRegionsError(
           `Deleting the pack failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -231,7 +215,7 @@ function RegionsSection({
       }
       onPacksChanged();
     },
-    [onPacksChanged],
+    [onPacksChanged, downloads],
   );
 
   const local = new Map(packs.map((p) => [p.manifest.id, p]));
@@ -247,6 +231,7 @@ function RegionsSection({
   }
   const rows = [...rowsById.values()];
   const pendingJobs = jobs.jobs.filter((job) => !job.manifest);
+  const activeDownloads = new Map(downloads.jobs.map((job) => [job.id, job]));
 
   return (
     <View>
@@ -259,6 +244,18 @@ function RegionsSection({
           <Text style={styles.buttonText}>Draw custom region</Text>
         </Pressable>
       </View>
+      <View style={styles.switchRow}>
+        <Text style={styles.rowText}>Auto-update on Wi-Fi</Text>
+        <Switch
+          value={offlinePrefs.autoUpdate}
+          onValueChange={offlinePrefs.setAutoUpdate}
+          testID="region-auto-update"
+        />
+      </View>
+      <Text style={styles.muted}>
+        Downloads keep running when you leave Atlas, and continue where they stopped if the
+        connection drops. Rebuilt regions are fetched again automatically over Wi-Fi.
+      </Text>
       {regionsError ? <Text style={styles.muted}>{regionsError}</Text> : null}
       {jobs.error ? <Text style={styles.error}>{jobs.error}</Text> : null}
       {pendingJobs.map((job) => (
@@ -282,23 +279,40 @@ function RegionsSection({
       {rows.map((region) => {
         const totalBytes = Object.values(region.files).reduce((s, f) => s + (f?.bytes ?? 0), 0);
         const installed = local.get(region.id);
-        const active = progress[region.id];
+        const active = activeDownloads.get(region.id);
+        const action = active ? packJobAction(active) : null;
         return (
           <View key={region.id} style={styles.regionRow}>
             <View style={styles.regionInfo}>
               <Text style={styles.rowText}>{region.name}</Text>
-              <Text style={styles.muted}>
-                {mb(totalBytes)}
-                {region.custom ? ' · custom' : ''}
-                {installed
-                  ? installed.manifest.version < region.version
-                    ? ' · update available'
-                    : ' · downloaded'
-                  : ''}
+              <Text style={active?.phase === 'failed' ? styles.error : styles.muted}>
+                {active
+                  ? packJobLabel(active)
+                  : `${mb(totalBytes)}${region.custom ? ' · custom' : ''}${
+                      installed
+                        ? installed.manifest.version < region.version
+                          ? ' · update available'
+                          : ' · downloaded'
+                        : ''
+                    }`}
               </Text>
             </View>
-            {active !== undefined ? (
-              <Text style={styles.rowText}>{Math.round(active * 100)}%</Text>
+            {active ? (
+              action === null ? (
+                <ActivityIndicator />
+              ) : (
+                <Pressable
+                  style={[styles.button, action === 'cancel' && styles.buttonQuiet]}
+                  onPress={() =>
+                    action === 'cancel' ? downloads.cancel(region.id) : downloads.start(region)
+                  }
+                  testID={`region-${action}-${region.id}`}
+                >
+                  <Text style={action === 'cancel' ? styles.buttonQuietText : styles.buttonText}>
+                    {action === 'cancel' ? 'Cancel' : action === 'resume' ? 'Resume' : 'Retry'}
+                  </Text>
+                </Pressable>
+              )
             ) : installed && installed.manifest.version >= region.version ? (
               <Pressable
                 style={[styles.button, styles.buttonQuiet]}
@@ -310,7 +324,7 @@ function RegionsSection({
             ) : (
               <Pressable
                 style={styles.button}
-                onPress={() => void download(region)}
+                onPress={() => downloads.start(region)}
                 testID={`region-download-${region.id}`}
               >
                 <Text style={styles.buttonText}>{installed ? 'Update' : 'Download'}</Text>
@@ -826,7 +840,10 @@ export function SettingsSheet({
   overlays,
   profilePreferences,
   navPrefs,
+  pip,
   regionJobs,
+  downloads,
+  offlinePrefs,
   onDrawRegion,
   bottomInset = 0,
 }: {
@@ -845,7 +862,12 @@ export function SettingsSheet({
   overlays: OverlaysController;
   profilePreferences: MapProfilePreferencesController;
   navPrefs: NavPrefsController;
+  /** Whether guidance continues in a floating mini window when Atlas is left. */
+  pip: NavPipController;
   regionJobs: RegionPackJobsController;
+  /** Background pack downloads: progress, resume and cancel. */
+  downloads: PackDownloadsController;
+  offlinePrefs: OfflinePrefsController;
   /** Close Settings and let the user select two corners on the map. */
   onDrawRegion: () => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
@@ -954,6 +976,23 @@ export function SettingsSheet({
               })}
             </View>
             <Text style={styles.muted}>Choose up to three readouts for active guidance.</Text>
+            <Text style={styles.heading}>Mini window</Text>
+            <View style={styles.switchRow}>
+              <Text style={styles.rowText}>Keep guiding when you leave Atlas</Text>
+              <Switch
+                value={pip.enabled && pip.available}
+                onValueChange={pip.setEnabled}
+                disabled={!pip.available}
+                testID="nav-pip"
+              />
+            </View>
+            <Text style={styles.muted}>
+              {pip.blockedByUser
+                ? 'Turned off for Atlas in Android settings — Apps → Atlas → Picture-in-picture.'
+                : !pip.available
+                  ? 'This device does not support picture-in-picture.'
+                  : 'Pressing Home mid-trip shrinks Atlas into a floating window showing the next turn. Tap it to come back.'}
+            </Text>
           </>
         ) : null}
         {section === 'offline' ? (
@@ -961,6 +1000,8 @@ export function SettingsSheet({
             packs={packs}
             onPacksChanged={onPacksChanged}
             jobs={regionJobs}
+            downloads={downloads}
+            offlinePrefs={offlinePrefs}
             onDrawRegion={onDrawRegion}
           />
         ) : null}

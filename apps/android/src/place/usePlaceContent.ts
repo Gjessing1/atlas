@@ -1,6 +1,7 @@
 import type { LatLng, PlaceContent } from '@atlas/core';
 import { useEffect, useState } from 'react';
 
+import { deviceLanguage } from '../deviceLanguage';
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
 import { packSearchDb } from '../search/offlineSearch';
@@ -82,6 +83,10 @@ export function usePlaceContent(
           name,
           lat: String(at.lat),
           lon: String(at.lng),
+          // Without this the proxy assumed English and a Norwegian hut, church
+          // or farm — described on no.wikipedia and nowhere else — read as a
+          // place nobody had ever written about.
+          lang: deviceLanguage(),
         });
         const response = await fetch(`${getServerOrigin()}/api/place-content?${params}`, {
           signal: AbortSignal.timeout(5_000),

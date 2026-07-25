@@ -42,9 +42,53 @@ describe('place content API', () => {
         title: 'Preikestolen',
         extract: 'Wikivoyage describes the cliff.',
         url: 'https://example.test/Wikivoyage',
-        language: 'no',
+        // Wikivoyage has no Norwegian edition, so that project skips straight
+        // to English rather than following no.wikivoyage.org's redirect.
+        language: 'en',
       },
     ]);
+    expect(fetchImpl.mock.calls.some((call) => String(call[0]).includes('no.wikivoyage.org'))).toBe(
+      false,
+    );
+    await app.close();
+  });
+
+  it('falls back to the local language where English describes nothing', async () => {
+    const hosts: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      hosts.push(url.hostname);
+      if (!url.hostname.startsWith('no.')) return new Response('{}');
+      return new Response(
+        JSON.stringify({
+          query: {
+            pages: [
+              {
+                title: 'Rondvassbu',
+                extract: 'Turisthytte i Rondane.',
+                fullurl: 'https://no.wikipedia.org/wiki/Rondvassbu',
+                coordinates: [{ lat: 61.7167, lon: 9.75 }],
+              },
+            ],
+          },
+        }),
+      );
+    });
+    const app = Fastify();
+    registerPlaceContentApi(app, { fetchImpl, userAgent: 'Atlas test' });
+    // An English-language phone standing at a Norwegian mountain hut: the hut
+    // is described only on no.wikipedia, which is the whole point.
+    const response = await app.inject({
+      url: '/api/place-content?name=Rondvassbu&lat=61.7167&lon=9.75&lang=en-GB',
+    });
+
+    expect(hosts[0]).toBe('en.wikipedia.org');
+    expect(hosts).toContain('no.wikipedia.org');
+    expect(response.json().content).toHaveLength(1);
+    expect(response.json().content[0]).toMatchObject({
+      title: 'Rondvassbu',
+      language: 'no',
+    });
     await app.close();
   });
 
@@ -223,6 +267,67 @@ describe('nearby place content', () => {
     expect(hosts).toEqual(['no.wikipedia.org', 'en.wikipedia.org']);
     expect(response.json().places).toHaveLength(2);
     expect(response.json().places[0].language).toBe('en');
+    await app.close();
+  });
+
+  it('merges the local edition into the reader’s, without listing a place twice', async () => {
+    const asked: URL[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      asked.push(url);
+      if (url.hostname.startsWith('en.')) {
+        return new Response(
+          JSON.stringify({
+            query: {
+              pages: [
+                {
+                  title: 'Asker Station',
+                  extract: 'A railway station.',
+                  fullurl: 'https://en.wikipedia.org/wiki/Asker_Station',
+                  coordinates: [{ lat: 59.8337, lon: 10.4345 }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          query: {
+            pages: [
+              // The same station under its Norwegian name: one row, not two.
+              {
+                title: 'Asker stasjon',
+                extract: 'Stasjonen ble åpnet i 1872.',
+                fullurl: 'https://no.wikipedia.org/wiki/Asker_stasjon',
+                coordinates: [{ lat: 59.8337, lon: 10.4345 }],
+                langlinks: [{ lang: 'en', title: 'Asker Station' }],
+              },
+              // Described in Norwegian only — the richness English cannot give.
+              {
+                title: 'Asker kirke',
+                extract: 'Kirke fra 1100-tallet.',
+                fullurl: 'https://no.wikipedia.org/wiki/Asker_kirke',
+                coordinates: [{ lat: 59.8353, lon: 10.435 }],
+              },
+            ],
+          },
+        }),
+      );
+    });
+    const app = Fastify();
+    registerPlaceContentApi(app, { fetchImpl, userAgent: 'Atlas test' });
+    const response = await app.inject({
+      url: '/api/place-content/nearby?lat=59.8336&lon=10.4348&lang=en',
+    });
+
+    const places = response.json().places as { title: string; language: string }[];
+    expect(asked.map((url) => url.hostname)).toEqual(['en.wikipedia.org', 'no.wikipedia.org']);
+    // Only the second (merged-in) edition is asked for counterpart titles.
+    expect(asked[0]!.searchParams.get('lllang')).toBeNull();
+    expect(asked[1]!.searchParams.get('lllang')).toBe('en');
+    expect(places.map((p) => p.title)).toEqual(['Asker Station', 'Asker kirke']);
+    expect(places.map((p) => p.language)).toEqual(['en', 'no']);
     await app.close();
   });
 

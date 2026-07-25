@@ -1,8 +1,11 @@
 import {
   bestMediaWikiPlacePage,
   commonsPlacePhotos,
+  hasWikivoyage,
   mediaWikiThumbnail,
-  nearbyMediaWikiPlaces,
+  mergeNearbyMediaWikiPlaces,
+  wikiLanguageChain,
+  WIKIMEDIA_USER_AGENT,
   type MediaWikiImagePage,
   type MediaWikiPlacePage,
   type PlaceContent,
@@ -37,15 +40,6 @@ function safeRadius(value: string | undefined, fallback: number): number {
   return Number.isFinite(radius) ? Math.min(10_000, Math.max(100, radius)) : fallback;
 }
 
-const DEFAULT_USER_AGENT =
-  'Atlas place content (self-hosted; https://git.gjessing.io/gjessing1/atlas)';
-
-function safeLanguage(value: string | undefined): string {
-  const language = value?.split(/[-_]/)[0]?.toLowerCase();
-  if (language === 'nb') return 'no';
-  return language && /^[a-z]{2,3}$/.test(language) ? language : 'en';
-}
-
 function pagesOf(response: MediaWikiResponse): MediaWikiPlacePage[] {
   const pages = response.query?.pages;
   if (!pages) return [];
@@ -64,7 +58,7 @@ export function registerPlaceContentApi(
   options: PlaceContentApiOptions = {},
 ): void {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+  const userAgent = options.userAgent ?? WIKIMEDIA_USER_AGENT;
 
   app.get<{
     Querystring: { name?: string; lat?: string; lon?: string; lang?: string };
@@ -81,8 +75,8 @@ export function registerPlaceContentApi(
     ) {
       return reply.code(400).send({ error: 'name, lat and lon are required' });
     }
-    const language = safeLanguage(request.query.lang);
     const at = { lat, lng: lon };
+    const languages = wikiLanguageChain(request.query.lang, at);
     reply.header('Cache-Control', 'public, max-age=86400');
 
     const loadLanguage = async (
@@ -139,12 +133,23 @@ export function registerPlaceContentApi(
       }
     };
 
+    /**
+     * The reader's language, then the local one, then English (see
+     * `wikiLanguageChain`). Sequential and first-hit-wins: an editon that has
+     * the article usually answers on the first or second try, and asking all of
+     * them in parallel would triple the load on Wikimedia to discard most of it.
+     */
     const load = async (
       source: PlaceContent['source'],
       project: 'wikipedia' | 'wikivoyage',
-    ): Promise<PlaceContent | null> =>
-      (await loadLanguage(source, project, language)) ??
-      (language === 'en' ? null : await loadLanguage(source, project, 'en'));
+    ): Promise<PlaceContent | null> => {
+      for (const contentLanguage of languages) {
+        if (project === 'wikivoyage' && !hasWikivoyage(contentLanguage)) continue;
+        const found = await loadLanguage(source, project, contentLanguage);
+        if (found) return found;
+      }
+      return null;
+    };
 
     const content = (
       await Promise.all([load('wikipedia', 'wikipedia'), load('wikivoyage', 'wikivoyage')])
@@ -163,12 +168,12 @@ export function registerPlaceContentApi(
   }>('/api/place-content/nearby', async (request, reply) => {
     const at = coordinateOf(request.query);
     if (!at) return reply.code(400).send({ error: 'lat and lon are required' });
-    const language = safeLanguage(request.query.lang);
+    const here = { lat: at.lat, lng: at.lon };
     const radiusM = safeRadius(request.query.radius, 2_000);
     const limit = Math.min(20, Math.max(1, Number(request.query.limit) || 12));
     reply.header('Cache-Control', 'public, max-age=86400');
 
-    const loadLanguage = async (contentLanguage: string) => {
+    const loadLanguage = async (contentLanguage: string, counterpart: string | undefined) => {
       const url = new URL(`https://${contentLanguage}.wikipedia.org/w/api.php`);
       for (const [key, value] of Object.entries({
         action: 'query',
@@ -180,7 +185,7 @@ export function registerPlaceContentApi(
         // Ask for more than we show: pages without an extract or coordinate are
         // dropped, and the list should still be full after that.
         ggslimit: String(Math.min(50, limit * 2)),
-        prop: 'coordinates|extracts|info|pageimages',
+        prop: `coordinates|extracts|info|pageimages${counterpart ? '|langlinks' : ''}`,
         exintro: '1',
         explaintext: '1',
         // A row, not an article: two sentences is enough to choose from.
@@ -188,6 +193,9 @@ export function registerPlaceContentApi(
         inprop: 'url',
         piprop: 'thumbnail',
         pithumbsize: '160',
+        // What this edition calls a page that the leading edition may already
+        // have listed — the merge drops the duplicate on the strength of it.
+        ...(counterpart ? { lllang: counterpart } : {}),
       })) {
         url.searchParams.set(key, value);
       }
@@ -196,23 +204,26 @@ export function registerPlaceContentApi(
           headers: { 'User-Agent': userAgent, 'Api-User-Agent': userAgent },
           signal: AbortSignal.timeout(5_000),
         });
-        if (!response.ok) return [];
-        const places = nearbyMediaWikiPlaces(
-          { lat: at.lat, lng: at.lon },
-          pagesOf((await response.json()) as MediaWikiResponse),
-          limit,
-        );
-        return places.map((place) => ({ ...place, language: contentLanguage }));
+        if (!response.ok) return { language: contentLanguage, pages: [] };
+        return {
+          language: contentLanguage,
+          pages: pagesOf((await response.json()) as MediaWikiResponse),
+        };
       } catch {
-        return [];
+        return { language: contentLanguage, pages: [] };
       }
     };
 
-    // The reader's own language first; English is the fallback everywhere the
-    // local Wikipedia has not described the area.
-    const local = await loadLanguage(language);
-    if (local.length > 0 || language === 'en') return { places: local };
-    return { places: await loadLanguage('en') };
+    // Both editions are asked, not one after the other: outside the
+    // English-speaking world the local Wikipedia is where the places actually
+    // are, and a list drawn from both is close to twice as long as either.
+    const languages = wikiLanguageChain(request.query.lang, here, 2);
+    const groups = await Promise.all(
+      languages.map((contentLanguage, index) =>
+        loadLanguage(contentLanguage, index === 0 ? undefined : languages[0]),
+      ),
+    );
+    return { places: mergeNearbyMediaWikiPlaces(here, groups, limit) };
   });
 
   /**

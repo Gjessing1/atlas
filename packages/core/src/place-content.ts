@@ -1,6 +1,19 @@
 import { haversineM, type LatLng } from './geo.js';
 
 /**
+ * Who Atlas says it is to Wikimedia — required, not decorative.
+ *
+ * `upload.wikimedia.org` answers 403 to requests with a generic or missing
+ * User-Agent, which is exactly what a stock HTTP client sends: React Native's
+ * image loader identifies itself as `okhttp/…`, so every Wikipedia thumbnail on
+ * Android came back rejected and rendered as an empty (black) tile. Anything
+ * that fetches Wikimedia — the backend proxy and the app's own `<Image>` tags —
+ * sends this instead.
+ */
+export const WIKIMEDIA_USER_AGENT =
+  'Atlas place content (self-hosted; https://git.gjessing.io/gjessing1/atlas)';
+
+/**
  * The article's lead image, when the proxy found one online.
  *
  * Absent for offline pack articles: region packs carry text only (photos would
@@ -34,6 +47,8 @@ export interface MediaWikiPlacePage {
   coordinates?: { lat?: number; lon?: number; primary?: string }[];
   /** `prop=pageimages` lead thumbnail, at the size the proxy asked for. */
   thumbnail?: { source?: string; width?: number; height?: number };
+  /** The same subject's title in another edition (`prop=langlinks&lllang=…`). */
+  langlinks?: { lang?: string; title?: string }[];
 }
 
 /**
@@ -172,20 +187,65 @@ export function nearbyMediaWikiPlaces(
 ): NearbyPlaceArticle[] {
   const places: NearbyPlaceArticle[] = [];
   for (const page of pages) {
-    const coordinate = page.coordinates?.[0];
-    if (!page.title?.trim() || !page.extract?.trim() || !page.fullurl) continue;
-    if (typeof coordinate?.lat !== 'number' || typeof coordinate.lon !== 'number') continue;
-    const position = { lat: coordinate.lat, lng: coordinate.lon };
-    const image = mediaWikiThumbnail(page);
-    places.push({
-      title: page.title,
-      extract: page.extract,
-      url: page.fullurl,
-      language: '',
-      position,
-      distanceM: Math.round(haversineM(at, position)),
-      ...(image ? { image } : {}),
-    });
+    const place = nearbyPlaceOf(at, page);
+    if (place) places.push(place);
+  }
+  return places.sort((a, b) => a.distanceM - b.distanceM).slice(0, limit);
+}
+
+/** One geosearch page as a row, or null when there is nothing to show. */
+function nearbyPlaceOf(at: LatLng, page: MediaWikiPlacePage): NearbyPlaceArticle | null {
+  const coordinate = page.coordinates?.[0];
+  if (!page.title?.trim() || !page.extract?.trim() || !page.fullurl) return null;
+  if (typeof coordinate?.lat !== 'number' || typeof coordinate.lon !== 'number') return null;
+  const position = { lat: coordinate.lat, lng: coordinate.lon };
+  const image = mediaWikiThumbnail(page);
+  return {
+    title: page.title,
+    extract: page.extract,
+    url: page.fullurl,
+    language: '',
+    position,
+    distanceM: Math.round(haversineM(at, position)),
+    ...(image ? { image } : {}),
+  };
+}
+
+/** A geosearch answer from one Wikipedia edition. */
+export interface NearbyPlaceGroup {
+  language: string;
+  pages: readonly MediaWikiPlacePage[];
+}
+
+/**
+ * One nearby list out of several language editions, best edition first.
+ *
+ * Norway is why this exists: ask English Wikipedia what is around a fjord-side
+ * village and it knows almost nothing, while the Norwegian edition describes
+ * the church, the farm and the ferry quay. Asking both roughly doubles what a
+ * card can show — as long as the same subject does not appear twice under two
+ * names, which is what the `langlinks` counterpart title in each page is for:
+ * "Oslo domkirke" is recognised as the article already listed as "Oslo
+ * Cathedral" and dropped, without a second round trip to find that out.
+ */
+export function mergeNearbyMediaWikiPlaces(
+  at: LatLng,
+  groups: readonly NearbyPlaceGroup[],
+  limit = 12,
+): NearbyPlaceArticle[] {
+  const covered = new Set<string>();
+  const places: NearbyPlaceArticle[] = [];
+  for (const group of groups) {
+    for (const page of group.pages) {
+      const place = nearbyPlaceOf(at, page);
+      if (!place) continue;
+      const names = [page.title, ...(page.langlinks ?? []).map((link) => link.title)]
+        .map((title) => (title ? normaliseName(title) : ''))
+        .filter((title) => title.length > 0);
+      if (names.some((name) => covered.has(name))) continue;
+      for (const name of names) covered.add(name);
+      places.push({ ...place, language: group.language });
+    }
   }
   return places.sort((a, b) => a.distanceM - b.distanceM).slice(0, limit);
 }

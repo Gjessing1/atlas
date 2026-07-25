@@ -2,6 +2,7 @@ import type { RegionPackFile, RegionPackManifest, RegionsResponse } from '@atlas
 import * as FileSystem from 'expo-file-system/legacy';
 import { unzip } from 'react-native-zip-archive';
 
+import { nativeSha256 } from '../../modules/packdownload';
 import { getServerOrigin } from '../serverOrigin';
 import { base64ToBytes, createSha256 } from './sha256';
 
@@ -32,6 +33,11 @@ export interface LocalPack {
 
 export function packDir(id: string): string {
   return `${PACKS_DIR}${id}`;
+}
+
+/** Where a pack is assembled before it is swapped into place. */
+export function stagingDir(id: string): string {
+  return `${packDir(id)}${STAGING_SUFFIX}`;
 }
 
 async function exists(uri: string): Promise<boolean> {
@@ -177,8 +183,18 @@ async function downloadFile(
   }
 }
 
-/** Streamed lowercase-hex SHA-256 of a file, read in base64 chunks so memory stays flat. */
+/**
+ * Streamed lowercase-hex SHA-256 of a file.
+ *
+ * The native digest is used where it exists: a pack file is hundreds of
+ * megabytes and reading one back through base64 into a JS hasher takes minutes
+ * on a phone — long enough that a finished background download looked stuck.
+ * The base64 loop stays as the fallback (and is what the unit tests exercise),
+ * chunked so memory stays flat.
+ */
 async function hashFile(uri: string, bytes: number): Promise<string> {
+  const native = await nativeSha256(uriToPath(uri)).catch(() => null);
+  if (native) return native;
   const hasher = createSha256();
   for (let position = 0; position < bytes; position += HASH_CHUNK_BYTES) {
     const length = Math.min(HASH_CHUNK_BYTES, bytes - position);
@@ -213,21 +229,94 @@ async function verifyDigest(target: string, file: RegionPackFile): Promise<void>
  * interrupted attempt for the *same* version is kept so its finished files can
  * be resumed/reused; one for any other version (or with no version marker) is a
  * stale in-progress build and is wiped so old files can't be mistaken for new.
+ *
+ * The marker carries the whole manifest, not just the version: a download that
+ * finishes in the background outlives the app that started it, so the next
+ * launch has to be able to pick a staging directory up and finish installing it
+ * knowing nothing else.
  */
-async function prepareStaging(staging: string, version: number): Promise<void> {
+export async function prepareStaging(staging: string, manifest: RegionPackManifest): Promise<void> {
   if (await exists(staging)) {
     let sameVersion = false;
     try {
       const raw = await FileSystem.readAsStringAsync(`${staging}/${STAGING_MARKER}`);
-      sameVersion = (JSON.parse(raw) as { version?: number }).version === version;
+      sameVersion = (JSON.parse(raw) as { version?: number }).version === manifest.version;
     } catch {
       sameVersion = false;
     }
-    if (sameVersion) return;
-    await FileSystem.deleteAsync(staging, { idempotent: true });
+    if (!sameVersion) await FileSystem.deleteAsync(staging, { idempotent: true });
   }
   await FileSystem.makeDirectoryAsync(staging, { intermediates: true });
-  await FileSystem.writeAsStringAsync(`${staging}/${STAGING_MARKER}`, JSON.stringify({ version }));
+  await FileSystem.writeAsStringAsync(
+    `${staging}/${STAGING_MARKER}`,
+    JSON.stringify({ version: manifest.version, manifest }),
+  );
+}
+
+/**
+ * Packs with a staging directory left over from an unfinished download, newest
+ * marker wins. These are what the app reconciles at launch: the bytes may have
+ * landed in the background (finish the install) or the attempt may have stopped
+ * half way (offer to resume).
+ */
+export async function pendingStagingPacks(): Promise<RegionPackManifest[]> {
+  let entries: string[];
+  try {
+    entries = await FileSystem.readDirectoryAsync(PACKS_DIR);
+  } catch {
+    return [];
+  }
+  const pending: RegionPackManifest[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(STAGING_SUFFIX)) continue;
+    try {
+      const raw = await FileSystem.readAsStringAsync(`${packDir(entry)}/${STAGING_MARKER}`);
+      const marker = JSON.parse(raw) as { manifest?: RegionPackManifest };
+      // A marker written before the manifest was recorded (or a foreign dir):
+      // nothing here can be finished without knowing what it was meant to be.
+      if (marker.manifest?.id) pending.push(marker.manifest);
+    } catch {
+      // Unreadable marker — leave it for the next download of that pack to wipe.
+    }
+  }
+  return pending;
+}
+
+/** Where one pack file is served from. */
+function fileUrl(manifest: RegionPackManifest, file: RegionPackFile): string {
+  const base = manifest.downloadBase ?? `/packs/${manifest.id}`;
+  return `${getServerOrigin()}${base}/${file.path}`;
+}
+
+/** True once a zip has been unpacked and marked complete. */
+async function unzipped(staging: string, kind: string): Promise<boolean> {
+  return await exists(`${unzipDirFor(staging, kind)}/${UNZIP_MARKER}`);
+}
+
+/** assets.zip unpacks to `<staging>/assets`; anything else to `<staging>/<kind>`. */
+function unzipDirFor(staging: string, kind: string): string {
+  return kind === 'assets' ? `${staging}/assets` : `${staging}/${kind}`;
+}
+
+/**
+ * The files of a pack still missing from its staging directory, as the native
+ * download worker wants them (plain paths, no file:// prefix). A file already
+ * there at the right size — or an archive already unpacked — is left out, which
+ * is what makes an interrupted download resume rather than restart.
+ */
+export async function pendingPackFiles(
+  manifest: RegionPackManifest,
+): Promise<{ url: string; path: string; bytes: number }[]> {
+  const staging = stagingDir(manifest.id);
+  const missing: { url: string; path: string; bytes: number }[] = [];
+  for (const [kind, file] of Object.entries(manifest.files)) {
+    if (!file) continue;
+    if (file.path.endsWith('.zip') && (await unzipped(staging, kind))) continue;
+    const info = await FileSystem.getInfoAsync(`${staging}/${file.path}`);
+    if (info.exists && info.size === file.bytes) continue;
+    missing.push({ url: fileUrl(manifest, file), path: file.path, bytes: file.bytes });
+  }
+  return missing;
 }
 
 /**
@@ -239,8 +328,7 @@ async function validateStaging(staging: string, manifest: RegionPackManifest): P
   for (const [kind, file] of Object.entries(manifest.files)) {
     if (!file) continue;
     if (file.path.endsWith('.zip')) {
-      const unzipDir = kind === 'assets' ? `${staging}/assets` : `${staging}/${kind}`;
-      if (!(await exists(`${unzipDir}/${UNZIP_MARKER}`))) {
+      if (!(await unzipped(staging, kind))) {
         throw new Error(`missing unpacked ${kind}`);
       }
     } else {
@@ -296,8 +384,8 @@ export async function downloadPack(
 ): Promise<LocalPack> {
   validatePackManifest(manifest);
   const live = packDir(manifest.id);
-  const staging = `${live}${STAGING_SUFFIX}`;
-  await prepareStaging(staging, manifest.version);
+  const staging = stagingDir(manifest.id);
+  await prepareStaging(staging, manifest);
 
   const entries = Object.entries(manifest.files).filter(
     (e): e is [string, RegionPackFile] => e[1] !== undefined,
@@ -306,16 +394,14 @@ export async function downloadPack(
   let doneBytes = 0;
 
   for (const [kind, file] of entries) {
-    const base = manifest.downloadBase ?? `/packs/${manifest.id}`;
-    const url = `${getServerOrigin()}${base}/${file.path}`;
+    const url = fileUrl(manifest, file);
     const target = `${staging}/${file.path}`;
     const isZip = file.path.endsWith('.zip');
-    // assets.zip → <staging>/assets/…
-    const unzipDir = kind === 'assets' ? `${staging}/assets` : `${staging}/${kind}`;
+    const unzipDir = unzipDirFor(staging, kind);
 
     // An archive a previous attempt already unpacked *and marked complete* (the
     // marker is written last, so a half-finished unzip is not mistaken for done).
-    if (isZip && (await exists(`${unzipDir}/${UNZIP_MARKER}`))) {
+    if (isZip && (await unzipped(staging, kind))) {
       doneBytes += file.bytes;
       onProgress(doneBytes / totalBytes);
       continue;
@@ -352,11 +438,11 @@ export async function downloadPack(
 export async function deletePack(id: string): Promise<void> {
   await FileSystem.deleteAsync(packDir(id), { idempotent: true });
   // Drop any in-progress staging or interrupted-swap backup for this pack too.
-  await FileSystem.deleteAsync(`${packDir(id)}${STAGING_SUFFIX}`, { idempotent: true });
+  await FileSystem.deleteAsync(stagingDir(id), { idempotent: true });
   await FileSystem.deleteAsync(`${packDir(id)}${BACKUP_SUFFIX}`, { idempotent: true });
 }
 
-/** react-native-zip-archive wants plain filesystem paths, not file:// URIs. */
-function uriToPath(uri: string): string {
+/** Native code (unzip, the download worker, hashing) wants plain paths, not file:// URIs. */
+export function uriToPath(uri: string): string {
   return uri.replace(/^file:\/\//, '');
 }

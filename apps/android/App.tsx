@@ -60,13 +60,17 @@ import type { LocalPack } from './src/regions/packs';
 import { AddStopSheet, NavStopTapCard } from './src/nav/AddStopSheet';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
+import { NavPipCard } from './src/nav/NavPipCard';
 import { navViewport } from './src/nav/navViewport';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
+import { useNavigationPip } from './src/nav/useNavigationPip';
 import { useTunnelDim } from './src/nav/useTunnelDim';
 import { listLocalPacks } from './src/regions/packs';
-import { usePackFreshness } from './src/regions/usePackFreshness';
+import { useOfflinePrefs } from './src/regions/useOfflinePrefs';
+import { usePackDownloads } from './src/regions/usePackDownloads';
+import { useAutoPackUpdate, usePackFreshness } from './src/regions/usePackFreshness';
 import { inaturOfferToFile } from './src/inatur';
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
@@ -105,6 +109,11 @@ import { useWeather } from './src/weather/useWeather';
  */
 const NAV_BAR_FALLBACK = 48;
 const STATUS_BAR_FALLBACK = 28;
+
+/** A picture-in-picture window has no system bars to clear. */
+const NO_SIDE_INSETS = { left: 0, right: 0 };
+/** Bottom strip the compact PiP guidance card occupies (NavPipCard). */
+const PIP_CARD_HEIGHT = 46;
 
 function AppInner() {
   const insets = useSafeAreaInsets();
@@ -251,16 +260,24 @@ function AppInner() {
   const navActive = nav.phase !== 'idle';
   const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
   const win = useWindowDimensions();
+  // Leaving Atlas mid-trip shrinks it into a floating mini window instead of
+  // hiding guidance. That window is its own tiny screen: no system bars, no
+  // guidance rail, and only the compact card at the bottom to keep clear of.
+  const pip = useNavigationPip(nav, data);
+  const inPip = pip.inPictureInPicture;
   const viewport = useMemo(
-    () => navViewport(win.width, win.height, side, topInset, bottomInset),
-    [win.width, win.height, side, topInset, bottomInset],
+    () =>
+      inPip
+        ? navViewport(win.width, win.height, NO_SIDE_INSETS, 0, PIP_CARD_HEIGHT, true)
+        : navViewport(win.width, win.height, side, topInset, bottomInset),
+    [win.width, win.height, side, topInset, bottomInset, inPip],
   );
   const landscape = viewport.landscape;
   // Mute and map orientation survive across trips (device-local, web parity).
   const navPrefs = useNavPrefs(data, nav);
   // The follow camera uses the same responsive viewport as the visible puck:
   // centred in portrait, or in the unobstructed right pane in landscape.
-  const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, navHeight);
+  const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, inPip ? 0 : navHeight);
   const navPuck = useNavPuck(nav, navCam, navPrefs.followMode, viewport);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Category candidates via the online explore endpoint with the downloaded
@@ -551,9 +568,15 @@ function AppInner() {
   // server tiles); everything else — search, routing, weather — stays online-first.
   const tiles = useTileSource(data, packs, camera.viewCenter);
   // Whether the pack currently drawing the map has been rebuilt on the server.
-  const stalePacks = usePackFreshness(packs);
+  const freshness = usePackFreshness(packs);
   const packStale =
-    tiles.coveringPack !== undefined && stalePacks.has(tiles.coveringPack.manifest.id);
+    tiles.coveringPack !== undefined && freshness.stale.has(tiles.coveringPack.manifest.id);
+  // Pack downloads run in a native foreground service, so they survive leaving
+  // Atlas; this reconciles them on every return (installing whatever finished
+  // meanwhile) and keeps rebuilt regions current by themselves over Wi-Fi.
+  const downloads = usePackDownloads(refreshPacks);
+  const offlinePrefs = useOfflinePrefs(data);
+  useAutoPackUpdate(freshness, offlinePrefs.autoUpdate);
   const { mapStyle, originReady, useOffline } = useMapStyle(
     data.storage,
     tiles.coveringPack,
@@ -602,335 +625,353 @@ function AppInner() {
         // toggle jumps the map. viewRef holds the latest settled camera.
         initialView={viewRef.current ?? initialView}
         showIdleChrome={showIdleChrome}
+        inPip={inPip}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
         onViewChange={camera.onViewChange}
         onUserGesture={navCam.onUserGesture}
         onDestinationMoved={dest.onMoved}
       />
-      {offlineRegion ? (
-        <OfflineRegionDrawControls
-          corner={offlineRegion.corner}
-          bbox={offlineRegion.bbox}
-          topInset={topInset}
-          bottomInset={bottomInset}
-          onReset={() => setOfflineRegion({ corner: null, bbox: null })}
-          onCancel={() => setOfflineRegion(null)}
-          onBuild={() => {
-            if (!offlineRegion.bbox) return;
-            setPendingRegion(offlineRegion.bbox);
-            setOfflineRegion(null);
-          }}
-        />
-      ) : null}
+      {/* In the mini window the map is the whole point: the compact guidance
+          card replaces every piece of normal chrome, and no sheet, banner or
+          control is rendered at a size where it could only be mis-tapped.
+          Expanding restores all of it — the same trip, camera and follow mode,
+          because MapScene and the navigation session were never unmounted. */}
+      {inPip ? (
+        <NavPipCard nav={nav} />
+      ) : (
+        <>
+          {offlineRegion ? (
+            <OfflineRegionDrawControls
+              corner={offlineRegion.corner}
+              bbox={offlineRegion.bbox}
+              topInset={topInset}
+              bottomInset={bottomInset}
+              onReset={() => setOfflineRegion({ corner: null, bbox: null })}
+              onCancel={() => setOfflineRegion(null)}
+              onBuild={() => {
+                if (!offlineRegion.bbox) return;
+                setPendingRegion(offlineRegion.bbox);
+                setOfflineRegion(null);
+              }}
+            />
+          ) : null}
 
-      {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
+          {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
           top stays bright) until live GPS returns. */}
-      {nav.state !== null ? (
-        <Animated.View pointerEvents="none" style={[styles.tunnelDim, { opacity: tunnelDim }]} />
-      ) : null}
+          {nav.state !== null ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.tunnelDim, { opacity: tunnelDim }]}
+            />
+          ) : null}
 
-      <NavBanner
-        nav={nav}
-        topInset={topInset}
-        bottomInset={bottomInset}
-        viewport={viewport}
-        navCam={navCam}
-        followMode={navPrefs.followMode}
-        onToggleFollowMode={navPrefs.toggleFollowMode}
-        widgets={navPrefs.widgets}
-        onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
-        onHeight={setNavHeight}
-      />
+          <NavBanner
+            nav={nav}
+            topInset={topInset}
+            bottomInset={bottomInset}
+            viewport={viewport}
+            navCam={navCam}
+            followMode={navPrefs.followMode}
+            onToggleFollowMode={navPrefs.toggleFollowMode}
+            widgets={navPrefs.widgets}
+            onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
+            onHeight={setNavHeight}
+          />
 
-      {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}
-      <NavChrome
-        nav={nav}
-        navCam={navCam}
-        puck={navPuck}
-        bottomInset={bottomInset}
-        viewport={viewport}
-      />
+          {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}
+          <NavChrome
+            nav={nav}
+            navCam={navCam}
+            puck={navPuck}
+            bottomInset={bottomInset}
+            viewport={viewport}
+          />
 
-      {/* Search shares the bottom-sheet model and stays above the keyboard;
+          {/* Search shares the bottom-sheet model and stays above the keyboard;
           hidden while navigating because the guidance UI owns the screen. */}
-      {searchOpen && !navActive && !planning ? (
-        <SearchBar
-          packs={packs}
-          places={data.places}
-          getBias={getBias}
-          onPick={dest.pickResult}
-          onClose={() => setSearchOpen(false)}
-          bottomInset={bottomInset}
-          getSetting={data.getSetting}
-          setSetting={data.setSetting}
-        />
-      ) : null}
+          {searchOpen && !navActive && !planning ? (
+            <SearchBar
+              packs={packs}
+              places={data.places}
+              getBias={getBias}
+              onPick={dest.pickResult}
+              onClose={() => setSearchOpen(false)}
+              bottomInset={bottomInset}
+              getSetting={data.getSetting}
+              setSetting={data.setSetting}
+            />
+          ) : null}
 
-      {/* Bottom-right: recentre on the current position (RoutePanel owns the
+          {/* Bottom-right: recentre on the current position (RoutePanel owns the
           bottom while planning, so hide it then; while navigating the follow
           camera + Re-centre pill cover it, so it's hidden too). */}
-      {showIdleChrome ? (
-        <View style={[styles.locateWrap, { bottom: bottomInset + 24, right: side.right + 12 }]}>
-          {/* Press feedback (dim + shrink) so the tap visibly registers — the
+          {showIdleChrome ? (
+            <View style={[styles.locateWrap, { bottom: bottomInset + 24, right: side.right + 12 }]}>
+              {/* Press feedback (dim + shrink) so the tap visibly registers — the
               fix can take a second to arrive and the button looked dead until
               the camera moved. */}
-          <Pressable
-            style={({ pressed }) => [styles.roundButton, pressed && styles.roundButtonPressed]}
-            onPress={() => void locate()}
-            testID="locate"
-          >
-            <CrosshairIcon />
-          </Pressable>
-        </View>
-      ) : null}
+              <Pressable
+                style={({ pressed }) => [styles.roundButton, pressed && styles.roundButtonPressed]}
+                onPress={() => void locate()}
+                testID="locate"
+              >
+                <CrosshairIcon />
+              </Pressable>
+            </View>
+          ) : null}
 
-      {/* The whole idle toolbar disappears for every navigation phase. This
+          {/* The whole idle toolbar disappears for every navigation phase. This
           includes route startup and terminal/error states, not only the
           follow-camera phases, so it cannot share coordinates with End. */}
-      {showIdleChrome ? (
-        <MenuCluster
-          bottomInset={bottomInset}
-          onToggleMenu={() => setMenuOpen((o) => !o)}
-          following={following}
-          onOpenSearch={() => setSearchOpen(true)}
-          onPlanRoute={() => route.start()}
-        />
-      ) : null}
+          {showIdleChrome ? (
+            <MenuCluster
+              bottomInset={bottomInset}
+              onToggleMenu={() => setMenuOpen((o) => !o)}
+              following={following}
+              onOpenSearch={() => setSearchOpen(true)}
+              onPlanRoute={() => route.start()}
+            />
+          ) : null}
 
-      {showIdleChrome ? (
-        <MapActivityControls
-          profile={profiles}
-          visibleProfiles={profilePreferences.visibleProfiles}
-          overlays={overlaysCtl}
-          mapZoom={mapZoom}
-          // Bottom-edge row, immediately left of the locate button. Menus
-          // expand upward, so profile switching no longer floats mid-map.
-          bottom={bottomInset + 24}
-          onPickProfile={onPickMapProfile}
-        />
-      ) : null}
+          {showIdleChrome ? (
+            <MapActivityControls
+              profile={profiles}
+              visibleProfiles={profilePreferences.visibleProfiles}
+              overlays={overlaysCtl}
+              mapZoom={mapZoom}
+              // Bottom-edge row, immediately left of the locate button. Menus
+              // expand upward, so profile switching no longer floats mid-map.
+              bottom={bottomInset + 24}
+              onPickProfile={onPickMapProfile}
+            />
+          ) : null}
 
-      {useOffline && showIdleChrome && tiles.showOfflineBadge ? (
-        // The native attribution/contributions button occupies the first cell
-        // of this top-left grid; offline status owns the second. A shared row
-        // prevents the two independent renderers from overlapping.
-        <View
-          style={[
-            styles.topLeftStatusGrid,
-            { top: attributionPosition.top, left: attributionPosition.left },
-          ]}
-          pointerEvents="box-none"
-        >
-          <View style={styles.attributionCell} pointerEvents="none" />
-          {/* The badge says the map is coming from disk. When the server has
+          {useOffline && showIdleChrome && tiles.showOfflineBadge ? (
+            // The native attribution/contributions button occupies the first cell
+            // of this top-left grid; offline status owns the second. A shared row
+            // prevents the two independent renderers from overlapping.
+            <View
+              style={[
+                styles.topLeftStatusGrid,
+                { top: attributionPosition.top, left: attributionPosition.left },
+              ]}
+              pointerEvents="box-none"
+            >
+              <View style={styles.attributionCell} pointerEvents="none" />
+              {/* The badge says the map is coming from disk. When the server has
               since rebuilt that region it also says *that*, because otherwise a
               months-old download keeps drawing months-old data and the reader
               blames the app rather than the pack. Settings does the updating. */}
-          <View
-            style={[styles.offlineBadge, packStale && styles.offlineBadgeStale]}
-            accessibilityLabel={`Offline map${
-              tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
-            }${packStale ? ' · update available in Settings' : ''}`}
-            testID="offline-badge"
-          >
-            <CloudOffIcon color={packStale ? theme.warning : undefined} />
-            {packStale ? <Text style={styles.offlineBadgeStaleText}>Update</Text> : null}
-          </View>
-        </View>
-      ) : null}
-      {data.status === 'error' ? (
-        <View
-          style={[
-            styles.banner,
-            { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
-          ]}
-        >
-          <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
-        </View>
-      ) : null}
-      {writeError ? (
-        <Pressable
-          style={[
-            styles.banner,
-            { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
-          ]}
-          onPress={clearWriteError}
-          testID="write-error-banner"
-        >
-          <Text style={styles.bannerText}>{writeError} — the change was not saved.</Text>
-        </Pressable>
-      ) : null}
-      <UpdateNotices storage={data.storage} topInset={topInset} />
+              <View
+                style={[styles.offlineBadge, packStale && styles.offlineBadgeStale]}
+                accessibilityLabel={`Offline map${
+                  tiles.coveringPack ? `: ${tiles.coveringPack.manifest.name}` : ''
+                }${packStale ? ' · update available in Settings' : ''}`}
+                testID="offline-badge"
+              >
+                <CloudOffIcon color={packStale ? theme.warning : undefined} />
+                {packStale ? <Text style={styles.offlineBadgeStaleText}>Update</Text> : null}
+              </View>
+            </View>
+          ) : null}
+          {data.status === 'error' ? (
+            <View
+              style={[
+                styles.banner,
+                { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
+              ]}
+            >
+              <Text style={styles.bannerText}>Storage unavailable: {data.error}</Text>
+            </View>
+          ) : null}
+          {writeError ? (
+            <Pressable
+              style={[
+                styles.banner,
+                { top: topInset + 60, left: side.left + 12, right: side.right + 12 },
+              ]}
+              onPress={clearWriteError}
+              testID="write-error-banner"
+            >
+              <Text style={styles.bannerText}>{writeError} — the change was not saved.</Text>
+            </Pressable>
+          ) : null}
+          <UpdateNotices storage={data.storage} topInset={topInset} />
 
-      <MainMenuSheet
-        visible={menuOpen && !planning && !navActive}
-        onClose={() => setMenuOpen(false)}
-        onOpenFavorites={() => setFavoritesOpen(true)}
-        onOpenTracks={() => setTracksOpen(true)}
-        onOpenLayers={() => setLayersOpen(true)}
-        onOpenExplore={() => setExploreOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        bottomInset={bottomInset}
-      />
+          <MainMenuSheet
+            visible={menuOpen && !planning && !navActive}
+            onClose={() => setMenuOpen(false)}
+            onOpenFavorites={() => setFavoritesOpen(true)}
+            onOpenTracks={() => setTracksOpen(true)}
+            onOpenLayers={() => setLayersOpen(true)}
+            onOpenExplore={() => setExploreOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            bottomInset={bottomInset}
+          />
 
-      {/* Mid-drive quick add-a-stop: category sheet from the banner's +, and a
+          {/* Mid-drive quick add-a-stop: category sheet from the banner's +, and a
           one-question card for a tapped place. */}
-      <AddStopSheet ctl={navAddStop} bottomInset={bottomInset} />
-      {destination && following && !navAddStop.open ? (
-        <NavStopTapCard
-          name={destination.name}
-          bottom={bottomInset + 16}
-          left={side.left + 12}
-          right={side.right + 12}
-          onAdd={() => {
-            nav.addStop({ lat: destination.lat, lng: destination.lng });
-            dest.clear();
-          }}
-          onClose={dest.clear}
-        />
-      ) : null}
+          <AddStopSheet ctl={navAddStop} bottomInset={bottomInset} />
+          {destination && following && !navAddStop.open ? (
+            <NavStopTapCard
+              name={destination.name}
+              bottom={bottomInset + 16}
+              left={side.left + 12}
+              right={side.right + 12}
+              onAdd={() => {
+                nav.addStop({ lat: destination.lat, lng: destination.lng });
+                dest.clear();
+              }}
+              onClose={dest.clear}
+            />
+          ) : null}
 
-      {destination && !planning && !navActive ? (
-        <DestinationCard
-          target={destination}
-          packs={packs}
-          onPickNearby={onPickNearbyPlace}
-          onDirections={() => {
-            dest.clear();
-            directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);
-          }}
-          onSave={
-            destination.canSave
-              ? () => {
-                  void data.savePlace({
-                    name: destination.name,
-                    lat: destination.lat,
-                    lng: destination.lng,
-                    address: destination.address,
-                  });
-                  dest.clear();
-                }
-              : undefined
-          }
-          onEdit={
-            destination.placeId
-              ? () => {
-                  setEditPlaceId(destination.placeId!);
-                  dest.clear();
-                }
-              : undefined
-          }
-          // Open the share-format chooser (Atlas link, plain coordinates, or a
-          // geo: hand-off to the user's preferred map app).
-          onShare={() =>
-            setShareTarget({
-              lat: destination.lat,
-              lng: destination.lng,
-              name: destination.name,
-            })
-          }
-          onWeather={() => setWeatherTarget({ lat: destination.lat, lng: destination.lng })}
-          onCancel={dest.clear}
-          bottomInset={bottomInset}
-        />
-      ) : null}
+          {destination && !planning && !navActive ? (
+            <DestinationCard
+              target={destination}
+              packs={packs}
+              onPickNearby={onPickNearbyPlace}
+              onDirections={() => {
+                dest.clear();
+                directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);
+              }}
+              onSave={
+                destination.canSave
+                  ? () => {
+                      void data.savePlace({
+                        name: destination.name,
+                        lat: destination.lat,
+                        lng: destination.lng,
+                        address: destination.address,
+                      });
+                      dest.clear();
+                    }
+                  : undefined
+              }
+              onEdit={
+                destination.placeId
+                  ? () => {
+                      setEditPlaceId(destination.placeId!);
+                      dest.clear();
+                    }
+                  : undefined
+              }
+              // Open the share-format chooser (Atlas link, plain coordinates, or a
+              // geo: hand-off to the user's preferred map app).
+              onShare={() =>
+                setShareTarget({
+                  lat: destination.lat,
+                  lng: destination.lng,
+                  name: destination.name,
+                })
+              }
+              onWeather={() => setWeatherTarget({ lat: destination.lat, lng: destination.lng })}
+              onCancel={dest.clear}
+              bottomInset={bottomInset}
+            />
+          ) : null}
 
-      <WeatherSheet
-        visible={weatherTarget !== null}
-        onClose={() => setWeatherTarget(null)}
-        target={weatherTarget}
-        weather={weather}
-        data={data}
-        bottomInset={bottomInset}
-      />
+          <WeatherSheet
+            visible={weatherTarget !== null}
+            onClose={() => setWeatherTarget(null)}
+            target={weatherTarget}
+            weather={weather}
+            data={data}
+            bottomInset={bottomInset}
+          />
 
-      <ExploreSheet
-        visible={exploreOpen && !planning && !navActive}
-        packs={packs}
-        getCenter={getBias}
-        zoom={mapZoom}
-        onPick={(result) => {
-          setExploreOpen(false);
-          dest.pickResult(result);
-        }}
-        onClose={() => setExploreOpen(false)}
-        bottomInset={bottomInset}
-      />
+          <ExploreSheet
+            visible={exploreOpen && !planning && !navActive}
+            packs={packs}
+            getCenter={getBias}
+            zoom={mapZoom}
+            onPick={(result) => {
+              setExploreOpen(false);
+              dest.pickResult(result);
+            }}
+            onClose={() => setExploreOpen(false)}
+            bottomInset={bottomInset}
+          />
 
-      <ShareSheet
-        target={shareTarget}
-        zoom={viewRef.current?.zoom ?? 14}
-        onClose={() => setShareTarget(null)}
-        bottomInset={bottomInset}
-      />
+          <ShareSheet
+            target={shareTarget}
+            zoom={viewRef.current?.zoom ?? 14}
+            onClose={() => setShareTarget(null)}
+            bottomInset={bottomInset}
+          />
 
-      <RoutePreview nav={nav} bottomInset={bottomInset} />
+          <RoutePreview nav={nav} bottomInset={bottomInset} />
 
-      <AppSheets
-        data={data}
-        sync={sync}
-        packs={packs}
-        onPacksChanged={refreshPacks}
-        bottomInset={bottomInset}
-        favoritesOpen={favoritesOpen}
-        onCloseFavorites={() => setFavoritesOpen(false)}
-        editPlaceId={editPlaceId}
-        onCloseEditPlace={() => setEditPlaceId(null)}
-        tracksOpen={tracksOpen}
-        onCloseTracks={() => setTracksOpen(false)}
-        layersOpen={layersOpen}
-        onCloseLayers={() => setLayersOpen(false)}
-        overlays={overlaysCtl}
-        profilePreferences={profilePreferences}
-        tiles={tiles}
-        settingsOpen={settingsOpen}
-        onCloseSettings={() => setSettingsOpen(false)}
-        appearance={appearance}
-        mapStyleEditor={mapStyleEditor}
-        navPrefs={navPrefs}
-        regionJobs={regionJobs}
-        onDrawRegion={() => {
-          setSettingsOpen(false);
-          setOfflineRegion({ corner: null, bbox: null });
-        }}
-        pendingPin={pendingPin}
-        onDismissPendingPin={() => setPendingPin(null)}
-        onPickDestination={dest.pick}
-        onImportTracks={importTracks}
-        onImportInatur={importInatur}
-      />
-      <PromptModal
-        visible={pendingRegion !== null}
-        title="Name offline region"
-        placeholder="e.g. Jotunheimen trip"
-        confirmLabel="Queue build"
-        onCancel={() => setPendingRegion(null)}
-        onConfirm={(value) => {
-          if (!pendingRegion) return;
-          const bbox = pendingRegion;
-          const name = value.trim() || 'Custom offline region';
-          setPendingRegion(null);
-          setSettingsOpen(true);
-          void regionJobs.create(name, bbox);
-        }}
-      />
-      {planning ? (
-        <RoutePanel
-          route={route}
-          transit={transit}
-          packs={packs}
-          places={data.places}
-          getBias={getBias}
-          fetchNearby={fetchNearbyStops}
-          onExport={exportRoute}
-          onNavigate={startNavigation}
-          onShowTransitTrip={showTransitTrip}
-          getMyLocation={directions.getMyLocation}
-          locatingOrigin={directions.locatingOrigin}
-          bottomInset={bottomInset}
-        />
-      ) : null}
+          <AppSheets
+            data={data}
+            sync={sync}
+            packs={packs}
+            onPacksChanged={refreshPacks}
+            bottomInset={bottomInset}
+            favoritesOpen={favoritesOpen}
+            onCloseFavorites={() => setFavoritesOpen(false)}
+            editPlaceId={editPlaceId}
+            onCloseEditPlace={() => setEditPlaceId(null)}
+            tracksOpen={tracksOpen}
+            onCloseTracks={() => setTracksOpen(false)}
+            layersOpen={layersOpen}
+            onCloseLayers={() => setLayersOpen(false)}
+            overlays={overlaysCtl}
+            profilePreferences={profilePreferences}
+            tiles={tiles}
+            settingsOpen={settingsOpen}
+            onCloseSettings={() => setSettingsOpen(false)}
+            appearance={appearance}
+            mapStyleEditor={mapStyleEditor}
+            navPrefs={navPrefs}
+            pip={pip}
+            regionJobs={regionJobs}
+            downloads={downloads}
+            offlinePrefs={offlinePrefs}
+            onDrawRegion={() => {
+              setSettingsOpen(false);
+              setOfflineRegion({ corner: null, bbox: null });
+            }}
+            pendingPin={pendingPin}
+            onDismissPendingPin={() => setPendingPin(null)}
+            onPickDestination={dest.pick}
+            onImportTracks={importTracks}
+            onImportInatur={importInatur}
+          />
+          <PromptModal
+            visible={pendingRegion !== null}
+            title="Name offline region"
+            placeholder="e.g. Jotunheimen trip"
+            confirmLabel="Queue build"
+            onCancel={() => setPendingRegion(null)}
+            onConfirm={(value) => {
+              if (!pendingRegion) return;
+              const bbox = pendingRegion;
+              const name = value.trim() || 'Custom offline region';
+              setPendingRegion(null);
+              setSettingsOpen(true);
+              void regionJobs.create(name, bbox);
+            }}
+          />
+          {planning ? (
+            <RoutePanel
+              route={route}
+              transit={transit}
+              packs={packs}
+              places={data.places}
+              getBias={getBias}
+              fetchNearby={fetchNearbyStops}
+              onExport={exportRoute}
+              onNavigate={startNavigation}
+              onShowTransitTrip={showTransitTrip}
+              getMyLocation={directions.getMyLocation}
+              locatingOrigin={directions.locatingOrigin}
+              bottomInset={bottomInset}
+            />
+          ) : null}
+        </>
+      )}
       <StatusBar style="auto" />
     </View>
   );

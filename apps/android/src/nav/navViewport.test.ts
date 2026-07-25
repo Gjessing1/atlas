@@ -26,6 +26,18 @@ describe('navViewport', () => {
     expect(view.overviewPadding.left).toBe(388);
   });
 
+  it('treats a picture-in-picture window as one small map, not a landscape screen', () => {
+    // 16:9 mini window: wider than tall, but no rail and no system bars.
+    const view = navViewport(320, 180, { left: 0, right: 0 }, 0, 46, true);
+
+    expect(view.landscape).toBe(false);
+    expect(view.mapLeft).toBe(0);
+    expect(view.mapRight).toBe(320);
+    expect(view.courseAnchor.x).toBe(160);
+    // The compact card owns the bottom strip, so the puck stays above it.
+    expect(view.courseAnchor.y).toBeLessThan(180 - 46 / 2);
+  });
+
   it('clears a landscape system bar on either side', () => {
     const barOnLeft = navViewport(800, 400, { left: 48, right: 0 }, 28, 0);
     const barOnRight = navViewport(800, 400, { left: 0, right: 48 }, 28, 0);

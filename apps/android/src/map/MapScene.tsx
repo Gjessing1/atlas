@@ -202,6 +202,13 @@ interface MapSceneProps {
    * during navigation the guidance rail owns map orientation instead.
    */
   showIdleChrome: boolean;
+  /**
+   * True while the app is showing as a picture-in-picture window. Nothing but
+   * the map itself belongs in a window that size, so the native attribution
+   * button (the only map ornament that survives navigation) goes too — the full
+   * app one tap away still carries it.
+   */
+  inPip: boolean;
   /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
   onMapPress: (point: LatLng, pixel: { x: number; y: number }) => void;
   /** Long-press outside route planning: pick the point as a destination. */
@@ -243,6 +250,7 @@ export function MapScene({
   navDot,
   initialView,
   showIdleChrome,
+  inPip,
   onMapPress,
   onPickPoint,
   onViewChange,
@@ -332,6 +340,7 @@ export function MapScene({
         // the bottom it competed with Atlas's menu, scale and locate controls.
         // The MapLibre logo watermark is off (attribution remains available).
         logo={false}
+        attribution={!inPip}
         attributionPosition={attributionPosition}
         // Track the zoom for zoom-proportional pin sizes; a user-driven move
         // additionally pauses the nav follow camera (free look-around).

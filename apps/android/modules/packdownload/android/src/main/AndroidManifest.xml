@@ -1,0 +1,20 @@
+<manifest
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools"
+>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+  <application>
+    <!--
+      WorkManager declares this service without a foregroundServiceType; from
+      API 34 a foreground service must have one or startForeground throws. The
+      merger folds the attribute onto its declaration.
+    -->
+    <service
+      android:name="androidx.work.impl.foreground.SystemForegroundService"
+      android:foregroundServiceType="dataSync"
+      tools:node="merge"
+    />
+  </application>
+</manifest>

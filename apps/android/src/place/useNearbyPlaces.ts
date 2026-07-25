@@ -2,6 +2,7 @@ import type { LatLng, NearbyPlaceArticle, PlacePhoto } from '@atlas/core';
 import { haversineM } from '@atlas/core';
 import { useEffect, useState } from 'react';
 
+import { deviceLanguage } from '../deviceLanguage';
 import type { LocalPack } from '../regions/packs';
 import { getServerOrigin } from '../serverOrigin';
 import { packSearchDb } from '../search/offlineSearch';
@@ -109,6 +110,9 @@ export function useNearbyPlaces(
           lat: String(lat),
           lon: String(lng),
           radius: String(NEARBY_RADIUS_M),
+          // The proxy merges this with whatever the *local* Wikipedia knows,
+          // which outside the English-speaking world is most of what there is.
+          lang: deviceLanguage(),
         });
         const response = await fetch(`${getServerOrigin()}/api/place-content/nearby?${params}`, {
           signal: AbortSignal.timeout(6_000),

@@ -26,6 +26,7 @@ export * from './profiles.js';
 export * from './routelabels.js';
 export * from './search.js';
 export * from './share.js';
+export * from './wiki-language.js';
 
 export {
   applyMapAppearance,
