@@ -263,31 +263,74 @@ describe('buildValhallaRequest', () => {
 });
 
 describe('roundTripLocations', () => {
-  it('lays the loop out at roughly the requested distance', () => {
-    const locs = roundTripLocations(oslo, 5000, 0);
-    expect(locs[0]).toEqual(oslo);
-    expect(locs[locs.length - 1]).toEqual(oslo);
-    // Straight-line perimeter of the loop polygon approximates the asked-for
-    // distance (roads only ever make it longer).
-    let perimeter = 0;
-    for (let i = 1; i < locs.length; i++) {
-      const a = locs[i - 1]!;
-      const b = locs[i]!;
+  /** Straight-line perimeter — roads only ever make the real loop longer. */
+  const perimeterM = (stops: { pos: { lat: number; lng: number } }[]): number => {
+    let total = 0;
+    for (let i = 1; i < stops.length; i++) {
+      const a = stops[i - 1]!.pos;
+      const b = stops[i]!.pos;
       const dLat = ((b.lat - a.lat) * Math.PI) / 180;
       const dLng = ((b.lng - a.lng) * Math.PI) / 180;
       const mLat = ((a.lat + b.lat) / 2) * (Math.PI / 180);
-      perimeter += 6371008.8 * Math.hypot(dLat, dLng * Math.cos(mLat));
+      total += 6371008.8 * Math.hypot(dLat, dLng * Math.cos(mLat));
     }
-    expect(perimeter).toBeGreaterThan(4000);
-    expect(perimeter).toBeLessThan(6000);
+    return total;
+  };
+
+  it('lays the loop out at roughly the requested distance', () => {
+    const locs = roundTripLocations([oslo], 5000, 0);
+    expect(locs[0]).toEqual({ pos: oslo, required: true });
+    expect(locs[locs.length - 1]).toEqual({ pos: oslo, required: true });
+    expect(perimeterM(locs)).toBeGreaterThan(4000);
+    expect(perimeterM(locs)).toBeLessThan(6000);
   });
 
   it('varies the loop with the seed but stays deterministic', () => {
-    const a = roundTripLocations(oslo, 5000, 1);
-    const b = roundTripLocations(oslo, 5000, 2);
-    const a2 = roundTripLocations(oslo, 5000, 1);
+    const a = roundTripLocations([oslo], 5000, 1);
+    const b = roundTripLocations([oslo], 5000, 2);
+    const a2 = roundTripLocations([oslo], 5000, 1);
     expect(a).toEqual(a2);
     expect(a[1]).not.toEqual(b[1]);
+  });
+
+  it('keeps a planned destination as a stop and comes home the long way', () => {
+    // 5 km north of the start, on a 20 km loop: the way out is the plan, the
+    // way home is stretched to fill the rest.
+    const lake = { lat: oslo.lat + 0.045, lng: oslo.lng };
+    const locs = roundTripLocations([oslo, lake], 20_000, 0);
+
+    expect(locs[0]).toEqual({ pos: oslo, required: true });
+    expect(locs[1]).toEqual({ pos: lake, required: true });
+    expect(locs[locs.length - 1]).toEqual({ pos: oslo, required: true });
+    // Everything between the destination and home is shaping, not a stop.
+    expect(locs.slice(2, -1).every((stop) => !stop.required)).toBe(true);
+    expect(locs.length).toBeGreaterThan(3);
+    expect(perimeterM(locs)).toBeGreaterThan(18_000);
+    expect(perimeterM(locs)).toBeLessThan(22_000);
+  });
+
+  it('returns straight home when the planned stops already fill the distance', () => {
+    const far = { lat: oslo.lat + 0.2, lng: oslo.lng };
+    const locs = roundTripLocations([oslo, far], 5_000, 0);
+    expect(locs).toEqual([
+      { pos: oslo, required: true },
+      { pos: far, required: true },
+      { pos: oslo, required: true },
+    ]);
+  });
+
+  it('sends planned stops as breaks and shaping points as through locations', () => {
+    const lake = { lat: oslo.lat + 0.045, lng: oslo.lng };
+    const body = buildValhallaRequest({
+      profile: 'bike',
+      points: [oslo, lake],
+      roundTrip: { distanceM: 20_000 },
+    });
+    const locations = body['locations'] as { type?: string }[];
+    expect(locations[0]!.type).toBe('break');
+    expect(locations[1]!.type).toBe('break');
+    expect(locations[locations.length - 1]!.type).toBe('break');
+    expect(locations.slice(2, -1).every((l) => l.type === 'through')).toBe(true);
   });
 });
 

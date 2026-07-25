@@ -92,6 +92,91 @@ describe('place content API', () => {
     await app.close();
   });
 
+  it('keeps looking past an edition that only knows the surrounding place', async () => {
+    // Asker rådhus: every large edition has an article on the municipality
+    // "Asker", only the Norwegian one describes the town hall. Answering with
+    // the first edition that matched *anything* handed readers the municipality.
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.hostname.startsWith('en.wikipedia')) {
+        return new Response(
+          JSON.stringify({
+            query: {
+              pages: [
+                {
+                  title: 'Asker',
+                  extract: 'A municipality in Akershus.',
+                  fullurl: 'https://en.wikipedia.org/wiki/Asker',
+                  coordinates: [{ lat: 59.8353, lon: 10.435 }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.hostname.startsWith('no.wikipedia')) {
+        return new Response(
+          JSON.stringify({
+            query: {
+              pages: [
+                {
+                  title: 'Asker rådhus',
+                  extract: 'Rådhus for Asker kommune.',
+                  fullurl: 'https://no.wikipedia.org/wiki/Asker_rådhus',
+                  coordinates: [{ lat: 59.8371, lon: 10.4362 }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return new Response('{}');
+    });
+    const app = Fastify();
+    registerPlaceContentApi(app, { fetchImpl, userAgent: 'Atlas test' });
+    const response = await app.inject({
+      url: '/api/place-content?name=Asker%20r%C3%A5dhus&lat=59.8371&lon=10.4362&lang=en',
+    });
+
+    expect(response.json().content).toHaveLength(1);
+    expect(response.json().content[0]).toMatchObject({
+      title: 'Asker rådhus',
+      language: 'no',
+    });
+    await app.close();
+  });
+
+  it('still answers with the surrounding place when nothing names the POI', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+      new URL(String(input)).hostname.startsWith('en.wikipedia')
+        ? new Response(
+            JSON.stringify({
+              query: {
+                pages: [
+                  {
+                    title: 'Asker',
+                    extract: 'A municipality in Akershus.',
+                    fullurl: 'https://en.wikipedia.org/wiki/Asker',
+                    coordinates: [{ lat: 59.8353, lon: 10.435 }],
+                  },
+                ],
+              },
+            }),
+          )
+        : new Response('{}'),
+    );
+    const app = Fastify();
+    registerPlaceContentApi(app, { fetchImpl, userAgent: 'Atlas test' });
+    const response = await app.inject({
+      url: '/api/place-content?name=Asker%20r%C3%A5dhus&lat=59.8371&lon=10.4362&lang=en',
+    });
+
+    // A broader article beats a blank card — it just must not pre-empt a better
+    // one, which is what the previous test proves.
+    expect(response.json().content[0]).toMatchObject({ title: 'Asker', language: 'en' });
+    await app.close();
+  });
+
   it('asks for a card-sized lead photo and passes it through', async () => {
     const requested: URL[] = [];
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {

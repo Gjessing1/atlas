@@ -14,7 +14,7 @@ import type { LatLng } from './geo.js';
 export interface RoutePlanState {
   profile: string;
   points: LatLng[];
-  /** Round-trip loop length in km — set only for a one-anchor loop plan. */
+  /** Round-trip loop length in km — set when the plan comes home to its start. */
   roundTripKm?: number;
 }
 
@@ -61,9 +61,10 @@ function decodeRoutePlan(hash: string): RoutePlanState | null {
   const loopMatch = /[#&]loop=([0-9.]+)/.exec(hash);
   if (loopMatch) {
     const km = Number(loopMatch[1]);
-    // A loop has exactly one anchor; more points mean the link is inconsistent,
-    // and the ordinary A→B→C reading of them is the safer one.
-    if (Number.isFinite(km) && km > 0 && points.length === 1) plan.roundTripKm = km;
+    // The points are the places the loop goes by way of, however many: a shared
+    // "40 km ride past the lake" must reopen as that ride, not as a line out to
+    // the lake with the loop silently dropped.
+    if (Number.isFinite(km) && km > 0) plan.roundTripKm = km;
   }
   return plan;
 }

@@ -425,3 +425,42 @@ test('stops along a route are browsed by category and insert in order', async ({
   await expect(page.locator('.route-waypoints li')).toHaveCount(3);
   await expect(page.locator('.route-waypoints')).toContainText('Corridor café');
 });
+
+test('a round trip keeps the stops already planned and rides through them', async ({ page }) => {
+  await mockRouting(page);
+  const requests: { lat: number; lon: number; type?: string }[][] = [];
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/route') || request.method() !== 'POST') return;
+    const body = request.postDataJSON() as { locations?: { lat: number; lon: number }[] };
+    if (body.locations) requests.push(body.locations);
+  });
+  await page.goto('/#map=12/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Route' }).click();
+  const [x1, y1] = await project(page, 59.905, 10.74);
+  const [x2, y2] = await project(page, 59.915, 10.76);
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+  await expect(page.locator('.route-stats')).toBeVisible();
+
+  // Ticking "round trip" used to throw the destination away and draw an
+  // arbitrary loop from the start; both stops must survive it.
+  await page.getByRole('checkbox', { name: 'Round trip' }).check();
+  await expect(page.locator('.route-waypoints li')).toHaveCount(2);
+  await expect(page.locator('.route-waypoints li').first()).toContainText('A');
+  await expect(page.locator('.route-waypoints li').nth(1)).toContainText('B');
+
+  // The loop query: both planned stops as real stops, shaping points to fill
+  // the requested distance, and home to the start.
+  await expect
+    .poll(() => {
+      const last = requests.at(-1) ?? [];
+      return last.length > 3 && last.filter((l) => l.type !== 'through').length === 3;
+    })
+    .toBe(true);
+  const loop = requests.at(-1)!;
+  expect(loop[0]!.lat).toBeCloseTo(loop.at(-1)!.lat, 4);
+  // The planned destination is a stop, not a shaping point.
+  expect(loop[1]!.type).toBe('break');
+  expect(loop.some((l) => l.type === 'through')).toBe(true);
+});

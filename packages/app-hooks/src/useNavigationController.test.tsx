@@ -750,3 +750,60 @@ describe('useNavigationController — walking modes', () => {
     expect(watchFacing).not.toHaveBeenCalled();
   });
 });
+
+describe('useNavigationController — resume an interrupted trip', () => {
+  const via: LatLng = { lat: 60, lng: 10.01 };
+
+  it('routes from the current position and guides at once, with no preview', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => result.current.resume(destination, 'car', { avoidTolls: true }, [via]));
+
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+    expect(result.current.previewPaths).toBeNull();
+    expect(result.current.destination).toEqual(destination);
+    expect(result.current.viaPoints).toEqual([via]);
+    expect(result.current.preferences).toEqual({ avoidTolls: true });
+    // One request, through the stop still ahead, from the fix taken just now.
+    expect(h.currentFix).toHaveBeenCalledTimes(1);
+    const query = h.route.mock.calls[0]![0] as RouteQuery;
+    expect(query.points).toEqual([expect.objectContaining(points[0]!), via, destination]);
+    expect(query.preferences).toEqual({ avoidTolls: true });
+    expect(query.alternatives).toBeUndefined();
+  });
+
+  it('keeps the resumed trip reroutable — the guard does not stay latched', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.resume(destination, 'car'));
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+
+    act(() => result.current.stop());
+    await act(() => result.current.start(destination));
+
+    expect(result.current.phase).toBe('preview');
+  });
+
+  it('surfaces a failed resume as the error phase rather than a dead trip', async () => {
+    const h = harness();
+    h.currentFix.mockRejectedValueOnce(new Error('Could not get a GPS fix — is location on?'));
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => result.current.resume(destination, 'car'));
+
+    expect(result.current.phase).toBe('error');
+    expect(result.current.error).toBe('Could not get a GPS fix — is location on?');
+    expect(result.current.destination).toBeNull();
+  });
+
+  it('speaks the departure prompt, exactly as a freshly started trip does', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => result.current.resume(destination, 'car'));
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+
+    expect(h.spoken.length).toBeGreaterThan(0);
+  });
+});

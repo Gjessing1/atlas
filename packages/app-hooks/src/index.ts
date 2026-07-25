@@ -51,6 +51,14 @@ export {
   type NavTripSummary,
 } from './useNavigationController.js';
 export {
+  parseResumableTrip,
+  useNavResume,
+  type NavResumeController,
+  type NavResumeSettings,
+  type NavResumeTarget,
+  type ResumableTrip,
+} from './useNavResume.js';
+export {
   useNavAddStop,
   NAV_STOP_CATEGORIES,
   type FetchNearbyFn,

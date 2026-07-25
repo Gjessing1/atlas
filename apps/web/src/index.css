@@ -3007,6 +3007,65 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
+/* A trip that died with the tab, offered back on the next load. Bottom centre
+   on an idle map: the map stays usable behind it and declining is one click. */
+.nav-resume {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+}
+
+.nav-resume-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-resume-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.nav-resume-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nav-resume-go {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-resume-dismiss {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* Mid-drive quick add-a-stop panel: bottom centre, clear of the banner. */
 .nav-add-stop {
   position: absolute;

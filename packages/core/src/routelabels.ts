@@ -34,9 +34,16 @@ export function modeTimeLabel(t: number | 'none' | undefined): string {
   return fmtDuration(t);
 }
 
-/** Waypoint label, matching the map markers: A, B, C… (⟳ for a round trip). */
+/**
+ * Waypoint label, matching the map markers: A, B, C… — or ⟳ for a loop with
+ * nothing but its anchor, where there is no order to letter.
+ *
+ * A loop *through* planned stops letters them like any other route: they are
+ * visited in that order, and a column of identical ⟳ marks would say nothing
+ * about which one comes first.
+ */
 export function waypointLabel(index: number, roundTrip: boolean, count: number): string {
-  if (roundTrip || count === 1) return '⟳';
+  if (count === 1) return '⟳';
   return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
 }
 

@@ -122,40 +122,138 @@ function roundaboutExitAngle(
   return Math.round(angleDelta(approach, departure));
 }
 
+/** A point on a synthesized loop, and whether the traveller asked for it. */
+export interface RoundTripStop {
+  pos: LatLng;
+  /**
+   * True for the start and for stops the traveller planned — these are real
+   * stops (Valhalla `break` locations). False for the shaping points invented
+   * to give the loop its length, which are `through` locations: the route must
+   * pass them, but they split no leg and allow no u-turn.
+   */
+  required: boolean;
+}
+
+/** Straight-line length of a polyline, in metres. */
+function crowLengthM(points: readonly LatLng[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1]!, points[i]!);
+  return total;
+}
+
+/**
+ * Shaping points that turn a straight run from `from` to `to` into an arc of
+ * roughly `targetM`, bulging to one side.
+ *
+ * This is what lets a loop honour a destination *and* a distance: the way out
+ * is the traveller's own plan, and the way home is stretched to fill whatever
+ * distance is left over. The offsets follow a half sine so the detour eases in
+ * and out instead of doubling back at a corner, and the height is solved for
+ * numerically — the arc's length grows monotonically with it, so a bisection
+ * converges in a few steps and needs no closed form.
+ */
+function bulgedReturn(from: LatLng, to: LatLng, targetM: number, side: 1 | -1): LatLng[] {
+  const chordM = haversineM(from, to);
+  const perpendicular = (bearingBetween(from, to) + side * 90 + 360) % 360;
+  // Fractions along the chord, and how much of the full height each carries.
+  const shape: readonly [number, number][] = [
+    [0.25, 0.7],
+    [0.5, 1],
+    [0.75, 0.7],
+  ];
+  const arcFor = (height: number): LatLng[] =>
+    shape.map(([along, share]) =>
+      project(
+        project(from, chordM * along, bearingBetween(from, to)),
+        height * share,
+        perpendicular,
+      ),
+    );
+
+  let low = 0;
+  let high = Math.max(targetM, chordM);
+  for (let i = 0; i < 24; i++) {
+    const mid = (low + high) / 2;
+    if (crowLengthM([from, ...arcFor(mid), to]) < targetM) low = mid;
+    else high = mid;
+  }
+  return arcFor((low + high) / 2);
+}
+
 /**
  * Valhalla has no round-trip algorithm (that was a GraphHopper feature), so
  * loops are synthesized in app code — the same way for the online service and
- * the on-device engine: put via points on a circle whose circumference is the
- * requested distance, anchored at the start. The seed picks the circle's
- * direction, so a new seed gives a different loop for the same distance.
+ * the on-device engine.
+ *
+ * With nothing but a start, the loop is a circle whose circumference is the
+ * requested distance, anchored at the start; the seed picks its direction, so a
+ * new seed gives a different loop of the same length.
+ *
+ * With stops planned (a destination, or several), those are kept: the loop runs
+ * through them in order and comes home along an arc stretched to whatever
+ * distance is left over. Turning "round trip" on used to discard everything but
+ * the starting point, which quietly threw away the destination the traveller
+ * had just entered — a 40 km loop from home instead of a 40 km loop *by way of
+ * the lake*. If the planned stops already exceed the requested distance the way
+ * home is direct: the stops are the plan, the distance is the wish.
  */
-export function roundTripLocations(start: LatLng, distanceM: number, seed = 0): LatLng[] {
-  // Scramble the seed so consecutive seeds give well-separated headings.
-  const heading = (seed * 137.508) % 360; // golden-angle steps
-  const radius = distanceM / (2 * Math.PI);
-  const center = project(start, radius, heading);
-  // The start sits on the circle at the opposite bearing; three more stops a
-  // quarter-turn apart make the route trace the whole loop.
-  const back = (heading + 180) % 360;
-  const vias = [90, 180, 270].map((step) => project(center, radius, (back + step) % 360));
-  return [start, ...vias, start];
+export function roundTripLocations(
+  points: readonly LatLng[],
+  distanceM: number,
+  seed = 0,
+): RoundTripStop[] {
+  const start = points[0];
+  if (!start) return [];
+  const planned = points.slice(1).filter((point) => haversineM(start, point) > 1);
+
+  if (planned.length === 0) {
+    // Scramble the seed so consecutive seeds give well-separated headings.
+    const heading = (seed * 137.508) % 360; // golden-angle steps
+    const radius = distanceM / (2 * Math.PI);
+    const center = project(start, radius, heading);
+    // The start sits on the circle at the opposite bearing; three more stops a
+    // quarter-turn apart make the route trace the whole loop.
+    const back = (heading + 180) % 360;
+    const vias = [90, 180, 270].map((step) => project(center, radius, (back + step) % 360));
+    return [
+      { pos: start, required: true },
+      ...vias.map((pos) => ({ pos, required: false })),
+      { pos: start, required: true },
+    ];
+  }
+
+  const outbound = [start, ...planned];
+  const last = planned[planned.length - 1]!;
+  const chordM = haversineM(last, start);
+  // What is left of the requested distance once the planned stops are visited.
+  // The 5 % margin keeps a barely-longer target from inventing a wobble that
+  // no road can follow anyway.
+  const returnM = distanceM - crowLengthM(outbound);
+  const detour =
+    returnM > chordM * 1.05
+      ? bulgedReturn(last, start, returnM, seed % 2 === 0 ? 1 : -1)
+      : ([] as LatLng[]);
+  return [
+    ...outbound.map((pos) => ({ pos, required: true })),
+    ...detour.map((pos) => ({ pos, required: false })),
+    { pos: start, required: true },
+  ];
 }
 
 /** Body for a Valhalla `POST /route` request. */
 export function buildValhallaRequest(query: RouteQuery): Record<string, unknown> {
-  // Round trips route start -> synthesized vias -> start. The vias are
-  // `through` locations: shaping points the route must pass, not stops (no
-  // leg split, no u-turn allowed at them).
+  // Round trips route start -> planned stops -> synthesized vias -> start. Only
+  // the traveller's own points are stops; the synthesized ones are `through`
+  // locations: shaping points the route must pass, not stops (no leg split, no
+  // u-turn allowed at them).
   const locations: { lat: number; lon: number; type?: string; heading?: number }[] = query.roundTrip
-    ? roundTripLocations(
-        query.points[0]!,
-        query.roundTrip.distanceM,
-        query.roundTrip.seed ?? 0,
-      ).map((p, i, all) => ({
-        lat: p.lat,
-        lon: p.lng,
-        type: i === 0 || i === all.length - 1 ? 'break' : 'through',
-      }))
+    ? roundTripLocations(query.points, query.roundTrip.distanceM, query.roundTrip.seed ?? 0).map(
+        (stop) => ({
+          lat: stop.pos.lat,
+          lon: stop.pos.lng,
+          type: stop.required ? 'break' : 'through',
+        }),
+      )
     : query.points.map((p) => ({ lat: p.lat, lon: p.lng }));
   // Continue in the direction of travel: Valhalla penalizes edges leaving the
   // first location against its heading (within the default 60° tolerance), so

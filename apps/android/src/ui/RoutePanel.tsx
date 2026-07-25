@@ -572,7 +572,9 @@ export function RoutePanel({
             placeholder={
               nextRole === 'start'
                 ? 'Start: address or saved place'
-                : stops.length >= 2
+                : // A loop comes home to its start, so nothing entered after the
+                  // first point is a destination — it is somewhere to go by way of.
+                  route.roundTrip || stops.length >= 2
                   ? 'Add a stop'
                   : 'Destination: address or saved place'
             }
@@ -647,7 +649,10 @@ export function RoutePanel({
                     </Text>
                   </Pressable>
                 )}
-                {editing === w.id ? null : !route.roundTrip ? (
+                {/* Loops are reordered like any other plan: their stops are
+                  visited in list order on the way round, so moving one changes
+                  the trip. Only a single-stop loop has no order to change. */}
+                {editing === w.id || route.waypoints.length < 2 ? null : (
                   <>
                     <Pressable
                       style={styles.iconButton}
@@ -673,7 +678,7 @@ export function RoutePanel({
                       </Text>
                     </Pressable>
                   </>
-                ) : null}
+                )}
                 {editing === w.id ? null : (
                   <Pressable
                     style={styles.iconButton}

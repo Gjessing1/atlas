@@ -3,7 +3,7 @@ import type { NavState } from '@atlas/navigation';
 import type { RouteInstruction } from '@atlas/routing';
 import { describe, expect, it } from 'vitest';
 
-import { pipGuidance } from './pipGuidance';
+import { pipCardMetrics, pipGuidance } from './pipGuidance';
 
 type Nav = Pick<NavController, 'phase' | 'state' | 'tripSummary' | 'error'>;
 
@@ -84,5 +84,31 @@ describe('pipGuidance', () => {
     expect(guidance.headline).toBe('Rerouting…');
     expect(guidance.detail).toBe('E6');
     expect(guidance.footer).toBe('14:32 · 12 km');
+  });
+});
+
+describe('pipCardMetrics', () => {
+  it('grows the card with the window the user resized it to', () => {
+    const small = pipCardMetrics(240, 135);
+    const large = pipCardMetrics(400, 225);
+
+    expect(large.icon).toBeGreaterThan(small.icon);
+    expect(large.headline).toBeGreaterThan(small.headline);
+    expect(large.padding).toBeGreaterThanOrEqual(small.padding);
+  });
+
+  it('stays readable at the extremes instead of scaling without limit', () => {
+    const tiny = pipCardMetrics(120, 68);
+    const huge = pipCardMetrics(1200, 675);
+
+    expect(tiny.icon).toBe(38);
+    expect(tiny.headline).toBe(26);
+    expect(huge.icon).toBe(76);
+    expect(huge.headline).toBe(48);
+  });
+
+  it('drops the arrival row in a window too short to hold it', () => {
+    expect(pipCardMetrics(160, 90).showFooter).toBe(false);
+    expect(pipCardMetrics(240, 135).showFooter).toBe(true);
   });
 });

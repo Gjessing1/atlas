@@ -18,7 +18,12 @@ export {
   formatExitSign,
   defaultRoutePreferences,
 } from './model.js';
-export { buildValhallaRequest, parseValhallaResponse, roundTripLocations } from './valhalla.js';
+export {
+  buildValhallaRequest,
+  parseValhallaResponse,
+  roundTripLocations,
+  type RoundTripStop,
+} from './valhalla.js';
 export {
   fetchRoute,
   httpTraceTransport,

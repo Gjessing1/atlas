@@ -79,7 +79,7 @@ describe('useRoute', () => {
     expect(result.current.paths![0]!.points).toEqual([A, B, C]);
   });
 
-  it('plans round trips from a single anchor and newLoop re-rolls the seed', async () => {
+  it('plans a loop from its anchor, re-rolls the seed, and takes stops on the way', async () => {
     const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
     const { result } = renderHook(() => useRoute(route));
 
@@ -95,10 +95,14 @@ describe('useRoute', () => {
     const q2 = route.mock.calls.at(-1)![0];
     expect(q2.roundTrip?.seed).toBe(1);
 
-    // Adding while in loop mode moves the single anchor instead of appending.
+    // A loop takes stops like any other plan: B is somewhere to go by way of,
+    // not a replacement anchor, and the query carries both points.
     act(() => result.current.addWaypoint(B));
-    expect(result.current.waypoints).toHaveLength(1);
-    expect(result.current.waypoints[0]!.pos).toEqual(B);
+    await settle();
+    expect(result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
+    const q3 = route.mock.calls.at(-1)![0];
+    expect(q3.points).toEqual([A, B]);
+    expect(q3.roundTrip?.distanceM).toBe(25_000);
   });
 
   it('turns a loop into a route from its anchor when a destination is added', async () => {
@@ -320,7 +324,7 @@ describe('useRoute', () => {
     expect(reloaded.result.current.preferences.preferTrails).toBe(false);
   });
 
-  it('round-trips a loop plan, and keeps only its anchor', () => {
+  it('round-trips a loop plan, stops and all', () => {
     const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
     const { result } = renderHook(() => useRoute(route));
 
@@ -334,7 +338,8 @@ describe('useRoute', () => {
     });
 
     const reloaded = renderHook(() => useRoute(route));
-    // Extra stops in a loop plan are inconsistent; the anchor wins.
+    // A shared loop keeps the places it was planned through — dropping them
+    // would reopen the link as a different trip of the same length.
     act(() =>
       reloaded.result.current.restore({
         profile: 'foot',
@@ -344,7 +349,7 @@ describe('useRoute', () => {
     );
     expect(reloaded.result.current.roundTrip).toBe(true);
     expect(reloaded.result.current.roundTripKm).toBe(8);
-    expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A]);
+    expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
   });
 
   it('ignores a restore with no stops', () => {

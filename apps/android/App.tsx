@@ -5,6 +5,7 @@ import {
   useMapStyleEditor,
   useNavAddStop,
   useNavPrefs,
+  useNavResume,
   useThemeMode,
   type FetchNearbyFn,
 } from '@atlas/app-hooks';
@@ -58,6 +59,7 @@ import { useMapStyle } from './src/map/useMapStyle';
 import { useTileSource } from './src/map/useTileSource';
 import type { LocalPack } from './src/regions/packs';
 import { AddStopSheet, NavStopTapCard } from './src/nav/AddStopSheet';
+import { NavResumeCard } from './src/nav/NavResumeCard';
 import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
 import { NavPipCard } from './src/nav/NavPipCard';
@@ -275,6 +277,18 @@ function AppInner() {
   const landscape = viewport.landscape;
   // Mute and map orientation survive across trips (device-local, web parity).
   const navPrefs = useNavPrefs(data, nav);
+  // A trip that died with the process — killed foreground service, crash, a
+  // cold start after too long away — is offered back on the next launch.
+  const navResume = useNavResume(data, {
+    phase: nav.phase,
+    destination: nav.destination,
+    viaPoints: nav.viaPoints,
+    viasPassed: nav.state?.viasPassed ?? 0,
+    profile: nav.profile,
+    preferences: nav.preferences,
+    remainingM: nav.state?.distanceRemainingM ?? null,
+    resume: nav.resume,
+  });
   // The follow camera uses the same responsive viewport as the visible puck:
   // centred in portrait, or in the unobstructed right pane in landscape.
   const navCam = useNavCamera(cameraRef, nav, navPrefs.followMode, viewport, inPip ? 0 : navHeight);
@@ -632,11 +646,13 @@ function AppInner() {
         onUserGesture={navCam.onUserGesture}
         onDestinationMoved={dest.onMoved}
       />
-      {/* In the mini window the map is the whole point: the compact guidance
-          card replaces every piece of normal chrome, and no sheet, banner or
-          control is rendered at a size where it could only be mis-tapped.
-          Expanding restores all of it — the same trip, camera and follow mode,
-          because MapScene and the navigation session were never unmounted. */}
+      {/* In the mini window the maneuver is the whole point: the guidance card
+          covers the map and replaces every piece of normal chrome, and no
+          sheet, banner or control is rendered at a size where it could only be
+          mis-tapped. A postage stamp of map is not something anyone can read at
+          a glance; which way and how far is. Expanding restores all of it — the
+          same trip, camera and follow mode, because MapScene and the navigation
+          session were never unmounted. */}
       {inPip ? (
         <NavPipCard nav={nav} />
       ) : (
@@ -677,6 +693,7 @@ function AppInner() {
             widgets={navPrefs.widgets}
             onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
             onHeight={setNavHeight}
+            onRect={pip.setBannerRect}
           />
 
           {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}
@@ -824,6 +841,19 @@ function AppInner() {
                 dest.clear();
               }}
               onClose={dest.clear}
+            />
+          ) : null}
+
+          {/* Offered on an idle map only: while planning or navigating, the trip
+          the user is busy with wins over the one they lost. */}
+          {navResume.resumable && showIdleChrome ? (
+            <NavResumeCard
+              trip={navResume.resumable}
+              bottom={bottomInset + 16}
+              left={side.left + 12}
+              right={side.right + 12}
+              onResume={navResume.resume}
+              onDismiss={navResume.dismiss}
             />
           ) : null}
 

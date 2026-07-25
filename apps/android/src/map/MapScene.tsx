@@ -3,6 +3,7 @@ import {
   bboxOutlinesFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  waypointLabel,
   type BBox,
   type LatLng,
 } from '@atlas/core';
@@ -804,12 +805,10 @@ export function MapScene({
                 }}
               >
                 <View style={styles.wpMarker}>
+                  {/* The panel's row and this pin must say the same thing, so
+                    both read the one label function. */}
                   <Text style={styles.wpMarkerText}>
-                    {route.roundTrip || route.waypoints.length === 1
-                      ? '⟳'
-                      : i < 26
-                        ? String.fromCharCode(65 + i)
-                        : String(i + 1)}
+                    {waypointLabel(i, route.roundTrip, route.waypoints.length)}
                   </Text>
                 </View>
               </ViewAnnotation>

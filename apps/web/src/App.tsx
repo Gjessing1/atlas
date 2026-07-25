@@ -1,6 +1,7 @@
 import {
   atlasShareUrl,
   decodeMapHash,
+  fmtDistanceM,
   haversineM,
   mapProfile,
   placeIsVisible,
@@ -21,6 +22,7 @@ import {
   useMapStyleEditor,
   useNavAddStop,
   useNavPrefs,
+  useNavResume,
   useThemeMode,
   type FetchNearbyFn,
 } from '@atlas/app-hooks';
@@ -225,6 +227,18 @@ export function App() {
   const navMoving = nav.phase === 'navigating' || nav.phase === 'rerouting';
   // Mute and map orientation survive across trips (device-local, Android parity).
   const navPrefs = useNavPrefs(userData, nav);
+  // A reloaded or crashed tab loses the trip exactly as a killed Android
+  // process does; the same record offers it back (device-local, never synced).
+  const navResume = useNavResume(userData, {
+    phase: nav.phase,
+    destination: nav.destination,
+    viaPoints: nav.viaPoints,
+    viasPassed: nav.state?.viasPassed ?? 0,
+    profile: nav.profile,
+    preferences: nav.preferences,
+    remainingM: nav.state?.distanceRemainingM ?? null,
+    resume: nav.resume,
+  });
   const follow = useNavLayers(map, nav, navPrefs.followMode);
   const { start: startNav } = nav;
   const { stop: stopRoute } = route;
@@ -659,6 +673,35 @@ export function App() {
           <SettingsIcon size={18} />
         </button>
       </div>
+      {/* Only on an idle map: a trip in progress outranks a lost one. */}
+      {nav.phase === 'idle' && navResume.resumable && (
+        <div className="nav-resume" data-testid="nav-resume-card">
+          <div className="nav-resume-text">
+            <div className="nav-resume-title">Resume navigation?</div>
+            <div className="nav-resume-detail">
+              {navResume.resumable.remainingM !== null
+                ? `${fmtDistanceM(navResume.resumable.remainingM)} to go`
+                : 'Your last trip was interrupted'}
+              {navResume.resumable.vias.length > 0
+                ? ` · ${navResume.resumable.vias.length} stop${
+                    navResume.resumable.vias.length === 1 ? '' : 's'
+                  } left`
+                : ''}
+            </div>
+          </div>
+          <button type="button" className="nav-resume-go" onClick={navResume.resume}>
+            Resume
+          </button>
+          <button
+            type="button"
+            className="nav-resume-dismiss"
+            aria-label="Dismiss"
+            onClick={navResume.dismiss}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}

@@ -126,6 +126,13 @@ export interface NavController {
   /** The route being followed (instructions included, for on-map turn arrows). */
   activePath: RoutePath | null;
   profile: RoutingProfile;
+  /**
+   * The planner's routing choices this trip was built with (avoid tolls,
+   * ferries …), or null when it uses the profile's defaults. Exposed so a trip
+   * can be recorded and restarted exactly as planned — a resumed drive that
+   * quietly dropped "avoid tolls" would be a different drive.
+   */
+  preferences: Partial<RoutePreferences> | null;
   /** Where the trip is headed (for the finish marker); null when idle. */
   destination: LatLng | null;
   /**
@@ -207,6 +214,20 @@ export interface NavController {
   setProfile: (profile: RoutingProfile) => void;
   /** Begin guidance along the selected preview choice. */
   go: () => Promise<void>;
+  /**
+   * Pick an interrupted trip back up: route from the current position to the
+   * same destination through the stops still ahead, and start guiding — no
+   * preview, because the traveller already chose this trip once and is being
+   * offered it back after a crash or a process death, not asked to plan it
+   * again. The route is fetched fresh for exactly that reason: after a gap the
+   * useful line starts from where they are now.
+   */
+  resume: (
+    destination: LatLng,
+    profile: RoutingProfile,
+    preferences?: Partial<RoutePreferences>,
+    vias?: LatLng[],
+  ) => Promise<void>;
   toggleMute: () => void;
   /** Set mute directly (the persisted preference applies through this). */
   setMuted: (muted: boolean) => void;
@@ -257,6 +278,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
   const [activePath, setActivePath] = useState<RoutePath | null>(null);
   const [profile, setProfileState] = useState<RoutingProfile>('car');
+  const [preferences, setPreferencesState] = useState<Partial<RoutePreferences> | null>(null);
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [viaPoints, setViaPoints] = useState<LatLng[]>([]);
   const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
@@ -511,6 +533,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setViaPoints([]);
       originRef.current = null;
       preferencesRef.current = undefined;
+      setPreferencesState(null);
       startInFlight.current = false;
       rerouteInFlight.current = false;
       rerouteBackoffUntil.current = 0;
@@ -550,6 +573,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setViaPoints([]);
       originRef.current = null;
       preferencesRef.current = undefined;
+      setPreferencesState(null);
       clearFasterOffer();
       setDestination(null);
       setError(message(err));
@@ -891,6 +915,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         originRef.current = origin;
         profileRef.current = prof;
         preferencesRef.current = preferences;
+        setPreferencesState(preferences ?? null);
         setProfileState(prof);
         setDestination(dest);
         setSpeedMps(null);
@@ -938,6 +963,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           if (seq !== previewSeq.current) return;
           profileRef.current = prof;
           preferencesRef.current = undefined;
+          setPreferencesState(null);
           setProfileState(prof);
           setPreviewPaths(paths);
           setPreviewIndex(0);
@@ -950,6 +976,50 @@ export function useNavigationController(platform: NavPlatform): NavController {
       })();
     },
     [fetchChoices],
+  );
+
+  /**
+   * Hand a chosen path to a fresh session and start guiding along it — the
+   * moment a *plan* becomes a *trip*, shared by Start and by resuming an
+   * interrupted one. Everything here is about the trip beginning: a session
+   * that has not departed yet, a zeroed distance bank, the fix watch, and the
+   * departure prompt that answers "which way now?".
+   */
+  const beginGuidance = useCallback(
+    async (path: RoutePath, origin: NavOriginFix | null) => {
+      tripSeq.current++;
+      const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
+      sessionRef.current = session;
+      offRouteSpokenRef.current = false;
+      enrich(session, path);
+      tripStartRef.current = Date.now();
+      traveledBaseRef.current = 0;
+      lastStateRef.current = null;
+      setTripSummary(null);
+      setState(null);
+      setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
+      setActivePath(path);
+      clearPreview();
+
+      stopWatch();
+      const stopFixes = await platformRef.current.watchFixes(onFix);
+      // End (or another trip) while the watch was starting: don't leave one live.
+      if (sessionRef.current !== session) {
+        stopFixes();
+        return;
+      }
+      watchStopRef.current = stopFixes;
+      setPhase('navigating');
+      // Guidance used to be silent until the first approach threshold —
+      // exactly when the traveller wonders "which way?".
+      const depart = session.departurePrompt();
+      if (depart) speak(depart.text);
+      // Show a state at once rather than waiting for the watch's first fix,
+      // but only if the origin fix is still recent — someone who studied the
+      // choices for a minute has moved, and a stale fix misplaces the puck.
+      if (origin && Date.now() - origin.atMs < ORIGIN_FRESH_MS) onFix(origin.fix);
+    },
+    [platformRef, enrich, clearPreview, stopWatch, onFix, speak],
   );
 
   const go = useCallback(async () => {
@@ -987,37 +1057,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
       // Cancel or profile switch while the refresh was in flight invalidates it.
       if (seq !== previewSeq.current || !destRef.current) return;
-      tripSeq.current++;
-      const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
-      sessionRef.current = session;
-      offRouteSpokenRef.current = false;
-      enrich(session, path);
-      tripStartRef.current = Date.now();
-      traveledBaseRef.current = 0;
-      lastStateRef.current = null;
-      setTripSummary(null);
-      setState(null);
-      setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-      setActivePath(path);
-      clearPreview();
-
-      stopWatch();
-      const stopFixes = await platformRef.current.watchFixes(onFix);
-      // End (or another trip) while the watch was starting: don't leave one live.
-      if (sessionRef.current !== session) {
-        stopFixes();
-        return;
-      }
-      watchStopRef.current = stopFixes;
-      setPhase('navigating');
-      // Guidance used to be silent until the first approach threshold —
-      // exactly when the traveller wonders "which way?".
-      const depart = session.departurePrompt();
-      if (depart) speak(depart.text);
-      // Show a state at once rather than waiting for the watch's first fix,
-      // but only if the origin fix is still recent — someone who studied the
-      // choices for a minute has moved, and a stale fix misplaces the puck.
-      if (origin && Date.now() - origin.atMs < ORIGIN_FRESH_MS) onFix(origin.fix);
+      await beginGuidance(path, origin);
     } catch (err) {
       fail(err);
     } finally {
@@ -1025,18 +1065,62 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // this only rescues the early returns above from a stuck spinner.
       if (seq === previewSeq.current) setPreviewLoading(false);
     }
-  }, [
-    platformRef,
-    previewPathsRef,
-    previewIndexRef,
-    fetchChoices,
-    enrich,
-    clearPreview,
-    stopWatch,
-    onFix,
-    speak,
-    fail,
-  ]);
+  }, [platformRef, previewPathsRef, previewIndexRef, fetchChoices, beginGuidance, fail]);
+
+  /**
+   * Restart an interrupted trip: same destination, same stops still ahead, same
+   * mode and preferences — routed from wherever the traveller is now, and
+   * guiding immediately. No preview, because this is not a new decision: it is
+   * the trip they were already on, handed back after the process died under
+   * them. The route is deliberately re-fetched rather than restored: minutes
+   * may have passed, and a line drawn from where they *were* is the one thing
+   * that would make resuming worse than starting over.
+   */
+  const resume = useCallback(
+    async (
+      dest: LatLng,
+      prof: RoutingProfile,
+      preferencesOverride?: Partial<RoutePreferences>,
+      vias: LatLng[] = [],
+    ) => {
+      if (startInFlight.current) return;
+      startInFlight.current = true;
+      const seq = ++previewSeq.current;
+      setError(null);
+      setPhase('starting');
+      try {
+        const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
+        if (seq !== previewSeq.current) return;
+
+        destRef.current = dest;
+        viasRef.current = vias;
+        setViaPoints(vias);
+        originRef.current = origin;
+        profileRef.current = prof;
+        preferencesRef.current = preferencesOverride;
+        setPreferencesState(preferencesOverride ?? null);
+        setProfileState(prof);
+        setDestination(dest);
+        setSpeedMps(null);
+        setAltitudeM(null);
+
+        const path = await fetchPath(origin.fix, dest, prof, preferencesOverride, undefined, vias);
+        if (seq !== previewSeq.current) return;
+        // Cleared here rather than in `finally`: `beginGuidance` bumps the
+        // preview sequence itself (it clears any preview), so by the time the
+        // finally runs this resume no longer looks like the current one and
+        // would leave the double-tap guard latched on for good.
+        startInFlight.current = false;
+        await beginGuidance(path, origin);
+      } catch (err) {
+        if (seq !== previewSeq.current) return;
+        fail(err);
+      } finally {
+        if (seq === previewSeq.current) startInFlight.current = false;
+      }
+    },
+    [platformRef, fetchPath, beginGuidance, fail],
+  );
 
   const guiding = phase === 'navigating' || phase === 'rerouting';
 
@@ -1156,6 +1240,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     routeCoords,
     activePath,
     profile,
+    preferences,
     destination,
     viaPoints,
     previewPaths,
@@ -1182,6 +1267,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     selectPreview: setPreviewIndex,
     setProfile,
     go,
+    resume,
     toggleMute,
     setMuted,
     arriveNow,

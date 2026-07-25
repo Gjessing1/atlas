@@ -17,7 +17,8 @@
     "dev:backend": "npm run dev -w @atlas/backend",
     "dev:web": "npm run dev -w @atlas/web",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "_comment:test": "Timeouts are raised well above vitest's 5s/10s defaults for one reason: the gate runs inside a docker build on a host that is also serving everything else, and a loaded runner has turned a 1.7s inject test into a 5s timeout — a red build with nothing wrong in it, which silently leaves the last release undeployed. A hang still fails, just later.",
+    "test": "npm run test --workspaces --if-present -- --testTimeout=30000 --hookTimeout=60000",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

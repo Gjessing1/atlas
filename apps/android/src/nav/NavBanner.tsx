@@ -156,6 +156,7 @@ export function NavBanner({
   widgets,
   onAddStop,
   onHeight,
+  onRect,
 }: {
   nav: NavController;
   topInset?: number;
@@ -169,6 +170,12 @@ export function NavBanner({
   onAddStop: () => void;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
+  /**
+   * Reports where the banner sits in the window (dp) — picture-in-picture
+   * shrinks the activity into exactly this rectangle, so the transition folds
+   * up the guidance rather than the whole screen.
+   */
+  onRect?: (rect: { x: number; y: number; width: number; height: number }) => void;
 }) {
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
@@ -222,7 +229,13 @@ export function NavBanner({
     >
       <View
         style={[styles.card, landscape && styles.cardCompact]}
-        onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+        onLayout={(e) => {
+          const { x, y, width, height } = e.nativeEvent.layout;
+          onHeight?.(height);
+          // The card is laid out inside the absolutely positioned wrap above,
+          // so its window position is that wrap's offset plus its own.
+          onRect?.({ x: viewport.guidanceLeft + x, y: topInset + 8 + y, width, height });
+        }}
       >
         {nav.phase === 'starting' ? (
           <View style={styles.stateBlock}>

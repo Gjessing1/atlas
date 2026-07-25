@@ -1,5 +1,5 @@
 import {
-  bestMediaWikiPlacePage,
+  bestMediaWikiPlaceMatch,
   commonsPlacePhotos,
   hasWikivoyage,
   mediaWikiThumbnail,
@@ -9,6 +9,7 @@ import {
   type MediaWikiImagePage,
   type MediaWikiPlacePage,
   type PlaceContent,
+  type PlaceMatchStrength,
 } from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
 
@@ -79,11 +80,17 @@ export function registerPlaceContentApi(
     const languages = wikiLanguageChain(request.query.lang, at);
     reply.header('Cache-Control', 'public, max-age=86400');
 
+    /** A candidate article plus how well its title answered the place's name. */
+    interface Candidate {
+      content: PlaceContent;
+      strength: PlaceMatchStrength;
+    }
+
     const loadLanguage = async (
       source: PlaceContent['source'],
       project: 'wikipedia' | 'wikivoyage',
       contentLanguage: string,
-    ): Promise<PlaceContent | null> => {
+    ): Promise<Candidate | null> => {
       const url = new URL(`https://${contentLanguage}.${project}.org/w/api.php`);
       for (const [key, value] of Object.entries({
         action: 'query',
@@ -114,19 +121,23 @@ export function registerPlaceContentApi(
           signal: AbortSignal.timeout(5_000),
         });
         if (!response.ok) return null;
-        const page = bestMediaWikiPlacePage(
+        const match = bestMediaWikiPlaceMatch(
           name,
           at,
           pagesOf((await response.json()) as MediaWikiResponse),
         );
-        if (!page?.title || !page.extract || !page.fullurl) return null;
+        const page = match?.page;
+        if (!match || !page?.title || !page.extract || !page.fullurl) return null;
         return {
-          source,
-          title: page.title,
-          extract: page.extract,
-          url: page.fullurl,
-          language: contentLanguage,
-          image: mediaWikiThumbnail(page),
+          strength: match.strength,
+          content: {
+            source,
+            title: page.title,
+            extract: page.extract,
+            url: page.fullurl,
+            language: contentLanguage,
+            image: mediaWikiThumbnail(page),
+          },
         };
       } catch {
         return null;
@@ -135,20 +146,30 @@ export function registerPlaceContentApi(
 
     /**
      * The reader's language, then the local one, then English (see
-     * `wikiLanguageChain`). Sequential and first-hit-wins: an editon that has
-     * the article usually answers on the first or second try, and asking all of
-     * them in parallel would triple the load on Wikimedia to discard most of it.
+     * `wikiLanguageChain`). Sequential: an edition that has the article usually
+     * answers on the first or second try, and asking all of them in parallel
+     * would triple the load on Wikimedia to discard most of it.
+     *
+     * An article actually *named* after the place ends the walk. A merely
+     * broader one does not: a pin on "Asker rådhus" matches the article "Asker"
+     * in every big edition, and stopping there would hand a reader the
+     * municipality while the Norwegian article about the town hall itself sat
+     * one request away. The broad hit is kept as a fallback — first one wins, so
+     * it stays in the reader's own language — and used only if no edition names
+     * the place.
      */
     const load = async (
       source: PlaceContent['source'],
       project: 'wikipedia' | 'wikivoyage',
     ): Promise<PlaceContent | null> => {
+      let fallback: PlaceContent | null = null;
       for (const contentLanguage of languages) {
         if (project === 'wikivoyage' && !hasWikivoyage(contentLanguage)) continue;
         const found = await loadLanguage(source, project, contentLanguage);
-        if (found) return found;
+        if (found?.strength === 'named') return found.content;
+        if (found && !fallback) fallback = found.content;
       }
-      return null;
+      return fallback;
     };
 
     const content = (

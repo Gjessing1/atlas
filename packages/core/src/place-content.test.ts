@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bestMediaWikiPlacePage,
+  bestMediaWikiPlaceMatch,
   commonsPlacePhotos,
   mergeNearbyMediaWikiPlaces,
   nearbyMediaWikiPlaces,
@@ -8,7 +8,7 @@ import {
 
 const at = { lat: 59.911, lng: 10.752 };
 
-describe('bestMediaWikiPlacePage', () => {
+describe('bestMediaWikiPlaceMatch', () => {
   it('prefers the matching title over a slightly nearer unrelated page', () => {
     const match = {
       title: 'Oslo Central Station',
@@ -17,7 +17,7 @@ describe('bestMediaWikiPlacePage', () => {
       coordinates: [{ lat: 59.9109, lon: 10.753 }],
     };
     expect(
-      bestMediaWikiPlacePage('Oslo Central Station', at, [
+      bestMediaWikiPlaceMatch('Oslo Central Station', at, [
         {
           title: 'Oslo',
           extract: 'Capital city.',
@@ -26,12 +26,37 @@ describe('bestMediaWikiPlacePage', () => {
         },
         match,
       ]),
-    ).toBe(match);
+    ).toEqual({ page: match, strength: 'named' });
+  });
+
+  it('reports the containing place as a broader match, not as the place itself', () => {
+    // The case that sent a reader looking for Asker's town hall the article
+    // about the municipality: every large edition has "Asker", only the
+    // Norwegian one has "Asker rådhus".
+    const municipality = {
+      title: 'Asker',
+      extract: 'A municipality in Akershus.',
+      fullurl: 'https://de.wikipedia.org/wiki/Asker',
+      coordinates: [{ lat: 59.8353, lon: 10.435 }],
+    };
+    expect(
+      bestMediaWikiPlaceMatch('Asker rådhus', { lat: 59.8371, lng: 10.4362 }, [municipality]),
+    ).toEqual({ page: municipality, strength: 'broader' });
+  });
+
+  it('treats a title that spells the whole name out as naming the place', () => {
+    const page = {
+      title: 'Preikestolen (fjell)',
+      extract: 'The cliff.',
+      fullurl: 'https://no.wikipedia.org/wiki/Preikestolen_(fjell)',
+      coordinates: [{ lat: at.lat, lon: at.lng }],
+    };
+    expect(bestMediaWikiPlaceMatch('Preikestolen', at, [page])?.strength).toBe('named');
   });
 
   it('rejects an unrelated article even when it is at the selected point', () => {
     expect(
-      bestMediaWikiPlacePage('My hotel', at, [
+      bestMediaWikiPlaceMatch('My hotel', at, [
         {
           title: 'Oslo Cathedral',
           extract: 'A cathedral.',
@@ -42,9 +67,22 @@ describe('bestMediaWikiPlacePage', () => {
     ).toBeNull();
   });
 
+  it('does not match a title that is only a substring of a word', () => {
+    expect(
+      bestMediaWikiPlaceMatch('Lomsdalen skole', { lat: 61.84, lng: 8.57 }, [
+        {
+          title: 'Lom',
+          extract: 'A municipality in Innlandet.',
+          fullurl: 'https://no.wikipedia.org/wiki/Lom',
+          coordinates: [{ lat: 61.8399, lon: 8.5701 }],
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it('never attaches a nearby article to a bare coordinate pin', () => {
     expect(
-      bestMediaWikiPlacePage('59.9110, 10.7520', at, [
+      bestMediaWikiPlaceMatch('59.9110, 10.7520', at, [
         {
           title: 'Oslo Cathedral',
           extract: 'A cathedral.',

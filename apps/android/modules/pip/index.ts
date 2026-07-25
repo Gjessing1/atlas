@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule, type EventSubscription } from 'expo-modules-core';
+import { PixelRatio } from 'react-native';
 
 /**
  * Picture-in-picture for active navigation.
@@ -13,6 +14,7 @@ interface PipNativeModule {
   isSupported(): boolean;
   isAllowed(): boolean;
   setActive(on: boolean): void;
+  setSourceRect(x: number, y: number, width: number, height: number): void;
   inPictureInPicture(): boolean;
   addListener(
     event: 'onPictureInPictureChange',
@@ -46,6 +48,33 @@ export function setPipActive(on: boolean): void {
     Native?.setActive(on);
   } catch {
     // A finishing activity — nothing to arm.
+  }
+}
+
+/**
+ * Where the guidance banner sits (dp, window coordinates) — the patch of screen
+ * the mini window is about to become.
+ *
+ * Android crops the shrinking activity to this rectangle, so it decides what
+ * the transition appears to fold up: the banner, or (with no hint) the whole
+ * screen full of map and chrome. Pass null while nothing is being guided.
+ */
+export function setPipSourceRect(
+  rect: { x: number; y: number; width: number; height: number } | null,
+): void {
+  try {
+    const scale = PixelRatio.get();
+    if (!rect) Native?.setSourceRect(0, 0, 0, 0);
+    else
+      Native?.setSourceRect(
+        Math.round(rect.x * scale),
+        Math.round(rect.y * scale),
+        Math.round(rect.width * scale),
+        Math.round(rect.height * scale),
+      );
+  } catch {
+    // Older build without the function, or a finishing activity: the module
+    // falls back to the whole content view, which is what it always used.
   }
 }
 

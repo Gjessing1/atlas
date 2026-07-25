@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import { waypointLabel, type LatLng } from '@atlas/core';
 import { viaInsertIndex, type RoutePath } from '@atlas/routing';
 import type { Feature, FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
@@ -222,12 +222,9 @@ export function useRouteLayers(
       }
     }
     wanted.forEach((waypoint, index) => {
-      const label =
-        route.roundTrip || wanted.length === 1
-          ? '⟳'
-          : index < 26
-            ? String.fromCharCode(65 + index)
-            : String(index + 1);
+      // The panel's row and this pin must say the same thing, so both read the
+      // one label function rather than each spelling the alphabet out.
+      const label = waypointLabel(index, route.roundTrip, wanted.length);
       let marker = markers.get(waypoint.id);
       if (!marker) {
         const el = document.createElement('div');

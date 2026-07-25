@@ -32,6 +32,14 @@ class PipModule : Module() {
   /** True while guidance wants the mini window (and the user has it enabled). */
   private var active = false
   private var listeningTo = WeakReference<ComponentActivity>(null)
+  /**
+   * Where on screen the content that continues in the mini window is drawn —
+   * the maneuver banner, reported by React as it lays out. The system crops the
+   * shrinking activity to this, so with the whole screen as the hint the
+   * transition folded the entire UI into the window and the driver watched the
+   * map, sheets and buttons squeeze past the one thing they were keeping.
+   */
+  private var sourceRect: Rect? = null
 
   private val activity: Activity?
     get() = appContext.activityProvider?.currentActivity
@@ -75,6 +83,27 @@ class PipModule : Module() {
       }
     }
 
+    /**
+     * Point the shrink animation at the guidance banner (device pixels, window
+     * coordinates). A width of 0 clears it, falling back to the whole content
+     * view. Params are re-applied straight away so the hint is already current
+     * when the system enters PiP by itself on Android 12+.
+     */
+    Function("setSourceRect") { x: Int, y: Int, width: Int, height: Int ->
+      val next = if (width > 0 && height > 0) Rect(x, y, x + width, y + height) else null
+      if (next == sourceRect) return@Function
+      sourceRect = next
+      val current = activity as? ComponentActivity ?: return@Function
+      if (!active || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function
+      current.runOnUiThread {
+        try {
+          current.setPictureInPictureParams(params(current, autoEnter = true))
+        } catch (err: IllegalStateException) {
+          // Finishing activity — the next setActive will carry the rect.
+        }
+      }
+    }
+
     /** Whether the activity is in PiP right now (for the first render). */
     Function("inPictureInPicture") {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity?.isInPictureInPictureMode == true
@@ -94,6 +123,7 @@ class PipModule : Module() {
 
     OnActivityDestroys {
       active = false
+      sourceRect = null
       listeningTo.clear()
     }
   }
@@ -113,14 +143,15 @@ class PipModule : Module() {
   }
 
   /**
-   * A 16:9 window sized from the map itself, so the shrink animation flies out
-   * of the map rather than out of nowhere. Seamless resize is off: the mini
-   * window holds a map and a maneuver, not a video, and stretching that while it
-   * re-lays out looks broken.
+   * A 16:9 window that flies out of the guidance banner — the content it is
+   * about to hold — falling back to the whole view before React has reported
+   * where that banner is. Seamless resize is off: the window holds a maneuver
+   * card, not a video, and stretching type while it re-lays out looks broken;
+   * the system crossfades instead and the card lays out at the new size.
    */
   private fun params(current: Activity, autoEnter: Boolean): PictureInPictureParams {
     val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
-    contentRect(current)?.let { builder.setSourceRectHint(it) }
+    (sourceRect ?: contentRect(current))?.let { builder.setSourceRectHint(it) }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       builder.setAutoEnterEnabled(autoEnter)
       builder.setSeamlessResizeEnabled(false)

@@ -125,24 +125,52 @@ function normaliseName(value: string): string {
     .trim();
 }
 
+/** Whole-word containment: "asker" is inside "asker radhus", "ker" is not. */
+function containsWords(haystack: string, needle: string): boolean {
+  return ` ${haystack} `.includes(` ${needle} `);
+}
+
+/**
+ * How well a page answers the name that was asked about.
+ *
+ * `named` — the article is about this place (same title, or a longer one that
+ * spells the whole name out: "Preikestolen (fjell)"). `broader` — it is about
+ * something the place merely belongs to, or a fuzzy neighbour: the article
+ * "Asker" for a pin on *Asker rådhus* is the municipality, not the town hall.
+ * Both are worth showing; only the first is worth stopping the search for.
+ */
+export type PlaceMatchStrength = 'named' | 'broader';
+
+/** The chosen page and how confidently it was chosen. */
+export interface MediaWikiPlaceMatch {
+  page: MediaWikiPlacePage;
+  strength: PlaceMatchStrength;
+}
+
 /**
  * Pick the page that most plausibly describes the selected POI.
  *
  * Nearby-page APIs can return a church, district, station and monument in the
- * same few hundred metres. An exact/contained title wins; otherwise a page is
- * accepted only when it is very close to the selected point. That keeps a
- * dropped pin beside a landmark from claiming the landmark's article.
+ * same few hundred metres. A title that spells out the place's name wins;
+ * otherwise a page is accepted only when it is very close to the selected
+ * point, or when it names something the place is part of. That keeps a dropped
+ * pin beside a landmark from claiming the landmark's article.
+ *
+ * The caller is told *which* of those it got, because the two deserve different
+ * treatment when several Wikipedia editions are being asked in turn: an article
+ * actually named after the place ends the search, while a broader one is only
+ * a fallback worth keeping if no edition does better.
  */
-export function bestMediaWikiPlacePage(
+export function bestMediaWikiPlaceMatch(
   placeName: string,
   at: LatLng,
   pages: readonly MediaWikiPlacePage[],
-): MediaWikiPlacePage | null {
+): MediaWikiPlaceMatch | null {
   const wanted = normaliseName(placeName);
   // Bare coordinate pins are place-card titles too, but never article names.
   if (!wanted || !/\p{L}/u.test(wanted)) return null;
   const wantedTokens = new Set(wanted.split(' '));
-  let best: { page: MediaWikiPlacePage; score: number } | null = null;
+  let best: (MediaWikiPlaceMatch & { score: number }) | null = null;
 
   for (const page of pages) {
     if (!page.title?.trim() || !page.extract?.trim() || !page.fullurl) continue;
@@ -157,19 +185,24 @@ export function bestMediaWikiPlacePage(
     for (const token of wantedTokens) if (titleTokens.has(token)) overlap++;
     const similarity = overlap / Math.max(wantedTokens.size, titleTokens.size, 1);
     const exact = title === wanted;
-    const contains = title.includes(wanted) || wanted.includes(title);
+    // Spells the name out (the article is at least as specific as the pin) …
+    const covers = !exact && containsWords(title, wanted);
+    // … or names something larger the pin sits inside.
+    const inside = !exact && !covers && containsWords(wanted, title);
 
     // A fuzzy title is useful only at the POI itself. Exact names can tolerate
     // a larger coordinate mismatch because large features often pin their
     // Wikipedia coordinate at an entrance or centroid.
-    if (!exact && !contains && (similarity < 0.5 || distanceM > 90)) continue;
+    if (!exact && !covers && !inside && (similarity < 0.5 || distanceM > 90)) continue;
     if (!exact && distanceM > 1_500) continue;
 
     const score =
-      (exact ? 10_000 : contains ? 6_000 : similarity * 3_000) - Math.min(distanceM, 5_000);
-    if (!best || score > best.score) best = { page, score };
+      (exact ? 10_000 : covers ? 6_000 : inside ? 4_000 : similarity * 3_000) -
+      Math.min(distanceM, 5_000);
+    if (best && score <= best.score) continue;
+    best = { page, strength: exact || covers ? 'named' : 'broader', score };
   }
-  return best?.page ?? null;
+  return best ? { page: best.page, strength: best.strength } : null;
 }
 
 /**

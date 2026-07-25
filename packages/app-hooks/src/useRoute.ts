@@ -188,7 +188,9 @@ export function useRoute(route: RouteFn): RoutePlanner {
         ? {
             profile,
             preferences,
-            points: [waypoints[0]!.pos],
+            // Every stop, not just the anchor: a loop through the places the
+            // traveller planned, sized to the requested distance.
+            points: waypoints.map((w) => w.pos),
             roundTrip: { distanceM: roundTripKm * 1000, seed },
           }
         : {
@@ -296,9 +298,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
       });
       setRoundTripState(loop);
       if (loop) setRoundTripKm(plan.roundTripKm!);
-      // A loop has one anchor no matter how many stops the caller handed over.
-      const stops = loop ? plan.waypoints.slice(0, 1) : plan.waypoints;
-      setWaypoints(stops.map((w) => nextWaypoint(w.pos, w.name)));
+      setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name)));
     },
     [nextWaypoint],
   );
@@ -340,11 +340,12 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const addWaypoint = useCallback(
     (pos: LatLng, name?: string) => {
       const wp = nextWaypoint(pos, name);
-      // A round trip has exactly one anchor: adding again moves it.
-      setWaypoints((wps) => (roundTrip ? [wp] : [...wps, wp]));
+      // Loops take stops like any other plan — they are places to ride past on
+      // the way round, and the route returns to the start regardless.
+      setWaypoints((wps) => [...wps, wp]);
       return wp.id;
     },
-    [roundTrip, nextWaypoint],
+    [nextWaypoint],
   );
 
   // Both halves of "route me there" in one commit, so neither reads the
@@ -423,10 +424,13 @@ export function useRoute(route: RouteFn): RoutePlanner {
     });
   }, []);
 
+  // Loop mode is a change of *shape*, not a new plan: the stops entered so far
+  // are kept and the route simply comes back to the start through them. It used
+  // to drop everything but the starting point, so ticking "round trip" on a
+  // planned route silently deleted the destination and drew an arbitrary loop
+  // of the requested length instead.
   const setRoundTrip = useCallback((on: boolean) => {
     setRoundTripState(on);
-    // Entering loop mode keeps only the starting point.
-    if (on) setWaypoints((wps) => wps.slice(0, 1));
   }, []);
 
   const newLoop = useCallback(() => {

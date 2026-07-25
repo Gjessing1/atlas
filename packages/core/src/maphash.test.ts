@@ -58,11 +58,16 @@ describe('map hash', () => {
     expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
   });
 
-  it('drops a loop length that contradicts a multi-stop plan', () => {
+  it('keeps the stops of a loop that has some', () => {
     const plan = decodeMapHash(
       '#map=10/59.91/10.75&route=car/59.91,10.75/60.1,10.9&loop=12',
     )?.route;
     expect(plan?.points).toHaveLength(2);
+    expect(plan?.roundTripKm).toBe(12);
+  });
+
+  it('ignores a loop length that is not a distance', () => {
+    const plan = decodeMapHash('#map=10/59.91/10.75&route=car/59.91,10.75&loop=0')?.route;
     expect(plan?.roundTripKm).toBeUndefined();
   });
 

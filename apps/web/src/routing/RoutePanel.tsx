@@ -28,7 +28,7 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { PlaceRecord } from '@atlas/storage';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
 import { TransitResults } from './TransitResults.js';
@@ -103,11 +103,13 @@ function StopSearch({
     initialQuery,
     limit: 8,
   });
+  const input = useRef<HTMLInputElement>(null);
 
   return (
     <div className="route-stop-search">
       <div className="route-stop-input-row">
         <input
+          ref={input}
           type="search"
           placeholder={placeholder}
           value={query}
@@ -131,6 +133,12 @@ function StopSearch({
                 onClick={() => {
                   onPick(hit.position, hit.name);
                   reset();
+                  // Stay in the box: picking a result moves focus to the button
+                  // that then disappears, so every further stop cost a click
+                  // back into the field before it could be typed. A trip with
+                  // five stops is five stops, not five stops and five clicks.
+                  // (Not while re-pointing an existing stop — that editor closes.)
+                  if (!onCancel) input.current?.focus();
                 }}
               >
                 <span className="result-name">
@@ -479,48 +487,6 @@ export function RoutePanel({
           )}
         </div>
 
-        {/* While a stop is being re-pointed, the add-a-stop box stands down — two
-          open search boxes with two different meanings is how you end up
-          appending a stop you meant to replace. */}
-        {editing === null && (
-          <StopSearch
-            places={places}
-            geocode={geocode}
-            placeholder={
-              nextRole === 'start'
-                ? 'Start: address or saved place…'
-                : stops.length >= 2
-                  ? 'Add a stop…'
-                  : 'Destination: address or saved place…'
-            }
-            ariaLabel={nextRole === 'start' ? 'Search for a start' : 'Search for a destination'}
-            onPick={(position, name) => route.addWaypoint(position, name)}
-          />
-        )}
-
-        {/* "My location" always seeds the start — the commonest plan begins where
-          you are. Kept beside the "or click the map" reminder so both ways of
-          setting the start sit together. */}
-        {editing === null && (
-          <div className="route-source-row">
-            <button
-              type="button"
-              className="route-my-location"
-              disabled={locating}
-              onClick={() => void addMyLocation()}
-            >
-              {locating ? 'Locating…' : '◎ My location as start'}
-            </button>
-            <span className="route-hint">or click the map</span>
-          </div>
-        )}
-        {/* A silent no-op would read as a dead button; say why nothing happened. */}
-        {locateFailed && (
-          <p className="route-hint">
-            No location fix — check location permission, or click the map.
-          </p>
-        )}
-
         {!route.roundTrip && !transitMode && path && route.waypoints.length >= 2 && (
           <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />
         )}
@@ -534,7 +500,7 @@ export function RoutePanel({
                 <li
                   key={w.id}
                   className={dragIndex === i ? 'dragging' : undefined}
-                  draggable={!route.roundTrip && !isEditing}
+                  draggable={!isEditing}
                   onDragStart={() => setDragIndex(i)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => {
@@ -602,14 +568,73 @@ export function RoutePanel({
               : 'Click the map to add start and destination.'}
           </p>
         )}
+
+        {/* The always-empty next stop, sitting at the end of the list where the
+          stop it adds will appear — fill it and it clears itself for the one
+          after, so a five-stop trip is typed in one pass. It used to sit above
+          the list, which read as a search box for the plan rather than as its
+          next row. While a stop is being re-pointed it stands down: two open
+          search boxes with two different meanings is how you end up appending a
+          stop you meant to replace. */}
+        {editing === null && (
+          <StopSearch
+            places={places}
+            geocode={geocode}
+            placeholder={
+              nextRole === 'start'
+                ? 'Start: address or saved place…'
+                : // A loop comes home to its start, so nothing entered after the
+                  // first point is a destination — it is somewhere to go by way of.
+                  route.roundTrip || stops.length >= 2
+                  ? 'Add a stop…'
+                  : 'Destination: address or saved place…'
+            }
+            ariaLabel={
+              nextRole === 'start'
+                ? 'Search for a start'
+                : route.roundTrip
+                  ? 'Search for a stop on the loop'
+                  : 'Search for a destination'
+            }
+            onPick={(position, name) => route.addWaypoint(position, name)}
+          />
+        )}
+
+        {/* "My location" always seeds the start — the commonest plan begins where
+          you are. Kept beside the "or click the map" reminder so both ways of
+          setting the start sit together. */}
+        {editing === null && (
+          <div className="route-source-row">
+            <button
+              type="button"
+              className="route-my-location"
+              disabled={locating}
+              onClick={() => void addMyLocation()}
+            >
+              {locating ? 'Locating…' : '◎ My location as start'}
+            </button>
+            <span className="route-hint">or click the map</span>
+          </div>
+        )}
+        {/* A silent no-op would read as a dead button; say why nothing happened. */}
+        {locateFailed && (
+          <p className="route-hint">
+            No location fix — check location permission, or click the map.
+          </p>
+        )}
         {!route.roundTrip && route.waypoints.length === 1 && (
           <p className="route-hint">Click the map to add the destination.</p>
         )}
         {/* Via points and route-line clicks belong to the road profiles: a
-          timetable cannot honour either, so the advice would be a lie here. */}
-        {!route.roundTrip && !transitMode && route.waypoints.length >= 2 && (
+          timetable cannot honour either, so the advice would be a lie here.
+          A loop's drawn line runs through synthesized shaping points as well as
+          the traveller's own, so an insert index read off it would land in the
+          wrong slot — clicking the line is off there, and the hint says only
+          what a loop can actually do. */}
+        {!transitMode && route.waypoints.length >= 2 && (
           <p className="route-hint">
-            Drag rows to reorder · drag markers to move · click the route line to add a via point.
+            Drag rows to reorder · drag markers to move
+            {route.roundTrip ? '.' : ' · click the route line to add a via point.'}
           </p>
         )}
 

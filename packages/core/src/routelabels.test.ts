@@ -47,9 +47,14 @@ describe('waypointLabel', () => {
     expect(waypointLabel(26, false, 30)).toBe('27');
   });
 
-  it('marks a loop, and a lone stop that is about to become one', () => {
-    expect(waypointLabel(0, true, 3)).toBe('⟳');
+  it('marks a lone stop — a loop with only its anchor', () => {
+    expect(waypointLabel(0, true, 1)).toBe('⟳');
     expect(waypointLabel(0, false, 1)).toBe('⟳');
+  });
+
+  it('letters the stops of a loop that has some, so their order is readable', () => {
+    expect(waypointLabel(0, true, 3)).toBe('A');
+    expect(waypointLabel(2, true, 3)).toBe('C');
   });
 });
 

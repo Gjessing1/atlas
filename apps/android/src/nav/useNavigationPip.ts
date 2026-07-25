@@ -8,6 +8,7 @@ import {
   pipBlockedByUser,
   pipSupported,
   setPipActive,
+  setPipSourceRect,
 } from '../../modules/pip';
 
 /** Device-local, like every other navigation preference (`local.` keys never sync). */
@@ -28,6 +29,12 @@ export interface NavPipController {
   blockedByUser: boolean;
   enabled: boolean;
   setEnabled: (value: boolean) => void;
+  /**
+   * Tell the system where the guidance banner is (dp, window coordinates), so
+   * the shrink animation folds up *that* rather than the whole screen. Wired to
+   * the banner's own layout.
+   */
+  setBannerRect: (rect: { x: number; y: number; width: number; height: number }) => void;
 }
 
 /**
@@ -87,5 +94,22 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
     return () => setPipActive(false);
   }, [available, armed, inPip, win.width, win.height]);
 
-  return { inPictureInPicture: inPip, available, blockedByUser, enabled, setEnabled };
+  const setBannerRect = useCallback(
+    (rect: { x: number; y: number; width: number; height: number }) => {
+      // In the mini window the banner is not rendered at all, and its last
+      // full-screen rectangle is the one worth keeping for the next entry.
+      if (!available || inPip) return;
+      setPipSourceRect(rect);
+    },
+    [available, inPip],
+  );
+
+  return {
+    inPictureInPicture: inPip,
+    available,
+    blockedByUser,
+    enabled,
+    setEnabled,
+    setBannerRect,
+  };
 }
