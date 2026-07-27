@@ -1,0 +1,23 @@
+{
+  "name": "@atlas/potential",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas Fish & Hunt potential engine — pure-TypeScript raster primitives, named signals, species/quarry data, the percentile ramp with its contrast gate, and per-point explanations. No network, no fs.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/conditions": "*"
+  }
+}
