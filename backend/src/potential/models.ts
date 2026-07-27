@@ -8,6 +8,7 @@ import {
   type CombineTerm,
   type Grid,
   type Mask,
+  type PotentialTarget,
 } from '@atlas/potential';
 import { burnPaths } from './cells.js';
 import { lakeModel } from './lake.js';
@@ -34,8 +35,20 @@ export interface DeriveModel {
   /**
    * What the surface can be tuned for. A surface with no declared target is
    * meaningless (D4), so this is never empty; the first entry is the default.
+   *
+   * A target's `caption` is the one line the picker can teach with — what
+   * choosing it actually changes about the arithmetic — and is rendered under
+   * the chips on both clients.
    */
-  readonly targets: readonly { readonly value: string; readonly label: string }[];
+  readonly targets: readonly PotentialTarget[];
+  /**
+   * Offer this model as a layer row in `/api/layers`.
+   *
+   * False for the diagnostic surfaces: they must stay reachable over HTTP (they
+   * are how the pipeline is verified against the live services) without being
+   * offered to anyone as an opinion.
+   */
+  readonly catalog: boolean;
   /**
    * Model revision. Part of the cache path, so bumping it makes every cell
    * re-derive rather than serving arithmetic that no longer exists.
@@ -127,6 +140,7 @@ export const diagnosticModel: DeriveModel = {
     { value: 'water', label: 'Lakes & channels' },
   ],
   rev: 1,
+  catalog: false,
   inputs: { terrain: true, lakes: true, streams: true },
   vocabulary: 'fishing',
   run(inputs, target) {

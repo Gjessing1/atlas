@@ -9,6 +9,31 @@ import { theme } from './theme';
 const OPACITY_STEPS = [0.25, 0.5, 0.75, 1];
 
 /**
+ * The ramp a derived surface is drawn with, in the model's own words — the web
+ * DerivedLegend's twin.
+ *
+ * A heatmap whose colours are unexplained is a decoration, and these ones carry
+ * a specific claim: the bands are percentiles of *what is on screen*, so "Prime"
+ * means the top 5 % of this water rather than the best water in Norway. The
+ * words and the swatches arrive together from the catalog, so the two clients
+ * cannot drift apart on what a colour means.
+ */
+function DerivedLegend({ meta }: { meta: LayerMeta }) {
+  const legend = meta.derived?.legend ?? [];
+  if (legend.length === 0) return null;
+  return (
+    <View style={styles.legend}>
+      {legend.map((band) => (
+        <View key={band.key} style={styles.legendBand}>
+          <View style={[styles.legendSwatch, { backgroundColor: band.color }]} />
+          <Text style={styles.legendLabel}>{band.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
  * A layer's variant picker (`LayerMeta.options`) — the web LayersPanel's twin.
  * The caption under the chips carries what the choice tunes; a filtered layer
  * is meaningless without it.
@@ -109,6 +134,7 @@ export function LayersContent({ overlays }: { overlays: OverlaysController }) {
                       />
                     ))
                   : null}
+                {on ? <DerivedLegend meta={meta} /> : null}
                 {on && meta.minzoom !== undefined ? (
                   <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
                 ) : null}
@@ -206,6 +232,10 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: theme.warning,
   },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6 },
+  legendBand: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  legendSwatch: { width: 16, height: 10, borderRadius: 2 },
+  legendLabel: { fontSize: 11, color: theme.textMuted },
   row: { paddingVertical: 8 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkbox: {

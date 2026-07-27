@@ -11,14 +11,25 @@ import {
   type PlacePhoto,
   type PlaceTarget,
 } from '@atlas/core';
+import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useMemo, useState } from 'react';
+import { PotentialExplain } from '../potential/PotentialExplain.js';
 import { useElevation } from './useElevation.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
 import { usePlaceContent } from './usePlaceContent.js';
 
 interface PlaceCardProps {
   target: PlaceTarget;
+  /**
+   * The derived surface's reading of this spot, when one is switched on and
+   * has something to say here (ROADMAP § N5, "tap to explain"). Null covers
+   * every quiet case at once — no derived layer, an unprepared cell, or ground
+   * the model does not read — because all three should leave the card unchanged.
+   */
+  potential?: PotentialExplainResponse | null;
+  /** Display name of the surface's target, e.g. "Ørret". */
+  potentialTarget?: string;
   /** The saved place at this position, if the user already has one. */
   saved: PlaceRecord | undefined;
   /** Saving is unavailable until persistent user storage has finished opening. */
@@ -236,6 +247,8 @@ function NearbyArticles({
  */
 export function PlaceCard({
   target,
+  potential,
+  potentialTarget,
   saved,
   saveEnabled,
   userAt,
@@ -314,6 +327,11 @@ export function PlaceCard({
           </div>
         )}
       </dl>
+      {/* Why the derived surface scores this spot the way it does. Above the
+          encyclopaedia content on purpose: the user tapped the water they were
+          looking at, and the answer to *that* comes before a Wikipedia article
+          about the lake. */}
+      {potential && <PotentialExplain data={potential} targetLabel={potentialTarget} />}
       {placeContent.status === 'loading' && target.name ? (
         <div className="place-card-content place-card-content-loading">Looking up local guide…</div>
       ) : null}

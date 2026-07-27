@@ -1,4 +1,5 @@
-import { decodeMapLink, type LatLng } from '@atlas/core';
+import { decodeMapLink, viewportBbox, type LatLng } from '@atlas/core';
+import type { PotentialView } from '@atlas/app-hooks';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dimensions, Linking } from 'react-native';
@@ -36,6 +37,12 @@ export interface BootCamera {
   mapZoom: number;
   /** Snapped viewport key for on-map overlay labels (see labelCellFor). */
   labelCell: string | null;
+  /**
+   * The settled camera as a bbox — what the derived-potential surfaces are
+   * prepared for. Derived rather than read off the map for the same reason
+   * `labelCell` is: this binding exposes no `getVisibleBounds`.
+   */
+  mapViewport: PotentialView | null;
   /**
    * Where the map is looking, rounded to ~1 km. Coarse on purpose: it decides
    * which offline pack covers the view, and that answer must not re-render the
@@ -78,6 +85,7 @@ export function useBootCamera(
   const [initialView, setInitialView] = useState<MapView | null>(null);
   const [mapZoom, setMapZoom] = useState(DEFAULT_VIEW.zoom);
   const [labelCell, setLabelCell] = useState<string | null>(null);
+  const [mapViewport, setMapViewport] = useState<PotentialView | null>(null);
   const [viewCenter, setViewCenter] = useState<LatLng | null>(null);
   const viewRef = useRef<MapView | null>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +136,10 @@ export function useBootCamera(
       viewRef.current = view;
       setMapZoom(Math.round(view.zoom));
       setLabelCell(labelCellFor(view.center, view.zoom, Dimensions.get('window')));
+      setMapViewport({
+        bbox: viewportBbox(view.center, view.zoom, Dimensions.get('window')),
+        zoom: view.zoom,
+      });
       const lat = Math.round(view.center.lat * 100) / 100;
       const lng = Math.round(view.center.lng * 100) / 100;
       setViewCenter((prev) => (prev && prev.lat === lat && prev.lng === lng ? prev : { lat, lng }));
@@ -148,5 +160,14 @@ export function useBootCamera(
 
   const getBias = useCallback(async () => viewRef.current?.center ?? null, []);
 
-  return { initialView, viewRef, mapZoom, labelCell, viewCenter, onViewChange, getBias };
+  return {
+    initialView,
+    viewRef,
+    mapZoom,
+    labelCell,
+    mapViewport,
+    viewCenter,
+    onViewChange,
+    getBias,
+  };
 }

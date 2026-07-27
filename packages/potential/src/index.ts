@@ -138,6 +138,34 @@ export {
 export { explainPoint, type ExplainContext, type PotentialExplanation } from './explain.js';
 
 export {
+  CELL_MAX_TILE_ZOOM,
+  CELL_ZOOM,
+  cellAt,
+  cellBounds,
+  cellId,
+  cellsForBbox,
+  inNorway,
+  NORWAY_ENVELOPE,
+  parseCellId,
+  potentialCellUrl,
+  potentialExplainUrl,
+  potentialLayersUrl,
+  potentialPrepareUrl,
+  potentialTileUrl,
+  type Cell,
+  type PotentialCellManifest,
+  type PotentialCellState,
+  type PotentialCellStatus,
+  type PotentialExplainResponse,
+  type PotentialInputRecord,
+  type PotentialLayerMeta,
+  type PotentialLayersResponse,
+  type PotentialPrepareRequest,
+  type PotentialPrepareResponse,
+  type PotentialTarget,
+} from './api.js';
+
+export {
   BOTTOM_FLAT_PERCENT,
   BOTTOM_STEEP_PERCENT,
   describeLakeSignal,

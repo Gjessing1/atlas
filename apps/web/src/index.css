@@ -3689,6 +3689,165 @@ button.transit-notice-summary {
   color: #fff;
 }
 
+/* Ramp legend for a derived potential surface. The swatch colours come from
+   the catalog row, not from here — the model owns what "Prime" looks like. */
+.layer-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 6px 0 2px 22px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.layer-legend-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.layer-legend-swatch {
+  width: 14px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}
+
+/* ---- Derived potential surfaces (ROADMAP §N5) ---- */
+
+/* The preparation pill: under the search box, gone once the surface is ready. */
+.potential-pill {
+  position: absolute;
+  top: 58px;
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 20%);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.potential-pill-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.potential-pill button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Zoom-in, outside-coverage and empty-coverage are statements about the data
+   rather than work in progress, so they read as quiet notes. */
+.potential-pill-zoom-in,
+.potential-pill-outside,
+.potential-pill-empty {
+  color: var(--text-muted);
+}
+
+.potential-pill-spinner {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: potential-spin 0.9s linear infinite;
+}
+
+@keyframes potential-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .potential-pill-spinner {
+    animation: none;
+  }
+}
+
+/* The explain block inside the place card. */
+.potential-explain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.potential-explain-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.potential-explain-target {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.potential-explain-summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.potential-explain-missing,
+.potential-explain-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.potential-explain-sources {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.potential-explain-inputs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.potential-explain-inputs li {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.potential-explain-inputs .input-failed {
+  color: var(--warning);
+}
+
 /* ---- Overlay identify popup (tap lake → depth, tap parcel → gnr/bnr) ---- */
 
 .identify-popup {
@@ -3959,7 +4118,8 @@ button.transit-notice-summary {
   white-space: nowrap;
 }
 
-.weather-factors {
+.weather-factors,
+.factor-list {
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -3968,7 +4128,8 @@ button.transit-notice-summary {
   padding: 0;
 }
 
-.weather-factors li {
+.weather-factors li,
+.factor-list li {
   display: flex;
   gap: 8px;
 }
@@ -3992,13 +4153,15 @@ button.transit-notice-summary {
   background: #d05a5a;
 }
 
-.weather-factors .factor-label {
+.weather-factors .factor-label,
+.factor-list .factor-label {
   display: block;
   font-size: 12px;
   font-weight: 600;
 }
 
-.weather-factors .factor-detail {
+.weather-factors .factor-detail,
+.factor-list .factor-detail {
   display: block;
   font-size: 12px;
   line-height: 1.35;

@@ -1,5 +1,5 @@
 import { bboxToUtm33, type LngLatBbox } from '@atlas/core';
-import { createGrid, type Grid } from '@atlas/potential';
+import { createGrid, type Grid, type PotentialInputRecord } from '@atlas/potential';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -113,22 +113,10 @@ export interface PotentialContext {
  * This is the provenance half of D4 ("nothing scores without saying why"): when
  * a surface looks wrong six months from now, the manifest says which services
  * answered, with how much data, and when — instead of leaving us to re-probe and
- * guess.
+ * guess. It travels to the client inside the manifest, so like the manifest
+ * itself the shape is declared once in `@atlas/potential` and only named here.
  */
-export interface InputRecord {
-  readonly id: string;
-  readonly label: string;
-  /** The service, as a human would name it. */
-  readonly source: string;
-  /** Did it answer? A *missing* input must read as unknown, never as bad ground. */
-  readonly ok: boolean;
-  /** What arrived: counts, extents, byte sizes. */
-  readonly detail: string;
-  /** Whether this cell's copy came from disk rather than the network. */
-  readonly cached: boolean;
-  /** When the data was fetched (epoch ms). */
-  readonly fetchedAt: number;
-}
+export type InputRecord = PotentialInputRecord;
 
 export interface LakeFeature {
   /** NVE's lake number — the join key to Elvenett and the weakened-ice layer. */

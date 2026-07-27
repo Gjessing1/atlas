@@ -92,7 +92,11 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     id: 'fishhunt',
     label: 'Fish & Hunt',
     routing: null,
-    layerTags: ['fishing', 'hunting'],
+    // `potential` surfaces the derived rows (§N5) and is deliberately a tag of
+    // its own rather than reusing `fishing`: a client whose bundle predates the
+    // derive service must not list a layer it would request from the wrong
+    // endpoint, and no shipped profile carries this tag.
+    layerTags: ['fishing', 'hunting', 'potential'],
     defaultLayers: [
       'property',
       'lake-depth',

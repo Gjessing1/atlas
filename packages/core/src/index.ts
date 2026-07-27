@@ -42,6 +42,7 @@ export {
   bboxToUtm33,
   polygonLabelPoint,
   snapLabelBbox,
+  viewportBbox,
   wgs84ToUtm33,
   OVERLAY_LABEL_SNAP_DEG,
   type LngLatBbox,

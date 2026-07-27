@@ -1,12 +1,17 @@
-import type { LngLatBbox } from '@atlas/core';
-import { createGrid, renderRamp, summariseSurface, type Grid } from '@atlas/potential';
+import {
+  createGrid,
+  renderRamp,
+  summariseSurface,
+  type Grid,
+  type PotentialCellManifest,
+} from '@atlas/potential';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PNG } from 'pngjs';
 import { CELL_MAX_TILE_ZOOM, CELL_PIXELS, CELL_ZOOM, cellRaster, type Cell } from './cells.js';
-import { gatherInputs, type InputRecord, type PotentialContext } from './inputs.js';
+import { gatherInputs, type PotentialContext } from './inputs.js';
 import { resolveTarget, type DeriveModel } from './models.js';
 
 /**
@@ -44,56 +49,12 @@ const RANK_PLANE = 'rank';
 /** Sentinel for "no value here" in a quantised plane; 0..254 carry 0..1. */
 const SIGNAL_NODATA = 255;
 
-export interface CellManifest {
-  /** `11/1083/596`. */
-  readonly cell: string;
-  readonly layer: string;
-  readonly target: string;
-  /** The model's revision at derive time. */
-  readonly rev: number;
-  readonly engineRev: number;
-  readonly derivedAt: number;
-  /** Ground metres per raster pixel. */
-  readonly cellSizeM: number;
-  readonly bounds: LngLatBbox;
-  /**
-   * Every input, with what it contributed and whether it answered — the
-   * provenance that makes a surface auditable months later instead of
-   * re-probing and guessing.
-   */
-  readonly inputs: readonly InputRecord[];
-  readonly contrast: {
-    readonly standout: boolean;
-    readonly validCells: number;
-    readonly spread: number;
-    readonly reason: string;
-  };
-  /** Absolute quality tier, or null when the model supplied no prior. */
-  readonly tier: string | null;
-  readonly notes: readonly string[];
-  /** Fraction of the cell that carries a score, 0..1. */
-  readonly coverage: number;
-  /** Content ETag shared by every tile of this cell. */
-  readonly etag: string;
-  /** Legend vocabulary, so a client renders the right words. */
-  readonly vocabulary: 'fishing' | 'hunt';
-  /**
-   * The persisted signal planes behind this cell, or null when the model
-   * supplied none. Their *order* is the file layout, so this is the header of
-   * the `.signals` blob beside the manifest, not decoration.
-   */
-  readonly signals: {
-    readonly pixels: number;
-    /** Plane order in the blob; `rank` is always first. */
-    readonly planes: readonly string[];
-    /** One entry per weighted signal, in plane order after `rank`. */
-    readonly terms: readonly {
-      readonly key: string;
-      readonly label: string;
-      readonly weight: number;
-    }[];
-  } | null;
-}
+/**
+ * A derived cell's manifest. **The shape is the wire contract** — the same type
+ * the clients read from `/api/potential/…/cell/x/y.json` and carry in a prepare
+ * response — so it lives in `@atlas/potential` and is only named here.
+ */
+export type CellManifest = PotentialCellManifest;
 
 /** Where a derived layer's artefacts live under the data dir. */
 export function cellDir(dataDir: string, model: DeriveModel, target: string): string {

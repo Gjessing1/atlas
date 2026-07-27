@@ -12,6 +12,16 @@ export interface ActiveOverlay {
   opacity: number;
   /** The layer's resolved options, for the layers that declare any. */
   options?: Record<string, string>;
+  /**
+   * An extra generation marker folded into the source id (see `sourceId`).
+   *
+   * Used by the derived surfaces, whose tiles come into existence *while the
+   * map is open*: a cell that finishes building writes new bytes behind URLs the
+   * map has already fetched and considers settled, so without a fresh source it
+   * would not appear until the user zoomed. The preparation hook's `readyKey`
+   * goes here.
+   */
+  variant?: string;
 }
 
 const ID_PREFIX = 'atlas-overlay-';
@@ -24,7 +34,12 @@ const ID_PREFIX = 'atlas-overlay-';
  */
 function sourceId(overlay: ActiveOverlay): string {
   const signature = layerOptionSignature(overlay.options ?? {});
-  return ID_PREFIX + overlay.meta.id + (signature ? `--${signature}` : '');
+  return (
+    ID_PREFIX +
+    overlay.meta.id +
+    (signature ? `--${signature}` : '') +
+    (overlay.variant ? `--${overlay.variant}` : '')
+  );
 }
 
 /**
@@ -41,38 +56,55 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
     let cancelled = false;
 
     const sync = () => {
-      if (cancelled || !map.isStyleLoaded()) return; // re-runs on style.load/idle
-      const style = map.getStyle();
+      if (cancelled) return;
+      // Deliberately *not* gated on isStyleLoaded(), for the reason its sibling
+      // useOverlayLabels already records: that reports false while tiles are
+      // still arriving, which on a profile with eight WMS overlays is a good ten
+      // seconds — during which switching a layer on did nothing at all, until
+      // the next idle happened to re-run this. `getStyle()` throws only before a
+      // style exists, so that is what we guard on; anything else the style
+      // refuses right now is retried on the next style.load/idle.
+      let style: maplibregl.StyleSpecification;
+      try {
+        style = map.getStyle();
+      } catch {
+        return;
+      }
       // Vector overlays are drawn by their own hooks (useSpeedCameraLayer) —
       // requesting raster tiles for them would only 404.
       const wanted = new Map(overlays.filter((o) => !o.meta.vector).map((o) => [sourceId(o), o]));
-      for (const layer of style.layers ?? []) {
-        if (layer.id.startsWith(ID_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
-      }
-      for (const sourceId of Object.keys(style.sources ?? {})) {
-        if (sourceId.startsWith(ID_PREFIX) && !wanted.has(sourceId)) map.removeSource(sourceId);
-      }
-      // Overlays slide in under the basemap's labels.
-      const labelAnchor = (style.layers ?? []).find((l) => l.type === 'symbol')?.id;
-      for (const [id, overlay] of wanted) {
-        if (!map.getSource(id)) {
-          map.addSource(id, {
-            type: 'raster',
-            tiles: [overlayTileUrl(location.origin, overlay.meta, overlay.options)],
-            tileSize: 256,
-            maxzoom: overlay.meta.maxzoom,
-            ...(overlay.meta.minzoom !== undefined ? { minzoom: overlay.meta.minzoom } : {}),
-            attribution: overlay.meta.attribution,
-          });
+      try {
+        for (const layer of style.layers ?? []) {
+          if (layer.id.startsWith(ID_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
         }
-        if (!map.getLayer(id)) {
-          map.addLayer(
-            { id, type: 'raster', source: id, paint: { 'raster-opacity': overlay.opacity } },
-            labelAnchor,
-          );
-        } else {
-          map.setPaintProperty(id, 'raster-opacity', overlay.opacity);
+        for (const id of Object.keys(style.sources ?? {})) {
+          if (id.startsWith(ID_PREFIX) && !wanted.has(id)) map.removeSource(id);
         }
+        // Overlays slide in under the basemap's labels.
+        const labelAnchor = (style.layers ?? []).find((l) => l.type === 'symbol')?.id;
+        for (const [id, overlay] of wanted) {
+          if (!map.getSource(id)) {
+            map.addSource(id, {
+              type: 'raster',
+              tiles: [overlayTileUrl(location.origin, overlay.meta, overlay.options)],
+              tileSize: 256,
+              maxzoom: overlay.meta.maxzoom,
+              ...(overlay.meta.minzoom !== undefined ? { minzoom: overlay.meta.minzoom } : {}),
+              attribution: overlay.meta.attribution,
+            });
+          }
+          if (!map.getLayer(id)) {
+            map.addLayer(
+              { id, type: 'raster', source: id, paint: { 'raster-opacity': overlay.opacity } },
+              labelAnchor,
+            );
+          } else {
+            map.setPaintProperty(id, 'raster-opacity', overlay.opacity);
+          }
+        }
+      } catch {
+        // Style not applied yet (or swapped underneath us): style.load/idle
+        // re-runs this pass, and it is idempotent.
       }
     };
 

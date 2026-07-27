@@ -4,6 +4,7 @@ import {
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
 } from '@atlas/core';
+import type { PotentialExplainResponse } from '@atlas/potential';
 import { useEffect, useRef, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -11,6 +12,7 @@ import { useNearbyPhotos, useNearbyPlaces } from '../place/useNearbyPlaces';
 import { usePlaceContent } from '../place/usePlaceContent';
 import type { LocalPack } from '../regions/packs';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
+import { PotentialExplainCard } from './PotentialExplainCard';
 import { WeatherIcon } from './icons';
 import { theme } from './theme';
 
@@ -78,6 +80,8 @@ const MAX_IDENTIFY_ROWS = 6;
 export function DestinationCard({
   target,
   packs,
+  potential,
+  potentialTarget,
   onDirections,
   onSave,
   onEdit,
@@ -88,6 +92,15 @@ export function DestinationCard({
   bottomInset = 0,
 }: {
   target: DestinationTarget;
+  /**
+   * The derived surface's reading of this spot, when one is on and has
+   * something to say here (§N5, "tap to explain"). Null covers every quiet
+   * case — no derived layer, an unprepared cell, ground the model does not
+   * read — because all three should leave the card unchanged.
+   */
+  potential?: PotentialExplainResponse | null;
+  /** Display name of the surface's target, e.g. "Ørret". */
+  potentialTarget?: string;
   /** Downloaded regions supply article text before the network is tried. */
   packs: LocalPack[];
   /** Open the route planner with this point as the destination. */
@@ -164,7 +177,10 @@ export function DestinationCard({
       peekHeight={
         (hasArticleImage ? 470 : identify.length > 0 || content.content.length > 0 ? 380 : 218) +
         52 +
-        (!hasArticleImage && photos.photos.length > 0 ? 118 : 0)
+        (!hasArticleImage && photos.photos.length > 0 ? 118 : 0) +
+        // The explain block is several rows of reasoning; without its own
+        // allowance it would push the actions off the peeked sheet.
+        (potential ? 200 : 0)
       }
       bottomInset={bottomInset}
       testID="destination-sheet"
@@ -189,6 +205,10 @@ export function DestinationCard({
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </View>
+
+      {/* Why the derived surface reads this spot the way it does. Above the
+        overlays' own answers: the user tapped the water they were looking at. */}
+      {potential ? <PotentialExplainCard data={potential} targetLabel={potentialTarget} /> : null}
 
       {identify.length > 0 ? (
         // "What's here" from the visible overlays. Scrolls inside the card so a

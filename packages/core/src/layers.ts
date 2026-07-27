@@ -167,6 +167,29 @@ export interface LayerMeta {
    * so an older client simply gets the layer's default variant.
    */
   options?: LayerOption[];
+  /**
+   * Present when this layer is a **derived potential surface** (ROADMAP § N5):
+   * its tiles come from the derive service at `/api/potential/…`, keyed by the
+   * layer's `target` option, rather than from the overlay proxy. `overlayTileUrl`
+   * is the one place that branches on it, so a client that renders catalog rows
+   * needs no second code path.
+   *
+   * It carries the ramp because a derived surface's colours are the model's
+   * opinion, not the panel's: shipping the words and the swatches together as
+   * data keeps two clients from disagreeing about what "Promising water" looks
+   * like, and lets the vocabulary change (a fisher casts, a hunter looks)
+   * without a client release.
+   */
+  derived?: {
+    /**
+     * Which language the surface speaks — a fisher casts, a hunter looks. It
+     * mirrors `@atlas/potential`'s `SurfaceVocabulary`, restated here because
+     * core sits below the engine and must not depend on it.
+     */
+    vocabulary: 'fishing' | 'hunt';
+    /** The ramp, coolest first. */
+    legend: { key: string; label: string; color: string }[];
+  };
 }
 
 /** GET /api/layers */
@@ -185,15 +208,29 @@ function optionQuery(
     .join('');
 }
 
-/** Cache-revisioned raster URL used by web and Android. */
+/**
+ * Cache-revisioned raster URL used by web and Android.
+ *
+ * A derived layer is served by the derive service instead, with its target in
+ * the path and **no cache-busting parameter**: re-deriving a cell rewrites the
+ * same URL, and that route answers `no-cache` with a content ETag so the client
+ * revalidates rather than being pinned to a surface that has since been rebuilt.
+ */
 export function overlayTileUrl(
   origin: string,
-  meta: Pick<LayerMeta, 'id' | 'rev' | 'options'>,
+  meta: Pick<LayerMeta, 'id' | 'rev' | 'options' | 'derived'>,
   chosen?: Readonly<Record<string, string | undefined>>,
 ): string {
   // `rev ?? 1` keeps an Android client's last cached pre-revision catalog
   // usable during an offline start immediately after upgrading.
   const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  if (meta.derived) {
+    const target = normalizeLayerOptions(meta.options, chosen)['target'] ?? '';
+    return (
+      `${origin}/api/potential/${encodeURIComponent(meta.id)}/${encodeURIComponent(target)}` +
+      `/{z}/{x}/{y}.png`
+    );
+  }
   return (
     `${origin}/api/overlay/${encodeURIComponent(meta.id)}/{z}/{x}/{y}.png` +
     `?v=${encodeURIComponent(String(rev))}${optionQuery(meta, chosen)}`

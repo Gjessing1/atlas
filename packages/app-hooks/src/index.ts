@@ -119,3 +119,12 @@ export {
   UPSTREAM_HEALTH_LABEL,
   type StatusState,
 } from './useStatus.js';
+export {
+  usePotential,
+  usePotentialExplain,
+  type PotentialExplainState,
+  type PotentialPrep,
+  type PotentialPrepStatus,
+  type PotentialTargetSelection,
+  type PotentialView,
+} from './usePotential.js';

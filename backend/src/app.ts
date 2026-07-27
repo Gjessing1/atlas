@@ -24,6 +24,7 @@ import { NvdbStore } from './nvdb-db.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
 import { registerPotentialApi, type PotentialApiOptions } from './potential/index.js';
+import { derivedLayerMetas } from './potential/catalog.js';
 import { allProbes, ProbeRunner, type ProbeRunnerOptions } from './probes.js';
 import type { RegionJobOptions } from './region-jobs.js';
 import { StatusRegistry } from './status.js';
@@ -560,9 +561,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const overlayLayers = registerOverlayApi(app, {
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
     status,
-    // The camera layer is data-gated, not config-gated: it appears exactly
-    // when the NVDB dataset on this instance carries the camera tables.
-    ...(nvdb?.hasCameraData ? { extraMeta: [speedCameraLayerMeta()] } : {}),
+    // Extra catalog rows with no WMS upstream behind them: the camera layer is
+    // data-gated, not config-gated (it appears exactly when the NVDB dataset on
+    // this instance carries the camera tables), and the derived surfaces are
+    // served by the derive service registered below.
+    extraMeta: [...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []), ...derivedLayerMetas()],
     ...opts.overlayApi,
   });
 

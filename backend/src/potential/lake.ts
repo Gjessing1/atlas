@@ -13,6 +13,7 @@ import {
   lakeSurface,
   magnitudeFromStrahler,
   seasonAt,
+  signalMeta,
   type FishSpecies,
   type Grid,
   type LakeInputs,
@@ -62,6 +63,30 @@ const MAX_DEPTH_LEVELS = 12;
 
 /** Lakes the surface can be tuned for: the species with lake weights at all. */
 const LAKE_TARGETS = FISH_SPECIES.filter((s) => Object.keys(s.lakeWeights).length > 0);
+
+/**
+ * The line under a target chip, built from the species' own weights rather
+ * than written by hand.
+ *
+ * The picker is the only place the surface can teach what it is tuned for, and
+ * a caption that restates the species name teaches nothing. Naming the two
+ * signals that weigh heaviest says what will actually move when you tap it —
+ * and because it is read off `lakeWeights`, it cannot drift from the
+ * arithmetic the way a hand-written sentence would.
+ *
+ * Deliberately season-free: the depth band shifts through the year, the catalog
+ * is cached on the device, and a chip promising "summer band 4–9 m" in October
+ * would be a lie the panel had no way to notice.
+ */
+function targetCaption(species: FishSpecies): string {
+  const top = Object.entries(species.lakeWeights)
+    .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
+    .slice(0, 2)
+    .map(([key]) => signalMeta(key)?.label.toLowerCase())
+    .filter((label): label is string => Boolean(label));
+  const weights = top.length === 2 ? `${top[0]} and ${top[1]}` : (top[0] ?? 'shoreline structure');
+  return `${species.nameEn} — ${weights} weigh heaviest.`;
+}
 
 /** Paint each lake's own polygon, and record which lake owns each pixel. */
 interface PaintedLakes {
@@ -353,8 +378,13 @@ function perLakeGrid(
 export const lakeModel: DeriveModel = {
   layer: 'lake-fishing',
   label: 'Lake fishing potential',
-  targets: LAKE_TARGETS.map((s) => ({ value: s.id, label: s.nameNo })),
+  targets: LAKE_TARGETS.map((s) => ({
+    value: s.id,
+    label: s.nameNo,
+    caption: targetCaption(s),
+  })),
   rev: 1,
+  catalog: true,
   inputs: { terrain: true, lakes: true, streams: true, depthContours: true, landCover: true },
   vocabulary: 'fishing',
   describeSignal(key, value, target, derivedAt) {

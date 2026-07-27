@@ -1,5 +1,12 @@
 import type { LngLatBbox } from '@atlas/core';
-import { burnPolyline, type Mask } from '@atlas/potential';
+import {
+  burnPolyline,
+  cellBounds,
+  CELL_MAX_TILE_ZOOM,
+  CELL_ZOOM,
+  type Cell,
+  type Mask,
+} from '@atlas/potential';
 
 /**
  * The derive grid: **fixed z11 cells**, not user-drawn areas (D2 of
@@ -17,9 +24,28 @@ import { burnPolyline, type Mask } from '@atlas/potential';
  * - **Trivial pyramids.** 1024 = 4 × 256, so a cell serves z11 at 4:1, z12 at
  *   2:1 and z13 pixel-for-pixel, and overzooms above that. The surface is
  *   10 m-smooth, so overzoom is honest rather than invented detail.
+ *
+ * **The addressing itself lives in `@atlas/potential`** (`api.ts`) and is only
+ * re-exported here. The clients have to agree with the server about which z11
+ * tile a point falls in — that is how a viewport becomes a list of cells to
+ * prepare — and a second implementation of that arithmetic is a registration
+ * bug waiting to happen. What stays here is what only the *derive service*
+ * needs: the padded raster, the projection onto it, and the tile pyramid.
  */
 
-export const CELL_ZOOM = 11;
+export {
+  CELL_MAX_TILE_ZOOM,
+  CELL_ZOOM,
+  cellAt,
+  cellBounds,
+  cellId,
+  cellsForBbox,
+  inNorway,
+  NORWAY_ENVELOPE,
+  parseCellId,
+  type Cell,
+} from '@atlas/potential';
+
 /** Raster edge of a cell's own extent, in pixels. */
 export const CELL_PIXELS = 1024;
 /**
@@ -33,87 +59,7 @@ export const CELL_PIXELS = 1024;
  */
 export const PAD_PIXELS = 32;
 
-/** Highest zoom served from a cell's own pixels; above this the client overzooms. */
-export const CELL_MAX_TILE_ZOOM = 13;
-
-const WEB_MERCATOR_EXTENT = 20037508.342789244;
 const EARTH_CIRCUMFERENCE_M = 2 * Math.PI * 6378137;
-
-/**
- * Norway's data envelope. Every input is a Norwegian government service, so a
- * cell outside this box has nothing to derive from — and per the Norway-only
- * precedent (ROADMAP §2.1) that must read as *absent*, never as an error.
- *
- * Svalbard and Jan Mayen are deliberately outside: NVE's lake register and
- * NIBIO's land cover do not cover them, so a cell there would derive an empty
- * surface that looks like a bug.
- */
-export const NORWAY_ENVELOPE: LngLatBbox = [4.0, 57.5, 31.6, 71.4];
-
-export interface Cell {
-  readonly z: number;
-  readonly x: number;
-  readonly y: number;
-}
-
-/** `11/1083/596` — the cell's canonical name, and a safe path fragment. */
-export function cellId(cell: Cell): string {
-  return `${cell.z}/${cell.x}/${cell.y}`;
-}
-
-/** Parses `11/1083/596`; null for anything that is not a valid cell address. */
-export function parseCellId(id: string): Cell | null {
-  const parts = id.split('/');
-  if (parts.length !== 3) return null;
-  const [z, x, y] = parts.map(Number);
-  if (z !== CELL_ZOOM) return null;
-  if (!Number.isInteger(x) || !Number.isInteger(y)) return null;
-  const span = 2 ** CELL_ZOOM;
-  if (x! < 0 || y! < 0 || x! >= span || y! >= span) return null;
-  return { z: CELL_ZOOM, x: x!, y: y! };
-}
-
-/** Latitude of a web-mercator northing, in degrees. */
-function mercatorToLat(northing: number): number {
-  return (Math.atan(Math.sinh((northing / WEB_MERCATOR_EXTENT) * Math.PI)) * 180) / Math.PI;
-}
-
-/** The tile's own extent in WGS84 degrees, `[west, south, east, north]`. */
-export function cellBounds(cell: Cell): LngLatBbox {
-  const size = (2 * WEB_MERCATOR_EXTENT) / 2 ** cell.z;
-  const minX = -WEB_MERCATOR_EXTENT + cell.x * size;
-  const maxY = WEB_MERCATOR_EXTENT - cell.y * size;
-  return [
-    (minX / WEB_MERCATOR_EXTENT) * 180,
-    mercatorToLat(maxY - size),
-    ((minX + size) / WEB_MERCATOR_EXTENT) * 180,
-    mercatorToLat(maxY),
-  ];
-}
-
-/** The z11 cell containing a point. */
-export function cellAt(lat: number, lng: number): Cell {
-  const n = 2 ** CELL_ZOOM;
-  const latRad = (lat * Math.PI) / 180;
-  return {
-    z: CELL_ZOOM,
-    x: Math.min(n - 1, Math.max(0, Math.floor(((lng + 180) / 360) * n))),
-    y: Math.min(
-      n - 1,
-      Math.max(
-        0,
-        Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n),
-      ),
-    ),
-  };
-}
-
-/** Does any part of this cell fall inside the Norwegian data envelope? */
-export function inNorway(cell: Cell): boolean {
-  const [west, south, east, north] = cellBounds(cell);
-  const [w, s, e, n] = NORWAY_ENVELOPE;
-  return west < e && east > w && south < n && north > s;
-}
 
 /**
  * The padded raster a cell is derived on, and everything needed to put vector
@@ -183,33 +129,6 @@ export function projectToRaster(
     ((lng - west) / (east - west)) * raster.size,
     ((north - lat) / (north - south)) * raster.size,
   ];
-}
-
-/**
- * Cells covering a viewport, nearest the centre first — so the water the user is
- * actually looking at is prepared before the corners.
- *
- * `limit` is a hard cap rather than an error: a zoomed-out viewport can span
- * hundreds of cells, and the honest answer there is "zoom in" (the UI shows a
- * hint below z11), not a queue of two hundred derives against public services.
- */
-export function cellsForBbox(bbox: LngLatBbox, limit = 12): Cell[] {
-  const [west, south, east, north] = bbox;
-  const topLeft = cellAt(north, west);
-  const bottomRight = cellAt(south, east);
-  const centre = cellAt((north + south) / 2, (west + east) / 2);
-  const cells: Cell[] = [];
-  for (let y = topLeft.y; y <= bottomRight.y; y++) {
-    for (let x = topLeft.x; x <= bottomRight.x; x++) {
-      const cell: Cell = { z: CELL_ZOOM, x, y };
-      if (inNorway(cell)) cells.push(cell);
-    }
-  }
-  cells.sort(
-    (a, b) =>
-      Math.hypot(a.x - centre.x, a.y - centre.y) - Math.hypot(b.x - centre.x, b.y - centre.y),
-  );
-  return cells.slice(0, limit);
 }
 
 /**

@@ -43,6 +43,12 @@ export interface ActiveOverlay {
 export interface OverlaysController {
   /** The active map profile, so the sheet can show its standing caveat. */
   profileId: string;
+  /**
+   * The derived potential surface currently switched on, with its resolved
+   * target — what the preparation pill prepares and what a map tap asks to have
+   * explained. At most one; see the web twin in useLayerCatalog.
+   */
+  derived: { meta: LayerMeta; layer: string; target: string } | null;
   /** Full cached/live catalog; profile settings configure inactive profiles from it. */
   allCatalog: LayerMeta[];
   /** The catalog narrowed to the active map profile. */
@@ -243,8 +249,15 @@ export function useOverlays(
     [catalog, origin, isOn, opacityFor, optionsFor],
   );
 
+  const derived = useMemo(() => {
+    const active = overlays.find((overlay) => overlay.meta.derived);
+    if (!active) return null;
+    return { meta: active.meta, layer: active.meta.id, target: active.options['target'] ?? '' };
+  }, [overlays]);
+
   return {
     profileId,
+    derived,
     allCatalog: renderableLayers,
     catalog,
     state,

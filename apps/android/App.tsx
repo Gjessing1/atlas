@@ -6,6 +6,8 @@ import {
   useNavAddStop,
   useNavPrefs,
   useNavResume,
+  usePotential,
+  usePotentialExplain,
   useThemeMode,
   type FetchNearbyFn,
 } from '@atlas/app-hooks';
@@ -54,6 +56,7 @@ import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
+import { PotentialPill } from './src/layers/PotentialPill';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import { useTileSource } from './src/map/useTileSource';
@@ -234,13 +237,42 @@ function AppInner() {
   const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
   const overlayLabels = useOverlayLabels(overlaysCtl.overlays, camera.labelCell);
+  // Derived potential surfaces (§N5): prepare the cells under the viewport and
+  // say what is happening while they build. `readyKey` rides into the raster
+  // source id below, so a cell that lands appears without a pan.
+  const potential = usePotential(
+    serverOrigin,
+    overlaysCtl.derived,
+    camera.mapViewport,
+    overlaysCtl.derived?.meta.derived?.vocabulary,
+  );
+  const overlays = useMemo(
+    () =>
+      overlaysCtl.overlays.map((overlay) =>
+        overlay.meta.derived && potential.readyKey
+          ? { ...overlay, sourceId: `${overlay.sourceId}--${potential.readyKey}` }
+          : overlay,
+      ),
+    [overlaysCtl.overlays, potential.readyKey],
+  );
   // The Statskog jaktfelt vector overlay's coverage (one GeoJSON fetch), drawn
   // by MapScene while the overlay is on — the Fish & Hunt signature layer.
-  const huntingFields = useHuntingFields(overlaysCtl.overlays, serverOrigin);
+  // "Why is this water good?" for the point the card is describing. The derived
+  // layers are not identify-capable overlays — a tap is answered with reasoning
+  // rather than upstream attributes — so this lands on the card directly.
+  const potentialExplain = usePotentialExplain(
+    serverOrigin,
+    overlaysCtl.derived,
+    pickedLat === undefined || pickedLng === undefined ? null : { lat: pickedLat, lng: pickedLng },
+  );
+  const potentialTargetLabel = overlaysCtl.derived?.meta.options
+    ?.find((option) => option.key === 'target')
+    ?.choices.find((choice) => choice.value === overlaysCtl.derived?.target)?.label;
+  const huntingFields = useHuntingFields(overlays, serverOrigin);
   // The ATK speed cameras as a map layer (the Drive signature overlay). The
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
   // is only the drawn layer.
-  const speedCameras = useSpeedCameras(overlaysCtl.overlays, serverOrigin);
+  const speedCameras = useSpeedCameras(overlays, serverOrigin);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -351,7 +383,7 @@ function AppInner() {
     nav,
     route,
     places: visiblePlaces,
-    overlays: overlaysCtl.overlays,
+    overlays,
     origin: serverOrigin,
     menuOpen,
     closeMenu: () => setMenuOpen(false),
@@ -633,7 +665,7 @@ function AppInner() {
         bottomInset={bottomInset}
         attributionPosition={attributionPosition}
         packs={packs}
-        overlays={overlaysCtl.overlays}
+        overlays={overlays}
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
         speedCameras={speedCameras}
@@ -831,6 +863,17 @@ function AppInner() {
               <Text style={styles.bannerText}>{writeError} — the change was not saved.</Text>
             </Pressable>
           ) : null}
+          {/* What the derive service is doing for the water on screen. Hidden
+          mid-trip along with the rest of the idle chrome — a driver is not
+          reading a fishing surface. */}
+          {!navActive && !planning ? (
+            <PotentialPill
+              prep={potential}
+              top={topInset + 60}
+              left={side.left + 12}
+              right={side.right + 12}
+            />
+          ) : null}
           <UpdateNotices storage={data.storage} topInset={topInset} />
 
           <MainMenuSheet
@@ -878,6 +921,8 @@ function AppInner() {
             <DestinationCard
               target={destination}
               packs={packs}
+              potential={potentialExplain.data}
+              potentialTarget={potentialTargetLabel}
               onPickNearby={onPickNearbyPlace}
               onDirections={() => {
                 dest.clear();

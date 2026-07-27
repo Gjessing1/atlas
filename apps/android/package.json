@@ -16,6 +16,7 @@
     "@atlas/core": "*",
     "@atlas/gpx": "*",
     "@atlas/navigation": "*",
+    "@atlas/potential": "*",
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",

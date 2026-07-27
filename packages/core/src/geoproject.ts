@@ -9,6 +9,8 @@
  * nothing, which reads exactly like "this lake has no data".
  */
 
+import type { LatLng } from './geo.js';
+
 /** A [west, south, east, north] box in WGS84 degrees. */
 export type LngLatBbox = [number, number, number, number];
 
@@ -89,6 +91,36 @@ export function bboxToUtm33(bbox: LngLatBbox): [number, number, number, number] 
  * not obviously wrong, which is the sort of waste nobody notices.
  */
 export const OVERLAY_LABEL_SNAP_DEG = 0.25;
+
+/**
+ * The bbox a map camera is looking at, from its centre, zoom and screen size.
+ *
+ * Android needs this because its MapLibre binding exposes no `getVisibleBounds`
+ * — the camera is all there is. It lives here rather than in the app so the two
+ * things that ask "what am I looking at?" (overlay labels, and which derived
+ * cells to prepare) cannot answer it differently.
+ *
+ * MapLibre's world is 512 px at zoom 0; in Mercator a pixel spans fewer degrees
+ * of latitude than of longitude, by cos(latitude). Approximate near the poles
+ * and for a pitched camera, which is fine for both callers: one snaps the
+ * result to a coarse grid, the other to ~10 km cells.
+ */
+export function viewportBbox(
+  center: LatLng,
+  zoom: number,
+  screen: { width: number; height: number },
+): LngLatBbox {
+  const degPerPxLng = 360 / (512 * 2 ** zoom);
+  const cosLat = Math.max(0.02, Math.cos((center.lat * Math.PI) / 180));
+  const halfLng = (screen.width / 2) * degPerPxLng;
+  const halfLat = (screen.height / 2) * degPerPxLng * cosLat;
+  return [
+    center.lng - halfLng,
+    Math.max(-85, center.lat - halfLat),
+    center.lng + halfLng,
+    Math.min(85, center.lat + halfLat),
+  ];
+}
 
 /** Round a viewport outwards to the shared label grid. */
 export function snapLabelBbox([w, s, e, n]: LngLatBbox, snap = OVERLAY_LABEL_SNAP_DEG): LngLatBbox {

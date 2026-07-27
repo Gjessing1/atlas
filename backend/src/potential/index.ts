@@ -162,7 +162,13 @@ export async function registerPotentialApi(
         cellZoom: CELL_ZOOM,
         cells: states,
         ready: states.filter((s) => s.status === 'ready').length,
-        working: states.filter((s) => s.status !== 'ready').length,
+        // `working` must count only what is still *going to* change, because a
+        // client polls while it is above zero. A failed cell is terminal until
+        // something asks for it again, so counting it here left the preparation
+        // pill announcing "1 of 2 areas" forever and re-asking every couple of
+        // seconds — found by driving the real map, not by a test.
+        working: states.filter((s) => s.status === 'queued' || s.status === 'running').length,
+        failed: states.filter((s) => s.status === 'failed').length,
         outsideCoverage: cells.length === 0,
       };
     },

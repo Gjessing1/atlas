@@ -40,6 +40,30 @@ function LayerOptionChips({
   );
 }
 
+/**
+ * The ramp a derived surface is drawn with, in the model's own words.
+ *
+ * A heatmap whose colours are unexplained is a decoration, and these ones carry
+ * a specific claim: the bands are *percentiles of what is on screen*, so "Prime"
+ * means the top 5 % of this water rather than the best water in Norway. The
+ * words and the swatches arrive together from the catalog so the two clients
+ * cannot drift apart on what a colour means.
+ */
+function DerivedLegend({ meta }: { meta: LayerMeta }) {
+  const legend = meta.derived?.legend ?? [];
+  if (legend.length === 0) return null;
+  return (
+    <div className="layer-legend" aria-label={`${meta.title} legend`}>
+      {legend.map((band) => (
+        <span key={band.key} className="layer-legend-band">
+          <span className="layer-legend-swatch" style={{ background: band.color }} />
+          {band.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 interface LayersPanelProps {
   layers: LayerCatalog;
   /** Current map zoom (rounded is fine) — drives the live "zoom in" hints. */
@@ -109,6 +133,7 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
                       option={option}
                     />
                   ))}
+                {on && <DerivedLegend meta={meta} />}
                 {on && meta.minzoom !== undefined && mapZoom < meta.minzoom && (
                   <div className="layer-hint">Zoom in to z{meta.minzoom}+ to see this layer.</div>
                 )}

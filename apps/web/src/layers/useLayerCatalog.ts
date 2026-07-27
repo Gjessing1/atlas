@@ -24,6 +24,17 @@ export interface LayerCatalog {
   /** The enabled overlays, ready for useOverlayLayers. */
   overlays: ActiveOverlay[];
   /**
+   * The derived potential surface currently switched on, with its chosen
+   * target resolved — what the preparation pill prepares and what a map tap
+   * asks to have explained.
+   *
+   * At most one: the surfaces are opinions about the same ground and stacking
+   * two of them would render a colour nobody can read. If more than one is
+   * somehow on, the first in catalog order wins, and the rest still draw — this
+   * decides which one the *pill and the card* speak for, not what is visible.
+   */
+  derived: { meta: LayerMeta; layer: string; target: string } | null;
+  /**
    * Whether a layer is currently on, resolving the device's stored choice
    * against the active profile's default (a hike-profile trail layer reads as
    * on before it has ever been touched). Panels/switchers must use this rather
@@ -195,12 +206,23 @@ export function useLayerCatalog(
     [catalog, isOn, opacityFor, optionsFor],
   );
 
+  const derived = useMemo(() => {
+    const active = overlays.find((overlay) => overlay.meta.derived);
+    if (!active) return null;
+    return {
+      meta: active.meta,
+      layer: active.meta.id,
+      target: active.options?.['target'] ?? '',
+    };
+  }, [overlays]);
+
   return {
     profileId,
     allCatalog: allLayers,
     catalog,
     state,
     overlays,
+    derived,
     isOn,
     opacityFor,
     optionsFor,

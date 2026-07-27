@@ -1,4 +1,4 @@
-import { snapLabelBbox } from '@atlas/core';
+import { snapLabelBbox, viewportBbox } from '@atlas/core';
 import type { LatLng, OverlayLabelsResponse } from '@atlas/core';
 import { useEffect, useState } from 'react';
 
@@ -24,20 +24,7 @@ export function labelCellFor(
   zoom: number,
   screen: { width: number; height: number },
 ): string {
-  // MapLibre's world is 512 px at zoom 0. In Mercator a pixel spans fewer
-  // degrees of latitude than longitude, by cos(latitude).
-  const degPerPxLng = 360 / (512 * 2 ** zoom);
-  const cosLat = Math.max(0.02, Math.cos((center.lat * Math.PI) / 180));
-  const halfLng = (screen.width / 2) * degPerPxLng;
-  const halfLat = (screen.height / 2) * degPerPxLng * cosLat;
-
-  const bbox = snapLabelBbox([
-    center.lng - halfLng,
-    center.lat - halfLat,
-    center.lng + halfLng,
-    center.lat + halfLat,
-  ]);
-  return `${bbox.join(',')}@${Math.round(zoom)}`;
+  return `${snapLabelBbox(viewportBbox(center, zoom, screen)).join(',')}@${Math.round(zoom)}`;
 }
 
 const EMPTY: OverlayLabelsResponse = { type: 'FeatureCollection', features: [] };

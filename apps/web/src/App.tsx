@@ -23,8 +23,11 @@ import {
   useNavAddStop,
   useNavPrefs,
   useNavResume,
+  usePotential,
+  usePotentialExplain,
   useThemeMode,
   type FetchNearbyFn,
+  type PotentialView,
 } from '@atlas/app-hooks';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
@@ -44,6 +47,7 @@ import {
 } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
+import { PotentialPill } from './potential/PotentialPill.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
@@ -188,23 +192,57 @@ export function App() {
     },
     [profiles, route],
   );
-  useOverlayLayers(map, layers.overlays);
-  useOverlayLabels(map, layers.overlays);
-  useOverlayIdentify(map, layers.overlays, blockPassiveClicksRef);
-  // The drive profile's signature overlay: ATK speed cameras as map features.
-  useSpeedCameraLayer(map, layers.overlays, blockPassiveClicksRef);
-  useHuntingFieldsLayer(map, layers.overlays, blockPassiveClicksRef);
-  // Rounded zoom for the panel's live "zoom in to z14+" hints.
+  // Rounded zoom for the panel's live "zoom in to z14+" hints, and the viewport
+  // the derive service is asked to prepare (see usePotential).
   const [mapZoom, setMapZoom] = useState(Math.round(initialView.zoom));
+  const [mapViewport, setMapViewport] = useState<PotentialView | null>(null);
   useEffect(() => {
     if (!map) return;
-    const onZoom = () => setMapZoom(Math.round(map.getZoom()));
-    map.on('zoomend', onZoom);
-    onZoom();
+    const onMove = () => {
+      setMapZoom(Math.round(map.getZoom()));
+      const b = map.getBounds();
+      setMapViewport({
+        bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+        zoom: map.getZoom(),
+      });
+    };
+    map.on('moveend', onMove);
+    onMove();
     return () => {
-      map.off('zoomend', onZoom);
+      map.off('moveend', onMove);
     };
   }, [map]);
+
+  // Derived potential surfaces (§N5): queue the cells under the viewport and
+  // say what is happening while they build. `readyKey` rides into the raster
+  // source id below so a cell that lands appears without a pan.
+  const potential = usePotential(
+    '',
+    layers.derived,
+    mapViewport,
+    layers.derived?.meta.derived?.vocabulary,
+  );
+  const overlays = useMemo(
+    () =>
+      layers.overlays.map((overlay) =>
+        overlay.meta.derived ? { ...overlay, variant: potential.readyKey } : overlay,
+      ),
+    [layers.overlays, potential.readyKey],
+  );
+  useOverlayLayers(map, overlays);
+  useOverlayLabels(map, overlays);
+  useOverlayIdentify(map, overlays, blockPassiveClicksRef);
+  // "Why is this water good?" for whatever the place card is pointing at. The
+  // derived layers are not identify-capable overlays — a tap on one is answered
+  // with reasoning rather than upstream attributes, so it lands in the card
+  // rather than in the identify popup.
+  const potentialExplain = usePotentialExplain('', layers.derived, target?.position ?? null);
+  const potentialTargetLabel = layers.derived?.meta.options
+    ?.find((option) => option.key === 'target')
+    ?.choices.find((choice) => choice.value === layers.derived?.target)?.label;
+  // The drive profile's signature overlay: ATK speed cameras as map features.
+  useSpeedCameraLayer(map, overlays, blockPassiveClicksRef);
+  useHuntingFieldsLayer(map, overlays, blockPassiveClicksRef);
 
   // ---- turn-by-turn navigation ----
 
@@ -703,6 +741,10 @@ export function App() {
           </button>
         </div>
       )}
+      {/* What the derive service is doing for the water on screen. Sits under
+          the search box because that is where "what is this map doing" belongs,
+          and it is absent entirely once the surface is ready. */}
+      {nav.phase === 'idle' && <PotentialPill prep={potential} />}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}
@@ -769,6 +811,8 @@ export function App() {
       {target && nav.phase === 'idle' && (
         <PlaceCard
           target={target}
+          potential={potentialExplain.data}
+          potentialTarget={potentialTargetLabel}
           saved={savedAtTarget}
           saveEnabled={userData.status === 'ready'}
           userAt={userAt}

@@ -60,6 +60,42 @@ describe('overlay tile URLs', () => {
       overlayTileUrl('', { id: 'wildlife', rev: 2, options: [speciesOption] }, { species: '../x' }),
     ).toBe('/api/overlay/wildlife/{z}/{x}/{y}.png?v=2&species=biggame');
   });
+
+  describe('derived surfaces', () => {
+    const targetOption: LayerOption = {
+      key: 'target',
+      label: 'Tuned for',
+      defaultValue: 'orret',
+      choices: [
+        { value: 'orret', label: 'Ørret' },
+        { value: 'gjedde', label: 'Gjedde' },
+      ],
+    };
+    const derivedLayer = {
+      id: 'lake-fishing',
+      rev: 1,
+      options: [targetOption],
+      derived: { legend: [] },
+    };
+
+    it('go to the derive service with the target in the path', () => {
+      expect(overlayTileUrl('https://atlas.example', derivedLayer, { target: 'gjedde' })).toBe(
+        'https://atlas.example/api/potential/lake-fishing/gjedde/{z}/{x}/{y}.png',
+      );
+    });
+
+    it('never send a target the catalog did not declare', () => {
+      expect(overlayTileUrl('', derivedLayer, { target: '../../etc' })).toBe(
+        '/api/potential/lake-fishing/orret/{z}/{x}/{y}.png',
+      );
+    });
+
+    // A re-derive rewrites the same URL, and the route revalidates with a
+    // content ETag — a `v=` parameter would only defeat that 304.
+    it('carry no cache-busting parameter', () => {
+      expect(overlayTileUrl('', derivedLayer)).not.toContain('?');
+    });
+  });
 });
 
 const speciesOption: LayerOption = {
