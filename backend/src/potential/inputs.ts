@@ -56,6 +56,9 @@ const NVE_REST = 'https://kart.nve.no/enterprise/rest/services';
 const MILJO_REST = 'https://kart.miljodirektoratet.no/arcgis/rest/services';
 const DTM_WCS = 'https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-25833';
 const AR5_WMS = 'https://wms.nibio.no/cgi-bin/ar5';
+const SR16_WMS = 'https://wms.nibio.no/cgi-bin/sr16';
+const KOMMUNEINFO = 'https://api.kartverket.no/kommuneinfo/v1';
+const SSB_TABLE = 'https://data.ssb.no/api/v0/no/table';
 
 /**
  * AR5 `Arealtype` palette → `artype` code, **measured against the live service
@@ -103,6 +106,62 @@ const AR5_PALETTE: Readonly<Record<string, number>> = {
  * halves are then box-downsampled back onto the cell grid.
  */
 const AR5_SPLIT = 2;
+
+/**
+ * SR16 `SRRHOYDEO` palette → dominant stand height class, **measured against
+ * the live service 2026-07-27** the same way AR5's was: draw the layer, then ask
+ * its own GetFeatureInfo what number sits under each colour.
+ *
+ * The reply hides the value inside a `document.write(...)`, so the probe reads
+ * `if (213 == 9999)` out of the script — ugly, and the only form that answers
+ * (GML and `text/plain` come back empty). The classes match the published legend
+ * breaks exactly: 0–20, 20–40 … 160–170, >170 **decimetres**.
+ *
+ * Two things this layer does *not* share with AR5, both measured: it has **no
+ * scale gate** (it draws identically at 4.3, 9.7 and 19.4 m/px, so one
+ * whole-cell request suffices where AR5 needs four), and it does **not**
+ * antialias — a 512² tile decodes to exactly these eleven colours and nothing
+ * between them. Exact matching is therefore complete rather than merely safe.
+ */
+const SR16_HEIGHT_PALETTE: Readonly<Record<string, number>> = {
+  '247,252,245': 1, // 0–20 dm
+  '229,245,224': 2, // 20–40
+  '199,233,192': 3, // 40–60
+  '161,217,155': 4, // 60–80
+  '116,196,118': 5, // 80–100
+  '65,171,93': 6, // 100–120
+  '35,139,69': 7, // 120–140
+  '0,109,44': 8, // 140–160
+  '0,68,27': 9, // 160–170
+  '0,40,15': 10, // >170
+  // 255,255,255 is −9999: outside the forest model. Absent on purpose — the
+  // models read a missing class as unknown, never as treeless ground.
+};
+
+/**
+ * Representative dominant height in **metres** per class, for the model.
+ *
+ * Class midpoints, with the open-topped class pinned at 20 m — measured
+ * readings inside it ran 17.8–21.7 m, and every band that consumes this
+ * (`MATURE_COVER_M` peaks 15–45 m) is flat across that range, so the exact
+ * figure changes nothing while a wilder guess would.
+ */
+const SR16_HEIGHT_M: readonly number[] = [1, 3, 5, 7, 9, 11, 13, 15, 16.5, 20];
+
+/**
+ * SR16 `SRRTRESLAG` palette → 1 Gran · 2 Furu · 3 Lauv (measured 2026-07-27).
+ *
+ * **This layer is not redundant, contrary to the note DATA-SOURCES carried until
+ * now.** AR5's own `Treslag` separates conifer from deciduous and stops there,
+ * so pine cannot be told from spruce anywhere in AR5 — and mature *pine* is
+ * precisely what a capercaillie lek is, i.e. the heaviest weight the storfugl
+ * quarry carries. One extra GetMap buys the whole signal.
+ */
+const SR16_SPECIES_PALETTE: Readonly<Record<string, number>> = {
+  '82,176,56': 1, // Gran
+  '205,170,101': 2, // Furu
+  '255,220,130': 3, // Lauv
+};
 
 /** `ltema` — the clean three-way classifier for the river network. */
 export const STREAM_REAL_CHANNEL = 3211;
@@ -237,6 +296,65 @@ export function isAbsoluteBarrier(barrier: MigrationBarrier): boolean {
   return (barrier.kind ?? '').toLowerCase().replace(/\s+/g, '') === 'vandringsstopp';
 }
 
+/**
+ * A surveyed wildlife functional area (Naturbase `artfunksjon`) — winter
+ * grazing, calving ground, a capercaillie lek.
+ *
+ * **Presence-only, and that is the whole handling rule.** 75 702 areas over 225
+ * species exist nationally, but they are where somebody has surveyed; the
+ * absence of a polygon means nobody looked, never that nothing lives there. The
+ * hunt model therefore reads this as a bonus behind a coverage gate and can
+ * never subtract for it.
+ */
+export interface WildlifeArea {
+  /** `norskNavn` — the species, e.g. `Elg`, `Storfugl`. Our join to a quarry. */
+  readonly species: string | null;
+  /** `funksjon` 1–9: 1 beite · 3 hi · 7 spill/parring · 8 yngle · 9 leve … */
+  readonly functionCode: number | null;
+  /** `verdi` A–D: Svært viktig · Viktig · Registrert · Ikke verdisatt. */
+  readonly value: string | null;
+  /** `aarstid` 1–15, a season combination rather than a single season. */
+  readonly seasonCode: number | null;
+  readonly name: string | null;
+  readonly rings: readonly (readonly (readonly [number, number])[])[];
+}
+
+/**
+ * A protected area (Miljødirektoratet `vern`, layer 0 `naturvern_omrade`).
+ *
+ * **Advisory only, and never a term in the model.** What a verneforskrift
+ * actually forbids is not derivable from the geometry — some reserves permit
+ * ordinary hunting, some forbid all of it, some restrict a season — so the
+ * surface says a protected area is here, names it, and links its own forskrift.
+ * Scoring it down would invent a rule; scoring it normally without saying so
+ * would hide one.
+ */
+export interface ProtectedArea {
+  readonly name: string | null;
+  /** `verneform` — Naturreservat, Nasjonalpark, Landskapsvernomraade … */
+  readonly kind: string | null;
+  /** Lovdata link to the verneforskrift that actually governs it. */
+  readonly regulationUrl: string | null;
+  readonly rings: readonly (readonly (readonly [number, number])[])[];
+}
+
+/**
+ * The regional harvest prior: which kommune this cell is in, and how much game
+ * it shot last season (SSB StatBank 03432 elg / 03434 hjort, per kommune).
+ *
+ * Coarse by construction and used only for the absolute tier (D5's second
+ * number), never per pixel — see `huntQuality()` for why a count rather than a
+ * density, and what that costs.
+ */
+export interface HarvestPrior {
+  readonly kommuneNumber: string | null;
+  readonly kommuneName: string | null;
+  /** Felte dyr last published season, per quarry id; null where no table exists. */
+  readonly felt: Readonly<Record<string, number | null>>;
+  /** The season the figures are from, e.g. `2025-2026`. */
+  readonly season: string | null;
+}
+
 /** Everything one derive run has to work with. */
 export interface CellInputs {
   readonly raster: CellRaster;
@@ -259,6 +377,18 @@ export interface CellInputs {
   readonly catchments: readonly CatchmentFeature[];
   readonly anadromous: readonly AnadromousStretch[];
   readonly barriers: readonly MigrationBarrier[];
+  /**
+   * SR16 dominant stand height in **metres** on the padded raster, or null when
+   * not requested / not answered. Nodata outside the forest model, which the
+   * models read as unknown rather than as treeless.
+   */
+  readonly treeHeight: Grid | null;
+  /** SR16 tree species (1 gran · 2 furu · 3 lauv) on the padded raster. */
+  readonly treeSpecies: Grid | null;
+  readonly wildlifeAreas: readonly WildlifeArea[];
+  readonly protectedAreas: readonly ProtectedArea[];
+  /** Null when not requested; a record with null fields when nothing answered. */
+  readonly harvest: HarvestPrior | null;
   /**
    * How every requested input actually went. **The list-valued fields above
    * cannot carry their own failure** the way `terrain` and `landCover` can — an
@@ -294,6 +424,11 @@ export interface InputRequest {
   readonly catchments?: boolean;
   readonly anadromous?: boolean;
   readonly barriers?: boolean;
+  readonly treeHeight?: boolean;
+  readonly treeSpecies?: boolean;
+  readonly wildlifeAreas?: boolean;
+  readonly protectedAreas?: boolean;
+  readonly harvest?: boolean;
 }
 
 // ---- disk cache -----------------------------------------------------------
@@ -618,6 +753,136 @@ async function loadBarriers(
   return out;
 }
 
+/**
+ * Surveyed wildlife functional areas for this cell (Naturbase `artfunksjon`
+ * layer 0), unfiltered by species.
+ *
+ * The national table is dominated by seabirds, bats and amphibians — the
+ * huntable subset is roughly 23 000 of 75 702 — but the filtering happens in the
+ * model, not here: the input cache is keyed by cell, so one pull warms every
+ * quarry's derive instead of eight overlapping species queries.
+ */
+async function loadWildlifeAreas(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+): Promise<WildlifeArea[]> {
+  const features = await arcgisFeatures(
+    ctx,
+    `${MILJO_REST}/artfunksjon/MapServer/0/query`,
+    bounds,
+    'norskNavn,funksjon,verdi,aarstid,omraadeNavn',
+  );
+  return features.map((f) => {
+    const p = f.properties ?? {};
+    return {
+      species: str(p['norskNavn']),
+      functionCode: num(p['funksjon']),
+      value: str(p['verdi']),
+      seasonCode: num(p['aarstid']),
+      name: str(p['omraadeNavn']),
+      rings: coordinateGroups(f.geometry),
+    };
+  });
+}
+
+/** Protected areas for this cell (`vern` layer 0) — advisory, never a signal. */
+async function loadProtectedAreas(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+): Promise<ProtectedArea[]> {
+  const features = await arcgisFeatures(
+    ctx,
+    `${MILJO_REST}/vern/MapServer/0/query`,
+    bounds,
+    'navn,verneform,verneforskrift',
+    { simplifyDeg: CATCHMENT_SIMPLIFY_DEG },
+  );
+  return features.map((f) => {
+    const p = f.properties ?? {};
+    return {
+      name: str(p['navn']) ?? str(p['offisieltNavn']),
+      kind: str(p['verneform']),
+      regulationUrl: str(p['verneforskrift']),
+      rings: coordinateGroups(f.geometry),
+    };
+  });
+}
+
+// ---- the regional harvest prior -------------------------------------------
+
+/** Which SSB table answers "how many were shot here", per quarry. */
+const HARVEST_TABLES: Readonly<Record<string, string>> = {
+  elg: '03432', // Felte elg, per kommune, 1986-87 →
+  hjort: '03434', // Felte hjort, same shape
+  // No småvilt equivalent exists: the per-kommune rype series ended in 1991-92,
+  // so grouse and hare quarries simply have no prior and say so.
+};
+
+/**
+ * One kommune's harvest of every quarry SSB publishes, for the latest season.
+ *
+ * Two keyless services, in order: Kartverket's kommuneinfo turns the cell centre
+ * into a kommunenummer, and SSB StatBank answers the count for it. A kommune
+ * SSB does not recognise (the 2024 boundary reform renumbered many) comes back
+ * as a null count rather than an error — the tier is then simply absent, which
+ * is the honest outcome for a prior nobody can compute.
+ */
+async function loadHarvest(
+  ctx: PotentialContext,
+  centre: readonly [number, number],
+): Promise<HarvestPrior> {
+  const [lng, lat] = centre;
+  const url = new URL(`${KOMMUNEINFO}/punkt`);
+  url.searchParams.set('nord', String(lat));
+  url.searchParams.set('ost', String(lng));
+  url.searchParams.set('koordsys', '4258');
+  const res = await ctx.fetchImpl(url, {
+    headers: { 'User-Agent': ctx.userAgent },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`kommuneinfo HTTP ${res.status}`);
+  const place = (await res.json()) as { kommunenummer?: string; kommunenavn?: string };
+  const kommuneNumber = place.kommunenummer ?? null;
+  const kommuneName = place.kommunenavn ?? null;
+
+  const felt: Record<string, number | null> = {};
+  let season: string | null = null;
+  if (kommuneNumber) {
+    for (const [id, table] of Object.entries(HARVEST_TABLES)) {
+      const body = {
+        query: [
+          { code: 'Region', selection: { filter: 'item', values: [kommuneNumber] } },
+          { code: 'Dyr', selection: { filter: 'item', values: ['00a'] } },
+          { code: 'Kjonn', selection: { filter: 'item', values: ['0'] } },
+          { code: 'Tid', selection: { filter: 'top', values: ['1'] } },
+        ],
+        response: { format: 'json-stat2' },
+      };
+      const answer = await ctx.fetchImpl(`${SSB_TABLE}/${table}`, {
+        method: 'POST',
+        headers: { 'User-Agent': ctx.userAgent, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      });
+      // A kommune outside the table's own region list answers 4xx. That is a
+      // fact about the join, not a broken upstream, so it must not fail the
+      // input for the other quarries.
+      if (!answer.ok) {
+        felt[id] = null;
+        continue;
+      }
+      const stat = (await answer.json()) as {
+        value?: (number | null)[];
+        dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
+      };
+      const value = stat.value?.[0];
+      felt[id] = typeof value === 'number' ? value : null;
+      season ??= Object.keys(stat.dimension?.Tid?.category?.index ?? {})[0] ?? null;
+    }
+  }
+  return { kommuneNumber, kommuneName, felt, season };
+}
+
 // ---- elevation ------------------------------------------------------------
 
 /**
@@ -770,6 +1035,69 @@ function classifyInto(
   }
 }
 
+/**
+ * One classified SR16 layer for a padded cell, as class codes on the derive
+ * raster (nodata outside the forest model).
+ *
+ * **One request, not four.** SR16 carries no `MaxScaleDenominator`, so unlike
+ * AR5 it draws happily at the cell's own 9.6 m/px — measured identical at 4.3,
+ * 9.7 and 19.4 m/px. It also does not antialias, so the eleven measured colours
+ * are the whole palette and an unmatched pixel is genuinely something new rather
+ * than a class boundary.
+ */
+async function loadSr16(
+  ctx: PotentialContext,
+  raster: CellRaster,
+  layer: string,
+  palette: Readonly<Record<string, number>>,
+): Promise<Grid> {
+  const [west, south, east, north] = raster.bounds;
+  const url = new URL(SR16_WMS);
+  const p = url.searchParams;
+  p.set('SERVICE', 'WMS');
+  p.set('VERSION', '1.3.0');
+  p.set('REQUEST', 'GetMap');
+  p.set('LAYERS', layer);
+  p.set('STYLES', '');
+  p.set('CRS', 'EPSG:4326');
+  // WMS 1.3.0 with EPSG:4326 is lat,lon ordered — the same trap AR5 sets, and
+  // with the same silent failure: a swapped BBOX returns blank, not an error.
+  p.set('BBOX', [south, west, north, east].join(','));
+  p.set('WIDTH', String(raster.size));
+  p.set('HEIGHT', String(raster.size));
+  p.set('FORMAT', 'image/png');
+  const res = await ctx.fetchImpl(url, {
+    headers: { 'User-Agent': ctx.userAgent },
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const png = PNG.sync.read(Buffer.from(await res.arrayBuffer()));
+  if (png.width !== raster.size || png.height !== raster.size) {
+    throw new Error(`SR16 ${layer} returned ${png.width}×${png.height}`);
+  }
+  const grid = createGrid(raster.size, raster.size, raster.cellSizeM);
+  for (let i = 0; i < grid.data.length; i++) {
+    const o = i * 4;
+    if (png.data[o + 3]! < 128) {
+      grid.data[i] = Number.NaN;
+      continue;
+    }
+    const code = palette[`${png.data[o]!},${png.data[o + 1]!},${png.data[o + 2]!}`];
+    grid.data[i] = code ?? Number.NaN;
+  }
+  return grid;
+}
+
+/** SR16 height classes → representative metres; nodata stays nodata. */
+function heightMetres(classes: Grid): Grid {
+  const grid = createGrid(classes.width, classes.height, classes.cellSizeM);
+  for (let i = 0; i < grid.data.length; i++) {
+    const code = classes.data[i]!;
+    grid.data[i] = Number.isFinite(code) ? (SR16_HEIGHT_M[code - 1] ?? Number.NaN) : Number.NaN;
+  }
+  return grid;
+}
+
 /** What arrived: the classes present, so a blank answer is visible as blank. */
 function describeLandCover(grid: Grid): string {
   const counts = new Map<number, number>();
@@ -828,6 +1156,31 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
     label: 'Migration barriers',
     source: 'Miljødirektoratet anadrome_laksefisk layers 0/1',
     probe: 'input:barriers',
+  },
+  treeHeight: {
+    label: 'Stand height',
+    source: 'NIBIO SR16 SRRHOYDEO (WMS)',
+    probe: 'input:sr16',
+  },
+  treeSpecies: {
+    label: 'Tree species',
+    source: 'NIBIO SR16 SRRTRESLAG (WMS)',
+    probe: 'input:sr16',
+  },
+  wildlifeAreas: {
+    label: 'Wildlife functional areas',
+    source: 'Naturbase artfunksjon layer 0',
+    probe: 'input:artfunksjon',
+  },
+  protectedAreas: {
+    label: 'Protected areas',
+    source: 'Miljødirektoratet vern layer 0',
+    probe: 'input:vern',
+  },
+  harvest: {
+    label: 'Regional harvest',
+    source: 'SSB 03432/03434 per kommune (Kartverket kommuneinfo)',
+    probe: 'input:harvest',
   },
 };
 
@@ -1058,6 +1411,99 @@ export async function gatherInputs(
       )
     : [];
 
+  /**
+   * Both SR16 layers share one shape: a classified PNG in, one byte of class
+   * code per pixel on disk. The *class* is what is cached, never the value the
+   * model reads — so `SR16_HEIGHT_M` stays the single place a class becomes
+   * metres, and re-deciding what class 9 is worth costs no cache invalidation.
+   */
+  const sr16 = async (
+    id: 'treeHeight' | 'treeSpecies',
+    layer: string,
+    palette: Readonly<Record<string, number>>,
+  ): Promise<Grid | null> =>
+    load<Grid | null>(
+      id,
+      'u8.gz',
+      (buf) => {
+        if (buf.byteLength !== raster.size * raster.size) throw new Error('wrong size');
+        const classes = createGrid(raster.size, raster.size, raster.cellSizeM);
+        // 0 is the on-disk stand-in for nodata; the class codes start at 1.
+        for (let i = 0; i < classes.data.length; i++) {
+          classes.data[i] = buf[i] === 0 ? Number.NaN : buf[i]!;
+        }
+        return classes;
+      },
+      (classes) => {
+        const bytes = Buffer.alloc(raster.size * raster.size);
+        for (let i = 0; i < bytes.length; i++) {
+          const v = classes!.data[i]!;
+          bytes[i] = Number.isFinite(v) ? v : 0;
+        }
+        return gzipSync(bytes);
+      },
+      async () => {
+        const value = await loadSr16(ctx, raster, layer, palette);
+        return { value, detail: describeClassified(value) };
+      },
+      (classes) => (classes ? describeClassified(classes) : 'absent'),
+      null,
+    );
+
+  const heightClasses = need.treeHeight
+    ? await sr16('treeHeight', 'SRRHOYDEO', SR16_HEIGHT_PALETTE)
+    : null;
+  const treeHeight = heightClasses ? heightMetres(heightClasses) : null;
+  const treeSpecies = need.treeSpecies
+    ? await sr16('treeSpecies', 'SRRTRESLAG', SR16_SPECIES_PALETTE)
+    : null;
+
+  const wildlifeAreas = need.wildlifeAreas
+    ? await load<WildlifeArea[]>(
+        'wildlifeAreas',
+        'json.gz',
+        (buf) => json<WildlifeArea[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadWildlifeAreas(ctx, raster.bounds);
+          return { value, detail: describeWildlife(value) };
+        },
+        describeWildlife,
+        [],
+      )
+    : [];
+
+  const protectedAreas = need.protectedAreas
+    ? await load<ProtectedArea[]>(
+        'protectedAreas',
+        'json.gz',
+        (buf) => json<ProtectedArea[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadProtectedAreas(ctx, raster.bounds);
+          return { value, detail: `${value.length} protected areas` };
+        },
+        (value) => `${value.length} protected areas`,
+        [],
+      )
+    : [];
+
+  const harvest = need.harvest
+    ? await load<HarvestPrior | null>(
+        'harvest',
+        'json.gz',
+        (buf) => json<HarvestPrior>(buf),
+        toJson,
+        async () => {
+          const [west, south, east, north] = raster.cellBounds;
+          const value = await loadHarvest(ctx, [(west + east) / 2, (south + north) / 2]);
+          return { value, detail: describeHarvest(value) };
+        },
+        (value) => (value ? describeHarvest(value) : 'absent'),
+        null,
+      )
+    : null;
+
   return {
     raster,
     terrain,
@@ -1068,8 +1514,46 @@ export async function gatherInputs(
     catchments,
     anadromous,
     barriers,
+    treeHeight,
+    treeSpecies,
+    wildlifeAreas,
+    protectedAreas,
+    harvest,
     records,
   };
+}
+
+/** Share of a classified grid that carries a class at all. */
+function describeClassified(classes: Grid): string {
+  let known = 0;
+  const counts = new Map<number, number>();
+  for (const v of classes.data) {
+    if (!Number.isFinite(v)) continue;
+    known++;
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  if (known === 0) return 'no coverage here';
+  const top = [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([code]) => code)
+    .join('/');
+  return `${Math.round((known / classes.data.length) * 100)} % classified, mainly ${top}`;
+}
+
+function describeWildlife(areas: readonly WildlifeArea[]): string {
+  if (areas.length === 0) return 'no surveyed areas here';
+  const species = [...new Set(areas.map((a) => a.species).filter(Boolean))];
+  return `${areas.length} areas — ${species.slice(0, 4).join(', ')}`;
+}
+
+function describeHarvest(prior: HarvestPrior): string {
+  if (!prior.kommuneNumber) return 'outside any kommune';
+  const felt = Object.entries(prior.felt)
+    .filter(([, n]) => n !== null)
+    .map(([id, n]) => `${n} ${id}`)
+    .join(', ');
+  return `${prior.kommuneName ?? prior.kommuneNumber}${felt ? `: ${felt} (${prior.season})` : ': no figures'}`;
 }
 
 function describeLakes(lakes: readonly LakeFeature[]): string {

@@ -487,6 +487,83 @@ function hydapiProbe(env: Record<string, string | undefined>): ProbeSpec {
   };
 }
 
+/**
+ * The regional harvest prior behind the hunt surface's absolute tier: SSB's
+ * felte-elg table, asked nationally.
+ *
+ * Probed on the national row rather than a kommune, because the failure that
+ * matters is the query *shape* — StatBank renames a dimension or retires a
+ * table long before it goes down — and a national figure has a floor worth
+ * asserting: Norway shoots ~30 000 moose a season and has not been near 10 000
+ * since the 1970s.
+ */
+function harvestProbe(): ProbeSpec {
+  return {
+    id: 'input:harvest',
+    label: 'SSB felte elg (regional prior)',
+    group: 'Engine inputs',
+    async run(fetchImpl) {
+      const res = await fetchImpl('https://data.ssb.no/api/v0/no/table/03432', {
+        method: 'POST',
+        headers: { 'User-Agent': PROBE_USER_AGENT, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: [
+            { code: 'Region', selection: { filter: 'item', values: ['0'] } },
+            { code: 'Dyr', selection: { filter: 'item', values: ['00a'] } },
+            { code: 'Kjonn', selection: { filter: 'item', values: ['0'] } },
+            { code: 'Tid', selection: { filter: 'top', values: ['1'] } },
+          ],
+          response: { format: 'json-stat2' },
+        }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      const body = (await res.json()) as {
+        value?: (number | null)[];
+        dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
+      };
+      const felt = body.value?.[0];
+      const season = Object.keys(body.dimension?.Tid?.category?.index ?? {})[0] ?? 'unknown season';
+      if (typeof felt !== 'number') return { ok: false, message: 'no figure in the reply' };
+      return {
+        ok: true,
+        detail: `${groupDigits(felt)} elg felt nationally, ${season}`,
+        warning: felt < 10_000 ? `only ${groupDigits(felt)} — query shape may have changed` : null,
+      };
+    },
+  };
+}
+
+/** Kommuneinfo turns a cell centre into the kommune the harvest prior needs. */
+function kommuneProbe(): ProbeSpec {
+  return {
+    id: 'input:kommune',
+    label: 'Kartverket kommuneinfo',
+    group: 'Engine inputs',
+    async run(fetchImpl) {
+      const res = await fetchImpl(
+        'https://api.kartverket.no/kommuneinfo/v1/punkt?nord=59.86&ost=10.42&koordsys=4258',
+        {
+          headers: { 'User-Agent': PROBE_USER_AGENT },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        },
+      );
+      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      const body = (await res.json()) as { kommunenummer?: string; kommunenavn?: string };
+      // Asker is 3203 since the 2024 reform. A different answer here is a
+      // renumbering, which is exactly what silently breaks the SSB join.
+      if (body.kommunenummer !== '3203') {
+        return {
+          ok: true,
+          detail: `answers ${body.kommunenavn ?? '?'} (${body.kommunenummer ?? '?'})`,
+          warning: `expected Asker 3203 at this point, got ${body.kommunenummer ?? 'nothing'} — kommune numbers may have changed`,
+        };
+      }
+      return { ok: true, detail: `${body.kommunenavn} ${body.kommunenummer}`, warning: null };
+    },
+  };
+}
+
 /** GBIF answers species presence keyless; used to sanity-check a target. */
 function gbifProbe(): ProbeSpec {
   return {
@@ -581,6 +658,8 @@ export function inputProbes(env: Record<string, string | undefined>): ProbeSpec[
       2_000,
       'areas',
     ),
+    harvestProbe(),
+    kommuneProbe(),
     hydapiProbe(env),
     gbifProbe(),
   ];

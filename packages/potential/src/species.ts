@@ -406,6 +406,20 @@ export interface Quarry {
   readonly treeLineBandM: Band | null;
   /** Distance from roads and dwellings the quarry keeps, in metres. */
   readonly disturbanceBufferM: number;
+  /**
+   * The season's kommune harvest that reads as **strong ground** for this
+   * quarry, or null where SSB publishes no per-kommune table (every småvilt
+   * species: the rype series was discontinued in 1991-92).
+   *
+   * Measured against the live tables for 2025-2026 rather than guessed, and
+   * per quarry because the two distributions are not remotely alike — among the
+   * kommuner that shoot any at all, elg runs median 73 / p90 228 / max 629
+   * (Trysil) while hjort runs median 64 / p90 634 / max 2 373 (Sunnfjord). One
+   * shared ceiling would have called an ordinary moose kommune excellent and a
+   * serious deer one merely good; the first version of this did exactly that,
+   * rating Oslo's 73 elg — the national *median* — "Excellent".
+   */
+  readonly strongHarvest: number | null;
   /** Ground the quarry uses, as a slope band in percent. */
   readonly slopeBandPercent: Band;
   readonly weights: Partial<Record<HuntSignalKey, number>>;
@@ -419,6 +433,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 8, max: 16 },
     treeLineBandM: null,
     disturbanceBufferM: 100,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 20, max: 45 },
     weights: {
       'edge-farmland': 1,
@@ -438,6 +453,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 6, max: 12 },
     treeLineBandM: null,
     disturbanceBufferM: 300,
+    strongHarvest: 230,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 15, max: 35 },
     weights: {
       browse: 1,
@@ -457,6 +473,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 8, peakMin: 14, peakMax: 30, max: 40 },
     treeLineBandM: null,
     disturbanceBufferM: 400,
+    strongHarvest: 630,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 40, max: 70 },
     weights: {
       'cover-mature': 1,
@@ -475,6 +492,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 10, peakMin: 16, peakMax: 30, max: 40 },
     treeLineBandM: null,
     disturbanceBufferM: 300,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     weights: {
       'pine-mature': 1,
@@ -492,6 +510,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 2, peakMax: 10, max: 20 },
     treeLineBandM: null,
     disturbanceBufferM: 250,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 25, max: 55 },
     weights: {
       'edge-myr': 1,
@@ -508,6 +527,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 0, peakMax: 3, max: 8 },
     treeLineBandM: { min: -250, peakMin: -100, peakMax: 100, max: 300 },
     disturbanceBufferM: 200,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     weights: {
       treeline: 1,
@@ -526,6 +546,7 @@ export const QUARRIES = [
     treeHeightBandM: null,
     treeLineBandM: { min: 0, peakMin: 200, peakMax: 900, max: 1400 },
     disturbanceBufferM: 200,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 45, max: 80 },
     weights: { treeline: 1, 'rocky-ridge': 0.9, slope: 0.4, artfunksjon: 0.4, quiet: 0.3 },
   },
@@ -536,6 +557,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 8, max: 18 },
     treeLineBandM: null,
     disturbanceBufferM: 100,
+    strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     weights: {
       'cover-young': 1,

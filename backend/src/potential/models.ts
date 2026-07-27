@@ -11,6 +11,7 @@ import {
   type PotentialTarget,
 } from '@atlas/potential';
 import { burnPaths } from './cells.js';
+import { huntModel } from './hunt.js';
 import { lakeModel } from './lake.js';
 import { riverModel } from './river.js';
 import {
@@ -202,11 +203,15 @@ function shoreScore(mask: Mask): Grid {
 }
 
 /**
- * Every model this build can derive. E4–E5 register their models here; the
- * routes 404 for anything absent, so a half-built model cannot be reached by
- * guessing a URL.
+ * Every model this build can derive. The routes 404 for anything absent, so a
+ * half-built model cannot be reached by guessing a URL.
  */
-export const DERIVE_MODELS: readonly DeriveModel[] = [lakeModel, riverModel, diagnosticModel];
+export const DERIVE_MODELS: readonly DeriveModel[] = [
+  lakeModel,
+  riverModel,
+  huntModel,
+  diagnosticModel,
+];
 
 export function deriveModel(layer: string): DeriveModel | undefined {
   return DERIVE_MODELS.find((m) => m.layer === layer);

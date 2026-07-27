@@ -21,6 +21,8 @@ import {
   distanceToMask,
   focalFraction,
   focalMean,
+  gridQuantile,
+  gridStats,
   mapValues,
   maskAt,
   maskFromGrid,
@@ -299,6 +301,137 @@ export function topographicPositionM(terrain: Grid, radiusM: number): Grid {
 export function classMask(grid: Grid, codes: readonly number[]): Mask {
   const set = new Set(codes);
   return maskFromGrid(grid, (v) => set.has(v));
+}
+
+/** Where the forest gives out locally, and why we believe it. */
+export interface TreeLine {
+  /**
+   * Elevation the local forest reaches, in metres, or null when this area
+   * cannot answer — which is a different thing from "there is no tree line".
+   */
+  readonly elevationM: number | null;
+  /** Share of the area that is mapped forest, 0..1 — the evidence behind it. */
+  readonly forestFraction: number;
+  /** The sentence the manifest carries, so a null is never silent. */
+  readonly reason: string;
+}
+
+/**
+ * The **local** tree line, derived from where forest cover actually collapses
+ * rather than guessed from a national elevation.
+ *
+ * A fixed number travels wrongly across Norway — the same 900 m is deep forest
+ * in Hedmark and bare fjell in Troms — and the tree line moves several hundred
+ * metres between a sheltered valley and the ridge above it. But the data already
+ * says where it is: land cover simply stops being forest above it, so the
+ * elevation at which mapped forest runs out *is* the measurement, per area, for
+ * free.
+ *
+ * The high quantile rather than the maximum is deliberate: one mis-classified
+ * pixel on a summit would otherwise move the line by hundreds of metres, and the
+ * quantile costs nothing to a real forest edge, which is thousands of pixels
+ * wide.
+ *
+ * Three answers are *not* an elevation, and all three matter:
+ *
+ * - **Almost no forest** — the area is above the line entirely. The lowest
+ *   ground in it is the best available stand-in, so ptarmigan ground is scored
+ *   relative to that rather than not at all.
+ * - **Forest throughout** — the line is somewhere above this area, and nothing
+ *   here can say where. A model that needs it must decline to speak, not invent
+ *   a number: quoting the 95th percentile of a lowland forest would put the
+ *   ptarmigan band in a spruce plantation.
+ * - **Forest reaches the top of the ground** — the subtle one, found on the
+ *   live drive rather than by a test. Nordmarka came back with a confident
+ *   "tree line ≈ 476 m", which is not a tree line at all: it is where the *hill*
+ *   ran out, in a cell whose highest ground is forested to its summit. The
+ *   forest fraction there is nowhere near 1 (lakes, farmland, the city edge), so
+ *   the "forest throughout" test above cannot catch it. A real tree line has
+ *   ground above it that is *not* forest, so that is what is required — without
+ *   it lirype would have been scored across the Oslo woods.
+ */
+export function treeLineElevationM(
+  forest: Mask,
+  terrain: Grid,
+  opts: {
+    quantile?: number;
+    /** Below this share of forest the area is treated as being above the line. */
+    minForestFraction?: number;
+    /** Above this share there is no tree line inside the area at all. */
+    maxForestFraction?: number;
+    /** Ground that must lie above the line before it is believed. */
+    minAboveFraction?: number;
+    /** How far above the line that ground has to reach, in metres. */
+    aboveMarginM?: number;
+  } = {},
+): TreeLine {
+  const q = opts.quantile ?? 0.95;
+  const minFraction = opts.minForestFraction ?? 0.02;
+  const maxFraction = opts.maxForestFraction ?? 0.9;
+  const minAbove = opts.minAboveFraction ?? 0.05;
+  const margin = opts.aboveMarginM ?? 50;
+
+  let forested = 0;
+  let ground = 0;
+  for (let i = 0; i < forest.data.length; i++) {
+    if (!Number.isFinite(terrain.data[i]!)) continue;
+    ground++;
+    if (forest.data[i] === 1) forested++;
+  }
+  if (ground === 0) {
+    return {
+      elevationM: null,
+      forestFraction: 0,
+      reason: 'No elevation here to find a tree line.',
+    };
+  }
+  const fraction = forested / ground;
+
+  if (fraction < minFraction) {
+    const low = gridStats(terrain).min;
+    return {
+      elevationM: Number.isFinite(low) ? low : null,
+      forestFraction: fraction,
+      reason: 'Almost no forest here — this area lies above the tree line.',
+    };
+  }
+  if (fraction > maxFraction) {
+    return {
+      elevationM: null,
+      forestFraction: fraction,
+      reason: 'Forest throughout — the tree line lies above this area.',
+    };
+  }
+  const elevationM = gridQuantile(applyMask(terrain, forest), q);
+  if (!Number.isFinite(elevationM)) {
+    return {
+      elevationM: null,
+      forestFraction: fraction,
+      reason: 'No tree line could be read from the forest here.',
+    };
+  }
+
+  // Is there open ground above it? Without that the "line" is only where the
+  // hill stopped, and the model would carry a lowland forest cell's summit
+  // around as if it were a tree line.
+  let above = 0;
+  for (let i = 0; i < forest.data.length; i++) {
+    const z = terrain.data[i]!;
+    if (Number.isFinite(z) && z > elevationM + margin) above++;
+  }
+  if (above / ground < minAbove) {
+    return {
+      elevationM: null,
+      forestFraction: fraction,
+      reason: 'Forest reaches the highest ground here, so no tree line lies inside this area.',
+    };
+  }
+
+  return {
+    elevationM,
+    forestFraction: fraction,
+    reason: `Local tree line ≈ ${Math.round(elevationM)} m, where mapped forest gives out.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

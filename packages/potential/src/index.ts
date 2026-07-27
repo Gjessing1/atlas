@@ -87,10 +87,12 @@ export {
   southness,
   structureField,
   topographicPositionM,
+  treeLineElevationM,
   type Band,
   type CellPoint,
   type ChannelClass,
   type ShorelineStructure,
+  type TreeLine,
 } from './signals.js';
 
 export {
@@ -214,3 +216,24 @@ export {
   type RiverInputs,
   type RiverSurface,
 } from './models/river.js';
+
+export {
+  AR5_DEVELOPED,
+  AR5_FARMLAND,
+  AR5_FOREST,
+  AR5_MYR,
+  AR5_WATER,
+  BROWSE_HEIGHT_M,
+  describeHuntSignal,
+  huntQuality,
+  huntSurface,
+  MATURE_COVER_M,
+  RIDGE_TPI_M,
+  SR16_DECIDUOUS,
+  SR16_PINE,
+  SR16_SPRUCE,
+  STAND_SPLIT_M,
+  YOUNG_COVER_M,
+  type HuntInputs,
+  type HuntSurface,
+} from './models/hunt.js';
