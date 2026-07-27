@@ -342,6 +342,7 @@ export async function registerPotentialApi(
         accessAvailable: access !== null,
         note: spotsNote({
           spots: withAccess.length,
+          cells: cells.length,
           pending,
           flat,
           derived: derived.length,

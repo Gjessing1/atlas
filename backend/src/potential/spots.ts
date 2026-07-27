@@ -237,18 +237,29 @@ export async function walkAccess(
   }
 }
 
-/** What "nothing to show" means here — a finding, never a blank list on its own. */
+/**
+ * What "nothing to show" means here — a finding, never a blank list on its own.
+ *
+ * Every branch names *which* nothing it is: outside the country the engine
+ * reads, not built yet, built and deliberately flat, or built with nothing in
+ * this particular viewport. "No spots" with no reason is the message that makes
+ * a working surface look broken.
+ */
 export function spotsNote(counts: {
   spots: number;
+  cells: number;
   pending: number;
   flat: number;
   derived: number;
   hunt: boolean;
 }): string | null {
   const what = counts.hunt ? 'ground' : 'water';
+  const areas = counts.pending === 1 ? 'area' : 'areas';
   if (counts.spots > 0) {
-    return counts.pending > 0 ? `Still reading ${counts.pending} more area(s).` : null;
+    return counts.pending > 0 ? `Still reading ${counts.pending} more ${areas}.` : null;
   }
+  // Norway-only, stated as an absence rather than an error (ROADMAP §2.1).
+  if (counts.cells === 0) return 'Derived surfaces cover Norway only.';
   if (counts.derived === 0) {
     return counts.pending > 0
       ? `Still reading the ${what} in view.`

@@ -172,7 +172,11 @@ export function useBestSpots(
   const bbox = view?.bbox;
   const zoom = view?.zoom ?? 0;
   const active = opts.enabled && layer !== null && bbox !== undefined && zoom >= CELL_ZOOM;
-  const key = active ? `${layer}/${target}/${viewKey(bbox)}/${opts.readyKey ?? ''}/${nonce}` : '';
+  // Everything the request is made of, so the effect below can depend on the
+  // *request* rather than on a bbox array that is new on every render.
+  const key = active
+    ? `${layer}/${target}/${limit}/${viewKey(bbox)}/${opts.readyKey ?? ''}/${nonce}`
+    : '';
 
   // A new area, target or nonce starts a fresh answer: the counts and the
   // numbering belong to the request that produced them.
