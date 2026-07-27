@@ -871,6 +871,17 @@ export interface CombineTerm {
   readonly grid: Grid;
   /** Plain-language reason for this term's value at a point (the D4 payload). */
   readonly describe?: (value: number) => string;
+  /**
+   * This term describes a state a pixel may simply **not be in**, so its absence
+   * is not a gap in the data.
+   *
+   * The river model's pool and riffle are the case: a reach is one or the other,
+   * and each term is nodata on the water the other describes — which is how the
+   * two avoid capping the surface between them. Without this flag the explain
+   * card reports every riffle as *"no pool data here"*, i.e. an upstream
+   * failure, about water the model read perfectly well.
+   */
+  readonly exclusive?: boolean;
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   maskFromGrid,
   maxOf,
   slopePercent,
+  valueAt,
 } from './raster.js';
 
 /**
@@ -407,3 +408,168 @@ export function magnitudeFromStrahler(order: number): number {
   if (!Number.isFinite(order) || order < 1) return 0;
   return Math.max(0, Math.min(1, (order - 1) / 6));
 }
+
+/**
+ * A point in fractional raster cell coordinates — how a channel's geometry
+ * enters the engine once the adapter has projected it.
+ */
+export interface CellPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Resample a polyline to even spacing, so everything measured *along* a channel
+ * has a length in metres rather than a length in however finely NVE happened to
+ * digitise that reach.
+ *
+ * This matters more than it sounds: Elvenett's vertex density varies by an order
+ * of magnitude between a surveyed main stem and a generalised brook, so a
+ * "window of 10 vertices" would be 100 m in one place and 2 km in the next, and
+ * every reach-scale band in this file would mean something different per river.
+ * The first and last vertices are always kept — they are the network's own
+ * nodes, and a confluence must not be moved by resampling.
+ */
+export function resampleLine(points: readonly CellPoint[], spacingCells: number): CellPoint[] {
+  if (!(spacingCells > 0)) throw new Error('resampleLine: spacingCells must be positive');
+  if (points.length < 2) return [...points];
+  const out: CellPoint[] = [points[0]!];
+  let carried = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!(length > 0)) continue;
+    // Walk the segment, emitting a point every `spacingCells` and carrying the
+    // remainder into the next segment so spacing never restarts at a vertex.
+    let travelled = spacingCells - carried;
+    while (travelled <= length) {
+      const t = travelled / length;
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      travelled += spacingCells;
+    }
+    carried = (carried + length) % spacingCells;
+  }
+  const last = points[points.length - 1]!;
+  const tail = out[out.length - 1]!;
+  if (Math.hypot(last.x - tail.x, last.y - tail.y) > 1e-9) out.push(last);
+  return out;
+}
+
+/** Values of a grid at each point of a path; nodata off the raster. */
+export function sampleAlong(grid: Grid, points: readonly CellPoint[]): number[] {
+  return points.map((p) => valueAt(grid, Math.round(p.x), Math.round(p.y)));
+}
+
+/**
+ * Centred mean over `window` samples, skipping nodata — run over an elevation
+ * profile *before* `monotonicDownstream`, and not optional.
+ *
+ * The running minimum is unforgiving of a single low reading: one noisy sample
+ * pins the profile at its value until the real channel drops below it, so a
+ * spurious 40 cm dip turns the next kilometre of river into a dead-flat "pool".
+ * Averaging first costs nothing at this scale and removes exactly that failure.
+ */
+export function smoothProfile(values: readonly number[], window: number): number[] {
+  const half = Math.max(0, Math.floor(window / 2));
+  if (half === 0) return [...values];
+  return values.map((_, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(values.length - 1, i + half); j++) {
+      const v = values[j]!;
+      if (Number.isFinite(v)) {
+        sum += v;
+        n++;
+      }
+    }
+    return n > 0 ? sum / n : Number.NaN;
+  });
+}
+
+/**
+ * How sharply the gradient **changes** along a channel, in percentage points —
+ * the seam signal's raw measure.
+ *
+ * A seam is the shear line between fast and slow water, and along a channel that
+ * is exactly where a riffle runs out into a pool or a pool spills into a riffle.
+ * Comparing the mean grade of the water ahead with the water behind finds those
+ * transitions without needing to classify either side first, and it finds them
+ * at the *reach* scale the window sets rather than at whatever spacing the
+ * source was digitised at.
+ */
+export function gradientBreakProfile(
+  gradientPercent: readonly number[],
+  spacingM: number,
+  windowM: number,
+): number[] {
+  if (!(spacingM > 0)) throw new Error('gradientBreakProfile: spacingM must be positive');
+  const half = Math.max(1, Math.round(windowM / spacingM / 2));
+  const mean = (from: number, to: number): number => {
+    let sum = 0;
+    let n = 0;
+    for (let i = Math.max(0, from); i <= Math.min(gradientPercent.length - 1, to); i++) {
+      const v = gradientPercent[i]!;
+      if (Number.isFinite(v)) {
+        sum += v;
+        n++;
+      }
+    }
+    return n > 0 ? sum / n : Number.NaN;
+  };
+  return gradientPercent.map((_, i) => {
+    const behind = mean(i - half, i - 1);
+    const ahead = mean(i + 1, i + half);
+    return Number.isFinite(behind) && Number.isFinite(ahead)
+      ? Math.abs(ahead - behind)
+      : Number.NaN;
+  });
+}
+
+/**
+ * How far the channel turns across a window, in degrees — 0 straight, 180 a
+ * hairpin. The bend signal's raw measure.
+ *
+ * Measured over a window rather than between adjacent vertices, because a
+ * digitised line wobbles by a degree or two per vertex and that noise is not a
+ * bend. The window is the length of channel a fish's current sees.
+ */
+export function curvatureDegProfile(
+  points: readonly CellPoint[],
+  spacingM: number,
+  windowM: number,
+): number[] {
+  if (!(spacingM > 0)) throw new Error('curvatureDegProfile: spacingM must be positive');
+  const half = Math.max(1, Math.round(windowM / spacingM / 2));
+  return points.map((p, i) => {
+    const back = points[i - half];
+    const forward = points[i + half];
+    if (!back || !forward) return Number.NaN;
+    const inX = p.x - back.x;
+    const inY = p.y - back.y;
+    const outX = forward.x - p.x;
+    const outY = forward.y - p.y;
+    const inLen = Math.hypot(inX, inY);
+    const outLen = Math.hypot(outX, outY);
+    if (!(inLen > 0) || !(outLen > 0)) return Number.NaN;
+    const cos = Math.max(-1, Math.min(1, (inX * outX + inY * outY) / (inLen * outLen)));
+    return (Math.acos(cos) * 180) / Math.PI;
+  });
+}
+
+/**
+ * Change in grade that reads as a current seam, in percentage points.
+ *
+ * Below ~0.1 the channel is simply continuing; a pool tail spilling into a
+ * riffle is typically a fraction of a point to a few points. Past ~25 the
+ * "seam" is the lip of a waterfall, which is not water anybody fishes, so the
+ * membership falls away again rather than saturating.
+ */
+export const SEAM_BREAK_PERCENT: Band = { min: 0.1, peakMin: 0.4, peakMax: 6, max: 25 };
+
+/**
+ * Turn across a reach that reads as a fishable bend, in degrees. Under ~5° the
+ * channel is straight; past ~170° the line has doubled back on itself, which in
+ * a national dataset is a digitising artefact far more often than a meander.
+ */
+export const BEND_DEG: Band = { min: 5, peakMin: 25, peakMax: 110, max: 170 };

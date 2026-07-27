@@ -126,6 +126,34 @@ export function signalMeta(key: string): SignalMeta | undefined {
   return [...LAKE_SIGNALS, ...RIVER_SIGNALS, ...HUNT_SIGNALS].find((s) => s.key === key);
 }
 
+/**
+ * The line under a target chip, built from that target's own weights rather
+ * than written by hand.
+ *
+ * The picker is the only place a surface can teach what it is tuned for, and a
+ * caption that restates the species name teaches nothing. Naming the two signals
+ * that weigh heaviest says what will actually move when you tap it — and because
+ * it is read off the weights, it cannot drift from the arithmetic the way a
+ * hand-written sentence would.
+ *
+ * Deliberately season-free: a depth band moves through the year and the catalog
+ * is cached on the device, so a chip promising "summer band 4–9 m" in October
+ * would be a lie the panel had no way to notice.
+ */
+export function weightsCaption(
+  name: string,
+  weights: Readonly<Record<string, number | undefined>>,
+  fallback: string,
+): string {
+  const top = Object.entries(weights)
+    .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
+    .slice(0, 2)
+    .map(([key]) => signalMeta(key)?.label.toLowerCase())
+    .filter((label): label is string => Boolean(label));
+  const phrase = top.length === 2 ? `${top[0]} and ${top[1]}` : (top[0] ?? fallback);
+  return `${name} — ${phrase} weigh heaviest.`;
+}
+
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 /** Meteorological season for a date — the granularity the depth shift deserves. */

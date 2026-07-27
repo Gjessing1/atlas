@@ -75,7 +75,10 @@ export function explainPoint(
   for (const term of terms) {
     const value = term.grid.data[y * term.grid.width + x];
     if (value === undefined || !Number.isFinite(value)) {
-      missing.push(term.label);
+      // An `exclusive` term is absent because this pixel is in the other state,
+      // not because an upstream failed. Reporting "no pool data here" about a
+      // riffle the model read perfectly would be a lie about the data.
+      if (!term.exclusive) missing.push(term.label);
       continue;
     }
     present.push({

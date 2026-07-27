@@ -231,6 +231,12 @@ export interface PotentialCellManifest {
       readonly key: string;
       readonly label: string;
       readonly weight: number;
+      /**
+       * Absent here means "this pixel is in the other state", not "the data is
+       * missing" — see `CombineTerm.exclusive`. Persisted because the explain
+       * card is rendered from the planes long after the model that knew.
+       */
+      readonly exclusive?: boolean;
     }[];
   } | null;
 }

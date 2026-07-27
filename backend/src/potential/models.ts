@@ -12,6 +12,7 @@ import {
 } from '@atlas/potential';
 import { burnPaths } from './cells.js';
 import { lakeModel } from './lake.js';
+import { riverModel } from './river.js';
 import {
   STREAM_FICTITIOUS,
   STREAM_REAL_CHANNEL,
@@ -205,7 +206,7 @@ function shoreScore(mask: Mask): Grid {
  * routes 404 for anything absent, so a half-built model cannot be reached by
  * guessing a URL.
  */
-export const DERIVE_MODELS: readonly DeriveModel[] = [lakeModel, diagnosticModel];
+export const DERIVE_MODELS: readonly DeriveModel[] = [lakeModel, riverModel, diagnosticModel];
 
 export function deriveModel(layer: string): DeriveModel | undefined {
   return DERIVE_MODELS.find((m) => m.layer === layer);

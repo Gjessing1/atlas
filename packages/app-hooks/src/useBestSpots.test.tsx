@@ -82,8 +82,19 @@ function stubFetch(over: { spots?: PotentialSpotsResponse; forecast?: WeatherFor
   vi.stubGlobal('fetch', fetchMock);
 }
 
+/**
+ * Pinned to an early morning, because the window this suite asserts on is
+ * *today's* — `windowForToday` looks forward from `now` to midnight, and the
+ * default stub's good hours are 06:00–08:00. Left on the wall clock, every one
+ * of these tests passed before breakfast and failed after it: the docker gate
+ * went red at 20:35 one evening with nothing wrong in the code, which is the
+ * failure this repo's raised test timeouts already exist to avoid — a red build
+ * that silently leaves the last release undeployed.
+ */
+const MORNING = new Date(2026, 6, 15, 5, 0, 0);
+
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: MORNING });
   stubFetch({});
 });
 

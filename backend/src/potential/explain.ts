@@ -97,6 +97,7 @@ export function explainSample(
     weight: term.weight,
     // Plane 0 is the rank, so the terms start at 1.
     grid: one(readSignal(blob, i + 1, sx, sy)),
+    ...(term.exclusive ? { exclusive: true } : {}),
     describe: (value) =>
       model.describeSignal?.(term.key, value, target, manifest.derivedAt) ??
       `${term.label}: ${Math.round(value * 100)} %`,

@@ -40,7 +40,20 @@ const MAX_PAGES = 12;
  */
 const SIMPLIFY_DEG = 0.00003;
 
+/**
+ * The same, for catchment polygons — ~55 m, nearly twenty times coarser.
+ *
+ * A main catchment is a national-scale polygon: the Drammensvassdraget is
+ * 17 108 km² and its full boundary is ~1 MB of JSON for a cell that only needs
+ * to know *which* catchment each channel pixel sits in. At 55 m the same four
+ * catchments come back in 92 kB and the only thing that moves is the divide —
+ * ground where the channels are first-order trickles whose Strahler order
+ * decides their size anyway.
+ */
+const CATCHMENT_SIMPLIFY_DEG = 0.0005;
+
 const NVE_REST = 'https://kart.nve.no/enterprise/rest/services';
+const MILJO_REST = 'https://kart.miljodirektoratet.no/arcgis/rest/services';
 const DTM_WCS = 'https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-25833';
 const AR5_WMS = 'https://wms.nibio.no/cgi-bin/ar5';
 
@@ -152,6 +165,78 @@ export interface DepthContour {
   readonly paths: readonly (readonly (readonly [number, number])[])[];
 }
 
+/**
+ * One main catchment — the only honest source of *how much water* a river
+ * carries, and the reason `arealregineenhet_km2` on the stream network is not
+ * used for anything.
+ *
+ * These tile the country rather than nesting: a single 10 km cell near Drammen
+ * holds the 17 108 km² Drammensvassdraget and the 7.8 km² Ebbestadelva side by
+ * side, so the figure has to be assigned per pixel and not per cell.
+ */
+export interface CatchmentFeature {
+  readonly name: string | null;
+  /** REGINE watercourse number, e.g. `012.Z`. */
+  readonly vassdragsnr: string | null;
+  readonly areaKm2: number | null;
+  /** Normal annual runoff, million m³/yr. Glomma: 24 376 ⇒ 772 m³/s. */
+  readonly qnormalMm3aar: number | null;
+  readonly rings: readonly (readonly (readonly [number, number])[])[];
+}
+
+/** A stretch of river that laks and sjøørret can physically reach. */
+export interface AnadromousStretch {
+  readonly river: string | null;
+  readonly vassdragsNr: string | null;
+  /** A nasjonalt laksevassdrag — the strongest protection Norway gives a river. */
+  readonly national: boolean;
+  /**
+   * Deep link into Lakseregisteret for this watercourse. **The primary call to
+   * action on any anadromous water**, because whether a river is open this week
+   * is decided by emergency forskrift and exists in no machine-readable form.
+   */
+  readonly lakseregUrl: string | null;
+  readonly paths: readonly (readonly (readonly [number, number])[])[];
+}
+
+/** A wall the sea-run fish cannot pass, and stack up underneath. */
+export interface MigrationBarrier {
+  /**
+   * Which target this barrier belongs to, taken from the **layer** rather than
+   * from the row's own `art` field: the layer is unambiguous (0 = laks,
+   * 1 = sjøørret) where the field's spelling is not ours to rely on.
+   */
+  readonly species: 'laks' | 'sjoorret';
+  /**
+   * `hindertype` — nominally a class, in practice free text: the national table
+   * holds `Vandringsstopp`, `Foss`, `Temporært hinder`, `TemporærtHinder`, null
+   * and one row reading *"Noe uenighet om hvor langt fisken går."*.
+   *
+   * Matched on in exactly one direction, by `isAbsoluteBarrier()` — never to
+   * decide what a barrier *is*, only whether we have been told plainly enough
+   * to say the run ends here.
+   */
+  readonly kind: string | null;
+  /** `hinderaarsak` — Foss, Demning, Kulvert, Terskel… */
+  readonly cause: string | null;
+  readonly info: string | null;
+  readonly position: readonly [number, number];
+}
+
+/**
+ * Is this obstacle the end of the run, rather than one fish get past?
+ *
+ * `hindertype` is free text, so this asks the question in the safe direction:
+ * only an explicit `Vandringsstopp` earns the strong reading, and everything
+ * else — a ladder, a prose remark, a null — falls back to the weaker sentence.
+ * Matched the other way round, one unrecognised spelling would promote a
+ * passable falls into a wall and tell the user no salmon go above Hellefoss,
+ * which has a ladder in it and a fishery for kilometres upstream.
+ */
+export function isAbsoluteBarrier(barrier: MigrationBarrier): boolean {
+  return (barrier.kind ?? '').toLowerCase().replace(/\s+/g, '') === 'vandringsstopp';
+}
+
 /** Everything one derive run has to work with. */
 export interface CellInputs {
   readonly raster: CellRaster;
@@ -171,7 +256,32 @@ export interface CellInputs {
    * models read as unknown, never as barren.
    */
   readonly landCover: Grid | null;
+  readonly catchments: readonly CatchmentFeature[];
+  readonly anadromous: readonly AnadromousStretch[];
+  readonly barriers: readonly MigrationBarrier[];
+  /**
+   * How every requested input actually went. **The list-valued fields above
+   * cannot carry their own failure** the way `terrain` and `landCover` can — an
+   * upstream that did not answer falls back to `[]`, which is the same value a
+   * genuinely empty area returns. A model that draws a conclusion from a list
+   * being empty must therefore check `inputFailed()` first, or it will state as
+   * fact about the ground what is really a fact about the network.
+   */
   readonly records: readonly InputRecord[];
+}
+
+/**
+ * Did this input fail outright, as opposed to answering with nothing?
+ *
+ * The distinction is the whole point. A cell with no mapped anadromous water is
+ * ordinary and worth saying so; a cell whose anadromous fetch 502'd looks
+ * identical from the array alone, and saying "no anadromous water is mapped
+ * here" about it is a lie the map has no way to notice. Miljødirektoratet has
+ * already served a broken TLS chain for months once (see `backend/certs/`), so
+ * this is a state the derive will really be in, not a theoretical one.
+ */
+export function inputFailed(inputs: CellInputs, id: keyof typeof INPUT_META): boolean {
+  return inputs.records.some((r) => r.id === id && !r.ok);
 }
 
 /** Which inputs a model wants; nothing else is fetched. */
@@ -181,6 +291,9 @@ export interface InputRequest {
   readonly streams?: boolean;
   readonly depthContours?: boolean;
   readonly landCover?: boolean;
+  readonly catchments?: boolean;
+  readonly anadromous?: boolean;
+  readonly barriers?: boolean;
 }
 
 // ---- disk cache -----------------------------------------------------------
@@ -236,6 +349,7 @@ async function arcgisFeatures(
   layerUrl: string,
   bounds: LngLatBbox,
   outFields: string,
+  opts: { simplifyDeg?: number } = {},
 ): Promise<GeoJsonFeature[]> {
   const [xmin, ymin, xmax, ymax] = bboxToUtm33(bounds);
   const envelope = JSON.stringify({
@@ -256,7 +370,7 @@ async function arcgisFeatures(
     p.set('outFields', outFields);
     p.set('returnGeometry', 'true');
     p.set('outSR', '4326');
-    p.set('maxAllowableOffset', String(SIMPLIFY_DEG));
+    p.set('maxAllowableOffset', String(opts.simplifyDeg ?? SIMPLIFY_DEG));
     p.set('resultOffset', String(page * PAGE_SIZE));
     p.set('resultRecordCount', String(PAGE_SIZE));
     p.set('f', 'geojson');
@@ -394,6 +508,114 @@ async function loadDepthContours(
       paths: coordinateGroups(f.geometry),
     }))
     .filter((c) => Number.isFinite(c.depthM));
+}
+
+/**
+ * Main catchments (Nedborfelt2 layer 3, `Hovedfelt_Nedborfelt_til_hav`) with
+ * their mean discharge.
+ *
+ * `qnormal_mm3aar` is the *catchment's* figure, i.e. the flow where it reaches
+ * the sea — the largest number anywhere in it. The river model therefore uses it
+ * as a **ceiling** on a reach's size rather than as the reach's own discharge,
+ * with Strahler order saying where in the network that reach sits.
+ */
+async function loadCatchments(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+): Promise<CatchmentFeature[]> {
+  const features = await arcgisFeatures(
+    ctx,
+    `${NVE_REST}/Nedborfelt2/MapServer/3/query`,
+    bounds,
+    'vassdragsnr,nedborfeltnavn,areal_km2,qnormal_mm3aar',
+    { simplifyDeg: CATCHMENT_SIMPLIFY_DEG },
+  );
+  return features.map((f) => {
+    const p = f.properties ?? {};
+    return {
+      name: str(p['nedborfeltnavn']),
+      vassdragsnr: str(p['vassdragsnr']),
+      areaKm2: num(p['areal_km2']),
+      qnormalMm3aar: num(p['qnormal_mm3aar']),
+      rings: coordinateGroups(f.geometry),
+    };
+  });
+}
+
+/**
+ * Anadromous stretches (`anadrome_laksefisk` layer 4) — where sea-run fish can
+ * get to, and nothing at all about where fishing is allowed.
+ *
+ * The two are routinely confused and must not be here: Norwegian salmon rivers
+ * are closed mid-season by emergency forskrift (Gaula, Orkla and Verdalselva
+ * from 1 August 2026), the open/closed list lives in a Lovdata vedlegg with no
+ * machine-readable form, and a map that says "fish here" about a closed river is
+ * a different class of wrong from a heatmap being imprecise. So the model reads
+ * channel character and hands the user `lakseregURL`.
+ */
+async function loadAnadromous(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+): Promise<AnadromousStretch[]> {
+  const features = await arcgisFeatures(
+    ctx,
+    `${MILJO_REST}/anadrome_laksefisk/MapServer/4/query`,
+    bounds,
+    'elvenavn,vassdragsNR,nasjonaltLaksevassdrag,lakseregURL',
+  );
+  return features.map((f) => {
+    const p = f.properties ?? {};
+    return {
+      river: str(p['elvenavn']),
+      vassdragsNr: str(p['vassdragsNR']),
+      national: str(p['nasjonaltLaksevassdrag'])?.toLowerCase() === 'ja',
+      lakseregUrl: str(p['lakseregURL']),
+      paths: coordinateGroups(f.geometry),
+    };
+  });
+}
+
+/** Which barrier layer belongs to which target species. */
+const BARRIER_LAYERS: readonly { readonly layer: number; readonly species: 'laks' | 'sjoorret' }[] =
+  [
+    { layer: 0, species: 'laks' },
+    { layer: 1, species: 'sjoorret' },
+  ];
+
+/**
+ * Migration barriers for both sea-run species (layers 0 and 1), tagged with the
+ * one they belong to.
+ *
+ * Fetched together and filtered by the model rather than fetched per target: the
+ * input cache is keyed by cell, so two targets of the same cell would otherwise
+ * pull two overlapping halves of the same national table.
+ */
+async function loadBarriers(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+): Promise<MigrationBarrier[]> {
+  const out: MigrationBarrier[] = [];
+  for (const { layer, species } of BARRIER_LAYERS) {
+    const features = await arcgisFeatures(
+      ctx,
+      `${MILJO_REST}/anadrome_laksefisk/MapServer/${layer}/query`,
+      bounds,
+      'hindertype,hinderaarsak,informasjon',
+    );
+    for (const f of features) {
+      const c = f.geometry?.type === 'Point' ? f.geometry.coordinates : null;
+      if (!Array.isArray(c) || typeof c[0] !== 'number' || typeof c[1] !== 'number') continue;
+      const p = f.properties ?? {};
+      out.push({
+        species,
+        kind: str(p['hindertype']),
+        cause: str(p['hinderaarsak']),
+        info: str(p['informasjon']),
+        position: [c[0], c[1]],
+      });
+    }
+  }
+  return out;
 }
 
 // ---- elevation ------------------------------------------------------------
@@ -592,6 +814,21 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
     source: 'NIBIO AR5 Arealtype (WMS)',
     probe: 'input:ar5',
   },
+  catchments: {
+    label: 'Catchments & discharge',
+    source: 'NVE Nedborfelt2 layer 3',
+    probe: 'input:catchments',
+  },
+  anadromous: {
+    label: 'Anadromous water',
+    source: 'Miljødirektoratet anadrome_laksefisk layer 4',
+    probe: 'input:anadromous',
+  },
+  barriers: {
+    label: 'Migration barriers',
+    source: 'Miljødirektoratet anadrome_laksefisk layers 0/1',
+    probe: 'input:barriers',
+  },
 };
 
 /**
@@ -776,7 +1013,63 @@ export async function gatherInputs(
       )
     : null;
 
-  return { raster, terrain, lakes, streams, depthContours, landCover, records };
+  const catchments = need.catchments
+    ? await load<CatchmentFeature[]>(
+        'catchments',
+        'json.gz',
+        (buf) => json<CatchmentFeature[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadCatchments(ctx, raster.bounds);
+          return { value, detail: describeCatchments(value) };
+        },
+        describeCatchments,
+        [],
+      )
+    : [];
+
+  const anadromous = need.anadromous
+    ? await load<AnadromousStretch[]>(
+        'anadromous',
+        'json.gz',
+        (buf) => json<AnadromousStretch[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadAnadromous(ctx, raster.bounds);
+          return { value, detail: describeAnadromous(value) };
+        },
+        describeAnadromous,
+        [],
+      )
+    : [];
+
+  const barriers = need.barriers
+    ? await load<MigrationBarrier[]>(
+        'barriers',
+        'json.gz',
+        (buf) => json<MigrationBarrier[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadBarriers(ctx, raster.bounds);
+          return { value, detail: `${value.length} barriers` };
+        },
+        (value) => `${value.length} barriers`,
+        [],
+      )
+    : [];
+
+  return {
+    raster,
+    terrain,
+    lakes,
+    streams,
+    depthContours,
+    landCover,
+    catchments,
+    anadromous,
+    barriers,
+    records,
+  };
 }
 
 function describeLakes(lakes: readonly LakeFeature[]): string {
@@ -787,4 +1080,16 @@ function describeLakes(lakes: readonly LakeFeature[]): string {
 function describeStreams(streams: readonly StreamFeature[]): string {
   const real = streams.filter((s) => s.ltema === STREAM_REAL_CHANNEL).length;
   return `${streams.length} segments, ${real} real channel`;
+}
+
+function describeCatchments(catchments: readonly CatchmentFeature[]): string {
+  if (catchments.length === 0) return 'no catchment mapped';
+  const biggest = catchments.reduce((a, b) => ((b.areaKm2 ?? 0) > (a.areaKm2 ?? 0) ? b : a));
+  return `${catchments.length} catchments, largest ${biggest.name ?? '?'} (${Math.round(biggest.areaKm2 ?? 0)} km²)`;
+}
+
+function describeAnadromous(stretches: readonly AnadromousStretch[]): string {
+  if (stretches.length === 0) return 'no anadromous water here';
+  const rivers = [...new Set(stretches.map((s) => s.river).filter(Boolean))];
+  return `${stretches.length} stretches${rivers.length ? ` — ${rivers.slice(0, 3).join(', ')}` : ''}`;
 }

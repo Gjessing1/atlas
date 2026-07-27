@@ -293,7 +293,12 @@ export async function deriveCell(
       : {
           pixels: SIGNAL_PIXELS,
           planes: [RANK_PLANE, ...terms.map((t) => t.key)],
-          terms: terms.map((t) => ({ key: t.key, label: t.label, weight: t.weight })),
+          terms: terms.map((t) => ({
+            key: t.key,
+            label: t.label,
+            weight: t.weight,
+            ...(t.exclusive ? { exclusive: true } : {}),
+          })),
         };
   if (signals) {
     const planes = [rank, ...terms.map((t) => cropToCell(t.grid, raster.pad))].map(quantisePlane);
