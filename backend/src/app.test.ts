@@ -345,6 +345,85 @@ describe('status page', () => {
     expect(body.overall).toBe('ok');
   });
 
+  /**
+   * Every probed upstream must be listed before it is checked. A source missing
+   * from the page reads as "fine", which is the failure N7 exists to remove.
+   */
+  it('lists the probed overlay and engine-input sources as not-yet-checked', async () => {
+    const res = await app.inject({ url: '/api/status' });
+    const body = res.json() as SystemStatus;
+    const byId = new Map(body.sources.map((s) => [s.id, s]));
+    expect(byId.get('input:dtm')).toMatchObject({ health: 'unknown', group: 'Engine inputs' });
+    expect(byId.has('overlay:statskog-jaktfelt:year')).toBe(true);
+    // No sweep has run in this app (probes are off under test).
+    expect(body.lastSweep).toBeNull();
+    expect(body.probing).toBe(false);
+  });
+
+  it('reading the status page never probes an upstream', async () => {
+    // The overlay fetch stub would record traffic if the page touched it.
+    const before = (await app.inject({ url: '/api/status' })).json() as SystemStatus;
+    const after = (await app.inject({ url: '/api/status' })).json() as SystemStatus;
+    expect(after.sources.find((s) => s.id === 'input:dtm')).toMatchObject({
+      health: 'unknown',
+      latencyMs: null,
+    });
+    expect(before.lastSweep).toBe(after.lastSweep);
+  });
+
+  it('POST /api/status/check sweeps the upstreams and reports latency', async () => {
+    const probeApp = await buildApp({
+      dataDir,
+      photonUrl: photonStub.listeningOrigin,
+      valhallaUrl: valhallaStub.listeningOrigin,
+      // Each probe kind gets the healthy-looking shape it checks for: a TIFF
+      // for the DTM coverage, a JSON count for the feature layers, an inked
+      // PNG for the raster tiles.
+      probes: {
+        enabled: false,
+        fetchImpl: (input) => {
+          const url = String(input instanceof Request ? input.url : input);
+          if (url.includes('wcs.hoyde')) {
+            const tiff = new Uint8Array(4096);
+            tiff[0] = 0x49; // 'I'
+            tiff[1] = 0x49; // 'I' — little-endian TIFF magic
+            return Promise.resolve(
+              new Response(tiff, { status: 200, headers: { 'content-type': 'image/tiff' } }),
+            );
+          }
+          if (url.includes('f=json') || url.includes('gbif') || url.includes('hydapi')) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ count: 2_000_000 }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            );
+          }
+          return Promise.resolve(
+            new Response(new Uint8Array(20_000), {
+              status: 200,
+              headers: { 'content-type': 'image/png' },
+            }),
+          );
+        },
+      },
+    });
+    const res = await probeApp.inject({ method: 'POST', url: '/api/status/check' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SystemStatus;
+    expect(body.lastSweep).not.toBeNull();
+    expect(body.probing).toBe(false);
+    const byId = new Map(body.sources.map((s) => [s.id, s]));
+    expect(byId.get('input:dtm')?.health).toBe('ok');
+    expect(byId.get('input:streams')).toMatchObject({ health: 'ok' });
+    expect(byId.get('input:streams')?.detail).toContain('segments');
+    expect(typeof byId.get('input:dtm')?.latencyMs).toBe('number');
+    // A newer Statskog season "exists" in this stub (every count query answers),
+    // so the year probe must be the one thing flagging itself.
+    expect(byId.get('overlay:statskog-jaktfelt:year')).toMatchObject({ health: 'degraded' });
+    await probeApp.close();
+  });
+
   it('marks an upstream degraded after it starts failing', async () => {
     const downApp = await buildApp({ dataDir, valhallaUrl: 'http://127.0.0.1:1' });
     await downApp.inject({

@@ -18,6 +18,13 @@ export interface StatusState {
   /** Why the last check failed, or null. `data` may still hold an older answer. */
   error: string | null;
   refresh: () => void;
+  /**
+   * Re-probe every upstream now, rather than reading what the server already
+   * knows. Costs real requests to other people's services, so it is an explicit
+   * button and never something a screen does on open.
+   */
+  check: () => void;
+  checking: boolean;
 }
 
 /** Plain-language name for each health level (the dot's meaning). */
@@ -40,23 +47,49 @@ export function statusAge(ts: number, now: number = Date.now()): string {
 }
 
 /**
- * The one line a source shows beside its name: healthy sources say when they
- * were last known good, failing ones lead with what went wrong and when —
+ * The one line a source shows beside its name: healthy sources say what came
+ * back and how long it took, failing ones lead with what went wrong and when —
  * "down" alone sends the user hunting through logs.
  */
 export function upstreamDetail(s: UpstreamStatus, now: number = Date.now()): string {
+  // A warning outranks everything: the source answered, so no timestamp or
+  // message explains why it is amber — the sentence does. This is the row that
+  // says "Statskog has published 2025 and you are serving 2024".
+  if (s.warning) return s.warning;
+  const latency = s.latencyMs == null ? null : `${s.latencyMs} ms`;
+  const join = (...parts: (string | null)[]) => parts.filter(Boolean).join(' · ');
   if (s.health === 'ok' || s.health === 'unknown') {
-    if (s.detail) return s.detail;
-    if (s.lastSuccess) return `checked ${statusAge(s.lastSuccess, now)}`;
+    if (s.detail) return join(s.detail, latency);
+    if (s.lastSuccess) return join(`checked ${statusAge(s.lastSuccess, now)}`, latency);
     // Unknown with a failure behind it is a stale outcome the server stopped
     // standing behind — say so rather than "awaiting first use", which would
     // read as "never tried".
     if (s.lastFailure) {
-      return `not checked since ${statusAge(s.lastFailure, now)}${s.message ? ` · ${s.message}` : ''}`;
+      return join(`not checked since ${statusAge(s.lastFailure, now)}`, s.message);
     }
     return 'awaiting first use';
   }
-  return `${s.message ?? 'failing'} · ${s.lastFailure ? statusAge(s.lastFailure, now) : ''}`.trim();
+  return join(s.message ?? 'failing', s.lastFailure ? statusAge(s.lastFailure, now) : null);
+}
+
+/**
+ * The footer line under the source list: when the server last swept its
+ * upstreams, and how many need attention. Both clients show the same sentence
+ * because both users are asking the same thing — *is this page telling me
+ * something current?*
+ */
+export function sweepSummary(data: SystemStatus, now: number = Date.now()): string {
+  const attention = data.sources.filter(
+    (s) => s.health === 'down' || s.health === 'degraded',
+  ).length;
+  const swept = data.probing
+    ? 'Checking upstreams…'
+    : // `== null` on purpose: during a release the app bundle and the backend can
+      // be one version apart, so these fields may be absent rather than null.
+      data.lastSweep == null
+      ? `${data.sources.length} sources · upstreams not checked yet this run`
+      : `${data.sources.length} sources · upstreams checked ${statusAge(data.lastSweep, now)}`;
+  return attention === 0 ? swept : `${swept} · ${attention} need attention`;
 }
 
 /** Sources bucketed by their `group` field, in first-seen order. */
@@ -78,24 +111,37 @@ export function groupUpstreams(sources: UpstreamStatus[]): [string, UpstreamStat
 export function useStatus(origin: string, enabled: boolean): StatusState {
   const [data, setData] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    fetch(`${origin}/api/status`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return (await res.json()) as SystemStatus;
-      })
-      .then((json) => setData(json))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'unreachable'))
-      .finally(() => setLoading(false));
-  }, [origin]);
+  /**
+   * `deep` decides which route is used: GET reads what the server already
+   * knows (free), POST makes it go and ask every upstream. Both answer with the
+   * same snapshot, so the caller's rendering is identical either way.
+   */
+  const load = useCallback(
+    (deep: boolean) => {
+      const busy = deep ? setChecking : setLoading;
+      busy(true);
+      setError(null);
+      fetch(`${origin}/api/status${deep ? '/check' : ''}`, { method: deep ? 'POST' : 'GET' })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return (await res.json()) as SystemStatus;
+        })
+        .then((json) => setData(json))
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'unreachable'))
+        .finally(() => busy(false));
+    },
+    [origin],
+  );
+
+  const refresh = useCallback(() => load(false), [load]);
+  const check = useCallback(() => load(true), [load]);
 
   useEffect(() => {
     if (enabled) refresh();
   }, [enabled, refresh]);
 
-  return { data, loading, error, refresh };
+  return { data, loading, error, refresh, check, checking };
 }

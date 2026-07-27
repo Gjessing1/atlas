@@ -23,6 +23,8 @@ import {
 import { NvdbStore } from './nvdb-db.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
+import { registerPotentialApi, type PotentialApiOptions } from './potential/index.js';
+import { allProbes, ProbeRunner, type ProbeRunnerOptions } from './probes.js';
 import type { RegionJobOptions } from './region-jobs.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
@@ -85,6 +87,14 @@ export interface AppOptions {
   placeContentApi?: PlaceContentApiOptions;
   /** Test/deployment seams for custom offline-region extraction. */
   regionJobs?: RegionJobOptions;
+  /** Test seams for the derived-potential engine (ROADMAP N5 → E2). */
+  potentialApi?: Partial<PotentialApiOptions>;
+  /**
+   * Active upstream probes (ROADMAP N7). `enabled` defaults to off under test —
+   * a background sweep against real government services is not something a unit
+   * test should trigger by existing.
+   */
+  probes?: ProbeRunnerOptions & { enabled?: boolean };
   /** Test seam: inject stores directly instead of via databaseUrl. */
   stores?: Stores;
   logger?: boolean;
@@ -138,6 +148,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       allowList: (request) =>
         request.url.startsWith('/api/tiles/') ||
         request.url.startsWith('/api/overlay/') ||
+        // Derived tiles only: /api/potential/prepare has its own tighter limit,
+        // because it queues work rather than reading a file.
+        (request.url.startsWith('/api/potential/') && request.url.includes('.png')) ||
         request.url.startsWith('/tiles/') ||
         request.url.startsWith('/assets/') ||
         request.url.startsWith('/packs/') ||
@@ -185,9 +198,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Basemap freshness is read from the PMTiles archives on disk, not probed.
   status.register('basemap', 'Basemap tiles', 'Map data');
 
-  // GET /api/status — per-upstream health for the settings/status page.
-  // Probe outcomes come from real traffic; freshness/liveness are read here.
-  app.get('/api/status', async (): Promise<SystemStatus> => {
+  // Active upstream probes (ROADMAP N7). The runner can only be built after the
+  // overlay catalog is registered — that is what knows which layers this instance
+  // actually serves — so the status routes below close over this holder rather
+  // than over a value that does not exist yet.
+  const probes: { runner?: ProbeRunner } = {};
+
+  /** Local, free checks: basemap freshness on disk and a Postgres ping. */
+  const refreshLocalStatus = async (): Promise<void> => {
     const detail = await basemapDetail(path.join(opts.dataDir, 'tiles'));
     status.setDetail('basemap', detail ?? 'no local archive — using world tiles');
     // A present, readable archive counts as ok; its absence isn't a failure
@@ -202,14 +220,38 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         status.record('postgres', false, 'unreachable');
       }
     }
-    return {
-      app: APP_NAME,
-      gitSha: process.env.GIT_SHA || 'dev',
-      generatedAt: Date.now(),
-      overall: status.overall(),
-      sources: status.toStatus(),
-    };
+  };
+
+  const snapshot = (): SystemStatus => ({
+    app: APP_NAME,
+    gitSha: process.env.GIT_SHA || 'dev',
+    generatedAt: Date.now(),
+    overall: status.overall(),
+    sources: status.toStatus(),
+    lastSweep: probes.runner?.snapshot.lastSweep ?? null,
+    probing: probes.runner?.snapshot.probing ?? false,
   });
+
+  // GET /api/status — per-upstream health for the settings/status page. Reading
+  // it never probes an upstream: it reports what real traffic and the periodic
+  // sweep have already established, so opening the page is free.
+  app.get('/api/status', async (): Promise<SystemStatus> => {
+    await refreshLocalStatus();
+    return snapshot();
+  });
+
+  // POST /api/status/check — "Check now" on the status page: re-probe every
+  // upstream and answer with the fresh snapshot. Rate-limited hard, because
+  // this is the one route where a user's button press spends someone else's
+  // bandwidth; concurrent presses also share a single sweep (see ProbeRunner).
+  app.post(
+    '/api/status/check',
+    { config: { rateLimit: { max: 4, timeWindow: '5 minutes' } } },
+    async (): Promise<SystemStatus> => {
+      await Promise.all([refreshLocalStatus(), probes.runner?.run(true) ?? Promise.resolve()]);
+      return snapshot();
+    },
+  );
 
   // Geocoding: thin proxy over the self-hosted Photon service so the client
   // never talks to it directly (single origin, no CORS, URL stays private).
@@ -515,7 +557,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // Overlay layer catalog + WMS tile/identify proxy. The tile cache lives on
   // its own disposable path — wiping it only costs re-fetches.
-  registerOverlayApi(app, {
+  const overlayLayers = registerOverlayApi(app, {
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
     status,
     // The camera layer is data-gated, not config-gated: it appears exactly
@@ -523,6 +565,35 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     ...(nvdb?.hasCameraData ? { extraMeta: [speedCameraLayerMeta()] } : {}),
     ...opts.overlayApi,
   });
+
+  // Derived potential surfaces (ROADMAP § N5 → E2): the fixed-z11-cell derive
+  // service — input adapters, the persisted job queue, and the revalidating tile
+  // route. The engine's arithmetic lives in @atlas/potential; this is the
+  // adapter that fetches, caches and serves. Cells are durable (they are the
+  // product); the cached upstream input responses share the disposable tile
+  // cache, because losing them only costs a re-fetch.
+  await registerPotentialApi(app, {
+    dataDir: opts.dataDir,
+    cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
+    status,
+    ...opts.potentialApi,
+  });
+
+  // The N7 sweep: one cheap request per upstream every few hours, over the
+  // layers this instance actually serves plus the Fish & Hunt engine's inputs.
+  // met.no is deliberately absent — its ToS asks for no synthetic polling, and
+  // the weather proxy's own traffic reports it (see probes.ts).
+  const probeRunner = new ProbeRunner(
+    allProbes(overlayLayers, opts.overlayApi?.env ?? process.env),
+    status,
+    app.log,
+    opts.probes ?? {},
+  );
+  probes.runner = probeRunner;
+  if (opts.probes?.enabled ?? process.env.NODE_ENV !== 'test') {
+    probeRunner.start();
+    app.addHook('onClose', () => probeRunner.stop());
+  }
 
   // Weather: met.no Locationforecast proxy (ToS discipline lives in
   // weather-api.ts — identifying UA, Expires caching, stale-on-failure).

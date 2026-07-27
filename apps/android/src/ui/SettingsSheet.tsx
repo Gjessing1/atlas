@@ -10,6 +10,7 @@ import type { AtlasStorage } from '@atlas/storage';
 import { describeStorageUnavailable } from '@atlas/storage';
 import {
   groupUpstreams,
+  sweepSummary,
   UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
   useStatus,
@@ -457,6 +458,21 @@ function StatusSection({ visible }: { visible: boolean }) {
           </View>
         ) : null}
       </View>
+      {/*
+        Re-probing spends requests on national services that owe us nothing, so
+        it stays an explicit press. Refresh above only reads what the server
+        already knows; this makes it go and ask.
+      */}
+      <Pressable
+        style={[styles.button, styles.buttonQuiet, status.checking && styles.buttonDisabled]}
+        disabled={status.checking}
+        onPress={status.check}
+        testID="status-check"
+      >
+        <Text style={styles.buttonQuietText}>
+          {status.checking ? 'Checking upstreams…' : 'Re-check every upstream now'}
+        </Text>
+      </Pressable>
       {status.error && !status.data ? (
         <Text style={styles.error}>Status unavailable — {status.error}.</Text>
       ) : null}
@@ -473,7 +489,10 @@ function StatusSection({ visible }: { visible: boolean }) {
                   <Text style={styles.statusName} numberOfLines={1}>
                     {source.label}
                   </Text>
-                  <Text style={styles.statusDetail} numberOfLines={2}>
+                  <Text
+                    style={[styles.statusDetail, source.warning ? styles.statusWarning : null]}
+                    numberOfLines={3}
+                  >
                     {upstreamDetail(source)}
                   </Text>
                 </View>
@@ -482,10 +501,14 @@ function StatusSection({ visible }: { visible: boolean }) {
           ))
         : null}
       {status.data ? (
-        <Text style={styles.muted}>
-          Backend build {status.data.gitSha === 'dev' ? 'dev' : status.data.gitSha.slice(0, 8)}.
-          Checks reflect real usage: a source stays “not checked” until the app has used it.
-        </Text>
+        <>
+          <Text style={styles.muted}>{sweepSummary(status.data)}</Text>
+          <Text style={styles.muted}>
+            Backend build {status.data.gitSha === 'dev' ? 'dev' : status.data.gitSha.slice(0, 8)}.
+            The server checks every data source by itself a few times a day, and also learns from
+            what the app actually uses.
+          </Text>
+        </>
       ) : null}
     </View>
   );
@@ -1212,5 +1235,7 @@ const styles = StyleSheet.create({
   statusDot: { width: 9, height: 9, borderRadius: 5 },
   statusName: { fontSize: 14, color: theme.text, fontWeight: '600' },
   statusDetail: { flex: 1, fontSize: 12, color: theme.textMuted, textAlign: 'right' },
+  // A silent-failure note is a sentence to read, not a timestamp to skim.
+  statusWarning: { color: '#d97706' },
   closeButton: { marginTop: 12, alignSelf: 'stretch', alignItems: 'center' },
 });

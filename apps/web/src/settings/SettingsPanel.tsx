@@ -1,8 +1,10 @@
 import {
   groupUpstreams,
+  sweepSummary,
   UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
   useStatus,
+  type StatusState,
   type MapProfilePreferencesController,
   type MapStyleEditorController,
   type NavPrefsController,
@@ -211,12 +213,14 @@ function SourceRow({ s }: { s: UpstreamStatus }) {
       <span className="status-name" title={UPSTREAM_HEALTH_LABEL[s.health]}>
         {s.label}
       </span>
-      <span className="status-detail">{upstreamDetail(s)}</span>
+      <span className={`status-detail${s.warning ? ' status-detail-warning' : ''}`}>
+        {upstreamDetail(s)}
+      </span>
     </li>
   );
 }
 
-function StatusSection({ data }: { data: SystemStatus }) {
+function StatusSection({ data, status }: { data: SystemStatus; status: StatusState }) {
   return (
     <>
       <div className="status-overall">
@@ -236,6 +240,20 @@ function StatusSection({ data }: { data: SystemStatus }) {
           </ul>
         </div>
       ))}
+      <p className="settings-note">{sweepSummary(data)}</p>
+      {/*
+        Re-probing spends requests on national services that owe us nothing, so
+        it stays an explicit button — the page itself only ever reads what the
+        server already knows.
+      */}
+      <button
+        type="button"
+        className="link-button"
+        disabled={status.checking}
+        onClick={status.check}
+      >
+        {status.checking ? 'Checking upstreams…' : 'Re-check every upstream now'}
+      </button>
     </>
   );
 }
@@ -368,10 +386,11 @@ export function SettingsPanel({
               <p className="settings-note settings-error">Status unavailable — {status.error}.</p>
             )}
             {!status.data && !status.error && <p className="settings-note">Loading…</p>}
-            {status.data && <StatusSection data={status.data} />}
+            {status.data && <StatusSection data={status.data} status={status} />}
             <p className="settings-note">
-              Checks reflect real usage: a source stays “not checked” until the app has used it this
-              session.
+              The server checks every data source by itself a few times a day, and also learns from
+              what the app actually uses. A source stays “not checked” until one of the two has
+              reached it.
             </p>
           </div>
         )}

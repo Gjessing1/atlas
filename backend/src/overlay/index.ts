@@ -23,9 +23,15 @@ import { registerTileRoute } from './tiles.js';
 
 export type { OverlayApiOptions } from './context.js';
 export type { OverlayLayer } from './catalog.js';
+import type { OverlayLayer } from './catalog.js';
 export { norwegianLayers, speedCameraLayerMeta } from './catalog.js';
 
-export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions): void {
+/**
+ * Returns the layers it actually configured (tokenless ones already dropped) —
+ * the N7 prober needs exactly that list, and re-deriving it would let the two
+ * disagree about which layers this instance serves.
+ */
+export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions): OverlayLayer[] {
   const env = opts.env ?? process.env;
   // Tokened layers without their env var drop out silently (no broken rows).
   const layers = (opts.layers ?? norwegianLayers()).filter(
@@ -68,4 +74,5 @@ export function registerOverlayApi(app: FastifyInstance, opts: OverlayApiOptions
   registerIdentifyRoute(ctx);
   registerLabelsRoute(ctx);
   registerFeaturesRoute(ctx);
+  return layers;
 }

@@ -114,6 +114,52 @@ describe('StatusRegistry', () => {
     expect(s.health).toBe('unknown');
   });
 
+  /**
+   * The silent failure. Every request succeeded, so nothing in the transport
+   * layer is wrong — and the data is still not to be trusted (a year-named
+   * service whose successor has appeared, a layer republished empty). Health has
+   * to reflect that, or the page reports "Operational" about wrong data.
+   */
+  it('is degraded while a warning stands, even though every request succeeded', () => {
+    const r = new StatusRegistry();
+    r.register('overlay:statskog-jaktfelt:year', 'Statskog year', 'Overlays');
+    r.record('overlay:statskog-jaktfelt:year', true);
+    expect(byId(r).get('overlay:statskog-jaktfelt:year')!.health).toBe('ok');
+    r.warn('overlay:statskog-jaktfelt:year', '2025 data has been published');
+    const warned = byId(r).get('overlay:statskog-jaktfelt:year')!;
+    expect(warned.health).toBe('degraded');
+    expect(warned.warning).toBe('2025 data has been published');
+    // Its message stays null: nothing failed, so there is nothing to blame.
+    expect(warned.message).toBeNull();
+    expect(r.overall()).toBe('degraded');
+  });
+
+  it('clears a warning when the upstream recovers', () => {
+    const r = new StatusRegistry();
+    r.record('overlay:statskog-jaktfelt', true);
+    r.warn('overlay:statskog-jaktfelt', 'only 0 features');
+    expect(byId(r).get('overlay:statskog-jaktfelt')!.health).toBe('degraded');
+    r.warn('overlay:statskog-jaktfelt', null);
+    expect(byId(r).get('overlay:statskog-jaktfelt')!.health).toBe('ok');
+    expect(byId(r).get('overlay:statskog-jaktfelt')!.warning).toBeNull();
+  });
+
+  it('records probe latency and rounds it', () => {
+    const r = new StatusRegistry();
+    r.record('input:dtm', true, undefined, 133.7);
+    expect(byId(r).get('input:dtm')!.latencyMs).toBe(134);
+    // Proxy traffic passes no timing, and must not blank an earlier probe's.
+    r.record('input:dtm', true);
+    expect(byId(r).get('input:dtm')!.latencyMs).toBe(134);
+  });
+
+  it('knows whether an id is already registered', () => {
+    const r = new StatusRegistry();
+    r.register('photon', 'Photon', 'Search');
+    expect(r.has('photon')).toBe(true);
+    expect(r.has('nope')).toBe(false);
+  });
+
   it('preserves registration order in the snapshot', () => {
     const r = new StatusRegistry();
     r.register('photon', 'Photon', 'Search');

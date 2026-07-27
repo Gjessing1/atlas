@@ -4545,6 +4545,15 @@ button.transit-notice-summary {
   white-space: nowrap;
 }
 
+/* A silent-failure note ("2025 data has been published") is a sentence, not a
+   timestamp: it needs the room the one-line ellipsis denies it, and enough
+   colour to be read rather than skimmed past. */
+.status-detail-warning {
+  color: #b45309;
+  white-space: normal;
+  text-align: right;
+}
+
 .status-dot {
   flex: 0 0 auto;
   width: 9px;

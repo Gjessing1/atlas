@@ -25,9 +25,9 @@ export interface AppVersionResponse {
 export type UpstreamHealth = 'ok' | 'degraded' | 'down' | 'unknown';
 
 /**
- * One upstream service or data source. Probes piggyback on real proxy traffic
- * (recorded in the proxy layer) rather than active polling, so `unknown` simply
- * means nothing has touched it since boot — not that it is broken.
+ * One upstream service or data source. Outcomes come from two places: real
+ * proxy traffic (recorded in the proxy layer) and the backend's own cheap
+ * periodic probes (ROADMAP N7). `unknown` means neither has an opinion yet.
  */
 export interface UpstreamStatus {
   id: string;
@@ -43,6 +43,16 @@ export interface UpstreamStatus {
   message: string | null;
   /** Extra context, e.g. "map data from 2026-07-12", "3 archives". */
   detail: string | null;
+  /** Round-trip of the last active probe in ms; null when never probed. */
+  latencyMs: number | null;
+  /**
+   * The *silent* failure: the upstream answered, but the answer is wrong in a
+   * way no HTTP status reports — a feature count that fell to zero, a scale
+   * range that stopped drawing, a year-named service whose successor has
+   * appeared and left us serving last year's data. Non-null counts as
+   * `degraded`, because the layer works and is nonetheless not to be trusted.
+   */
+  warning: string | null;
 }
 
 /**
@@ -57,6 +67,13 @@ export interface SystemStatus {
   /** Worst health across all sources (unknown sources don't drag it down). */
   overall: UpstreamHealth;
   sources: UpstreamStatus[];
+  /**
+   * Epoch ms the periodic probe sweep last finished, or null when none has run
+   * yet. Distinguishes "everything is fine" from "nothing has been checked".
+   */
+  lastSweep: number | null;
+  /** True while a sweep is in flight, so the client can show progress. */
+  probing: boolean;
 }
 
 // ---- Point elevation (GET /api/elevation) ----

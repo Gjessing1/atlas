@@ -114,6 +114,7 @@ export {
   useStatus,
   groupUpstreams,
   statusAge,
+  sweepSummary,
   upstreamDetail,
   UPSTREAM_HEALTH_LABEL,
   type StatusState,

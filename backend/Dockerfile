@@ -46,6 +46,11 @@ COPY --from=build /app/backend/package.json ./backend/
 # root node_modules copy alone loses them and the server crashes on import.
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
+# Completes one upstream's broken TLS chain (kart.miljodirektoratet.no ships its
+# leaf twice and omits the signing intermediate). See backend/certs/upstream-cas.pem
+# for why this is safe and what the N7 status probe watches for.
+COPY --from=build /app/backend/certs ./backend/certs
+ENV NODE_EXTRA_CA_CERTS=/app/backend/certs/upstream-cas.pem
 # Built web app → backend/public, served same-origin by backend/src/index.ts.
 COPY --from=build /app/apps/web/dist ./backend/public
 WORKDIR /app/backend

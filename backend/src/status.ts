@@ -1,11 +1,20 @@
 import type { UpstreamHealth, UpstreamStatus } from '@atlas/core';
 
 /**
- * In-process health registry. Every proxy records the outcome of the real
- * requests it already makes (`record(id, ok, message?)`); the status endpoint
- * reads a snapshot. This "piggyback on real traffic" model means a source stays
- * `unknown` until something actually exercises it — no active polling, no
- * synthetic load against rate-limited upstreams (met.no especially).
+ * In-process health registry. Two things write to it:
+ *
+ * - **Real traffic** — every proxy records the outcome of the requests it
+ *   already makes (`record(id, ok, message?)`). Free, and it reports exactly
+ *   what users experienced.
+ * - **Active probes** (`probes.ts`, ROADMAP N7) — one cheap request per
+ *   upstream every few hours, because piggybacking alone cannot see a source
+ *   nobody has opened, and the tile proxy serves later views from its disk
+ *   cache without ever re-asking upstream. That blind spot is not theoretical:
+ *   it hid a dead `wildlife-areas` layer (see probes.ts).
+ *
+ * The load stays deliberately tiny and met.no is left out of the sweep entirely
+ * — its ToS asks for no synthetic polling, and the weather proxy's own traffic
+ * reports it anyway.
  *
  * State is per-process and resets on restart, which is exactly right: it
  * describes "has this instance been able to reach X since it booted".
@@ -21,6 +30,8 @@ interface Probe {
   lastFailure: number | null;
   message: string | null;
   detail: string | null;
+  latencyMs: number | null;
+  warning: string | null;
 }
 
 /**
@@ -44,8 +55,13 @@ const FAILURE_TTL_MS = 30 * 60_000;
 
 function health(p: Probe, now: number): UpstreamHealth {
   if (p.lastSuccess === null && p.lastFailure === null) return 'unknown';
-  if (p.lastFailure === null) return 'ok';
-  if (p.lastSuccess !== null && p.lastSuccess >= p.lastFailure - BATCH_GRACE_MS) return 'ok';
+  if (p.lastFailure === null) return p.warning === null ? 'ok' : 'degraded';
+  if (p.lastSuccess !== null && p.lastSuccess >= p.lastFailure - BATCH_GRACE_MS) {
+    // Reachable — but a warning means the answer itself is not to be trusted
+    // (stale year-named service, coverage gone to zero), which is degraded even
+    // though every request succeeded.
+    return p.warning === null ? 'ok' : 'degraded';
+  }
   if (now - p.lastFailure > FAILURE_TTL_MS) return 'unknown';
   // A failing source that has succeeded before is degraded (typically serving a
   // cached/stale copy); one that has never worked this run is down.
@@ -91,17 +107,30 @@ export class StatusRegistry {
       lastFailure: null,
       message: null,
       detail: null,
+      latencyMs: null,
+      warning: null,
     });
   }
 
-  /** Record one real request's outcome. Auto-registers an unseen id. */
-  record(id: string, ok: boolean, message?: string): void {
+  /** Is this id known to the registry? */
+  has(id: string): boolean {
+    return this.probes.has(id);
+  }
+
+  /**
+   * Record one request's outcome. Auto-registers an unseen id. `latencyMs` is
+   * only passed by the active prober — proxy traffic doesn't time itself, and a
+   * user-facing request's duration would mix queueing and cache reads into a
+   * number read as "how far away is this upstream".
+   */
+  record(id: string, ok: boolean, message?: string, latencyMs?: number): void {
     let p = this.probes.get(id);
     if (!p) {
       this.register(id, id, 'Other');
       p = this.probes.get(id)!;
     }
     const now = this.clock();
+    if (latencyMs !== undefined) p.latencyMs = Math.round(latencyMs);
     if (ok) {
       p.lastSuccess = now;
       p.message = null;
@@ -109,6 +138,18 @@ export class StatusRegistry {
       p.lastFailure = now;
       if (message) p.message = message.slice(0, 200);
     }
+  }
+
+  /**
+   * Flag (or clear) the silent kind of failure: the upstream answers, but its
+   * answer is wrong — zero features where there were thousands, a successor
+   * year-service that has appeared. Only the active prober calls this, and it
+   * always calls it with the outcome, so a warning clears itself once the
+   * upstream recovers.
+   */
+  warn(id: string, warning: string | null): void {
+    const p = this.probes.get(id);
+    if (p) p.warning = warning === null ? null : warning.slice(0, 200);
   }
 
   /** Attach non-probe context (freshness, cache age) to a source's detail line. */
@@ -130,6 +171,8 @@ export class StatusRegistry {
         lastFailure: p.lastFailure,
         message: p.message,
         detail: p.detail,
+        latencyMs: p.latencyMs,
+        warning: p.warning,
       }));
   }
 
