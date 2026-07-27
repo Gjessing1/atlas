@@ -20,6 +20,7 @@ export {
   distanceToMask,
   distanceTransform,
   fillNearest,
+  fillRings,
   focalFraction,
   focalMean,
   gridHistogram,
@@ -135,3 +136,17 @@ export {
 } from './species.js';
 
 export { explainPoint, type ExplainContext, type PotentialExplanation } from './explain.js';
+
+export {
+  BOTTOM_FLAT_PERCENT,
+  BOTTOM_STEEP_PERCENT,
+  describeLakeSignal,
+  lakeProductivity,
+  lakeRegulation,
+  lakeSurface,
+  NEARSHORE_STEEP_PERCENT,
+  SHORE_BAND_M,
+  SHORE_COVER_VALUE,
+  type LakeInputs,
+  type LakeSurface,
+} from './models/lake.js';

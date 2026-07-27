@@ -1,6 +1,7 @@
 import type { LngLatBbox } from '@atlas/core';
 import { createGrid, renderRamp, summariseSurface, type Grid } from '@atlas/potential';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PNG } from 'pngjs';
@@ -23,7 +24,25 @@ import { resolveTarget, type DeriveModel } from './models.js';
  * *shared* arithmetic changes (ranking, ramp, tile geometry) so every cell of
  * every layer re-derives, rather than serving new tiles built by old rules.
  */
-export const ENGINE_REV = 1;
+export const ENGINE_REV = 2;
+
+/**
+ * Edge, in pixels, of the per-cell signal planes kept for the explain card.
+ *
+ * A quarter of the cell's own resolution — ~38 m per sample. The card answers
+ * "why is this water good?", and a mean over the 38 m around the tap is both
+ * cheaper to store and a *steadier* answer than one 9.6 m pixel, which can sit
+ * on the edge of a drop-off band and report the wrong side of it. Storing the
+ * full-resolution planes would multiply a cell's footprint by sixteen to make
+ * the answer twitchier.
+ */
+export const SIGNAL_PIXELS = 256;
+
+/** Reserved plane name for the ranked surface itself. */
+const RANK_PLANE = 'rank';
+
+/** Sentinel for "no value here" in a quantised plane; 0..254 carry 0..1. */
+const SIGNAL_NODATA = 255;
 
 export interface CellManifest {
   /** `11/1083/596`. */
@@ -58,6 +77,22 @@ export interface CellManifest {
   readonly etag: string;
   /** Legend vocabulary, so a client renders the right words. */
   readonly vocabulary: 'fishing' | 'hunt';
+  /**
+   * The persisted signal planes behind this cell, or null when the model
+   * supplied none. Their *order* is the file layout, so this is the header of
+   * the `.signals` blob beside the manifest, not decoration.
+   */
+  readonly signals: {
+    readonly pixels: number;
+    /** Plane order in the blob; `rank` is always first. */
+    readonly planes: readonly string[];
+    /** One entry per weighted signal, in plane order after `rank`. */
+    readonly terms: readonly {
+      readonly key: string;
+      readonly label: string;
+      readonly weight: number;
+    }[];
+  } | null;
 }
 
 /** Where a derived layer's artefacts live under the data dir. */
@@ -83,6 +118,59 @@ export function manifestPath(
   cell: Cell,
 ): string {
   return path.join(cellDir(dataDir, model, target), 'cell', String(cell.x), `${cell.y}.json`);
+}
+
+/** Where a cell's quantised signal planes live — beside its manifest. */
+export function signalsPath(
+  dataDir: string,
+  model: DeriveModel,
+  target: string,
+  cell: Cell,
+): string {
+  return path.join(cellDir(dataDir, model, target), 'cell', String(cell.x), `${cell.y}.signals.gz`);
+}
+
+/**
+ * Quantise one grid to a `SIGNAL_PIXELS`² byte plane by **block mean over the
+ * valid samples**, so a block that is half nodata reports the half it knows
+ * rather than being dragged toward zero — the same "missing means unknown" rule
+ * the combine uses, applied to storage.
+ */
+export function quantisePlane(grid: Grid): Uint8Array {
+  const out = new Uint8Array(SIGNAL_PIXELS * SIGNAL_PIXELS).fill(SIGNAL_NODATA);
+  const step = Math.max(1, Math.round(grid.width / SIGNAL_PIXELS));
+  for (let sy = 0; sy < SIGNAL_PIXELS; sy++) {
+    for (let sx = 0; sx < SIGNAL_PIXELS; sx++) {
+      let sum = 0;
+      let n = 0;
+      for (let dy = 0; dy < step; dy++) {
+        const y = sy * step + dy;
+        if (y >= grid.height) break;
+        for (let dx = 0; dx < step; dx++) {
+          const x = sx * step + dx;
+          if (x >= grid.width) break;
+          const v = grid.data[y * grid.width + x]!;
+          if (Number.isFinite(v)) {
+            sum += v;
+            n++;
+          }
+        }
+      }
+      if (n === 0) continue;
+      const mean = Math.max(0, Math.min(1, sum / n));
+      out[sy * SIGNAL_PIXELS + sx] = Math.round(mean * (SIGNAL_NODATA - 1));
+    }
+  }
+  return out;
+}
+
+/** Read one sample out of a plane; NaN for nodata or an out-of-range index. */
+export function readSignal(planes: Buffer, planeIndex: number, sx: number, sy: number): number {
+  if (sx < 0 || sy < 0 || sx >= SIGNAL_PIXELS || sy >= SIGNAL_PIXELS) return Number.NaN;
+  const offset = planeIndex * SIGNAL_PIXELS * SIGNAL_PIXELS + sy * SIGNAL_PIXELS + sx;
+  const raw = planes[offset];
+  if (raw === undefined || raw === SIGNAL_NODATA) return Number.NaN;
+  return raw / (SIGNAL_NODATA - 1);
 }
 
 /** Read a cell's manifest, or null when it has not been derived at this revision. */
@@ -213,6 +301,25 @@ export async function deriveCell(
     }
   }
 
+  // The signals that produced the pixels, kept so the surface can later say
+  // *why* (D4). Written before the manifest for the same reason the tiles are:
+  // a manifest on disk promises that everything it describes is already there.
+  const terms = result.terms ?? [];
+  const signals: CellManifest['signals'] =
+    terms.length === 0
+      ? null
+      : {
+          pixels: SIGNAL_PIXELS,
+          planes: [RANK_PLANE, ...terms.map((t) => t.key)],
+          terms: terms.map((t) => ({ key: t.key, label: t.label, weight: t.weight })),
+        };
+  if (signals) {
+    const planes = [rank, ...terms.map((t) => cropToCell(t.grid, raster.pad))].map(quantisePlane);
+    const blob = Buffer.alloc(planes.length * SIGNAL_PIXELS * SIGNAL_PIXELS);
+    planes.forEach((plane, i) => blob.set(plane, i * SIGNAL_PIXELS * SIGNAL_PIXELS));
+    await writeAtomic(signalsPath(dataDir, model, target, cell), gzipSync(blob));
+  }
+
   const valid = summary.contrast.validCells / (CELL_PIXELS * CELL_PIXELS);
   const manifest: CellManifest = {
     cell: `${cell.z}/${cell.x}/${cell.y}`,
@@ -235,6 +342,7 @@ export async function deriveCell(
     coverage: Math.round(valid * 1000) / 1000,
     etag,
     vocabulary: model.vocabulary,
+    signals,
   };
   // Written last, so a manifest on disk always means the tiles beside it are
   // complete: the routes treat its presence as "this cell is ready".

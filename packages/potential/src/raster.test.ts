@@ -8,6 +8,7 @@ import {
   createMask,
   distanceTransform,
   fillNearest,
+  fillRings,
   focalFraction,
   focalMean,
   gridOf,
@@ -195,6 +196,103 @@ describe('burn', () => {
       12.5,
     );
     expect(Array.from(g.data.slice(10, 15))).toEqual([12.5, 12.5, 12.5, 12.5, 12.5]);
+  });
+});
+
+describe('fillRings', () => {
+  /** Set cells of a row, as a string, so a filled shape reads at a glance. */
+  const row = (mask: ReturnType<typeof createMask>, y: number): string =>
+    Array.from(mask.data.slice(y * mask.width, (y + 1) * mask.width))
+      .map((v) => (v === 1 ? '#' : '.'))
+      .join('');
+
+  it('fills a ring interior, not just its outline', () => {
+    const mask = createMask(6, 6, 10);
+    fillRings(mask, [
+      [
+        [1, 1],
+        [5, 1],
+        [5, 5],
+        [1, 5],
+      ],
+    ]);
+    expect(row(mask, 0)).toBe('......');
+    expect(row(mask, 2)).toBe('.####.');
+    expect(row(mask, 4)).toBe('.####.');
+    expect(row(mask, 5)).toBe('......');
+  });
+
+  it('punches islands out under the even-odd rule, whatever the winding', () => {
+    const island: [number, number][] = [
+      [3, 3],
+      [6, 3],
+      [6, 6],
+      [3, 6],
+    ];
+    for (const inner of [island, [...island].reverse()]) {
+      const mask = createMask(10, 10, 10);
+      fillRings(mask, [
+        [
+          [1, 1],
+          [8, 1],
+          [8, 8],
+          [1, 8],
+        ],
+        inner,
+      ]);
+      expect(row(mask, 2)).toBe('.#######..');
+      expect(row(mask, 4)).toBe('.##...##..');
+    }
+  });
+
+  it('fills the visible part of a lake that continues past the raster', () => {
+    const mask = createMask(4, 4, 10);
+    fillRings(mask, [
+      [
+        [-5, -5],
+        [2, -5],
+        [2, 2],
+        [-5, 2],
+      ],
+    ]);
+    expect(row(mask, 0)).toBe('##..');
+    expect(row(mask, 1)).toBe('##..');
+    expect(row(mask, 3)).toBe('....');
+  });
+
+  it('counts a shared vertex once, so a concave outline does not leak', () => {
+    // A bay cut into the top edge: its mouth is wide, it narrows with depth,
+    // and it closes at the apex. Every row is a separate chance for the two
+    // sloped edges — which meet at a vertex the scanline passes exactly — to be
+    // counted twice or not at all, either of which floods or empties the row.
+    const mask = createMask(7, 6, 10);
+    fillRings(mask, [
+      [
+        [0, 0],
+        [2, 0],
+        [3.5, 3],
+        [5, 0],
+        [7, 0],
+        [7, 5],
+        [0, 5],
+      ],
+    ]);
+    expect(row(mask, 0)).toBe('##...##');
+    expect(row(mask, 1)).toBe('###.###');
+    expect(row(mask, 3)).toBe('#######');
+  });
+
+  it('ignores degenerate rings rather than throwing', () => {
+    const mask = createMask(4, 4, 10);
+    fillRings(mask, [
+      [],
+      [[1, 1]],
+      [
+        [1, 1],
+        [2, 2],
+      ],
+    ]);
+    expect(Array.from(mask.data).every((v) => v === 0)).toBe(true);
   });
 });
 

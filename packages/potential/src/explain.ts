@@ -21,8 +21,17 @@ import { BAND_LABELS, bandForRank } from './surface.js';
 export interface PotentialExplanation {
   /** 0..100 — the percentile rank of this point within its own surface. */
   readonly score: number;
-  readonly band: SurfaceBandKey;
-  readonly bandLabel: string;
+  /**
+   * The ramp band, or **null where nothing is derived**.
+   *
+   * Null rather than the coolest band, because they mean opposite things: a
+   * `quiet` pixel is a judgement ("this water is not special"), an underived one
+   * is an absence ("we do not model dry land, or this lake was never reached").
+   * Collapsing the two would let a client label the middle of a field "Quiet"
+   * — a verdict on ground the engine never looked at.
+   */
+  readonly band: SurfaceBandKey | null;
+  readonly bandLabel: string | null;
   readonly factors: ConditionFactor[];
   /** Labels of signals that have nothing to say here — unknown, not bad. */
   readonly missing: string[];
@@ -57,8 +66,9 @@ export function explainPoint(
 ): PotentialExplanation {
   const vocabulary = ctx.vocabulary ?? 'fishing';
   const rank = ctx.rank.data[y * ctx.rank.width + x] ?? Number.NaN;
-  const band = bandForRank(rank);
-  const bandLabel = BAND_LABELS[vocabulary][band.key];
+  const derived = Number.isFinite(rank);
+  const band = derived ? bandForRank(rank).key : null;
+  const bandLabel = band === null ? null : BAND_LABELS[vocabulary][band];
 
   const present: ConditionFactor[] = [];
   const missing: string[] = [];
@@ -90,15 +100,15 @@ export function explainPoint(
   const missingNote = missing.length
     ? ` No ${missing.map((m) => m.toLowerCase()).join(', ')} data here.`
     : '';
-  const summary = !Number.isFinite(rank)
+  const summary = !derived
     ? 'Nothing is derived for this point.'
     : top
       ? `${bandLabel}. ${cap(top.detail.replace(/\.\s*$/, ''))}.${missingNote}`
       : `${bandLabel}.${missingNote}`;
 
   return {
-    score: Number.isFinite(rank) ? Math.round(rank * 100) : Number.NaN,
-    band: band.key,
+    score: derived ? Math.round(rank * 100) : Number.NaN,
+    band,
     bandLabel,
     factors,
     missing,

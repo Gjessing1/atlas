@@ -665,6 +665,89 @@ export function burnPolylineValue(
   }
 }
 
+/**
+ * Fill closed rings into a mask — the **water mask**, and the one primitive the
+ * derive service found missing once E2 was running.
+ *
+ * Burning a lake's rings draws its *outline*; almost every lake signal needs its
+ * *interior*: "is this pixel water" gates the whole surface, the shore band is
+ * defined by distance to the interior's boundary, and `mouthMask` asks which
+ * side of the shoreline a stream cell is on. An outline cannot answer any of
+ * them.
+ *
+ * Rings are filled together under the **even-odd** rule, so a lake's islands
+ * (which NVE returns as further rings of the same polygon) punch holes without
+ * the caller having to know which ring is which — winding order is not reliable
+ * across the sources here, and even-odd needs no such promise.
+ *
+ * Scanline at pixel centres: a row crosses an edge when the edge spans that
+ * centre's `y`, with the top vertex counted and the bottom one not, so shared
+ * vertices between consecutive edges produce exactly one crossing rather than
+ * two or none. Coordinates are fractional cell indices and may lie outside the
+ * raster — a lake continuing past the cell edge must still fill the part that is
+ * inside, which is why clipping happens per span rather than per vertex.
+ */
+export function fillRings(
+  mask: Mask,
+  rings: readonly (readonly (readonly [number, number])[])[],
+): void {
+  interface Edge {
+    readonly yMin: number;
+    readonly yMax: number;
+    /** x at `yMin`, and dx/dy — the scanline's x is `x0 + (y - yMin) * slope`. */
+    readonly x0: number;
+    readonly slope: number;
+  }
+  const edges: Edge[] = [];
+  let top = Number.POSITIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]!;
+      // Close the ring even when the source did not repeat the first vertex.
+      const b = ring[(i + 1) % ring.length]!;
+      const [ax, ay] = a;
+      const [bx, by] = b;
+      if (!Number.isFinite(ax) || !Number.isFinite(ay)) continue;
+      if (!Number.isFinite(bx) || !Number.isFinite(by)) continue;
+      if (ay === by) continue; // horizontal edges cross no scanline centre
+      const upper = ay < by ? a : b;
+      const lower = ay < by ? b : a;
+      edges.push({
+        yMin: upper[1],
+        yMax: lower[1],
+        x0: upper[0],
+        slope: (lower[0] - upper[0]) / (lower[1] - upper[1]),
+      });
+      if (upper[1] < top) top = upper[1];
+      if (lower[1] > bottom) bottom = lower[1];
+    }
+  }
+  if (edges.length === 0) return;
+
+  const yStart = Math.max(0, Math.ceil(top - 0.5));
+  const yEnd = Math.min(mask.height - 1, Math.floor(bottom - 0.5));
+  const crossings: number[] = [];
+  for (let y = yStart; y <= yEnd; y++) {
+    const scan = y + 0.5;
+    crossings.length = 0;
+    for (const edge of edges) {
+      // Half-open in y: the top vertex belongs to the edge, the bottom does not.
+      if (scan < edge.yMin || scan >= edge.yMax) continue;
+      crossings.push(edge.x0 + (scan - edge.yMin) * edge.slope);
+    }
+    if (crossings.length < 2) continue;
+    crossings.sort((a, b) => a - b);
+    const row = y * mask.width;
+    for (let i = 0; i + 1 < crossings.length; i += 2) {
+      const from = Math.max(0, Math.ceil(crossings[i]! - 0.5));
+      const to = Math.min(mask.width - 1, Math.floor(crossings[i + 1]! - 0.5));
+      for (let x = from; x <= to; x++) mask.data[row + x] = 1;
+    }
+  }
+}
+
 function bresenham(
   x0: number,
   y0: number,

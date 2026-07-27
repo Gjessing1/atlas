@@ -1,16 +1,16 @@
 import {
-  burnPolyline,
   createMask,
   gridStats,
   mapValues,
   maxOf,
   proximityField,
   slopePercent,
+  type CombineTerm,
   type Grid,
   type Mask,
 } from '@atlas/potential';
-import type { CellRaster } from './cells.js';
-import { projectToRaster } from './cells.js';
+import { burnPaths } from './cells.js';
+import { lakeModel } from './lake.js';
 import {
   STREAM_FICTITIOUS,
   STREAM_REAL_CHANNEL,
@@ -45,6 +45,22 @@ export interface DeriveModel {
   /** Vocabulary for the legend words — a fisher casts, a hunter looks. */
   readonly vocabulary: 'fishing' | 'hunt';
   run(inputs: CellInputs, target: string): ModelResult;
+  /**
+   * The plain-language reason one persisted signal gives at a value.
+   *
+   * The explain card is rendered from planes on disk, long after the closure
+   * that produced them is gone, so a model that wants its card to say more than
+   * "Inflow mouth: 54 %" has to be able to re-derive the sentence from the key
+   * and the value alone. `derivedAt` is passed because a seasonal band shifts:
+   * the card must describe the surface that was *built*, not the one today
+   * would build.
+   */
+  describeSignal?(
+    key: string,
+    value: number,
+    target: string,
+    derivedAt: number,
+  ): string | undefined;
 }
 
 export interface ModelResult {
@@ -62,27 +78,16 @@ export interface ModelResult {
   readonly absolute?: number;
   /** Plain-language notes for the manifest and the coverage message. */
   readonly notes: readonly string[];
-}
-
-/** Burn every path of a vector input onto a mask, in raster pixels. */
-export function burnPaths(
-  raster: CellRaster,
-  paths: readonly (readonly (readonly [number, number])[])[],
-  mask: Mask,
-): number {
-  let burned = 0;
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    burnPolyline(
-      mask,
-      path.map(([lng, lat]) => {
-        const [x, y] = projectToRaster(raster, lng, lat);
-        return [Math.round(x), Math.round(y)] as const;
-      }),
-    );
-    burned++;
-  }
-  return burned;
+  /**
+   * The weighted signals that produced `score`, on the same padded raster.
+   *
+   * Supplied so the derive can persist them and answer "why is this pixel hot?"
+   * later (D4). The ranked surface alone cannot: it is one number per pixel, and
+   * the whole point of the explain card is naming *which* signal put it there.
+   * A model may omit them, in which case tapping the surface reports the rank
+   * and nothing more.
+   */
+  readonly terms?: readonly CombineTerm[];
 }
 
 /** Scale a grid to 0..1 by its own range, preserving NaN. Diagnostics only. */
@@ -182,11 +187,11 @@ function shoreScore(mask: Mask): Grid {
 }
 
 /**
- * Every model this build can derive. E3–E5 register their models here; the
+ * Every model this build can derive. E4–E5 register their models here; the
  * routes 404 for anything absent, so a half-built model cannot be reached by
  * guessing a URL.
  */
-export const DERIVE_MODELS: readonly DeriveModel[] = [diagnosticModel];
+export const DERIVE_MODELS: readonly DeriveModel[] = [lakeModel, diagnosticModel];
 
 export function deriveModel(layer: string): DeriveModel | undefined {
   return DERIVE_MODELS.find((m) => m.layer === layer);

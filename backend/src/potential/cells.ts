@@ -1,4 +1,5 @@
 import type { LngLatBbox } from '@atlas/core';
+import { burnPolyline, type Mask } from '@atlas/potential';
 
 /**
  * The derive grid: **fixed z11 cells**, not user-drawn areas (D2 of
@@ -235,4 +236,31 @@ export function cellForTile(
     offsetY: (y % factor) * covered,
     scale: covered / 256,
   };
+}
+
+/**
+ * Burn every path of a vector input onto a mask, in raster pixels.
+ *
+ * Lives here rather than beside the models because it is pure cell geometry —
+ * and because both the model registry and the individual models need it, which
+ * would otherwise make them import each other at runtime.
+ */
+export function burnPaths(
+  raster: CellRaster,
+  paths: readonly (readonly (readonly [number, number])[])[],
+  mask: Mask,
+): number {
+  let burned = 0;
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    burnPolyline(
+      mask,
+      path.map(([lng, lat]) => {
+        const [x, y] = projectToRaster(raster, lng, lat);
+        return [Math.round(x), Math.round(y)] as const;
+      }),
+    );
+    burned++;
+  }
+  return burned;
 }

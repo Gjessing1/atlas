@@ -6,11 +6,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { writeArrayBuffer } from 'geotiff';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CELL_PIXELS, cellRaster, type Cell } from './cells.js';
+import { burnPaths, CELL_PIXELS, cellRaster, type Cell } from './cells.js';
 import { cropToCell, deriveCell, manifestPath, readManifest, tilePath } from './derive.js';
 import { gatherInputs, type PotentialContext } from './inputs.js';
 import { registerPotentialApi } from './index.js';
-import { burnPaths, type DeriveModel, type ModelResult } from './models.js';
+import type { DeriveModel, ModelResult } from './models.js';
 
 const CELL: Cell = { z: 11, x: 1083, y: 596 };
 const RASTER = cellRaster(CELL);

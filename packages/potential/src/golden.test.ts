@@ -1,37 +1,36 @@
 /**
- * The D5 golden tests — the acceptance criteria for E1 written down as code.
+ * The D5 golden tests — the acceptance criteria for the lake model written down
+ * as code.
  *
- * The standing requirement is that a surface must never read as "this whole
- * lake is equally good", and must be *allowed* to say "nothing special here".
- * FISH-HUNT-ENGINE.md § D5 makes that an E1 golden test rather than an E3
- * eyeball, for a good reason: percentile ranking guarantees a top decile
+ * The standing requirement is that a surface must never read as "this whole lake
+ * is equally good", and must be *allowed* to say "nothing special here".
+ * FISH-HUNT-ENGINE.md § D5 makes that a golden test rather than an eyeball on a
+ * real lake later, for a good reason: percentile ranking guarantees a top decile
  * whether or not one is deserved, so the honesty of every surface the engine
  * will ever draw rests on the gate below.
  *
- * Two synthetic lakes, built from the primitives exactly as the E3 lake model
- * will build them:
+ * Two synthetic lakes, run through the **real** `lakeSurface()` model rather
+ * than a local imitation of it — a golden test that scores its own private
+ * arithmetic proves nothing about what ships:
  *
  *   1. a featureless pond → must report **no standout**;
  *   2. one drop-off and one inflow → must produce **exactly two maxima**.
  */
 import { describe, expect, it } from 'vitest';
 import {
-  applyMask,
   bestSpots,
-  combine,
   contrastGate,
   createMask,
   explainPoint,
+  fishSpecies,
   gridOf,
+  lakeProductivity,
+  lakeRegulation,
+  lakeSurface,
   maskOf,
-  membershipGrid,
-  mouthMask,
-  nearshoreSlopePercent,
-  proximityField,
-  shorelineStructure,
   summariseSurface,
 } from './index.js';
-import type { CombineTerm, Grid, Mask } from './index.js';
+import type { Grid, LakeInputs, Mask } from './index.js';
 
 const SIZE = 81;
 const CELL_M = 10;
@@ -39,56 +38,38 @@ const CX = 40;
 const CY = 40;
 const RADIUS = 30;
 
+const ORRET = fishSpecies('orret')!;
+
 /** A round lake, 600 m across, centred in the cell. */
 function roundLake(): Mask {
   return maskOf(SIZE, SIZE, CELL_M, (x, y) => Math.hypot(x - CX, y - CY) <= RADIUS);
 }
 
-/**
- * Assemble a lake surface from the shore-model signals — the depth-free model
- * that runs for ~97 % of Norwegian lakes.
- */
-function lakeSurface(opts: { water: Mask; terrain: Grid; streams: Mask }): {
-  score: Grid;
-  terms: CombineTerm[];
-} {
-  const { water, terrain, streams } = opts;
-  const shore = shorelineStructure(water, { radiusM: 120, shoreBandM: 120 });
-  const nearshore = membershipGrid(
-    nearshoreSlopePercent(terrain, water, { ringM: 60, spreadM: 60, shoreBandM: 120 }),
-    { min: 0, peakMin: 25, peakMax: 200, max: 400 },
-  );
-  const mouths = mouthMask(streams, water, { ringM: 40 });
-  const inlet = applyMask(proximityField(mouths, { halfDistanceM: 60, maxDistanceM: 300 }), water);
-
-  const terms: CombineTerm[] = [
-    {
-      key: 'inlet',
-      label: 'Inflow mouth',
-      weight: 1,
-      grid: inlet,
-      describe: (v) => `${Math.round(v * 100)} % of the way to an inflow mouth`,
-    },
-    {
-      key: 'nearshore-slope',
-      label: 'Nearshore drop-off',
-      weight: 0.8,
-      grid: nearshore,
-      describe: () => 'steep shoreline terrain, so a drop-off is inferred',
-    },
-    { key: 'cove', label: 'Cove', weight: 0.5, grid: shore.coves },
-  ];
-  return { score: applyMask(combine(terms), water), terms };
+/** Shore-model inputs with nothing supplied but the pieces a test names. */
+function inputs(over: Partial<LakeInputs> & { water: Mask }): LakeInputs {
+  const empty = createMask(SIZE, SIZE, CELL_M);
+  return {
+    terrain: null,
+    depthM: null,
+    inflows: empty,
+    outflows: empty,
+    inflowMagnitude: null,
+    landCover: null,
+    productivity: null,
+    regulated: null,
+    ...over,
+  };
 }
+
+const surfaceFor = (over: Partial<LakeInputs> & { water: Mask }) =>
+  lakeSurface(inputs(over), { species: ORRET, season: 'summer' });
 
 describe('D5 — a surface must be allowed to say "nothing special here"', () => {
   it('reports no standout on a featureless pond', () => {
-    const water = roundLake();
     // Flat bog all round, no inflow anywhere.
-    const surface = lakeSurface({
-      water,
+    const surface = surfaceFor({
+      water: roundLake(),
       terrain: gridOf(SIZE, SIZE, CELL_M, () => 100),
-      streams: createMask(SIZE, SIZE, CELL_M),
     });
 
     const gate = contrastGate(surface.score);
@@ -101,20 +82,22 @@ describe('D5 — a surface must be allowed to say "nothing special here"', () =>
   });
 
   it('finds exactly two maxima on a lake with one drop-off and one inlet', () => {
-    const water = roundLake();
     // One short cliff on the western shore; gentle bog everywhere else.
     const terrain = gridOf(SIZE, SIZE, CELL_M, (x, y) => {
       const west = x < CX - RADIUS && Math.abs(y - CY) < 5;
       return west ? 100 + (CX - RADIUS - x) * 12 : 100;
     });
     // One stream entering from the north, stopping at the shore.
-    const streams = maskOf(SIZE, SIZE, CELL_M, (x, y) => x === CX && y <= CY - RADIUS + 2);
+    const inflows = maskOf(SIZE, SIZE, CELL_M, (x, y) => x === CX && y <= CY - RADIUS + 2);
 
-    const surface = lakeSurface({ water, terrain, streams });
+    const surface = surfaceFor({ water: roundLake(), terrain, inflows });
     const summary = summariseSurface(surface.score, { absolute: 0.55 });
 
     expect(summary.contrast.standout).toBe(true);
     expect(summary.tier).toBe('good');
+    // No survey here, so the shore model ran and says so by omission.
+    expect(surface.bathymetric).toBe(false);
+    expect(surface.depthBandLabel).toBeNull();
 
     // 250 m on a 600 m lake: closer than that and two "spots" are the same lie
     // seen twice. The cliff's hot band is ~200 m of shore, and its ends differ
@@ -145,10 +128,9 @@ describe('D5 — a surface must be allowed to say "nothing special here"', () =>
   });
 
   it('ranks the whole surface, so the hot band stays rare by construction', () => {
-    const water = roundLake();
     const terrain = gridOf(SIZE, SIZE, CELL_M, (x) => 100 + Math.max(0, CX - RADIUS - x) * 12);
-    const streams = maskOf(SIZE, SIZE, CELL_M, (x, y) => x === CX && y <= CY - RADIUS + 2);
-    const { rank } = summariseSurface(lakeSurface({ water, terrain, streams }).score);
+    const inflows = maskOf(SIZE, SIZE, CELL_M, (x, y) => x === CX && y <= CY - RADIUS + 2);
+    const { rank } = summariseSurface(surfaceFor({ water: roundLake(), terrain, inflows }).score);
 
     let valid = 0;
     let prime = 0;
@@ -157,8 +139,101 @@ describe('D5 — a surface must be allowed to say "nothing special here"', () =>
       valid++;
       if (v >= 0.95) prime++;
     }
-    expect(valid).toBeGreaterThan(2000);
+    expect(valid).toBeGreaterThan(1000);
     // "Prime" is the top ~5 % of valid cells — not a calibration hope, a property.
     expect(prime / valid).toBeLessThan(0.08);
+  });
+});
+
+describe('the lake model chooses its half by data, not by configuration', () => {
+  const water = roundLake();
+  /** A bowl: 0 m at the bank, deepest in the middle. */
+  const depthM = (peak: number): Grid =>
+    gridOf(SIZE, SIZE, CELL_M, (x, y) => {
+      const r = Math.hypot(x - CX, y - CY);
+      return r <= RADIUS ? (1 - r / RADIUS) * peak : Number.NaN;
+    });
+
+  it('reads a survey when one exists, and names the band in use', () => {
+    const surface = lakeSurface(inputs({ water, depthM: depthM(20) }), {
+      species: ORRET,
+      season: 'summer',
+    });
+    expect(surface.bathymetric).toBe(true);
+    // Ørret's 1–6 m band shifts 3 m deeper in summer, and the label says so
+    // rather than the shift happening silently.
+    expect(surface.depthBandLabel).toBe('Summer band 4–9 m');
+    expect(surface.terms.map((t) => t.key)).toEqual(
+      expect.arrayContaining(['structure', 'depth-band']),
+    );
+  });
+
+  it('scores open water only where a survey reaches it', () => {
+    const mid = CY * SIZE + CX;
+    // Shore model: the middle of a 600 m lake is 300 m out, past the 150 m
+    // band, so it is *unknown* and draws nothing — not a cool-coloured verdict.
+    expect(Number.isNaN(surfaceFor({ water }).score.data[mid]!)).toBe(true);
+    // Bathymetric model: the survey reaches the middle, so it is scored.
+    const surveyed = lakeSurface(inputs({ water, depthM: depthM(20) }), {
+      species: ORRET,
+      season: 'summer',
+    });
+    expect(Number.isFinite(surveyed.score.data[mid]!)).toBe(true);
+  });
+
+  it('never scores dry land', () => {
+    const surface = surfaceFor({ water, terrain: gridOf(SIZE, SIZE, CELL_M, () => 100) });
+    expect(Number.isNaN(surface.score.data[0]!)).toBe(true);
+  });
+
+  it('leaves a term out entirely when its input is missing', () => {
+    const withoutDtm = surfaceFor({ water });
+    expect(withoutDtm.terms.map((t) => t.key)).not.toContain('nearshore-slope');
+    expect(withoutDtm.notes.join(' ')).toMatch(/No elevation here/);
+
+    const withDtm = surfaceFor({ water, terrain: gridOf(SIZE, SIZE, CELL_M, () => 100) });
+    expect(withDtm.terms.map((t) => t.key)).toContain('nearshore-slope');
+  });
+
+  it('weights a big inflow above a trickle', () => {
+    const inflows = maskOf(SIZE, SIZE, CELL_M, (x, y) => x === CX && y <= CY - RADIUS + 2);
+    const at = (magnitude: number | null) => {
+      const surface = lakeSurface(
+        inputs({
+          water,
+          inflows,
+          inflowMagnitude: magnitude === null ? null : gridOf(SIZE, SIZE, CELL_M, () => magnitude),
+        }),
+        { species: ORRET, season: 'summer' },
+      );
+      const term = surface.terms.find((t) => t.key === 'inlet')!;
+      return term.grid.data[(CY - RADIUS + 3) * SIZE + CX]!;
+    };
+    // A 4th-order river outranks a first-order trickle at the same distance.
+    expect(at(1)).toBeGreaterThan(at(0.2));
+    // An unattributed inflow is still an inflow: discounted, never demoted to
+    // the trickle it might not be.
+    expect(at(null)).toBeGreaterThan(at(0.2));
+    expect(at(null)).toBeLessThanOrEqual(at(1));
+  });
+});
+
+describe('the absolute tier — D5’s second number', () => {
+  it('rates a lowland lake with a large catchment above a high mountain tarn', () => {
+    const lowland = lakeProductivity({ elevationM: 90, areaKm2: 0.8, catchmentKm2: 40 });
+    const tarn = lakeProductivity({ elevationM: 1300, areaKm2: 0.05, catchmentKm2: 0.4 });
+    expect(lowland).toBeGreaterThan(tarn);
+    expect(lowland).toBeGreaterThan(0.5);
+    expect(tarn).toBeLessThan(0.35);
+  });
+
+  it('neither promises nor condemns a lake the register says nothing about', () => {
+    expect(lakeProductivity({ elevationM: null, areaKm2: null, catchmentKm2: null })).toBe(0.5);
+  });
+
+  it('marks a regulated lake down as a low value, never a negative weight', () => {
+    expect(lakeRegulation('InnsjøRegulert')).toBeLessThan(0.5);
+    expect(lakeRegulation('Innsjø')).toBe(1);
+    expect(lakeRegulation(null)).toBe(1);
   });
 });

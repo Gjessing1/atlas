@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { fromArrayBuffer } from 'geotiff';
+import { PNG } from 'pngjs';
 import type { CellRaster } from './cells.js';
 import { cellId } from './cells.js';
 
@@ -41,6 +42,54 @@ const SIMPLIFY_DEG = 0.00003;
 
 const NVE_REST = 'https://kart.nve.no/enterprise/rest/services';
 const DTM_WCS = 'https://wcs.geonorge.no/skwms1/wcs.hoyde-dtm-nhm-25833';
+const AR5_WMS = 'https://wms.nibio.no/cgi-bin/ar5';
+
+/**
+ * AR5 `Arealtype` palette → `artype` code, **measured against the live service
+ * 2026-07-27**, not taken from cartographic documentation.
+ *
+ * Reverse-engineering this by eye is a trap and was caught being one: the
+ * obvious reading of `145,231,255` (a pale blue) is Myr, and it is in fact
+ * `81 Ferskvann`; Myr is the *other* pale blue, `181,236,252`. Every row below
+ * was confirmed by drawing the layer and then asking its own GetFeatureInfo
+ * what sits at that pixel, which is the only method that cannot be fooled by a
+ * plausible-looking colour.
+ *
+ * Exact matches only. MapServer antialiases class boundaries — about 13 % of a
+ * lowland tile is blended edge pixels — and a nearest-colour fallback would
+ * assign every one of them to a class it is merely closest to. An edge pixel is
+ * genuinely ambiguous, so it stays nodata, which the models already read as
+ * "unknown" rather than as bad ground.
+ */
+const AR5_PALETTE: Readonly<Record<string, number>> = {
+  '252,219,214': 11, // Bebygd
+  '179,120,76': 12, // Samferdsel
+  '255,209,110': 21, // Fulldyrka jord
+  '255,255,76': 22, // Overflatedyrka jord
+  '255,255,173': 23, // Innmarksbeite
+  '158,204,115': 30, // Skog
+  '217,217,217': 50, // Åpen fastmark
+  '181,236,252': 60, // Myr
+  '145,231,255': 81, // Ferskvann
+  '204,254,254': 82, // Hav
+  // 99 "Ikke kartlagt" (255,255,255) is deliberately absent: AR5 stops at the
+  // tree line, and "not mapped" must read as unknown, never as barren ground.
+};
+
+/**
+ * How many sub-requests the AR5 GetMap is split into, per axis.
+ *
+ * **The layer refuses to draw below roughly 9 m/px** — its sub-layers carry a
+ * `MaxScaleDenominator`, and past it MapServer answers 200 with a blank image
+ * rather than an error. Measured 2026-07-27: 8.73 m/px draws, 9.25 m/px comes
+ * back a uniform white 5 933-byte PNG. A padded derive cell is 9.60 m/px, i.e.
+ * just the wrong side of the line, so a single whole-cell request would silently
+ * return "this area has no land cover" for the entire country.
+ *
+ * Splitting 2×2 puts each quadrant at 4.8 m/px with comfortable margin; the
+ * halves are then box-downsampled back onto the cell grid.
+ */
+const AR5_SPLIT = 2;
 
 /** `ltema` — the clean three-way classifier for the river network. */
 export const STREAM_REAL_CHANNEL = 3211;
@@ -128,6 +177,12 @@ export interface CellInputs {
   readonly lakes: readonly LakeFeature[];
   readonly streams: readonly StreamFeature[];
   readonly depthContours: readonly DepthContour[];
+  /**
+   * AR5 `artype` codes on the padded raster, or null when not requested / not
+   * answered. Nodata above the tree line, where AR5 simply stops — which the
+   * models read as unknown, never as barren.
+   */
+  readonly landCover: Grid | null;
   readonly records: readonly InputRecord[];
 }
 
@@ -137,6 +192,7 @@ export interface InputRequest {
   readonly lakes?: boolean;
   readonly streams?: boolean;
   readonly depthContours?: boolean;
+  readonly landCover?: boolean;
 }
 
 // ---- disk cache -----------------------------------------------------------
@@ -409,6 +465,120 @@ export async function decodeTerrain(buffer: ArrayBuffer, raster: CellRaster): Pr
   return grid;
 }
 
+// ---- land cover -----------------------------------------------------------
+
+/**
+ * NIBIO AR5 land cover for one padded cell, as `artype` codes on the derive
+ * raster (nodata where AR5 does not map, which above the tree line is most of
+ * it).
+ *
+ * Four requests, not one, because of the scale gate documented on `AR5_SPLIT`.
+ * Each quadrant is fetched at twice the cell's resolution and averaged down by
+ * **majority**, never by mixing channels: land-cover codes are labels, so the
+ * mean of "forest" and "bog" is not a class. A block with no clear winner —
+ * all four sub-pixels antialiased — comes back unknown.
+ */
+async function loadLandCover(ctx: PotentialContext, raster: CellRaster): Promise<Grid> {
+  const [west, south, east, north] = raster.bounds;
+  const grid = createGrid(raster.size, raster.size, raster.cellSizeM);
+  const half = raster.size / AR5_SPLIT;
+  if (!Number.isInteger(half)) throw new Error(`raster ${raster.size} is not divisible by 2`);
+
+  for (let qy = 0; qy < AR5_SPLIT; qy++) {
+    for (let qx = 0; qx < AR5_SPLIT; qx++) {
+      const qWest = west + ((east - west) * qx) / AR5_SPLIT;
+      const qEast = west + ((east - west) * (qx + 1)) / AR5_SPLIT;
+      const qNorth = north - ((north - south) * qy) / AR5_SPLIT;
+      const qSouth = north - ((north - south) * (qy + 1)) / AR5_SPLIT;
+
+      const url = new URL(AR5_WMS);
+      const p = url.searchParams;
+      p.set('SERVICE', 'WMS');
+      p.set('VERSION', '1.3.0');
+      p.set('REQUEST', 'GetMap');
+      p.set('LAYERS', 'Arealtype');
+      p.set('STYLES', '');
+      p.set('CRS', 'EPSG:4326');
+      // WMS 1.3.0 with EPSG:4326 is **lat,lon** ordered. Getting this backwards
+      // returns a blank image rather than an error, which is indistinguishable
+      // from the scale gate above — so both traps look the same and neither
+      // announces itself.
+      p.set('BBOX', [qSouth, qWest, qNorth, qEast].join(','));
+      // Twice the cell's pixel density: this is the whole point of the split.
+      p.set('WIDTH', String(half * AR5_SPLIT));
+      p.set('HEIGHT', String(half * AR5_SPLIT));
+      p.set('FORMAT', 'image/png');
+      const res = await ctx.fetchImpl(url, {
+        headers: { 'User-Agent': ctx.userAgent },
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const png = PNG.sync.read(Buffer.from(await res.arrayBuffer()));
+      if (png.width !== half * AR5_SPLIT || png.height !== half * AR5_SPLIT) {
+        throw new Error(`AR5 returned ${png.width}×${png.height}`);
+      }
+      classifyInto(png, grid, qx * half, qy * half, half);
+    }
+  }
+  return grid;
+}
+
+/** Majority-vote one AR5 quadrant down onto its half of the cell raster. */
+function classifyInto(
+  png: { width: number; data: Buffer },
+  grid: Grid,
+  originX: number,
+  originY: number,
+  size: number,
+): void {
+  const votes = new Map<number, number>();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      votes.clear();
+      for (let dy = 0; dy < AR5_SPLIT; dy++) {
+        for (let dx = 0; dx < AR5_SPLIT; dx++) {
+          const i = ((y * AR5_SPLIT + dy) * png.width + (x * AR5_SPLIT + dx)) * 4;
+          // Transparent pixels carry no class; MapServer also emits fully
+          // transparent areas outside coverage.
+          if (png.data[i + 3]! < 128) continue;
+          const code =
+            AR5_PALETTE[`${png.data[i]!},${png.data[i + 1]!},${png.data[i + 2]!}`] ?? null;
+          if (code === null) continue;
+          votes.set(code, (votes.get(code) ?? 0) + 1);
+        }
+      }
+      let best = Number.NaN;
+      let bestCount = 0;
+      for (const [code, count] of votes) {
+        if (count > bestCount) {
+          bestCount = count;
+          best = code;
+        }
+      }
+      grid.data[(originY + y) * grid.width + (originX + x)] = best;
+    }
+  }
+}
+
+/** What arrived: the classes present, so a blank answer is visible as blank. */
+function describeLandCover(grid: Grid): string {
+  const counts = new Map<number, number>();
+  let known = 0;
+  for (const v of grid.data) {
+    if (!Number.isFinite(v)) continue;
+    known++;
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  if (known === 0) return 'no mapped land cover';
+  const share = Math.round((known / grid.data.length) * 100);
+  const top = [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([code]) => code)
+    .join('/');
+  return `${share} % classified, mainly artype ${top}`;
+}
+
 // ---- the gather -----------------------------------------------------------
 
 /** One adapter's identity on the status page and in the manifest. */
@@ -428,6 +598,11 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
     label: 'Depth contours',
     source: 'NVE Innsjødatabase2 layer 2',
     probe: 'input:soundings',
+  },
+  landCover: {
+    label: 'Land cover',
+    source: 'NIBIO AR5 Arealtype (WMS)',
+    probe: 'input:ar5',
   },
 };
 
@@ -582,7 +757,38 @@ export async function gatherInputs(
       )
     : [];
 
-  return { raster, terrain, lakes, streams, depthContours, records };
+  const landCover = need.landCover
+    ? await load<Grid | null>(
+        'landCover',
+        'u8.gz',
+        (buf) => {
+          if (buf.byteLength !== raster.size * raster.size) throw new Error('wrong size');
+          const grid = createGrid(raster.size, raster.size, raster.cellSizeM);
+          // 0 is the on-disk stand-in for nodata: `artype` has no 0 class, so
+          // the codes round-trip without needing a second plane.
+          for (let i = 0; i < grid.data.length; i++) {
+            grid.data[i] = buf[i] === 0 ? Number.NaN : buf[i]!;
+          }
+          return grid;
+        },
+        (grid) => {
+          const bytes = Buffer.alloc(raster.size * raster.size);
+          for (let i = 0; i < bytes.length; i++) {
+            const v = grid!.data[i]!;
+            bytes[i] = Number.isFinite(v) ? v : 0;
+          }
+          return gzipSync(bytes);
+        },
+        async () => {
+          const value = await loadLandCover(ctx, raster);
+          return { value, detail: describeLandCover(value) };
+        },
+        (grid) => (grid ? describeLandCover(grid) : 'absent'),
+        null,
+      )
+    : null;
+
+  return { raster, terrain, lakes, streams, depthContours, landCover, records };
 }
 
 function describeLakes(lakes: readonly LakeFeature[]): string {

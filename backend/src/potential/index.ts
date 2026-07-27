@@ -1,11 +1,14 @@
 import type { LngLatBbox } from '@atlas/core';
+import { explainPoint, type CombineTerm, type Grid } from '@atlas/potential';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from '../status.js';
 import {
   CELL_MAX_TILE_ZOOM,
   CELL_ZOOM,
+  cellAt,
   cellForTile,
   cellId,
   cellsForBbox,
@@ -13,15 +16,15 @@ import {
   parseCellId,
   type Cell,
 } from './cells.js';
-import { readManifest, tilePath } from './derive.js';
+import { readManifest, readSignal, signalsPath, tilePath } from './derive.js';
 import type { PotentialContext } from './inputs.js';
 import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './models.js';
 import { DeriveQueue, type CellState } from './jobs.js';
 
 /**
- * The derived-potential HTTP surface (ROADMAP § N5 → E2).
+ * The derived-potential HTTP surface (ROADMAP § N5 → E2, E3).
  *
- * Four routes, and the shape of them is the design:
+ * Five routes, and the shape of them is the design:
  *
  * - `GET  /api/potential/layers` — which models this build can derive, and what
  *   each can be tuned for. A client never invents a target.
@@ -31,6 +34,8 @@ import { DeriveQueue, type CellState } from './jobs.js';
  * - `GET  /api/potential/:layer/:target/:z/:x/:y.png` — a derived tile.
  * - `GET  /api/potential/:layer/:target/cell/:x/:y.json` — a cell's manifest:
  *   the coverage verdict and the provenance of every input behind it.
+ * - `GET  /api/potential/:layer/:target/explain?lat=&lng=` — why *this point*
+ *   scores what it does, in the same factor shape the weather card renders.
  *
  * **Caching is revalidating, not long-lived**, and that is the one thing here
  * that was learned the hard way rather than designed: a re-derive rewrites the
@@ -179,6 +184,97 @@ export async function registerPotentialApi(
       return reply.header('cache-control', 'no-cache').send(manifest);
     },
   );
+
+  /**
+   * "Why is this water good?" — D4's *nothing scores without saying why*, at one
+   * point.
+   *
+   * The answer is assembled from the signal planes the derive persisted, not
+   * recomputed: re-running the model here would be both slow and a second
+   * implementation that could drift from the one that drew the pixels. The
+   * headline number is the **rank within this cell**, never a fake absolute —
+   * "top 4 % of this area" is the only claim the model can honestly make.
+   */
+  app.get<{
+    Params: { layer: string; target: string };
+    Querystring: { lat?: string; lng?: string };
+  }>('/api/potential/:layer/:target/explain', async (request, reply) => {
+    const model = byLayer(request.params.layer);
+    if (!model) return reply.code(404).send({ error: 'unknown layer' });
+    const lat = Number(request.query.lat);
+    const lng = Number(request.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85) {
+      return reply.code(400).send({ error: 'invalid point' });
+    }
+    const target = resolveTarget(model, request.params.target);
+    const cell = cellAt(lat, lng);
+    const manifest = await readManifest(opts.dataDir, model, target, cell);
+    if (!manifest) {
+      const state = await stateOf(model, target, cell, false);
+      return reply.code(404).send({ error: 'cell not derived', state });
+    }
+
+    const [west, south, east, north] = manifest.bounds;
+    const pixels = manifest.signals?.pixels ?? 0;
+    const sx = Math.floor(((lng - west) / (east - west)) * pixels);
+    const sy = Math.floor(((north - lat) / (north - south)) * pixels);
+
+    const shared = {
+      cell: manifest.cell,
+      layer: model.layer,
+      target,
+      vocabulary: model.vocabulary,
+      tier: manifest.tier,
+      // The gate's verdict travels with every answer: on a surface with no
+      // standout, "top 3 %" means nothing and the client must be able to say so.
+      standout: manifest.contrast.standout,
+      contrast: manifest.contrast.reason,
+      notes: manifest.notes,
+      inputs: manifest.inputs,
+    };
+
+    const blob = manifest.signals
+      ? await readFile(signalsPath(opts.dataDir, model, target, cell))
+          .then((raw) => gunzipSync(raw))
+          .catch(() => null)
+      : null;
+    if (!manifest.signals || !blob) {
+      return reply.header('cache-control', 'no-cache').send({
+        ...shared,
+        score: null,
+        factors: [],
+        missing: [],
+        summary: manifest.contrast.reason,
+      });
+    }
+
+    // A 1×1 grid per term: `explainPoint` is the same function the golden
+    // tests drive, so the card's wording cannot drift from the engine's.
+    const one = (value: number): Grid => ({
+      width: 1,
+      height: 1,
+      cellSizeM: manifest.cellSizeM,
+      data: Float32Array.of(value),
+    });
+    const terms: CombineTerm[] = manifest.signals.terms.map((term, i) => ({
+      key: term.key,
+      label: term.label,
+      weight: term.weight,
+      // Plane 0 is the rank, so the terms start at 1.
+      grid: one(readSignal(blob, i + 1, sx, sy)),
+      // Re-derived from the key and the value, because a closure cannot be
+      // persisted — without this the card would restate the number it is
+      // supposed to be explaining.
+      describe: (value) =>
+        model.describeSignal?.(term.key, value, target, manifest.derivedAt) ??
+        `${term.label}: ${Math.round(value * 100)} %`,
+    }));
+    const explanation = explainPoint(terms, 0, 0, {
+      rank: one(readSignal(blob, 0, sx, sy)),
+      vocabulary: model.vocabulary,
+    });
+    return reply.header('cache-control', 'no-cache').send({ ...shared, ...explanation });
+  });
 
   app.get<{ Params: { layer: string; target: string; z: string; x: string; y: string } }>(
     '/api/potential/:layer/:target/:z/:x/:y.png',
