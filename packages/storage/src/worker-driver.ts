@@ -1,5 +1,6 @@
 import type { SqlDriver, SqlRow, SqlValue } from './driver.js';
 import type { StorageWorkerRequest, StorageWorkerResponse } from './protocol.js';
+import { StorageUnavailableError } from './unavailable.js';
 
 /** How long close() waits for the worker to release the database before terminating anyway. */
 const CLOSE_TIMEOUT_MS = 2000;
@@ -76,7 +77,9 @@ export function createWorkerSqlDriver(worker: Worker): Promise<SqlDriver> {
           break;
         case 'init-error':
           worker.terminate();
-          rejectReady(new Error(msg.error));
+          rejectReady(
+            msg.busy ? new StorageUnavailableError('busy', msg.error) : new Error(msg.error),
+          );
           break;
         case 'result':
           pending.get(msg.id)?.resolve(msg.rows);

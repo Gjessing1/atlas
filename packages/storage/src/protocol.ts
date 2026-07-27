@@ -10,6 +10,8 @@ export type StorageWorkerRequest =
 /** Worker → main thread. */
 export type StorageWorkerResponse =
   | { type: 'ready' }
-  | { type: 'init-error'; error: string }
+  // `busy` = the database is held by another page (recoverable by waiting),
+  // as opposed to a database that cannot be opened at all.
+  | { type: 'init-error'; error: string; busy?: boolean }
   | { type: 'result'; id: number; rows: SqlRow[] }
   | { type: 'error'; id: number; error: string };

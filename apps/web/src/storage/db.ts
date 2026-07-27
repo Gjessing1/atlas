@@ -48,18 +48,68 @@ async function acquireOwnership(): Promise<Ownership | null> {
 }
 
 /**
- * Resolve once no other page owns the database — i.e. the tab holding it was
- * closed. Ownership is taken (briefly) and immediately given up again; the
- * caller re-opens, which takes it properly.
+ * Consecutive opens that failed *while this page held ownership* — i.e. the
+ * lock says the database is ours and OPFS still says no. That means the handles
+ * are held by something the lock does not cover (a page running an older
+ * bundle, or one the browser has not finished tearing down), and no lock
+ * release is coming to tell us when to try again.
+ */
+let contendedFailures = 0;
+
+/**
+ * How long to wait before the next attempt after `contendedFailures` of them.
+ * Jittered, because two pages in this state would otherwise keep retrying in
+ * lockstep, each one's attempt spoiling the other's.
+ */
+function backoffMs(failures: number): number {
+  const steps = [1_000, 2_000, 4_000, 8_000, 15_000];
+  const base = steps[Math.min(failures, steps.length) - 1] ?? 0;
+  return base * (0.5 + Math.random() * 0.5);
+}
+
+const abortableDelay = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('aborted'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      },
+      { once: true },
+    );
+  });
+
+/**
+ * Resolve once the database is worth trying for again.
+ *
+ * Normally that is exactly the owner lock: another page has it, and the moment
+ * that page closes we get the lock, drop it again, and the caller re-opens.
+ *
+ * When our *own* attempts are what failed, the lock is free and waiting on it
+ * resolves instantly — so waiting on it alone is not a wait at all. That turned
+ * a stuck database into a hot retry loop (a fresh worker every second, the
+ * banner blinking with it, and every attempt another roll of sqlite's
+ * delete-the-pool cleanup path). Back off first, then wait for the lock.
  */
 export function awaitAvailability(signal: AbortSignal): Promise<void> {
   const manager = locks();
   if (!manager) return Promise.reject(new Error('Web Locks unavailable'));
-  return manager.request(OWNER_LOCK, { signal }, () => undefined).then(() => undefined);
+  const wait = contendedFailures > 0 ? abortableDelay(backoffMs(contendedFailures), signal) : null;
+  return (wait ?? Promise.resolve())
+    .then(() => manager.request(OWNER_LOCK, { signal }, () => undefined))
+    .then(() => undefined);
 }
 
 /** OPFS refusing a second exclusive handle — a busy database, not a broken one. */
 function isBusyFailure(err: unknown): boolean {
+  // The worker says so outright when it found the pool locked; the text checks
+  // below are for a refusal that got as far as sqlite's own VFS install.
+  if (err instanceof StorageUnavailableError) return err.reason === 'busy';
   const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
   return (
     text.includes('NoModificationAllowedError') ||
@@ -125,14 +175,24 @@ export async function openStorage(): Promise<AtlasStorage> {
   if (!opfsSupported()) throw new StorageUnavailableError('unsupported');
 
   const ownership = await acquireOwnership();
-  if (!ownership) throw new StorageUnavailableError('busy');
+  // Another page owns it. Nothing was attempted here, so there is nothing to
+  // back off from: clearing the count lets awaitAvailability wait on that
+  // page's lock directly, and take over the moment it closes.
+  if (!ownership) {
+    contendedFailures = 0;
+    throw new StorageUnavailableError('busy');
+  }
 
-  const retryDelaysMs = [0, 300, 900];
+  // Two attempts, not one: a page that just closed can still be releasing its
+  // handles. Anything longer-lived than that is the caller's backoff to wait.
+  const retryDelaysMs = [0, 400];
   let last: unknown;
   for (const ms of retryDelaysMs) {
     if (ms > 0) await delay(ms);
     try {
-      return await openOnce(ownership);
+      const storage = await openOnce(ownership);
+      contendedFailures = 0;
+      return storage;
     } catch (err) {
       last = err;
     }
@@ -140,9 +200,12 @@ export async function openStorage(): Promise<AtlasStorage> {
   ownership.release();
   // We hold the lock, so an OPFS refusal here means handles held by a page
   // that predates it (an older bundle, or one the browser has not torn down
-  // yet) — still "busy", still worth waiting out.
+  // yet) — still "busy", still worth waiting out. Only that case is counted:
+  // it is the one whose retries have no lock release to pace them.
+  const busy = isBusyFailure(last);
+  if (busy) contendedFailures += 1;
   throw new StorageUnavailableError(
-    isBusyFailure(last) ? 'busy' : 'failed',
+    busy ? 'busy' : 'failed',
     last instanceof Error ? last.message : undefined,
   );
 }

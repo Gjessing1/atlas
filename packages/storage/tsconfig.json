@@ -3,7 +3,9 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "lib": ["ES2023", "WebWorker"]
+    // AsyncIterable: the storage worker walks the SAH pool's directory before
+    // handing it to sqlite (worker.ts, poolIsFree).
+    "lib": ["ES2023", "WebWorker", "WebWorker.AsyncIterable"]
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]

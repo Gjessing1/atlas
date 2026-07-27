@@ -160,6 +160,46 @@ describe('useUserData', () => {
       await waitFor(() => expect(result.current.status).toBe('ready'));
     });
 
+    it('takes over in the background without blinking through loading', async () => {
+      // Reported as "flashes on the screen": every background attempt reset the
+      // status to 'loading', so the banner explaining the busy database
+      // disappeared and came back with each one. Only a pressed Retry may.
+      const { storage } = createPlatform();
+      let opens = 0;
+      let release!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      const platform: UserDataPlatform<MemFile> = {
+        openStorage: async () => {
+          opens += 1;
+          if (opens <= 2) throw new StorageUnavailableError('busy');
+          await storage.init();
+          return storage;
+        },
+        awaitAvailability: () => (opens < 2 ? Promise.resolve() : released),
+        readFile: (file) => Promise.resolve(file),
+        saveTextFile: () => Promise.resolve(),
+      };
+
+      const seen: string[] = [];
+      const { result } = renderHook(() => {
+        const data = useUserData(platform);
+        if (seen[seen.length - 1] !== data.status) seen.push(data.status);
+        return data;
+      });
+      await waitFor(() => expect(opens).toBe(2));
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(seen).toEqual(['loading', 'error']);
+
+      // A press is a different matter: it says so, then opens.
+      act(() => result.current.retry());
+      await act(async () => {
+        release();
+        await released;
+      });
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      expect(seen).toEqual(['loading', 'error', 'loading', 'ready']);
+    });
+
     it('stops waiting for a busy storage once unmounted', async () => {
       const aborted = vi.fn();
       const platform: UserDataPlatform<MemFile> = {

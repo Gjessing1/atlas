@@ -271,8 +271,10 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const [error, setError] = useState<string | null>(null);
   const [errorReason, setErrorReason] = useState<StorageUnavailableReason | null>(null);
   // Bumping this re-runs the open effect: the user pressing Retry, or the
-  // platform reporting that whoever held the database has let go.
-  const [attempt, setAttempt] = useState(0);
+  // platform reporting that whoever held the database has let go. `manual`
+  // separates the two — a press deserves the visible "loading" it asked for,
+  // a background attempt must leave what the UI already says alone.
+  const [attempt, setAttempt] = useState({ n: 0, manual: false });
   const statusRef = useRef(status);
   statusRef.current = status;
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -325,13 +327,15 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
    * app offline for a moment.
    */
   const retry = useCallback(() => {
-    if (statusRef.current === 'error') setAttempt((n) => n + 1);
+    if (statusRef.current === 'error') setAttempt((a) => ({ n: a.n + 1, manual: true }));
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     const waiting = new AbortController();
-    setStatus('loading');
+    // Retrying in the background behind a stated error keeps the error stated:
+    // flipping back to 'loading' on every attempt made the banner blink.
+    if (attempt.manual || statusRef.current !== 'error') setStatus('loading');
     const opened = storageCloseChain.then(() => platform.openStorage());
     opened.then(
       async (s) => {
@@ -359,7 +363,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         if (reason === 'busy' && platform.awaitAvailability) {
           platform.awaitAvailability(waiting.signal).then(
             () => {
-              if (!cancelled) setAttempt((n) => n + 1);
+              if (!cancelled) setAttempt((a) => ({ n: a.n + 1, manual: false }));
             },
             () => undefined,
           );
