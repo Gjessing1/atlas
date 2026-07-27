@@ -689,6 +689,10 @@ export function allProbes(
  * expired certificate is exactly the persistent, silent breakage this file
  * exists to catch (see the header), so it must be reported on the first sweep
  * rather than retried and delayed.
+ *
+ * The derive service's input loader shares this policy (`isTransient` is
+ * exported for it): a cell derived through a blip records "this layer did not
+ * answer" and then keeps that gap, because nothing re-derives a cell on its own.
  */
 const TRANSIENT_CAUSES = new Set([
   'ECONNREFUSED',
@@ -709,7 +713,7 @@ const TRANSIENT_CAUSES = new Set([
  * Absent for anything that is not one — a probe's own `throw new Error(...)`
  * keeps reporting its message rather than the useless string "Error".
  */
-function causeCode(err: unknown): string | undefined {
+export function causeCode(err: unknown): string | undefined {
   if (!(err instanceof Error)) return undefined;
   const cause = err.cause as { code?: string; name?: string } | undefined;
   return cause?.code ?? cause?.name;
@@ -719,7 +723,7 @@ function causeCode(err: unknown): string | undefined {
  * Is this worth one more try? `AbortSignal.timeout` throws a bare DOMException
  * with no `cause`, so the error's own name has to be consulted too.
  */
-function isTransient(err: unknown): boolean {
+export function isTransient(err: unknown): boolean {
   const code = causeCode(err) ?? (err instanceof Error ? err.name : undefined);
   return code !== undefined && TRANSIENT_CAUSES.has(code);
 }

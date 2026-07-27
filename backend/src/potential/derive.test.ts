@@ -359,6 +359,43 @@ describe('input adapters', () => {
     expect(inputs.records[0]!.detail).toContain('503');
   });
 
+  /**
+   * A blip must not be baked into a cell. Nothing re-derives a cell on its own,
+   * so a refused connection during a derive leaves "this layer did not answer"
+   * in the manifest permanently — which is what happened minutes after the hunt
+   * surface shipped, when Miljødirektoratet refused every connection for a few
+   * minutes. One retry, exactly as the N7 sweep does it.
+   */
+  it('retries a refused connection once, and keeps the answer', async () => {
+    const good = upstreamStub();
+    let first = true;
+    ctx.fetchImpl = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      if (first) {
+        first = false;
+        const err = new Error('fetch failed');
+        (err as Error & { cause?: unknown }).cause = { code: 'ECONNREFUSED' };
+        return Promise.reject(err);
+      }
+      return good(input, init);
+    });
+    const inputs = await gatherInputs(RASTER, { lakes: true }, ctx);
+    expect(inputs.lakes[0]!.name).toBe('Semsvannet');
+    expect(inputs.records[0]!.ok).toBe(true);
+  });
+
+  it('does not retry a broken certificate — persistent breakage must surface at once', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(() => {
+      const err = new Error('fetch failed');
+      (err as Error & { cause?: unknown }).cause = { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' };
+      return Promise.reject(err);
+    });
+    ctx.fetchImpl = fetchImpl;
+    const inputs = await gatherInputs(RASTER, { lakes: true }, ctx);
+    expect(fetchImpl.mock.calls).toHaveLength(1);
+    expect(inputs.records[0]!.ok).toBe(false);
+    expect(inputs.records[0]!.detail).toContain('UNABLE_TO_VERIFY');
+  });
+
   it('rejects a coverage that is not the size it asked for', async () => {
     ctx.fetchImpl = upstreamStub({ terrainSize: 64 });
     const inputs = await gatherInputs(RASTER, { terrain: true }, ctx);

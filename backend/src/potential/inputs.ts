@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { fromArrayBuffer } from 'geotiff';
 import { PNG } from 'pngjs';
 import type { CellRaster } from './cells.js';
+import { isTransient } from '../probes.js';
 import { cellId } from './cells.js';
 
 /**
@@ -1184,6 +1185,37 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
   },
 };
 
+/** Pause before the one retry of a transient transport failure. */
+const RETRY_DELAY_MS = 750;
+
+/**
+ * One retry for a transport failure that says nothing about the upstream —
+ * the same policy the N7 sweep uses, and here for a sharper reason.
+ *
+ * A probe that believes a blip is red for six hours and then corrects itself; a
+ * **derive** that believes one bakes the gap into a cell that nothing will
+ * re-derive on its own. Found the day the hunt surface shipped: minutes after
+ * the deploy, `kart.miljodirektoratet.no` refused every connection for several
+ * minutes, and the cells derived in that window carry "the surveyed-areas layer
+ * did not answer" permanently. TLS failures are excluded exactly as they are
+ * there — a broken chain is persistent breakage that must surface at once, not
+ * be retried into a slower failure.
+ */
+async function attempt<T>(
+  fetchFresh: () => Promise<T>,
+  ctx: PotentialContext,
+  input: string,
+): Promise<T> {
+  try {
+    return await fetchFresh();
+  } catch (err) {
+    if (!isTransient(err)) throw err;
+    ctx.log.warn({ err, input }, 'transient input failure — retrying once');
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return await fetchFresh();
+  }
+}
+
 /**
  * Fetch every requested input for a cell, cached, and describe what arrived.
  *
@@ -1230,7 +1262,7 @@ export async function gatherInputs(
       }
     }
     try {
-      const { value, detail } = await fetchFresh();
+      const { value, detail } = await attempt(fetchFresh, ctx, id);
       await writeAtomic(ctx, file, toCache(value));
       ctx.record(meta.probe, true);
       records.push({
