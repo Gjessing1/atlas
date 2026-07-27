@@ -386,3 +386,44 @@ describe('the explain endpoint', () => {
     expect(body.bandLabel).toBeNull();
   });
 });
+
+describe('best spots on water the gate refused to rank', () => {
+  /**
+   * The stub lake is a plain rectangle with even banks, and the contrast gate
+   * (D5) says so: its hot 5 % is not meaningfully clear of its median. The
+   * shortlist is bound by that verdict — numbering eight points on water the
+   * surface itself declined to rank is exactly the failure the gate exists to
+   * prevent, and "nothing stands out here" has to survive all the way to the
+   * list rather than being quietly overruled by a ranking that always finds a
+   * top decile.
+   */
+  it('offers nothing, and says why', async () => {
+    const app = Fastify({ logger: false });
+    await registerPotentialApi(app, {
+      dataDir,
+      cacheDir,
+      fetchImpl: upstreamStub(),
+      userAgent: 'atlas-test',
+      models: [lakeModel],
+      valhallaUrl: 'http://router.test',
+    });
+    await app.ready();
+    try {
+      const derived = await deriveCell(dataDir, lakeModel, 'orret', CELL, context());
+      expect(derived.manifest.contrast.standout).toBe(false);
+
+      const bbox = [LAKE.west - 0.004, LAKE.south - 0.004, LAKE.east + 0.004, LAKE.north + 0.004];
+      const res = await app.inject({
+        url: `/api/potential/lake-fishing/orret/spots?bbox=${bbox.join(',')}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { spots: unknown[]; flat: number; pending: number; note: string };
+      expect(body.spots).toHaveLength(0);
+      expect(body.flat).toBe(1);
+      expect(body.pending).toBe(0);
+      expect(body.note).toMatch(/No standout water/);
+    } finally {
+      await app.close();
+    }
+  });
+});

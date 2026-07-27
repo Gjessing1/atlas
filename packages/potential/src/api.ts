@@ -15,9 +15,10 @@
  * `{z}/{x}/{y}` template rather than a URL.
  */
 
+import type { ConditionFactor } from '@atlas/conditions';
 import type { LatLng, LngLatBbox } from '@atlas/core';
 import type { PotentialExplanation } from './explain.js';
-import type { SurfaceVocabulary } from './surface.js';
+import type { SurfaceBandKey, SurfaceVocabulary } from './surface.js';
 
 // ---- cell addressing ------------------------------------------------------
 
@@ -291,6 +292,70 @@ export interface PotentialExplainResponse extends PotentialExplanation {
   readonly inputs: readonly PotentialInputRecord[];
 }
 
+/**
+ * How a spot is reached on foot from the nearest drivable road — the number
+ * that decides whether a prime shoreline is tonight's plan or next summer's.
+ */
+export interface PotentialSpotAccess {
+  readonly distanceM: number;
+  readonly durationS: number;
+  /**
+   * The router could not walk the last stretch (no path reaches the water), so
+   * this is a straight-line floor rather than a route. Said out loud in the UI:
+   * an over-confident "12 min" to a spot with no path to it is exactly the kind
+   * of number that gets someone into a bog at dusk.
+   */
+  readonly approximate: boolean;
+  /** Where the walk starts — the nearest point on a road a car can reach. */
+  readonly from: LatLng;
+}
+
+/** One numbered recommendation from "best spots in view". */
+export interface PotentialSpot {
+  /** Stable within a response, and the id the map markers carry. */
+  readonly id: string;
+  readonly position: LatLng;
+  /** The derived cell this came out of, for provenance. */
+  readonly cell: string;
+  /** Percentile rank within its own cell, 0..1. */
+  readonly rank: number;
+  /** `rank` as 0..100, the same number the explain card quotes. */
+  readonly score: number;
+  readonly band: SurfaceBandKey;
+  readonly bandLabel: string;
+  /** The strongest factor's own sentence — why *this* point, in one line. */
+  readonly reason: string;
+  /** The full weighted breakdown, in the weather card's shape. */
+  readonly factors: readonly ConditionFactor[];
+  /** Null when the router could not be asked, or found no road at all. */
+  readonly access: PotentialSpotAccess | null;
+}
+
+/** GET /api/potential/:layer/:target/spots?bbox=w,s,e,n */
+export interface PotentialSpotsResponse {
+  readonly layer: string;
+  readonly target: string;
+  readonly vocabulary: SurfaceVocabulary;
+  /** Strongest first, already thinned to real alternatives. */
+  readonly spots: readonly PotentialSpot[];
+  /**
+   * Cells under this view that are not derived yet. Above zero the shortlist is
+   * **provisional** — the best water in view may still be building — and the UI
+   * has to say so rather than presenting eight of them as the answer.
+   */
+  readonly pending: number;
+  /**
+   * Derived cells whose contrast gate found no standout. Not a failure: it is
+   * the surface declining to point at anything, and the reason an empty list
+   * can be honest.
+   */
+  readonly flat: number;
+  /** Whether walk-in times could be asked for at all (the router may be down). */
+  readonly accessAvailable: boolean;
+  /** Why the list is empty or short. Null when it needs no explanation. */
+  readonly note: string | null;
+}
+
 // ---- URLs -----------------------------------------------------------------
 
 /** Where the derive service lives. `origin` is '' on the web (same-origin). */
@@ -326,6 +391,26 @@ export function potentialExplainUrl(
   return (
     `${origin}/api/potential/${encodeURIComponent(layer)}/${encodeURIComponent(target)}/explain` +
     `?lat=${at.lat}&lng=${at.lng}`
+  );
+}
+
+/**
+ * The shortlist for what is on screen. A GET with the bbox in the query, so it
+ * caches and retries like any read — the cells it reads were queued by
+ * `/prepare`, and asking for spots never starts work of its own.
+ */
+export function potentialSpotsUrl(
+  origin: string,
+  layer: string,
+  target: string,
+  bbox: LngLatBbox,
+  limit?: number,
+): string {
+  const query = new URLSearchParams({ bbox: bbox.map((n) => n.toFixed(6)).join(',') });
+  if (limit !== undefined) query.set('limit', String(limit));
+  return (
+    `${origin}/api/potential/${encodeURIComponent(layer)}/${encodeURIComponent(target)}/spots` +
+    `?${query.toString()}`
   );
 }
 

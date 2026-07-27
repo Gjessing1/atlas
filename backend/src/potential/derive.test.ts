@@ -1,4 +1,11 @@
-import { createGrid, gridStats, type Grid } from '@atlas/potential';
+import { haversineM } from '@atlas/core';
+import {
+  createGrid,
+  gridStats,
+  SPOT_LIMIT,
+  SPOT_MIN_SEPARATION_M,
+  type Grid,
+} from '@atlas/potential';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -87,10 +94,47 @@ const streamFeature = (ltema: number, strahler: number) => ({
   properties: { ltema, elveordenstrahler: strahler, elvenavnhierarki: 'Askerelva', vatnlnr: 0 },
 });
 
+/** How far west of a spot the stub router puts the nearest road (~560 m here). */
+const ROAD_OFFSET_LNG = 0.01;
+
+/**
+ * Valhalla's two answers for the walk in from the nearest road: `/locate`
+ * correlates a spot to a drivable edge, `/sources_to_targets` walks from it.
+ *
+ * `snapped` is the case worth having a mode for — the router reporting a walk
+ * of seconds because it never reached the water and quietly routed road-to-road.
+ */
+function routerStub(mode: 'ok' | 'snapped' | 'no-road' | 'down', path: string, init?: RequestInit) {
+  if (mode === 'down') return new Response('nope', { status: 503 });
+  const body = JSON.parse(String(init?.body ?? '{}')) as {
+    locations?: { lat: number; lon: number }[];
+    sources?: { lat: number; lon: number }[];
+  };
+  if (path.includes('/locate')) {
+    return Response.json(
+      (body.locations ?? []).map((at) =>
+        mode === 'no-road'
+          ? { edges: [] }
+          : { edges: [{ correlated_lat: at.lat, correlated_lon: at.lon - ROAD_OFFSET_LNG }] },
+      ),
+    );
+  }
+  const n = (body.sources ?? []).length;
+  const entry = mode === 'snapped' ? { distance: 0.02, time: 15 } : { distance: 0.75, time: 640 };
+  return Response.json({
+    sources_to_targets: Array.from({ length: n }, () => Array.from({ length: n }, () => entry)),
+  });
+}
+
 /** Answers every upstream the adapters call, by URL. */
-function upstreamStub(over: { terrainSize?: number } = {}) {
-  return vi.fn<typeof fetch>().mockImplementation(async (input) => {
+function upstreamStub(
+  over: { terrainSize?: number; router?: 'ok' | 'snapped' | 'no-road' | 'down' } = {},
+) {
+  return vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
+    if (url.includes('/locate') || url.includes('/sources_to_targets')) {
+      return routerStub(over.router ?? 'ok', url, init);
+    }
     if (url.includes('wcs.hoyde-dtm')) {
       const buf = await terrainTiff(over.terrainSize);
       return new Response(buf, { status: 200, headers: { 'content-type': 'image/tiff' } });
@@ -189,6 +233,61 @@ const flatModel: DeriveModel = {
     }
     return { score: g, notes: [] };
   },
+};
+
+/**
+ * The same lake with four separated summits on it — a surface that genuinely
+ * has somewhere to point, which is what "best spots in view" needs and the flat
+ * and single-blob models above deliberately do not provide.
+ *
+ * Smooth gaussians rather than blocks, because that is what a real signal field
+ * looks like after the proximity decays and membership functions: a plateau of
+ * exactly equal pixels would test the plateau-collapse path instead of the
+ * ranking. The four amplitudes differ so the expected order is unambiguous.
+ */
+const PEAK_SIGMA_PX = 18;
+const PEAK_CENTRES: readonly (readonly [number, number, number])[] = [
+  [500, 500, 1],
+  [570, 500, 0.94],
+  [500, 570, 0.88],
+  [570, 570, 0.82],
+];
+
+const spotsModel: DeriveModel = {
+  ...peakModel(),
+  layer: 'spots',
+  run: (inputs): ModelResult => {
+    const { size, cellSizeM } = inputs.raster;
+    const score = createGrid(size, size, cellSizeM, Number.NaN);
+    const structure = createGrid(size, size, cellSizeM, Number.NaN);
+    const cover = createGrid(size, size, cellSizeM, Number.NaN);
+    for (let y = LAKE_FROM; y < LAKE_TO; y++) {
+      for (let x = LAKE_FROM; x < LAKE_TO; x++) {
+        let field = 0;
+        for (const [cx, cy, amp] of PEAK_CENTRES) {
+          const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+          field = Math.max(field, amp * Math.exp(-d2 / (2 * PEAK_SIGMA_PX ** 2)));
+        }
+        const i = y * size + x;
+        score.data[i] = 0.08 + 0.9 * field;
+        structure.data[i] = field;
+        cover.data[i] = 0.5;
+      }
+    }
+    return {
+      score,
+      absolute: 0.6,
+      notes: [],
+      terms: [
+        { key: 'structure', label: 'Bottom structure', weight: 1, grid: structure },
+        { key: 'shore-cover', label: 'Shore cover', weight: 0.4, grid: cover },
+      ],
+    };
+  },
+  describeSignal: (key, value) =>
+    key === 'structure'
+      ? `Bottom structure, ${Math.round(value * 100)} % of the best here.`
+      : undefined,
 };
 
 // ---- inputs ---------------------------------------------------------------
@@ -554,5 +653,195 @@ describe('potential routes', () => {
       path.dirname(path.dirname(tilePath(dataDir, model, 'first', 11, CELL.x, CELL.y))),
     );
     expect(zooms).toContain(String(CELL.x));
+  });
+});
+
+// ---- best spots in view ---------------------------------------------------
+
+/**
+ * The shortlist over a prepared cell (ROADMAP § N5 → E6).
+ *
+ * Everything asserted here is a rule the obvious implementation would break:
+ * the list must agree with the ramp about "prime", must merge candidates in
+ * metres rather than pixels, must never derive anything of its own, and must
+ * survive a router that is down or that quietly failed to reach the water.
+ */
+describe('best spots in view', () => {
+  let app: FastifyInstance;
+
+  /** The four summits sit inside this; the western pair inside the narrow one. */
+  const VIEW = [10.445, 59.838, 10.47, 59.853];
+  const WEST_ONLY = [10.445, 59.838, 10.4575, 59.853];
+
+  const start = async (router?: 'ok' | 'snapped' | 'no-road' | 'down') => {
+    app = Fastify({ logger: false });
+    await registerPotentialApi(app, {
+      dataDir,
+      cacheDir,
+      fetchImpl: upstreamStub({ router }),
+      models: [spotsModel, flatModel],
+      concurrency: 1,
+      valhallaUrl: 'http://router.test',
+    });
+    await app.ready();
+  };
+
+  interface SpotsBody {
+    spots: {
+      id: string;
+      cell: string;
+      position: { lat: number; lng: number };
+      rank: number;
+      score: number;
+      band: string;
+      bandLabel: string;
+      reason: string;
+      factors: { key: string; weight: number; detail: string }[];
+      access: { distanceM: number; durationS: number; approximate: boolean } | null;
+    }[];
+    pending: number;
+    flat: number;
+    accessAvailable: boolean;
+    note: string | null;
+  }
+
+  const spotsUrl = (layer = 'spots', bbox = VIEW, limit?: number) =>
+    `/api/potential/${layer}/first/spots?bbox=${bbox.join(',')}` +
+    (limit === undefined ? '' : `&limit=${limit}`);
+
+  const ask = async (...args: Parameters<typeof spotsUrl>) =>
+    (await app.inject({ url: spotsUrl(...args) })).json() as SpotsBody;
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('finds every summit, strongest first, each with the reason its card would give', async () => {
+    await start();
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask();
+
+    expect(body.spots).toHaveLength(PEAK_CENTRES.length);
+    expect(body.pending).toBe(0);
+    expect(body.flat).toBe(0);
+    const ranks = body.spots.map((s) => s.rank);
+    expect([...ranks].sort((a, b) => b - a)).toEqual(ranks);
+
+    for (const spot of body.spots) {
+      // The ramp's own hot band, so the list and the pixels agree on "prime".
+      expect(spot.rank).toBeGreaterThanOrEqual(0.95);
+      expect(spot.band).toBe('prime');
+      expect(spot.score).toBe(Math.round(spot.rank * 100));
+      expect(spot.cell).toBe('11/1083/596');
+      // The reason is the model's own sentence for its strongest factor, not a
+      // restatement of the number being explained.
+      expect(spot.reason).toMatch(/Bottom structure, \d+ % of the best here\./);
+      expect(spot.factors.map((f) => f.key)).toContain('shore-cover');
+    }
+  });
+
+  it('offers alternatives, not neighbours of one hotspot', async () => {
+    await start();
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask();
+    for (let i = 0; i < body.spots.length; i++) {
+      for (let j = i + 1; j < body.spots.length; j++) {
+        expect(haversineM(body.spots[i]!.position, body.spots[j]!.position)).toBeGreaterThanOrEqual(
+          SPOT_MIN_SEPARATION_M,
+        );
+      }
+    }
+  });
+
+  /** "In view" is the feature: a cell reaches ~10 km past a phone's viewport. */
+  it('drops summits outside the requested viewport', async () => {
+    await start();
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask('spots', WEST_ONLY);
+    expect(body.spots).toHaveLength(2);
+    for (const spot of body.spots) {
+      expect(spot.position.lng).toBeLessThanOrEqual(WEST_ONLY[2]!);
+      expect(spot.position.lng).toBeGreaterThanOrEqual(WEST_ONLY[0]!);
+    }
+  });
+
+  it('walks each spot in from the nearest road', async () => {
+    await start();
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask();
+    expect(body.accessAvailable).toBe(true);
+    const access = body.spots[0]!.access!;
+    expect(access.distanceM).toBe(750);
+    expect(access.durationS).toBe(640);
+    expect(access.approximate).toBe(false);
+  });
+
+  /**
+   * The failure this feature would otherwise ship with. A lake shore usually has
+   * no mapped path, so Valhalla snaps the destination back onto the road and
+   * reports a walk of seconds — telling the user that a spot 500 m across a bog
+   * is roadside. A route shorter than the line between its own endpoints is
+   * proof of that, and the answer becomes a stated approximation instead.
+   */
+  it('falls back to a straight-line floor when the router never reached the water', async () => {
+    await start('snapped');
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const access = (await ask()).spots[0]!.access!;
+    expect(access.approximate).toBe(true);
+    expect(access.distanceM).toBeGreaterThan(400);
+    expect(access.durationS).toBeGreaterThan(300);
+  });
+
+  it('keeps the spots when the router is down, and says access is unavailable', async () => {
+    await start('down');
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask();
+    expect(body.spots.length).toBeGreaterThan(0);
+    expect(body.accessAvailable).toBe(false);
+    expect(body.spots.every((s) => s.access === null)).toBe(true);
+  });
+
+  it('reports no road near a spot as an absence on that spot, not as a failure', async () => {
+    await start('no-road');
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const body = await ask();
+    expect(body.spots.length).toBeGreaterThan(0);
+    expect(body.spots.every((s) => s.access === null)).toBe(true);
+  });
+
+  it('honours a limit, and caps it at the shortlist maximum', async () => {
+    await start();
+    await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    expect((await ask('spots', VIEW, 2)).spots).toHaveLength(2);
+    expect((await ask('spots', VIEW, 99)).spots.length).toBeLessThanOrEqual(SPOT_LIMIT);
+  });
+
+  /**
+   * Asking for spots must never start a derive: the list is open while panning,
+   * and queueing from here would turn a pan into a load generator against the
+   * public services.
+   */
+  it('counts an underived cell as pending instead of deriving it', async () => {
+    await start();
+    const body = await ask();
+    expect(body.spots).toHaveLength(0);
+    expect(body.pending).toBeGreaterThan(0);
+    expect(body.note).toMatch(/reading the water/i);
+    expect(await readManifest(dataDir, spotsModel, 'first', CELL)).toBeNull();
+  });
+
+  it('offers nothing on a surface the contrast gate refused to rank', async () => {
+    await start();
+    await deriveCell(dataDir, flatModel, 'first', CELL, ctx);
+    const body = await ask('flat');
+    expect(body.spots).toHaveLength(0);
+    expect(body.flat).toBe(1);
+    expect(body.note).toMatch(/No standout water/);
+  });
+
+  it('rejects a malformed bbox and an unknown layer', async () => {
+    await start();
+    expect((await app.inject({ url: spotsUrl('spots', [11, 60, 10, 59]) })).statusCode).toBe(400);
+    expect((await app.inject({ url: spotsUrl('nope') })).statusCode).toBe(404);
   });
 });

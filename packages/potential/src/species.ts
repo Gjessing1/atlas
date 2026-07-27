@@ -157,6 +157,18 @@ export interface FishSpecies {
   readonly plausibleMaxAltitudeM: number | null;
   /** Sea-run, so the anadromous gate and barrier-pool boost apply. */
   readonly anadromous: boolean;
+  /**
+   * Which temperature band `@atlas/conditions` should use when this target's
+   * spots are asked *when* to go — the structure/conditions split (D3) needs
+   * the two halves to agree on the species, and only one of them speaks
+   * Norwegian.
+   *
+   * A data row rather than a `switch` in the hook, for the reason this whole
+   * file exists: a new species must never be a code path. The conditions engine
+   * knows four bands, so several species share one — sea trout feeds in the
+   * same water a brown trout does.
+   */
+  readonly conditionsSpecies: 'trout' | 'char' | 'perch' | 'pike';
   readonly lakeWeights: Partial<Record<LakeSignalKey, number>>;
   readonly riverWeights: Partial<Record<RiverSignalKey, number>>;
 }
@@ -170,6 +182,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 3, autumn: 0, winter: 2 },
     plausibleMaxAltitudeM: null,
     anadromous: false,
+    conditionsSpecies: 'trout',
     lakeWeights: {
       inlet: 1,
       structure: 0.8,
@@ -201,6 +214,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 6, autumn: 0, winter: 4 },
     plausibleMaxAltitudeM: null,
     anadromous: false,
+    conditionsSpecies: 'char',
     lakeWeights: {
       'depth-band': 0.9,
       structure: 0.8,
@@ -223,6 +237,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 1, autumn: 0, winter: 3 },
     plausibleMaxAltitudeM: 800,
     anadromous: false,
+    conditionsSpecies: 'perch',
     lakeWeights: {
       cove: 0.9,
       'shore-cover': 0.8,
@@ -245,6 +260,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 1, autumn: 0, winter: 1 },
     plausibleMaxAltitudeM: 500,
     anadromous: false,
+    conditionsSpecies: 'pike',
     lakeWeights: {
       cove: 1,
       'shore-cover': 0.9,
@@ -266,6 +282,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 0, autumn: 0, winter: 0 },
     plausibleMaxAltitudeM: null,
     anadromous: true,
+    conditionsSpecies: 'trout',
     lakeWeights: {},
     riverWeights: {
       pool: 1,
@@ -286,6 +303,7 @@ export const FISH_SPECIES = [
     seasonalDepthShiftM: { spring: 0, summer: 0, autumn: 0, winter: 0 },
     plausibleMaxAltitudeM: null,
     anadromous: true,
+    conditionsSpecies: 'trout',
     lakeWeights: {},
     riverWeights: {
       pool: 0.8,

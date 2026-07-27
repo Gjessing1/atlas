@@ -53,6 +53,14 @@ export interface MapPressOptions {
   pickDestination: (target: DestinationTarget) => void;
   /** Report what the overlays say is under the tap (web parity, §Android queue). */
   showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[]) => void;
+  /**
+   * The numbered "best spots" markers, when the shortlist is open, and what to
+   * do with a tap on one. Hit-tested by distance like the saved pins rather
+   * than by a layer query, for the same reason: touches on small round targets
+   * want a finger-sized tolerance, not a pixel-exact one.
+   */
+  spots?: readonly { readonly id: string; readonly position: LatLng }[];
+  pickSpot?: (id: string) => void;
 }
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
@@ -123,6 +131,8 @@ export function useMapPress({
   closeMenu,
   pickDestination,
   showIdentify,
+  spots,
+  pickSpot,
 }: MapPressOptions): MapPressHandlers {
   // Identify is a network round trip, so a second tap can land before the first
   // answers. Only the newest tap's answer may reach the card — otherwise the
@@ -219,6 +229,23 @@ export function useMapPress({
         // Ground size of one screen pixel at this zoom (512px tiles) makes the
         // tap tolerance a constant ~36 px at any zoom level.
         const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+        // A numbered spot wins over anything under it: the user is looking at
+        // the shortlist and aimed at one of its markers.
+        if (spots?.length && pickSpot) {
+          let bestSpot: { id: string; position: LatLng } | undefined;
+          let bestSpotM = Infinity;
+          for (const spot of spots) {
+            const d = haversineM({ lat, lng }, spot.position);
+            if (d < bestSpotM) {
+              bestSpotM = d;
+              bestSpot = spot;
+            }
+          }
+          if (bestSpot && bestSpotM <= PIN_TAP_PX * metersPerPx) {
+            pickSpot(bestSpot.id);
+            return;
+          }
+        }
         let best: PlaceRecord | undefined;
         let bestM = Infinity;
         for (const place of places) {
@@ -274,6 +301,8 @@ export function useMapPress({
       origin,
       pickDestination,
       showIdentify,
+      spots,
+      pickSpot,
     ],
   );
 

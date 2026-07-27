@@ -3716,15 +3716,33 @@ button.transit-notice-summary {
 /* ---- Derived potential surfaces (ROADMAP §N5) ---- */
 
 /* The preparation pill: under the search box, gone once the surface is ready. */
-.potential-pill {
+/* One column under the search box for everything the derived surfaces say: the
+   preparation pill, the "best spots" affordance and the shortlist itself.
+   Stacking them beats three independent absolute offsets, which would overlap
+   as soon as the pill has something to say while the panel is open. */
+.potential-bar {
   position: absolute;
   top: 58px;
   left: 12px;
   z-index: 4;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100% - 72px);
+  pointer-events: none;
+}
+
+.potential-bar > * {
+  pointer-events: auto;
+}
+
+.potential-pill {
+  display: flex;
   align-items: center;
   gap: 8px;
-  max-width: min(340px, calc(100vw - 24px));
+  max-width: 100%;
   padding: 6px 10px;
   border-radius: 999px;
   background: var(--surface);
@@ -3779,6 +3797,186 @@ button.transit-notice-summary {
   .potential-pill-spinner {
     animation: none;
   }
+}
+
+/* "Best spots in view" — the affordance and the shortlist (§N5 → E6). */
+.spots-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 20%);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spots-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 25%);
+  font-size: 12px;
+}
+
+.spots-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.spots-head strong {
+  font-size: 13px;
+}
+
+.spots-target {
+  flex: 1;
+  color: var(--text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.spots-close {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The conditions half of a spot (D3): when, beside where. */
+.spots-window {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-sunken, rgb(127 127 127 / 10%));
+}
+
+.spots-window span {
+  color: var(--text-muted);
+}
+
+.spots-window-prime {
+  border-left-color: #d83e30;
+}
+
+.spots-window-good {
+  border-left-color: #e8a838;
+}
+
+.spots-window-note,
+.spots-pending,
+.spots-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.spots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.spots-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spots-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.spots-row:hover,
+.spots-row:focus-visible {
+  background: var(--border);
+}
+
+/* The number is the link between the list and the marker, so it is drawn the
+   same way in both: the band's own colour, at full strength. */
+.spots-number {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.spots-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.spots-row-head {
+  font-weight: 600;
+}
+
+.spots-walk {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.spots-reason {
+  color: var(--text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.spots-save {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.spots-save:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text);
+}
+
+.spots-save:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* The explain block inside the place card. */
@@ -4829,6 +5027,16 @@ button.transit-notice-summary {
     width: auto;
     top: 104px;
     max-height: calc(100% - 116px);
+  }
+
+  /* Same treatment for the derived-surface column — it clears the two-row
+     topbar and spans the width rather than floating at a desktop width. */
+  .potential-bar {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    top: 104px;
+    max-height: calc(100% - 200px);
   }
 
   /* The planner docks to the bottom as a draggable sheet rather than floating

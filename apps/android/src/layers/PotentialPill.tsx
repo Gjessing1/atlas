@@ -12,6 +12,18 @@ import { theme } from '../ui/theme';
  * Placed under the search bar rather than over the map's bottom half, which on
  * a phone belongs to the sheets.
  */
+/**
+ * Whether the pill is on screen at all.
+ *
+ * Exported because whatever sits under it has to know: the "best spots"
+ * affordance stacks below the pill, and computing that offset from a second,
+ * hand-copied version of this rule is how the two would end up overlapping the
+ * first time a state was added here.
+ */
+export function potentialPillVisible(prep: PotentialPrep): boolean {
+  return prep.status !== 'off' && prep.status !== 'ready' && Boolean(prep.message);
+}
+
 export function PotentialPill({
   prep,
   top,
@@ -23,7 +35,7 @@ export function PotentialPill({
   left: number;
   right: number;
 }) {
-  if (prep.status === 'off' || prep.status === 'ready' || !prep.message) return null;
+  if (!potentialPillVisible(prep)) return null;
   const working = prep.status === 'preparing';
   return (
     <View style={[styles.pill, { top, left, right }]} testID="potential-pill">

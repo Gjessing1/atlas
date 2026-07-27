@@ -1,8 +1,7 @@
 import type { LngLatBbox } from '@atlas/core';
-import { explainPoint, type CombineTerm, type Grid } from '@atlas/potential';
+import { thinSpots, type PotentialSpot } from '@atlas/potential';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from '../status.js';
 import {
@@ -16,15 +15,17 @@ import {
   parseCellId,
   type Cell,
 } from './cells.js';
-import { readManifest, readSignal, signalsPath, tilePath } from './derive.js';
+import { readManifest, tilePath } from './derive.js';
+import { explainSample, loadSignals, sampleIndexAt } from './explain.js';
 import type { PotentialContext } from './inputs.js';
 import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './models.js';
 import { DeriveQueue, type CellState } from './jobs.js';
+import { cellCandidates, describeCandidate, spotsNote, walkAccess, SPOT_LIMIT } from './spots.js';
 
 /**
  * The derived-potential HTTP surface (ROADMAP § N5 → E2, E3).
  *
- * Five routes, and the shape of them is the design:
+ * Six routes, and the shape of them is the design:
  *
  * - `GET  /api/potential/layers` — which models this build can derive, and what
  *   each can be tuned for. A client never invents a target.
@@ -36,6 +37,8 @@ import { DeriveQueue, type CellState } from './jobs.js';
  *   the coverage verdict and the provenance of every input behind it.
  * - `GET  /api/potential/:layer/:target/explain?lat=&lng=` — why *this point*
  *   scores what it does, in the same factor shape the weather card renders.
+ * - `GET  /api/potential/:layer/:target/spots?bbox=` — the numbered shortlist
+ *   for what is on screen, each with its reason and its walk in from the road.
  *
  * **Caching is revalidating, not long-lived**, and that is the one thing here
  * that was learned the hard way rather than designed: a re-derive rewrites the
@@ -57,6 +60,14 @@ export interface PotentialApiOptions {
   userAgent?: string;
   /** N7 status registry: the engine inputs are probed sources. */
   status?: StatusRegistry;
+  /**
+   * Valhalla base URL, for the walk in from the nearest road on a spot.
+   *
+   * Optional on purpose: without it the shortlist still lists spots and simply
+   * says nothing about access, which is the same degradation an unreachable
+   * router gets. A missing walk time must never cost the feature.
+   */
+  valhallaUrl?: string;
   /** Test seam: replaces the registered models. */
   models?: readonly DeriveModel[];
   /** Cells derived at once. Deliberately low — see DeriveQueue. */
@@ -220,10 +231,7 @@ export async function registerPotentialApi(
       return reply.code(404).send({ error: 'cell not derived', state });
     }
 
-    const [west, south, east, north] = manifest.bounds;
-    const pixels = manifest.signals?.pixels ?? 0;
-    const sx = Math.floor(((lng - west) / (east - west)) * pixels);
-    const sy = Math.floor(((north - lat) / (north - south)) * pixels);
+    const { sx, sy } = sampleIndexAt(manifest, { lat, lng });
 
     const shared = {
       cell: manifest.cell,
@@ -239,12 +247,8 @@ export async function registerPotentialApi(
       inputs: manifest.inputs,
     };
 
-    const blob = manifest.signals
-      ? await readFile(signalsPath(opts.dataDir, model, target, cell))
-          .then((raw) => gunzipSync(raw))
-          .catch(() => null)
-      : null;
-    if (!manifest.signals || !blob) {
+    const blob = await loadSignals(opts.dataDir, model, target, cell, manifest);
+    if (!blob) {
       return reply.header('cache-control', 'no-cache').send({
         ...shared,
         score: null,
@@ -253,34 +257,99 @@ export async function registerPotentialApi(
         summary: manifest.contrast.reason,
       });
     }
-
-    // A 1×1 grid per term: `explainPoint` is the same function the golden
-    // tests drive, so the card's wording cannot drift from the engine's.
-    const one = (value: number): Grid => ({
-      width: 1,
-      height: 1,
-      cellSizeM: manifest.cellSizeM,
-      data: Float32Array.of(value),
-    });
-    const terms: CombineTerm[] = manifest.signals.terms.map((term, i) => ({
-      key: term.key,
-      label: term.label,
-      weight: term.weight,
-      // Plane 0 is the rank, so the terms start at 1.
-      grid: one(readSignal(blob, i + 1, sx, sy)),
-      // Re-derived from the key and the value, because a closure cannot be
-      // persisted — without this the card would restate the number it is
-      // supposed to be explaining.
-      describe: (value) =>
-        model.describeSignal?.(term.key, value, target, manifest.derivedAt) ??
-        `${term.label}: ${Math.round(value * 100)} %`,
-    }));
-    const explanation = explainPoint(terms, 0, 0, {
-      rank: one(readSignal(blob, 0, sx, sy)),
-      vocabulary: model.vocabulary,
-    });
+    const explanation = explainSample(model, target, manifest, blob, sx, sy);
     return reply.header('cache-control', 'no-cache').send({ ...shared, ...explanation });
   });
+
+  /**
+   * "Where do I go tonight?" — the numbered shortlist for what is on screen
+   * (E6). Read-only over the cells `/prepare` already built: a viewport with
+   * nothing derived answers `pending`, never a queue of fresh derives, because
+   * panning with the list open would otherwise be a load generator.
+   */
+  app.get<{
+    Params: { layer: string; target: string };
+    Querystring: { bbox?: string; limit?: string };
+  }>(
+    '/api/potential/:layer/:target/spots',
+    // Each answer can cost two router calls, so it is capped like /prepare.
+    { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const model = byLayer(request.params.layer);
+      if (!model) return reply.code(404).send({ error: 'unknown layer' });
+      const bbox = parseBbox(request.query.bbox?.split(','));
+      if (!bbox) return reply.code(400).send({ error: 'invalid bbox' });
+      const target = resolveTarget(model, request.params.target);
+      const requested = Number(request.query.limit);
+      const limit = Number.isInteger(requested)
+        ? Math.max(1, Math.min(SPOT_LIMIT, requested))
+        : SPOT_LIMIT;
+
+      const cells = cellsForBbox(bbox);
+      const manifests = await Promise.all(
+        cells.map(async (cell) => ({
+          cell,
+          manifest: await readManifest(opts.dataDir, model, target, cell),
+        })),
+      );
+      const derived = manifests.filter((entry) => entry.manifest !== null);
+      const flat = derived.filter((entry) => !entry.manifest!.contrast.standout).length;
+
+      // Candidates from every standout cell, then one geographic merge: cells
+      // are derived independently, so a lake straddling two of them offers the
+      // same bay twice until they are compared in metres.
+      const candidates = (
+        await Promise.all(
+          derived.map(async (entry) => {
+            const manifest = entry.manifest!;
+            const blob = await loadSignals(opts.dataDir, model, target, entry.cell, manifest);
+            if (!blob) return [];
+            return cellCandidates(manifest, blob, entry.cell, bbox, limit).map((candidate) => ({
+              candidate,
+              manifest,
+              blob,
+            }));
+          }),
+        )
+      ).flat();
+
+      const chosen = thinSpots(
+        candidates.map((c) => ({ ...c, position: c.candidate.position, rank: c.candidate.rank })),
+        { limit },
+      );
+      const spots: PotentialSpot[] = chosen.map((c) =>
+        describeCandidate(c.candidate, c.manifest, c.blob, model, target),
+      );
+
+      // Walk-in times last, and never fatal: a shortlist without them is still
+      // the feature, and the router is a separate service that can be down.
+      const access = opts.valhallaUrl
+        ? await walkAccess(
+            spots.map((spot) => spot.position),
+            { valhallaUrl: opts.valhallaUrl, fetchImpl: ctx.fetchImpl, log: ctx.log },
+          )
+        : null;
+      const withAccess = spots.map((spot, i) => ({ ...spot, access: access?.[i] ?? null }));
+
+      const pending = cells.length - derived.length;
+      return reply.header('cache-control', 'no-cache').send({
+        layer: model.layer,
+        target,
+        vocabulary: model.vocabulary,
+        spots: withAccess,
+        pending,
+        flat,
+        accessAvailable: access !== null,
+        note: spotsNote({
+          spots: withAccess.length,
+          pending,
+          flat,
+          derived: derived.length,
+          hunt: model.vocabulary === 'hunt',
+        }),
+      });
+    },
+  );
 
   app.get<{ Params: { layer: string; target: string; z: string; x: string; y: string } }>(
     '/api/potential/:layer/:target/:z/:x/:y.png',

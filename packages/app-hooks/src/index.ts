@@ -128,3 +128,12 @@ export {
   type PotentialTargetSelection,
   type PotentialView,
 } from './usePotential.js';
+export {
+  useBestSpots,
+  spotWalkLabel,
+  spotWindowLabel,
+  windowForToday,
+  type BestSpotsState,
+  type BestSpotsStatus,
+  type SpotsWindow,
+} from './useBestSpots.js';

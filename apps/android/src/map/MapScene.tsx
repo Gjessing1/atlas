@@ -28,6 +28,7 @@ import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import type { SpeedCameras } from '../layers/useSpeedCameras';
+import { spotsFeatureCollection, type PotentialSpot } from '@atlas/potential';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
@@ -89,6 +90,13 @@ export const SPEED_CAMERA_LAYER_IDS = [
   'atlas-cameras-section',
   'atlas-cameras-section-casing',
 ];
+
+/**
+ * The numbered "best spots" discs. Drawn last of the overlay sources so they
+ * sit above the derived surface they came from — a marker in the ramp's own hot
+ * colour is invisible on top of it without the white halo *and* the ordering.
+ */
+export const SPOT_LAYER_ID = 'atlas-spots-disc';
 
 /** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
 export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
@@ -173,6 +181,8 @@ interface MapSceneProps {
   huntingFields: HuntingFields | null;
   /** ATK speed-camera coverage to draw (null = overlay off / not loaded). */
   speedCameras: SpeedCameras | null;
+  /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
+  spots: readonly PotentialSpot[];
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   /** First corner and completed rectangle while drawing a custom offline region. */
@@ -238,6 +248,7 @@ export function MapScene({
   overlayLabels,
   huntingFields,
   speedCameras,
+  spots,
   trackGeo,
   offlineRegionCorner,
   offlineRegionBbox,
@@ -573,6 +584,47 @@ export function MapScene({
                 'text-halo-width': 1.4,
                 'text-opacity': speedCameras.opacity,
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* The numbered "best spots in view" markers (§N5 → E6). The numbers come
+        from the shared `spotsFeatureCollection`, not from this file: a marker and
+        its row in the sheet are the same recommendation, and numbering them
+        per-client would break the only link between the two halves of it. */}
+        {spots.length > 0 ? (
+          <GeoJSONSource id="atlas-spots" data={spotsFeatureCollection(spots)}>
+            <Layer
+              type="circle"
+              id="atlas-spots-halo"
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 18],
+                'circle-color': '#ffffff',
+                'circle-opacity': 0.9,
+              }}
+            />
+            <Layer
+              type="circle"
+              id={SPOT_LAYER_ID}
+              paint={{
+                // The band's own colour, so a spot reads as the hot end of the
+                // ramp it was found on.
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10.5, 14, 15],
+                'circle-color': ['get', 'color'],
+                'circle-stroke-width': 1.5,
+                'circle-stroke-color': '#ffffff',
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-spots-number"
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
             />
           </GeoJSONSource>
         ) : null}

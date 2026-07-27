@@ -579,6 +579,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     dataDir: opts.dataDir,
     cacheDir: process.env.TILECACHE_DIR ?? path.join(opts.dataDir, 'tilecache'),
     status,
+    // "Best spots in view" walks each spot in from the nearest road, which is a
+    // pedestrian route like any other — the same engine the planner uses, so an
+    // instance without routing loses the walk time and keeps the spots.
+    valhallaUrl,
     ...opts.potentialApi,
   });
 

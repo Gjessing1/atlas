@@ -151,6 +151,7 @@ export {
   potentialExplainUrl,
   potentialLayersUrl,
   potentialPrepareUrl,
+  potentialSpotsUrl,
   potentialTileUrl,
   type Cell,
   type PotentialCellManifest,
@@ -162,8 +163,23 @@ export {
   type PotentialLayersResponse,
   type PotentialPrepareRequest,
   type PotentialPrepareResponse,
+  type PotentialSpot,
+  type PotentialSpotAccess,
+  type PotentialSpotsResponse,
   type PotentialTarget,
 } from './api.js';
+
+export {
+  spotBandLabel,
+  spotColor,
+  spotPlaceDraft,
+  spotsFeatureCollection,
+  SPOT_LIMIT,
+  SPOT_MIN_RANK,
+  SPOT_MIN_SEPARATION_M,
+  thinSpots,
+  type SpotPlaceDraft,
+} from './spots.js';
 
 export {
   BOTTOM_FLAT_PERCENT,

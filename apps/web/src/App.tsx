@@ -22,6 +22,7 @@ import {
   useMapStyleEditor,
   useNavAddStop,
   useNavPrefs,
+  useBestSpots,
   useNavResume,
   usePotential,
   usePotentialExplain,
@@ -29,6 +30,7 @@ import {
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
+import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -48,6 +50,7 @@ import {
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
+import { SpotsButton, SpotsPanel } from './potential/SpotsPanel.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
@@ -55,6 +58,7 @@ import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
+import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTransitLayers } from './map/useTransitLayers.js';
 import { useShareHash } from './map/useShareHash.js';
@@ -240,6 +244,37 @@ export function App() {
   const potentialTargetLabel = layers.derived?.meta.options
     ?.find((option) => option.key === 'target')
     ?.choices.find((choice) => choice.value === layers.derived?.target)?.label;
+  // The shortlist a derived surface turns into a plan (§N5 → E6): opened by
+  // hand, because it is a real request against the derive service and the
+  // router rather than a legend that could just appear.
+  const [spotsOpen, setSpotsOpen] = useState(false);
+  useEffect(() => {
+    if (!layers.derived) setSpotsOpen(false);
+  }, [layers.derived]);
+  const bestSpots = useBestSpots('', layers.derived, mapViewport, {
+    enabled: spotsOpen,
+    readyKey: potential.readyKey,
+    vocabulary: layers.derived?.meta.derived?.vocabulary,
+  });
+  // Picking a spot — from the list or from its marker — opens the *same* card a
+  // tap on the water opens, so the reasoning, the elevation, the weather and
+  // Save are the ones the user already knows. The number is carried in the
+  // title so the card and the list agree about which spot this is.
+  const onPickSpot = useCallback(
+    (spot: PotentialSpot) => {
+      const index = bestSpots.spots.findIndex((candidate) => candidate.id === spot.id);
+      setPin(null);
+      setTarget({
+        source: 'poi',
+        position: spot.position,
+        name: `Spot ${index + 1}`,
+        category: spot.bandLabel,
+      });
+      map?.easeTo({ center: [spot.position.lng, spot.position.lat], duration: 500 });
+    },
+    [bestSpots.spots, map],
+  );
+  useSpotLayer(map, bestSpots.spots, onPickSpot, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
   useSpeedCameraLayer(map, overlays, blockPassiveClicksRef);
   useHuntingFieldsLayer(map, overlays, blockPassiveClicksRef);
@@ -500,6 +535,15 @@ export function App() {
     // and the sidebar would slide in over the card the user is still reading.
   }, [target, savePlace]);
 
+  // A spot saved from the shortlist keeps its reasoning in the notes: the pin
+  // syncs and comes along offline, where the surface that produced it will not.
+  const onSaveSpot = useCallback(
+    (spot: PotentialSpot, index: number) => {
+      void savePlace(spotPlaceDraft(spot, index, { targetLabel: potentialTargetLabel }));
+    },
+    [savePlace, potentialTargetLabel],
+  );
+
   const onAddStop = useCallback(() => {
     if (!target) return;
     route.addWaypoint(target.position, target.name);
@@ -741,10 +785,29 @@ export function App() {
           </button>
         </div>
       )}
-      {/* What the derive service is doing for the water on screen. Sits under
-          the search box because that is where "what is this map doing" belongs,
-          and it is absent entirely once the surface is ready. */}
-      {nav.phase === 'idle' && <PotentialPill prep={potential} />}
+      {/* What the derive service is doing for the water on screen, and the
+          shortlist it can turn into. Both sit under the search box because that
+          is where "what is this map doing" belongs; the pill is absent entirely
+          once the surface is ready, and the column keeps the panel below
+          whatever the pill is saying rather than on top of it. */}
+      {nav.phase === 'idle' && layers.derived && (
+        <div className="potential-bar">
+          <PotentialPill prep={potential} />
+          {!spotsOpen && potential.status !== 'zoom-in' && potential.status !== 'outside' && (
+            <SpotsButton onOpen={() => setSpotsOpen(true)} />
+          )}
+          {spotsOpen && (
+            <SpotsPanel
+              state={bestSpots}
+              targetLabel={potentialTargetLabel}
+              saveEnabled={userData.status === 'ready'}
+              onPick={onPickSpot}
+              onSave={onSaveSpot}
+              onClose={() => setSpotsOpen(false)}
+            />
+          )}
+        </div>
+      )}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}
@@ -817,7 +880,10 @@ export function App() {
           saveEnabled={userData.status === 'ready'}
           userAt={userAt}
           routeActive={route.active}
-          shifted={sidebarOpen}
+          // Both left-hand panels push the card clear of themselves: picking a
+          // spot from the shortlist would otherwise open the card *behind* the
+          // list it was picked from.
+          shifted={sidebarOpen || spotsOpen}
           onDirections={() => onDirectionsToTarget(target.position, target.name)}
           onSave={onSaveTarget}
           onShowSaved={(place) => {

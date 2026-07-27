@@ -1,4 +1,5 @@
 import {
+  useBestSpots,
   useMapProfile,
   useMapProfilePreferences,
   useRegionPackJobs,
@@ -56,7 +57,9 @@ import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
-import { PotentialPill } from './src/layers/PotentialPill';
+import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
+import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
+import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
 import { useTileSource } from './src/map/useTileSource';
@@ -118,6 +121,9 @@ const STATUS_BAR_FALLBACK = 28;
 
 /** A picture-in-picture window has no system bars to clear. */
 const NO_SIDE_INSETS = { left: 0, right: 0 };
+
+/** Stable identity for "no shortlist", so a closed sheet never re-renders the scene. */
+const EMPTY_SPOTS: readonly PotentialSpot[] = [];
 
 function AppInner() {
   const insets = useSafeAreaInsets();
@@ -268,6 +274,18 @@ function AppInner() {
   const potentialTargetLabel = overlaysCtl.derived?.meta.options
     ?.find((option) => option.key === 'target')
     ?.choices.find((choice) => choice.value === overlaysCtl.derived?.target)?.label;
+  // The shortlist a derived surface turns into a plan (§N5 → E6). Opened by
+  // hand: it is a real request against the derive service and the router, not a
+  // legend that could just appear.
+  const [spotsOpen, setSpotsOpen] = useState(false);
+  useEffect(() => {
+    if (!overlaysCtl.derived) setSpotsOpen(false);
+  }, [overlaysCtl.derived]);
+  const bestSpots = useBestSpots(serverOrigin, overlaysCtl.derived, camera.mapViewport, {
+    enabled: spotsOpen,
+    readyKey: potential.readyKey,
+    vocabulary: overlaysCtl.derived?.meta.derived?.vocabulary,
+  });
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   // The ATK speed cameras as a map layer (the Drive signature overlay). The
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
@@ -378,6 +396,39 @@ function AppInner() {
     },
     [following, dest],
   );
+  // Picking a spot — from the sheet or from its marker — opens the *same* card
+  // a tap on the water opens, so the reasoning and Save are the ones the user
+  // already knows. The number rides in the title so card and list agree about
+  // which spot this is.
+  const { pickOnMap } = dest;
+  const onPickSpot = useCallback(
+    (spot: PotentialSpot, index: number) => {
+      pickOnMap({
+        lat: spot.position.lat,
+        lng: spot.position.lng,
+        name: `Spot ${index + 1}`,
+        detail: spot.bandLabel,
+        canSave: true,
+      });
+    },
+    [pickOnMap],
+  );
+  const onPickSpotById = useCallback(
+    (id: string) => {
+      const index = bestSpots.spots.findIndex((candidate) => candidate.id === id);
+      const spot = bestSpots.spots[index];
+      if (spot) onPickSpot(spot, index);
+    },
+    [bestSpots.spots, onPickSpot],
+  );
+  // A spot saved from the shortlist keeps its reasoning in the notes: the pin
+  // syncs and comes along offline, where the surface that produced it will not.
+  const onSaveSpot = useCallback(
+    (spot: PotentialSpot, index: number) => {
+      void data.savePlace(spotPlaceDraft(spot, index, { targetLabel: potentialTargetLabel }));
+    },
+    [data, potentialTargetLabel],
+  );
   const { onMapPress: onRegularMapPress, onPickPoint: onRegularPickPoint } = useMapPress({
     mapRef,
     nav,
@@ -389,6 +440,8 @@ function AppInner() {
     closeMenu: () => setMenuOpen(false),
     pickDestination: pickPressTarget,
     showIdentify: dest.showIdentify,
+    spots: spotsOpen ? bestSpots.spots : undefined,
+    pickSpot: onPickSpotById,
   });
   const selectOfflineRegionPoint = useCallback((point: LatLng) => {
     setOfflineRegion((current) => {
@@ -669,6 +722,7 @@ function AppInner() {
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
         speedCameras={speedCameras}
+        spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}
@@ -874,7 +928,33 @@ function AppInner() {
               right={side.right + 12}
             />
           ) : null}
+          {/* The shortlist's affordance, stacked under whatever the pill is
+          saying. Absent below z11 and outside Norway, where there is nothing to
+          rank and the pill has already said so. */}
+          {!navActive &&
+          !planning &&
+          overlaysCtl.derived &&
+          !spotsOpen &&
+          potential.status !== 'zoom-in' &&
+          potential.status !== 'outside' ? (
+            <SpotsButton
+              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
+              left={side.left + 12}
+              onPress={() => setSpotsOpen(true)}
+            />
+          ) : null}
           <UpdateNotices storage={data.storage} topInset={topInset} />
+
+          <SpotsSheet
+            visible={spotsOpen && !planning && !navActive}
+            state={bestSpots}
+            targetLabel={potentialTargetLabel}
+            saveEnabled={data.status === 'ready'}
+            onPick={onPickSpot}
+            onSave={onSaveSpot}
+            onClose={() => setSpotsOpen(false)}
+            bottomInset={bottomInset}
+          />
 
           <MainMenuSheet
             visible={menuOpen && !planning && !navActive}

@@ -134,6 +134,27 @@ export function readSignal(planes: Buffer, planeIndex: number, sx: number, sy: n
   return raw / (SIGNAL_NODATA - 1);
 }
 
+/**
+ * Read a whole plane back as a grid — what "best spots in view" ranks over.
+ *
+ * The planes were stored to answer *why is this point good?* one sample at a
+ * time; the shortlist asks *which points are good?* of all 65 536 at once, and
+ * re-running the model to find out would be both slow and a second
+ * implementation of the arithmetic that drew the pixels. `cellSizeM` is the
+ * ground size of a **signal** sample (four derive pixels), so a separation
+ * measured in metres means the same thing here as everywhere else.
+ */
+export function readPlane(planes: Buffer, planeIndex: number, cellSizeM: number): Grid {
+  const grid = createGrid(SIGNAL_PIXELS, SIGNAL_PIXELS, cellSizeM);
+  const base = planeIndex * SIGNAL_PIXELS * SIGNAL_PIXELS;
+  for (let i = 0; i < SIGNAL_PIXELS * SIGNAL_PIXELS; i++) {
+    const raw = planes[base + i];
+    grid.data[i] =
+      raw === undefined || raw === SIGNAL_NODATA ? Number.NaN : raw / (SIGNAL_NODATA - 1);
+  }
+  return grid;
+}
+
 /** Read a cell's manifest, or null when it has not been derived at this revision. */
 export async function readManifest(
   dataDir: string,
