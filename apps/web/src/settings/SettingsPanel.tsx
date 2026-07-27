@@ -6,6 +6,7 @@ import {
   type MapProfilePreferencesController,
   type MapStyleEditorController,
   type NavPrefsController,
+  type StorageAvailability,
   type ThemeModeController,
 } from '@atlas/app-hooks';
 import {
@@ -25,6 +26,8 @@ import type { SyncState } from '../sync/useSync.js';
 
 interface SettingsPanelProps {
   sync: SyncState;
+  /** Whether the local database is open — sign-in cannot work without it. */
+  storage: StorageAvailability;
   appearance: ThemeModeController;
   mapStyle: MapStyleEditorController;
   navPrefs: NavPrefsController;
@@ -240,6 +243,7 @@ function StatusSection({ data }: { data: SystemStatus }) {
 /** Settings grouped by task so map, profile, navigation and account controls do not mix. */
 export function SettingsPanel({
   sync,
+  storage,
   appearance,
   mapStyle,
   navPrefs,
@@ -343,7 +347,7 @@ export function SettingsPanel({
         {tab === 'account' && (
           <div className="settings-section">
             <h3>Account &amp; sync</h3>
-            <AccountPanel sync={sync} />
+            <AccountPanel sync={sync} storage={storage} />
           </div>
         )}
 

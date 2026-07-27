@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { AtlasStorage } from '@atlas/storage';
+import { AtlasStorage, StorageUnavailableError } from '@atlas/storage';
 import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { parseKmz } from '@atlas/gpx';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -84,6 +84,102 @@ describe('useUserData', () => {
     const { result } = renderHook(() => useUserData(platform));
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(result.current.error).toBe('OPFS unavailable');
+    // An unclassified throw is a real failure, not a busy database.
+    expect(result.current.errorReason).toBe('failed');
+  });
+
+  describe('recovering from an unavailable storage', () => {
+    /** A platform whose first N opens fail, then hands over a working storage. */
+    function flakyPlatform(failures: number, err: () => unknown) {
+      const { storage } = createPlatform();
+      let opens = 0;
+      const platform: UserDataPlatform<MemFile> = {
+        openStorage: async () => {
+          opens += 1;
+          if (opens <= failures) throw err();
+          await storage.init();
+          return storage;
+        },
+        readFile: (file) => Promise.resolve(file),
+        saveTextFile: () => Promise.resolve(),
+      };
+      return { platform, storage, opens: () => opens };
+    }
+
+    it('retry() opens again after a failure', async () => {
+      const { platform, opens } = flakyPlatform(1, () => new Error('disk on fire'));
+      const { result } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('error'));
+
+      act(() => result.current.retry());
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      expect(opens()).toBe(2);
+      // The failure is not left behind on the state that recovered from it.
+      expect(result.current.error).toBeNull();
+      expect(result.current.errorReason).toBeNull();
+    });
+
+    it('retry() on a working storage does nothing (never closes what works)', async () => {
+      const { platform, opens } = flakyPlatform(0, () => new Error('unused'));
+      const { result } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+
+      act(() => result.current.retry());
+      await waitFor(() => expect(opens()).toBe(1));
+      expect(result.current.status).toBe('ready');
+    });
+
+    it('waits out a busy storage and takes over when it is released', async () => {
+      const { platform: base, storage } = flakyPlatform(1, () => {
+        throw new Error('unreachable');
+      });
+      let release!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      let opens = 0;
+      const platform: UserDataPlatform<MemFile> = {
+        ...base,
+        openStorage: async () => {
+          opens += 1;
+          // Held by another page until `release` — the second tab case.
+          if (opens === 1) throw new StorageUnavailableError('busy');
+          await storage.init();
+          return storage;
+        },
+        awaitAvailability: () => released,
+      };
+
+      const { result } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(result.current.errorReason).toBe('busy');
+
+      // Nobody pressed anything: the other page let go, and this one takes over.
+      await act(async () => {
+        release();
+        await released;
+      });
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+    });
+
+    it('stops waiting for a busy storage once unmounted', async () => {
+      const aborted = vi.fn();
+      const platform: UserDataPlatform<MemFile> = {
+        openStorage: () => Promise.reject(new StorageUnavailableError('busy')),
+        awaitAvailability: (signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              aborted();
+              reject(new Error('aborted'));
+            });
+          }),
+        readFile: (file) => Promise.resolve(file),
+        saveTextFile: () => Promise.resolve(),
+      };
+
+      const { result, unmount } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      unmount();
+      expect(aborted).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('writes through mutations and surfaces failed writes', async () => {

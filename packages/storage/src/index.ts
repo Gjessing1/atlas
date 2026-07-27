@@ -15,6 +15,12 @@ export type {
   TrackRecord,
 } from './records.js';
 export type { StorageWorkerRequest, StorageWorkerResponse } from './protocol.js';
+export type { StorageUnavailableReason } from './unavailable.js';
+export {
+  StorageUnavailableError,
+  describeStorageUnavailable,
+  storageUnavailableReason,
+} from './unavailable.js';
 export { parseExportedData } from './records.js';
 export { MIGRATIONS, migrate } from './migrations.js';
 export { AtlasStorage, LOCAL_SETTING_PREFIX } from './storage.js';

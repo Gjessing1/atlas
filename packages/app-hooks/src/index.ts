@@ -105,6 +105,7 @@ export {
   importedCount,
   type ImportOptions,
   type ImportResult,
+  type StorageAvailability,
   type UndoableDelete,
   type UserData,
   type UserDataPlatform,

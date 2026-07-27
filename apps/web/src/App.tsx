@@ -68,6 +68,7 @@ import { useTransitPlan } from './routing/useTransit.js';
 import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { SearchBox } from './SearchBox.js';
+import { StorageBanner } from './storage/StorageBanner.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
 import { useWeather } from './weather/useWeather.js';
@@ -797,6 +798,7 @@ export function App() {
           onClose={() => setExploreOpen(false)}
         />
       )}
+      <StorageBanner storage={userData} />
       {writeError && (
         <div className="write-error-toast" role="alert">
           <span>{writeError} — the change was not saved.</span>
@@ -851,6 +853,7 @@ export function App() {
         {settingsOpen && (
           <SettingsPanel
             sync={sync}
+            storage={userData}
             appearance={appearance}
             mapStyle={mapStyleEditor}
             navPrefs={navPrefs}

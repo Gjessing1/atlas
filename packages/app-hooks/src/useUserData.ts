@@ -17,10 +17,11 @@ import type {
   NewPlace,
   PlacePatch,
   PlaceRecord,
+  StorageUnavailableReason,
   TrackPatch,
   TrackRecord,
 } from '@atlas/storage';
-import { parseExportedData } from '@atlas/storage';
+import { parseExportedData, storageUnavailableReason } from '@atlas/storage';
 import { unzipSync, zipSync } from 'fflate';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -33,6 +34,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 export interface UserDataPlatform<TFile> {
   openStorage: () => Promise<AtlasStorage>;
+  /**
+   * Optional: resolve once a storage that was `busy` may be free again — on
+   * web, when the page holding the exclusive OPFS handles goes away. Lets a
+   * second tab come alive by itself instead of leaving the user at a dead end
+   * with no clue that closing the other one is what unblocks it.
+   *
+   * Rejection (including on abort) means "stop waiting", never "retry now".
+   */
+  awaitAvailability?: (signal: AbortSignal) => Promise<void>;
   /** Read a picked/dropped file into its name + raw bytes. */
   readFile: (file: TFile) => Promise<{ name: string; bytes: Uint8Array }>;
   /** Deliver a single exported file (browser download / OS share sheet). */
@@ -169,10 +179,26 @@ export interface UndoableDelete {
   undo: () => Promise<void>;
 }
 
-export interface UserData<TFile> {
+/**
+ * Whether the user's data is actually open, and what to say (and offer) when
+ * it is not. Broken out of `UserData` because the surfaces that report it —
+ * a banner, the Account panel — have no business with the rest of the API.
+ */
+export interface StorageAvailability {
   /** 'error' means persistent storage is unavailable. */
   status: 'loading' | 'ready' | 'error';
   error: string | null;
+  /**
+   * Why, when `status` is 'error'. `'busy'` is the recoverable one: another
+   * page holds the database and this one takes over when that page closes, so
+   * the UI should say *that* rather than offer a pointless retry.
+   */
+  errorReason: StorageUnavailableReason | null;
+  /** Open again after a failure. A no-op unless `status` is 'error'. */
+  retry: () => void;
+}
+
+export interface UserData<TFile> extends StorageAvailability {
   /** Latest failed storage write, for a dismissible toast — null when none. */
   writeError: string | null;
   clearWriteError: () => void;
@@ -243,6 +269,12 @@ let storageCloseChain: Promise<unknown> = Promise.resolve();
 export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<TFile> {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [errorReason, setErrorReason] = useState<StorageUnavailableReason | null>(null);
+  // Bumping this re-runs the open effect: the user pressing Retry, or the
+  // platform reporting that whoever held the database has let go.
+  const [attempt, setAttempt] = useState(0);
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const [writeError, setWriteError] = useState<string | null>(null);
   const [undoable, setUndoable] = useState<UndoableDelete | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -287,8 +319,19 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [reportWriteFailure],
   );
 
+  /**
+   * Try again after a failure. Guarded on the error state because a reopen of
+   * a working database would close it first — a stray call must not take the
+   * app offline for a moment.
+   */
+  const retry = useCallback(() => {
+    if (statusRef.current === 'error') setAttempt((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    const waiting = new AbortController();
+    setStatus('loading');
     const opened = storageCloseChain.then(() => platform.openStorage());
     opened.then(
       async (s) => {
@@ -300,17 +343,32 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         setPlaces(p);
         setTracks(t);
         setStorage(s);
+        setError(null);
+        setErrorReason(null);
         setStatus('ready');
       },
       (err: unknown) => {
         if (cancelled) return;
         console.error('Persistent storage unavailable', err);
+        const reason = storageUnavailableReason(err);
         setError(err instanceof Error ? err.message : String(err));
+        setErrorReason(reason);
         setStatus('error');
+        // Somebody else has it: wait for them to let go and take over, rather
+        // than making the user work out that a second tab is the problem.
+        if (reason === 'busy' && platform.awaitAvailability) {
+          platform.awaitAvailability(waiting.signal).then(
+            () => {
+              if (!cancelled) setAttempt((n) => n + 1);
+            },
+            () => undefined,
+          );
+        }
       },
     );
     return () => {
       cancelled = true;
+      waiting.abort();
       storageRef.current = null;
       // Close whatever this effect opened — even when the open resolves after
       // cleanup, the chained close still releases it (no leaked instance, no
@@ -322,7 +380,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         )
         .catch(() => undefined);
     };
-  }, [platform]);
+  }, [platform, attempt]);
 
   const refreshPlaces = useCallback(async () => {
     if (storageRef.current) setPlaces(await storageRef.current.listPlaces());
@@ -681,6 +739,8 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   return {
     status,
     error,
+    errorReason,
+    retry,
     writeError,
     clearWriteError,
     undoable,

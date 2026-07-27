@@ -7,6 +7,7 @@ import {
   type RegionPackManifest,
 } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
+import { describeStorageUnavailable } from '@atlas/storage';
 import {
   groupUpstreams,
   UPSTREAM_HEALTH_LABEL,
@@ -16,6 +17,7 @@ import {
   type MapProfilePreferencesController,
   type NavPrefsController,
   type RegionPackJobsController,
+  type StorageAvailability,
   type ThemeModeController,
 } from '@atlas/app-hooks';
 import type { UpstreamHealth } from '@atlas/core';
@@ -60,7 +62,7 @@ const STATUS_LABEL: Record<SyncState['status'], string> = {
   error: 'Sync error',
 };
 
-function AccountSection({ sync }: { sync: SyncState }) {
+function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAvailability }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -155,7 +157,21 @@ function AccountSection({ sync }: { sync: SyncState }) {
         </Pressable>
         {busy ? <ActivityIndicator /> : null}
       </View>
-      {!sync.ready ? <Text style={styles.muted}>Opening local storage…</Text> : null}
+      {/* A storage failure disables sign-in (an account's data syncs into the
+          local database), so it has to be said here rather than left as an
+          "Opening local storage…" that never finishes. */}
+      {storage.status === 'error' ? (
+        <View>
+          <Text style={styles.error}>
+            {describeStorageUnavailable(storage.errorReason ?? 'failed')}
+          </Text>
+          <Pressable style={[styles.button, styles.buttonQuiet]} onPress={storage.retry}>
+            <Text style={styles.buttonQuietText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : !sync.ready ? (
+        <Text style={styles.muted}>Opening local storage…</Text>
+      ) : null}
     </View>
   );
 }
@@ -833,6 +849,7 @@ export function SettingsSheet({
   packs,
   onPacksChanged,
   storage,
+  storageState,
   tiles,
   onExportAll,
   appearance,
@@ -853,6 +870,8 @@ export function SettingsSheet({
   packs: LocalPack[];
   onPacksChanged: () => void;
   storage: AtlasStorage | null;
+  /** Whether that database is open, and why not — sign-in depends on it. */
+  storageState: StorageAvailability;
   /** Which basemap tiles are being drawn, and the switch that forces streaming. */
   tiles: TileSource;
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
@@ -1008,7 +1027,7 @@ export function SettingsSheet({
         {section === 'account' ? (
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
-            <AccountSection sync={sync} />
+            <AccountSection sync={sync} storage={storageState} />
             <Text style={styles.heading}>Your data</Text>
             <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
             <View style={styles.buttonRow}>

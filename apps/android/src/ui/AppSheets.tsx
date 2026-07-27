@@ -180,6 +180,7 @@ export function AppSheets({
         packs={packs}
         onPacksChanged={onPacksChanged}
         storage={data.storage}
+        storageState={data}
         tiles={tiles}
         onExportAll={() => void data.exportAll()}
         appearance={appearance}

@@ -4,7 +4,7 @@ import {
   type UserData as SharedUserData,
 } from '@atlas/app-hooks';
 import type { UserDataPlatform } from '@atlas/app-hooks';
-import { openStorage } from './db.js';
+import { awaitAvailability, openStorage } from './db.js';
 
 export type { ImportOptions, ImportResult } from '@atlas/app-hooks';
 export type UserData = SharedUserData<File>;
@@ -26,6 +26,7 @@ function download(fileName: string, bytes: Uint8Array, type: string): void {
  */
 const platform: UserDataPlatform<File> = {
   openStorage,
+  awaitAvailability,
   readFile: async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }),
   saveTextFile: (name, body, mime) => {
     download(name, new TextEncoder().encode(body), mime);

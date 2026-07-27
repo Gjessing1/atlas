@@ -1,4 +1,6 @@
+import type { StorageAvailability } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
+import { describeStorageUnavailable } from '@atlas/storage';
 import { useState } from 'react';
 import type { SyncState } from './useSync.js';
 
@@ -155,7 +157,7 @@ function DeleteAccountForm({ sync }: { sync: SyncState }) {
  * Account + sync state, shown in the Settings panel. Anonymous local-only is
  * the default — this panel is the only place an account enters the picture.
  */
-export function AccountPanel({ sync }: { sync: SyncState }) {
+export function AccountPanel({ sync, storage }: { sync: SyncState; storage: StorageAvailability }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [invite, setInvite] = useState('');
@@ -255,7 +257,20 @@ export function AccountPanel({ sync }: { sync: SyncState }) {
             )}
           </div>
         </form>
-        {!sync.ready && <p className="account-note">Opening local storage…</p>}
+        {/* Sign-in needs the local database (the account's data is synced into
+            it), so a storage failure disables this form. Saying which of the
+            two states it is in is the whole point — "Opening local storage…"
+            on a failure is a promise that never lands. */}
+        {storage.status === 'error' ? (
+          <p className="account-error">
+            {describeStorageUnavailable(storage.errorReason ?? 'failed')}{' '}
+            <button type="button" className="link-button" onClick={storage.retry}>
+              Try again
+            </button>
+          </p>
+        ) : (
+          !sync.ready && <p className="account-note">Opening local storage…</p>
+        )}
         {!canRegister && <p className="account-note">This server is not accepting new accounts.</p>}
         {formError && <p className="account-error">{formError}</p>}
       </div>

@@ -2274,6 +2274,54 @@ button.transit-notice-summary {
 }
 
 /* Failed storage write (useUserData.writeError) — the change was NOT saved. */
+/* Persistent storage could not be opened (useUserData.status === 'error').
+   Ranks above the write-error toast's slot because it is the *cause* of every
+   write failure that would otherwise follow it. */
+.storage-banner {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(92vw, 520px);
+  padding: 12px 14px;
+  /* The danger *pair*, not solid --danger: that variable is a dark red in
+     light mode and a light pink in dark mode, so white-on-danger is only
+     legible in one of the two themes. */
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.storage-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.storage-banner button {
+  flex: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 0;
+}
+
+.storage-banner button.storage-banner-retry {
+  border: 1px solid currentcolor;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
 .write-error-toast {
   position: absolute;
   top: 64px;
@@ -2284,8 +2332,9 @@ button.transit-notice-summary {
   gap: 10px;
   max-width: min(90vw, 480px);
   padding: 10px 14px;
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
   border-radius: 8px;
   font-size: 13px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
@@ -2294,7 +2343,7 @@ button.transit-notice-summary {
 .write-error-toast button {
   background: none;
   border: none;
-  color: #fff;
+  color: inherit;
   cursor: pointer;
   font-size: 14px;
   padding: 0;
