@@ -15,6 +15,7 @@ const log = {
   warn: () => {},
   error: () => {},
   info: () => {},
+  debug: () => {},
 } as unknown as Parameters<typeof ProbeRunner>[2];
 
 /** A PNG-ish body of a given size with the right content-type. */
@@ -228,16 +229,26 @@ describe('ProbeRunner', () => {
     run: () => Promise.resolve(outcome),
   });
 
-  function runner(specs: ProbeSpec[], opts: { intervalMs?: number } = {}) {
+  function runner(
+    specs: ProbeSpec[],
+    opts: { intervalMs?: number; retryIntervalMs?: number } = {},
+  ) {
     let now = 1_700_000_000_000;
     const status = new StatusRegistry(() => now);
     const r = new ProbeRunner(specs, status, log, {
       now: () => now,
       intervalMs: opts.intervalMs ?? 1000,
+      retryIntervalMs: opts.retryIntervalMs ?? 1000,
+      // No real pause between the retry attempts — the delay is not under test.
+      retryDelayMs: 0,
       fetchImpl: vi.fn<typeof fetch>(),
     });
     return { r, status, tick: (ms: number) => void (now += ms) };
   }
+
+  /** A transport error carrying `cause.code`, the shape undici throws. */
+  const transportError = (code: string): Error =>
+    Object.assign(new Error('fetch failed'), { cause: { code } });
 
   it('registers every probed source before any sweep, so none is missing from the page', () => {
     const { status } = runner([spec('a', { ok: true }), spec('b', { ok: true })]);
@@ -306,6 +317,70 @@ describe('ProbeRunner', () => {
       health: 'down',
       message: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
     });
+  });
+
+  /**
+   * The false alarm this retry exists for: five Miljødirektoratet probes hit
+   * one refused connection during a redeploy and the status page called the
+   * whole instance `down` for six hours while the services were answering.
+   */
+  it('retries a refused connection once before believing it', async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(transportError('ECONNREFUSED'))
+      .mockResolvedValue({ ok: true, detail: '922 features' });
+    const { r, status } = runner([{ id: 'a', label: 'a', group: 'Test', run }]);
+    await r.run(true);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(status.toStatus()[0]).toMatchObject({ health: 'ok', detail: '922 features' });
+  });
+
+  it('reports a transient failure that survives the retry', async () => {
+    const run = vi.fn().mockRejectedValue(transportError('ECONNREFUSED'));
+    const { r, status } = runner([{ id: 'a', label: 'a', group: 'Test', run }]);
+    await r.run(true);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(status.toStatus()[0]).toMatchObject({ health: 'down', message: 'ECONNREFUSED' });
+  });
+
+  /**
+   * A broken chain is the persistent, silent breakage the sweep exists to
+   * catch — retrying it would only double the load and delay the alarm.
+   */
+  it('does not retry a TLS failure', async () => {
+    const run = vi.fn().mockRejectedValue(transportError('UNABLE_TO_VERIFY_LEAF_SIGNATURE'));
+    const { r, status } = runner([{ id: 'a', label: 'a', group: 'Test', run }]);
+    await r.run(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(status.toStatus()[0]).toMatchObject({
+      health: 'down',
+      message: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    });
+  });
+
+  /** A source that is down is the one case where the answer is expected to change. */
+  it('re-probes a failed source on the short interval, not the six-hour one', async () => {
+    const run = vi.fn().mockResolvedValue({ ok: false, message: 'HTTP 500' });
+    const { r, tick } = runner([{ id: 'a', label: 'a', group: 'Test', run }], {
+      intervalMs: 6 * 60 * 60 * 1000,
+      retryIntervalMs: 30 * 60_000,
+    });
+    await r.run(false);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    // Long before `intervalMs` would allow it, but past the retry interval.
+    tick(30 * 60_000);
+    await r.run(false);
+    expect(run).toHaveBeenCalledTimes(2);
+
+    // Once it recovers it goes back to the slow cadence.
+    run.mockResolvedValue({ ok: true });
+    tick(30 * 60_000);
+    await r.run(false);
+    expect(run).toHaveBeenCalledTimes(3);
+    tick(30 * 60_000);
+    await r.run(false);
+    expect(run).toHaveBeenCalledTimes(3);
   });
 
   it('keeps sweeping after one probe throws', async () => {

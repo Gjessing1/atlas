@@ -601,11 +601,64 @@ export function allProbes(
   return [...specs, ...inputProbes(env)];
 }
 
+/**
+ * Transport failures that say nothing about the upstream's health — a refused
+ * or reset connection, a DNS hiccup, a timeout. These are worth one retry
+ * before the status page calls a source dead.
+ *
+ * A TLS failure is deliberately **not** in this set. An incomplete chain or an
+ * expired certificate is exactly the persistent, silent breakage this file
+ * exists to catch (see the header), so it must be reported on the first sweep
+ * rather than retried and delayed.
+ */
+const TRANSIENT_CAUSES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'TimeoutError',
+  'AbortError',
+]);
+
+/**
+ * The cause code that identifies a transport failure, as undici attaches it.
+ * Absent for anything that is not one — a probe's own `throw new Error(...)`
+ * keeps reporting its message rather than the useless string "Error".
+ */
+function causeCode(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined;
+  const cause = err.cause as { code?: string; name?: string } | undefined;
+  return cause?.code ?? cause?.name;
+}
+
+/**
+ * Is this worth one more try? `AbortSignal.timeout` throws a bare DOMException
+ * with no `cause`, so the error's own name has to be consulted too.
+ */
+function isTransient(err: unknown): boolean {
+  const code = causeCode(err) ?? (err instanceof Error ? err.name : undefined);
+  return code !== undefined && TRANSIENT_CAUSES.has(code);
+}
+
 export interface ProbeRunnerOptions {
   /** Test seam: upstream HTTP. */
   fetchImpl?: typeof fetch;
   /** How long a result stands before the source is re-probed. */
   intervalMs?: number;
+  /**
+   * How long a *failing* result stands. Far shorter than `intervalMs`, because
+   * a source that is down is the one case where the answer is expected to
+   * change — and leaving the page red for six hours after an upstream came back
+   * teaches people to disbelieve it.
+   */
+  retryIntervalMs?: number;
+  /** Pause before the one retry of a transient transport error. */
+  retryDelayMs?: number;
   /** How many probes run at once. Small: these are other people's servers. */
   concurrency?: number;
   now?: () => number;
@@ -622,9 +675,13 @@ export class ProbeRunner {
   private readonly specs: ProbeSpec[];
   private readonly fetchImpl: typeof fetch;
   private readonly intervalMs: number;
+  private readonly retryIntervalMs: number;
+  private readonly retryDelayMs: number;
   private readonly concurrency: number;
   private readonly now: () => number;
-  private readonly lastRun = new Map<string, number>();
+  /** When each spec last ran, and whether that run was clean — the two things */
+  /** the due-filter needs to pick between `intervalMs` and `retryIntervalMs`. */
+  private readonly lastRun = new Map<string, { at: number; ok: boolean }>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private sweep: Promise<void> | undefined;
   private lastSweep: number | null = null;
@@ -638,6 +695,8 @@ export class ProbeRunner {
     this.specs = specs;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.intervalMs = options.intervalMs ?? 6 * 60 * 60 * 1000;
+    this.retryIntervalMs = options.retryIntervalMs ?? 30 * 60_000;
+    this.retryDelayMs = options.retryDelayMs ?? 2_000;
     this.concurrency = options.concurrency ?? 3;
     this.now = options.now ?? Date.now;
     // Register every probed source up front so the status page lists it as
@@ -688,7 +747,9 @@ export class ProbeRunner {
   private async execute(force: boolean): Promise<void> {
     const due = this.specs.filter((spec) => {
       const last = this.lastRun.get(spec.id);
-      return force || last === undefined || this.now() - last >= this.intervalMs;
+      if (force || last === undefined) return true;
+      const after = last.ok ? this.intervalMs : this.retryIntervalMs;
+      return this.now() - last.at >= after;
     });
     let next = 0;
     const worker = async (): Promise<void> => {
@@ -703,20 +764,44 @@ export class ProbeRunner {
     );
   }
 
+  /**
+   * Run one probe, retrying **once** if it failed for a reason that says
+   * nothing about the upstream.
+   *
+   * This exists because a single refused connection used to paint a source red
+   * until the next sweep six hours later. Five Miljødirektoratet probes tripped
+   * over one such blip during a redeploy and the status page reported the whole
+   * instance `down` while every one of those services was answering normally.
+   * A page that cries wolf gets ignored, which costs more than the one extra
+   * request this retry spends.
+   */
+  private async attempt(spec: ProbeSpec): Promise<ProbeOutcome> {
+    try {
+      return await spec.run(this.fetchImpl);
+    } catch (err) {
+      if (!isTransient(err)) throw err;
+      this.log.debug(
+        { probe: spec.id, code: causeCode(err) },
+        'transient probe failure — retrying',
+      );
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
+      return await spec.run(this.fetchImpl);
+    }
+  }
+
   private async runOne(spec: ProbeSpec): Promise<void> {
     const started = this.now();
-    this.lastRun.set(spec.id, started);
     let outcome: ProbeOutcome;
     try {
-      outcome = await spec.run(this.fetchImpl);
+      outcome = await this.attempt(spec);
     } catch (err) {
       // A TLS or DNS failure surfaces as a bare "fetch failed"; the cause code
       // is what actually identifies it, and it is the difference between "their
       // certificate broke" and "our network is down".
-      const cause = err instanceof Error ? (err.cause as { code?: string } | undefined) : undefined;
-      const reason = cause?.code ?? (err instanceof Error ? err.message : String(err));
+      const reason = causeCode(err) ?? (err instanceof Error ? err.message : String(err));
       outcome = { ok: false, message: reason, warning: null };
     }
+    this.lastRun.set(spec.id, { at: started, ok: outcome.ok });
     const latency = this.now() - started;
     this.status.record(spec.id, outcome.ok, outcome.message, latency);
     if (outcome.warning !== undefined) this.status.warn(spec.id, outcome.warning);
