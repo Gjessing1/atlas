@@ -15,6 +15,7 @@ import {
 import {
   mapProfile,
   placeIsVisible,
+  savedPlaceAt,
   type BBox,
   type LatLng,
   type MapAppearance,
@@ -191,8 +192,6 @@ function AppInner() {
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
   const [navHeight, setNavHeight] = useState(0);
-  // Coords awaiting a name before they're saved as a pin (name-on-save prompt).
-  const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
   const [offlineRegion, setOfflineRegion] = useState<{
     corner: LatLng | null;
     bbox: BBox | null;
@@ -242,6 +241,20 @@ function AppInner() {
   // Placing a pin somewhere is the user pointing at a place; leaving the sheet
   // describing the previous one is simply the wrong answer. Only while it is
   // open — this never opens the sheet by itself.
+  // The saved place the card's spot already *is*, if any — the identity it was
+  // picked with when it has one, otherwise the shared proximity match. Deciding
+  // from `canSave` alone offered "Save pin" a second time when the user tapped
+  // the POI rather than the pin they had saved on it, and made a duplicate; web
+  // has keyed off `savedPlaceAt` since the card shipped.
+  const savedAtDestination = useMemo(() => {
+    const at = dest.destination;
+    if (!at) return undefined;
+    if (at.placeId) {
+      const byId = data.places.find((place) => place.id === at.placeId);
+      if (byId) return byId;
+    }
+    return savedPlaceAt(data.places, { lat: at.lat, lng: at.lng });
+  }, [dest.destination, data.places]);
   const pickedLat = dest.destination?.lat;
   const pickedLng = dest.destination?.lng;
   useEffect(() => {
@@ -1054,22 +1067,34 @@ function AppInner() {
                 directions.planTo({ lat: destination.lat, lng: destination.lng }, destination.name);
               }}
               onSave={
-                destination.canSave
+                destination.canSave && !savedAtDestination
                   ? () => {
-                      void data.savePlace({
-                        name: destination.name,
-                        lat: destination.lat,
-                        lng: destination.lng,
-                        address: destination.address,
-                      });
-                      dest.clear();
+                      void data
+                        .savePlace({
+                          name: destination.name,
+                          lat: destination.lat,
+                          lng: destination.lng,
+                          address: destination.address,
+                        })
+                        .then((place) => {
+                          // A long-pressed point is saved under its own
+                          // coordinates; open the editor on it so naming it is
+                          // the next tap rather than a hunt through Favorites.
+                          // Anything picked with a name is already called the
+                          // right thing and keeps the card, where Save has just
+                          // become Edit.
+                          if (place && destination.unnamed) {
+                            dest.clear();
+                            setEditPlaceId(place.id);
+                          }
+                        });
                     }
                   : undefined
               }
               onEdit={
-                destination.placeId
+                savedAtDestination
                   ? () => {
-                      setEditPlaceId(destination.placeId!);
+                      setEditPlaceId(savedAtDestination.id);
                       dest.clear();
                     }
                   : undefined
@@ -1151,8 +1176,6 @@ function AppInner() {
               setSettingsOpen(false);
               setOfflineRegion({ corner: null, bbox: null });
             }}
-            pendingPin={pendingPin}
-            onDismissPendingPin={() => setPendingPin(null)}
             onPickDestination={dest.pick}
             onImportTracks={importTracks}
             onImportInatur={importInatur}

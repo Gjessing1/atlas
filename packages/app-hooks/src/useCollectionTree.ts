@@ -197,6 +197,36 @@ export function promoteParentId(
   return parent?.parentId ?? null;
 }
 
+/**
+ * The folders that must be open for an item filed in `collectionId` to be on
+ * screen — the item's own folder first, then outwards to the one that renders
+ * at the root.
+ *
+ * Revealing a row is otherwise a walk of `parentId` at the call site, and that
+ * walk has two ways to go wrong that the tree has already settled: a dangling
+ * parent, and a cycle. Both render at the root here, so the walk stops at the
+ * first node with `depth === 0` rather than following the pointer chain — which
+ * for a cycle would never end.
+ *
+ * An unfiled item (or one naming a folder that no longer exists) is already
+ * visible at the root and needs nothing expanded, so the list is empty.
+ */
+export function ancestorFolderIds<C extends TreeFolder, P extends TreeItem, T extends TreeItem>(
+  tree: CollectionTree<C, P, T>,
+  collectionId: string | null,
+): string[] {
+  const out: string[] = [];
+  let id = collectionId;
+  while (id !== null) {
+    const node = tree.byId.get(id);
+    if (!node) break;
+    out.push(id);
+    if (node.depth === 0) break;
+    id = node.folder.parentId;
+  }
+  return out;
+}
+
 /** Memoized {@link buildCollectionTree} — rebuilds only when the arrays change. */
 export function useCollectionTree<
   C extends TreeFolder,

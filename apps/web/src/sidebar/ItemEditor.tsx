@@ -1,6 +1,17 @@
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord } from '@atlas/storage';
 
+/** The fields the editor can change; every key is optional and auto-saved. */
+export interface ItemPatch {
+  name?: string;
+  address?: string;
+  notes?: string;
+  tags?: string[];
+  collectionId?: string | null;
+  icon?: string;
+  color?: string;
+}
+
 interface EditorProps {
   name: string;
   /** Present for places; tracks have no address field. */
@@ -9,15 +20,7 @@ interface EditorProps {
   tags: string[];
   collectionId: string | null;
   collections: CollectionRecord[];
-  onPatch: (patch: {
-    name?: string;
-    address?: string;
-    notes?: string;
-    tags?: string[];
-    collectionId?: string | null;
-    icon?: string;
-    color?: string;
-  }) => void;
+  onPatch: (patch: ItemPatch) => void;
   onDelete: () => void;
   /** Present for places: the current icon/colour, enabling the style picker. */
   style?: { icon: string; color: string };

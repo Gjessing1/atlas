@@ -1,4 +1,3 @@
-import type { LatLng } from '@atlas/core';
 import type {
   MapStyleEditorController,
   MapProfilePreferencesController,
@@ -18,7 +17,6 @@ import type { ImportOptions, ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
 import { LayersSheet, type KeepOfflineControls } from './LayersSheet';
-import { PromptModal } from './PromptModal';
 import { SettingsSheet } from './SettingsSheet';
 import { TracksSheet } from './TracksSheet';
 
@@ -57,10 +55,6 @@ interface AppSheetsProps {
   offlinePrefs: OfflinePrefsController;
   onDrawRegion: () => void;
 
-  /** Coords awaiting a name before they're saved as a pin (name-on-save prompt). */
-  pendingPin: LatLng | null;
-  onDismissPendingPin: () => void;
-
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
@@ -70,7 +64,7 @@ interface AppSheetsProps {
 
 /**
  * All modal surfaces above the map: the three ☰ sheets (places & folders,
- * tracks, settings) and the name-this-pin prompt. Pure wiring between the
+ * tracks, settings) and the focused place editor. Pure wiring between the
  * shared user-data/sync hooks and the sheet components — no logic of its own.
  */
 export function AppSheets({
@@ -101,8 +95,6 @@ export function AppSheets({
   downloads,
   offlinePrefs,
   onDrawRegion,
-  pendingPin,
-  onDismissPendingPin,
   onPickDestination,
   onImportTracks,
   onImportInatur,
@@ -198,20 +190,6 @@ export function AppSheets({
         offlinePrefs={offlinePrefs}
         onDrawRegion={onDrawRegion}
         bottomInset={bottomInset}
-      />
-      <PromptModal
-        visible={pendingPin !== null}
-        title="Name this pin"
-        placeholder="e.g. Home, Trailhead…"
-        confirmLabel="Save pin"
-        onCancel={onDismissPendingPin}
-        onConfirm={(value) => {
-          if (!pendingPin) return;
-          const { lat, lng } = pendingPin;
-          const name = value.trim() || `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-          void data.savePlace({ name, lat, lng });
-          onDismissPendingPin();
-        }}
       />
     </>
   );

@@ -39,6 +39,12 @@ export interface DestinationTarget {
   address?: string;
   /** Search results / long-press points can be saved as a pin; saved places can't. */
   canSave?: boolean;
+  /**
+   * The user never named this spot — `name` is its coordinates, filled in so the
+   * card has a heading. Saving it produces a pin called "59.9139, 10.7522", so
+   * the editor opens on it straight afterwards to be named.
+   */
+  unnamed?: boolean;
   /** Set when the target is a saved place — enables the Edit action. */
   placeId?: string;
   /**
@@ -386,7 +392,9 @@ export function DestinationCard({
             onPress={once(onEdit)}
             testID="destination-edit"
           >
-            <Text style={styles.saveText}>Edit</Text>
+            {/* The star says "already saved" — the same word and mark the web
+                card uses once a spot has a place behind it. */}
+            <Text style={styles.saveText}>★ Edit</Text>
           </Pressable>
         ) : null}
         <Pressable

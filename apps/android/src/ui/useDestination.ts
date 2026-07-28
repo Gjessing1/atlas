@@ -86,7 +86,13 @@ export function useDestination(
 
   const pickPoint = useCallback(
     (at: LatLng, fly = true) => {
-      const target = { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true };
+      const target = {
+        lat: at.lat,
+        lng: at.lng,
+        name: coordName(at),
+        canSave: true,
+        unnamed: true,
+      };
       if (fly) pickOnMap(target);
       else setDestination(target);
     },
@@ -112,13 +118,20 @@ export function useDestination(
     setDestination((d) =>
       d
         ? { ...d, identify: groups }
-        : { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true, identify: groups },
+        : {
+            lat: at.lat,
+            lng: at.lng,
+            name: coordName(at),
+            canSave: true,
+            unnamed: true,
+            identify: groups,
+          },
     );
   }, []);
 
   const onMoved = useCallback((at: LatLng) => {
     setDestination((d) =>
-      d ? { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true } : d,
+      d ? { lat: at.lat, lng: at.lng, name: coordName(at), canSave: true, unnamed: true } : d,
     );
   }, []);
 

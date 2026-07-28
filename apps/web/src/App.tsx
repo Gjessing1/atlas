@@ -75,6 +75,7 @@ import { useRoute } from './routing/useRoute.js';
 import { useTransitPlan } from './routing/useTransit.js';
 import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
 import { PlaceCard } from './place/PlaceCard.js';
+import { PlaceEditDialog } from './place/PlaceEditDialog.js';
 import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
 import { type ImportResult, useUserData } from './storage/useUserData.js';
@@ -134,6 +135,11 @@ export function App() {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [locateRequest, setLocateRequest] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // The saved place whose editor is open, and the one the Collections tree
+  // should reveal — both by id, so a rename or a delete elsewhere is followed
+  // rather than leaving a stale copy of the record on screen.
+  const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
+  const [revealPlaceId, setRevealPlaceId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<{
@@ -523,15 +529,37 @@ export function App() {
     [target, userData.places],
   );
 
+  // Identity-stable: it sits in the Sidebar's reveal effect deps, where a fresh
+  // arrow per render would re-run that effect on every render.
+  const onRevealed = useCallback(() => setRevealPlaceId(null), []);
+
+  // Resolved from the live list rather than held as a record: deleting the
+  // place — here, or on another device mid-edit — closes the editor instead of
+  // leaving it editing something that no longer exists.
+  const editPlace = useMemo(
+    () => (editPlaceId ? (userData.places.find((p) => p.id === editPlaceId) ?? null) : null),
+    [editPlaceId, userData.places],
+  );
+
   const onSaveTarget = useCallback(() => {
     if (!target) return;
+    const name = placeTargetTitle(target);
+    // A bare pin has no name to save — `placeTargetTitle` falls back to its
+    // coordinates, which is not what the user would have called it. Saving is
+    // still what they asked for, so it happens either way; the editor then
+    // opens on the new place so naming it is the next keystroke rather than a
+    // hunt through the sidebar. Anything that arrived with a name (a POI, a
+    // search hit, a spot) is already called the right thing and is left alone.
+    const needsName = !target.name?.trim();
     void savePlace({
-      name: placeTargetTitle(target),
+      name,
       lat: target.position.lat,
       lng: target.position.lng,
       address: target.source === 'search' ? target.address : undefined,
+    }).then((place) => {
+      if (place && needsName) setEditPlaceId(place.id);
     });
-    // No sidebar pop-open: the button flipping to "★ Saved" is the confirmation,
+    // No sidebar pop-open: the button flipping to "★ Edit" is the confirmation,
     // and the sidebar would slide in over the card the user is still reading.
   }, [target, savePlace]);
 
@@ -886,10 +914,7 @@ export function App() {
           shifted={sidebarOpen || spotsOpen}
           onDirections={() => onDirectionsToTarget(target.position, target.name)}
           onSave={onSaveTarget}
-          onShowSaved={(place) => {
-            setSidebarOpen(true);
-            showPlace(place);
-          }}
+          onEdit={(place) => setEditPlaceId(place.id)}
           onAddStop={onAddStop}
           onShare={onShareTarget}
           onWeather={() => weatherAt.setTarget(target.position)}
@@ -906,6 +931,23 @@ export function App() {
             onSearchSelect(result);
           }}
           onClose={() => setExploreOpen(false)}
+        />
+      )}
+      {/* Opened from the card's Edit action, and straight after saving a pin
+          that has only its coordinates for a name. Looked up by id every render
+          so a delete (from here or from a synced device) closes it. */}
+      {editPlace && (
+        <PlaceEditDialog
+          place={editPlace}
+          collections={userData.collections}
+          onPatch={(patch) => void userData.updatePlace(editPlace.id, patch)}
+          onDelete={() => void userData.deletePlace(editPlace.id)}
+          onShowInCollections={() => {
+            setEditPlaceId(null);
+            setRevealPlaceId(editPlace.id);
+            setSidebarOpen(true);
+          }}
+          onClose={() => setEditPlaceId(null)}
         />
       )}
       <StorageBanner storage={userData} />
@@ -954,6 +996,8 @@ export function App() {
           <Sidebar
             data={userData}
             selectedTrackId={selectedTrack?.track.id ?? null}
+            revealPlaceId={revealPlaceId}
+            onRevealed={onRevealed}
             onShowPlace={showPlace}
             onShowTrack={showTrack}
             onImported={onImported}

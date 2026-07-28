@@ -1,4 +1,4 @@
-import { promoteParentId, useCollectionTree } from '@atlas/app-hooks';
+import { ancestorFolderIds, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
 import {
   fmtKm,
   inaturSegments,
@@ -8,7 +8,7 @@ import {
 } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
@@ -19,6 +19,13 @@ import type { ImportOptions, ImportResult, UserData } from './storage/useUserDat
 interface SidebarProps {
   data: UserData;
   selectedTrackId: string | null;
+  /**
+   * A place to bring into view as the sidebar opens: its folders are expanded
+   * and the row is scrolled to and highlighted. Null when nothing asked.
+   */
+  revealPlaceId?: string | null;
+  /** The reveal has been carried out; the caller can drop its request. */
+  onRevealed?: () => void;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
   onImported: (result: ImportResult) => void;
@@ -91,6 +98,8 @@ function FolderNameInput({
 export function Sidebar({
   data,
   selectedTrackId,
+  revealPlaceId = null,
+  onRevealed,
   onShowPlace,
   onShowTrack,
   onImported,
@@ -131,6 +140,47 @@ export function Sidebar({
     tracks: data.tracks,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const revealRowRef = useRef<HTMLLIElement>(null);
+  // The just-revealed row, marked for a couple of seconds after the scroll.
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+
+  /**
+   * Bring a requested place into view. Opening the sidebar on a place is not
+   * the same as showing it: folders start collapsed, so a place filed two deep
+   * used to be nowhere on the screen that had just appeared.
+   *
+   * Two passes on purpose — expanding the ancestors is a state change, so the
+   * row does not exist to scroll to until the render after it. The second pass
+   * (once `revealRowRef` is attached) does the scrolling and reports back.
+   */
+  useEffect(() => {
+    if (!revealPlaceId) return;
+    const place = data.places.find((p) => p.id === revealPlaceId);
+    if (!place) {
+      onRevealed?.();
+      return;
+    }
+    const ancestors = ancestorFolderIds(tree, place.collectionId);
+    setExpandedFolders((current) => {
+      if (ancestors.every((id) => current.has(id))) return current;
+      const next = new Set(current);
+      for (const id of ancestors) next.add(id);
+      return next;
+    });
+    const row = revealRowRef.current;
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Scrolling a row into a list of near-identical rows does not say *which*
+    // one was meant; the highlight does, and then gets out of the way.
+    setHighlighted(revealPlaceId);
+    onRevealed?.();
+  }, [revealPlaceId, data.places, tree, expandedFolders, onRevealed]);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    const t = setTimeout(() => setHighlighted(null), 2500);
+    return () => clearTimeout(t);
+  }, [highlighted]);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
   const toggleFolder = (id: string) =>
@@ -221,7 +271,13 @@ export function Sidebar({
   const placeRow = (place: PlaceRecord) => {
     const key = `place:${place.id}`;
     return (
-      <li key={key} className={`item-row${place.visible ? '' : ' hidden'}`}>
+      <li
+        key={key}
+        // Only the row being revealed takes the ref; the effect scrolls to
+        // whatever it finds attached.
+        ref={place.id === revealPlaceId ? revealRowRef : undefined}
+        className={`item-row${place.visible ? '' : ' hidden'}${place.id === highlighted ? ' revealed' : ''}`}
+      >
         <div
           className={`item-line${dropClass(key)}${drag?.id === place.id ? ' dragging' : ''}`}
           {...dragProps(

@@ -308,7 +308,15 @@ export function useMapPress({
 
   const onPickPoint = useCallback(
     (at: LatLng) => {
-      pickDestination({ lat: at.lat, lng: at.lng, name: coordName(at), canSave: true });
+      // `unnamed`: the heading is the coordinate, not something the user chose —
+      // saving this opens the editor so the pin gets a name.
+      pickDestination({
+        lat: at.lat,
+        lng: at.lng,
+        name: coordName(at),
+        canSave: true,
+        unnamed: true,
+      });
     },
     [pickDestination],
   );

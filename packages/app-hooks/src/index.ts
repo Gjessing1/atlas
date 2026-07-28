@@ -90,6 +90,7 @@ export {
 } from './useRouteStops.js';
 export {
   useCollectionTree,
+  ancestorFolderIds,
   buildCollectionTree,
   flattenCollectionTree,
   promoteParentId,

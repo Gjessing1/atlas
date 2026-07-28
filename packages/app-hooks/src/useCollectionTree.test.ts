@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ancestorFolderIds,
   buildCollectionTree,
   flattenCollectionTree,
   promoteParentId,
@@ -100,5 +101,44 @@ describe('promoteParentId', () => {
 
   it('repairs an orphan by promoting it to the root', () => {
     expect(promoteParentId(collections, folder('orphan', 'gone'))).toBeNull();
+  });
+});
+
+describe('ancestorFolderIds', () => {
+  it('lists the folder chain innermost first, so a nested row can be revealed', () => {
+    const tree = buildCollectionTree({
+      collections: [folder('a'), folder('a1', 'a'), folder('a1x', 'a1')],
+    });
+
+    expect(ancestorFolderIds(tree, 'a1x')).toEqual(['a1x', 'a1', 'a']);
+    expect(ancestorFolderIds(tree, 'a')).toEqual(['a']);
+  });
+
+  it('needs nothing expanded for an item that already renders at the root', () => {
+    const tree = buildCollectionTree({ collections: [folder('a')] });
+
+    expect(ancestorFolderIds(tree, null)).toEqual([]);
+    // Names a folder that no longer exists: the tree files it at the root.
+    expect(ancestorFolderIds(tree, 'gone')).toEqual([]);
+  });
+
+  it('stops at the orphan the tree promoted to the root instead of chasing the pointer', () => {
+    const tree = buildCollectionTree({
+      collections: [folder('orphan', 'gone'), folder('child', 'orphan')],
+    });
+
+    expect(ancestorFolderIds(tree, 'child')).toEqual(['child', 'orphan']);
+  });
+
+  it('terminates on a cyclic parent chain', () => {
+    // Both folders point at each other; the tree renders one of them as a root,
+    // which is where the walk has to stop — following parentId never would.
+    const tree = buildCollectionTree({
+      collections: [folder('x', 'y'), folder('y', 'x')],
+    });
+
+    const ids = ancestorFolderIds(tree, 'x');
+    expect(ids[0]).toBe('x');
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

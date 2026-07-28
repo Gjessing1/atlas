@@ -4,7 +4,6 @@ import {
   fmtCoords,
   fmtDistanceM,
   placeTargetSubtitle,
-  placeTargetTitle,
   type LatLng,
   type NearbyPlaceArticle,
   type PlaceContent,
@@ -43,7 +42,8 @@ interface PlaceCardProps {
   /** Open the route planner with this point as the destination. */
   onDirections: () => void;
   onSave: () => void;
-  onShowSaved: (place: PlaceRecord) => void;
+  /** Open this place's editor, focused on it (saved targets only). */
+  onEdit: (place: PlaceRecord) => void;
   onAddStop: () => void;
   /**
    * Share this spot. Resolves with how it went out: the OS share sheet took it
@@ -256,7 +256,7 @@ export function PlaceCard({
   shifted,
   onDirections,
   onSave,
-  onShowSaved,
+  onEdit,
   onAddStop,
   onShare,
   onWeather,
@@ -274,7 +274,11 @@ export function PlaceCard({
 
   const coords = fmtCoords(target.position);
   const subtitle = placeTargetSubtitle(target, userAt);
-  const title = placeTargetTitle(target);
+  // A pin the user saved and named keeps showing its coordinates otherwise: the
+  // target is a bare coordinate and knows nothing of the place now standing on
+  // it. The card already claims that spot *is* that place — it offers ★ Edit for
+  // it — so it should call it by the name the user gave it.
+  const title = target.name?.trim() || saved?.name || coords;
   // A bare pin already shows its coordinates as the heading; don't repeat them.
   const showCoords = title !== coords;
 
@@ -363,9 +367,11 @@ export function PlaceCard({
             Add stop
           </button>
         )}
+        {/* Already saved: the useful action is editing *this* place — renaming
+            it, filing it, adding a note — not being shown that it exists. */}
         {saved ? (
-          <button type="button" onClick={() => onShowSaved(saved)}>
-            ★ Saved
+          <button type="button" onClick={() => onEdit(saved)}>
+            ★ Edit
           </button>
         ) : (
           <button

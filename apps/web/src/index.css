@@ -713,6 +713,32 @@ button {
   border-radius: 6px;
 }
 
+/* A row the app just scrolled to ("Show in collections"). Scrolling alone does
+   not say which of a dozen similar rows was meant; this does, then fades. */
+.item-row.revealed > .item-line {
+  border-radius: 6px;
+  animation: reveal-row 2.5s ease-out forwards;
+}
+
+@keyframes reveal-row {
+  0%,
+  60% {
+    background: var(--surface-selected);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-row.revealed > .item-line {
+    animation: none;
+    background: var(--surface-selected);
+  }
+}
+
 /* Hidden-from-map places/folders: dim the label but keep the toggle crisp. */
 .item-row.hidden > .item-line > .item-name,
 .item-row.hidden > .item-line > .item-icon,
@@ -2411,6 +2437,36 @@ button.transit-notice-summary {
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* The place card's Edit action: the sidebar's own editor, on the backdrop
+   instead of inside the tree. Wider than a confirmation and scrollable, because
+   the style picker plus five fields outgrows a short viewport. */
+.place-edit-dialog {
+  width: min(360px, 100%);
+  max-height: min(560px, 88vh);
+  overflow-y: auto;
+  padding: 12px 14px 4px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+.place-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+}
+
+/* Already inside a padded, titled dialog — drop the row's indent and its
+   second background. */
+.place-edit-dialog .item-editor {
+  margin: 0;
+  padding: 8px 0 0;
+  background: transparent;
 }
 
 .confirm-title {
