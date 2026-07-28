@@ -1,4 +1,11 @@
-import { flattenCollectionTree, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
+import {
+  collectionDropZone,
+  flattenCollectionTree,
+  promoteParentId,
+  useCollectionTree,
+  type CollectionDragItem,
+  type CollectionDropZone,
+} from '@atlas/app-hooks';
 import { trackSummary } from '@atlas/core';
 import type {
   CollectionRecord,
@@ -151,8 +158,7 @@ export function FavoritesSheet({
   onDeleteFolder,
   onSetAllVisible,
   onExportAll,
-  onReorderPlaces,
-  onReorderCollections,
+  onDrop,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -181,9 +187,8 @@ export function FavoritesSheet({
   onSetAllVisible: (visible: boolean) => void;
   /** Export everything as a file — also in Settings → Account & data. */
   onExportAll: () => void;
-  /** Persist a drag arrangement (row ≡ handles) — ids in their new order. */
-  onReorderPlaces: (orderedIds: string[]) => void;
-  onReorderCollections: (orderedIds: string[]) => void;
+  /** Apply the shared place/folder drop spec after the native gesture is measured. */
+  onDrop: (drag: CollectionDragItem, target: CollectionDragItem, zone: CollectionDropZone) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -261,10 +266,31 @@ export function FavoritesSheet({
   const dropPlaceAtFolder = (place: PlaceRecord, pageY: number): boolean => {
     for (const [folderId, frame] of folderFrames.current) {
       if (pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
-        if (place.collectionId !== folderId) onPatch(place.id, { collectionId: folderId });
+        onDrop({ kind: 'place', id: place.id }, { kind: 'folder', id: folderId }, 'inside');
         // Show where it went — dropping into a closed folder otherwise looks
         // like the place simply vanished from the list.
         revealFolder(folderId);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * A folder released over any visible folder row uses the same 30/40/30
+   * before/inside/after zones as web. Releasing between rows falls back to the
+   * sibling edge selected by ReorderableList.
+   */
+  const dropFolderAtFolder = (folder: CollectionRecord, pageY: number): boolean => {
+    for (const [folderId, frame] of folderFrames.current) {
+      if (folderId !== folder.id && pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
+        const height = frame.bottom - frame.top;
+        const position = height > 0 ? (pageY - frame.top) / height : 0.5;
+        onDrop(
+          { kind: 'folder', id: folder.id },
+          { kind: 'folder', id: folderId },
+          collectionDropZone(position, 'all'),
+        );
         return true;
       }
     }
@@ -442,7 +468,9 @@ export function FavoritesSheet({
         <ReorderableList
           items={level}
           keyOf={(place) => place.id}
-          onReorder={onReorderPlaces}
+          onMove={(place, target, zone) =>
+            onDrop({ kind: 'place', id: place.id }, { kind: 'place', id: target.id }, zone)
+          }
           onDragActive={onDragActive}
           onDropAt={dropPlaceAtFolder}
           renderRow={placeRow}
@@ -461,8 +489,11 @@ export function FavoritesSheet({
         <ReorderableList
           items={level}
           keyOf={(folder) => folder.id}
-          onReorder={onReorderCollections}
+          onMove={(folder, target, zone) =>
+            onDrop({ kind: 'folder', id: folder.id }, { kind: 'folder', id: target.id }, zone)
+          }
           onDragActive={onDragActive}
+          onDropAt={dropFolderAtFolder}
           renderRow={(folder, handle) => (
             <View>
               <View

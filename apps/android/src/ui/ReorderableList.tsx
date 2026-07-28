@@ -7,14 +7,14 @@ import { theme } from './theme';
  * Long-lists drag-to-arrange without native gesture libs (keeps the feature
  * OTA-updatable): each row gets a ≡ handle wired to a PanResponder; while a
  * row is held, the rows in between shift out of its way, and releasing calls
- * `onReorder` with the ids in their new order. The enclosing ScrollView must
+ * `onMove` with the crossed sibling and edge. The enclosing ScrollView must
  * freeze while a drag is live — hence `onDragActive`.
  */
 export function ReorderableList<T>({
   items,
   keyOf,
   renderRow,
-  onReorder,
+  onMove,
   onDragActive,
   onDropAt,
 }: {
@@ -22,7 +22,8 @@ export function ReorderableList<T>({
   keyOf: (item: T) => string;
   /** Render one row; place `handle` where the drag grip should sit. */
   renderRow: (item: T, handle: React.ReactNode) => React.ReactNode;
-  onReorder: (orderedIds: string[]) => void;
+  /** A sibling row was crossed; the shared collection model resolves the move. */
+  onMove: (item: T, target: T, zone: 'before' | 'after') => void;
   /** Fires on drag start/end — disable the outer ScrollView (and close editors). */
   onDragActive: (active: boolean) => void;
   /**
@@ -41,8 +42,8 @@ export function ReorderableList<T>({
   // Latest items/callbacks for the long-lived responders (created once per row key).
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const onReorderRef = useRef(onReorder);
-  onReorderRef.current = onReorder;
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
   const onDragActiveRef = useRef(onDragActive);
   onDragActiveRef.current = onDragActive;
   const onDropAtRef = useRef(onDropAt);
@@ -93,10 +94,10 @@ export function ReorderableList<T>({
           const item = itemsRef.current.find((candidate) => keyOf(candidate) === key);
           if (item && onDropAtRef.current?.(item, gesture.moveY)) return;
           if (!cur || cur.to === cur.from) return;
-          const ids = itemsRef.current.map(keyOf);
-          const [moved] = ids.splice(cur.from, 1);
-          ids.splice(cur.to, 0, moved!);
-          onReorderRef.current(ids);
+          const target = itemsRef.current[cur.to];
+          if (item && target) {
+            onMoveRef.current(item, target, cur.to < cur.from ? 'before' : 'after');
+          }
         },
         onPanResponderTerminate: () => {
           setDrag(null);

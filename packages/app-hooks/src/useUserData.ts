@@ -24,6 +24,11 @@ import type {
 import { parseExportedData, storageUnavailableReason } from '@atlas/storage';
 import { unzipSync, zipSync } from 'fflate';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  resolveCollectionDrop,
+  type CollectionDragItem,
+  type CollectionDropZone,
+} from './collectionDnd.js';
 
 /**
  * Platform seams for useUserData. Must be referentially stable across renders
@@ -222,6 +227,12 @@ export interface UserData<TFile> extends StorageAvailability {
   reorderPlaces: (orderedIds: string[]) => Promise<void>;
   /** Persist a drag-and-drop arrangement of folders (ids in their new order). */
   reorderCollections: (orderedIds: string[]) => Promise<void>;
+  /** Apply the shared place/folder drop rules and refresh the affected lists. */
+  arrangeCollectionItem: (
+    drag: CollectionDragItem,
+    target: CollectionDragItem,
+    zone: CollectionDropZone,
+  ) => Promise<void>;
 
   importFiles: (files: TFile[], options?: ImportOptions) => Promise<ImportResult>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
@@ -462,6 +473,41 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
       }
     },
     [refreshCollections, reportWriteFailure],
+  );
+
+  const arrangeCollectionItem = useCallback(
+    async (
+      drag: CollectionDragItem,
+      target: CollectionDragItem,
+      zone: CollectionDropZone,
+    ): Promise<void> => {
+      const s = storageRef.current;
+      if (!s) return;
+      const operations = resolveCollectionDrop({ collections, places, drag, target, zone });
+      if (operations.length === 0) return;
+      try {
+        for (const operation of operations) {
+          switch (operation.type) {
+            case 'move-place':
+              await s.updatePlace(operation.id, { collectionId: operation.collectionId });
+              break;
+            case 'move-folder':
+              await s.moveCollection(operation.id, operation.parentId);
+              break;
+            case 'reorder-places':
+              await s.reorderPlaces(operation.orderedIds);
+              break;
+            case 'reorder-folders':
+              await s.reorderCollections(operation.orderedIds);
+              break;
+          }
+        }
+        await Promise.all([refreshCollections(), refreshPlaces()]);
+      } catch (err) {
+        reportWriteFailure('Arranging collections', err);
+      }
+    },
+    [collections, places, refreshCollections, refreshPlaces, reportWriteFailure],
   );
 
   const importFiles = useCallback(
@@ -767,6 +813,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     deletePlace,
     reorderPlaces,
     reorderCollections,
+    arrangeCollectionItem,
     importFiles,
     updateTrack,
     deleteTrack,

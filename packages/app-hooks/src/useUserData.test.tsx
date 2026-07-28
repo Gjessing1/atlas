@@ -315,6 +315,57 @@ describe('useUserData', () => {
     expect(result.current.collections.find((c) => c.id === childId)!.parentId).toBeNull();
   });
 
+  it('applies the shared collection drop outcome as one ordered user-data action', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.createCollection('Alpha');
+      await result.current.createCollection('Beta');
+    });
+    const alphaId = result.current.collections.find((c) => c.name === 'Alpha')!.id;
+    const betaId = result.current.collections.find((c) => c.name === 'Beta')!.id;
+    await act(async () => {
+      await result.current.createCollection('Child', alphaId);
+    });
+    const childId = result.current.collections.find((c) => c.name === 'Child')!.id;
+
+    // An edge drop beside a root folder both reparents and ranks the child.
+    await act(async () => {
+      await result.current.arrangeCollectionItem(
+        { kind: 'folder', id: childId },
+        { kind: 'folder', id: betaId },
+        'after',
+      );
+    });
+    expect(result.current.collections.map((c) => c.name)).toEqual(['Alpha', 'Beta', 'Child']);
+    expect(result.current.collections.find((c) => c.id === childId)!.parentId).toBeNull();
+
+    await act(async () => {
+      await result.current.savePlace({ name: 'Root', lat: 59, lng: 10 });
+      await result.current.savePlace({
+        name: 'Filed',
+        lat: 60,
+        lng: 11,
+        collectionId: alphaId,
+      });
+    });
+    const rootId = result.current.places.find((p) => p.name === 'Root')!.id;
+    const filedId = result.current.places.find((p) => p.name === 'Filed')!.id;
+
+    // A place edge drop carries both the destination folder and its order.
+    await act(async () => {
+      await result.current.arrangeCollectionItem(
+        { kind: 'place', id: rootId },
+        { kind: 'place', id: filedId },
+        'before',
+      );
+    });
+    expect(result.current.places.map((p) => p.name)).toEqual(['Root', 'Filed']);
+    expect(result.current.places.find((p) => p.id === rootId)!.collectionId).toBe(alphaId);
+  });
+
   it('clears a pending undo when dismissed', async () => {
     const { platform } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

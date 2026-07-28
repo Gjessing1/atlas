@@ -101,6 +101,18 @@ export {
   type TreeItem,
 } from './useCollectionTree.js';
 export {
+  collectionDropZone,
+  resolveCollectionDrop,
+  type CollectionDragItem,
+  type CollectionDragKind,
+  type CollectionDropFolder,
+  type CollectionDropInput,
+  type CollectionDropOperation,
+  type CollectionDropPlace,
+  type CollectionDropZone,
+  type CollectionDropZoneMode,
+} from './collectionDnd.js';
+export {
   useUserData,
   sanitizeFileName,
   importedCount,

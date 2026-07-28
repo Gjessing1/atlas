@@ -145,8 +145,7 @@ export function AppSheets({
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
         onExportAll={() => void data.exportAll()}
-        onReorderPlaces={(ids) => void data.reorderPlaces(ids)}
-        onReorderCollections={(ids) => void data.reorderCollections(ids)}
+        onDrop={(drag, target, zone) => void data.arrangeCollectionItem(drag, target, zone)}
         bottomInset={bottomInset}
       />
       <PlaceEditSheet
