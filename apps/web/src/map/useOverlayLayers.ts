@@ -1,7 +1,16 @@
-import { identifyOverlays, layerOptionSignature, overlayTileUrl, snapLabelBbox } from '@atlas/core';
-import type { LayerMeta, OverlayLabelsResponse } from '@atlas/core';
-import maplibregl from 'maplibre-gl';
+import {
+  huntingFieldIdentify,
+  identifyOverlays,
+  layerOptionSignature,
+  overlayTileUrl,
+  snapLabelBbox,
+  speedCameraIdentify,
+} from '@atlas/core';
+import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
+import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
+import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
+import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -268,23 +277,51 @@ export function useOverlayLabels(map: maplibregl.Map | null, overlays: ActiveOve
 }
 
 /**
- * Tap-to-identify for overlays that support it (lake depth points, cadastral
- * parcels): a map click queries /api/overlay/:id/identify for each visible
- * identify-capable overlay and pops up the cleaned attributes. Silent when
- * nothing is found — most clicks are navigation, not questions.
+ * Everything the visible overlays have to say about the point under a click, in
+ * one answer: the vector overlays this client draws itself (hunting fields, ATK
+ * cameras) answered from the features on screen, and the raster ones asked over
+ * /api/overlay/:id/identify. Silent when nothing is found — most clicks are
+ * navigation, not questions.
+ *
+ * Three separate click handlers used to open three separate MapLibre popups
+ * here, each with its own markup, so a click that hit a lake *and* a hunting
+ * field produced two floating boxes and neither of them the place card the user
+ * was already looking at. Now the answers go to that card via `onIdentify`, the
+ * way Android has always assembled them (`useMapPress`), and in the same order:
+ * local groups lead, because they are what the user aimed at, and the server's
+ * rows are ambient context for the same point.
  */
 export function useOverlayIdentify(
   map: maplibregl.Map | null,
   overlays: ActiveOverlay[],
-  suppress?: { readonly current: boolean },
+  suppress: { readonly current: boolean } | undefined,
+  onIdentify: (at: { lat: number; lng: number }, groups: OverlayIdentifyGroup[]) => void,
 ): void {
   const overlaysRef = useRef(overlays);
   overlaysRef.current = overlays;
+  const onIdentifyRef = useRef(onIdentify);
+  onIdentifyRef.current = onIdentify;
+  // Identify is a network round trip, so a second click can land before the
+  // first answers. Only the newest click's answer may reach the card —
+  // otherwise the rows would describe a point the user has left behind.
+  const clickSeq = useRef(0);
 
   useEffect(() => {
     if (!map) return;
     const onClick = async (e: maplibregl.MapMouseEvent) => {
       if (suppress?.current) return;
+      const click = ++clickSeq.current;
+      const at = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      // Answered from what is already drawn, before the network is involved.
+      const drawn = (layers: string[]): Record<string, unknown> | null => {
+        const present = layers.filter((id) => map.getLayer(id));
+        if (present.length === 0) return null;
+        return map.queryRenderedFeatures(e.point, { layers: present })[0]?.properties ?? null;
+      };
+      const local = [
+        speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
+        huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
+      ].filter((group): group is OverlayIdentifyGroup => group !== null);
       // Served same-origin, so the shared helper needs no origin prefix. The
       // options ride along so a filtered layer answers for what it draws.
       const results = await identifyOverlays(
@@ -294,25 +331,9 @@ export function useOverlayIdentify(
         map.getZoom(),
         (meta) => overlaysRef.current.find((o) => o.meta.id === meta.id)?.options,
       );
-      if (results.length === 0) return;
-
-      const el = document.createElement('div');
-      el.className = 'identify-popup';
-      for (const result of results.slice(0, 4)) {
-        const heading = document.createElement('strong');
-        heading.textContent = result.title;
-        el.appendChild(heading);
-        for (const [key, value] of Object.entries(result.properties).slice(0, 8)) {
-          const row = document.createElement('div');
-          row.className = 'identify-row';
-          row.textContent = `${key}: ${value}`;
-          el.appendChild(row);
-        }
-      }
-      new maplibregl.Popup({ offset: 8, maxWidth: '300px' })
-        .setLngLat(e.lngLat)
-        .setDOMContent(el)
-        .addTo(map);
+      const groups = [...local, ...results];
+      if (groups.length === 0 || click !== clickSeq.current) return;
+      onIdentifyRef.current(at, groups);
     };
     const handler = (e: maplibregl.MapMouseEvent) => void onClick(e);
     map.on('click', handler);

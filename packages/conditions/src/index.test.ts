@@ -5,6 +5,7 @@ import {
   bestWindows,
   buildPlanner,
   compass16,
+  describeSunDay,
   forecastTable,
   pressureTrend,
   sunDay,
@@ -88,6 +89,24 @@ describe('sun', () => {
     expect(noon.azimuth).toBeLessThan(220);
     const midnight = sunPosition(new Date('2026-06-21T23:00:00Z'), OSLO.lat, OSLO.lon);
     expect(midnight.altitude).toBeLessThan(0);
+  });
+
+  it('says the day in one line: sunrise, sunset, and how long it lasts', () => {
+    const day = sunDay(new Date('2026-06-21T12:00:00Z'), OSLO.lat, OSLO.lon);
+    // Clock times are local to the device, so assert the shape and the numbers
+    // that are timezone-independent rather than a fixed CEST string.
+    expect(describeSunDay(day)).toMatch(/^↑ \d\d:\d\d · ↓ \d\d:\d\d · 18 h \d+ min of daylight$/);
+  });
+
+  it('names the polar cases instead of showing a blank where they matter most', () => {
+    const polarDay = sunDay(new Date('2026-06-21T12:00:00Z'), 69.65, 18.96);
+    expect(describeSunDay(polarDay)).toBe('Midnight sun — the sun stays up all day');
+    // Tromsø in December still has usable twilight, so the line names its hours.
+    const polarNight = sunDay(new Date('2026-12-21T12:00:00Z'), 69.65, 18.96);
+    expect(describeSunDay(polarNight)).toMatch(/^Polar night — twilight \d\d:\d\d–\d\d:\d\d$/);
+    // Far enough north the sun never clears -6°: there is no twilight to name.
+    const svalbard = sunDay(new Date('2026-12-21T12:00:00Z'), 78.22, 15.65);
+    expect(describeSunDay(svalbard)).toBe('Polar night — no daylight or twilight');
   });
 
   it('labels compass points', () => {

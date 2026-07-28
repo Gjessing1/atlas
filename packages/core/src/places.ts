@@ -5,6 +5,7 @@
 
 import { haversineM, type LatLng } from './geo.js';
 import { fmtCoords, fmtDistanceM } from './format.js';
+import type { OverlayIdentifyGroup } from './layers.js';
 
 /**
  * The colour palette offered for places/pins. Stored on each place as the hex
@@ -127,6 +128,13 @@ export interface PlaceTarget {
   address?: string;
   /** Set when the target *is* a saved place — the card then offers Edit, not Save. */
   placeId?: string;
+  /**
+   * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
+   * depth, a parcel's number). Arrives *after* the card opens — the network
+   * round trip must never delay the actions — so it is set on an existing
+   * target rather than being part of what opens one.
+   */
+  identify?: readonly OverlayIdentifyGroup[];
 }
 
 /**

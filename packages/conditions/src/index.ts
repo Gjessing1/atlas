@@ -13,7 +13,7 @@ export {
   type FishingConditionsInput,
   type HuntConditionsInput,
 } from './conditions.js';
-export { symbolEmoji, windArrow } from './display.js';
+export { describeSunDay, symbolEmoji, windArrow } from './display.js';
 export {
   forecastTable,
   type DayPeriod,

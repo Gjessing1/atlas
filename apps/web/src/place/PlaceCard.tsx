@@ -1,20 +1,21 @@
-import { sunDay, type SunDay } from '@atlas/conditions';
+import { usePlaceFacts } from '@atlas/app-hooks';
 import {
-  fmtClock,
   fmtCoords,
   fmtDistanceM,
+  identifyCardGroups,
   placeTargetSubtitle,
+  shareFormats,
   type LatLng,
   type NearbyPlaceArticle,
   type PlaceContent,
   type PlacePhoto,
   type PlaceTarget,
+  type ShareFormat,
 } from '@atlas/core';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
-import { useElevation } from './useElevation.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
 import { usePlaceContent } from './usePlaceContent.js';
 
@@ -46,11 +47,14 @@ interface PlaceCardProps {
   onEdit: (place: PlaceRecord) => void;
   onAddStop: () => void;
   /**
-   * Share this spot. Resolves with how it went out: the OS share sheet took it
-   * ('shared'), or it went to the clipboard instead ('copied' — the only case
-   * the button needs to confirm, since a share sheet is its own feedback).
+   * Act on a chosen share format. Resolves with how it went out: the OS share
+   * sheet took it ('shared'), or it went to the clipboard instead ('copied' —
+   * the only case the chooser needs to confirm, since a share sheet is its own
+   * feedback).
    */
-  onShare: () => Promise<'shared' | 'copied'>;
+  onShare: (format: ShareFormat) => Promise<'shared' | 'copied'>;
+  /** An Atlas link to this exact spot, for the chooser's link option. */
+  shareUrl: () => string;
   /** Open the forecast panel on this spot rather than on the map centre. */
   onWeather: () => void;
   /** Remove the dropped pin (pin targets only). */
@@ -58,27 +62,6 @@ interface PlaceCardProps {
   /** Re-aim the card at a described place picked from the nearby list. */
   onShowNearby: (place: NearbyPlaceArticle) => void;
   onClose: () => void;
-}
-
-/**
- * The day's light in one line: sunrise/sunset and how long the day is, or what
- * is happening instead when the sun does not cross the horizon at all.
- *
- * Both polar branches still check `dawn`/`dusk` rather than assuming twilight
- * exists. It does at Tromsø in December — the sun reaches about -3° at noon, so
- * there are usable hours — but not far enough north (Svalbard, deep winter),
- * where the sun stays below -6° all day and there is no twilight to name.
- */
-function describeLight(sun: SunDay): string {
-  if (sun.polar === 'day') return 'Midnight sun — the sun stays up all day';
-  if (sun.polar === 'night') {
-    if (!sun.dawn || !sun.dusk) return 'Polar night — no daylight or twilight';
-    return `Polar night — twilight ${fmtClock(sun.dawn.valueOf())}–${fmtClock(sun.dusk.valueOf())}`;
-  }
-  if (!sun.sunrise || !sun.sunset) return '';
-  const hours = Math.floor(sun.daylightMs / 3600000);
-  const minutes = Math.round((sun.daylightMs % 3600000) / 60000);
-  return `↑ ${fmtClock(sun.sunrise.valueOf())} · ↓ ${fmtClock(sun.sunset.valueOf())} · ${hours} h ${minutes} min of daylight`;
 }
 
 /**
@@ -231,6 +214,79 @@ function NearbyArticles({
 }
 
 /**
+ * What the visible overlays say sits here — a lake's surveyed depth, a parcel's
+ * number — as a block *inside* the card.
+ *
+ * It used to be a separate MapLibre popup with its own unstyled markup and its
+ * own row caps, so one click on one lake could produce two surfaces describing
+ * the same spot in two visual languages. The answers belong to the point the
+ * card is already about; the caps are `identifyCardGroups`', shared with
+ * Android so both clients cut a chatty upstream at the same place.
+ *
+ * Scrolls within a fixed height for the same reason Android's does: no upstream
+ * gets to push the card's actions out of reach.
+ */
+function IdentifyBlock({ groups }: { groups: PlaceTarget['identify'] }) {
+  const shown = identifyCardGroups(groups ?? []);
+  if (shown.length === 0) return null;
+  return (
+    <div className="place-card-identify" data-testid="place-card-identify">
+      {shown.map((group, i) => (
+        <section key={`${group.title}-${i}`}>
+          <strong>{group.title}</strong>
+          {group.rows.map(([key, value]) => (
+            <div className="place-card-identify-row" key={key}>
+              <span>{key}</span>
+              <span>{value}</span>
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * How to send this spot somewhere — the same chooser, with the same wording and
+ * order, as the Android sheet (`shareFormats` in @atlas/core owns the list).
+ *
+ * Web previously had a Share button and a separate Copy coords one, which is
+ * two ways to answer one question and neither of them the Android answer. One
+ * button now opens the list, and each option says what the recipient actually
+ * gets; the `geo:` hand-off is absent here because a desktop browser has no map
+ * app to hand the point to.
+ */
+function ShareChooser({
+  formats,
+  onPick,
+  onClose,
+}: {
+  formats: readonly ShareFormat[];
+  onPick: (format: ShareFormat) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="place-card-share" role="menu" data-testid="place-card-share">
+      {formats.map((format) => (
+        <button
+          key={format.key}
+          type="button"
+          role="menuitem"
+          onClick={() => onPick(format)}
+          data-testid={`share-${format.key}`}
+        >
+          <strong>{format.title}</strong>
+          <span>{format.subtitle}</span>
+        </button>
+      ))}
+      <button type="button" className="place-card-share-cancel" onClick={onClose}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/**
  * One card for every way of pointing at a spot: a dropped pin, a saved place, a
  * POI tapped on the map, a picked search result.
  *
@@ -259,18 +315,25 @@ export function PlaceCard({
   onEdit,
   onAddStop,
   onShare,
+  shareUrl,
   onWeather,
   onRemovePin,
   onShowNearby,
   onClose,
 }: PlaceCardProps) {
-  const [copied, setCopied] = useState<'coords' | 'link' | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   // Clear the "Copied" confirmation; a second copy restarts the timer.
   useEffect(() => {
     if (!copied) return;
-    const t = setTimeout(() => setCopied(null), 1500);
+    const t = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(t);
   }, [copied]);
+  // A chooser left open from the previous spot would share the new one under
+  // the old one's coordinates.
+  useEffect(() => {
+    setShareOpen(false);
+  }, [target.position.lat, target.position.lng]);
 
   const coords = fmtCoords(target.position);
   const subtitle = placeTargetSubtitle(target, userAt);
@@ -282,20 +345,14 @@ export function PlaceCard({
   // A bare pin already shows its coordinates as the heading; don't repeat them.
   const showCoords = title !== coords;
 
-  const elevation = useElevation(target.position);
+  // Both "what is this spot like" facts from one shared hook, so the two cards
+  // cannot end up with different halves of the pair (§7.2).
+  const { elevation, light } = usePlaceFacts('', target.position);
   const placeContent = usePlaceContent(target.name, target.position);
   const hasArticleImage = placeContent.content.some((article) => article.image);
   // Asked as the card opens, and dropped as soon as the article's own lead
   // photo lands — a card shows one photo block, never two.
   const photos = useNearbyPhotos(target.position, !hasArticleImage);
-  // Sun times are pure local maths (no network, no coverage limits), so unlike
-  // elevation they are always available — recomputed per position, and per day
-  // only in the sense that the card is short-lived.
-  const sun = useMemo(
-    () => sunDay(new Date(), target.position.lat, target.position.lng),
-    [target.position.lat, target.position.lng],
-  );
-  const light = describeLight(sun);
 
   return (
     <div className={`place-card${shifted ? ' place-card-shifted' : ''}`} role="dialog">
@@ -336,6 +393,8 @@ export function PlaceCard({
           looking at, and the answer to *that* comes before a Wikipedia article
           about the lake. */}
       {potential && <PotentialExplain data={potential} targetLabel={potentialTarget} />}
+      {/* And above the overlays' own answers, for the same reason. */}
+      <IdentifyBlock groups={target.identify} />
       {placeContent.status === 'loading' && target.name ? (
         <div className="place-card-content place-card-content-loading">Looking up local guide…</div>
       ) : null}
@@ -388,22 +447,10 @@ export function PlaceCard({
         </button>
         <button
           type="button"
-          onClick={() => {
-            void onShare().then((how) => {
-              if (how === 'copied') setCopied('link');
-            });
-          }}
+          aria-expanded={shareOpen}
+          onClick={() => setShareOpen((open) => !open)}
         >
-          {copied === 'link' ? 'Copied' : 'Share'}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            void navigator.clipboard.writeText(coords);
-            setCopied('coords');
-          }}
-        >
-          {copied === 'coords' ? 'Copied' : 'Copy coords'}
+          {copied ? 'Copied' : 'Share'}
         </button>
         {target.source === 'pin' && (
           <button type="button" onClick={onRemovePin}>
@@ -411,6 +458,20 @@ export function PlaceCard({
           </button>
         )}
       </div>
+      {shareOpen && (
+        <ShareChooser
+          // Built when the chooser opens rather than per render: the link
+          // carries the camera's zoom, which changes under an open card.
+          formats={shareFormats(target.position, target.name, shareUrl())}
+          onPick={(format) => {
+            setShareOpen(false);
+            void onShare(format).then((how) => {
+              if (how === 'copied') setCopied(true);
+            });
+          }}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
     </div>
   );
 }

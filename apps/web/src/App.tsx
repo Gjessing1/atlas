@@ -7,13 +7,14 @@ import {
   placeIsVisible,
   placeTargetTitle,
   savedPlaceAt,
-  shareMessage,
   type ColorScheme,
   type LatLng,
   type MapViewState,
   type NearbyPlaceArticle,
+  type OverlayIdentifyGroup,
   type PlaceTarget,
   type SearchResult,
+  type ShareFormat,
   type VisibilityFolder,
 } from '@atlas/core';
 import {
@@ -101,6 +102,13 @@ const SettingsPanel = lazy(() =>
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 
+/**
+ * How near an overlay's answer must land, on screen, to belong to the card that
+ * is already open. A finger/cursor-sized radius — the same idea as Android's
+ * pin tap tolerance.
+ */
+const IDENTIFY_SAME_SPOT_PX = 40;
+
 // Decoded once at startup; afterwards the map keeps the hash in sync. A share
 // link (hash) always wins over the persisted last view.
 const hashView = decodeMapHash(window.location.hash);
@@ -170,7 +178,7 @@ export function App() {
   const [measureOpen, setMeasureOpen] = useState(false);
   const measuringRef = useRef(measureOpen);
   measuringRef.current = measureOpen;
-  // Route mode or the measure tool own map clicks; identify + POI popups and
+  // Route mode or the measure tool own map clicks; identify, the POI card and
   // the route-click handler read this ref to yield.
   const blockPassiveClicksRef = useRef(false);
   blockPassiveClicksRef.current = route.active || measureOpen;
@@ -241,11 +249,10 @@ export function App() {
   );
   useOverlayLayers(map, overlays);
   useOverlayLabels(map, overlays);
-  useOverlayIdentify(map, overlays, blockPassiveClicksRef);
   // "Why is this water good?" for whatever the place card is pointing at. The
   // derived layers are not identify-capable overlays — a tap on one is answered
-  // with reasoning rather than upstream attributes, so it lands in the card
-  // rather than in the identify popup.
+  // with reasoning rather than upstream attributes, and both now land in the
+  // same card.
   const potentialExplain = usePotentialExplain('', layers.derived, target?.position ?? null);
   const potentialTargetLabel = layers.derived?.meta.options
     ?.find((option) => option.key === 'target')
@@ -282,8 +289,8 @@ export function App() {
   );
   useSpotLayer(map, bestSpots.spots, onPickSpot, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
-  useSpeedCameraLayer(map, overlays, blockPassiveClicksRef);
-  useHuntingFieldsLayer(map, overlays, blockPassiveClicksRef);
+  useSpeedCameraLayer(map, overlays);
+  useHuntingFieldsLayer(map, overlays);
 
   // ---- turn-by-turn navigation ----
 
@@ -448,6 +455,35 @@ export function App() {
     [followPin],
   );
 
+  // What the overlays say is under a click goes onto the card that click
+  // opened — or opens one for the bare point, since a lake with a surveyed
+  // depth is worth a card of its own. Same rule as Android's `showIdentify`,
+  // and the reason the answers no longer get a popup of their own.
+  //
+  // The answers only join a card that is about *that* point, measured on
+  // screen so the test means the same thing at every zoom. A POI's own
+  // coordinate sits a few pixels from the click that opened it and belongs
+  // together; the next lake along does not, and merging there would relabel a
+  // card with another place's depth.
+  const onIdentify = useCallback(
+    (at: LatLng, groups: OverlayIdentifyGroup[]) => {
+      const map = mapRef.current;
+      if (target && map) {
+        const a = map.project(target.position);
+        const b = map.project(at);
+        if (Math.hypot(a.x - b.x, a.y - b.y) <= IDENTIFY_SAME_SPOT_PX) {
+          setTarget({ ...target, identify: groups });
+          return;
+        }
+      }
+      setPin(at);
+      followPin(at);
+      setTarget({ source: 'pin', position: at, identify: groups });
+    },
+    [target, followPin],
+  );
+  useOverlayIdentify(map, overlays, blockPassiveClicksRef, onIdentify);
+
   // ---- user data on the map ----
 
   const { tracks, getTrackData, savePlace } = userData;
@@ -581,35 +617,37 @@ export function App() {
   // A link to this exact spot, independent of where the camera happens to sit
   // (the address bar's hash follows the map, which is not what "share this
   // place" means).
-  //
-  // Where the browser has one, the OS share sheet gets it — that is what puts
-  // the location into the recipient's messaging and maps apps rather than into
-  // a page only Atlas users can open. The payload carries the plain coordinates
-  // as well as the Atlas link, so someone on Google Maps or OsmAnd can still act
-  // on it; the clipboard fallback copies the same text.
-  const onShareTarget = useCallback(async (): Promise<'shared' | 'copied'> => {
-    if (!target) return 'copied';
+  const shareUrl = useCallback(() => {
+    if (!target) return window.location.href;
     const zoom = Math.max(mapRef.current?.getZoom() ?? 14, 14);
-    const url = atlasShareUrl(
+    return atlasShareUrl(
       `${window.location.origin}${window.location.pathname}`,
       target.position,
       zoom,
     );
-    const text = shareMessage(target.position, target.name, url);
-    if (navigator.share) {
+  }, [target]);
+
+  // Carry out whichever format the card's chooser produced (the list itself is
+  // `shareFormats`, shared with Android).
+  //
+  // 'send' prefers the OS share sheet where the browser has one — that is what
+  // puts the location into the recipient's messaging and maps apps rather than
+  // into a page only Atlas users can open. Without one, or when it fails for
+  // any reason other than being dismissed, the same text goes to the clipboard
+  // so the user still gets something they can paste.
+  const onShareTarget = useCallback(async (format: ShareFormat): Promise<'shared' | 'copied'> => {
+    if (format.action === 'send' && navigator.share) {
       try {
-        await navigator.share({ title: target.name ?? 'Location', text });
+        await navigator.share({ title: format.title, text: format.payload });
         return 'shared';
       } catch (err) {
         // A dismissed share sheet is not a failure — say nothing and stop.
         if (err instanceof DOMException && err.name === 'AbortError') return 'shared';
-        // Anything else (no permission, unsupported payload): fall through to
-        // the clipboard so the user still gets something they can paste.
       }
     }
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(format.payload);
     return 'copied';
-  }, [target]);
+  }, []);
 
   // Elevation-profile hover → a small dot marker on the map.
   const hoverMarkerRef = useRef<maplibregl.Marker | null>(null);
@@ -917,6 +955,7 @@ export function App() {
           onEdit={(place) => setEditPlaceId(place.id)}
           onAddStop={onAddStop}
           onShare={onShareTarget}
+          shareUrl={shareUrl}
           onWeather={() => weatherAt.setTarget(target.position)}
           onRemovePin={() => onPinChange(null)}
           onShowNearby={onShowNearbyPlace}

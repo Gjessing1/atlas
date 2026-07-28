@@ -161,6 +161,52 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   await expect(page.locator('.place-card')).toHaveCount(0);
 });
 
+test('what the overlays say lands on the place card, not in a popup of its own', async ({
+  page,
+}) => {
+  // One identify-capable overlay, switched on through the real quick switch.
+  await page.route('**/api/layers**', (route) =>
+    route.fulfill({
+      json: {
+        layers: [
+          {
+            id: 'lake-depth',
+            rev: 1,
+            title: 'Lake depth',
+            group: 'Water',
+            identify: true,
+            maxzoom: 18,
+            attribution: 'NVE',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/overlay/lake-depth/identify**', (route) =>
+    route.fulfill({ json: { results: [{ navn: 'Semsvannet', maksdyp: '32.5' }] } }),
+  );
+  // Raster tiles for the stub layer are irrelevant here; keep them off the wire.
+  await page.route('**/api/overlay/lake-depth/tiles/**', (route) => route.abort());
+
+  await page.goto('/#map=14/59.8553/10.4211');
+  await waitForMap(page);
+  await page.getByRole('button', { name: /^Map layers/ }).click();
+  await page.getByRole('button', { name: 'Lake depth' }).click();
+  await page.keyboard.press('Escape');
+
+  const box = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  // The answer opens the card for the clicked point and sits inside it — the
+  // separate MapLibre popup that used to show this is gone.
+  const card = page.locator('.place-card');
+  await expect(card.getByTestId('place-card-identify')).toContainText('Lake depth');
+  await expect(card.getByTestId('place-card-identify')).toContainText('32.5');
+  await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
+  // And it is one card: the spot's own facts are still there beside the answer.
+  await expect(card.locator('.place-card-facts')).toContainText('Light');
+});
+
 test('a place with no article of its own shows nearby photos and places', async ({ page }) => {
   // The user's own case: a town hall Wikipedia has never written about.
   await page.route('**/api/place-content?**', (route) => route.fulfill({ json: { content: [] } }));
@@ -265,7 +311,17 @@ test('sharing a place hands out the pin, the coordinates and the Atlas link', as
   });
   await page.goto('/#map=13/59.5/10.5&pin=59.5/10.5');
   await waitForMap(page);
-  await page.locator('.place-card').getByRole('button', { name: 'Share' }).click();
+  const card = page.locator('.place-card');
+  // Share opens the format chooser — the same list, in the same words, as the
+  // Android sheet. The `geo:` hand-off is deliberately absent on the web.
+  await card.getByRole('button', { name: 'Share' }).click();
+  const chooser = card.getByTestId('place-card-share');
+  await expect(chooser.getByRole('menuitem')).toHaveText([
+    /Atlas link/,
+    /Copy coordinates59\.50000, 10\.50000/,
+  ]);
+  await chooser.getByTestId('share-link').click();
+  await expect(chooser).toHaveCount(0);
 
   await page.waitForFunction(
     () => (window as unknown as { __shared: string[] }).__shared.length > 0,

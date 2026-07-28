@@ -1,8 +1,10 @@
 import type { NavController } from '@atlas/app-hooks';
 import {
   haversineM,
+  huntingFieldIdentify,
   identifyOverlays,
   POI_LAYER_IDS,
+  speedCameraIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
 } from '@atlas/core';
@@ -52,7 +54,7 @@ export interface MapPressOptions {
   closeMenu: () => void;
   pickDestination: (target: DestinationTarget) => void;
   /** Report what the overlays say is under the tap (web parity, §Android queue). */
-  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[]) => void;
+  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[], sameSpotM: number) => void;
   /**
    * The numbered "best spots" markers, when the shortlist is open, and what to
    * do with a tap on one. Hit-tested by distance like the saved pins rather
@@ -67,43 +69,8 @@ const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
 
 type QueriedFeature = { properties?: Record<string, unknown> | null };
 
-/**
- * A tapped Statskog jaktfelt polygon as an identify group for the card: the
- * field name is the heading, the species it is opened for and Statskog's
- * remarks are the rows (web parity with useHuntingFieldsLayer's popup). Local
- * hit-test, not a server round trip — the coverage is already on the client.
- */
-function huntingFieldGroup(hits: QueriedFeature[] | undefined): OverlayIdentifyGroup | null {
-  const props = hits?.[0]?.properties;
-  if (!props) return null;
-  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
-  const name = str(props['Feltnavn']);
-  const properties: Record<string, string> = {};
-  const species = str(props['Art']);
-  const remarks = str(props['Merknad']);
-  if (species) properties['Species'] = species;
-  if (remarks) properties['Remarks'] = remarks;
-  return { title: name ?? 'Hunting field', properties };
-}
-
-/**
- * A tapped ATK camera as an identify group (web parity with
- * useSpeedCameraLayer's popup): the heading says *which kind* of enforcement it
- * is, because a fixed camera and an average-speed section are driven
- * differently, and the row is Vegvesen's own name for it. Also a local
- * hit-test — the coverage is on the client already.
- */
-function speedCameraGroup(hits: QueriedFeature[] | undefined): OverlayIdentifyGroup | null {
-  const props = hits?.[0]?.properties;
-  if (!props) return null;
-  const point = props['kind'] === 'point';
-  const name =
-    typeof props['name'] === 'string' && props['name'].trim() ? props['name'].trim() : null;
-  return {
-    title: point ? 'Speed camera' : 'Average speed control',
-    properties: name ? { Name: name } : {},
-  };
-}
+/** The first queried feature's properties, for the shared identify builders. */
+const hitProps = (hits: QueriedFeature[] | undefined) => hits?.[0]?.properties;
 
 const boxAround = ({ x, y }: Pixel): PixelBounds => [
   [x - TAP_PADDING_PX, y - TAP_PADDING_PX],
@@ -156,6 +123,49 @@ export function useMapPress({
         })();
         return;
       }
+      // Ground size of one screen pixel at this zoom (512px tiles) makes the
+      // tap tolerance a constant ~36 px at any zoom level.
+      const tapToleranceM = (zoom: number) =>
+        PIN_TAP_PX * ((78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom);
+
+      /** The saved pin under the tap, if the tap landed close enough to one. */
+      const tappedPlace = (metersPerPx: number): PlaceRecord | undefined => {
+        let best: PlaceRecord | undefined;
+        let bestM = Infinity;
+        for (const place of places) {
+          const d = haversineM({ lat, lng }, { lat: place.lat, lng: place.lng });
+          if (d < bestM) {
+            bestM = d;
+            best = place;
+          }
+        }
+        return best && bestM <= metersPerPx ? best : undefined;
+      };
+
+      /** The named basemap POI under the tap, anchored on its own coordinate. */
+      const tappedPoi = async (): Promise<DestinationTarget | null> => {
+        const pois = await mapRef.current
+          ?.queryRenderedFeatures(pixelBounds, { layers: POI_LAYER_IDS })
+          .catch(() => undefined);
+        const poi = pois?.[0];
+        if (!poi) return null;
+        const props = (poi.properties ?? {}) as Record<string, unknown>;
+        const name = (props['name'] ?? props['name:latin']) as string | undefined;
+        if (!name) return null;
+        const kind = [props['class'], props['subclass']]
+          .filter((v): v is string => typeof v === 'string' && v !== name)
+          .join(' · ');
+        const [poiLng, poiLat] =
+          poi.geometry?.type === 'Point' ? (poi.geometry.coordinates as number[]) : [lng, lat];
+        return {
+          lat: poiLat ?? lat,
+          lng: poiLng ?? lng,
+          name,
+          detail: kind || undefined,
+          canSave: true,
+        };
+      };
+
       if (route.active) {
         void (async () => {
           // Tap on the selected line: insert a via there (web parity — the
@@ -175,6 +185,24 @@ export function useMapPress({
                 ),
                 at,
               );
+              return;
+            }
+          }
+          // A tap that lands on something the user has a *name* for becomes
+          // that stop, not the coordinate under their finger — the capability
+          // web offers as the card's "Add stop" while a plan is open (§7.2).
+          // The planner owns the bottom of the screen here, so there is no card
+          // to put the action on; one tap adds the named stop directly.
+          const zoom = await mapRef.current?.getZoom();
+          if (zoom !== undefined) {
+            const place = tappedPlace(tapToleranceM(zoom));
+            if (place) {
+              route.addWaypoint({ lat: place.lat, lng: place.lng }, place.name);
+              return;
+            }
+            const poi = await tappedPoi();
+            if (poi) {
+              route.addWaypoint({ lat: poi.lat, lng: poi.lng }, poi.name);
               return;
             }
           }
@@ -219,16 +247,14 @@ export function useMapPress({
             // Local groups lead: they are what the user aimed at, and the
             // server rows are ambient context for the same point.
             const groups = [
-              speedCameraGroup(cameraHits),
-              huntingFieldGroup(huntHits),
+              speedCameraIdentify(hitProps(cameraHits)),
+              huntingFieldIdentify(hitProps(huntHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);
-            if (tap === tapSeq.current) showIdentify({ lat, lng }, groups);
+            if (tap === tapSeq.current) showIdentify({ lat, lng }, groups, tapToleranceM(zoom));
           })();
         }
-        // Ground size of one screen pixel at this zoom (512px tiles) makes the
-        // tap tolerance a constant ~36 px at any zoom level.
-        const metersPerPx = (78271.5 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+        const toleranceM = tapToleranceM(zoom);
         // A numbered spot wins over anything under it: the user is looking at
         // the shortlist and aimed at one of its markers.
         if (spots?.length && pickSpot) {
@@ -241,21 +267,13 @@ export function useMapPress({
               bestSpot = spot;
             }
           }
-          if (bestSpot && bestSpotM <= PIN_TAP_PX * metersPerPx) {
+          if (bestSpot && bestSpotM <= toleranceM) {
             pickSpot(bestSpot.id);
             return;
           }
         }
-        let best: PlaceRecord | undefined;
-        let bestM = Infinity;
-        for (const place of places) {
-          const d = haversineM({ lat, lng }, { lat: place.lat, lng: place.lng });
-          if (d < bestM) {
-            bestM = d;
-            best = place;
-          }
-        }
-        if (best && bestM <= PIN_TAP_PX * metersPerPx) {
+        const best = tappedPlace(toleranceM);
+        if (best) {
           pickDestination({
             lat: best.lat,
             lng: best.lng,
@@ -266,28 +284,9 @@ export function useMapPress({
           });
           return;
         }
-        // No pin hit — try the basemap POIs (name/class popup, web parity).
-        const pois = await mapRef.current
-          ?.queryRenderedFeatures(pixelBounds, { layers: POI_LAYER_IDS })
-          .catch(() => undefined);
-        const poi = pois?.[0];
-        if (!poi) return;
-        const props = (poi.properties ?? {}) as Record<string, unknown>;
-        const name = (props['name'] ?? props['name:latin']) as string | undefined;
-        if (!name) return;
-        const kind = [props['class'], props['subclass']]
-          .filter((v): v is string => typeof v === 'string' && v !== name)
-          .join(' · ');
-        // Anchor on the POI's own coordinate when it has one, not the tap.
-        const [poiLng, poiLat] =
-          poi.geometry?.type === 'Point' ? (poi.geometry.coordinates as number[]) : [lng, lat];
-        pickDestination({
-          lat: poiLat ?? lat,
-          lng: poiLng ?? lng,
-          name,
-          detail: kind || undefined,
-          canSave: true,
-        });
+        // No pin hit — try the basemap POIs (name/class card, web parity).
+        const poi = await tappedPoi();
+        if (poi) pickDestination(poi);
       })();
     },
     [

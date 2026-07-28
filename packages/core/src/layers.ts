@@ -316,6 +316,87 @@ export async function identifyOverlays(
   return settled.flatMap((s) => (s.status === 'fulfilled' ? s.value : []));
 }
 
+/** Trimmed string, or null for anything that is not usable text. */
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * A tapped Statskog *jaktfelt* polygon as an identify group: the field's name
+ * is the heading, the species it is opened for and Statskog's remarks are the
+ * rows.
+ *
+ * Both clients draw this coverage themselves, so the answer is a local
+ * hit-test rather than a server round trip — but *what the answer says* is one
+ * thing, here, rather than a popup builder on web and a group builder on
+ * Android that agreed only by accident.
+ */
+export function huntingFieldIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const rows: Record<string, string> = {};
+  const species = str(properties['Art']);
+  const remarks = str(properties['Merknad']);
+  if (species) rows['Species'] = species;
+  if (remarks) rows['Remarks'] = remarks;
+  return { title: str(properties['Feltnavn']) ?? 'Hunting field', properties: rows };
+}
+
+/**
+ * A tapped ATK camera as an identify group. The heading says *which kind* of
+ * enforcement it is, because a fixed camera and an average-speed section are
+ * driven differently; the row is Vegvesen's own name for it.
+ */
+export function speedCameraIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const name = str(properties['name']);
+  return {
+    title: properties['kind'] === 'point' ? 'Speed camera' : 'Average speed control',
+    properties: name ? { Name: name } : {},
+  };
+}
+
+/**
+ * How much of an identify answer a place card shows: at most this many
+ * overlays, and this many attributes from each.
+ *
+ * The caps live here rather than in the two cards because they had drifted —
+ * Android showed 3 × 6, the web popup 4 × 8, so the same tap on the same lake
+ * described it differently depending on the device. A cap is a layout decision,
+ * but *which* cap is a product one, and there is only one product.
+ */
+export const IDENTIFY_CARD_GROUPS = 3;
+export const IDENTIFY_CARD_ROWS = 6;
+
+/** One overlay's answer, cut to what a card has room for. */
+export interface IdentifyCardGroup {
+  readonly title: string;
+  /** `[label, value]` pairs in the upstream's own order. */
+  readonly rows: readonly (readonly [string, string])[];
+}
+
+/**
+ * The identify answers a place card should render, capped and flattened.
+ *
+ * A group with no rows is kept, not dropped: the heading is often the whole
+ * answer — an unnamed ATK site is still "Speed camera", and a hunting field
+ * with no remarks is still that field.
+ */
+export function identifyCardGroups(
+  groups: readonly OverlayIdentifyGroup[],
+): readonly IdentifyCardGroup[] {
+  return groups.slice(0, IDENTIFY_CARD_GROUPS).map((group) => ({
+    title: group.title,
+    rows: Object.entries(group.properties).slice(0, IDENTIFY_CARD_ROWS) as (readonly [
+      string,
+      string,
+    ])[],
+  }));
+}
+
 /**
  * GET /api/overlay/:id/labels?bbox=w,s,e,n — point labels to draw over the
  * raster, as GeoJSON so both maps can hand it straight to a symbol layer.

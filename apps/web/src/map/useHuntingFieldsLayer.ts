@@ -1,11 +1,17 @@
 import { overlayFeaturesUrl } from '@atlas/core';
-import maplibregl from 'maplibre-gl';
+import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import type { ActiveOverlay } from './useOverlayLayers.js';
 
 const LAYER_ID = 'statskog-jaktfelt';
 const SOURCE_ID = 'atlas-jaktfelt';
 const FILL = 'atlas-jaktfelt-fill';
+/**
+ * The layer a click is hit-tested against for "what field is this?". Exported
+ * so the one identify pass (useOverlayIdentify) can ask it along with
+ * everything else the click hit, in one answer on the place card.
+ */
+export const HUNTING_FIELDS_FILL_LAYER = FILL;
 const OUTLINE = 'atlas-jaktfelt-outline';
 const LABEL = 'atlas-jaktfelt-label';
 const ALL_LAYERS = [FILL, OUTLINE, LABEL];
@@ -19,19 +25,16 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', feature
 /**
  * The Statskog storviltjaktfelt overlay (catalog id `statskog-jaktfelt`, the
  * Fish & Hunt signature layer): state-forest big-game hunting fields as
- * outlined polygons with a faint fill, the field name at closer zooms, and a
- * click popup naming the field, the species it is opened for and Statskog's
- * remarks. One country-sized GeoJSON fetch (/api/overlay/statskog-jaktfelt/
+ * outlined polygons with a faint fill and the field name at closer zooms. What
+ * a click on one says — the field, the species it is opened for, Statskog's
+ * remarks — is `huntingFieldIdentify` in @atlas/core, rendered on the place
+ * card. One country-sized GeoJSON fetch (/api/overlay/statskog-jaktfelt/
  * features) — 922 simplified polygons — cached across style swaps.
  *
  * Structurally the speed-camera hook (useSpeedCameraLayer): the vector-overlay
  * pattern, applied to polygons instead of camera geometry.
  */
-export function useHuntingFieldsLayer(
-  map: maplibregl.Map | null,
-  overlays: ActiveOverlay[],
-  suppressClicks?: { readonly current: boolean },
-): void {
+export function useHuntingFieldsLayer(map: maplibregl.Map | null, overlays: ActiveOverlay[]): void {
   // Survives effect re-runs and style reloads, so a style swap re-seeds the
   // source from the last payload instead of flashing empty.
   const dataRef = useRef<GeoJSON.FeatureCollection | null>(null);
@@ -147,43 +150,4 @@ export function useHuntingFieldsLayer(
     // `overlays` stays out of the deps on purpose (fresh array every render);
     // presence, rev and opacity are what actually matter.
   }, [map, Boolean(active), rev, opacity]);
-
-  useEffect(() => {
-    if (!map) return;
-    const onClick = (e: maplibregl.MapMouseEvent) => {
-      if (suppressClicks?.current) return;
-      if (!map.getLayer(FILL)) return;
-      const hit = map.queryRenderedFeatures(e.point, { layers: [FILL] })[0];
-      if (!hit) return;
-      const props = hit.properties ?? {};
-      const str = (v: unknown): string | null =>
-        typeof v === 'string' && v.trim() ? v.trim() : null;
-      const name = str(props['Feltnavn']);
-      const species = str(props['Art']);
-      const remarks = str(props['Merknad']);
-
-      const el = document.createElement('div');
-      el.className = 'identify-popup';
-      const heading = document.createElement('strong');
-      heading.textContent = name ?? 'Hunting field';
-      el.appendChild(heading);
-      const addRow = (label: string, value: string) => {
-        const row = document.createElement('div');
-        row.className = 'identify-row';
-        row.textContent = `${label}: ${value}`;
-        el.appendChild(row);
-      };
-      if (species) addRow('Species', species);
-      if (remarks) addRow('Remarks', remarks);
-
-      new maplibregl.Popup({ offset: 8, maxWidth: '260px' })
-        .setLngLat(e.lngLat)
-        .setDOMContent(el)
-        .addTo(map);
-    };
-    map.on('click', onClick);
-    return () => {
-      map.off('click', onClick);
-    };
-  }, [map, suppressClicks]);
 }

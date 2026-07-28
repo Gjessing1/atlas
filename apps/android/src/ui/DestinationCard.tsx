@@ -1,5 +1,7 @@
+import { usePlaceFacts } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
+  identifyCardGroups,
   WIKIMEDIA_USER_AGENT,
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
@@ -11,6 +13,7 @@ import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { useNearbyPhotos, useNearbyPlaces } from '../place/useNearbyPlaces';
 import { usePlaceContent } from '../place/usePlaceContent';
 import type { LocalPack } from '../regions/packs';
+import { useServerOrigin } from '../serverOrigin';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { PotentialExplainCard } from './PotentialExplainCard';
 import { WeatherIcon } from './icons';
@@ -67,9 +70,38 @@ function WikiBadge() {
   );
 }
 
-/** Attribute rows shown per overlay, and how many of each fit the card. */
-const MAX_IDENTIFY_GROUPS = 3;
-const MAX_IDENTIFY_ROWS = 6;
+/**
+ * The two "what is this spot like" facts, above everything about what can be
+ * *done* with the spot. Elevation is fetched and Norway-only, so it states its
+ * own absence rather than silently leaving the row short; light is local maths
+ * and is simply omitted on the rare day it has nothing to say.
+ */
+function PlaceFacts({ elevation, light }: ReturnType<typeof usePlaceFacts>) {
+  return (
+    <View style={styles.facts} testID="destination-facts">
+      <View style={styles.factRow}>
+        <Text style={styles.factLabel}>Elevation</Text>
+        <Text style={styles.factValue}>
+          {elevation.status === 'loading'
+            ? '…'
+            : elevation.status === 'error'
+              ? 'unavailable'
+              : elevation.status === 'ready'
+                ? elevation.elevationM === null
+                  ? 'no data here'
+                  : `${Math.round(elevation.elevationM)} m`
+                : ''}
+        </Text>
+      </View>
+      {light ? (
+        <View style={styles.factRow}>
+          <Text style={styles.factLabel}>Light</Text>
+          <Text style={styles.factValue}>{light}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 /**
  * Bottom card shown after a *place* is picked (search result, long-press, saved
@@ -123,8 +155,11 @@ export function DestinationCard({
   onCancel: () => void;
   bottomInset?: number;
 }) {
-  const identify = target.identify ?? [];
+  // Capped by the shared helper, so a chatty upstream is cut at the same place
+  // on both clients rather than at whatever number each card happened to pick.
+  const identify = identifyCardGroups(target.identify ?? []);
   const at = { lat: target.lat, lng: target.lng };
+  const facts = usePlaceFacts(useServerOrigin(), at);
   const content = usePlaceContent(packs, target.name, at);
   const hasArticleImage = content.content.some((article) => article.image);
   // Photos of the *area*, for the common case of a place with no article of
@@ -183,6 +218,9 @@ export function DestinationCard({
       peekHeight={
         (hasArticleImage ? 470 : identify.length > 0 || content.content.length > 0 ? 380 : 218) +
         52 +
+        // Elevation is always a row; the light line is usually a second one and
+        // wraps to two on a narrow phone.
+        (facts.light ? 46 : 22) +
         (!hasArticleImage && photos.photos.length > 0 ? 118 : 0) +
         // The explain block is several rows of reasoning; without its own
         // allowance it would push the actions off the peeked sheet.
@@ -212,6 +250,8 @@ export function DestinationCard({
         </Pressable>
       </View>
 
+      <PlaceFacts {...facts} />
+
       {/* Why the derived surface reads this spot the way it does. Above the
         overlays' own answers: the user tapped the water they were looking at. */}
       {potential ? <PotentialExplainCard data={potential} targetLabel={potentialTarget} /> : null}
@@ -220,21 +260,19 @@ export function DestinationCard({
         // "What's here" from the visible overlays. Scrolls inside the card so a
         // chatty upstream can never push the actions off the sheet.
         <ScrollView style={styles.identify} bounces={false} testID="destination-identify">
-          {identify.slice(0, MAX_IDENTIFY_GROUPS).map((group, i) => (
+          {identify.map((group, i) => (
             <View key={`${group.title}-${i}`} style={styles.identifyGroup}>
               <Text style={styles.identifyTitle}>{group.title}</Text>
-              {Object.entries(group.properties)
-                .slice(0, MAX_IDENTIFY_ROWS)
-                .map(([key, value]) => (
-                  <View key={key} style={styles.identifyRow}>
-                    <Text style={styles.identifyKey} numberOfLines={1}>
-                      {key}
-                    </Text>
-                    <Text style={styles.identifyValue} numberOfLines={2}>
-                      {value}
-                    </Text>
-                  </View>
-                ))}
+              {group.rows.map(([key, value]) => (
+                <View key={key} style={styles.identifyRow}>
+                  <Text style={styles.identifyKey} numberOfLines={1}>
+                    {key}
+                  </Text>
+                  <Text style={styles.identifyValue} numberOfLines={2}>
+                    {value}
+                  </Text>
+                </View>
+              ))}
             </View>
           ))}
         </ScrollView>
@@ -423,6 +461,12 @@ const styles = StyleSheet.create({
   name: { fontSize: 17, fontWeight: '700', color: theme.text },
   detail: { fontSize: 13, color: theme.textMuted, marginTop: 1 },
   close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
+  facts: { marginTop: 10, gap: 2 },
+  factRow: { flexDirection: 'row', gap: 6, alignItems: 'flex-start' },
+  // A fixed label column keeps the two values aligned; the light line is long
+  // enough to wrap, and wrapping under a ragged label reads as two columns.
+  factLabel: { width: 62, fontSize: 12, color: theme.textMuted },
+  factValue: { flex: 1, fontSize: 12, color: theme.text },
   identify: { maxHeight: 132, marginTop: 12 },
   identifyGroup: { marginBottom: 8 },
   identifyTitle: { fontSize: 12, fontWeight: '800', color: theme.textMuted, marginBottom: 2 },

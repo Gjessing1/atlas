@@ -1,4 +1,4 @@
-import type { LatLng, OverlayIdentifyGroup, SearchResult } from '@atlas/core';
+import { haversineM, type LatLng, type OverlayIdentifyGroup, type SearchResult } from '@atlas/core';
 import { useCallback, useState } from 'react';
 
 import type { DestinationTarget } from './DestinationCard';
@@ -36,8 +36,13 @@ export interface DestinationController {
    * Overlay tap-to-identify answered for the tapped point: show it on the card
    * that tap opened, or open one for the bare point when the tap hit no pin or
    * POI (a lake with a surveyed depth is worth a card of its own).
+   *
+   * `sameSpotM` is how near the open card must be to the tapped point to be
+   * about it — the caller's tap tolerance in metres. Without it, tapping the
+   * next lake along would relabel the card still showing the last one with
+   * another place's depth.
    */
-  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[]) => void;
+  showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[], sameSpotM: number) => void;
   /** The red pin was dragged: the destination becomes that adjusted point. */
   onMoved: (at: LatLng) => void;
   clear: () => void;
@@ -113,21 +118,24 @@ export function useDestination(
     [pick],
   );
 
-  const showIdentify = useCallback((at: LatLng, groups: OverlayIdentifyGroup[]) => {
-    if (groups.length === 0) return;
-    setDestination((d) =>
-      d
-        ? { ...d, identify: groups }
-        : {
-            lat: at.lat,
-            lng: at.lng,
-            name: coordName(at),
-            canSave: true,
-            unnamed: true,
-            identify: groups,
-          },
-    );
-  }, []);
+  const showIdentify = useCallback(
+    (at: LatLng, groups: OverlayIdentifyGroup[], sameSpotM: number) => {
+      if (groups.length === 0) return;
+      setDestination((d) =>
+        d && haversineM({ lat: d.lat, lng: d.lng }, at) <= sameSpotM
+          ? { ...d, identify: groups }
+          : {
+              lat: at.lat,
+              lng: at.lng,
+              name: coordName(at),
+              canSave: true,
+              unnamed: true,
+              identify: groups,
+            },
+      );
+    },
+    [],
+  );
 
   const onMoved = useCallback((at: LatLng) => {
     setDestination((d) =>

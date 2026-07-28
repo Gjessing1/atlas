@@ -1,5 +1,5 @@
 import { overlayFeaturesUrl } from '@atlas/core';
-import maplibregl from 'maplibre-gl';
+import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import type { ActiveOverlay } from './useOverlayLayers.js';
 
@@ -10,6 +10,12 @@ const SECTION_LINE = 'atlas-cameras-section';
 const SECTION_LABEL = 'atlas-cameras-section-label';
 const POINT_DOT = 'atlas-cameras-point';
 const POINT_LABEL = 'atlas-cameras-point-label';
+/**
+ * The layers a click is hit-tested against for "which enforcement is this?".
+ * Exported so the one identify pass (useOverlayIdentify) can ask them along
+ * with everything else the click hit, in one answer on the place card.
+ */
+export const SPEED_CAMERA_IDENTIFY_LAYERS = [POINT_DOT, SECTION_LINE, SECTION_CASING];
 const ALL_LAYERS = [SECTION_CASING, SECTION_LINE, SECTION_LABEL, POINT_DOT, POINT_LABEL];
 
 /** Enforcement amber — distinct from the route purple and the transit colours. */
@@ -21,16 +27,13 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', feature
 /**
  * The ATK speed-camera overlay (catalog id `speed-cameras`, the drive
  * profile's signature layer): point cameras as amber dots, average-speed
- * sections as amber lines, names at higher zooms, and a click popup naming
- * what was hit. The data is one country-sized GeoJSON fetch
+ * sections as amber lines and names at higher zooms. What a click on one says
+ * is `speedCameraIdentify` in @atlas/core, rendered on the place card along
+ * with everything else that click hit. The data is one country-sized GeoJSON fetch
  * (/api/overlay/speed-cameras/features) — a few hundred features — cached
  * across style swaps like the overlay labels are.
  */
-export function useSpeedCameraLayer(
-  map: maplibregl.Map | null,
-  overlays: ActiveOverlay[],
-  suppressClicks?: { readonly current: boolean },
-): void {
+export function useSpeedCameraLayer(map: maplibregl.Map | null, overlays: ActiveOverlay[]): void {
   // Survives effect re-runs and style reloads, so a style swap re-seeds the
   // source from the last payload instead of flashing empty (same reasoning as
   // useOverlayLabels' dataRef).
@@ -193,38 +196,4 @@ export function useSpeedCameraLayer(
     // `overlays` stays out of the deps on purpose (fresh array every render);
     // presence, rev and opacity are what actually matter.
   }, [map, Boolean(active), rev, opacity]);
-
-  useEffect(() => {
-    if (!map) return;
-    const onClick = (e: maplibregl.MapMouseEvent) => {
-      if (suppressClicks?.current) return;
-      if (!map.getLayer(POINT_DOT)) return;
-      const hits = map.queryRenderedFeatures(e.point, {
-        layers: [POINT_DOT, SECTION_LINE, SECTION_CASING],
-      });
-      const hit = hits[0];
-      if (!hit) return;
-      const isPoint = hit.properties?.['kind'] === 'point';
-      const name = typeof hit.properties?.['name'] === 'string' ? hit.properties['name'] : null;
-      const el = document.createElement('div');
-      el.className = 'identify-popup';
-      const heading = document.createElement('strong');
-      heading.textContent = isPoint ? 'Speed camera' : 'Average speed control';
-      el.appendChild(heading);
-      if (name) {
-        const row = document.createElement('div');
-        row.className = 'identify-row';
-        row.textContent = name;
-        el.appendChild(row);
-      }
-      new maplibregl.Popup({ offset: 8, maxWidth: '260px' })
-        .setLngLat(e.lngLat)
-        .setDOMContent(el)
-        .addTo(map);
-    };
-    map.on('click', onClick);
-    return () => {
-      map.off('click', onClick);
-    };
-  }, [map, suppressClicks]);
 }

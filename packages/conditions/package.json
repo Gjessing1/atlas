@@ -16,5 +16,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*"
   }
 }

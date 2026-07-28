@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  IDENTIFY_CARD_ROWS,
+  identifyCardGroups,
   identifyOverlays,
+  huntingFieldIdentify,
+  speedCameraIdentify,
   layerOptionSignature,
   normalizeLayerOptions,
   overlayIdentifyUrl,
@@ -224,5 +228,67 @@ describe('identifyOverlays', () => {
       identifyOverlays('', [layer('slope', false)], { lat: 60, lng: 11 }, 12),
     ).resolves.toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('identifyCardGroups', () => {
+  const group = (title: string, rows: number) => ({
+    title,
+    properties: Object.fromEntries(
+      Array.from({ length: rows }, (_, i) => [`key${i}`, `value${i}`]),
+    ),
+  });
+
+  it('caps overlays and their rows to what one card can show', () => {
+    const capped = identifyCardGroups([
+      group('Depth', 9),
+      group('Parcels', 2),
+      group('Wildlife', 1),
+      group('Slope', 3),
+    ]);
+    expect(capped.map((g) => g.title)).toEqual(['Depth', 'Parcels', 'Wildlife']);
+    expect(capped[0]!.rows).toHaveLength(IDENTIFY_CARD_ROWS);
+    expect(capped[0]!.rows[0]).toEqual(['key0', 'value0']);
+    expect(capped[1]!.rows).toHaveLength(2);
+  });
+
+  it('keeps a heading that is itself the answer', () => {
+    // An unnamed ATK site has no attributes worth a row, but "there is a speed
+    // camera here" is exactly what the user tapped to find out.
+    expect(identifyCardGroups([group('Speed camera', 0), group('Parcels', 1)])).toEqual([
+      { title: 'Speed camera', rows: [] },
+      { title: 'Parcels', rows: [['key0', 'value0']] },
+    ]);
+  });
+
+  it('is empty for a tap nothing answered', () => {
+    expect(identifyCardGroups([])).toEqual([]);
+  });
+});
+
+describe('local overlay identify groups', () => {
+  it('reads a Statskog jaktfelt the same way on both clients', () => {
+    expect(huntingFieldIdentify({ Feltnavn: ' Vestre felt ', Art: 'Elg', Merknad: '  ' })).toEqual({
+      title: 'Vestre felt',
+      properties: { Species: 'Elg' },
+    });
+    // No name from the upstream: the heading still says what was tapped.
+    expect(huntingFieldIdentify({ Art: 'Rådyr' })).toEqual({
+      title: 'Hunting field',
+      properties: { Species: 'Rådyr' },
+    });
+    expect(huntingFieldIdentify(null)).toBeNull();
+  });
+
+  it('names the kind of speed enforcement, because they are driven differently', () => {
+    expect(speedCameraIdentify({ kind: 'point', name: 'Rv4 Gran' })).toEqual({
+      title: 'Speed camera',
+      properties: { Name: 'Rv4 Gran' },
+    });
+    expect(speedCameraIdentify({ kind: 'section' })).toEqual({
+      title: 'Average speed control',
+      properties: {},
+    });
+    expect(speedCameraIdentify(undefined)).toBeNull();
   });
 });

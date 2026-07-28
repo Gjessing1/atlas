@@ -130,6 +130,12 @@ export {
   type PotentialView,
 } from './usePotential.js';
 export {
+  useElevation,
+  usePlaceFacts,
+  type ElevationState,
+  type PlaceFacts,
+} from './usePlaceFacts.js';
+export {
   useBestSpots,
   spotWalkLabel,
   spotWindowLabel,

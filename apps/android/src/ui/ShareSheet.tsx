@@ -1,7 +1,8 @@
-import { atlasShareUrl, fmtCoords, geoUri, shareMessage, type LatLng } from '@atlas/core';
+import { atlasShareUrl, shareFormats, type LatLng, type ShareFormat } from '@atlas/core';
 import { Linking, Modal, Pressable, Share, StyleSheet, Text } from 'react-native';
 
 import { getServerOrigin } from '../serverOrigin';
+import { copyToClipboard } from './clipboard';
 import { useSideInsets } from './insets';
 import { theme } from './theme';
 
@@ -14,6 +15,10 @@ export interface ShareTarget extends LatLng {
  * everyone: an Atlas link opens the map here, plain coordinates paste anywhere,
  * and a `geo:` link hands the point to whatever map app the user actually
  * prefers. Presented as a compact bottom sheet over the destination card.
+ *
+ * The options themselves come from `shareFormats` in @atlas/core, so the web
+ * card's chooser offers the same things in the same words — everything platform
+ * -specific is the *doing*, below, not the list.
  */
 export function ShareSheet({
   target,
@@ -32,44 +37,22 @@ export function ShareSheet({
   if (!target) return null;
   const pin = { lat: target.lat, lng: target.lng };
 
-  const shareLink = () => {
-    // The coordinates travel with the link: a recipient without Atlas cannot
-    // open our instance usefully, but they can paste "59.80563, 10.36701" into
-    // whatever map app they do use.
-    const url = atlasShareUrl(`${getServerOrigin()}/`, pin, zoom);
-    void Share.share({ message: shareMessage(pin, target.name, url) });
-    onClose();
-  };
-  const shareCoords = () => {
-    void Share.share({ message: fmtCoords(pin) });
-    onClose();
-  };
-  const openInMaps = () => {
+  const act = (format: ShareFormat) => {
+    if (format.action === 'send') void Share.share({ message: format.payload });
     // geo: lets Android offer every installed map app.
-    void Linking.openURL(geoUri(pin, target.name));
+    else if (format.action === 'open') void Linking.openURL(format.payload);
+    else copyToClipboard(format.payload);
     onClose();
   };
 
-  const options: { key: string; title: string; subtitle: string; onPress: () => void }[] = [
+  const options = shareFormats(
+    pin,
+    target.name,
+    atlasShareUrl(`${getServerOrigin()}/`, pin, zoom),
     {
-      key: 'link',
-      title: 'Atlas link',
-      subtitle: 'Opens the map here, in any browser',
-      onPress: shareLink,
+      handoff: true,
     },
-    {
-      key: 'coords',
-      title: 'Coordinates',
-      subtitle: fmtCoords(pin),
-      onPress: shareCoords,
-    },
-    {
-      key: 'geo',
-      title: 'Open in a map app',
-      subtitle: 'Google Maps, Organic Maps, OsmAnd…',
-      onPress: openInMaps,
-    },
-  ];
+  );
 
   return (
     <Modal
@@ -102,7 +85,7 @@ export function ShareSheet({
             <Pressable
               key={option.key}
               style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
-              onPress={option.onPress}
+              onPress={() => act(option)}
               testID={`share-${option.key}`}
             >
               <Text style={styles.optionTitle}>{option.title}</Text>
