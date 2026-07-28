@@ -1,4 +1,10 @@
-import type { RegionPackFile, RegionPackManifest, RegionsResponse } from '@atlas/core';
+import {
+  packFileEntries,
+  packUnzipDir,
+  type RegionPackFile,
+  type RegionPackManifest,
+  type RegionsResponse,
+} from '@atlas/core';
 import * as FileSystem from 'expo-file-system/legacy';
 import { unzip } from 'react-native-zip-archive';
 
@@ -131,8 +137,7 @@ export function validatePackManifest(manifest: RegionPackManifest): void {
   if (!isSafeSegment(manifest.id)) {
     throw new Error(`unsafe pack id: ${JSON.stringify(manifest.id)}`);
   }
-  for (const [kind, file] of Object.entries(manifest.files)) {
-    if (!file) continue;
+  for (const { kind, file } of packFileEntries(manifest)) {
     if (!isSafeRelPath(file.path)) {
       throw new Error(`unsafe path for ${kind}: ${JSON.stringify(file.path)}`);
     }
@@ -289,13 +294,18 @@ function fileUrl(manifest: RegionPackManifest, file: RegionPackFile): string {
 }
 
 /** True once a zip has been unpacked and marked complete. */
-async function unzipped(staging: string, kind: string): Promise<boolean> {
-  return await exists(`${unzipDirFor(staging, kind)}/${UNZIP_MARKER}`);
+async function unzipped(staging: string, file: RegionPackFile): Promise<boolean> {
+  return await exists(`${unzipDirFor(staging, file)}/${UNZIP_MARKER}`);
 }
 
-/** assets.zip unpacks to `<staging>/assets`; anything else to `<staging>/<kind>`. */
-function unzipDirFor(staging: string, kind: string): string {
-  return kind === 'assets' ? `${staging}/assets` : `${staging}/${kind}`;
+/**
+ * Where an archive unpacks to. The rule lives in `@atlas/core` (the archive's
+ * own path, minus `.zip`) so a new kind of pack file needs no naming rule here
+ * — and `assets.zip` keeps unpacking to `assets/`, where every already-installed
+ * pack has it.
+ */
+function unzipDirFor(staging: string, file: RegionPackFile): string {
+  return `${staging}/${packUnzipDir(file)}`;
 }
 
 /**
@@ -309,9 +319,8 @@ export async function pendingPackFiles(
 ): Promise<{ url: string; path: string; bytes: number }[]> {
   const staging = stagingDir(manifest.id);
   const missing: { url: string; path: string; bytes: number }[] = [];
-  for (const [kind, file] of Object.entries(manifest.files)) {
-    if (!file) continue;
-    if (file.path.endsWith('.zip') && (await unzipped(staging, kind))) continue;
+  for (const { file } of packFileEntries(manifest)) {
+    if (file.path.endsWith('.zip') && (await unzipped(staging, file))) continue;
     const info = await FileSystem.getInfoAsync(`${staging}/${file.path}`);
     if (info.exists && info.size === file.bytes) continue;
     missing.push({ url: fileUrl(manifest, file), path: file.path, bytes: file.bytes });
@@ -325,10 +334,9 @@ export async function pendingPackFiles(
  * the swap so a stale skip-marker or a partial file can never ship.
  */
 async function validateStaging(staging: string, manifest: RegionPackManifest): Promise<void> {
-  for (const [kind, file] of Object.entries(manifest.files)) {
-    if (!file) continue;
+  for (const { kind, file } of packFileEntries(manifest)) {
     if (file.path.endsWith('.zip')) {
-      if (!(await unzipped(staging, kind))) {
+      if (!(await unzipped(staging, file))) {
         throw new Error(`missing unpacked ${kind}`);
       }
     } else {
@@ -387,21 +395,19 @@ export async function downloadPack(
   const staging = stagingDir(manifest.id);
   await prepareStaging(staging, manifest);
 
-  const entries = Object.entries(manifest.files).filter(
-    (e): e is [string, RegionPackFile] => e[1] !== undefined,
-  );
-  const totalBytes = entries.reduce((sum, [, f]) => sum + f.bytes, 0) || 1;
+  const entries = packFileEntries(manifest);
+  const totalBytes = entries.reduce((sum, { file }) => sum + file.bytes, 0) || 1;
   let doneBytes = 0;
 
-  for (const [kind, file] of entries) {
+  for (const { file } of entries) {
     const url = fileUrl(manifest, file);
     const target = `${staging}/${file.path}`;
     const isZip = file.path.endsWith('.zip');
-    const unzipDir = unzipDirFor(staging, kind);
+    const unzipDir = unzipDirFor(staging, file);
 
     // An archive a previous attempt already unpacked *and marked complete* (the
     // marker is written last, so a half-finished unzip is not mistaken for done).
-    if (isZip && (await unzipped(staging, kind))) {
+    if (isZip && (await unzipped(staging, file))) {
       doneBytes += file.bytes;
       onProgress(doneBytes / totalBytes);
       continue;

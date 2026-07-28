@@ -281,6 +281,84 @@ describe('validatePackManifest', () => {
   });
 });
 
+/**
+ * The generic layer slot (ROADMAP § N5 → E7). `files` stopped being a flat
+ * object of optional files when it grew `layers`, and every walker here has to
+ * agree about that — a pack whose surfaces are silently skipped installs
+ * "successfully" and then draws nothing.
+ */
+describe('layer files', () => {
+  const withLayers = (id = 'potential-abc'): RegionPackManifest => {
+    const bytes = new Uint8Array(randomBytes(120));
+    h.content.set('potential-hunt-elg.zip', bytes);
+    return {
+      id,
+      name: 'Elgvaldet',
+      bbox: { sw: { lat: 60, lng: 10.6 }, ne: { lat: 60.03, lng: 10.65 } },
+      version: 2,
+      builtAt: 1000,
+      downloadBase: `/potential-packs/${id}`,
+      custom: true,
+      files: {
+        layers: [
+          {
+            path: 'potential-hunt-elg.zip',
+            bytes: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            kind: 'potential',
+            layer: 'hunt',
+            target: 'elg',
+            minzoom: 11,
+            maxzoom: 13,
+            cells: ['11/1084/594'],
+          },
+        ],
+      },
+    };
+  };
+
+  it('installs a pack that is nothing but surfaces', async () => {
+    const manifest = withLayers();
+    const pack = await downloadPack(manifest, () => {});
+    expect(pack.dir).toBe(packDir('potential-abc'));
+    // Unpacked to the archive's own name, and the archive itself removed.
+    expect(h.memfs.has(`${packDir('potential-abc')}/potential-hunt-elg/fonts/glyph.pbf`)).toBe(
+      true,
+    );
+    expect(h.memfs.has(`${packDir('potential-abc')}/potential-hunt-elg.zip`)).toBe(false);
+    expect(h.memfs.has(`${packDir('potential-abc')}.staging`)).toBe(false);
+  });
+
+  it('validates layer paths rather than waving them through', () => {
+    const bad = withLayers();
+    bad.files.layers![0]!.path = '../../etc/passwd';
+    expect(() => validatePackManifest(bad)).toThrow(/unsafe path/);
+    const negative = withLayers();
+    negative.files.layers![0]!.bytes = -1;
+    expect(() => validatePackManifest(negative)).toThrow(/invalid byte count/);
+  });
+
+  it('asks for the layer archive when it is still missing', async () => {
+    const manifest = withLayers();
+    await prepareStaging(stagingDir(manifest.id), manifest);
+    const pending = await pendingPackFiles(manifest);
+    expect(pending.map((f) => f.path)).toEqual(['potential-hunt-elg.zip']);
+    // Downloaded from the pack's own base, not /packs/<id>.
+    expect(pending[0]!.url).toBe(
+      'http://test/potential-packs/potential-abc/potential-hunt-elg.zip',
+    );
+  });
+
+  it('carries surfaces alongside the fixed slots', async () => {
+    const manifest = makeManifest();
+    const layers = withLayers().files.layers!;
+    manifest.files.layers = layers;
+    await downloadPack(manifest, () => {});
+    expect(h.memfs.has(`${packDir('oslo')}/assets/fonts/glyph.pbf`)).toBe(true);
+    expect(h.memfs.has(`${packDir('oslo')}/potential-hunt-elg/fonts/glyph.pbf`)).toBe(true);
+  });
+});
+
 describe('downloadPack', () => {
   it('installs a fresh pack and reports full progress', async () => {
     const manifest = makeManifest();

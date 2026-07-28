@@ -35,6 +35,7 @@ import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Appearance,
   BackHandler,
@@ -76,6 +77,8 @@ import { useNavCamera } from './src/nav/useNavCamera';
 import { useNavigation } from './src/nav/useNavigation';
 import { useNavigationPip } from './src/nav/useNavigationPip';
 import { useTunnelDim } from './src/nav/useTunnelDim';
+import { packWithSurface, withLocalSurfaces } from './src/regions/localSurfaces';
+import { requestPotentialPack, viewBbox } from './src/regions/potentialPack';
 import { listLocalPacks } from './src/regions/packs';
 import { useOfflinePrefs } from './src/regions/useOfflinePrefs';
 import { usePackDownloads } from './src/regions/usePackDownloads';
@@ -195,6 +198,12 @@ function AppInner() {
     bbox: BBox | null;
   } | null>(null);
   const [pendingRegion, setPendingRegion] = useState<BBox | null>(null);
+  // "Keep this area offline" (§N5 → E7): the framed area of the switched-on
+  // derived surface, waiting for a name, and whether one is being packed.
+  const [keepArea, setKeepArea] = useState<{ layer: string; target: string; bbox: BBox } | null>(
+    null,
+  );
+  const [keeping, setKeeping] = useState(false);
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
@@ -242,6 +251,11 @@ function AppInner() {
   // Where the map opens, where it is now, and remembering that for next launch.
   const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
+  // Downloaded tiles win wherever a pack covers the view (Settings can force
+  // server tiles); everything else — search, routing, weather — stays online-first.
+  // Resolved here rather than beside the other pack state below, because the
+  // overlay list is built from it: a derived surface is drawn from a pack too.
+  const tiles = useTileSource(data, packs, camera.viewCenter);
   const overlayLabels = useOverlayLabels(overlaysCtl.overlays, camera.labelCell);
   // Derived potential surfaces (§N5): prepare the cells under the viewport and
   // say what is happening while they build. `readyKey` rides into the raster
@@ -254,12 +268,19 @@ function AppInner() {
   );
   const overlays = useMemo(
     () =>
-      overlaysCtl.overlays.map((overlay) =>
-        overlay.meta.derived && potential.readyKey
-          ? { ...overlay, sourceId: `${overlay.sourceId}--${potential.readyKey}` }
-          : overlay,
+      // …and a surface the user kept offline (§N5 → E7) is then pointed at the
+      // pack's own tiles instead of the derive service.
+      withLocalSurfaces(
+        overlaysCtl.overlays.map((overlay) =>
+          overlay.meta.derived && potential.readyKey
+            ? { ...overlay, sourceId: `${overlay.sourceId}--${potential.readyKey}` }
+            : overlay,
+        ),
+        packs,
+        camera.viewCenter,
+        tiles.preferOnline,
       ),
-    [overlaysCtl.overlays, potential.readyKey],
+    [overlaysCtl.overlays, potential.readyKey, packs, camera.viewCenter, tiles.preferOnline],
   );
   // The Statskog jaktfelt vector overlay's coverage (one GeoJSON fetch), drawn
   // by MapScene while the overlay is on — the Fish & Hunt signature layer.
@@ -286,6 +307,33 @@ function AppInner() {
     readyKey: potential.readyKey,
     vocabulary: overlaysCtl.derived?.meta.derived?.vocabulary,
   });
+  // "Keep this area offline" (§N5 → E7). Offered only for a derived surface
+  // that is switched on and has a settled viewport, because what it keeps is
+  // the area on screen — and it reports "kept" instead once a downloaded pack
+  // already carries this ground, since a second copy is never what was wanted.
+  const keptOffline =
+    overlaysCtl.derived !== null &&
+    packWithSurface(
+      packs,
+      overlaysCtl.derived.layer,
+      overlaysCtl.derived.target,
+      camera.viewCenter,
+    ) !== undefined;
+  const keepOfflineControls = useMemo(() => {
+    const derived = overlaysCtl.derived;
+    const view = camera.mapViewport;
+    if (!derived || !view) return undefined;
+    return {
+      busy: keeping,
+      kept: keptOffline,
+      onKeep: () => {
+        // The sheet covers the map it is about to pack; close it so the naming
+        // prompt sits over the area being kept.
+        setLayersOpen(false);
+        setKeepArea({ layer: derived.layer, target: derived.target, bbox: viewBbox(view.bbox) });
+      },
+    };
+  }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   // The ATK speed cameras as a map layer (the Drive signature overlay). The
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
@@ -678,9 +726,6 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
 
-  // Downloaded tiles win wherever a pack covers the view (Settings can force
-  // server tiles); everything else — search, routing, weather — stays online-first.
-  const tiles = useTileSource(data, packs, camera.viewCenter);
   // Whether the pack currently drawing the map has been rebuilt on the server.
   const freshness = usePackFreshness(packs);
   const packStale =
@@ -1089,6 +1134,7 @@ function AppInner() {
             onCloseTracks={() => setTracksOpen(false)}
             layersOpen={layersOpen}
             onCloseLayers={() => setLayersOpen(false)}
+            keepOffline={keepOfflineControls}
             overlays={overlaysCtl}
             profilePreferences={profilePreferences}
             tiles={tiles}
@@ -1110,6 +1156,37 @@ function AppInner() {
             onPickDestination={dest.pick}
             onImportTracks={importTracks}
             onImportInatur={importInatur}
+          />
+          <PromptModal
+            visible={keepArea !== null}
+            title="Keep this area offline"
+            placeholder="e.g. Elgvaldet"
+            confirmLabel="Keep"
+            onCancel={() => setKeepArea(null)}
+            onConfirm={(value) => {
+              const area = keepArea;
+              if (!area) return;
+              setKeepArea(null);
+              setKeeping(true);
+              void requestPotentialPack(serverOrigin, {
+                name: value.trim() || 'Offline area',
+                bbox: area.bbox,
+                surfaces: [{ layer: area.layer, target: area.target }],
+              })
+                .then((manifest) => {
+                  // Straight into the same background download every pack uses,
+                  // and into the screen that shows its progress.
+                  downloads.start(manifest);
+                  setSettingsOpen(true);
+                })
+                .catch((error: unknown) =>
+                  Alert.alert(
+                    'Keep this area offline',
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                )
+                .finally(() => setKeeping(false));
+            }}
           />
           <PromptModal
             visible={pendingRegion !== null}

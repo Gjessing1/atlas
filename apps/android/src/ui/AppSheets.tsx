@@ -17,7 +17,7 @@ import type { PackDownloadsController } from '../regions/usePackDownloads';
 import type { ImportOptions, ImportResult, UserData } from '../useUserData';
 import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
-import { LayersSheet } from './LayersSheet';
+import { LayersSheet, type KeepOfflineControls } from './LayersSheet';
 import { PromptModal } from './PromptModal';
 import { SettingsSheet } from './SettingsSheet';
 import { TracksSheet } from './TracksSheet';
@@ -38,6 +38,8 @@ interface AppSheetsProps {
   onCloseTracks: () => void;
   layersOpen: boolean;
   onCloseLayers: () => void;
+  /** "Keep this area offline" for the switched-on derived surface (§N5 → E7). */
+  keepOffline?: KeepOfflineControls;
   /** Overlay catalog + per-device state for the Layers sheet. */
   overlays: OverlaysController;
   profilePreferences: MapProfilePreferencesController;
@@ -85,6 +87,7 @@ export function AppSheets({
   onCloseTracks,
   layersOpen,
   onCloseLayers,
+  keepOffline,
   overlays,
   profilePreferences,
   settingsOpen,
@@ -171,6 +174,7 @@ export function AppSheets({
         visible={layersOpen}
         onClose={onCloseLayers}
         overlays={overlays}
+        keepOffline={keepOffline}
         bottomInset={bottomInset}
       />
       <SettingsSheet

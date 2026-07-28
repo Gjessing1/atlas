@@ -2,6 +2,7 @@ import type { LngLatBbox } from '@atlas/core';
 import { thinSpots, type PotentialSpot } from '@atlas/potential';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from '../status.js';
 import {
@@ -21,6 +22,7 @@ import { repairVerdict } from './health.js';
 import type { PotentialContext } from './inputs.js';
 import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './models.js';
 import { DeriveQueue, type CellState } from './jobs.js';
+import { PotentialPackBuilder, PotentialPackError } from './packs.js';
 import { cellCandidates, describeCandidate, spotsNote, walkAccess, SPOT_LIMIT } from './spots.js';
 
 /**
@@ -40,6 +42,9 @@ import { cellCandidates, describeCandidate, spotsNote, walkAccess, SPOT_LIMIT } 
  *   scores what it does, in the same factor shape the weather card renders.
  * - `GET  /api/potential/:layer/:target/spots?bbox=` — the numbered shortlist
  *   for what is on screen, each with its reason and its walk in from the road.
+ * - `POST /api/potential/packs` — "keep this area offline": zip the cells the
+ *   user has framed into a downloadable pack (packs.ts). Assembles only what is
+ *   already derived, so it can refuse rather than queue a hundred derives.
  *
  * **Caching is revalidating, not long-lived**, and that is the one thing here
  * that was learned the hard way rather than designed: a re-derive rewrites the
@@ -73,6 +78,8 @@ export interface PotentialApiOptions {
   models?: readonly DeriveModel[];
   /** Cells derived at once. Deliberately low — see DeriveQueue. */
   concurrency?: number;
+  /** Test seam: the clock offline packs are stamped and expired by. */
+  now?: () => number;
 }
 
 /** 1×1 transparent PNG — a cell that is not ready yet renders as nothing. */
@@ -110,6 +117,24 @@ export async function registerPotentialApi(
   const queue = new DeriveQueue(opts.dataDir, models, ctx, { concurrency: opts.concurrency });
   await queue.init();
   app.addHook('onClose', () => queue.close());
+
+  // "Keep this area offline" (E7). Server-side artifacts are temporary — the
+  // copy that matters is the one on the device — so they are swept on a timer
+  // as well as at startup.
+  const packs = new PotentialPackBuilder({ dataDir: opts.dataDir, models, now: opts.now });
+  await packs.init();
+  const packSweep = setInterval(() => void packs.expireOld(), 60 * 60 * 1000);
+  packSweep.unref();
+  app.addHook('onClose', () => clearInterval(packSweep));
+  await app.register(fastifyStatic, {
+    root: packs.artifactsDir,
+    prefix: '/potential-packs/',
+    decorateReply: false,
+    // Content is immutable per id (the id is a digest of what is inside), but
+    // the pack expires server-side, so this is a cache window rather than a
+    // promise of permanence.
+    maxAge: '1h',
+  });
 
   const byLayer = (layer: string): DeriveModel | undefined =>
     opts.models ? opts.models.find((m) => m.layer === layer) : deriveModel(layer);
@@ -397,6 +422,25 @@ export async function registerPotentialApi(
           hunt: model.vocabulary === 'hunt',
         }),
       });
+    },
+  );
+
+  /**
+   * "Keep this area offline" (E7). Cheap — it zips tiles that already exist —
+   * but it writes to disk, so it is capped like the other two write paths.
+   */
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/potential/packs',
+    { config: { rateLimit: { max: 12, timeWindow: '1 hour' } } },
+    async (request, reply) => {
+      try {
+        return await packs.build(request.body ?? {});
+      } catch (error) {
+        if (error instanceof PotentialPackError) {
+          return reply.code(error.statusCode).send({ error: error.message, ...error.detail });
+        }
+        throw error;
+      }
     },
   );
 

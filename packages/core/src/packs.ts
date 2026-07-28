@@ -21,6 +21,36 @@ export interface RegionPackFile {
   sha256?: string;
 }
 
+/**
+ * One layer's offline artifact — **the generic slot** the fixed kinds below
+ * could never be (ROADMAP § N6's architectural note, needed for the first time
+ * by § N5 → E7).
+ *
+ * The fixed slots each name one thing the app cannot work without, so a closed
+ * union was right for them. Layer data is the opposite: it is open-ended by
+ * construction (the overlay catalog grows without a client release), and one
+ * layer can have several offline artifacts — a derived surface is per *target*,
+ * so elg and rådyr are two archives of the same layer. Hence an array of
+ * self-describing files rather than another named field.
+ *
+ * `bbox` is the user's rectangle, but a derived surface only exists in whole
+ * z11 cells, so `cells` is what the archive actually covers and the only honest
+ * answer to "can this view be drawn from disk".
+ */
+export interface RegionPackLayerFile extends RegionPackFile {
+  /** What sort of layer data this is. Only derived potential exists today. */
+  kind: 'potential';
+  /** Catalog layer id — matches `LayerMeta.id`, e.g. `hunt`. */
+  layer: string;
+  /** The resolved option variant it was derived for, e.g. `elg`. */
+  target: string;
+  /** Tile zooms present in the archive; above `maxzoom` a client overzooms. */
+  minzoom: number;
+  maxzoom: number;
+  /** The derive cells inside, as `z/x/y`. Coverage, as opposed to intent. */
+  cells: string[];
+}
+
 export interface RegionPackManifest {
   id: string;
   /** Human-readable region name, e.g. "Oslo". */
@@ -62,7 +92,65 @@ export interface RegionPackManifest {
      * before it existed, which simply render the basemap-only outdoor layers.
      */
     outdoor?: RegionPackFile;
+    /**
+     * Per-layer offline artifacts (ROADMAP § N5 → E7) — the open-ended slot
+     * beside the fixed ones. Absent on every pack built before it existed, and
+     * on any pack whose region carries no layer data.
+     */
+    layers?: RegionPackLayerFile[];
   };
+}
+
+/** One downloadable file of a pack, with the slot it came from. */
+export interface RegionPackEntry {
+  /**
+   * Which slot this is, for messages and for telling two files apart: a fixed
+   * kind (`basemap`), or `layer:<layer>:<target>` for a layer artifact.
+   */
+  kind: string;
+  file: RegionPackFile;
+}
+
+/**
+ * Every file a pack references, fixed slots and layer artifacts alike.
+ *
+ * Exists because `files` stopped being a flat object of optional files the
+ * moment it grew an array: `Object.entries(files)` used to be a safe way to
+ * walk a pack, and a client doing that would now hand an *array* to code
+ * expecting a `RegionPackFile`. One helper, used by every walker on both sides,
+ * is what keeps that from being rediscovered per call site.
+ */
+export function packFileEntries(manifest: RegionPackManifest): RegionPackEntry[] {
+  const entries: RegionPackEntry[] = [];
+  for (const [kind, value] of Object.entries(manifest.files)) {
+    if (!value || kind === 'layers') continue;
+    entries.push({ kind, file: value as RegionPackFile });
+  }
+  for (const file of manifest.files.layers ?? []) {
+    entries.push({ kind: `layer:${file.layer}:${file.target}`, file });
+  }
+  return entries;
+}
+
+/**
+ * Where an archive unpacks to, relative to the pack directory: its own path
+ * without the `.zip`. Derived from the path rather than the slot name so a
+ * layer artifact needs no naming rule of its own — and it keeps `assets.zip`
+ * unpacking to `assets/`, exactly where every already-installed pack has it.
+ */
+export function packUnzipDir(file: RegionPackFile): string {
+  return file.path.replace(/\.zip$/, '');
+}
+
+/** The layer artifact for one derived surface, if this pack carries it. */
+export function packLayerFile(
+  manifest: RegionPackManifest,
+  layer: string,
+  target: string,
+): RegionPackLayerFile | undefined {
+  return (manifest.files.layers ?? []).find(
+    (file) => file.layer === layer && file.target === target,
+  );
 }
 
 /** GET /api/regions */

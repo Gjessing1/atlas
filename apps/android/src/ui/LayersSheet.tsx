@@ -73,8 +73,51 @@ function LayerOptionChips({
   );
 }
 
+/**
+ * "Keep this area offline" for a derived surface (ROADMAP § N5 → E7).
+ *
+ * It sits under the legend of the switched-on surface rather than in Settings →
+ * Offline regions, because what it keeps is *what the map is looking at* — the
+ * area you framed when you looked up your permit — and that is only meaningful
+ * beside the surface it belongs to. Once it is kept it says so and stops
+ * offering, since a second copy of the same ground is never what was wanted.
+ */
+export interface KeepOfflineControls {
+  /** Ask for the framed area. Absent = the affordance is not offered at all. */
+  onKeep: (meta: LayerMeta) => void;
+  /** A request is in flight. */
+  busy: boolean;
+  /** A downloaded pack already carries this surface where the map is looking. */
+  kept: boolean;
+}
+
+function KeepOffline({ meta, controls }: { meta: LayerMeta; controls: KeepOfflineControls }) {
+  if (controls.kept) {
+    return <Text style={styles.hint}>Kept offline — this area draws without a connection.</Text>;
+  }
+  return (
+    <Pressable
+      style={styles.keepOffline}
+      disabled={controls.busy}
+      onPress={() => controls.onKeep(meta)}
+      testID={`layer-keep-offline-${meta.id}`}
+    >
+      <Text style={styles.keepOfflineText}>
+        {controls.busy ? 'Packing this area…' : '↓ Keep this area offline'}
+      </Text>
+    </Pressable>
+  );
+}
+
 /** Full layer controls without sheet chrome, reused by Settings → Map. */
-export function LayersContent({ overlays }: { overlays: OverlaysController }) {
+export function LayersContent({
+  overlays,
+  keepOffline,
+}: {
+  overlays: OverlaysController;
+  /** Omitted by Settings → Map, which has no viewport to keep. */
+  keepOffline?: KeepOfflineControls;
+}) {
   const groups: [string, LayerMeta[]][] = [];
   for (const meta of overlays.catalog) {
     const group = groups.find(([name]) => name === meta.group);
@@ -135,6 +178,9 @@ export function LayersContent({ overlays }: { overlays: OverlaysController }) {
                     ))
                   : null}
                 {on ? <DerivedLegend meta={meta} /> : null}
+                {on && meta.derived && keepOffline ? (
+                  <KeepOffline meta={meta} controls={keepOffline} />
+                ) : null}
                 {on && meta.minzoom !== undefined ? (
                   <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
                 ) : null}
@@ -182,11 +228,13 @@ export function LayersSheet({
   visible,
   onClose,
   overlays,
+  keepOffline,
   bottomInset = 0,
 }: {
   visible: boolean;
   onClose: () => void;
   overlays: OverlaysController;
+  keepOffline?: KeepOfflineControls;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
@@ -200,7 +248,7 @@ export function LayersSheet({
     >
       <Text style={styles.heading}>Map layers</Text>
       <ScrollView style={styles.scroll}>
-        <LayersContent overlays={overlays} />
+        <LayersContent overlays={overlays} keepOffline={keepOffline} />
       </ScrollView>
       <Pressable style={styles.closeButton} onPress={onClose} testID="layers-close">
         <Text style={styles.closeButtonText}>Close</Text>
@@ -253,6 +301,15 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   sourceLink: { color: theme.accent, textDecorationLine: 'underline' },
   hint: { fontSize: 12, color: theme.warning, marginTop: 2 },
+  keepOffline: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceMuted,
+    alignSelf: 'flex-start',
+  },
+  keepOfflineText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   opacityRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   opacityChip: {
     paddingHorizontal: 12,

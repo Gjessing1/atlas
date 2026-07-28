@@ -4,6 +4,7 @@ import {
   MAP_PROFILES,
   MAX_NAV_WIDGETS,
   NAV_WIDGETS,
+  packFileEntries,
   type RegionPackManifest,
 } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
@@ -249,6 +250,11 @@ function RegionsSection({
   const rows = [...rowsById.values()];
   const pendingJobs = jobs.jobs.filter((job) => !job.manifest);
   const activeDownloads = new Map(downloads.jobs.map((job) => [job.id, job]));
+  // A pack that is neither published nor a region job — an area kept offline
+  // from the layer panel (§N5 → E7) — has no row of its own until it finishes
+  // installing. Without this, a user sent here to watch a download would find
+  // the screen saying nothing about it.
+  const unlistedDownloads = downloads.jobs.filter((job) => !rowsById.has(job.id));
 
   return (
     <View>
@@ -290,11 +296,32 @@ function RegionsSection({
           )}
         </View>
       ))}
+      {unlistedDownloads.map((job) => (
+        <View key={job.id} style={styles.regionRow}>
+          <View style={styles.regionInfo}>
+            <Text style={styles.rowText}>{job.name}</Text>
+            <Text style={job.phase === 'failed' ? styles.error : styles.muted}>
+              {packJobLabel(job)}
+            </Text>
+          </View>
+          {packJobAction(job) === 'cancel' ? (
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={() => downloads.cancel(job.id)}
+              testID={`region-cancel-${job.id}`}
+            >
+              <Text style={styles.buttonQuietText}>Cancel</Text>
+            </Pressable>
+          ) : (
+            <ActivityIndicator />
+          )}
+        </View>
+      ))}
       {rows.length === 0 && pendingJobs.length === 0 && !regionsError ? (
         <Text style={styles.muted}>{regions === null ? 'Loading…' : 'No regions published.'}</Text>
       ) : null}
       {rows.map((region) => {
-        const totalBytes = Object.values(region.files).reduce((s, f) => s + (f?.bytes ?? 0), 0);
+        const totalBytes = packFileEntries(region).reduce((s, { file }) => s + file.bytes, 0);
         const installed = local.get(region.id);
         const active = activeDownloads.get(region.id);
         const action = active ? packJobAction(active) : null;

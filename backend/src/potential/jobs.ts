@@ -194,12 +194,27 @@ export class DeriveQueue {
     }
   }
 
+  /**
+   * Start working, on the next turn rather than this one.
+   *
+   * The deferral is the contract, not an optimisation: `request()` answers with
+   * the job it just created, and draining inline meant that job came back
+   * already `running` — before a single byte had been fetched — purely because
+   * the caller happened to arrive when no pump was in flight. So the state a
+   * client saw for a brand-new cell depended on event-loop timing. One
+   * microtask makes it always `queued`, which is both true and stable.
+   * `this.pumping` is still assigned synchronously, so `close()` waits for the
+   * deferred drain the same as before, and `worker()` re-checks `closing`.
+   */
   private pump(): void {
     if (this.closing) return;
-    this.pumping ??= this.drain().finally(() => {
-      this.pumping = undefined;
-      if (!this.closing && [...this.jobs.values()].some((j) => j.status === 'queued')) this.pump();
-    });
+    this.pumping ??= Promise.resolve()
+      .then(() => this.drain())
+      .finally(() => {
+        this.pumping = undefined;
+        if (!this.closing && [...this.jobs.values()].some((j) => j.status === 'queued'))
+          this.pump();
+      });
   }
 
   private async drain(): Promise<void> {
