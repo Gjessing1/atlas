@@ -12,6 +12,7 @@ import {
   usePotential,
   useRoutePlanPersistence,
   usePotentialExplain,
+  usePotentialTarget,
   useThemeMode,
   type FetchNearbyFn,
 } from '@atlas/app-hooks';
@@ -70,7 +71,6 @@ import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
 import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
-import { PermitButton, PermitSheet } from './src/ui/PermitSheet';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -165,11 +165,6 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
-  // The half-built plan survives the app being killed in the background — the
-  // same hook the web app restores its plan with (§7.6). Android has no address
-  // bar to carry a plan, so there is never a link plan to prefer over the saved
-  // one; the day it handles an incoming atlas:// link, that goes here.
-  useRoutePlanPersistence(route, data, null);
   const transit = useTransitPlan(route);
   const directions = useDirections(route);
   // Geometry of the visible tracks, for the map's track line layer.
@@ -206,13 +201,9 @@ function AppInner() {
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
-  const [permitOpen, setPermitOpen] = useState(false);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
   const measure = useMeasure();
-  useEffect(() => {
-    if (profiles.profile.id !== 'fishhunt') setPermitOpen(false);
-  }, [profiles.profile.id]);
   const [navHeight, setNavHeight] = useState(0);
   const [offlineRegion, setOfflineRegion] = useState<{
     corner: LatLng | null;
@@ -286,6 +277,11 @@ function AppInner() {
   // Where the map opens, where it is now, and remembering that for next launch.
   const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
+  // The half-built plan survives the app being killed in the background, and a
+  // plan someone sent by link wins over it — the same hook, with the same
+  // precedence, as the web app (§7.6). It sits below useBootCamera because the
+  // link is what that hook resolves, and until it has, the saved plan waits.
+  useRoutePlanPersistence(route, data, camera.linkPlan);
   // Downloaded tiles win wherever a pack covers the view (Settings can force
   // server tiles); everything else — search, routing, weather — stays online-first.
   // Resolved here rather than beside the other pack state below, because the
@@ -327,9 +323,11 @@ function AppInner() {
     overlaysCtl.derived,
     pickedLat === undefined || pickedLng === undefined ? null : { lat: pickedLat, lng: pickedLng },
   );
-  const potentialTargetLabel = overlaysCtl.derived?.meta.options
-    ?.find((option) => option.key === 'target')
-    ?.choices.find((choice) => choice.value === overlaysCtl.derived?.target)?.label;
+  // The Fish & Hunt sub-profile: which animal the derived surface is tuned for,
+  // and the one-tap way to change it. Also the source of the target's *name*,
+  // which the spots sheet and a saved spot both label themselves with.
+  const potentialTargets = usePotentialTarget(overlaysCtl);
+  const potentialTargetLabel = potentialTargets.active?.label;
   // The shortlist a derived surface turns into a plan (§N5 → E6). Opened by
   // hand: it is a real request against the derive service and the router, not a
   // legend that could just appear.
@@ -1055,6 +1053,7 @@ function AppInner() {
               profile={profiles}
               visibleProfiles={profilePreferences.visibleProfiles}
               overlays={overlaysCtl}
+              targets={potentialTargets}
               mapZoom={mapZoom}
               // Bottom-edge row, immediately left of the locate button. Menus
               // expand upward, so profile switching no longer floats mid-map.
@@ -1156,13 +1155,6 @@ function AppInner() {
               right={side.right + 12}
             />
           ) : null}
-          {!navActive && !planning && !permitOpen && profiles.profile.id === 'fishhunt' ? (
-            <PermitButton
-              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
-              left={side.left + 12}
-              onPress={() => setPermitOpen(true)}
-            />
-          ) : null}
           {/* The shortlist's affordance, stacked under whatever the pill is
           saying. Absent below z11 and outside Norway, where there is nothing to
           rank and the pill has already said so. */}
@@ -1173,12 +1165,7 @@ function AppInner() {
           potential.status !== 'zoom-in' &&
           potential.status !== 'outside' ? (
             <SpotsButton
-              top={
-                topInset +
-                60 +
-                (potentialPillVisible(potential) ? 40 : 0) +
-                (profiles.profile.id === 'fishhunt' ? 40 : 0)
-              }
+              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
               left={side.left + 12}
               onPress={() => setSpotsOpen(true)}
             />
@@ -1193,14 +1180,6 @@ function AppInner() {
             onPick={onPickSpot}
             onSave={onSaveSpot}
             onClose={() => setSpotsOpen(false)}
-            bottomInset={bottomInset}
-          />
-
-          <PermitSheet
-            visible={permitOpen && !planning && !navActive}
-            onClose={() => setPermitOpen(false)}
-            onSave={(input) => savePermit(input)}
-            onSaved={showTrack}
             bottomInset={bottomInset}
           />
 

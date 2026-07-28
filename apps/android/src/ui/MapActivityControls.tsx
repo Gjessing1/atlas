@@ -1,23 +1,24 @@
-import type { MapProfileController } from '@atlas/app-hooks';
+import type { MapProfileController, PotentialTargetSwitch } from '@atlas/app-hooks';
 import type { MapProfile } from '@atlas/core';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import { useSideInsets } from './insets';
-import { LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
+import { FishHuntIcon, LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
 
 /**
- * Bottom-right, one-tap map setup: activity profiles plus the current
- * profile's overlay catalog. Both surfaces operate on the same persisted state
- * as the route planner and full Layers sheet, so switching never creates a
- * second source of truth.
+ * Bottom-right, one-tap map setup: activity profiles, the Fish & Hunt
+ * sub-profile, and the current profile's overlay catalog. All three operate on
+ * the same persisted state as the route planner and full Layers sheet, so
+ * switching never creates a second source of truth.
  */
 export function MapActivityControls({
   profile,
   visibleProfiles,
   overlays,
+  targets,
   mapZoom,
   bottom,
   onPickProfile,
@@ -25,6 +26,12 @@ export function MapActivityControls({
   profile: MapProfileController;
   visibleProfiles: readonly MapProfile[];
   overlays: OverlaysController;
+  /**
+   * What the derived surface is tuned for. Its trigger is absent outside Fish &
+   * Hunt, where the catalog carries nothing derived — the row is decided by the
+   * data, not by a profile id spelled out a second time here.
+   */
+  targets: PotentialTargetSwitch;
   mapZoom: number;
   /** Already includes the system navigation-bar inset. */
   bottom: number;
@@ -32,6 +39,7 @@ export function MapActivityControls({
 }) {
   const [layersOpen, setLayersOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
+  const [targetsOpen, setTargetsOpen] = useState(false);
   const win = useWindowDimensions();
   // In landscape the system navigation bar sits on a side of the screen: the
   // triggers and the menus they open both start inside it. `right` is the
@@ -41,14 +49,22 @@ export function MapActivityControls({
   const activeCount = overlays.overlays.length;
   const activeProfile = profile.profile;
   const ActiveIcon = MAP_PROFILE_ICON[activeProfile.id]!;
+  const quarry = targets.active;
+  // The quarry pill gets a row of its own rather than a third seat in the
+  // bottom row: a labelled pill beside two 44 dp circles reaches ~270 dp, which
+  // on a 360 dp phone runs straight into the menu/search/route cluster on the
+  // other side. A row to itself also puts it where the web app puts it.
+  const quarryRow = targets.groups.length > 0;
+  const menuBottom = bottom + (quarryRow ? 104 : 52);
   const closeMenus = () => {
     setLayersOpen(false);
     setProfilesOpen(false);
+    setTargetsOpen(false);
   };
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {layersOpen || profilesOpen ? (
+      {layersOpen || profilesOpen || targetsOpen ? (
         <Pressable
           style={styles.backdrop}
           onPress={closeMenus}
@@ -59,7 +75,7 @@ export function MapActivityControls({
 
       {profilesOpen ? (
         <View
-          style={[styles.profileMenu, { bottom: bottom + 52, right }]}
+          style={[styles.profileMenu, { bottom: menuBottom, right }]}
           accessibilityLabel="Map profile"
         >
           {visibleProfiles.map((item) => {
@@ -89,12 +105,74 @@ export function MapActivityControls({
         </View>
       ) : null}
 
+      {/* What are you after? Grouped by surface, because lake and river ask
+          different questions about the same fish. */}
+      {targetsOpen ? (
+        <View
+          style={[
+            styles.quarryMenu,
+            {
+              bottom: menuBottom,
+              right,
+              maxHeight: Math.max(88, Math.min(win.height * 0.52, 420, win.height - bottom - 64)),
+            },
+          ]}
+          accessibilityLabel="Fish & game"
+        >
+          <ScrollView bounces={false} contentContainerStyle={styles.layerMenuContent}>
+            {targets.groups.map((group) => (
+              <View key={group.layer}>
+                <Text style={styles.quarryGroupTitle}>{group.title}</Text>
+                {group.choices.map((choice) => (
+                  <Pressable
+                    key={`${choice.layer}:${choice.value}`}
+                    style={[styles.layerItem, choice.active && styles.layerItemOn]}
+                    onPress={() => {
+                      targets.select(choice.layer, choice.value);
+                      setTargetsOpen(false);
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: choice.active }}
+                    accessibilityLabel={choice.label}
+                    testID={`quarry-${choice.layer}-${choice.value}`}
+                  >
+                    <Text
+                      style={[styles.layerLabel, choice.active && styles.layerLabelOn]}
+                      numberOfLines={1}
+                    >
+                      {choice.label}
+                    </Text>
+                    {choice.active ? <Text style={styles.profileCheck}>✓</Text> : null}
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+            {quarry ? (
+              // The way back out: without it the only way to stop drawing an
+              // opinion over the map is to find the row in the Layers sheet.
+              <Pressable
+                style={[styles.layerItem, styles.quarryClear]}
+                onPress={() => {
+                  targets.clear();
+                  setTargetsOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Turn the surface off"
+                testID="quarry-clear"
+              >
+                <Text style={styles.quarryClearLabel}>Turn the surface off</Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {layersOpen ? (
         <View
           style={[
             styles.layerMenu,
             {
-              bottom: bottom + 52,
+              bottom: menuBottom,
               right,
               // In landscape the system inset + offline controls can consume
               // half the short edge; cap the menu to the room actually left.
@@ -131,11 +209,43 @@ export function MapActivityControls({
         </View>
       ) : null}
 
+      {/* A pill rather than a third identical circle: the animal's name is the
+          whole point of the control, and an icon cannot say "Elg". */}
+      {quarryRow ? (
+        <View style={[styles.controlRow, { bottom: bottom + 52, right }]}>
+          <Pressable
+            style={[styles.quarryTrigger, targetsOpen && styles.controlSelected]}
+            onPress={() => {
+              setLayersOpen(false);
+              setProfilesOpen(false);
+              setTargetsOpen((open) => !open);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={
+              quarry
+                ? `Fish & game: ${quarry.label}, ${quarry.layerTitle}`
+                : 'Fish & game potential'
+            }
+            accessibilityState={{ expanded: targetsOpen }}
+            testID="quarry-toggle"
+          >
+            <FishHuntIcon color={quarry ? theme.accent : theme.icon} size={20} />
+            <Text
+              style={[styles.quarryTriggerLabel, quarry && styles.quarryTriggerLabelOn]}
+              numberOfLines={1}
+            >
+              {quarry ? quarry.label : 'What to look for'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={[styles.controlRow, { bottom, right }]}>
         <Pressable
           style={[styles.profileTrigger, profilesOpen && styles.controlSelected]}
           onPress={() => {
             setLayersOpen(false);
+            setTargetsOpen(false);
             setProfilesOpen((open) => !open);
           }}
           accessibilityRole="button"
@@ -151,6 +261,7 @@ export function MapActivityControls({
             style={styles.layerButton}
             onPress={() => {
               setProfilesOpen(false);
+              setTargetsOpen(false);
               setLayersOpen((open) => !open);
             }}
             accessibilityRole="button"
@@ -201,6 +312,41 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   controlSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
+  quarryTrigger: {
+    height: 44,
+    maxWidth: 200,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    elevation: 4,
+  },
+  quarryTriggerLabel: { flexShrink: 1, color: theme.text, fontSize: 13, fontWeight: '600' },
+  quarryTriggerLabelOn: { color: theme.accent, fontWeight: '700' },
+  quarryMenu: {
+    position: 'absolute',
+    width: 230,
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: theme.surface,
+    elevation: 8,
+  },
+  quarryGroupTitle: {
+    paddingHorizontal: 9,
+    paddingTop: 8,
+    paddingBottom: 3,
+    color: theme.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  quarryClear: { marginTop: 4, borderTopWidth: 1, borderTopColor: theme.border },
+  quarryClearLabel: { flex: 1, color: theme.textMuted, fontSize: 13 },
   layerButton: {
     width: 44,
     height: 44,

@@ -1,5 +1,5 @@
 import { decodeMapLink, viewportBbox, type LatLng } from '@atlas/core';
-import type { PotentialView } from '@atlas/app-hooks';
+import { planFromHash, type PotentialView, type StoredRoutePlan } from '@atlas/app-hooks';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dimensions, Linking } from 'react-native';
@@ -52,6 +52,13 @@ export interface BootCamera {
   onViewChange: (view: MapView) => void;
   /** Viewport bias for geocoding (web parity: SearchBox sends lat/lon). */
   getBias: () => Promise<LatLng | null>;
+  /**
+   * The route plan carried by a link — `undefined` until the launch URL has
+   * been read, then the plan or null. Feeds `useRoutePlanPersistence`, whose
+   * third state exists for exactly this: the launch URL arrives asynchronously
+   * here, and the plan saved on the device must not win that race.
+   */
+  linkPlan: StoredRoutePlan | null | undefined;
 }
 
 /** Parse a persisted camera setting; null when absent or malformed. */
@@ -71,10 +78,11 @@ export function parseCameraSetting(raw: string | null): MapView | null {
  * Decides where the map opens, keeps track of where it is now, and remembers
  * that for next launch.
  *
- * A `#map=` launch link (share link or `atlas:` deep link) always wins over the
- * persisted view: someone who tapped a link to a place means to see that place.
- * Links arriving while the app is already running fly there instead. Either way
- * a pin in the link is handed to `onLinkPin`, so the app can show its card.
+ * A `#map=` launch link (a shared https link or an `atlas:` deep link) always
+ * wins over the persisted view: someone who tapped a link to a place means to
+ * see that place. Links arriving while the app is already running fly there
+ * instead. Either way a pin in the link is handed to `onLinkPin` so the app can
+ * show its card, and a route plan in it is published as `linkPlan`.
  */
 export function useBootCamera(
   settings: BootCameraSettings,
@@ -87,6 +95,7 @@ export function useBootCamera(
   const [labelCell, setLabelCell] = useState<string | null>(null);
   const [mapViewport, setMapViewport] = useState<PotentialView | null>(null);
   const [viewCenter, setViewCenter] = useState<LatLng | null>(null);
+  const [linkPlan, setLinkPlan] = useState<StoredRoutePlan | null | undefined>(undefined);
   const viewRef = useRef<MapView | null>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -102,6 +111,9 @@ export function useBootCamera(
     void (async () => {
       const launch = decodeMapLink((await Linking.getInitialURL().catch(() => null)) ?? '');
       if (cancelled) return;
+      // Always resolved, link or not: `undefined` is what holds the saved plan
+      // back, so leaving it unset on the no-link path would strand the planner.
+      setLinkPlan(launch?.route ? planFromHash(launch.route) : null);
       if (launch) {
         setInitialView({ center: launch.center, zoom: launch.zoom });
         if (launch.pin) onLinkPinRef.current(launch.pin);
@@ -121,6 +133,10 @@ export function useBootCamera(
       const view = decodeMapLink(url);
       if (!view) return;
       if (view.pin) onLinkPinRef.current(view.pin);
+      // Only when the link carries one: a plain place link says nothing about
+      // the plan the user has open, so it must not close it.
+      const plan = view.route ? planFromHash(view.route) : null;
+      if (plan) setLinkPlan(plan);
       cameraRef.current?.flyTo({
         center: [view.center.lng, view.center.lat],
         zoom: view.zoom,
@@ -169,5 +185,6 @@ export function useBootCamera(
     viewCenter,
     onViewChange,
     getBias,
+    linkPlan,
   };
 }

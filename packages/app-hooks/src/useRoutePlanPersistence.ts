@@ -40,9 +40,17 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
 
 /**
  * Keeps the open route plan across restarts: restores the saved plan on
- * startup, then writes every later change back. A plan carried by a link (web's
- * URL hash) wins and is passed in as `fromLink` — restoring the local plan over
- * someone's link would be the wrong plan entirely.
+ * startup, then writes every later change back. A plan carried by a link wins
+ * and is passed in as `fromLink` — restoring the local plan over someone's link
+ * would be the wrong plan entirely.
+ *
+ * `fromLink` has three states, and the third is what makes this work on the
+ * phone: `undefined` means *the launch link has not been read yet*, and holds
+ * the saved plan back until it has. Web knows its hash synchronously and never
+ * passes it; Android learns the launch URL from an async `Linking` call, so
+ * without the wait the saved plan would win a race against the link the user
+ * actually tapped. A *new* plan arriving later (a link received while the app
+ * is already running) is restored too, over whatever is open.
  *
  * Shared because losing a half-built plan is *worse* on the phone, which is
  * where the OS kills a backgrounded app: this lived in the web app for three
@@ -53,25 +61,30 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
 export function useRoutePlanPersistence(
   route: RoutePlanner,
   settings: RoutePlanSettings,
-  fromLink: StoredRoutePlan | null,
+  fromLink: StoredRoutePlan | null | undefined,
 ): void {
   const { status, getSetting, setSetting } = settings;
   const { restore, plan } = route;
   // Until the saved plan has been read, saving would write the empty startup
   // plan over it.
   const restoredRef = useRef(false);
+  // The link plan already opened, by identity: a second link is a second plan
+  // even when it names the same stops, and re-restoring the same one would
+  // undo the edits the user has made to it since.
+  const openedLinkRef = useRef<StoredRoutePlan | null>(null);
 
   // A link's plan is in hand already: open it without waiting for storage, so
   // a shared route still works in a tab where storage is unavailable (the
   // single-tab OPFS lock) — there is just nothing to save afterwards.
   useEffect(() => {
-    if (restoredRef.current || !fromLink) return;
+    if (!fromLink || fromLink === openedLinkRef.current) return;
+    openedLinkRef.current = fromLink;
     restoredRef.current = true;
     restore(fromLink);
   }, [fromLink, restore]);
 
   useEffect(() => {
-    if (restoredRef.current || status !== 'ready') return;
+    if (restoredRef.current || status !== 'ready' || fromLink === undefined) return;
     let cancelled = false;
     void getSetting(PLAN_SETTING).then((raw) => {
       if (cancelled) return;
@@ -87,7 +100,9 @@ export function useRoutePlanPersistence(
     return () => {
       cancelled = true;
     };
-  }, [status, getSetting, restore]);
+    // `fromLink` is a dependency for its *undefined* case only: the effect has
+    // to run again once the launch link resolves to "no plan in it".
+  }, [status, getSetting, restore, fromLink]);
 
   useEffect(() => {
     if (!restoredRef.current || status !== 'ready') return;

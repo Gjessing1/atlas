@@ -16,6 +16,7 @@
  * this is a checklist to be read at release time, not a component inventory.
  */
 export const PARITY_SURFACES = [
+  'map',
   'card',
   'collections',
   'search',
@@ -29,6 +30,7 @@ export type ParitySurface = (typeof PARITY_SURFACES)[number];
 
 /** Human-readable heading for each surface, for the release-time report. */
 export const PARITY_SURFACE_LABELS: Record<ParitySurface, string> = {
+  map: 'Map chrome',
   card: 'Place card',
   collections: 'Collections & tracks',
   search: 'Search',

@@ -81,6 +81,71 @@ describe('useRoutePlanPersistence', () => {
     expect(restore).toHaveBeenCalledTimes(1);
   });
 
+  it('holds the saved plan back while the launch link is still being read', async () => {
+    // Android learns its launch URL from an async Linking call. Restoring the
+    // saved plan meanwhile would let it win a race against the link the user
+    // actually tapped — the bug this third `undefined` state exists to prevent.
+    const restore = vi.fn();
+    const store = settings({ [PLAN_SETTING]: JSON.stringify(savedPlan) });
+    const linked: StoredRoutePlan = { profile: 'bike', waypoints: [{ pos: BERGEN }] };
+    const { rerender } = renderHook(
+      ({ link }: { link: StoredRoutePlan | null | undefined }) =>
+        useRoutePlanPersistence(planner(null, restore), store, link),
+      { initialProps: { link: undefined as StoredRoutePlan | null | undefined } },
+    );
+    await Promise.resolve();
+    expect(store.getSetting).not.toHaveBeenCalled();
+
+    rerender({ link: linked });
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(linked));
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the saved plan once the launch link turns out to carry none', async () => {
+    const restore = vi.fn();
+    const store = settings({ [PLAN_SETTING]: JSON.stringify(savedPlan) });
+    const { rerender } = renderHook(
+      ({ link }: { link: StoredRoutePlan | null | undefined }) =>
+        useRoutePlanPersistence(planner(null, restore), store, link),
+      { initialProps: { link: undefined as StoredRoutePlan | null | undefined } },
+    );
+    rerender({ link: null });
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(savedPlan));
+  });
+
+  it('opens a link that arrives while the app is already running', async () => {
+    // A shared link tapped in a chat app reaches a running Atlas as a `url`
+    // event; it must replace whatever plan is open, not be ignored because
+    // something was restored at boot.
+    const restore = vi.fn();
+    const store = settings({ [PLAN_SETTING]: JSON.stringify(savedPlan) });
+    const received: StoredRoutePlan = { profile: 'bike', waypoints: [{ pos: BERGEN }] };
+    const { rerender } = renderHook(
+      ({ link }: { link: StoredRoutePlan | null | undefined }) =>
+        useRoutePlanPersistence(planner(null, restore), store, link),
+      { initialProps: { link: null as StoredRoutePlan | null | undefined } },
+    );
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(savedPlan));
+
+    rerender({ link: received });
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(received));
+  });
+
+  it('does not re-open the same link on a re-render', async () => {
+    // Identity, not value: re-restoring would throw away the stops the user has
+    // added to the shared plan since it opened.
+    const restore = vi.fn();
+    const linked: StoredRoutePlan = { profile: 'bike', waypoints: [{ pos: BERGEN }] };
+    const store = settings();
+    const { rerender } = renderHook(() =>
+      useRoutePlanPersistence(planner(null, restore), store, linked),
+    );
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(linked));
+    rerender();
+    rerender();
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
   it('treats a corrupt setting as nothing to restore', async () => {
     const restore = vi.fn();
     const store = settings({ [PLAN_SETTING]: '{not json' });

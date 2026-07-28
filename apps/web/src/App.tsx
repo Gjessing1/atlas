@@ -32,6 +32,7 @@ import {
   useRoutePlanPersistence,
   usePotential,
   usePotentialExplain,
+  usePotentialTarget,
   useThemeMode,
   type FetchNearbyFn,
   type PotentialView,
@@ -56,8 +57,8 @@ import {
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
+import { PotentialTargetSwitch } from './potential/PotentialTargetSwitch.js';
 import { SpotsButton, SpotsPanel } from './potential/SpotsPanel.js';
-import { PermitPanel } from './permit/PermitPanel.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
@@ -149,7 +150,6 @@ export function App() {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [locateRequest, setLocateRequest] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [permitOpen, setPermitOpen] = useState(false);
   // The saved place whose editor is open, and the one the Collections tree
   // should reveal — both by id, so a rename or a delete elsewhere is followed
   // rather than leaving a stale copy of the record on screen.
@@ -200,9 +200,6 @@ export function App() {
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
   const profiles = useMapProfile(userData);
-  useEffect(() => {
-    if (profiles.profile.id !== 'fishhunt') setPermitOpen(false);
-  }, [profiles.profile.id]);
   const profilePreferences = useMapProfilePreferences(userData);
   const layers = useLayerCatalog(
     userData,
@@ -265,9 +262,11 @@ export function App() {
   // with reasoning rather than upstream attributes, and both now land in the
   // same card.
   const potentialExplain = usePotentialExplain('', layers.derived, target?.position ?? null);
-  const potentialTargetLabel = layers.derived?.meta.options
-    ?.find((option) => option.key === 'target')
-    ?.choices.find((choice) => choice.value === layers.derived?.target)?.label;
+  // The Fish & Hunt sub-profile: which animal the derived surface is tuned for,
+  // and the one-tap way to change it. Also the source of the target's *name*,
+  // which the spots panel and a saved spot both label themselves with.
+  const potentialTargets = usePotentialTarget(layers);
+  const potentialTargetLabel = potentialTargets.active?.label;
   // The shortlist a derived surface turns into a plan (§N5 → E6): opened by
   // hand, because it is a real request against the derive service and the
   // router rather than a legend that could just appear.
@@ -915,21 +914,9 @@ export function App() {
           is where "what is this map doing" belongs; the pill is absent entirely
           once the surface is ready, and the column keeps the panel below
           whatever the pill is saying rather than on top of it. */}
-      {nav.phase === 'idle' && (layers.derived || profiles.profile.id === 'fishhunt') && (
+      {nav.phase === 'idle' && layers.derived && (
         <div className="potential-bar">
-          {layers.derived ? <PotentialPill prep={potential} /> : null}
-          {profiles.profile.id === 'fishhunt' && !permitOpen ? (
-            <button type="button" className="permit-button" onClick={() => setPermitOpen(true)}>
-              My permit area
-            </button>
-          ) : null}
-          {permitOpen ? (
-            <PermitPanel
-              onSave={savePermit}
-              onSaved={showTrack}
-              onClose={() => setPermitOpen(false)}
-            />
-          ) : null}
+          <PotentialPill prep={potential} />
           {layers.derived &&
             !spotsOpen &&
             potential.status !== 'zoom-in' &&
@@ -951,6 +938,10 @@ export function App() {
           overlap as catalogs/profile choices change. */}
       {nav.phase === 'idle' && (
         <div className="map-control-grid">
+          {/* The Fish & Hunt sub-profile, one row above the layers it tunes.
+              Renders nothing in the other profiles — their catalogs carry no
+              derived surface. */}
+          <PotentialTargetSwitch targets={potentialTargets} />
           <MapProfileSwitch
             active={profiles.profile.id}
             profiles={profilePreferences.visibleProfiles}

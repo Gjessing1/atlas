@@ -12,6 +12,46 @@ import type { ParityCapability } from './types.js';
  * field), which is exactly why §7.6's second rule says to put it there.
  */
 export const PARITY_CHECKLIST: readonly ParityCapability[] = [
+  // ----------------------------------------------------------------- map ---
+  // The controls on the map itself. Recorded from v0.129.0: until then the one
+  // surface nobody meets through a panel was also the one the checklist had
+  // nothing to say about, which is how the Fish & Hunt profile ended up with a
+  // permit button on the map *and* the same tool in the drawer.
+  {
+    id: 'map-activity-switch',
+    surface: 'map',
+    capability: 'Switch activity profile without opening a panel',
+    hook: 'useMapProfile',
+    web: { file: 'apps/web/src/layers/MapProfileSwitch.tsx', contains: 'profile-switch' },
+    android: {
+      file: 'apps/android/src/ui/MapActivityControls.tsx',
+      contains: 'map-profile-toggle',
+    },
+    note: 'Web shows the profiles as a row of chips with the active one labelled; the phone has room for one 44 dp trigger, so the row becomes a menu. Same list, same order, same `visibleProfiles`.',
+  },
+  {
+    id: 'map-layer-quick-switch',
+    surface: 'map',
+    capability: 'Turn an overlay on or off from the map corner',
+    web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'layer-switch-menu' },
+    android: {
+      file: 'apps/android/src/ui/MapActivityControls.tsx',
+      contains: 'layer-quick-toggle',
+    },
+  },
+  {
+    id: 'map-potential-target',
+    surface: 'map',
+    capability: 'Pick what you are after — the Fish & Hunt sub-profile — in one tap',
+    hook: 'usePotentialTarget',
+    web: {
+      file: 'apps/web/src/potential/PotentialTargetSwitch.tsx',
+      contains: 'quarry-switch-menu',
+    },
+    android: { file: 'apps/android/src/ui/MapActivityControls.tsx', contains: 'quarry-toggle' },
+    note: 'Sits directly above the layer switch on both clients: the animal is what the derived surface is tuned for, so it belongs beside the layers rather than three steps into the panel that lists them.',
+  },
+
   // ---------------------------------------------------------------- card ---
   {
     id: 'card-one-card-per-target',
@@ -207,8 +247,9 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'collections-import-permit',
     surface: 'collections',
     capability: 'Turn a bought iNatur permit into a mapped area',
-    web: { file: 'apps/web/src/permit/PermitPanel.tsx', contains: 'iNatur' },
-    android: { file: 'apps/android/src/ui/PermitSheet.tsx', contains: 'iNatur' },
+    web: { file: 'apps/web/src/Sidebar.tsx', contains: 'iNatur permit' },
+    android: { file: 'apps/android/src/ui/TracksSheet.tsx', contains: 'iNatur permit' },
+    note: 'Both clients used to carry a second, thinner copy of this on the map itself — a "My permit area" button in the Fish & Hunt profile whose panel could not choose a folder. Removed in v0.129.0: the permit is a saved area, so it belongs where the other saved areas come in.',
   },
   {
     id: 'collections-export-all',
@@ -540,10 +581,10 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'planner-open-shared-link',
     surface: 'planner',
     capability: 'Open a shared Atlas link that somebody sent you',
+    hook: 'useRoutePlanPersistence',
     web: { file: 'apps/web/src/App.tsx', contains: 'planFromHash' },
-    android: null,
-    open: true,
-    why: 'Android builds share links but cannot receive one: there is no deep-link handling and no https intent filter for the Atlas host. Closing it needs `android.intentFilters` in app.json plus a Linking handler — native config, so an APK release rather than an OTA bundle.',
+    android: { file: 'apps/android/src/map/useBootCamera.ts', contains: 'planFromHash' },
+    note: 'Web decodes its own address bar; Android is handed the URL by the OS (an `android.intentFilters` App Link for the default server host, verified against /.well-known/assetlinks.json). Because that arrives asynchronously, `useRoutePlanPersistence` takes a third `undefined` state meaning "the launch link is still being read" — without it the plan saved on the device wins the race against the link the user tapped.',
   },
   {
     id: 'planner-plan-survives-restart',

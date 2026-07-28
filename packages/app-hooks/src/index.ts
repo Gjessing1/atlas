@@ -169,6 +169,14 @@ export {
   type PotentialView,
 } from './usePotential.js';
 export {
+  usePotentialTarget,
+  POTENTIAL_TARGET_KEY,
+  type PotentialLayerAccess,
+  type PotentialTargetChoice,
+  type PotentialTargetGroup,
+  type PotentialTargetSwitch,
+} from './usePotentialTarget.js';
+export {
   useElevation,
   usePlaceFacts,
   type ElevationState,

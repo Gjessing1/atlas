@@ -13,6 +13,7 @@ import {
 } from '@atlas/core';
 import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { registerAppLinks } from './applinks.js';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerExploreApi } from './explore-api.js';
 import {
@@ -659,6 +660,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Offline region packs + Android app self-update (Phase 6).
   await registerPacksApi(app, opts.dataDir, opts.regionJobs);
   registerUpdatesApi(app, opts.dataDir);
+
+  // Android App Links: lets a shared Atlas link open the app rather than a
+  // browser tab. Registered before the SPA fallback, which would otherwise
+  // answer the verifier with the app shell.
+  registerAppLinks(app, process.env.ANDROID_CERT_SHA256);
 
   // In production the built web app is copied to backend/public (see backend/Dockerfile)
   // and served same-origin. In dev, Vite serves the web app and proxies here.
