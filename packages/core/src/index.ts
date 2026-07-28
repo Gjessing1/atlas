@@ -23,6 +23,7 @@ export * from './packs.js';
 export * from './places.js';
 export * from './place-content.js';
 export * from './profiles.js';
+export * from './recent-searches.js';
 export * from './routelabels.js';
 export * from './search.js';
 export * from './share.js';

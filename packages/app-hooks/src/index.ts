@@ -81,6 +81,26 @@ export {
   type StopSearchPlace,
 } from './useStopSearch.js';
 export {
+  useRecentSearches,
+  type RecentSearches,
+  type RecentSearchStore,
+} from './useRecentSearches.js';
+export {
+  useExplore,
+  EXPLORE_EMPTY,
+  EXPLORE_ERROR,
+  EXPLORE_LOADING,
+  EXPLORE_REFRESH,
+  EXPLORE_SUBTITLE,
+  EXPLORE_SUBTITLE_OFFLINE,
+  EXPLORE_TITLE,
+  type ExploreArea,
+  type ExploreFetchFn,
+  type ExploreHits,
+  type ExploreQuery,
+  type ExploreState,
+} from './useExplore.js';
+export {
   useRouteStops,
   routeStopCategories,
   routeSampleCircles,

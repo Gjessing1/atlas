@@ -1,3 +1,4 @@
+import { useRecentSearches } from '@atlas/app-hooks';
 import {
   coordinateSearchResult,
   parseCoordinateQuery,
@@ -6,7 +7,7 @@ import {
   type SearchablePlace,
   type SearchResult,
 } from '@atlas/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface SearchBoxProps {
   /** Called when the user picks a result. */
@@ -17,23 +18,30 @@ interface SearchBoxProps {
   places: SearchablePlace[];
 }
 
-/** Recently picked results, newest first (device-local, like `atlas.auth`). */
+/**
+ * Recents are kept in `localStorage`, not in the OPFS database: they are a
+ * convenience, and the database is single-tab (a second window has none), so
+ * losing them there would be a worse trade than the one the platform seam
+ * exists to allow. Android's half of the seam is a `local.` setting.
+ */
 const RECENT_KEY = 'atlas.search.recent';
-const MAX_RECENT = 8;
-
-function loadRecent(): SearchResult[] {
-  try {
-    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as SearchResult[];
-    return Array.isArray(list) ? list.slice(0, MAX_RECENT) : [];
-  } catch {
-    return [];
-  }
-}
 
 export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [recent, setRecent] = useState<SearchResult[]>(loadRecent);
+  const {
+    recent,
+    remember,
+    clear: clearRecentList,
+  } = useRecentSearches(
+    useMemo(
+      () => ({
+        load: () => localStorage.getItem(RECENT_KEY),
+        save: (raw: string) => localStorage.setItem(RECENT_KEY, raw),
+      }),
+      [],
+    ),
+  );
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -102,15 +110,7 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   }, [query, getBias]);
 
   const pick = (result: SearchResult) => {
-    const key = (r: SearchResult) =>
-      `${r.name}@${r.position.lat.toFixed(5)},${r.position.lng.toFixed(5)}`;
-    const next = [result, ...recent.filter((r) => key(r) !== key(result))].slice(0, MAX_RECENT);
-    setRecent(next);
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-    } catch {
-      // Storage full/unavailable — recents just don't persist.
-    }
+    remember(result);
     pickedRef.current = result.name;
     setQuery(result.name);
     setOpen(false);
@@ -120,13 +120,8 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   // Recents are a convenience, not a record — the user can wipe them, and
   // nothing else in the app depends on them being there.
   const clearRecent = () => {
-    setRecent([]);
+    clearRecentList();
     setOpen(false);
-    try {
-      localStorage.removeItem(RECENT_KEY);
-    } catch {
-      // Storage unavailable; the in-memory list is cleared either way.
-    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

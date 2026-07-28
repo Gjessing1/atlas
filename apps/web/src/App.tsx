@@ -1,5 +1,6 @@
 import {
   atlasShareUrl,
+  clampExploreRadiusM,
   decodeMapHash,
   fmtDistanceM,
   haversineM,
@@ -405,14 +406,10 @@ export function App() {
     const northEast = bounds.getNorthEast();
     return {
       center: { lat: center.lat, lng: center.lng },
-      radiusM: Math.min(
-        50_000,
-        Math.max(
-          500,
-          haversineM(
-            { lat: center.lat, lng: center.lng },
-            { lat: northEast.lat, lng: northEast.lng },
-          ),
+      radiusM: clampExploreRadiusM(
+        haversineM(
+          { lat: center.lat, lng: center.lng },
+          { lat: northEast.lat, lng: northEast.lng },
         ),
       ),
     };

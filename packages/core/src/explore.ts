@@ -61,6 +61,21 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
   },
 ];
 
+/**
+ * The browse radius both clients ask for, in metres. Web measures the map's own
+ * half-diagonal and Android derives one from zoom and screen size, but the
+ * bounds are a property of the *question* — below the floor a browse returns
+ * nothing in open country, above the ceiling it stops being "this area" and
+ * starts being a national query the upstreams will not answer well.
+ */
+export const EXPLORE_RADIUS_MIN_M = 500;
+export const EXPLORE_RADIUS_MAX_M = 50_000;
+
+export function clampExploreRadiusM(radiusM: number): number {
+  if (!Number.isFinite(radiusM)) return EXPLORE_RADIUS_MIN_M;
+  return Math.min(EXPLORE_RADIUS_MAX_M, Math.max(EXPLORE_RADIUS_MIN_M, radiusM));
+}
+
 export function isExploreCategory(value: unknown): value is ExploreCategoryId {
   return typeof value === 'string' && EXPLORE_CATEGORIES.some((category) => category.id === value);
 }

@@ -1,12 +1,17 @@
-import { savedPlaceResults, type SearchablePlace, type SearchResult } from '@atlas/core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRecentSearches } from '@atlas/app-hooks';
+import {
+  RECENT_SEARCHES_SETTING,
+  savedPlaceResults,
+  type SearchablePlace,
+  type SearchResult,
+} from '@atlas/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
 import { BottomSheet } from '../ui/BottomSheet';
 import { theme } from '../ui/theme';
 import { geoSearch, type SearchBias } from './geoSearch';
-import { parseRecentSearches, pushRecentSearch, RECENT_SEARCHES_SETTING } from './recentSearches';
 
 /**
  * Geocoding box: the server's Photon proxy (/api/search) when online, the
@@ -41,16 +46,25 @@ export function SearchBar({
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [recent, setRecent] = useState<SearchResult[]>([]);
   const [offline, setOffline] = useState(false);
   const generation = useRef(0);
   // Read when a search runs rather than depended on — a fresh array each render.
   const placesRef = useRef(places);
   placesRef.current = places;
 
-  useEffect(() => {
-    void getSetting(RECENT_SEARCHES_SETTING).then((raw) => setRecent(parseRecentSearches(raw)));
-  }, [getSetting]);
+  const {
+    recent,
+    remember,
+    clear: clearRecent,
+  } = useRecentSearches(
+    useMemo(
+      () => ({
+        load: () => getSetting(RECENT_SEARCHES_SETTING),
+        save: (raw: string) => setSetting(RECENT_SEARCHES_SETTING, raw),
+      }),
+      [getSetting, setSetting],
+    ),
+  );
 
   const search = useCallback(
     async (text: string) => {
@@ -86,11 +100,11 @@ export function SearchBar({
 
   const pick = useCallback(
     (result: SearchResult) => {
-      setSetting(RECENT_SEARCHES_SETTING, JSON.stringify(pushRecentSearch(recent, result)));
+      remember(result);
       close();
       onPick(result);
     },
-    [recent, setSetting, close, onPick],
+    [remember, close, onPick],
   );
 
   // The overlay can also be unmounted from outside (navigation starting, route
@@ -133,7 +147,15 @@ export function SearchBar({
       {shown.length > 0 ? (
         <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
           {showingRecent ? (
-            <Text style={styles.listTag}>recent</Text>
+            // Web has offered this since its recents shipped; Android never
+            // did, which left the phone the one device that cannot forget
+            // where you have been.
+            <View style={styles.tagRow}>
+              <Text style={styles.listTag}>recent</Text>
+              <Pressable onPress={clearRecent} hitSlop={10} testID="search-recent-clear">
+                <Text style={styles.clearRecent}>Clear</Text>
+              </Pressable>
+            </View>
           ) : offline ? (
             <Text style={styles.listTag}>offline results</Text>
           ) : null}
@@ -179,6 +201,13 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   listTag: { fontSize: 11, color: theme.textMuted, paddingHorizontal: 14, paddingTop: 4 },
+  tagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 14,
+  },
+  clearRecent: { fontSize: 12, color: theme.accent, fontWeight: '700', paddingTop: 4 },
   result: { paddingHorizontal: 14, paddingVertical: 8 },
   resultName: { fontSize: 15, color: theme.text },
   resultLabel: { fontSize: 12, color: theme.textMuted },

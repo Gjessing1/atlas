@@ -1,11 +1,19 @@
 import {
+  useExplore,
+  EXPLORE_EMPTY,
+  EXPLORE_REFRESH,
+  EXPLORE_TITLE,
+  type ExploreArea,
+  type ExploreQuery,
+} from '@atlas/app-hooks';
+import {
+  clampExploreRadiusM,
   EXPLORE_CATEGORIES,
   fmtDistanceM,
-  type ExploreCategoryId,
   type LatLng,
   type SearchResult,
 } from '@atlas/core';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
@@ -17,7 +25,7 @@ function viewRadiusM(center: LatLng, zoom: number): number {
   const { width, height } = Dimensions.get('window');
   const metresPerPixel =
     (156_543.03392 * Math.cos((center.lat * Math.PI) / 180)) / 2 ** Math.max(0, zoom);
-  return Math.min(50_000, Math.max(500, (Math.hypot(width, height) / 2) * metresPerPixel));
+  return clampExploreRadiusM((Math.hypot(width, height) / 2) * metresPerPixel);
 }
 
 /** Offline-capable category browse over the current Android map view. */
@@ -38,33 +46,19 @@ export function ExploreSheet({
   onClose: () => void;
   bottomInset: number;
 }) {
-  const [category, setCategory] = useState<ExploreCategoryId>('food');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [offline, setOffline] = useState(false);
-  const [error, setError] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-
-  const load = useCallback(async () => {
+  const getArea = useCallback(async (): Promise<ExploreArea | null> => {
     const center = await getCenter();
-    if (!center) return;
-    setLoading(true);
-    setError(false);
-    try {
-      const found = await geoExplore(packs, category, center, viewRadiusM(center, zoom));
-      setResults(found.results);
-      setOffline(found.offline);
-    } catch {
-      setResults([]);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [packs, category, getCenter, zoom]);
+    return center ? { center, radiusM: viewRadiusM(center, zoom) } : null;
+  }, [getCenter, zoom]);
 
-  useEffect(() => {
-    if (visible) void load();
-  }, [visible, load, refresh]);
+  // The pack fallback is what makes this sheet answer at all in the field; the
+  // shared hook only ever sees "the query succeeded, offline or not".
+  const fetchNearby = useCallback(
+    ({ category, center, radiusM }: ExploreQuery) => geoExplore(packs, category, center, radiusM),
+    [packs],
+  );
+
+  const explore = useExplore({ getArea, fetchNearby, active: visible });
 
   return (
     <BottomSheet
@@ -77,10 +71,8 @@ export function ExploreSheet({
     >
       <View style={styles.header}>
         <View>
-          <Text style={styles.heading}>Explore this area</Text>
-          <Text style={styles.muted}>
-            {offline ? 'From downloaded regions' : 'Top places in the current map view'}
-          </Text>
+          <Text style={styles.heading}>{EXPLORE_TITLE}</Text>
+          <Text style={styles.muted}>{explore.subtitle}</Text>
         </View>
         <Pressable onPress={onClose} hitSlop={10}>
           <Text style={styles.close}>✕</Text>
@@ -90,10 +82,10 @@ export function ExploreSheet({
         {EXPLORE_CATEGORIES.map((item) => (
           <Pressable
             key={item.id}
-            style={[styles.category, category === item.id && styles.categorySelected]}
-            onPress={() => setCategory(item.id)}
+            style={[styles.category, explore.category === item.id && styles.categorySelected]}
+            onPress={() => explore.setCategory(item.id)}
             accessibilityRole="tab"
-            accessibilityState={{ selected: category === item.id }}
+            accessibilityState={{ selected: explore.category === item.id }}
             testID={`explore-${item.id}`}
           >
             <Text style={styles.categoryText}>{item.label}</Text>
@@ -101,22 +93,14 @@ export function ExploreSheet({
         ))}
       </View>
       <View style={styles.status}>
-        <Text style={styles.muted}>
-          {loading
-            ? 'Looking nearby…'
-            : error
-              ? 'Explore is unavailable.'
-              : `${results.length} places`}
-        </Text>
-        <Pressable onPress={() => setRefresh((value) => value + 1)}>
-          <Text style={styles.refresh}>Refresh map view</Text>
+        <Text style={styles.muted}>{explore.status}</Text>
+        <Pressable onPress={explore.refresh}>
+          <Text style={styles.refresh}>{EXPLORE_REFRESH}</Text>
         </Pressable>
       </View>
-      {!loading && !error && results.length === 0 ? (
-        <Text style={styles.empty}>No places in this category are indexed here.</Text>
-      ) : null}
+      {explore.showEmpty ? <Text style={styles.empty}>{EXPLORE_EMPTY}</Text> : null}
       <ScrollView style={styles.results}>
-        {results.map((result, index) => (
+        {explore.results.map((result, index) => (
           <Pressable
             style={styles.result}
             key={`${result.name}/${result.position.lat}/${result.position.lng}`}

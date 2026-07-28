@@ -1,15 +1,30 @@
 import {
-  EXPLORE_CATEGORIES,
-  fmtDistanceM,
-  type ExploreCategoryId,
-  type LatLng,
-  type SearchResult,
-} from '@atlas/core';
-import { useCallback, useEffect, useState } from 'react';
+  useExplore,
+  EXPLORE_EMPTY,
+  EXPLORE_REFRESH,
+  EXPLORE_TITLE,
+  type ExploreArea,
+  type ExploreQuery,
+} from '@atlas/app-hooks';
+import { EXPLORE_CATEGORIES, fmtDistanceM, type SearchResult } from '@atlas/core';
 
-export interface ExploreArea {
-  center: LatLng;
-  radiusM: number;
+export type { ExploreArea };
+
+/** The web half of the seam: the backend's Photon-backed browse endpoint. */
+async function fetchExplore({ category, center, radiusM, signal }: ExploreQuery) {
+  const params = new URLSearchParams({
+    category,
+    lat: String(center.lat),
+    lon: String(center.lng),
+    radius: String(radiusM),
+  });
+  const response = await fetch(`/api/explore?${params}`, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { results: SearchResult[] };
+  // Web has no offline packs (§7's deliberate difference), so an answer here is
+  // always the live index — the tag is rendered from shared state regardless,
+  // and starts telling the truth by itself the day web gets packs.
+  return { results: body.results, offline: false };
 }
 
 /** Category-first POI browse for the current map view. */
@@ -22,44 +37,14 @@ export function ExplorePanel({
   onPick: (result: SearchResult) => void;
   onClose: () => void;
 }) {
-  const [category, setCategory] = useState<ExploreCategoryId>('food');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-
-  const load = useCallback(async () => {
-    const area = getArea();
-    const params = new URLSearchParams({
-      category,
-      lat: String(area.center.lat),
-      lon: String(area.center.lng),
-      radius: String(area.radiusM),
-    });
-    setLoading(true);
-    setError(false);
-    try {
-      const response = await fetch(`/api/explore?${params}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setResults(((await response.json()) as { results: SearchResult[] }).results);
-    } catch {
-      setResults([]);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [category, getArea]);
-
-  useEffect(() => {
-    void load();
-  }, [load, refresh]);
+  const explore = useExplore({ getArea, fetchNearby: fetchExplore });
 
   return (
     <aside className="explore-panel" aria-label="Explore nearby places">
       <div className="explore-head">
         <div>
-          <strong>Explore this area</strong>
-          <span>Top places in the current map view</span>
+          <strong>{EXPLORE_TITLE}</strong>
+          <span>{explore.subtitle}</span>
         </div>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close explore">
           ✕
@@ -70,9 +55,9 @@ export function ExplorePanel({
           <button
             type="button"
             role="tab"
-            aria-selected={category === item.id}
-            className={category === item.id ? 'selected' : undefined}
-            onClick={() => setCategory(item.id)}
+            aria-selected={explore.category === item.id}
+            className={explore.category === item.id ? 'selected' : undefined}
+            onClick={() => explore.setCategory(item.id)}
             key={item.id}
           >
             {item.label}
@@ -80,24 +65,14 @@ export function ExplorePanel({
         ))}
       </div>
       <div className="explore-status">
-        {loading
-          ? 'Looking nearby…'
-          : error
-            ? 'Explore is unavailable.'
-            : `${results.length} places`}
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => setRefresh((value) => value + 1)}
-        >
-          Refresh map view
+        {explore.status}
+        <button type="button" className="link-button" onClick={explore.refresh}>
+          {EXPLORE_REFRESH}
         </button>
       </div>
-      {!loading && !error && results.length === 0 ? (
-        <p className="explore-empty">No places in this category are indexed here.</p>
-      ) : null}
+      {explore.showEmpty ? <p className="explore-empty">{EXPLORE_EMPTY}</p> : null}
       <ul className="explore-results">
-        {results.map((result) => (
+        {explore.results.map((result) => (
           <li key={`${result.name}/${result.position.lat}/${result.position.lng}`}>
             <button type="button" onClick={() => onPick(result)}>
               <span>
