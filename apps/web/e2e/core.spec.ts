@@ -226,8 +226,12 @@ test('saving from the place card flips the button and lists the place', async ({
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
   const card = page.locator('.place-card');
   await card.getByRole('button', { name: 'Save' }).click();
+  // A pin has only its coordinates for a name, so the editor opens on it to be
+  // named; this journey is about the card, so dismiss it and keep the default.
+  await expect(page.locator('.place-edit-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
   // The saved place is found by proximity, so the card knows it is now saved.
-  await expect(card.getByRole('button', { name: '★ Saved' })).toBeVisible();
+  await expect(card.getByRole('button', { name: '★ Edit' })).toBeVisible();
 });
 
 test('share link restores camera and pin; garbage hash falls back', async ({ page }) => {

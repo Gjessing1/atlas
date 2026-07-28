@@ -12,7 +12,11 @@ test('a saved place can be hidden from and restored to the map', async ({ page }
   const card = page.locator('.place-card');
   const name = (await card.locator('strong').textContent())!;
   await card.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(card.getByRole('button', { name: '★ Saved' })).toBeVisible();
+  // Saving a coordinate-named pin opens its editor to be named; this journey is
+  // about visibility, so close it and keep the coordinates as the name.
+  await expect(page.locator('.place-edit-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(card.getByRole('button', { name: '★ Edit' })).toBeVisible();
   await card.getByRole('button', { name: 'Remove pin' }).click();
   await expect(page.locator('.place-marker')).toHaveCount(1);
 
