@@ -28,7 +28,10 @@ const hit = (name: string, lat: number, lng: number): SearchResult => ({
 
 describe('routeStopCategories', () => {
   it('offers fuel and charging to drivers only', () => {
-    expect(routeStopCategories('car').map((c) => c.id)).toContain('fuel');
+    const driving = routeStopCategories('car').map((c) => c.id);
+    expect(driving).toContain('fuel');
+    expect(driving).toContain('supermarket');
+    expect(driving).toContain('rest-area');
     const walk = routeStopCategories('foot').map((c) => c.id);
     expect(walk).not.toContain('fuel');
     expect(walk).not.toContain('charging');

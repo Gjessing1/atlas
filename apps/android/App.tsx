@@ -29,6 +29,7 @@ import {
   isRoutingProfile,
   ROUTING_PROFILES,
   routePathToTrackData,
+  trackToRoutePoints,
   type RoutePath,
 } from '@atlas/routing';
 import { transitTripBounds, type TransitTrip } from '@atlas/transit';
@@ -718,6 +719,28 @@ function AppInner() {
     [data, topInset, bottomInset, side],
   );
 
+  const planTrack = useCallback(
+    (track: TrackRecord) => {
+      void data.getTrackData(track.id).then((trackData) => {
+        if (!trackData) return;
+        const points = trackToRoutePoints(trackData);
+        if (points.length < 2) return;
+        route.restore({
+          profile: route.profile,
+          waypoints: points.map((pos, index) => ({
+            pos,
+            ...(index === 0
+              ? { name: `${track.name} start` }
+              : index === points.length - 1
+                ? { name: `${track.name} finish` }
+                : {}),
+          })),
+        });
+      });
+    },
+    [data, route],
+  );
+
   // Resolve an iNatur permit link/id to its boundary and import it as a track
   // (GPX under the hood, so it draws/exports/syncs). Throws a user-facing
   // message on failure; TracksSheet's own try/catch surfaces it.
@@ -1245,6 +1268,7 @@ function AppInner() {
             }}
             onPickDestination={dest.pick}
             onShowTrack={showTrack}
+            onPlanTrack={planTrack}
             onImportTracks={importTracks}
             onImportInatur={importInatur}
           />
@@ -1300,9 +1324,13 @@ function AppInner() {
               transit={transit}
               packs={packs}
               places={data.places}
+              collections={data.collections}
               getBias={getBias}
               fetchNearby={fetchNearbyStops}
               onExport={exportRoute}
+              onSaveTrack={async (trackData, name, collectionId) =>
+                (await data.saveTrack(trackData, name, collectionId)) !== null
+              }
               onNavigate={startNavigation}
               onShowTransitTrip={showTransitTrip}
               getMyLocation={directions.getMyLocation}

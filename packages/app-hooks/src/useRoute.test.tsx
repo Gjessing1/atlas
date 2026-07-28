@@ -88,7 +88,11 @@ describe('useRoute', () => {
     act(() => result.current.setRoundTripKm(25));
     await settle();
     const q1 = route.mock.calls.at(-1)![0];
-    expect(q1.roundTrip).toEqual({ distanceM: 25_000, seed: 0 });
+    expect(q1.roundTrip).toEqual({ distanceM: 25_000, seed: 0, direction: 'either' });
+
+    act(() => result.current.setRoundTripDirection('counterclockwise'));
+    await settle();
+    expect(route.mock.calls.at(-1)![0].roundTrip?.direction).toBe('counterclockwise');
 
     act(() => result.current.newLoop());
     await settle();
@@ -335,6 +339,7 @@ describe('useRoute', () => {
       profile: 'car',
       waypoints: [{ pos: A }],
       roundTripKm: 25,
+      roundTripDirection: 'either',
     });
 
     const reloaded = renderHook(() => useRoute(route));

@@ -10,6 +10,7 @@ import type {
   RoutePath,
   RouteQuery,
   RouteResult,
+  RoundTripDirection,
   RoutingProfile,
   VerbalInstruction,
 } from './model.js';
@@ -201,10 +202,13 @@ export function roundTripLocations(
   points: readonly LatLng[],
   distanceM: number,
   seed = 0,
+  direction: RoundTripDirection = 'either',
 ): RoundTripStop[] {
   const start = points[0];
   if (!start) return [];
   const planned = points.slice(1).filter((point) => haversineM(start, point) > 1);
+  const turn: 1 | -1 =
+    direction === 'clockwise' ? 1 : direction === 'counterclockwise' ? -1 : seed % 2 === 0 ? 1 : -1;
 
   if (planned.length === 0) {
     // Scramble the seed so consecutive seeds give well-separated headings.
@@ -214,7 +218,9 @@ export function roundTripLocations(
     // The start sits on the circle at the opposite bearing; three more stops a
     // quarter-turn apart make the route trace the whole loop.
     const back = (heading + 180) % 360;
-    const vias = [90, 180, 270].map((step) => project(center, radius, (back + step) % 360));
+    const vias = [90, 180, 270].map((step) =>
+      project(center, radius, (back + turn * step + 360) % 360),
+    );
     return [
       { pos: start, required: true },
       ...vias.map((pos) => ({ pos, required: false })),
@@ -230,9 +236,7 @@ export function roundTripLocations(
   // no road can follow anyway.
   const returnM = distanceM - crowLengthM(outbound);
   const detour =
-    returnM > chordM * 1.05
-      ? bulgedReturn(last, start, returnM, seed % 2 === 0 ? 1 : -1)
-      : ([] as LatLng[]);
+    returnM > chordM * 1.05 ? bulgedReturn(last, start, returnM, turn) : ([] as LatLng[]);
   return [
     ...outbound.map((pos) => ({ pos, required: true })),
     ...detour.map((pos) => ({ pos, required: false })),
@@ -247,13 +251,16 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   // locations: shaping points the route must pass, not stops (no leg split, no
   // u-turn allowed at them).
   const locations: { lat: number; lon: number; type?: string; heading?: number }[] = query.roundTrip
-    ? roundTripLocations(query.points, query.roundTrip.distanceM, query.roundTrip.seed ?? 0).map(
-        (stop) => ({
-          lat: stop.pos.lat,
-          lon: stop.pos.lng,
-          type: stop.required ? 'break' : 'through',
-        }),
-      )
+    ? roundTripLocations(
+        query.points,
+        query.roundTrip.distanceM,
+        query.roundTrip.seed ?? 0,
+        query.roundTrip.direction,
+      ).map((stop) => ({
+        lat: stop.pos.lat,
+        lon: stop.pos.lng,
+        type: stop.required ? 'break' : 'through',
+      }))
     : query.points.map((p) => ({ lat: p.lat, lon: p.lng }));
   // Continue in the direction of travel: Valhalla penalizes edges leaving the
   // first location against its heading (within the default 60° tolerance), so
@@ -313,6 +320,8 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
     costingOptions['bicycle'] = {
       ...costingOptions['bicycle'],
       ...(preferences.avoidHills ? { use_hills: 0 } : {}),
+      ...(preferences.avoidHighways ? { use_roads: 0.05 } : {}),
+      ...(preferences.avoidUnpaved ? { bicycle_type: 'road', avoid_bad_surfaces: 0.9 } : {}),
       ...(preferences.preferTrails
         ? { bicycle_type: 'mountain', use_roads: 0.1, avoid_bad_surfaces: 0 }
         : {}),

@@ -453,8 +453,13 @@ button {
   gap: 4px;
 }
 
+.place-card-nearby-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .place-card-nearby-toggle {
-  align-self: flex-start;
   padding: 3px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1111,6 +1116,7 @@ button {
 
 .elevation-panel {
   position: absolute;
+  z-index: 4;
   left: 50%;
   transform: translateX(-50%);
   bottom: 12px;
@@ -1173,12 +1179,24 @@ button {
   fill-opacity: 0.1;
 }
 
-.profile-line {
-  fill: none;
-  stroke: var(--accent);
+.profile-segment {
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+
+.surface-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 3px 10px 7px 44px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.surface-breakdown strong {
+  color: var(--text);
 }
 
 .crosshair {
@@ -1229,6 +1247,7 @@ button {
 /* Right side, clear of the top-right zoom controls. */
 .route-panel {
   position: absolute;
+  z-index: 5;
   top: 12px;
   right: 56px;
   width: min(300px, calc(100vw - 80px));
@@ -1369,6 +1388,17 @@ button {
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
+}
+
+.route-roundtrip select {
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .route-roundtrip button {
@@ -1524,6 +1554,39 @@ button {
 .route-roundtrip button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.route-save-track {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.route-save-track label {
+  display: grid;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.route-save-track input,
+.route-save-track select {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.route-save-track > div {
+  display: flex;
+  gap: 6px;
 }
 
 .route-error {
@@ -4638,6 +4701,9 @@ button.transit-notice-summary {
 
 .settings-panel {
   position: absolute;
+  /* Settings is a deliberate modal surface. Keep it above an active planner
+     so its tabs remain usable without discarding the route underneath. */
+  z-index: 6;
   top: 60px;
   right: 12px;
   bottom: 12px;

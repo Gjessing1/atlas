@@ -90,3 +90,13 @@ export interface ElevationResponse {
   /** Upstream data source label (e.g. "Nasjonal høydemodell"), when given. */
   source?: string;
 }
+
+/** One point in POST /api/elevation/profile, in the same order as the request. */
+export interface ElevationProfileSample extends ElevationResponse {
+  /** Kartverket N50 terrain class, when coverage includes one. */
+  terrain?: string;
+}
+
+export interface ElevationProfileResponse {
+  samples: ElevationProfileSample[];
+}

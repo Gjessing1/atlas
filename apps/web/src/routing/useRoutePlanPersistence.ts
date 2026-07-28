@@ -27,6 +27,9 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
     waypoints: hashPlan.points.map((pos) => ({ pos })),
   };
   if (hashPlan.roundTripKm !== undefined) plan.roundTripKm = hashPlan.roundTripKm;
+  if (hashPlan.roundTripDirection !== undefined) {
+    plan.roundTripDirection = hashPlan.roundTripDirection;
+  }
   return plan;
 }
 

@@ -1,8 +1,9 @@
 import { useRoute as useSharedRoute, type RouteFn, type RoutePlanner } from '@atlas/app-hooks';
+import { enrichPlannedResult, httpElevationProfile } from '@atlas/routing';
 import { useMemo } from 'react';
 
 import { useServerOrigin } from '../serverOrigin';
-import { makeRouteProvider } from './offlineRouting';
+import { makeRouteProvider, makeTraceTransport } from './offlineRouting';
 
 export type { RoutePlanner, RouteWaypoint } from '@atlas/app-hooks';
 
@@ -15,7 +16,12 @@ export function useRoute(): RoutePlanner {
   const baseUrl = useServerOrigin();
   const route = useMemo<RouteFn>(() => {
     const provider = makeRouteProvider(baseUrl);
-    return (query, signal) => provider.route(query, signal);
+    const trace = makeTraceTransport(baseUrl);
+    const elevation = httpElevationProfile({ baseUrl });
+    return async (query, signal) => {
+      const result = await provider.route(query, signal);
+      return query.details ? enrichPlannedResult(result, query, trace, elevation, signal) : result;
+    };
   }, [baseUrl]);
   return useSharedRoute(route);
 }

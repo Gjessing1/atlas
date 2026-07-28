@@ -1,5 +1,6 @@
 import { fmtKm } from '@atlas/core';
 import { buildElevationProfile, type TrackData } from '@atlas/gpx';
+import { routeSurfaceAt, routeSurfaceBreakdown, type RouteEnrichment } from '@atlas/routing';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
@@ -16,7 +17,21 @@ const MAX_BARS = 160;
  * and stays OTA-updatable. Touch-drag scrubs a crosshair with an elevation +
  * distance readout, like the web chart's hover.
  */
-export function ElevationChart({ data }: { data: TrackData }) {
+function gradeColor(grade: number): string {
+  const magnitude = Math.abs(grade);
+  if (magnitude < 3) return '#3b9b62';
+  if (magnitude < 6) return grade < 0 ? '#54a6c7' : '#d4a52d';
+  if (magnitude < 12) return grade < 0 ? '#397fba' : '#e47f2c';
+  return grade < 0 ? '#315e9f' : '#d84b3e';
+}
+
+export function ElevationChart({
+  data,
+  enrichment,
+}: {
+  data: TrackData;
+  enrichment?: RouteEnrichment;
+}) {
   const [width, setWidth] = useState(0);
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
 
@@ -58,7 +73,15 @@ export function ElevationChart({ data }: { data: TrackData }) {
   };
 
   const scrubbed = scrubIndex !== null ? profile[scrubIndex] : undefined;
+  const scrubbedPrevious =
+    scrubIndex !== null && scrubIndex > 0 ? profile[scrubIndex - 1] : undefined;
+  const scrubbedGrade =
+    scrubbed && scrubbedPrevious && scrubbed.distM > scrubbedPrevious.distM
+      ? ((scrubbed.ele - scrubbedPrevious.ele) / (scrubbed.distM - scrubbedPrevious.distM)) * 100
+      : null;
+  const scrubbedSurface = scrubbed ? routeSurfaceAt(enrichment, scrubbed.distM) : null;
   const scrubX = scrubIndex !== null ? (scrubIndex / (profile.length - 1)) * width : 0;
+  const surfaces = routeSurfaceBreakdown(enrichment, chart.maxDist);
 
   return (
     <View>
@@ -67,6 +90,8 @@ export function ElevationChart({ data }: { data: TrackData }) {
         {scrubbed ? (
           <Text style={styles.readout}>
             {Math.round(scrubbed.ele)} m · {fmtKm(scrubbed.distM)}
+            {scrubbedGrade !== null ? ` · ${scrubbedGrade.toFixed(1)}%` : ''}
+            {scrubbedSurface ? ` · ${scrubbedSurface}` : ''}
           </Text>
         ) : (
           <Text style={styles.readoutHint}>touch the chart to inspect</Text>
@@ -85,13 +110,21 @@ export function ElevationChart({ data }: { data: TrackData }) {
         onResponderTerminate={() => setScrubIndex(null)}
         testID="elevation-chart"
       >
-        {profile.map((p, i) => (
-          <View
-            key={i}
-            style={[styles.bar, { height: chart.heightFor(p.ele) }]}
-            pointerEvents="none"
-          />
-        ))}
+        {profile.map((p, i) => {
+          const previous = profile[i - 1];
+          const distanceM = previous ? p.distM - previous.distM : 0;
+          const grade = previous && distanceM > 0 ? ((p.ele - previous.ele) / distanceM) * 100 : 0;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.bar,
+                { height: chart.heightFor(p.ele), backgroundColor: gradeColor(grade) },
+              ]}
+              pointerEvents="none"
+            />
+          );
+        })}
         {scrubbed ? (
           <View pointerEvents="none" style={[styles.crosshair, { left: scrubX }]} />
         ) : null}
@@ -100,6 +133,16 @@ export function ElevationChart({ data }: { data: TrackData }) {
         <Text style={styles.axisLabel}>{Math.round(chart.minEle)} m</Text>
         <Text style={styles.axisLabel}>{fmtKm(chart.maxDist)}</Text>
       </View>
+      {surfaces.length > 0 ? (
+        <View style={styles.surfaceRow}>
+          <Text style={styles.surfaceTitle}>Surface</Text>
+          {surfaces.map((surface) => (
+            <Text key={surface.label} style={styles.axisLabel}>
+              {surface.label} {surface.percent}%
+            </Text>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -113,7 +156,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
   },
-  bar: { flex: 1, backgroundColor: '#7fb0e8' },
+  bar: { flex: 1 },
   crosshair: {
     position: 'absolute',
     top: 0,
@@ -130,5 +173,7 @@ const styles = StyleSheet.create({
   axisLabel: { fontSize: 11, color: theme.textMuted },
   readout: { fontSize: 12, color: theme.text, fontWeight: '700' },
   readoutHint: { fontSize: 11, color: theme.textMuted },
+  surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 3 },
+  surfaceTitle: { fontSize: 11, color: theme.text, fontWeight: '700' },
   empty: { fontSize: 13, color: theme.textMuted },
 });

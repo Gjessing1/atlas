@@ -235,6 +235,12 @@ export interface UserData<TFile> extends StorageAvailability {
   ) => Promise<void>;
 
   importFiles: (files: TFile[], options?: ImportOptions) => Promise<ImportResult>;
+  /** Save generated geometry (for example a planned route) as a synced track. */
+  saveTrack: (
+    data: TrackData,
+    name: string,
+    collectionId?: string | null,
+  ) => Promise<TrackRecord | null>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
   deleteTrack: (id: string) => Promise<void>;
   /** Parsed geometry for a track (cached in memory). */
@@ -594,6 +600,33 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [platform, refreshTracks, refreshPlaces, refreshCollections],
   );
 
+  const saveTrack = useCallback(
+    async (
+      data: TrackData,
+      name: string,
+      collectionId: string | null = null,
+    ): Promise<TrackRecord | null> => {
+      const s = storageRef.current;
+      if (!s) return null;
+      try {
+        const savedName = name.trim() || data.name?.trim() || 'Planned route';
+        const track = await s.createTrack({
+          name: savedName,
+          gpx: buildGpx({ ...data, name: savedName }),
+          stats: computeTrackStats(data) as unknown as Record<string, number>,
+          collectionId,
+        });
+        trackDataCache.current.set(track.id, data);
+        await refreshTracks();
+        return track;
+      } catch (err) {
+        reportWriteFailure('Saving route', err);
+        return null;
+      }
+    },
+    [refreshTracks, reportWriteFailure],
+  );
+
   const updateTrack = useCallback(
     async (id: string, patch: TrackPatch) => {
       try {
@@ -815,6 +848,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     reorderCollections,
     arrangeCollectionItem,
     importFiles,
+    saveTrack,
     updateTrack,
     deleteTrack,
     getTrackData,

@@ -19,15 +19,16 @@ import {
   type FetchNearbyFn,
   type StopGeocodeFn,
 } from '@atlas/app-hooks';
-import { buildGpx } from '@atlas/gpx';
+import { buildGpx, type TrackData } from '@atlas/gpx';
 import {
   pathViaLabels,
   ROUTING_PROFILES,
   routePathToTrackData,
+  routeSurfaceBreakdown,
   type RoutePath,
   type RoutePreferences,
 } from '@atlas/routing';
-import type { PlaceRecord } from '@atlas/storage';
+import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
@@ -251,10 +252,11 @@ const CUSTOM_OPTIONS: readonly {
     label: 'Avoid ferries',
     profiles: ['car', 'bike', 'foot', 'hike', 'run'],
   },
-  { key: 'avoidHighways', label: 'Avoid highways', profiles: ['car'] },
+  { key: 'avoidHighways', label: 'Avoid highways / main roads', profiles: ['car', 'bike'] },
   { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },
   { key: 'avoidHills', label: 'Prefer flatter ways', profiles: ['bike', 'foot', 'hike', 'run'] },
   { key: 'preferTrails', label: 'Prefer trails', profiles: ['bike', 'hike', 'run'] },
+  { key: 'avoidUnpaved', label: 'Avoid unpaved surfaces', profiles: ['bike'] },
 ];
 
 /** Route-planning panel: profile, stops, round trip, result stats, GPX export. */
@@ -262,17 +264,21 @@ export function RoutePanel({
   route,
   transit,
   places,
+  collections,
   getBias,
   getMyLocation,
   locatingOrigin,
   fetchNearby,
   onNavigate,
+  onSaveTrack,
 }: {
   route: RoutePlanner;
   /** Public transport for the same plan — a travel mode beside the road profiles. */
   transit: TransitPlan;
   /** Saved places, offered in the stop search alongside geocoder results. */
   places: PlaceRecord[];
+  /** Destination folders for saving this plan as a synced track. */
+  collections: CollectionRecord[];
   /** Current map center, biasing the geocoder towards the viewport. */
   getBias: () => LatLng | null;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
@@ -287,6 +293,7 @@ export function RoutePanel({
    * guidance starts from here.
    */
   onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
+  onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -294,11 +301,20 @@ export function RoutePanel({
   const [editing, setEditing] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState('Planned route');
+  const [saveCollection, setSaveCollection] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   // On the phone layout this panel is a draggable bottom sheet; swiping it down
   // past its peek closes the planner, the same as the ✕. Inert on desktop.
   const sheet = useBottomSheet({ onDismiss: route.stop, initial: 'half' });
   const geocode = useGeocode(getBias);
   const path = route.paths?.[route.selectedPath];
+  const surfaces = useMemo(
+    () => routeSurfaceBreakdown(path?.enrichment, path?.distanceM ?? 0),
+    [path],
+  );
   const transitMode = transit.enabled;
   // Trip times sit under the mode icons only for a point-to-point plan, where
   // comparing modes makes sense; a loop or a single stop has nothing to compare.
@@ -369,6 +385,20 @@ export function RoutePanel({
   };
   // Any edit to the plan invalidates the "copied" confirmation.
   useEffect(() => setCopied(false), [route.waypoints, route.profile, route.roundTripKm]);
+  useEffect(() => setSaved(false), [path]);
+
+  const saveRoute = async () => {
+    if (!path || !saveName.trim()) return;
+    setSaving(true);
+    const ok = await onSaveTrack(
+      routePathToTrackData(path, saveName.trim()),
+      saveName.trim(),
+      saveCollection || null,
+    );
+    setSaving(false);
+    setSaved(ok);
+    if (ok) setSaveOpen(false);
+  };
 
   return (
     <div className="route-panel" ref={sheet.sheetRef} data-sheet-snap={sheet.snap}>
@@ -480,6 +510,19 @@ export function RoutePanel({
                 aria-label="Round trip distance in kilometers"
               />
               <span>km</span>
+              <select
+                value={route.roundTripDirection}
+                onChange={(event) =>
+                  route.setRoundTripDirection(
+                    event.currentTarget.value as typeof route.roundTripDirection,
+                  )
+                }
+                aria-label="Round trip direction"
+              >
+                <option value="either">Either direction</option>
+                <option value="clockwise">Clockwise</option>
+                <option value="counterclockwise">Counterclockwise</option>
+              </select>
               <button type="button" onClick={route.newLoop} disabled={route.waypoints.length === 0}>
                 New loop
               </button>
@@ -683,13 +726,65 @@ export function RoutePanel({
             </button>
             {/* A journey is a timetable, not a track: there is nothing to export. */}
             {path && !transitMode && (
-              <button type="button" onClick={exportGpx}>
-                Export GPX
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSaved(false);
+                    setSaveOpen((open) => !open);
+                  }}
+                >
+                  {saved ? 'Saved as track' : 'Save track'}
+                </button>
+                <button type="button" onClick={exportGpx}>
+                  Export GPX
+                </button>
+              </>
             )}
             <button type="button" onClick={copyLink} title="Copy a link that reopens this plan">
               {copied ? 'Link copied' : 'Share'}
             </button>
+          </div>
+        )}
+        {saveOpen && path && !transitMode && (
+          <div className="route-save-track">
+            <label>
+              Track name
+              <input
+                value={saveName}
+                onChange={(event) => setSaveName(event.currentTarget.value)}
+                autoFocus
+              />
+            </label>
+            <label>
+              Folder
+              <select
+                value={saveCollection}
+                onChange={(event) => setSaveCollection(event.currentTarget.value)}
+              >
+                <option value="">No folder</option>
+                {[...collections]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((collection) => (
+                    <option key={collection.id} value={collection.id}>
+                      {collection.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <div>
+              <button
+                type="button"
+                className="primary"
+                disabled={saving || !saveName.trim()}
+                onClick={() => void saveRoute()}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button type="button" onClick={() => setSaveOpen(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
@@ -705,7 +800,8 @@ export function RoutePanel({
           <div className="route-stats">
             <strong>{fmtKm(path.distanceM)}</strong> · {fmtDuration(path.timeMs)} · ETA{' '}
             {fmtEta(path.timeMs)}
-            {/* Valhalla tiles carry no elevation data, so 0/0 means "unknown". */}
+            {/* The profile adapter fills terrain heights where coverage exists;
+                0/0 still means "unknown" elsewhere. */}
             {path.ascentM > 0 || path.descentM > 0
               ? ` · ↗ ${Math.round(path.ascentM)} m ↘ ${Math.round(path.descentM)} m`
               : null}
@@ -719,6 +815,16 @@ export function RoutePanel({
                 {route.profile === 'car'
                   ? '.'
                   : ' — there is no land route. Check sailing times, or try public transport.'}
+              </div>
+            )}
+            {surfaces.length > 0 && (
+              <div className="surface-breakdown" aria-label="Route surfaces">
+                <strong>Surface</strong>
+                {surfaces.map((surface) => (
+                  <span key={surface.label}>
+                    {surface.label} {surface.percent}%
+                  </span>
+                ))}
               </div>
             )}
           </div>

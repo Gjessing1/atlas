@@ -35,6 +35,7 @@ describe('buildTraceAttributesRequest', () => {
   it('asks for kilometres so limits come back in km/h', () => {
     const req = buildTraceAttributesRequest(line(2), 'car');
     expect(req['directions_options']).toEqual({ units: 'kilometers' });
+    expect((req['filters'] as { attributes: string[] }).attributes).toContain('edge.surface');
   });
 });
 
@@ -45,7 +46,13 @@ describe('parseTraceAttributes', () => {
     const segments = parseTraceAttributes(
       {
         edges: [
-          { begin_shape_index: 0, end_shape_index: 2, speed_limit: 80, road_class: 'trunk' },
+          {
+            begin_shape_index: 0,
+            end_shape_index: 2,
+            speed_limit: 80,
+            road_class: 'trunk',
+            surface: 'paved_smooth',
+          },
           { begin_shape_index: 2, end_shape_index: 4, speed_limit: 50, names: ['Storgata'] },
         ],
       },
@@ -55,6 +62,7 @@ describe('parseTraceAttributes', () => {
     expect(segments[0]!.startM).toBe(0);
     expect(segments[0]!.speedLimitKph).toBe(80);
     expect(segments[0]!.roadClass).toBe('trunk');
+    expect(segments[0]!.surface).toBe('paved_smooth');
     // Two ~111 m steps in, give or take the earth's shape.
     expect(segments[1]!.startM).toBeCloseTo(222, 0);
     expect(segments[1]!.name).toBe('Storgata');

@@ -207,11 +207,13 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   await expect(card.locator('.place-card-facts')).toContainText('Light');
 });
 
-test('a place with no article of its own shows nearby photos and places', async ({ page }) => {
+test('nearby photos and places are separate on-demand features', async ({ page }) => {
   // The user's own case: a town hall Wikipedia has never written about.
+  let photoRequests = 0;
   await page.route('**/api/place-content?**', (route) => route.fulfill({ json: { content: [] } }));
-  await page.route('**/api/place-photos**', (route) =>
-    route.fulfill({
+  await page.route('**/api/place-photos**', (route) => {
+    photoRequests += 1;
+    return route.fulfill({
       json: {
         photos: [
           {
@@ -225,8 +227,8 @@ test('a place with no article of its own shows nearby photos and places', async 
           },
         ],
       },
-    }),
-  );
+    });
+  });
   await page.route('**/api/place-content/nearby**', (route) =>
     route.fulfill({
       json: {
@@ -249,8 +251,11 @@ test('a place with no article of its own shows nearby photos and places', async 
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
   const card = page.locator('.place-card');
 
-  // Photos of the area stand in for the picture the place itself does not have,
-  // and each tile says how far off it was taken.
+  // Opening the marker card does not fetch or show imagery. Photos are a peer
+  // action beside Nearby places, and each result says how far off it was taken.
+  await expect(card.locator('.place-card-photo-strip')).toHaveCount(0);
+  expect(photoRequests).toBe(0);
+  await card.getByRole('button', { name: /Photos nearby/ }).click();
   await expect(card.locator('.place-card-photo-strip a')).toHaveCount(1);
   await expect(card.locator('.place-card-photos')).toContainText('39 m');
 
@@ -406,10 +411,42 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toContainText('km');
+  await expect(page.locator('.route-stats')).toContainText('Surface');
+  await expect(page.locator('.elevation-panel')).toBeVisible();
+  await expect(page.locator('.profile-segment')).not.toHaveCount(0);
   const hasRouteSource = await page.evaluate(() =>
     Boolean(window.__atlasMap!.getSource('atlas-route')),
   );
   expect(hasRouteSource).toBe(true);
+});
+
+test('a planned route saves as a track and reopens as an editable route', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=12/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Route' }).click();
+  const [x1, y1] = await project(page, 59.905, 10.74);
+  const [x2, y2] = await project(page, 59.915, 10.76);
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+  await expect(page.locator('.route-stats')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Save track' }).click();
+  const save = page.locator('.route-save-track');
+  await save.getByLabel('Track name').fill('Desktop ride');
+  await save.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Saved as track' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Close route planning' }).click();
+  await page.getByRole('button', { name: 'Collections' }).click();
+  const sidebar = page.locator('.sidebar');
+  await expect(sidebar).toContainText('Desktop ride');
+  await sidebar.getByRole('button', { name: 'Edit Desktop ride' }).click();
+  await sidebar.getByRole('button', { name: 'Plan as route' }).click();
+
+  await expect(page.locator('.route-panel')).toBeVisible();
+  await expect(page.locator('.route-waypoints li')).toHaveCount(2);
+  await expect(page.locator('.route-waypoints')).toContainText('Desktop ride start');
 });
 
 test('running and custom trail preferences reach the routing engine', async ({ page }) => {

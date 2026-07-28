@@ -28,6 +28,8 @@ interface SidebarProps {
   onRevealed?: () => void;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
+  /** Convert a stored/imported track into an editable snapped route. */
+  onPlanTrack: (track: TrackRecord) => void;
   /** Plan a trip to this place — the row's Go button (Android parity). */
   onGoToPlace: (place: PlaceRecord) => void;
   onImported: (result: ImportResult) => void;
@@ -104,6 +106,7 @@ export function Sidebar({
   onRevealed,
   onShowPlace,
   onShowTrack,
+  onPlanTrack,
   onGoToPlace,
   onImported,
   onClose,
@@ -416,6 +419,9 @@ export function Sidebar({
                 </button>
                 <button type="button" onClick={() => void data.exportTrack(track.id, 'kml')}>
                   Download KML
+                </button>
+                <button type="button" onClick={() => onPlanTrack(track)}>
+                  Plan as route
                 </button>
               </>
             }

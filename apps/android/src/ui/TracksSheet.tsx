@@ -35,6 +35,7 @@ export function TracksSheet({
   onSetVisible,
   onRename,
   onExport,
+  onPlan,
   onDelete,
   onImport,
   onImportInatur,
@@ -49,6 +50,7 @@ export function TracksSheet({
   onSetVisible: (id: string, visible: boolean) => void;
   onRename: (id: string, name: string) => void;
   onExport: (id: string, format: 'gpx' | 'kml') => void;
+  onPlan: (track: TrackRecord) => void;
   onDelete: (id: string) => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
   onImport: (options?: ImportOptions) => Promise<ImportResult | null>;
@@ -292,6 +294,13 @@ export function TracksSheet({
                   </Pressable>
                   <Pressable
                     style={[styles.button, styles.buttonQuiet]}
+                    onPress={() => onPlan(track)}
+                    testID={`track-plan-${track.id}`}
+                  >
+                    <Text style={styles.buttonQuietText}>Plan route</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.button, styles.buttonQuiet]}
                     onPress={() => onExport(track.id, 'gpx')}
                     testID={`track-export-gpx-${track.id}`}
                   >
@@ -368,7 +377,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: theme.text,
   },
-  actionRow: { flexDirection: 'row', gap: 8 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   fieldLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted, marginTop: 8 },
   inaturRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   inaturInput: { flex: 1 },

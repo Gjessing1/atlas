@@ -1,9 +1,10 @@
-import type { LatLng } from '@atlas/core';
+import type { ElevationProfileResponse, LatLng } from '@atlas/core';
 
 import type { RouteCameras } from './cameras.js';
 import type { RouteQuery, RouteResult } from './model.js';
 import type { SpeedLimitOverride } from './nvdb.js';
 import type { ValhallaTransport } from './provider.js';
+import type { RouteElevationTransport } from './planning.js';
 import { buildValhallaRequest, parseValhallaResponse } from './valhalla.js';
 
 /**
@@ -85,6 +86,22 @@ export function httpTraceTransport(opts: FetchRouteOptions = {}): ValhallaTransp
     });
     if (!res.ok) throw new RoutingError(`route attributes failed (HTTP ${res.status})`);
     return (await res.json()) as unknown;
+  };
+}
+
+/** Batch route elevations through the backend's Kartverket profile proxy. */
+export function httpElevationProfile(opts: FetchRouteOptions = {}): RouteElevationTransport {
+  return async (points, signal) => {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const res = await doFetch(`${opts.baseUrl ?? ''}/api/elevation/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points }),
+      signal: signal ?? opts.signal,
+    });
+    if (!res.ok) throw new RoutingError(`elevation profile failed (HTTP ${res.status})`);
+    const json = (await res.json()) as ElevationProfileResponse;
+    return json.samples.map((sample) => sample.elevationM);
   };
 }
 

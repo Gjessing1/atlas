@@ -1,6 +1,7 @@
 import { fmtDuration, fmtKm, type LatLng } from '@atlas/core';
 import { buildElevationProfile } from '@atlas/gpx';
 import type { TrackData } from '@atlas/gpx';
+import { routeSurfaceAt, routeSurfaceBreakdown, type RouteEnrichment } from '@atlas/routing';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 /** A "nice" tick step (1/2/5 × 10^k) giving roughly `target` intervals. */
@@ -16,6 +17,8 @@ interface ElevationProfileProps {
   /** Summary stats to show in the header (subset of @atlas/gpx TrackStats keys). */
   stats: Record<string, number>;
   data: TrackData;
+  /** OSM surface ranges for routed paths; imported tracks may not carry them. */
+  enrichment?: RouteEnrichment;
   onClose: () => void;
   /** Fired while hovering the chart so the map can mark the position. */
   onHoverPoint: (point: LatLng | null) => void;
@@ -24,10 +27,20 @@ interface ElevationProfileProps {
 const HEIGHT = 120;
 const MARGIN = { top: 10, right: 12, bottom: 20, left: 44 };
 
+/** Green on easy ground, warming through orange to red as uphill grade rises. */
+function gradeColor(grade: number): string {
+  const magnitude = Math.abs(grade);
+  if (magnitude < 3) return '#3b9b62';
+  if (magnitude < 6) return grade < 0 ? '#54a6c7' : '#d4a52d';
+  if (magnitude < 12) return grade < 0 ? '#397fba' : '#e47f2c';
+  return grade < 0 ? '#315e9f' : '#d84b3e';
+}
+
 export function ElevationProfile({
   title,
   stats,
   data,
+  enrichment,
   onClose,
   onHoverPoint,
 }: ElevationProfileProps) {
@@ -82,6 +95,12 @@ export function ElevationProfile({
       .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.distM).toFixed(1)},${y(p.ele).toFixed(1)}`)
       .join('');
     const areaPath = `${linePath}L${x(maxDist).toFixed(1)},${innerH}L0,${innerH}Z`;
+    const segments = profile.slice(1).map((point, index) => {
+      const previous = profile[index]!;
+      const distanceM = point.distM - previous.distM;
+      const grade = distanceM > 0 ? ((point.ele - previous.ele) / distanceM) * 100 : 0;
+      return { previous, point, grade };
+    });
 
     const yTicks: number[] = [];
     for (let v = yMin; v <= yMax + 1e-9; v += yStep) yTicks.push(v);
@@ -89,7 +108,7 @@ export function ElevationProfile({
     const xTicks: number[] = [];
     for (let v = 0; v <= maxDist + 1e-9; v += xStep) xTicks.push(v);
 
-    return { maxDist, x, y, linePath, areaPath, yTicks, xTicks };
+    return { maxDist, x, y, areaPath, segments, yTicks, xTicks };
   }, [profile, innerW, innerH]);
 
   const setHover = (index: number | null) => {
@@ -129,6 +148,17 @@ export function ElevationProfile({
   };
 
   const hovered = hoverIndex !== null ? profile[hoverIndex] : undefined;
+  const hoveredPrevious =
+    hoverIndex !== null && hoverIndex > 0 ? profile[hoverIndex - 1] : undefined;
+  const hoveredGrade =
+    hovered && hoveredPrevious && hovered.distM > hoveredPrevious.distM
+      ? ((hovered.ele - hoveredPrevious.ele) / (hovered.distM - hoveredPrevious.distM)) * 100
+      : null;
+  const hoveredSurface = hovered ? routeSurfaceAt(enrichment, hovered.distM) : null;
+  const surfaces = useMemo(
+    () => routeSurfaceBreakdown(enrichment, profile.at(-1)?.distM ?? 0),
+    [enrichment, profile],
+  );
 
   return (
     <div className="elevation-panel" ref={containerRef}>
@@ -172,7 +202,17 @@ export function ElevationProfile({
                 </text>
               ))}
               <path d={chart.areaPath} className="profile-area" />
-              <path d={chart.linePath} className="profile-line" />
+              {chart.segments.map(({ previous, point, grade }, index) => (
+                <line
+                  key={index}
+                  x1={chart.x(previous.distM)}
+                  y1={chart.y(previous.ele)}
+                  x2={chart.x(point.distM)}
+                  y2={chart.y(point.ele)}
+                  className="profile-segment"
+                  stroke={gradeColor(grade)}
+                />
+              ))}
               {hovered && (
                 <g>
                   <line
@@ -201,6 +241,18 @@ export function ElevationProfile({
             >
               <strong>{Math.round(hovered.ele)} m</strong>
               <span>{fmtKm(hovered.distM)}</span>
+              {hoveredGrade !== null && <span>{hoveredGrade.toFixed(1)}% grade</span>}
+              {hoveredSurface && <span>{hoveredSurface}</span>}
+            </div>
+          )}
+          {surfaces.length > 0 && (
+            <div className="surface-breakdown" aria-label="Route surfaces">
+              <strong>Surface</strong>
+              {surfaces.map((surface) => (
+                <span key={surface.label}>
+                  {surface.label} {surface.percent}%
+                </span>
+              ))}
             </div>
           )}
         </div>

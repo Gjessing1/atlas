@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { viaInsertIndex } from './insert.js';
 import { routePathToTrackData, type RoutePath } from './model.js';
+import { trackToRoutePoints } from './track.js';
 import { optimizeWaypointOrder } from './optimize.js';
 import { sortRouteChoices } from './choices.js';
 import {
@@ -57,6 +58,34 @@ describe('routePathToTrackData', () => {
     expect(data.segments).toHaveLength(1);
     expect(data.segments[0]).toHaveLength(3);
     expect(data.waypoints).toEqual([]);
+  });
+});
+
+describe('trackToRoutePoints', () => {
+  it('keeps endpoints and the shape-defining bends within the waypoint cap', () => {
+    const points = Array.from({ length: 40 }, (_, i) => ({
+      lat: i < 20 ? 60 : 60 + (i - 19) * 0.001,
+      lng: 10 + Math.min(i, 19) * 0.001,
+    }));
+    const route = trackToRoutePoints({ segments: [points], waypoints: [] }, 6);
+    expect(route).toHaveLength(6);
+    expect(route[0]).toEqual(points[0]);
+    expect(route.at(-1)).toEqual(points.at(-1));
+    expect(route).toContainEqual(points[19]);
+  });
+
+  it('drops duplicate joins between GPX segments', () => {
+    const a = { lat: 60, lng: 10 };
+    const b = { lat: 60.1, lng: 10.1 };
+    expect(
+      trackToRoutePoints({
+        segments: [
+          [a, b],
+          [b, { lat: 60.2, lng: 10.2 }],
+        ],
+        waypoints: [],
+      }),
+    ).toHaveLength(3);
   });
 });
 

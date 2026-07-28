@@ -20,6 +20,8 @@ export const NAV_STOP_CATEGORIES: readonly { id: ExploreCategoryId; label: strin
   { id: 'fuel', label: 'Gas' },
   { id: 'charging', label: 'Charging' },
   { id: 'food', label: 'Food' },
+  { id: 'supermarket', label: 'Groceries' },
+  { id: 'rest-area', label: 'Rest area' },
 ];
 
 /** A candidate stop: a nearby POI projected onto the remaining route. */

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { AtlasStorage, StorageUnavailableError } from '@atlas/storage';
 import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
-import { parseKmz } from '@atlas/gpx';
+import { parseGpx, parseKmz } from '@atlas/gpx';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { unzipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
@@ -247,6 +247,44 @@ describe('useUserData', () => {
     expect(result.current.places).toHaveLength(1); // nothing was deleted
     act(() => result.current.clearWriteError());
     expect(result.current.writeError).toBeNull();
+  });
+
+  it('saves a generated route as a named, foldered, syncable GPX track', async () => {
+    const { storage, platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.createCollection('Weekend');
+    });
+    const folder = result.current.collections[0]!;
+
+    let savedId = '';
+    await act(async () => {
+      const saved = await result.current.saveTrack(
+        {
+          segments: [
+            [
+              { lat: 59.9, lng: 10.7, ele: 100 },
+              { lat: 59.91, lng: 10.71, ele: 125 },
+            ],
+          ],
+          waypoints: [],
+        },
+        'Oslo ride',
+        folder.id,
+      );
+      savedId = saved?.id ?? '';
+    });
+
+    expect(result.current.tracks).toMatchObject([
+      { id: savedId, name: 'Oslo ride', collectionId: folder.id },
+    ]);
+    const gpx = await storage.getTrackGpx(savedId);
+    expect(parseGpx(gpx!).name).toBe('Oslo ride');
+    expect(await storage.listOutbox()).toContainEqual(
+      expect.objectContaining({ entity: 'track', id: savedId, op: 'upsert' }),
+    );
   });
 
   it('offers an undo for each delete and restores the record on demand', async () => {

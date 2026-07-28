@@ -161,17 +161,17 @@ export function DestinationCard({
   const at = { lat: target.lat, lng: target.lng };
   const facts = usePlaceFacts(useServerOrigin(), at);
   const content = usePlaceContent(packs, target.name, at);
-  const hasArticleImage = content.content.some((article) => article.image);
-  // Photos of the *area*, for the common case of a place with no article of
-  // its own — until v0.99.0 such a place showed nothing at all. Dropped as soon
-  // as the article brings its own lead photo: one photo block per card.
-  const photos = useNearbyPhotos(at, !hasArticleImage);
+  const [photosOpen, setPhotosOpen] = useState(false);
+  // Photos are a deliberate feature beside Nearby places, not eager card
+  // decoration. Nothing is downloaded until that action is opened.
+  const photos = useNearbyPhotos(at, photosOpen);
   const [nearbyOpen, setNearbyOpen] = useState(false);
   const nearby = useNearbyPlaces(packs, at, nearbyOpen);
   // Every point is a new question — a list left open from the previous card
   // would describe somewhere the user has already moved on from.
   useEffect(() => {
     setNearbyOpen(false);
+    setPhotosOpen(false);
   }, [target.lat, target.lng]);
   /**
    * Reading is a bigger sheet than tapping "Directions".
@@ -210,18 +210,14 @@ export function DestinationCard({
       mode="map"
       onClose={onCancel}
       initialSnap="peek"
-      // Overlay answers need room of their own, and an article photo needs more
-      // still; without either the card keeps its three action rows exactly as
-      // before. The "Nearby places" row is always present, and the photo strip
-      // whenever the place has no article picture of its own — both are added
-      // here rather than left to push the actions off the peeked sheet.
+      // Overlay/article answers need room of their own. Photos no longer affect
+      // the initial card height: their peer action expands the sheet on demand.
       peekHeight={
-        (hasArticleImage ? 470 : identify.length > 0 || content.content.length > 0 ? 380 : 218) +
+        (identify.length > 0 || content.content.length > 0 ? 380 : 218) +
         52 +
         // Elevation is always a row; the light line is usually a second one and
         // wraps to two on a narrow phone.
         (facts.light ? 46 : 22) +
-        (!hasArticleImage && photos.photos.length > 0 ? 118 : 0) +
         // The explain block is several rows of reasoning; without its own
         // allowance it would push the actions off the peeked sheet.
         (potential ? 200 : 0)
@@ -282,13 +278,7 @@ export function DestinationCard({
         <Text style={styles.contentLoading}>Looking up local guide…</Text>
       ) : null}
       {content.content.length > 0 ? (
-        <ScrollView
-          // A photo needs room the text-only card never had, so the article
-          // area grows only when one is actually there.
-          style={[styles.content, hasArticleImage && styles.contentWithImage]}
-          bounces={false}
-          testID="destination-content"
-        >
+        <ScrollView style={styles.content} bounces={false} testID="destination-content">
           {content.content.map((article) => (
             <View key={`${article.source}/${article.url}`} style={styles.article}>
               <View style={styles.articleHead}>
@@ -303,65 +293,93 @@ export function DestinationCard({
                   <Text style={styles.articleLink}>Read article</Text>
                 </Pressable>
               </View>
-              {article.image ? (
-                <Pressable onPress={() => void Linking.openURL(article.url)}>
-                  <Image
-                    source={wikimediaSource(article.image.url)}
-                    style={styles.articleImage}
-                    resizeMode="cover"
-                    accessibilityLabel={article.title}
-                  />
-                </Pressable>
-              ) : null}
               <Text style={styles.articleText}>{article.extract}</Text>
             </View>
           ))}
         </ScrollView>
       ) : null}
 
-      {/* Photos taken near here (Wikimedia Commons). Labelled as *nearby* on
-          purpose: the closest photo may be of the building across the road. */}
-      {!hasArticleImage && photos.photos.length > 0 ? (
-        <View style={styles.photos} testID="destination-photos">
-          <Text style={styles.sectionLabel}>Photos nearby · Wikimedia Commons</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
-            {photos.photos.map((photo) => (
-              <Pressable
-                key={photo.pageUrl}
-                onPress={() => void Linking.openURL(photo.pageUrl)}
-                style={styles.photoTile}
-                accessibilityLabel={`${photo.title}${photo.credit ? `, ${photo.credit}` : ''}`}
-              >
-                <Image
-                  source={wikimediaSource(photo.url)}
-                  style={styles.photo}
-                  resizeMode="cover"
-                />
-                {photo.distanceM !== null ? (
-                  <Text style={styles.photoDistance}>{fmtDistanceM(photo.distanceM)}</Text>
-                ) : null}
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
+      {/* Photos and described places are peer actions. Images no longer load
+          into every marker card or displace its primary actions. */}
+      <View style={styles.nearbyButtons}>
+        <Pressable
+          style={[styles.nearbyToggle, photosOpen && styles.nearbyToggleOpen]}
+          onPress={() => {
+            const opening = !photosOpen;
+            setPhotosOpen(opening);
+            if (opening) expand();
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: photosOpen }}
+          testID="destination-photos-toggle"
+        >
+          <Text style={styles.nearbyToggleText}>◫ Photos nearby</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.nearbyToggle, nearbyOpen && styles.nearbyToggleOpen]}
+          onPress={() => {
+            const opening = !nearbyOpen;
+            setNearbyOpen(opening);
+            if (opening) expand();
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: nearbyOpen }}
+          testID="destination-nearby-toggle"
+        >
+          <WikiBadge />
+          <Text style={styles.nearbyToggleText}>Nearby places</Text>
+        </Pressable>
+      </View>
+      {photosOpen ? (
+        photos.status === 'loading' && !content.content.some((article) => article.image) ? (
+          <Text style={styles.contentLoading}>Looking for photos…</Text>
+        ) : photos.photos.length === 0 && !content.content.some((article) => article.image) ? (
+          <Text style={styles.contentLoading}>No nearby photos found.</Text>
+        ) : (
+          <View style={styles.photos} testID="destination-photos">
+            <Text style={styles.sectionLabel}>Wikimedia Commons</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
+              {content.content
+                .filter((article) => article.image)
+                .map((article) => (
+                  <Pressable
+                    key={article.url}
+                    onPress={() => void Linking.openURL(article.url)}
+                    style={styles.photoTile}
+                    accessibilityLabel={article.title}
+                  >
+                    <Image
+                      source={wikimediaSource(article.image!.url)}
+                      style={styles.photo}
+                      resizeMode="cover"
+                    />
+                    <Text style={styles.photoDistance}>Article</Text>
+                  </Pressable>
+                ))}
+              {photos.photos.map((photo) => (
+                <Pressable
+                  key={photo.pageUrl}
+                  onPress={() => void Linking.openURL(photo.pageUrl)}
+                  style={styles.photoTile}
+                  accessibilityLabel={`${photo.title}${photo.credit ? `, ${photo.credit}` : ''}`}
+                >
+                  <Image
+                    source={wikimediaSource(photo.url)}
+                    style={styles.photo}
+                    resizeMode="cover"
+                  />
+                  {photo.distanceM !== null ? (
+                    <Text style={styles.photoDistance}>{fmtDistanceM(photo.distanceM)}</Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )
       ) : null}
 
       {/* Described places around this spot — the question a name lookup cannot
           answer, since most POIs have no article of their own. */}
-      <Pressable
-        style={[styles.nearbyToggle, nearbyOpen && styles.nearbyToggleOpen]}
-        onPress={() => {
-          const opening = !nearbyOpen;
-          setNearbyOpen(opening);
-          if (opening) expand();
-        }}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: nearbyOpen }}
-        testID="destination-nearby-toggle"
-      >
-        <WikiBadge />
-        <Text style={styles.nearbyToggleText}>Nearby places</Text>
-      </Pressable>
       {nearbyOpen ? (
         nearby.status === 'loading' ? (
           <Text style={styles.contentLoading}>Looking around…</Text>
@@ -475,7 +493,6 @@ const styles = StyleSheet.create({
   identifyValue: { flex: 1, fontSize: 13, color: theme.text, fontWeight: '600' },
   contentLoading: { marginTop: 12, color: theme.textMuted, fontSize: 13 },
   content: { maxHeight: 150, marginTop: 12 },
-  contentWithImage: { maxHeight: 280 },
   article: { marginBottom: 10 },
   articleHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   articleSourceRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
@@ -508,11 +525,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   nearbyToggle: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -520,6 +535,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.border,
   },
+  nearbyButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   nearbyToggleOpen: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   nearbyToggleText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   nearbyList: { maxHeight: 200, marginTop: 6 },
@@ -531,13 +547,6 @@ const styles = StyleSheet.create({
   nearbyTitle: { flexShrink: 1, color: theme.text, fontSize: 14, fontWeight: '700' },
   nearbyExtract: { color: theme.textMuted, fontSize: 11, lineHeight: 15, marginTop: 1 },
   articleLink: { color: theme.accent, fontWeight: '700', fontSize: 12 },
-  articleImage: {
-    width: '100%',
-    height: 130,
-    borderRadius: 8,
-    marginTop: 6,
-    backgroundColor: theme.surfaceMuted,
-  },
   articleText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {

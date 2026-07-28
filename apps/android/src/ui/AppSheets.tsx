@@ -60,6 +60,8 @@ interface AppSheetsProps {
   onPickDestination: (target: DestinationTarget) => void;
   /** Frame a track on the map (a track row's name, in either sheet). */
   onShowTrack: (track: TrackRecord) => void;
+  /** Convert a stored/imported track to an editable snapped route. */
+  onPlanTrack: (track: TrackRecord) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
   /** Resolve an iNatur permit link/id and import its boundary as a track. */
   onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
@@ -100,6 +102,7 @@ export function AppSheets({
   onDrawRegion,
   onPickDestination,
   onShowTrack,
+  onPlanTrack,
   onImportTracks,
   onImportInatur,
 }: AppSheetsProps) {
@@ -135,6 +138,7 @@ export function AppSheets({
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
         onShowTrack={onShowTrack}
+        onPlanTrack={onPlanTrack}
         onPatchTrack={(id, patch) => void data.updateTrack(id, patch)}
         onDeleteTrack={(id) => void data.deleteTrack(id)}
         onExportTrack={(id, format) => void data.exportTrack(id, format)}
@@ -164,6 +168,10 @@ export function AppSheets({
         onSetVisible={(id, v) => void data.updateTrack(id, { visible: v })}
         onRename={(id, name) => void data.updateTrack(id, { name })}
         onExport={(id, format) => void data.exportTrack(id, format)}
+        onPlan={(track) => {
+          onCloseTracks();
+          onPlanTrack(track);
+        }}
         onDelete={(id) => void data.deleteTrack(id)}
         collections={data.collections}
         onImport={onImportTracks}

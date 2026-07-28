@@ -148,6 +148,7 @@ export function FavoritesSheet({
   onPatch,
   onDelete,
   onShowTrack,
+  onPlanTrack,
   onPatchTrack,
   onDeleteTrack,
   onExportTrack,
@@ -173,6 +174,7 @@ export function FavoritesSheet({
   onDelete: (id: string) => void;
   /** Frame a track on the map (the row's name, like web's track row). */
   onShowTrack: (track: TrackRecord) => void;
+  onPlanTrack: (track: TrackRecord) => void;
   onPatchTrack: (id: string, patch: EditableTrackPatch) => void;
   onDeleteTrack: (id: string) => void;
   onExportTrack: (id: string, format: 'gpx' | 'kml') => void;
@@ -428,6 +430,16 @@ export function FavoritesSheet({
             folders={flatFolders}
             actions={
               <>
+                <Pressable
+                  style={[styles.button, styles.buttonQuiet]}
+                  onPress={() => {
+                    onPlanTrack(track);
+                    onClose();
+                  }}
+                  testID={`track-plan-${track.id}`}
+                >
+                  <Text style={styles.buttonQuietText}>Plan route</Text>
+                </Pressable>
                 <Pressable
                   style={[styles.button, styles.buttonQuiet]}
                   onPress={() => onExportTrack(track.id, 'gpx')}

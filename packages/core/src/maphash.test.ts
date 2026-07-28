@@ -58,6 +58,21 @@ describe('map hash', () => {
     expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
   });
 
+  it('round-trips an explicit loop direction', () => {
+    const state = {
+      center: { lat: 59.91, lng: 10.75 },
+      zoom: 10,
+      route: {
+        profile: 'bike',
+        points: [{ lat: 59.91, lng: 10.75 }],
+        roundTripKm: 30,
+        roundTripDirection: 'counterclockwise' as const,
+      },
+    };
+    expect(encodeMapHash(state)).toContain('&loop=30&loopdir=ccw');
+    expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
+  });
+
   it('keeps the stops of a loop that has some', () => {
     const plan = decodeMapHash(
       '#map=10/59.91/10.75&route=car/59.91,10.75/60.1,10.9&loop=12',

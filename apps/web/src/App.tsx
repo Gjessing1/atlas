@@ -33,7 +33,7 @@ import {
 } from '@atlas/app-hooks';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
-import { isRoutingProfile, routePathToTrackData } from '@atlas/routing';
+import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -557,6 +557,30 @@ export function App() {
     [getTrackData],
   );
 
+  const planTrack = useCallback(
+    (track: TrackRecord) => {
+      void getTrackData(track.id).then((data) => {
+        if (!data) return;
+        const points = trackToRoutePoints(data);
+        if (points.length < 2) return;
+        setSidebarOpen(false);
+        setSelectedTrack(null);
+        route.restore({
+          profile: route.profile,
+          waypoints: points.map((pos, index) => ({
+            pos,
+            ...(index === 0
+              ? { name: `${track.name} start` }
+              : index === points.length - 1
+                ? { name: `${track.name} finish` }
+                : {}),
+          })),
+        });
+      });
+    },
+    [getTrackData, route],
+  );
+
   const onImported = useCallback(
     (result: ImportResult) => {
       const first = result.tracks[0];
@@ -1034,11 +1058,15 @@ export function App() {
             route={route}
             transit={transit}
             places={userData.places}
+            collections={userData.collections}
             getBias={getBias}
             getMyLocation={getMyLocation}
             locatingOrigin={directions.locatingOrigin}
             fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
+            onSaveTrack={async (data, name, collectionId) =>
+              (await userData.saveTrack(data, name, collectionId)) !== null
+            }
           />
         )}
         {sidebarOpen && (
@@ -1049,6 +1077,7 @@ export function App() {
             onRevealed={onRevealed}
             onShowPlace={showPlace}
             onShowTrack={showTrack}
+            onPlanTrack={planTrack}
             onGoToPlace={goToPlace}
             onImported={onImported}
             onClose={() => setSidebarOpen(false)}
@@ -1068,8 +1097,8 @@ export function App() {
             onClose={() => setSettingsOpen(false)}
           />
         )}
-        {/* Valhalla routes carry no elevation data — skip the profile rather
-            than draw an empty chart. */}
+        {/* Route detail samples terrain heights; outside coverage, skip the
+            profile rather than draw an empty chart. */}
         {routePath &&
         routeTrackData &&
         !routeProfileHidden &&
@@ -1083,6 +1112,7 @@ export function App() {
               durationMs: routePath.timeMs,
             }}
             data={routeTrackData}
+            enrichment={routePath.enrichment}
             onClose={() => setRouteProfileHidden(true)}
             onHoverPoint={onProfileHover}
           />

@@ -41,6 +41,8 @@ export function routeStopCategories(
     ? [
         { id: 'fuel', label: 'Gas' },
         { id: 'charging', label: 'Charging' },
+        { id: 'supermarket', label: 'Groceries' },
+        { id: 'rest-area', label: 'Rest area' },
         { id: 'food', label: 'Food' },
         { id: 'coffee', label: 'Coffee' },
         { id: 'essentials', label: 'Essentials' },

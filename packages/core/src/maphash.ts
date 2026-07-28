@@ -16,6 +16,7 @@ export interface RoutePlanState {
   points: LatLng[];
   /** Round-trip loop length in km — set when the plan comes home to its start. */
   roundTripKm?: number;
+  roundTripDirection?: 'either' | 'clockwise' | 'counterclockwise';
 }
 
 /** Shareable map view: camera position, an optional dropped pin, an optional route plan. */
@@ -40,7 +41,12 @@ export function encodeMapHash(state: MapViewState): string {
   if (plan && plan.points.length > 0 && /^[a-z_-]+$/.test(plan.profile)) {
     const points = plan.points.map((p) => `${round(p.lat, 5)},${round(p.lng, 5)}`).join('/');
     hash += `&route=${plan.profile}/${points}`;
-    if (plan.roundTripKm !== undefined) hash += `&loop=${round(plan.roundTripKm, 2)}`;
+    if (plan.roundTripKm !== undefined) {
+      hash += `&loop=${round(plan.roundTripKm, 2)}`;
+      if (plan.roundTripDirection && plan.roundTripDirection !== 'either') {
+        hash += `&loopdir=${plan.roundTripDirection === 'clockwise' ? 'cw' : 'ccw'}`;
+      }
+    }
   }
   return hash;
 }
@@ -65,6 +71,10 @@ function decodeRoutePlan(hash: string): RoutePlanState | null {
     // "40 km ride past the lake" must reopen as that ride, not as a line out to
     // the lake with the loop silently dropped.
     if (Number.isFinite(km) && km > 0) plan.roundTripKm = km;
+    const direction = /[#&]loopdir=(cw|ccw)/.exec(hash)?.[1];
+    if (direction) {
+      plan.roundTripDirection = direction === 'cw' ? 'clockwise' : 'counterclockwise';
+    }
   }
   return plan;
 }

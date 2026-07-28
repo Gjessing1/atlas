@@ -29,6 +29,8 @@ export interface RoutePreferences {
   avoidTolls: boolean;
   avoidHills: boolean;
   preferTrails: boolean;
+  /** Prefer a paved route where the graph offers a reasonable alternative. */
+  avoidUnpaved: boolean;
 }
 
 /** Atlas defaults, including the long-standing ferry avoidance off the road network. */
@@ -39,8 +41,12 @@ export function defaultRoutePreferences(profile: RoutingProfile): RoutePreferenc
     avoidTolls: false,
     avoidHills: false,
     preferTrails: false,
+    avoidUnpaved: false,
   };
 }
+
+/** Which way a synthesized loop should travel around its start. */
+export type RoundTripDirection = 'either' | 'clockwise' | 'counterclockwise';
 
 /**
  * Narrow an untrusted string (a share link's hash, a restored setting) to a
@@ -59,6 +65,11 @@ export interface RouteQuery {
   alternatives?: boolean;
   /** Ask for turn-by-turn instructions (needed for navigation; off by default). */
   instructions?: boolean;
+  /**
+   * Ask the platform adapter for sampled elevation and surface attribution.
+   * This is an Atlas-only flag and is never sent in the Valhalla request.
+   */
+  details?: boolean;
   /**
    * Travel direction (deg, 0 = north) at the first waypoint. Navigation
    * reroutes pass the current course so the new route continues the way the
@@ -82,6 +93,8 @@ export interface RouteQuery {
     distanceM: number;
     /** Vary the seed to get a different loop for the same distance. */
     seed?: number;
+    /** Hold the loop's travel direction while varying its shape. */
+    direction?: RoundTripDirection;
   };
 }
 
@@ -224,6 +237,29 @@ export interface RoutePath {
    * traveller cannot start whenever they like.
    */
   hasFerry?: boolean;
+  /**
+   * OSM/Valhalla road attributes aligned to distance along this path. Planner
+   * routes fill these for the surface breakdown; navigation consumes the same
+   * shape through RouteEnrichment.
+   */
+  enrichment?: RouteEnrichment;
+}
+
+/** Road attributes that hold over one stretch of a routed path. */
+export interface RouteEnrichmentSegment {
+  startM: number;
+  endM: number;
+  speedLimitKph?: number;
+  tunnel?: boolean;
+  roadClass?: string;
+  name?: string;
+  /** Valhalla surface value (`paved_smooth`, `gravel`, `dirt`, …). */
+  surface?: string;
+}
+
+/** Road attributes for a whole route, ordered by start distance. */
+export interface RouteEnrichment {
+  segments: RouteEnrichmentSegment[];
 }
 
 /** A successful routing response: the primary path first, then alternatives. */

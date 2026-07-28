@@ -1,9 +1,12 @@
 export type {
   RoutingProfile,
   RoutingProfileInfo,
+  RoundTripDirection,
   RoutePreferences,
   RouteQuery,
   RoutePath,
+  RouteEnrichment,
+  RouteEnrichmentSegment,
   RouteResult,
   RouteInstruction,
   RouteLane,
@@ -27,6 +30,7 @@ export {
 export {
   fetchRoute,
   httpTraceTransport,
+  httpElevationProfile,
   httpNvdbLimits,
   httpNvdbCameras,
   RoutingError,
@@ -34,6 +38,12 @@ export {
   type NvdbLimitTransport,
   type NvdbCameraTransport,
 } from './client.js';
+export {
+  enrichPlannedPath,
+  enrichPlannedResult,
+  routeProfileIndexes,
+  type RouteElevationTransport,
+} from './planning.js';
 export {
   conflateCameras,
   type CameraConflationOptions,
@@ -54,8 +64,6 @@ export {
   tunnelAt,
   tunnelNear,
   type EnrichRouteOptions,
-  type RouteEnrichment,
-  type RouteEnrichmentSegment,
   type RouteTunnel,
 } from './enrich.js';
 export {
@@ -75,6 +83,13 @@ export { optimizeWaypointOrder } from './optimize.js';
 export { pathViaLabels } from './via.js';
 export { sortRouteChoices } from './choices.js';
 export { viaInsertIndex } from './insert.js';
+export { trackToRoutePoints } from './track.js';
+export {
+  routeSurfaceAt,
+  routeSurfaceBreakdown,
+  routeSurfaceLabel,
+  type RouteSurfaceShare,
+} from './surface.js';
 export {
   distanceToRouteM,
   photonBbox,

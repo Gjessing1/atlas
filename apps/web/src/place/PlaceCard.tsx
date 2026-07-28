@@ -65,40 +65,6 @@ interface PlaceCardProps {
 }
 
 /**
- * The article's lead photo, linked to the article like the "Read article" line
- * beside it — a photo is how you recognise a place, so the Wikipedia block is
- * not text-only when we are online.
- *
- * It reserves its aspect ratio up front (no reflow when the image lands) and
- * removes itself if the file fails to load: a broken-image glyph in the middle
- * of a card is worse than no photo at all, and Commons files do get renamed.
- */
-function ArticleImage({ article }: { article: PlaceContent }) {
-  const [failed, setFailed] = useState(false);
-  const image = article.image;
-  // Reset when the card moves on to a different article.
-  useEffect(() => setFailed(false), [image?.url]);
-  if (!image || failed) return null;
-  return (
-    <a
-      className="place-card-content-image"
-      href={article.url}
-      target="_blank"
-      rel="noreferrer"
-      style={{ aspectRatio: `${image.width} / ${image.height}` }}
-    >
-      <img
-        src={image.url}
-        alt={article.title}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
-      />
-    </a>
-  );
-}
-
-/**
  * The Wikipedia "W" — the same mark on the article head and on every nearby row,
  * so "there is something to read here" is one recognisable thing across the card
  * (and, in the nearby list, tells the described places from the rest at a glance).
@@ -120,8 +86,9 @@ function WikiBadge() {
  * distance, because the nearest photo may well be of the building opposite;
  * clicking through goes to the Commons file page with the full licence.
  */
-function NearbyPhotos({ photos }: { photos: PlacePhoto[] }) {
-  if (photos.length === 0) return null;
+function NearbyPhotos({ photos, articles }: { photos: PlacePhoto[]; articles: PlaceContent[] }) {
+  const picturedArticles = articles.filter((article) => article.image);
+  if (photos.length === 0 && picturedArticles.length === 0) return null;
   return (
     <section className="place-card-photos">
       <div className="place-card-content-head">
@@ -131,6 +98,23 @@ function NearbyPhotos({ photos }: { photos: PlacePhoto[] }) {
         </a>
       </div>
       <div className="place-card-photo-strip">
+        {picturedArticles.map((article) => (
+          <a
+            key={article.url}
+            href={article.url}
+            target="_blank"
+            rel="noreferrer"
+            title={article.title}
+          >
+            <img
+              src={article.image!.url}
+              alt={article.title}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+            <span>Article</span>
+          </a>
+        ))}
         {photos.map((photo) => (
           <a
             key={photo.pageUrl}
@@ -154,32 +138,60 @@ function NearbyPhotos({ photos }: { photos: PlacePhoto[] }) {
  * Collapsed by default and fetched only when opened — one more Wikimedia round
  * trip per card, on a card that is usually opened to get directions.
  */
-function NearbyArticles({
+function NearbyFeatures({
   at,
+  articles,
   onShowNearby,
 }: {
   at: LatLng;
+  articles: PlaceContent[];
   onShowNearby: (place: NearbyPlaceArticle) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const nearby = useNearbyPlaces(at, open);
+  const [placesOpen, setPlacesOpen] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
+  const nearby = useNearbyPlaces(at, placesOpen);
+  const photos = useNearbyPhotos(at, photosOpen);
+  const hasPhotos = photos.photos.length > 0 || articles.some((article) => article.image);
+  useEffect(() => {
+    setPlacesOpen(false);
+    setPhotosOpen(false);
+  }, [at.lat, at.lng]);
 
   return (
     <section className="place-card-nearby">
-      <button
-        type="button"
-        className="place-card-nearby-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <WikiBadge />
-        Nearby places
-      </button>
-      {open && nearby.status === 'loading' && <p className="place-card-sub">Looking around…</p>}
-      {open && nearby.status === 'ready' && nearby.places.length === 0 && (
+      <div className="place-card-nearby-buttons">
+        <button
+          type="button"
+          className="place-card-nearby-toggle"
+          aria-expanded={photosOpen}
+          onClick={() => setPhotosOpen((value) => !value)}
+        >
+          ◫ Photos nearby
+        </button>
+        <button
+          type="button"
+          className="place-card-nearby-toggle"
+          aria-expanded={placesOpen}
+          onClick={() => setPlacesOpen((value) => !value)}
+        >
+          <WikiBadge />
+          Nearby places
+        </button>
+      </div>
+      {photosOpen && photos.status === 'loading' && !hasPhotos && (
+        <p className="place-card-sub">Looking for photos…</p>
+      )}
+      {photosOpen && photos.status === 'ready' && !hasPhotos && (
+        <p className="place-card-sub">No nearby photos found.</p>
+      )}
+      {photosOpen && <NearbyPhotos photos={photos.photos} articles={articles} />}
+      {placesOpen && nearby.status === 'loading' && (
+        <p className="place-card-sub">Looking around…</p>
+      )}
+      {placesOpen && nearby.status === 'ready' && nearby.places.length === 0 && (
         <p className="place-card-sub">Nothing described within a couple of kilometres.</p>
       )}
-      {open && nearby.places.length > 0 && (
+      {placesOpen && nearby.places.length > 0 && (
         <ul>
           {nearby.places.map((place) => (
             <li key={place.url}>
@@ -349,10 +361,6 @@ export function PlaceCard({
   // cannot end up with different halves of the pair (§7.2).
   const { elevation, light } = usePlaceFacts('', target.position);
   const placeContent = usePlaceContent(target.name, target.position);
-  const hasArticleImage = placeContent.content.some((article) => article.image);
-  // Asked as the card opens, and dropped as soon as the article's own lead
-  // photo lands — a card shows one photo block, never two.
-  const photos = useNearbyPhotos(target.position, !hasArticleImage);
 
   return (
     <div className={`place-card${shifted ? ' place-card-shifted' : ''}`} role="dialog">
@@ -409,14 +417,16 @@ export function PlaceCard({
               Read article
             </a>
           </div>
-          <ArticleImage article={article} />
           <p>{article.extract}</p>
         </section>
       ))}
-      {/* Only when the article did not bring its own photo — one photo block
-          per card, and the article's own picture is the better one. */}
-      {!hasArticleImage && <NearbyPhotos photos={photos.photos} />}
-      <NearbyArticles at={target.position} onShowNearby={onShowNearby} />
+      {/* Images stay behind their own deliberate action: opening a marker card
+          no longer spends bandwidth or lets a photo push its actions away. */}
+      <NearbyFeatures
+        at={target.position}
+        articles={placeContent.content}
+        onShowNearby={onShowNearby}
+      />
       <div className="place-card-actions">
         <button type="button" className="primary" onClick={onDirections}>
           Directions

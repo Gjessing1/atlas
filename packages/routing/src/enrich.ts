@@ -1,7 +1,14 @@
 import { haversineM, type LatLng } from '@atlas/core';
 
-import type { RoutePath, RoutingProfile } from './model.js';
+import type {
+  RouteEnrichment,
+  RouteEnrichmentSegment,
+  RoutePath,
+  RoutingProfile,
+} from './model.js';
 import type { ValhallaTransport } from './provider.js';
+
+export type { RouteEnrichment, RouteEnrichmentSegment } from './model.js';
 
 /**
  * Route enrichment — per-edge road attributes aligned to distance along a
@@ -20,31 +27,6 @@ import type { ValhallaTransport } from './provider.js';
  * the same enrichment survives display prediction and dead reckoning, which
  * both move a distance, not an index.
  */
-
-/** Road attributes that hold over one stretch of the route. */
-export interface RouteEnrichmentSegment {
-  /** Distance (m) along the route where this stretch begins (inclusive). */
-  startM: number;
-  /** Distance (m) along the route where it ends (exclusive, except the last). */
-  endM: number;
-  /**
-   * Posted limit in km/h. Absent where the tiles carry no limit for the edge —
-   * roughly 5 % of edges — which callers must render as "unknown", never as
-   * the last known value.
-   */
-  speedLimitKph?: number;
-  /** True on edges tagged as tunnels. */
-  tunnel?: boolean;
-  /** Valhalla road class (`motorway`, `trunk`, `residential`, …). */
-  roadClass?: string;
-  /** Primary road name on the edge, when it has one. */
-  name?: string;
-}
-
-/** Road attributes for a whole route, ordered by `startM` and non-overlapping. */
-export interface RouteEnrichment {
-  segments: RouteEnrichmentSegment[];
-}
 
 /** Valhalla costing model for an Atlas profile — trace_attributes needs one too. */
 function costingFor(profile: RoutingProfile): string {
@@ -70,6 +52,7 @@ const ATTRIBUTE_FILTERS = [
   'edge.tunnel',
   'edge.road_class',
   'edge.names',
+  'edge.surface',
   'edge.begin_shape_index',
   'edge.end_shape_index',
 ];
@@ -102,6 +85,7 @@ interface ValhallaTraceEdge {
   tunnel?: boolean;
   road_class?: string;
   names?: string[];
+  surface?: string;
   begin_shape_index?: number;
   end_shape_index?: number;
 }
@@ -121,7 +105,8 @@ function sameAttributes(a: RouteEnrichmentSegment, b: RouteEnrichmentSegment): b
     a.speedLimitKph === b.speedLimitKph &&
     a.tunnel === b.tunnel &&
     a.roadClass === b.roadClass &&
-    a.name === b.name
+    a.name === b.name &&
+    a.surface === b.surface
   );
 }
 
@@ -166,6 +151,9 @@ export function parseTraceAttributes(
     }
     const name = raw.names?.find((n) => typeof n === 'string' && n.length > 0);
     if (name) segment.name = name;
+    if (typeof raw.surface === 'string' && raw.surface.length > 0) {
+      segment.surface = raw.surface;
+    }
     out.push(segment);
   }
 

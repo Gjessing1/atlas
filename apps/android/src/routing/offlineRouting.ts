@@ -26,9 +26,12 @@ import { makeValhallaConfig } from './valhallaConfig';
 /** The points a query will actually route through — round trips synthesize vias. */
 function queryPoints(query: RouteQuery): LatLng[] {
   return query.roundTrip
-    ? roundTripLocations(query.points, query.roundTrip.distanceM, query.roundTrip.seed ?? 0).map(
-        (stop) => stop.pos,
-      )
+    ? roundTripLocations(
+        query.points,
+        query.roundTrip.distanceM,
+        query.roundTrip.seed ?? 0,
+        query.roundTrip.direction,
+      ).map((stop) => stop.pos)
     : query.points;
 }
 

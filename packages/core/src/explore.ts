@@ -2,7 +2,16 @@ import { haversineM, type LatLng } from './geo.js';
 import type { SearchResult } from './search.js';
 
 export type ExploreCategoryId =
-  'food' | 'coffee' | 'sights' | 'nature' | 'shops' | 'essentials' | 'fuel' | 'charging';
+  | 'food'
+  | 'coffee'
+  | 'sights'
+  | 'nature'
+  | 'shops'
+  | 'essentials'
+  | 'fuel'
+  | 'charging'
+  | 'supermarket'
+  | 'rest-area';
 
 export interface ExploreCategory {
   id: ExploreCategoryId;
@@ -44,6 +53,12 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
   // pharmacies to find it.
   { id: 'fuel', label: 'Gas', osmTags: ['amenity/fuel'] },
   { id: 'charging', label: 'Charging', osmTags: ['amenity/charging_station'] },
+  { id: 'supermarket', label: 'Groceries', osmTags: ['shop/supermarket', 'shop/convenience'] },
+  {
+    id: 'rest-area',
+    label: 'Rest areas',
+    osmTags: ['highway/rest_area', 'highway/services', 'tourism/picnic_site'],
+  },
 ];
 
 export function isExploreCategory(value: unknown): value is ExploreCategoryId {

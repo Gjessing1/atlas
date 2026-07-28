@@ -111,8 +111,20 @@ export async function mockRouting(page: Page): Promise<void> {
             end_shape_index: shape.length - 1,
             speed_limit: 60,
             road_class: 'primary',
+            surface: 'paved_smooth',
           },
         ],
+      },
+    });
+  });
+  await page.route('**/api/elevation/profile', (route) => {
+    const body = route.request().postDataJSON() as { points?: unknown[] };
+    const points = body.points ?? [];
+    return route.fulfill({
+      json: {
+        samples: points.map((_, index) => ({
+          elevationM: 100 + Math.sin((index / Math.max(points.length - 1, 1)) * Math.PI) * 40,
+        })),
       },
     });
   });

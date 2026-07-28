@@ -8,6 +8,7 @@ import {
   type RouteQuery,
   type RoutePreferences,
   type RouteResult,
+  type RoundTripDirection,
   type RoutingProfile,
 } from '@atlas/routing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -33,6 +34,7 @@ export interface StoredRoutePlan {
   profile: RoutingProfile;
   waypoints: { pos: LatLng; name?: string }[];
   roundTripKm?: number;
+  roundTripDirection?: RoundTripDirection;
   /** Custom costing choices for this profile. */
   preferences?: Partial<RoutePreferences>;
 }
@@ -62,6 +64,7 @@ export interface RoutePlanner {
   waypoints: RouteWaypoint[];
   roundTrip: boolean;
   roundTripKm: number;
+  roundTripDirection: RoundTripDirection;
   /** Routed paths (primary first, then alternatives); null while unroutable. */
   paths: RoutePath[] | null;
   selectedPath: number;
@@ -133,6 +136,7 @@ export interface RoutePlanner {
   optimize: () => void;
   setRoundTrip: (on: boolean) => void;
   setRoundTripKm: (km: number) => void;
+  setRoundTripDirection: (direction: RoundTripDirection) => void;
   /** Ask for a different loop of the same length. */
   newLoop: () => void;
   selectPath: (index: number) => void;
@@ -151,6 +155,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const [waypoints, setWaypoints] = useState<RouteWaypoint[]>([]);
   const [roundTrip, setRoundTripState] = useState(false);
   const [roundTripKm, setRoundTripKm] = useState(10);
+  const [roundTripDirection, setRoundTripDirection] = useState<RoundTripDirection>('either');
   const [seed, setSeed] = useState(0);
   const [paths, setPaths] = useState<RoutePath[] | null>(null);
   const [selectedPath, setSelectedPath] = useState(0);
@@ -191,13 +196,19 @@ export function useRoute(route: RouteFn): RoutePlanner {
             // Every stop, not just the anchor: a loop through the places the
             // traveller planned, sized to the requested distance.
             points: waypoints.map((w) => w.pos),
-            roundTrip: { distanceM: roundTripKm * 1000, seed },
+            details: true,
+            roundTrip: {
+              distanceM: roundTripKm * 1000,
+              seed,
+              direction: roundTripDirection,
+            },
           }
         : {
             profile,
             preferences,
             points: waypoints.map((w) => w.pos),
             alternatives: waypoints.length === 2,
+            details: true,
             // Street names ride on instructions — needed for "via …" labels
             // that tell the alternatives apart in the panel. Walk, hike and
             // cycle routes ask for them however many stops there are: a ferry
@@ -224,7 +235,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [active, profile, preferences, waypoints, roundTrip, roundTripKm, seed]);
+  }, [active, profile, preferences, waypoints, roundTrip, roundTripKm, roundTripDirection, seed]);
 
   // Trip time for *every* mode, for the picker's "🚗 24 min · 🚲 1 h 10" row.
   // The main effect above only routes the selected profile; this fills in the
@@ -297,7 +308,10 @@ export function useRoute(route: RouteFn): RoutePlanner {
           : otherProfiles;
       });
       setRoundTripState(loop);
-      if (loop) setRoundTripKm(plan.roundTripKm!);
+      if (loop) {
+        setRoundTripKm(plan.roundTripKm!);
+        setRoundTripDirection(plan.roundTripDirection ?? 'either');
+      }
       setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name)));
     },
     [nextWaypoint],
@@ -313,8 +327,16 @@ export function useRoute(route: RouteFn): RoutePlanner {
       custom && Object.keys(custom).length > 0
         ? { profile, waypoints: stops, preferences: custom }
         : { profile, waypoints: stops };
-    return roundTrip ? { ...base, roundTripKm } : base;
-  }, [active, profile, preferencesByProfile, waypoints, roundTrip, roundTripKm]);
+    return roundTrip ? { ...base, roundTripKm, roundTripDirection } : base;
+  }, [
+    active,
+    profile,
+    preferencesByProfile,
+    waypoints,
+    roundTrip,
+    roundTripKm,
+    roundTripDirection,
+  ]);
 
   const setPreference = useCallback(
     <K extends keyof RoutePreferences>(key: K, value: RoutePreferences[K]) => {
@@ -330,6 +352,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     setActive(false);
     setWaypoints([]);
     setRoundTripState(false);
+    setRoundTripDirection('either');
     setPaths(null);
     setError(null);
   }, []);
@@ -444,6 +467,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     waypoints,
     roundTrip,
     roundTripKm,
+    roundTripDirection,
     paths,
     selectedPath,
     loading,
@@ -468,6 +492,7 @@ export function useRoute(route: RouteFn): RoutePlanner {
     optimize,
     setRoundTrip,
     setRoundTripKm,
+    setRoundTripDirection,
     newLoop,
     selectPath: setSelectedPath,
   };

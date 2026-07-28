@@ -151,6 +151,21 @@ describe('buildValhallaRequest', () => {
         avoid_bad_surfaces: 0,
       },
     });
+
+    expect(
+      buildValhallaRequest({
+        profile: 'bike',
+        points: [oslo, sognsvann],
+        preferences: { avoidHighways: true, avoidUnpaved: true },
+      })['costing_options'],
+    ).toEqual({
+      bicycle: {
+        use_ferry: 0,
+        use_roads: 0.05,
+        bicycle_type: 'road',
+        avoid_bad_surfaces: 0.9,
+      },
+    });
   });
 
   it('keeps ferries off walking and cycling routes, but not driving ones', () => {
@@ -291,6 +306,13 @@ describe('roundTripLocations', () => {
     const a2 = roundTripLocations([oslo], 5000, 1);
     expect(a).toEqual(a2);
     expect(a[1]).not.toEqual(b[1]);
+  });
+
+  it('honours clockwise and counterclockwise loop direction', () => {
+    const clockwise = roundTripLocations([oslo], 5000, 2, 'clockwise');
+    const counter = roundTripLocations([oslo], 5000, 2, 'counterclockwise');
+    expect(clockwise[1]).not.toEqual(counter[1]);
+    expect(clockwise.at(-1)).toEqual(counter.at(-1));
   });
 
   it('keeps a planned destination as a stop and comes home the long way', () => {

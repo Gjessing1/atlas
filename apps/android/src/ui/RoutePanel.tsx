@@ -18,14 +18,16 @@ import {
   type FetchNearbyFn,
   type StopGeocodeFn,
 } from '@atlas/app-hooks';
+import type { TrackData } from '@atlas/gpx';
 import {
   pathViaLabels,
   ROUTING_PROFILES,
   routePathToTrackData,
+  routeSurfaceBreakdown,
   type RoutePath,
   type RoutePreferences,
 } from '@atlas/routing';
-import type { PlaceRecord } from '@atlas/storage';
+import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -45,6 +47,7 @@ import type { TransitPlan } from '../routing/useTransit';
 import { geoSearch, type SearchBias } from '../search/geoSearch';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
+import { flattenFolders } from './folders';
 import { PROFILE_ICON, TramIcon } from './modeIcons';
 import { theme } from './theme';
 import { TransitResults } from './TransitResults';
@@ -258,10 +261,11 @@ const CUSTOM_OPTIONS: readonly {
     label: 'Avoid ferries',
     profiles: ['car', 'bike', 'foot', 'hike', 'run'],
   },
-  { key: 'avoidHighways', label: 'Avoid highways', profiles: ['car'] },
+  { key: 'avoidHighways', label: 'Avoid highways / main roads', profiles: ['car', 'bike'] },
   { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },
   { key: 'avoidHills', label: 'Flatter ways', profiles: ['bike', 'foot', 'hike', 'run'] },
   { key: 'preferTrails', label: 'Prefer trails', profiles: ['bike', 'hike', 'run'] },
+  { key: 'avoidUnpaved', label: 'Avoid unpaved surfaces', profiles: ['bike'] },
 ];
 
 /**
@@ -277,9 +281,11 @@ export function RoutePanel({
   transit,
   packs,
   places,
+  collections,
   getBias,
   fetchNearby,
   onExport,
+  onSaveTrack,
   onNavigate,
   onShowTransitTrip,
   getMyLocation,
@@ -293,12 +299,14 @@ export function RoutePanel({
   packs: LocalPack[];
   /** Saved places, offered in the stop search alongside geocoder results. */
   places: PlaceRecord[];
+  collections: CollectionRecord[];
   /** Current map centre, to bias the stop search towards the viewport. */
   getBias: SearchBias;
   /** Category POIs near a point — the same explore seam the mid-drive panel uses. */
   fetchNearby: FetchNearbyFn;
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
+  onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
   /**
    * Start turn-by-turn to the last stop in the current profile, via the plan's
    * intermediate stops. This panel is the only place a travel mode is chosen,
@@ -323,6 +331,10 @@ export function RoutePanel({
   const [tripOnMap, setTripOnMap] = useState(false);
   const transitMode = transit.enabled;
   const path = route.paths?.[route.selectedPath] ?? null;
+  const surfaces = useMemo(
+    () => routeSurfaceBreakdown(path?.enrichment, path?.distanceM ?? 0),
+    [path],
+  );
   // Trip times sit under the mode icons only for a point-to-point plan, where
   // comparing modes makes sense; a loop or a single stop has nothing to compare.
   const showModeTimes = !route.roundTrip && route.waypoints.length >= 2;
@@ -334,15 +346,22 @@ export function RoutePanel({
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
-  // Server routes carry elevation (DEM); offline-pack routes don't — no chart then.
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState('Planned route');
+  const [saveCollection, setSaveCollection] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  // Planner detail samples Kartverket heights where coverage is available.
   const hasElevation = path?.points.some((p) => p.ele !== undefined) ?? false;
   const profileData = useMemo(
     () => (path && hasElevation ? routePathToTrackData(path, 'route') : null),
     [path, hasElevation],
   );
+  useEffect(() => setSaved(false), [path]);
 
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
+  const folders = useMemo(() => flattenFolders(collections), [collections]);
   /** Waypoint id whose search box is open for re-pointing, or null. */
   const [editing, setEditing] = useState<number | null>(null);
   const stops = route.waypoints;
@@ -551,6 +570,27 @@ export function RoutePanel({
                 testID="route-roundtrip-km"
               />
               <Text style={styles.muted}>km</Text>
+              {(
+                [
+                  ['either', 'Either way'],
+                  ['clockwise', 'Clockwise'],
+                  ['counterclockwise', 'Counterclockwise'],
+                ] as const
+              ).map(([direction, label]) => (
+                <Pressable
+                  key={direction}
+                  style={[
+                    styles.chip,
+                    route.roundTripDirection === direction && styles.chipSelected,
+                  ]}
+                  onPress={() => route.setRoundTripDirection(direction)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: route.roundTripDirection === direction }}
+                  testID={`route-roundtrip-${direction}`}
+                >
+                  <Text style={styles.chipText}>{label}</Text>
+                </Pressable>
+              ))}
               <Pressable
                 style={[styles.button, styles.buttonQuiet]}
                 onPress={route.newLoop}
@@ -757,12 +797,88 @@ export function RoutePanel({
             {path && !transitMode ? (
               <Pressable
                 style={[styles.button, styles.buttonQuiet]}
+                onPress={() => {
+                  setSaved(false);
+                  setSaveOpen((open) => !open);
+                }}
+                testID="route-save-track"
+              >
+                <Text style={styles.buttonQuietText}>
+                  {saved ? 'Saved as track' : 'Save track'}
+                </Text>
+              </Pressable>
+            ) : null}
+            {path && !transitMode ? (
+              <Pressable
+                style={[styles.button, styles.buttonQuiet]}
                 onPress={() => onExport(path)}
                 testID="route-export"
               >
                 <Text style={styles.buttonQuietText}>Export GPX</Text>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+        {saveOpen && path && !transitMode ? (
+          <View style={styles.saveTrack}>
+            <Text style={styles.fieldLabel}>Track name</Text>
+            <TextInput
+              style={styles.saveInput}
+              value={saveName}
+              onChangeText={setSaveName}
+              autoFocus
+              returnKeyType="done"
+              testID="route-save-name"
+            />
+            <Text style={styles.fieldLabel}>Folder</Text>
+            <View style={styles.chipRow}>
+              <Pressable
+                style={[styles.chip, saveCollection === null && styles.chipSelected]}
+                onPress={() => setSaveCollection(null)}
+                testID="route-save-folder-none"
+              >
+                <Text style={styles.chipText}>No folder</Text>
+              </Pressable>
+              {folders.map(({ folder, depth }) => (
+                <Pressable
+                  key={folder.id}
+                  style={[styles.chip, saveCollection === folder.id && styles.chipSelected]}
+                  onPress={() => setSaveCollection(folder.id)}
+                  testID={`route-save-folder-${folder.id}`}
+                >
+                  <Text style={styles.chipText}>
+                    {depth > 0 ? '└ ' : ''}📁 {folder.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.actionRow}>
+              <Pressable
+                style={[styles.button, !saveName.trim() || saving ? styles.buttonDisabled : null]}
+                disabled={!saveName.trim() || saving}
+                onPress={() => {
+                  setSaving(true);
+                  void onSaveTrack(
+                    routePathToTrackData(path, saveName.trim()),
+                    saveName.trim(),
+                    saveCollection,
+                  ).then((ok) => {
+                    setSaving(false);
+                    setSaved(ok);
+                    if (ok) setSaveOpen(false);
+                  });
+                }}
+                testID="route-save-confirm"
+              >
+                <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save'}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.button, styles.buttonQuiet]}
+                onPress={() => setSaveOpen(false)}
+              >
+                <Text style={styles.buttonQuietText}>Cancel</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
@@ -781,23 +897,37 @@ export function RoutePanel({
 
         {!transitMode && route.error ? <Text style={styles.error}>{route.error}</Text> : null}
         {!transitMode && path ? (
-          <View style={styles.statsRow}>
-            <Text style={styles.stats}>
-              {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
-              {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
-            </Text>
-            {profileData ? (
-              <Pressable
-                style={[styles.chip, profileOpen && styles.chipSelected]}
-                onPress={() => setProfileOpen((o) => !o)}
-                testID="route-profile-toggle"
-              >
-                <Text style={styles.chipText}>Profile</Text>
-              </Pressable>
+          <View>
+            <View style={styles.statsRow}>
+              <Text style={styles.stats}>
+                {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
+                {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+              </Text>
+              {profileData ? (
+                <Pressable
+                  style={[styles.chip, profileOpen && styles.chipSelected]}
+                  onPress={() => setProfileOpen((o) => !o)}
+                  testID="route-profile-toggle"
+                >
+                  <Text style={styles.chipText}>Profile</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {surfaces.length > 0 ? (
+              <View style={styles.surfaceRow}>
+                <Text style={styles.surfaceTitle}>Surface</Text>
+                {surfaces.map((surface) => (
+                  <Text key={surface.label} style={styles.surfaceText}>
+                    {surface.label} {surface.percent}%
+                  </Text>
+                ))}
+              </View>
             ) : null}
           </View>
         ) : null}
-        {!transitMode && profileOpen && profileData ? <ElevationChart data={profileData} /> : null}
+        {!transitMode && profileOpen && profileData ? (
+          <ElevationChart data={profileData} enrichment={path?.enrichment} />
+        ) : null}
         {!transitMode && route.paths && route.paths.length > 1 ? (
           <View style={styles.chipRow}>
             {route.paths.map((p, i) => (
@@ -871,7 +1001,7 @@ const styles = StyleSheet.create({
   // before a mode is chosen. Muted so the icon leads.
   modeTime: { marginTop: 2, fontSize: 10, color: theme.textMuted },
   modeTimeSelected: { color: theme.accent },
-  roundRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  roundRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   kmInput: {
     borderWidth: 1,
     borderColor: theme.border,
@@ -881,6 +1011,25 @@ const styles = StyleSheet.create({
     minWidth: 60,
     fontSize: 15,
     color: theme.text,
+  },
+  saveTrack: {
+    gap: 6,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
+  },
+  fieldLabel: { fontSize: 12, color: theme.textMuted, fontWeight: '600' },
+  saveInput: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: theme.surface,
+    color: theme.text,
+    fontSize: 14,
   },
   // No maxHeight any more: the panel's own scroller owns the overflow, and a
   // nested one here would fight it for the gesture.
@@ -940,6 +1089,9 @@ const styles = StyleSheet.create({
   error: { fontSize: 13, color: theme.danger },
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   stats: { fontSize: 14, color: theme.text, fontWeight: '600', flexShrink: 1 },
+  surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
+  surfaceTitle: { fontSize: 12, color: theme.text, fontWeight: '700' },
+  surfaceText: { fontSize: 12, color: theme.textMuted },
   stopSearch: { flexGrow: 1 },
   stopInputRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   stopInputGrow: { flexGrow: 1, flexShrink: 1 },

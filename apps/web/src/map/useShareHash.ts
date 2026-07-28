@@ -34,6 +34,7 @@ export function useShareHash(
                 profile: plan.profile,
                 points: plan.waypoints.map((w) => w.pos),
                 roundTripKm: plan.roundTripKm,
+                roundTripDirection: plan.roundTripDirection,
               }
             : undefined,
         }),
