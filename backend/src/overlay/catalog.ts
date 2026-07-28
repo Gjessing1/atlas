@@ -43,6 +43,12 @@ export interface WmsUpstream {
    */
   identifyValues?: Record<string, Record<string, string>>;
   /**
+   * Per-field presentation formats for upstream encodings that are not already
+   * readable text. NVE's historic `dato_dig` values use both YYYYMMDD and
+   * YYYYDDMM, so formatting it generically can swap day and month.
+   */
+  identifyFormats?: Record<string, 'nve-date'>;
+  /**
    * Optional ArcGIS REST source for map labels — a number the raster tile can
    * never show because it lives in the upstream's *attributes*, not its
    * symbology. NVE's lake bathymetry is the motivating case: a surveyed lake
@@ -721,13 +727,15 @@ export function norwegianLayers(): OverlayLayer[] {
         // Most specific first: an assessed area outranks the not-assessed
         // envelope it sits inside, which otherwise answers for every tap.
         identifyLayers: 'SvekketIs,SvekketIsElv,OppsprukketIsLangsLand,SvekketIsIkkeVurdert',
-        // `hoyde` and the digitizing bookkeeping are dropped: elevation is on the
-        // map already, and `hrv`/`lrv` are the numbers that explain *why* the ice
-        // here is bad — the reservoir's drawdown range in metres above sea level.
-        identifyFields: ['navn', 'vurdert', 'hrv', 'lrv', 'areal_km2', 'vassdragnr'],
+        // `dato_dig` is when NVE's static hazard polygon was mapped. It is not a
+        // field observation, but it is the only freshness evidence this source
+        // carries and must be visible beside the separate live Regobs markers.
+        // Elevation is already on the map; hrv/lrv explain the drawdown hazard.
+        identifyFields: ['navn', 'vurdert', 'dato_dig', 'hrv', 'lrv', 'areal_km2', 'vassdragnr'],
         identifyLabels: {
           navn: 'Lake',
           vurdert: 'Ice conditions',
+          dato_dig: 'Mapped',
           hrv: 'Regulated high water (m)',
           lrv: 'Regulated low water (m)',
           areal_km2: 'Area (km²)',
@@ -744,6 +752,7 @@ export function norwegianLayers(): OverlayLayer[] {
             '3': 'Cracked ice along the shore',
           },
         },
+        identifyFormats: { dato_dig: 'nve-date' },
       },
     },
     {

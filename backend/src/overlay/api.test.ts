@@ -4,6 +4,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { layerInProfile, MAP_PROFILES } from '@atlas/core';
+import { iceObservationLayerMeta } from '../ice-observations-api.js';
 import { norwegianLayers, registerOverlayApi, type OverlayLayer } from './index.js';
 
 const PNG_BYTES = Buffer.from(
@@ -253,9 +254,15 @@ describe('layer catalog', () => {
     // surface is a silent no-op: `layerInProfile` filters the tagged layer
     // out of the panel, so it can never turn on. This checks the two
     // vocabularies against the *real* catalog (a synthetic meta in the core
-    // test cannot — it doesn't know a layer's actual tags). The speed-cameras
-    // vector layer is catalog-injected, not in `norwegianLayers`, so allow it.
-    const byId = new Map(norwegianLayers().map((l) => [l.meta.id, l.meta]));
+    // test cannot — it doesn't know a layer's actual tags). Rolling Regobs is
+    // catalog-injected by its own route rather than in `norwegianLayers`; add
+    // that always-present row here. Speed cameras are data-gated, so allow them.
+    const byId = new Map(
+      [...norwegianLayers().map((l) => l.meta), iceObservationLayerMeta()].map((meta) => [
+        meta.id,
+        meta,
+      ]),
+    );
     for (const profile of MAP_PROFILES) {
       for (const id of profile.defaultLayers ?? []) {
         if (id === 'speed-cameras') continue;

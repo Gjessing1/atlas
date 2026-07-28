@@ -86,12 +86,14 @@ export function presentFields(
   props: Record<string, string>,
   labels: Record<string, string> | undefined,
   values: Record<string, Record<string, string>> | undefined,
+  formats?: Record<string, 'nve-date'>,
 ): Record<string, string> {
-  if (!labels && !values) return props;
+  if (!labels && !values && !formats) return props;
   const lower = <T>(map: Record<string, T> | undefined) =>
     new Map(Object.entries(map ?? {}).map(([k, v]) => [k.toLowerCase(), v] as const));
   const labelBy = lower(labels);
   const valueBy = lower(values);
+  const formatBy = lower(formats);
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(props)) {
     const k = key.toLowerCase();
@@ -101,9 +103,34 @@ export function presentFields(
     const codes = valueBy.get(k);
     const decoded = codes?.[value] ?? codes?.[value.replace(/\.0+$/, '')] ?? value;
     if (decoded === '') continue;
-    out[labelBy.get(k) ?? key] = decoded;
+    out[labelBy.get(k) ?? key] = formatBy.get(k) === 'nve-date' ? formatNveDate(decoded) : decoded;
   }
   return out;
+}
+
+/**
+ * NVE's SvekketIs service exposes historic `dato_dig` values in two orderings:
+ * conventional YYYYMMDD (`20060217`) and Norwegian YYYYDDMM (`20211811`).
+ * Prefer YYYYMMDD when both are plausible, fall back to YYYYDDMM when only that
+ * forms a real date, and keep malformed values verbatim rather than inventing.
+ */
+export function formatNveDate(value: string): string {
+  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+  if (!match) return value;
+  const year = Number(match[1]);
+  const a = Number(match[2]);
+  const b = Number(match[3]);
+  const valid = (month: number, day: number) => {
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  };
+  if (valid(a, b)) return `${match[1]}-${match[2]}-${match[3]}`;
+  if (valid(b, a)) return `${match[1]}-${match[3]}-${match[2]}`;
+  return value;
 }
 
 /**
@@ -272,7 +299,9 @@ export function registerIdentifyRoute(ctx: OverlayContext): void {
           .filter((r) => optionKeeps(layer, chosen, r))
           .map((r) => selectFields(r, wms.identifyFields))
           .filter((r) => Object.keys(r).length > 0)
-          .map((r) => presentFields(r, wms.identifyLabels, wms.identifyValues));
+          .map((r) =>
+            presentFields(r, wms.identifyLabels, wms.identifyValues, wms.identifyFormats),
+          );
         return { results: selected.slice(0, 8) };
       } catch (err) {
         request.log.warn({ err, layer: layer.meta.id, format }, 'identify upstream failed');

@@ -1,12 +1,5 @@
 import { ancestorFolderIds, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
-import {
-  inaturSegments,
-  inaturTrackName,
-  resolveInaturOffer,
-  trackSummary,
-  INATUR_UNAVAILABLE,
-} from '@atlas/core';
-import { buildGpx } from '@atlas/gpx';
+import { trackSummary } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
@@ -33,6 +26,8 @@ interface SidebarProps {
   /** Plan a trip to this place — the row's Go button (Android parity). */
   onGoToPlace: (place: PlaceRecord) => void;
   onImported: (result: ImportResult) => void;
+  /** Resolve and persist an iNatur permit as a filled area overlay. */
+  onSavePermit: (input: string, options?: ImportOptions) => Promise<TrackRecord | null>;
   onClose: () => void;
 }
 
@@ -109,6 +104,7 @@ export function Sidebar({
   onPlanTrack,
   onGoToPlace,
   onImported,
+  onSavePermit,
   onClose,
 }: SidebarProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -250,29 +246,21 @@ export function Sidebar({
     }
   };
 
-  // Resolve an iNatur offer link/id to its boundary and drop it as a track —
-  // GPX under the hood, so it draws, exports and syncs like any other track
-  // ("everything exportable"). The permit's sub-areas become track segments.
+  // Resolve an iNatur offer and persist the polygon topology as a real filled
+  // overlay. The record still carries GPX underneath for export and sync.
   const onResolveInatur = async () => {
     const raw = inaturInput.trim();
     if (!raw) return;
     setInaturBusy(true);
     setInaturError(null);
     try {
-      const area = await resolveInaturOffer('', raw);
-      const gpx = buildGpx({
-        name: inaturTrackName(area),
-        segments: inaturSegments(area),
-        waypoints: [],
-      });
-      const file = new File([gpx], `inatur-${area.offerId}.gpx`, { type: 'application/gpx+xml' });
-      const result = await data.importFiles([file], importOptions());
-      setImportErrors(result.errors);
-      onImported(result);
+      const track = await onSavePermit(raw, importOptions());
+      if (!track) return;
+      onShowTrack(track);
       setInaturInput('');
       setInaturOpen(false);
     } catch (err) {
-      setInaturError(err instanceof Error ? err.message : INATUR_UNAVAILABLE);
+      setInaturError(err instanceof Error ? err.message : String(err));
     } finally {
       setInaturBusy(false);
     }

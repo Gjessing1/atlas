@@ -596,6 +596,70 @@ function gbifProbe(): ProbeSpec {
 }
 
 /**
+ * Regobs is a rolling vector feed rather than a catalog WMS, so it cannot use
+ * OVERLAY_PROBES. Ask for one Norwegian ice registration from the last year:
+ * enough to catch a changed search contract or an empty republish without
+ * manufacturing meaningful traffic.
+ */
+export function regobsProbe(): ProbeSpec {
+  return {
+    id: 'regobs',
+    label: 'NVE Regobs (ice observations)',
+    group: 'Hunting & fishing',
+    async run(fetchImpl) {
+      const now = Date.now();
+      const res = await fetchImpl('https://api.regobs.no/v6/Search', {
+        method: 'POST',
+        headers: {
+          'User-Agent': PROBE_USER_AGENT,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          LangKey: 2,
+          SelectedGeoHazards: [70],
+          FromDtObsTime: new Date(now - 365 * 24 * 60 * 60_000).toISOString(),
+          ToDtObsTime: new Date(now).toISOString(),
+          NumberOfRecords: 1,
+          Offset: 0,
+          OrderBy: 'DtObsTime',
+          AscendingOrder: false,
+          Extent: {
+            TopLeft: { Latitude: 72, Longitude: 4 },
+            BottomRight: { Latitude: 57, Longitude: 32 },
+          },
+        }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      const body = (await res.json()) as unknown;
+      if (!Array.isArray(body)) return { ok: false, message: 'search reply is not an array' };
+      const first = body[0] as
+        { RegId?: unknown; DtObsTime?: unknown; ObsLocation?: unknown } | undefined;
+      if (!first) {
+        return {
+          ok: true,
+          detail: 'search answered with no ice registrations in the last year',
+          warning: 'Regobs search is unexpectedly empty',
+        };
+      }
+      if (
+        typeof first.RegId !== 'number' ||
+        typeof first.DtObsTime !== 'string' ||
+        !first.ObsLocation
+      ) {
+        return { ok: false, message: 'registration shape changed' };
+      }
+      return {
+        ok: true,
+        detail: `latest registration ${first.RegId} from ${first.DtObsTime.slice(0, 10)}`,
+        warning: null,
+      };
+    },
+  };
+}
+
+/**
  * Every non-catalog upstream the derived engine reads. Counts in the floors come
  * from docs/DATA-SOURCES.md, measured against the live services.
  */
@@ -677,7 +741,7 @@ export function allProbes(
     const year = yearSuccessorProbe(layer);
     if (year) specs.push(year);
   }
-  return [...specs, ...inputProbes(env)];
+  return [...specs, regobsProbe(), ...inputProbes(env)];
 }
 
 /**

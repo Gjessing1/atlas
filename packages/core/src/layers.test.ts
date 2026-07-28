@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   IDENTIFY_CARD_ROWS,
+  formatIceObservationTime,
+  iceObservationIdentify,
+  iceObservationsUrl,
   identifyCardGroups,
   identifyOverlays,
   huntingFieldIdentify,
@@ -63,6 +66,18 @@ describe('overlay tile URLs', () => {
     expect(
       overlayTileUrl('', { id: 'wildlife', rev: 2, options: [speciesOption] }, { species: '../x' }),
     ).toBe('/api/overlay/wildlife/{z}/{x}/{y}.png?v=2&species=biggame');
+  });
+
+  it('scopes rolling ice observations to the viewport and catalog revision', () => {
+    expect(
+      iceObservationsUrl(
+        'https://atlas.example',
+        { id: 'ice-observations', rev: 3 },
+        [9.5, 59, 11.25, 60.5],
+      ),
+    ).toBe(
+      'https://atlas.example/api/overlay/ice-observations/features?bbox=9.5,59,11.25,60.5&v=3',
+    );
   });
 
   describe('derived surfaces', () => {
@@ -290,5 +305,28 @@ describe('local overlay identify groups', () => {
       properties: {},
     });
     expect(speedCameraIdentify(undefined)).toBeNull();
+  });
+
+  it('shows the exact Regobs observation clock and useful report context', () => {
+    expect(formatIceObservationTime('2026-01-09T14:07:00+01:00')).toBe('2026-01-09 14:07 +01:00');
+    expect(
+      iceObservationIdentify({
+        label: 'Open water',
+        observedAt: '2026-01-09T14:07:00+01:00',
+        observer: 'Kari',
+        summary: 'Open water by the outlet.',
+        sourceUrl: 'https://www.regobs.no/registration/42',
+      }),
+    ).toEqual({
+      title: 'Open water',
+      properties: {
+        Observed: '2026-01-09 14:07 +01:00',
+        Type: 'Open water',
+        Observer: 'Kari',
+        Details: 'Open water by the outlet.',
+        Regobs: 'https://www.regobs.no/registration/42',
+      },
+    });
+    expect(iceObservationIdentify({ label: 'Ice', observedAt: '' })).toBeNull();
   });
 });

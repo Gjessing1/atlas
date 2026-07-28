@@ -15,6 +15,7 @@ import {
 import {
   mapProfile,
   placeIsVisible,
+  resolveInaturOffer,
   savedPlaceAt,
   type BBox,
   type LatLng,
@@ -59,10 +60,12 @@ import { MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
+import { useIceObservations } from './src/layers/useIceObservations';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
 import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
+import { PermitButton, PermitSheet } from './src/ui/PermitSheet';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -86,7 +89,6 @@ import { listLocalPacks } from './src/regions/packs';
 import { useOfflinePrefs } from './src/regions/useOfflinePrefs';
 import { usePackDownloads } from './src/regions/usePackDownloads';
 import { useAutoPackUpdate, usePackFreshness } from './src/regions/usePackFreshness';
-import { inaturOfferToFile } from './src/inatur';
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
@@ -193,6 +195,10 @@ function AppInner() {
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
+  const [permitOpen, setPermitOpen] = useState(false);
+  useEffect(() => {
+    if (profiles.profile.id !== 'fishhunt') setPermitOpen(false);
+  }, [profiles.profile.id]);
   const [navHeight, setNavHeight] = useState(0);
   const [offlineRegion, setOfflineRegion] = useState<{
     corner: LatLng | null;
@@ -350,6 +356,7 @@ function AppInner() {
     };
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
+  const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
   // The ATK speed cameras as a map layer (the Drive signature overlay). The
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
   // is only the drawn layer.
@@ -741,15 +748,31 @@ function AppInner() {
     [data, route],
   );
 
-  // Resolve an iNatur permit link/id to its boundary and import it as a track
-  // (GPX under the hood, so it draws/exports/syncs). Throws a user-facing
-  // message on failure; TracksSheet's own try/catch surfaces it.
-  const importInatur = useCallback(
+  const savePermit = useCallback(
     async (input: string, options?: ImportOptions) => {
-      const file = await inaturOfferToFile(serverOrigin, input);
-      return data.importFiles([file], options);
+      const area = await resolveInaturOffer(serverOrigin, input);
+      let collectionId = options?.collectionId ?? null;
+      if (options?.newCollection) {
+        const collection = await data.createCollection(
+          options.newCollection.name,
+          options.newCollection.parentId ?? null,
+        );
+        if (!collection) return null;
+        collectionId = collection.id;
+      }
+      return data.savePermitArea(area, collectionId);
     },
     [serverOrigin, data],
+  );
+
+  // The older Tracks entry uses the same area-overlay save and keeps its
+  // existing import-summary contract for the status line.
+  const importInatur = useCallback(
+    async (input: string, options?: ImportOptions) => {
+      const track = await savePermit(input, options);
+      return track ? { tracks: [track], places: [], errors: [], restored: null } : null;
+    },
+    [savePermit],
   );
 
   // Recentre on the user's position. While navigating this re-engages the
@@ -837,6 +860,7 @@ function AppInner() {
         overlays={overlays}
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
+        iceObservations={iceObservations}
         speedCameras={speedCameras}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         trackGeo={trackGeo}
@@ -1076,6 +1100,13 @@ function AppInner() {
               right={side.right + 12}
             />
           ) : null}
+          {!navActive && !planning && !permitOpen && profiles.profile.id === 'fishhunt' ? (
+            <PermitButton
+              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
+              left={side.left + 12}
+              onPress={() => setPermitOpen(true)}
+            />
+          ) : null}
           {/* The shortlist's affordance, stacked under whatever the pill is
           saying. Absent below z11 and outside Norway, where there is nothing to
           rank and the pill has already said so. */}
@@ -1086,7 +1117,12 @@ function AppInner() {
           potential.status !== 'zoom-in' &&
           potential.status !== 'outside' ? (
             <SpotsButton
-              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
+              top={
+                topInset +
+                60 +
+                (potentialPillVisible(potential) ? 40 : 0) +
+                (profiles.profile.id === 'fishhunt' ? 40 : 0)
+              }
               left={side.left + 12}
               onPress={() => setSpotsOpen(true)}
             />
@@ -1101,6 +1137,14 @@ function AppInner() {
             onPick={onPickSpot}
             onSave={onSaveSpot}
             onClose={() => setSpotsOpen(false)}
+            bottomInset={bottomInset}
+          />
+
+          <PermitSheet
+            visible={permitOpen && !planning && !navActive}
+            onClose={() => setPermitOpen(false)}
+            onSave={(input) => savePermit(input)}
+            onSaved={showTrack}
             bottomInset={bottomInset}
           />
 

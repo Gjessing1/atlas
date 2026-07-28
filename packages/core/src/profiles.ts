@@ -105,6 +105,9 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       'terrain-contours',
       'statskog-jaktfelt',
       'ice-weak',
+      // Live Regobs points sit above NVE's static hydropower hazard polygons:
+      // type by symbol, report age by colour, exact observation time on tap.
+      'ice-observations',
       // Land cover is the ground-reading layer of this profile — myr, forest
       // and its species, clear-cut — so it starts on here and nowhere else. It
       // is offered in Hike but off by default: NIBIO refuses to draw it below

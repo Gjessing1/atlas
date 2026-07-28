@@ -8,6 +8,7 @@ import {
   type KmlFolder,
   type TrackData,
 } from '@atlas/gpx';
+import { inaturSegments, inaturTrackName, type InaturArea } from '@atlas/core';
 import type {
   AtlasStorage,
   CollectionRecord,
@@ -15,6 +16,7 @@ import type {
   ExportedData,
   ImportSummary,
   NewPlace,
+  NewTrack,
   PlacePatch,
   PlaceRecord,
   StorageUnavailableReason,
@@ -241,6 +243,11 @@ export interface UserData<TFile> extends StorageAvailability {
     name: string,
     collectionId?: string | null,
   ) => Promise<TrackRecord | null>;
+  /**
+   * Save a resolved iNatur permit as a filled, synced area overlay with a GPX
+   * boundary underneath for normal export and cross-app portability.
+   */
+  savePermitArea: (area: InaturArea, collectionId?: string | null) => Promise<TrackRecord | null>;
   updateTrack: (id: string, patch: TrackPatch) => Promise<void>;
   deleteTrack: (id: string) => Promise<void>;
   /** Parsed geometry for a track (cached in memory). */
@@ -248,7 +255,7 @@ export interface UserData<TFile> extends StorageAvailability {
   /** Export one track as .gpx (stored original) or .kml (converted). */
   exportTrack: (id: string, format: 'gpx' | 'kml') => Promise<void>;
 
-  createCollection: (name: string, parentId?: string | null) => Promise<void>;
+  createCollection: (name: string, parentId?: string | null) => Promise<CollectionRecord | null>;
   renameCollection: (id: string, name: string) => Promise<void>;
   moveCollection: (id: string, parentId: string | null) => Promise<void>;
   setCollectionVisible: (id: string, visible: boolean) => Promise<void>;
@@ -266,6 +273,35 @@ export interface UserData<TFile> extends StorageAvailability {
 
 export const sanitizeFileName = (name: string): string =>
   name.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
+
+/**
+ * The one permit-area persistence shape used by both apps: interoperable GPX
+ * boundary plus the topology the map needs to fill holes correctly.
+ */
+export function permitTrackInput(
+  area: InaturArea,
+  collectionId: string | null = null,
+): { data: TrackData; input: NewTrack } {
+  const name = inaturTrackName(area);
+  const data: TrackData = { name, segments: inaturSegments(area), waypoints: [] };
+  return {
+    data,
+    input: {
+      name,
+      gpx: buildGpx(data),
+      stats: computeTrackStats(data) as unknown as Record<string, number>,
+      collectionId,
+      tags: ['iNatur permit'],
+      area: {
+        kind: 'area',
+        source: 'inatur',
+        sourceId: area.offerId,
+        polygons: area.polygons,
+        bbox: area.bbox,
+      },
+    },
+  };
+}
 
 /**
  * Serializes the storage lifecycle: each open waits for every previous
@@ -627,6 +663,24 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [refreshTracks, reportWriteFailure],
   );
 
+  const savePermitArea = useCallback(
+    async (area: InaturArea, collectionId: string | null = null): Promise<TrackRecord | null> => {
+      const s = storageRef.current;
+      if (!s) return null;
+      try {
+        const { data, input } = permitTrackInput(area, collectionId);
+        const track = await s.createTrack(input);
+        trackDataCache.current.set(track.id, data);
+        await refreshTracks();
+        return track;
+      } catch (err) {
+        reportWriteFailure('Saving permit area', err);
+        return null;
+      }
+    },
+    [refreshTracks, reportWriteFailure],
+  );
+
   const updateTrack = useCallback(
     async (id: string, patch: TrackPatch) => {
       try {
@@ -688,10 +742,12 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   const createCollection = useCallback(
     async (name: string, parentId: string | null = null) => {
       try {
-        await storageRef.current?.createCollection(name, parentId);
+        const collection = (await storageRef.current?.createCollection(name, parentId)) ?? null;
         await refreshCollections();
+        return collection;
       } catch (err) {
         reportWriteFailure('Creating folder', err);
+        return null;
       }
     },
     [refreshCollections, reportWriteFailure],
@@ -849,6 +905,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     arrangeCollectionItem,
     importFiles,
     saveTrack,
+    savePermitArea,
     updateTrack,
     deleteTrack,
     getTrackData,

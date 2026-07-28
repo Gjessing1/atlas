@@ -2,6 +2,7 @@ import type { NavController } from '@atlas/app-hooks';
 import {
   haversineM,
   huntingFieldIdentify,
+  iceObservationIdentify,
   identifyOverlays,
   POI_LAYER_IDS,
   speedCameraIdentify,
@@ -21,6 +22,7 @@ import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import {
   HUNT_FIELDS_FILL_LAYER_ID,
+  ICE_OBSERVATION_LAYER_IDS,
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
   SPEED_CAMERA_LAYER_IDS,
@@ -231,7 +233,7 @@ export function useMapPress({
                   .catch(() => undefined)
               : undefined;
           void (async () => {
-            const [serverGroups, huntHits, cameraHits] = await Promise.all([
+            const [serverGroups, iceHits, huntHits, cameraHits] = await Promise.all([
               identifyOverlays(
                 origin,
                 overlays.map((o) => o.meta),
@@ -241,12 +243,14 @@ export function useMapPress({
                 // layer never answers with what it is not drawing.
                 (meta) => overlays.find((o) => o.meta.id === meta.id)?.options,
               ),
+              query(vectorOn('ice-observations'), ICE_OBSERVATION_LAYER_IDS),
               query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
               query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
             ]);
             // Local groups lead: they are what the user aimed at, and the
             // server rows are ambient context for the same point.
             const groups = [
+              iceObservationIdentify(hitProps(iceHits)),
               speedCameraIdentify(hitProps(cameraHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               ...serverGroups,

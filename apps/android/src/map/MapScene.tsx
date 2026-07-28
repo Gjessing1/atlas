@@ -28,6 +28,7 @@ import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import type { SpeedCameras } from '../layers/useSpeedCameras';
+import type { VectorOverlayData } from '../layers/useVectorOverlay';
 import { spotsFeatureCollection, type PotentialSpot } from '@atlas/potential';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
@@ -89,6 +90,12 @@ export const SPEED_CAMERA_LAYER_IDS = [
   'atlas-cameras-point',
   'atlas-cameras-section',
   'atlas-cameras-section-casing',
+];
+
+/** Regobs marker layers hit-tested for exact observation time and details. */
+export const ICE_OBSERVATION_LAYER_IDS = [
+  'atlas-ice-observations-symbol',
+  'atlas-ice-observations-dot',
 ];
 
 /**
@@ -179,6 +186,8 @@ interface MapSceneProps {
   overlayLabels: OverlayLabelData;
   /** Statskog hunting-fields coverage to draw (null = overlay off / not loaded). */
   huntingFields: HuntingFields | null;
+  /** Rolling Regobs markers for the current viewport. */
+  iceObservations: VectorOverlayData | null;
   /** ATK speed-camera coverage to draw (null = overlay off / not loaded). */
   speedCameras: SpeedCameras | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
@@ -247,6 +256,7 @@ export function MapScene({
   overlays,
   overlayLabels,
   huntingFields,
+  iceObservations,
   speedCameras,
   spots,
   trackGeo,
@@ -502,6 +512,44 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
+        {/* Regobs ice observations: symbol = report kind, colour = age. Kept
+          separate from the static weakened-ice raster so the map never makes
+          an old hydropower hazard polygon look like a current field report. */}
+        {iceObservations ? (
+          <GeoJSONSource id="atlas-ice-observations" data={iceObservations.data}>
+            <Layer
+              type="circle"
+              id="atlas-ice-observations-dot"
+              minzoom={7}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 7, 12, 10, 16, 12],
+                'circle-color': ['get', 'markerColor'],
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff',
+                'circle-opacity': iceObservations.opacity,
+                'circle-stroke-opacity': iceObservations.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-ice-observations-symbol"
+              minzoom={7}
+              layout={{
+                'text-field': ['get', 'symbol'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 7, 10, 12, 13, 16, 15],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': '#ffffff',
+                'text-halo-color': 'rgba(0,0,0,0.18)',
+                'text-halo-width': 0.7,
+                'text-opacity': iceObservations.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
         {/* ATK speed cameras (web useSpeedCameraLayer's twin, same enforcement
           amber): fixed point cameras as dots, average-speed sections as lines
           with a white casing so they read over any road colour, names once
@@ -664,9 +712,20 @@ export function MapScene({
         {trackGeo.features.length > 0 ? (
           <GeoJSONSource id="atlas-tracks" data={trackGeo}>
             <Layer
+              type="fill"
+              id="atlas-track-areas-fill"
+              filter={['==', ['get', 'featureKind'], 'area']}
+              paint={{ 'fill-color': '#c2410c', 'fill-opacity': 0.16 }}
+            />
+            <Layer
               type="line"
               id="atlas-tracks-line"
-              paint={{ 'line-color': '#2a78d6', 'line-width': 4, 'line-opacity': 0.9 }}
+              filter={['==', ['get', 'featureKind'], 'line']}
+              paint={{
+                'line-color': ['case', ['==', ['get', 'recordKind'], 'area'], '#c2410c', '#2a78d6'],
+                'line-width': 4,
+                'line-opacity': 0.9,
+              }}
             />
           </GeoJSONSource>
         ) : null}

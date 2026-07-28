@@ -88,6 +88,12 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE places ADD COLUMN address TEXT NOT NULL DEFAULT '';
   `,
+  // A track may also be an area-shaped interoperable record (currently an
+  // iNatur permit). GPX remains canonical for export; this JSON retains polygon
+  // topology so the map can fill exterior rings without filling their holes.
+  `
+  ALTER TABLE tracks ADD COLUMN area TEXT;
+  `,
 ];
 
 /**

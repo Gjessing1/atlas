@@ -207,6 +207,165 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   await expect(card.locator('.place-card-facts')).toContainText('Light');
 });
 
+test('Fish & Hunt shows live ice times and saves a permit as a filled area', async ({ page }) => {
+  await page.route('**/api/layers**', (route) =>
+    route.fulfill({
+      json: {
+        layers: [
+          {
+            id: 'ice-observations',
+            rev: 1,
+            title: 'Ice observations',
+            description: 'Latest Regobs observations',
+            group: 'Water & depth',
+            attribution: 'NVE Regobs',
+            minzoom: 7,
+            maxzoom: 18,
+            defaultOpacity: 1,
+            identify: false,
+            profiles: ['fishing', 'hunting', 'ski'],
+            vector: true,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/overlay/ice-observations/features**', (route) =>
+    route.fulfill({
+      json: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [10, 60] },
+            properties: {
+              regId: 42,
+              kind: 'open-water',
+              label: 'Open water',
+              observedAt: '2026-01-19T10:15:00+01:00',
+              observer: 'Kari',
+              summary: 'Open by the outlet',
+              age: 'fresh',
+              markerColor: '#16a34a',
+              symbol: '≈',
+              sourceUrl: 'https://www.regobs.no/registration/42',
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/inatur/resolve?**', (route) =>
+    route.fulfill({
+      json: {
+        offerId: '0123456789abcdef01234567',
+        name: 'Test permit',
+        bbox: [9.98, 59.98, 10.02, 60.02],
+        polygons: [
+          [
+            [
+              [9.98, 59.98],
+              [10.02, 59.98],
+              [10.02, 60.02],
+              [9.98, 60.02],
+              [9.98, 59.98],
+            ],
+            [
+              [9.995, 59.995],
+              [10.005, 59.995],
+              [10.005, 60.005],
+              [9.995, 60.005],
+              [9.995, 59.995],
+            ],
+          ],
+        ],
+        rings: [
+          [
+            [9.98, 59.98],
+            [10.02, 59.98],
+            [10.02, 60.02],
+            [9.98, 60.02],
+            [9.98, 59.98],
+          ],
+          [
+            [9.995, 59.995],
+            [10.005, 59.995],
+            [10.005, 60.005],
+            [9.995, 60.005],
+            [9.995, 59.995],
+          ],
+        ],
+        subAreas: 1,
+      },
+    }),
+  );
+
+  await page.goto('/#map=10/60/10');
+  await waitForMap(page);
+  await page.getByRole('radio', { name: 'Fish & Hunt' }).click();
+  await expect(page.getByRole('button', { name: 'My permit area' })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window.__atlasMap!.getStyle().sources['atlas-ice-observations'] as {
+              data?: { features?: unknown[] };
+            }
+          )?.data?.features?.length ?? 0,
+      ),
+    )
+    .toBe(1);
+
+  const marker = await project(page, 60, 10);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ([x, y]) =>
+          window.__atlasMap!.queryRenderedFeatures(
+            [
+              [x! - 10, y! - 10],
+              [x! + 10, y! + 10],
+            ],
+            { layers: ['atlas-ice-observations-dot'] },
+          ).length,
+        marker,
+      ),
+    )
+    .toBe(1);
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(canvas.x + marker[0], canvas.y + marker[1]);
+  const identify = page.getByTestId('place-card-identify');
+  await expect(identify).toContainText('Open water');
+  await expect(identify).toContainText('2026-01-19 10:15 +01:00');
+  await expect(identify).toContainText('Kari');
+  await page.locator('.place-card').getByRole('button', { name: 'Close' }).click();
+
+  await page.getByRole('button', { name: 'My permit area' }).click();
+  await page.getByLabel('iNatur offer link or id').fill('0123456789abcdef01234567');
+  await page.getByRole('button', { name: 'Show area' }).click();
+  await expect(page.locator('section[aria-label="My permit area"]')).toHaveCount(0);
+
+  const savedArea = () =>
+    page.evaluate(() => {
+      const sources = window.__atlasMap!.getStyle().sources;
+      const id = Object.keys(sources).find((key) => key.startsWith('atlas-track-'));
+      if (!id) return null;
+      const data = (sources[id] as { data?: GeoJSON.FeatureCollection }).data;
+      const area = data?.features.find((feature) => feature.geometry.type === 'MultiPolygon');
+      return area?.geometry.type === 'MultiPolygon' ? area.geometry.coordinates : null;
+    });
+  await expect.poll(savedArea).toHaveLength(1);
+  expect((await savedArea())?.[0]).toHaveLength(2); // exterior + excluded hole
+
+  // The filled topology is persisted, not merely held by the just-completed
+  // resolver or flattened into the GPX boundary.
+  await page.reload();
+  await waitForMap(page);
+  await expect.poll(savedArea).toHaveLength(1);
+  expect((await savedArea())?.[0]).toHaveLength(2);
+});
+
 test('nearby photos and places are separate on-demand features', async ({ page }) => {
   // The user's own case: a town hall Wikipedia has never written about.
   let photoRequests = 0;

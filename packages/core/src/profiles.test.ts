@@ -103,6 +103,7 @@ describe('map profiles', () => {
       'terrain-contours',
       'statskog-jaktfelt',
       'ice-weak',
+      'ice-observations',
       'land-cover',
       'rivers',
     ]);

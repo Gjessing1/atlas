@@ -7,6 +7,7 @@ import {
   OVERLAY_PROBES,
   overlayProbe,
   ProbeRunner,
+  regobsProbe,
   yearSuccessorProbe,
   type ProbeSpec,
 } from './probes.js';
@@ -50,9 +51,32 @@ describe('probe coverage', () => {
     // Every layer, the year-successor check, and the non-catalog N5 inputs.
     expect(ids).toContain('overlay:lake-depth');
     expect(ids).toContain('overlay:statskog-jaktfelt:year');
+    expect(ids).toContain('regobs');
     expect(ids).toContain('input:dtm');
     expect(ids).toContain('input:streams');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('checks that the Regobs search still returns usable ice registrations', async () => {
+    const fetchImpl = vi.fn(async () =>
+      json([
+        {
+          RegId: 466238,
+          DtObsTime: '2026-06-22T09:10:00+02:00',
+          ObsLocation: { Latitude: 61.43, Longitude: 7.72 },
+        },
+      ]),
+    );
+    await expect(regobsProbe().run(fetchImpl as typeof fetch)).resolves.toMatchObject({
+      ok: true,
+      detail: 'latest registration 466238 from 2026-06-22',
+      warning: null,
+    });
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      SelectedGeoHazards: [70],
+      NumberOfRecords: 1,
+    });
   });
 
   /**

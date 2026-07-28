@@ -1,6 +1,6 @@
 import type { TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
-import type { Feature } from 'geojson';
+import type { Feature, FeatureCollection } from 'geojson';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 
@@ -9,16 +9,29 @@ const TRACK_COLOR = '#2a78d6';
 
 const lineLayerId = (sourceId: string) => `${sourceId}-line`;
 const casingLayerId = (sourceId: string) => `${sourceId}-casing`;
+const fillLayerId = (sourceId: string) => `${sourceId}-fill`;
 
-function trackFeature(trackId: string, data: TrackData): Feature {
-  return {
+function trackFeatures(track: TrackRecord, data: TrackData): FeatureCollection {
+  const line: Feature = {
     type: 'Feature',
-    properties: { trackId },
+    properties: {
+      trackId: track.id,
+      featureKind: 'line',
+      recordKind: track.area ? 'area' : 'track',
+    },
     geometry: {
       type: 'MultiLineString',
       coordinates: data.segments.map((seg) => seg.map((p) => [p.lng, p.lat])),
     },
   };
+  const area: Feature | null = track.area
+    ? {
+        type: 'Feature',
+        properties: { trackId: track.id, featureKind: 'area', recordKind: 'area' },
+        geometry: { type: 'MultiPolygon', coordinates: track.area.polygons },
+      }
+    : null;
+  return { type: 'FeatureCollection', features: area ? [area, line] : [line] };
 }
 
 /**
@@ -45,7 +58,11 @@ export function useTrackLayers(
 
       for (const sourceId of Object.keys(map.getStyle()?.sources ?? {})) {
         if (!sourceId.startsWith(SOURCE_PREFIX) || wanted.has(sourceId)) continue;
-        for (const layerId of [lineLayerId(sourceId), casingLayerId(sourceId)]) {
+        for (const layerId of [
+          lineLayerId(sourceId),
+          casingLayerId(sourceId),
+          fillLayerId(sourceId),
+        ]) {
           if (map.getLayer(layerId)) map.removeLayer(layerId);
         }
         map.removeSource(sourceId);
@@ -55,11 +72,21 @@ export function useTrackLayers(
         if (map.getSource(sourceId)) continue;
         void getTrackData(track.id).then((data) => {
           if (cancelled || !data || !map.isStyleLoaded() || map.getSource(sourceId)) return;
-          map.addSource(sourceId, { type: 'geojson', data: trackFeature(track.id, data) });
+          map.addSource(sourceId, { type: 'geojson', data: trackFeatures(track, data) });
+          if (track.area) {
+            map.addLayer({
+              id: fillLayerId(sourceId),
+              type: 'fill',
+              source: sourceId,
+              filter: ['==', ['get', 'featureKind'], 'area'],
+              paint: { 'fill-color': '#c2410c', 'fill-opacity': 0.16 },
+            });
+          }
           map.addLayer({
             id: casingLayerId(sourceId),
             type: 'line',
             source: sourceId,
+            filter: ['==', ['get', 'featureKind'], 'line'],
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.85 },
           });
@@ -67,8 +94,9 @@ export function useTrackLayers(
             id: lineLayerId(sourceId),
             type: 'line',
             source: sourceId,
+            filter: ['==', ['get', 'featureKind'], 'line'],
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': TRACK_COLOR, 'line-width': 3 },
+            paint: { 'line-color': track.area ? '#c2410c' : TRACK_COLOR, 'line-width': 3 },
           });
         });
       }
@@ -95,7 +123,9 @@ export function useTrackLayers(
       if (!style?.layers) return;
       const trackLayers = style.layers
         .map((l) => l.id)
-        .filter((id) => id.startsWith(SOURCE_PREFIX) && id.endsWith('-line'));
+        .filter(
+          (id) => id.startsWith(SOURCE_PREFIX) && (id.endsWith('-line') || id.endsWith('-fill')),
+        );
       if (trackLayers.length === 0) return;
       const hit = map.queryRenderedFeatures(e.point, { layers: trackLayers })[0];
       const trackId = hit?.properties?.['trackId'] as string | undefined;

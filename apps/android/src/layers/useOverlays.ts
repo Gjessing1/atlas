@@ -18,7 +18,7 @@ import type { UserData } from '../useUserData';
 // `renderableLayers` filter below). Kept as an explicit id set rather than a
 // clever heuristic — the vector layers genuinely differ in what drawing them
 // means (hunting-field polygons vs. camera dots and average-speed lines).
-const RENDERABLE_VECTOR_IDS = new Set(['statskog-jaktfelt', 'speed-cameras']);
+const RENDERABLE_VECTOR_IDS = new Set(['statskog-jaktfelt', 'speed-cameras', 'ice-observations']);
 
 // Visibility/opacity are device-local preferences (`local.` keys never sync).
 const STATE_SETTING = 'local.layers.state';

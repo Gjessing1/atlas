@@ -4,6 +4,28 @@ import { migrate } from './migrations.js';
 import { createNodeSqlDriver as createNodeDriver } from './node-driver.js';
 import { AtlasStorage } from './storage.js';
 
+const PERMIT_AREA = {
+  kind: 'area' as const,
+  source: 'inatur' as const,
+  sourceId: '0123456789abcdef01234567',
+  polygons: [
+    [
+      [
+        [10, 60],
+        [11, 60],
+        [11, 61],
+        [10, 60],
+      ],
+      [
+        [10.2, 60.2],
+        [10.3, 60.2],
+        [10.2, 60.2],
+      ],
+    ],
+  ] as [number, number][][][],
+  bbox: [10, 60, 11, 61] as [number, number, number, number],
+};
+
 /**
  * Delegate driver that rewrites the first batch statement matching `match`
  * into invalid SQL, so the failure happens *inside* the transaction — the
@@ -158,6 +180,7 @@ describe('AtlasStorage', () => {
       name: 'Morning run',
       gpx,
       stats: { distanceM: 5000, points: 120 },
+      area: PERMIT_AREA,
     });
 
     const [listed] = await storage.listTracks();
@@ -165,6 +188,7 @@ describe('AtlasStorage', () => {
       name: 'Morning run',
       stats: { distanceM: 5000, points: 120 },
       visible: true,
+      area: PERMIT_AREA,
     });
     expect('gpx' in listed!).toBe(false);
     expect(await storage.getTrackGpx(track.id)).toBe(gpx);
@@ -335,9 +359,19 @@ describe('AtlasStorage', () => {
     });
 
     it('reads sync payloads including the track GPX body', async () => {
-      const track = await storage.createTrack({ name: 'T', gpx: '<gpx/>', stats: { d: 1 } });
+      const track = await storage.createTrack({
+        name: 'T',
+        gpx: '<gpx/>',
+        stats: { d: 1 },
+        area: PERMIT_AREA,
+      });
       const record = await storage.readSyncRecord('track', track.id);
-      expect(record!.data).toMatchObject({ name: 'T', gpx: '<gpx/>', stats: { d: 1 } });
+      expect(record!.data).toMatchObject({
+        name: 'T',
+        gpx: '<gpx/>',
+        stats: { d: 1 },
+        area: PERMIT_AREA,
+      });
       expect(await storage.readSyncRecord('track', 'missing')).toBeNull();
 
       await storage.setSetting('theme', 'dark');
@@ -388,12 +422,19 @@ describe('AtlasStorage', () => {
         id: 'remote-track',
         updatedAt: 5,
         deleted: false,
-        data: { name: 'From phone', gpx: '<gpx/>', visible: false, createdAt: 4 },
+        data: {
+          name: 'From phone',
+          gpx: '<gpx/>',
+          visible: false,
+          area: PERMIT_AREA,
+          createdAt: 4,
+        },
       });
       expect((await storage.listTracks())[0]).toMatchObject({
         id: 'remote-track',
         name: 'From phone',
         visible: false,
+        area: PERMIT_AREA,
       });
       expect(await storage.getTrackGpx('remote-track')).toBe('<gpx/>');
     });
@@ -499,13 +540,13 @@ describe('AtlasStorage', () => {
   it('exports everything', async () => {
     const collection = await storage.createCollection('C');
     await storage.createPlace({ name: 'P', lat: 1, lng: 2, collectionId: collection.id });
-    await storage.createTrack({ name: 'T', gpx: '<gpx/>' });
+    await storage.createTrack({ name: 'T', gpx: '<gpx/>', area: PERMIT_AREA });
     await storage.setSetting('k', 'v');
 
     const dump = await storage.exportAll();
     expect(dump.collections).toHaveLength(1);
     expect(dump.places).toHaveLength(1);
-    expect(dump.tracks[0]).toMatchObject({ name: 'T', gpx: '<gpx/>' });
+    expect(dump.tracks[0]).toMatchObject({ name: 'T', gpx: '<gpx/>', area: PERMIT_AREA });
     expect(dump.settings).toEqual({ k: 'v' });
     expect(dump.exportedAt).toBeGreaterThan(0);
   });
@@ -529,7 +570,11 @@ describe('AtlasStorage', () => {
         notes: 'Steep',
         tags: ['hike'],
       });
-      await storage.createTrack({ name: 'Day 1', gpx: '<gpx>original</gpx>' });
+      await storage.createTrack({
+        name: 'Day 1',
+        gpx: '<gpx>original</gpx>',
+        area: PERMIT_AREA,
+      });
       await storage.setSetting('units', 'metric');
       const dump = await storage.exportAll();
 
@@ -544,7 +589,11 @@ describe('AtlasStorage', () => {
       expect(await restored.listCollections()).toEqual(await storage.listCollections());
       expect(await restored.listPlaces()).toEqual(await storage.listPlaces());
       const tracks = await restored.exportAll();
-      expect(tracks.tracks[0]).toMatchObject({ name: 'Day 1', gpx: '<gpx>original</gpx>' });
+      expect(tracks.tracks[0]).toMatchObject({
+        name: 'Day 1',
+        gpx: '<gpx>original</gpx>',
+        area: PERMIT_AREA,
+      });
       expect(await restored.getSetting('units')).toBe('metric');
     });
 

@@ -11,6 +11,7 @@ export type {
   PlaceRecord,
   SyncChange,
   SyncEntity,
+  TrackAreaOverlay,
   TrackPatch,
   TrackRecord,
 } from './records.js';

@@ -45,21 +45,21 @@ interface GeoJsonFeature {
 }
 
 type Ring = [number, number][];
+type Polygon = Ring[];
 
 /**
- * Every ring of a Polygon/MultiPolygon geometry — exterior *and* interior. An
- * offer can carve an un-permitted island out of its area (a hole in the polygon:
- * inatur.no draws it as a gap in the shading); each hole is an interior ring we
- * must keep, or Atlas would paint straight over the excluded ground. Each ring
- * is closed, so drawn as a GPX segment it renders as its own loop.
+ * Every polygon of a Polygon/MultiPolygon geometry, retaining its ring
+ * topology. An offer can carve an un-permitted island out of its area (a hole
+ * in the polygon: inatur.no draws it as a gap in the shading); flattening the
+ * rings is fine for GPX line export but not for a filled map overlay.
  */
-function allRings(geom: GeoJsonFeature['geometry']): Ring[] {
+function allPolygons(geom: GeoJsonFeature['geometry']): Polygon[] {
   if (!geom?.coordinates) return [];
   if (geom.type === 'Polygon') {
-    return (geom.coordinates as Ring[]).filter((r): r is Ring => !!r);
+    return [(geom.coordinates as Ring[]).filter((r): r is Ring => !!r)];
   }
   if (geom.type === 'MultiPolygon') {
-    return (geom.coordinates as Ring[][]).flat().filter((r): r is Ring => !!r);
+    return (geom.coordinates as Ring[][]).map((polygon) => polygon.filter((r): r is Ring => !!r));
   }
   return [];
 }
@@ -76,29 +76,33 @@ function pickName(props: Record<string, unknown> | null | undefined): string | u
 
 /** Build an InaturArea from the delområde features that carry the offer id. */
 export function toInaturArea(offerId: string, features: GeoJsonFeature[]): InaturArea | null {
-  const rings: Ring[] = [];
+  const polygons: Polygon[] = [];
   let w = Infinity;
   let s = Infinity;
   let e = -Infinity;
   let n = -Infinity;
   for (const f of features) {
-    for (const ring of allRings(f.geometry)) {
-      if (ring.length < 3) continue;
-      rings.push(ring);
-      for (const [lng, lat] of ring) {
-        if (lng < w) w = lng;
-        if (lng > e) e = lng;
-        if (lat < s) s = lat;
-        if (lat > n) n = lat;
+    for (const polygon of allPolygons(f.geometry)) {
+      const usable = polygon.filter((ring) => ring.length >= 3);
+      if (usable.length === 0) continue;
+      polygons.push(usable);
+      for (const ring of usable) {
+        for (const [lng, lat] of ring) {
+          if (lng < w) w = lng;
+          if (lng > e) e = lng;
+          if (lat < s) s = lat;
+          if (lat > n) n = lat;
+        }
       }
     }
   }
-  if (!rings.length || !Number.isFinite(w)) return null;
+  if (!polygons.length || !Number.isFinite(w)) return null;
   return {
     offerId,
     name: pickName(features[0]?.properties),
     bbox: [w, s, e, n],
-    rings,
+    polygons,
+    rings: polygons.flat(),
     subAreas: features.length,
   };
 }

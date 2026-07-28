@@ -15,6 +15,7 @@ import type {
   PlaceRecord,
   SyncChange,
   SyncEntity,
+  TrackAreaOverlay,
   TrackPatch,
   TrackRecord,
 } from './records.js';
@@ -52,6 +53,48 @@ function parseStats(value: SqlValue | undefined): Record<string, number> {
     return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {};
   } catch {
     return {};
+  }
+}
+
+function parseTrackArea(value: SqlValue | undefined): TrackAreaOverlay | null {
+  if (value == null || value === '') return null;
+  try {
+    const parsed = JSON.parse(String(value)) as Partial<TrackAreaOverlay>;
+    const coordinate = (point: unknown): point is [number, number] =>
+      Array.isArray(point) &&
+      point.length === 2 &&
+      typeof point[0] === 'number' &&
+      typeof point[1] === 'number' &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1]);
+    const polygonsOk =
+      Array.isArray(parsed.polygons) &&
+      parsed.polygons.every(
+        (polygon) =>
+          Array.isArray(polygon) &&
+          polygon.length > 0 &&
+          polygon.every(
+            (ring) =>
+              Array.isArray(ring) && ring.length >= 3 && ring.every((point) => coordinate(point)),
+          ),
+      );
+    const bboxOk =
+      Array.isArray(parsed.bbox) &&
+      parsed.bbox.length === 4 &&
+      parsed.bbox.every((n) => typeof n === 'number' && Number.isFinite(n));
+    if (
+      parsed.kind !== 'area' ||
+      parsed.source !== 'inatur' ||
+      typeof parsed.sourceId !== 'string' ||
+      !parsed.sourceId ||
+      !polygonsOk ||
+      !bboxOk
+    ) {
+      return null;
+    }
+    return parsed as TrackAreaOverlay;
+  } catch {
+    return null;
   }
 }
 
@@ -95,13 +138,14 @@ function rowToTrack(r: SqlRow): TrackRecord {
     notes: String(r['notes']),
     tags: parseTags(r['tags']),
     visible: Number(r['visible']) !== 0,
+    area: parseTrackArea(r['area']),
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
 }
 
 const TRACK_COLUMNS =
-  'id, name, stats, collection_id, notes, tags, visible, created_at, updated_at';
+  'id, name, stats, collection_id, notes, tags, visible, area, created_at, updated_at';
 
 /**
  * The user-data repository: collections (folders), places (favorites/pins),
@@ -429,14 +473,15 @@ export class AtlasStorage {
       notes: input.notes ?? '',
       tags: input.tags ?? [],
       visible: true,
+      area: input.area ?? null,
       createdAt: now,
       updatedAt: now,
     };
     await this.driver.batch([
       {
         sql: `INSERT INTO tracks (id, name, gpx, stats, collection_id, notes, tags,
-                                  visible, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  visible, area, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [
           record.id,
           record.name,
@@ -446,6 +491,7 @@ export class AtlasStorage {
           record.notes,
           JSON.stringify(record.tags),
           1,
+          input.area ? JSON.stringify(input.area) : null,
           record.createdAt,
           record.updatedAt,
         ],
@@ -639,6 +685,7 @@ export class AtlasStorage {
           notes: t.notes,
           tags: t.tags,
           visible: t.visible,
+          area: t.area,
           createdAt: t.createdAt,
         },
         summary.tracks,
@@ -774,6 +821,7 @@ export class AtlasStorage {
         notes: t.notes,
         tags: t.tags,
         visible: t.visible,
+        area: t.area,
         createdAt: t.createdAt,
       },
     };
@@ -919,8 +967,8 @@ export class AtlasStorage {
         return {
           sql: `INSERT OR REPLACE INTO tracks
                   (id, name, gpx, stats, collection_id, notes, tags,
-                   visible, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   visible, area, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           params: [
             change.id,
             str('name', '(unnamed)'),
@@ -930,6 +978,7 @@ export class AtlasStorage {
             str('notes'),
             json('tags', '[]'),
             d['visible'] === false ? 0 : 1,
+            d['area'] == null ? null : json('area', 'null'),
             createdAt,
             change.updatedAt,
           ],

@@ -1,6 +1,38 @@
 /** Overlay layer catalog: the client-side layer registry and its map style. */
 
 import type { LatLng } from './geo.js';
+import type { LngLatBbox } from './geoproject.js';
+
+/** Live Regobs ice observations, drawn as viewport-fetched point markers. */
+export const ICE_OBSERVATIONS_ID = 'ice-observations';
+
+export type IceObservationKind = 'open-water' | 'danger' | 'ice' | 'observation';
+export type IceObservationAge = 'fresh' | 'recent' | 'older' | 'stale';
+
+/** Display-ready properties carried by every live ice-observation point. */
+export interface IceObservationProperties {
+  regId: number;
+  kind: IceObservationKind;
+  label: string;
+  observedAt: string;
+  observer?: string;
+  summary?: string;
+  age: IceObservationAge;
+  markerColor: string;
+  symbol: string;
+  sourceUrl: string;
+}
+
+export interface IceObservationFeature {
+  type: 'Feature';
+  geometry: { type: 'Point'; coordinates: [number, number] };
+  properties: IceObservationProperties;
+}
+
+export interface IceObservationsResponse {
+  type: 'FeatureCollection';
+  features: IceObservationFeature[];
+}
 
 /**
  * Layer ids of the OpenFreeMap Liberty style that render the OpenMapTiles
@@ -251,6 +283,26 @@ export function overlayFeaturesUrl(origin: string, meta: Pick<LayerMeta, 'id' | 
 }
 
 /**
+ * Cache-revisioned, viewport-scoped URL for live Regobs ice observations.
+ *
+ * Unlike the curated vector overlays above, this is a rolling observation feed:
+ * fetching all of Norway would be both slow and stale immediately. Both clients
+ * derive the same bbox from their settled camera and hand the response straight
+ * to a GeoJSON source.
+ */
+export function iceObservationsUrl(
+  origin: string,
+  meta: Pick<LayerMeta, 'id' | 'rev'>,
+  bbox: LngLatBbox,
+): string {
+  const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/features` +
+    `?bbox=${bbox.join(',')}&v=${encodeURIComponent(String(rev))}`
+  );
+}
+
+/**
  * GET /api/overlay/:id/identify — cleaned upstream attributes per feature
  * (noise keys filtered by the backend). Values are display-ready strings.
  */
@@ -319,6 +371,44 @@ export async function identifyOverlays(
 /** Trimmed string, or null for anything that is not usable text. */
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * Regobs timestamps carry the observer's local offset. Preserve the date and
+ * clock they submitted rather than silently converting it to the viewer's
+ * timezone — the timestamp is evidence about the observation, not a countdown.
+ */
+export function formatIceObservationTime(value: unknown): string | null {
+  const text = str(value);
+  if (!text) return null;
+  const iso = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})?/.exec(
+    text,
+  );
+  return iso ? `${iso[1]} ${iso[2]}${iso[3] ? ` ${iso[3]}` : ''}` : text;
+}
+
+/**
+ * A tapped Regobs marker as a shared identify group. The marker's shape says
+ * report type, its colour says age, and this card supplies the exact submitted
+ * date/time plus the useful human context.
+ */
+export function iceObservationIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const observed = formatIceObservationTime(properties['observedAt']);
+  if (!observed) return null;
+  const rows: Record<string, string> = {
+    Observed: observed,
+    Type: str(properties['label']) ?? 'Ice observation',
+  };
+  const observer = str(properties['observer']);
+  const summary = str(properties['summary']);
+  const source = str(properties['sourceUrl']);
+  if (observer) rows['Observer'] = observer;
+  if (summary) rows['Details'] = summary;
+  if (source) rows['Regobs'] = source;
+  return { title: str(properties['label']) ?? 'Ice observation', properties: rows };
 }
 
 /**

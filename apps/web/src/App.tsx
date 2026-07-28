@@ -6,6 +6,7 @@ import {
   mapProfile,
   placeIsVisible,
   placeTargetTitle,
+  resolveInaturOffer,
   savedPlaceAt,
   type ColorScheme,
   type LatLng,
@@ -52,12 +53,14 @@ import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
 import { SpotsButton, SpotsPanel } from './potential/SpotsPanel.js';
+import { PermitPanel } from './permit/PermitPanel.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
+import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -79,7 +82,7 @@ import { PlaceCard } from './place/PlaceCard.js';
 import { PlaceEditDialog } from './place/PlaceEditDialog.js';
 import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
-import { type ImportResult, useUserData } from './storage/useUserData.js';
+import { type ImportOptions, type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
 import { useWeather } from './weather/useWeather.js';
 import { useWeatherTarget } from './weather/useWeatherTarget.js';
@@ -143,6 +146,7 @@ export function App() {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [locateRequest, setLocateRequest] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [permitOpen, setPermitOpen] = useState(false);
   // The saved place whose editor is open, and the one the Collections tree
   // should reveal — both by id, so a rename or a delete elsewhere is followed
   // rather than leaving a stale copy of the record on screen.
@@ -192,6 +196,9 @@ export function App() {
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
   const profiles = useMapProfile(userData);
+  useEffect(() => {
+    if (profiles.profile.id !== 'fishhunt') setPermitOpen(false);
+  }, [profiles.profile.id]);
   const profilePreferences = useMapProfilePreferences(userData);
   const layers = useLayerCatalog(
     userData,
@@ -291,6 +298,7 @@ export function App() {
   // The drive profile's signature overlay: ATK speed cameras as map features.
   useSpeedCameraLayer(map, overlays);
   useHuntingFieldsLayer(map, overlays);
+  useIceObservationsLayer(map, overlays);
 
   // ---- turn-by-turn navigation ----
 
@@ -555,6 +563,23 @@ export function App() {
       });
     },
     [getTrackData],
+  );
+
+  const savePermit = useCallback(
+    async (input: string, options?: ImportOptions): Promise<TrackRecord | null> => {
+      const area = await resolveInaturOffer('', input);
+      let collectionId = options?.collectionId ?? null;
+      if (options?.newCollection) {
+        const collection = await userData.createCollection(
+          options.newCollection.name,
+          options.newCollection.parentId ?? null,
+        );
+        if (!collection) return null;
+        collectionId = collection.id;
+      }
+      return userData.savePermitArea(area, collectionId);
+    },
+    [userData],
   );
 
   const planTrack = useCallback(
@@ -890,13 +915,26 @@ export function App() {
           is where "what is this map doing" belongs; the pill is absent entirely
           once the surface is ready, and the column keeps the panel below
           whatever the pill is saying rather than on top of it. */}
-      {nav.phase === 'idle' && layers.derived && (
+      {nav.phase === 'idle' && (layers.derived || profiles.profile.id === 'fishhunt') && (
         <div className="potential-bar">
-          <PotentialPill prep={potential} />
-          {!spotsOpen && potential.status !== 'zoom-in' && potential.status !== 'outside' && (
-            <SpotsButton onOpen={() => setSpotsOpen(true)} />
-          )}
-          {spotsOpen && (
+          {layers.derived ? <PotentialPill prep={potential} /> : null}
+          {profiles.profile.id === 'fishhunt' && !permitOpen ? (
+            <button type="button" className="permit-button" onClick={() => setPermitOpen(true)}>
+              My permit area
+            </button>
+          ) : null}
+          {permitOpen ? (
+            <PermitPanel
+              onSave={savePermit}
+              onSaved={showTrack}
+              onClose={() => setPermitOpen(false)}
+            />
+          ) : null}
+          {layers.derived &&
+            !spotsOpen &&
+            potential.status !== 'zoom-in' &&
+            potential.status !== 'outside' && <SpotsButton onOpen={() => setSpotsOpen(true)} />}
+          {layers.derived && spotsOpen && (
             <SpotsPanel
               state={bestSpots}
               targetLabel={potentialTargetLabel}
@@ -1080,6 +1118,7 @@ export function App() {
             onPlanTrack={planTrack}
             onGoToPlace={goToPlace}
             onImported={onImported}
+            onSavePermit={savePermit}
             onClose={() => setSidebarOpen(false)}
           />
         )}

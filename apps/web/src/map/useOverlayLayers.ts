@@ -1,5 +1,6 @@
 import {
   huntingFieldIdentify,
+  iceObservationIdentify,
   identifyOverlays,
   layerOptionSignature,
   overlayTileUrl,
@@ -10,6 +11,7 @@ import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@at
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
+import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
@@ -316,9 +318,16 @@ export function useOverlayIdentify(
       const drawn = (layers: string[]): Record<string, unknown> | null => {
         const present = layers.filter((id) => map.getLayer(id));
         if (present.length === 0) return null;
-        return map.queryRenderedFeatures(e.point, { layers: present })[0]?.properties ?? null;
+        // Finger/mouse-sized target: Regobs points and camera dots should not
+        // require a pixel-perfect click on their centre.
+        const box: [[number, number], [number, number]] = [
+          [e.point.x - 10, e.point.y - 10],
+          [e.point.x + 10, e.point.y + 10],
+        ];
+        return map.queryRenderedFeatures(box, { layers: present })[0]?.properties ?? null;
       };
       const local = [
+        iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);

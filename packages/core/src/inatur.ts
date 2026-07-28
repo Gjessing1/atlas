@@ -28,9 +28,17 @@ export interface InaturArea {
   /** [w,s,e,n] spanning every sub-area. */
   bbox: [number, number, number, number];
   /**
+   * The actual polygon topology: sub-area → ring → [lng,lat]. Ring zero is the
+   * exterior and later rings are holes. This is what a persisted map overlay
+   * draws; unlike the flattened `rings` compatibility view it cannot fill an
+   * excluded island by mistake.
+   */
+  polygons: [number, number][][][];
+  /**
    * All boundary rings across the offer's sub-areas, as [lng,lat] pairs — the
    * exterior outline of each polygon *and* any interior rings (holes: ground the
    * permit excludes). Each ring is closed; a client draws each as its own loop.
+   * Kept alongside `polygons` because GPX export is line-based.
    */
   rings: [number, number][][];
   /** How many delområde polygons the offer resolved to. */

@@ -35,6 +35,11 @@ import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
 import { registerInaturApi, type InaturApiOptions } from './inatur-api.js';
+import {
+  iceObservationLayerMeta,
+  registerIceObservationsApi,
+  type IceObservationsApiOptions,
+} from './ice-observations-api.js';
 import { registerTransitApi, type TransitApiOptions } from './transit-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
@@ -86,6 +91,8 @@ export interface AppOptions {
   transitApi?: TransitApiOptions;
   /** Test seams for the iNatur permit-boundary resolver. */
   inaturApi?: InaturApiOptions;
+  /** Test seams for the public NVE Regobs ice-observation feed. */
+  iceObservationsApi?: IceObservationsApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam for Wikimedia place summaries. */
@@ -575,9 +582,18 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // data-gated, not config-gated (it appears exactly when the NVDB dataset on
     // this instance carries the camera tables), and the derived surfaces are
     // served by the derive service registered below.
-    extraMeta: [...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []), ...derivedLayerMetas()],
+    extraMeta: [
+      ...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []),
+      iceObservationLayerMeta(),
+      ...derivedLayerMetas(),
+    ],
     ...opts.overlayApi,
   });
+
+  // Rolling Regobs markers: a viewport-scoped vector feed, kept separate from
+  // the static weakened-ice WMS so a mapped hazard can never masquerade as a
+  // current field observation.
+  registerIceObservationsApi(app, { status, ...opts.iceObservationsApi });
 
   // Derived potential surfaces (ROADMAP § N5 → E2): the fixed-z11-cell derive
   // service — input adapters, the persisted job queue, and the revalidating tile

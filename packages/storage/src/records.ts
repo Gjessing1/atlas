@@ -35,6 +35,19 @@ export interface PlaceRecord {
 }
 
 /** A saved track's metadata; the GPX body is fetched separately (it can be large). */
+export interface TrackAreaOverlay {
+  /** Filled-area overlays are still backed by GPX for interoperable export. */
+  kind: 'area';
+  /** Where the authoritative boundary came from. */
+  source: 'inatur';
+  /** iNatur offer id, so the saved item remains traceable to the permit. */
+  sourceId: string;
+  /** Polygon → ring → [lng,lat], with holes retained after the exterior ring. */
+  polygons: [number, number][][][];
+  /** [west,south,east,north], used to frame the saved area without parsing GPX. */
+  bbox: [number, number, number, number];
+}
+
 export interface TrackRecord {
   id: string;
   name: string;
@@ -45,6 +58,11 @@ export interface TrackRecord {
   tags: string[];
   /** Whether the track is currently drawn on the map. */
   visible: boolean;
+  /**
+   * Optional filled geometry for an area-shaped record. The GPX remains the
+   * exportable boundary; this topology is what lets the map preserve holes.
+   */
+  area: TrackAreaOverlay | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -69,6 +87,8 @@ export interface NewTrack {
   collectionId?: string | null;
   notes?: string;
   tags?: string[];
+  /** Filled overlay geometry when this GPX represents an area rather than a path. */
+  area?: TrackAreaOverlay | null;
 }
 
 export interface PlacePatch {

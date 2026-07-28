@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanProps,
+  formatNveDate,
   keepsIdentify,
   parseEsriXmlInfo,
   parseGeojsonInfo,
@@ -156,6 +157,17 @@ describe('presentFields', () => {
     // An unannotated layer must behave exactly as before.
     const raw = { navn: 'Verkensvannet', maksdyp: '21.5' };
     expect(presentFields(raw, undefined, undefined)).toBe(raw);
+  });
+
+  it('formats both date orderings present in NVE weakened-ice records', () => {
+    expect(formatNveDate('20060217')).toBe('2006-02-17');
+    expect(formatNveDate('20211811')).toBe('2021-11-18');
+    expect(
+      presentFields({ dato_dig: '20211811' }, { dato_dig: 'Mapped' }, undefined, {
+        dato_dig: 'nve-date',
+      }),
+    ).toEqual({ Mapped: '2021-11-18' });
+    expect(formatNveDate('20213131')).toBe('20213131');
   });
 });
 

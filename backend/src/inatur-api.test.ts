@@ -58,6 +58,7 @@ describe('toInaturArea', () => {
     // Both rings survive; the hole sits inside so it never widens the bbox.
     expect(area!.rings).toHaveLength(2);
     expect(area!.rings[1]).toEqual(hole);
+    expect(area!.polygons).toEqual([[RING, hole]]);
     expect(area!.bbox).toEqual([10, 60, 10.2, 60.2]);
     expect(area!.subAreas).toBe(1);
   });
@@ -85,6 +86,7 @@ describe('toInaturArea', () => {
     ]);
     expect(area).not.toBeNull();
     expect(area!.rings).toHaveLength(2);
+    expect(area!.polygons).toHaveLength(2);
     expect(area!.bbox).toEqual([10, 60, 11.1, 61.1]);
     expect(area!.name).toBe('Vest');
     expect(area!.subAreas).toBe(2);
@@ -116,6 +118,7 @@ describe('GET /api/inatur/resolve', () => {
     expect(area.offerId).toBe(ID);
     expect(area.name).toBe('Storvasslia');
     expect(area.rings[0]).toHaveLength(RING.length);
+    expect(area.polygons).toEqual([[RING]]);
     // The id is lower-cased into the SQL literal, queried in 4326.
     expect(requests[0]!.searchParams.get('where')).toBe(`tilbudsid='${ID}'`);
     expect(requests[0]!.searchParams.get('outSR')).toBe('4326');

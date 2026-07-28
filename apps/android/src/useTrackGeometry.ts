@@ -7,8 +7,10 @@ export interface TrackGeometry {
   type: 'FeatureCollection';
   features: {
     type: 'Feature';
-    properties: { trackId: string };
-    geometry: { type: 'MultiLineString'; coordinates: number[][][] };
+    properties: { trackId: string; featureKind: 'line' | 'area'; recordKind: 'track' | 'area' };
+    geometry:
+      | { type: 'MultiLineString'; coordinates: number[][][] }
+      | { type: 'MultiPolygon'; coordinates: number[][][][] };
   }[];
 }
 
@@ -51,9 +53,20 @@ export function useTrackGeometry(
           }
         }
         if (coords.length > 0) {
+          if (track.area) {
+            features.push({
+              type: 'Feature',
+              properties: { trackId: track.id, featureKind: 'area', recordKind: 'area' },
+              geometry: { type: 'MultiPolygon', coordinates: track.area.polygons },
+            });
+          }
           features.push({
             type: 'Feature',
-            properties: { trackId: track.id },
+            properties: {
+              trackId: track.id,
+              featureKind: 'line',
+              recordKind: track.area ? 'area' : 'track',
+            },
             geometry: { type: 'MultiLineString', coordinates: coords },
           });
         }
