@@ -9,6 +9,7 @@ import {
   fmtEta,
   fmtKm,
   fmtWhenClock,
+  trackSummary,
 } from './index.js';
 
 describe('fmtClock', () => {
@@ -118,5 +119,24 @@ describe('fmtEta', () => {
     expect(fmtEta(90 * 60_000, at(21, 5))).toBe('22:35');
     // Past midnight is an ordinary answer, not a wrap-around bug.
     expect(fmtEta(60 * 60_000, at(23, 30))).toBe('00:30');
+  });
+});
+
+describe('trackSummary', () => {
+  it('joins the stats a track actually has', () => {
+    expect(trackSummary({ distanceM: 12_400, durationMs: 3 * 3_600_000, ascentM: 640.4 })).toBe(
+      '12.4 km · 3 h 0 min · ↗ 640 m',
+    );
+    expect(trackSummary({ distanceM: 850 })).toBe('850 m');
+  });
+
+  it('drops a zero duration or ascent rather than printing "0 min"', () => {
+    // An imported route has geometry but no timestamps and often no elevation;
+    // "0 min · ↗ 0 m" reads as a measurement, not as an absent one.
+    expect(trackSummary({ distanceM: 2000, durationMs: 0, ascentM: 0 })).toBe('2.0 km');
+  });
+
+  it('still says something when nothing was measurable', () => {
+    expect(trackSummary({})).toBe('no stats');
   });
 });

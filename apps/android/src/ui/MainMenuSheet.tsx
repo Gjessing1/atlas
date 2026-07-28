@@ -39,13 +39,13 @@ export function MainMenuSheet({
     },
     {
       label: 'Collections',
-      detail: 'Saved places and folders',
+      detail: 'Saved places, tracks and folders',
       testID: 'open-favorites',
       onPress: onOpenFavorites,
     },
     {
       label: 'Tracks',
-      detail: 'Import, show and export',
+      detail: 'Import and profiles',
       testID: 'open-tracks',
       onPress: onOpenTracks,
     },

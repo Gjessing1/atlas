@@ -6,6 +6,7 @@ import type {
   ThemeModeController,
   NavPrefsController,
 } from '@atlas/app-hooks';
+import type { TrackRecord } from '@atlas/storage';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import type { TileSource } from '../map/useTileSource';
@@ -57,6 +58,8 @@ interface AppSheetsProps {
 
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
+  /** Frame a track on the map (a track row's name, in either sheet). */
+  onShowTrack: (track: TrackRecord) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
   /** Resolve an iNatur permit link/id and import its boundary as a track. */
   onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
@@ -96,6 +99,7 @@ export function AppSheets({
   offlinePrefs,
   onDrawRegion,
   onPickDestination,
+  onShowTrack,
   onImportTracks,
   onImportInatur,
 }: AppSheetsProps) {
@@ -106,6 +110,7 @@ export function AppSheets({
         visible={favoritesOpen}
         onClose={onCloseFavorites}
         places={data.places}
+        tracks={data.tracks}
         collections={data.collections}
         onFlyTo={(place) =>
           onPickDestination({
@@ -129,12 +134,17 @@ export function AppSheets({
         }}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
+        onShowTrack={onShowTrack}
+        onPatchTrack={(id, patch) => void data.updateTrack(id, patch)}
+        onDeleteTrack={(id) => void data.deleteTrack(id)}
+        onExportTrack={(id, format) => void data.exportTrack(id, format)}
         onCreateFolder={(name, parentId) => void data.createCollection(name, parentId)}
         onRenameFolder={(id, name) => void data.renameCollection(id, name)}
         onMoveFolder={(id, parentId) => void data.moveCollection(id, parentId)}
         onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
+        onExportAll={() => void data.exportAll()}
         onReorderPlaces={(ids) => void data.reorderPlaces(ids)}
         onReorderCollections={(ids) => void data.reorderCollections(ids)}
         bottomInset={bottomInset}

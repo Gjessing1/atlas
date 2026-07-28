@@ -674,21 +674,29 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
       const s = storageRef.current;
       if (!s) return;
       try {
-        const [ps, cs] = await Promise.all([s.listPlaces(), s.listCollections()]);
+        // Tracks are in the list this button sits above — on both clients now —
+        // so "Hide all" that left every track drawn was answering a different
+        // question from the one the user asked.
+        const [ps, ts, cs] = await Promise.all([
+          s.listPlaces(),
+          s.listTracks(),
+          s.listCollections(),
+        ]);
         // Only flip rows that differ, so we don't churn updated_at (and the sync
         // outbox) for records already in the wanted state.
         await Promise.all([
           ...ps.filter((p) => p.visible !== visible).map((p) => s.updatePlace(p.id, { visible })),
+          ...ts.filter((t) => t.visible !== visible).map((t) => s.updateTrack(t.id, { visible })),
           ...cs
             .filter((c) => c.visible !== visible)
             .map((c) => s.setCollectionVisible(c.id, visible)),
         ]);
-        await Promise.all([refreshPlaces(), refreshCollections()]);
+        await Promise.all([refreshPlaces(), refreshTracks(), refreshCollections()]);
       } catch (err) {
         reportWriteFailure('Updating visibility', err);
       }
     },
-    [refreshPlaces, refreshCollections, reportWriteFailure],
+    [refreshPlaces, refreshTracks, refreshCollections, reportWriteFailure],
   );
 
   const exportAll = useCallback(async () => {

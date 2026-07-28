@@ -1,5 +1,5 @@
 import { importedCount } from '@atlas/app-hooks';
-import { fmtDuration, fmtKm } from '@atlas/core';
+import { trackSummary } from '@atlas/core';
 import type { TrackData } from '@atlas/gpx';
 import type { CollectionRecord, TrackRecord } from '@atlas/storage';
 import { useMemo, useRef, useState } from 'react';
@@ -17,22 +17,15 @@ import type { ImportOptions, ImportResult } from '../useUserData';
 import { BottomSheet } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
+import { confirmDelete } from './ItemEditor';
 import { theme } from './theme';
 
-function trackSummary(stats: Record<string, number>): string {
-  const parts: string[] = [];
-  if (typeof stats.distanceM === 'number') parts.push(fmtKm(stats.distanceM));
-  if (typeof stats.durationMs === 'number' && stats.durationMs > 0)
-    parts.push(fmtDuration(stats.durationMs));
-  if (typeof stats.ascentM === 'number' && stats.ascentM > 0)
-    parts.push(`↗ ${Math.round(stats.ascentM)} m`);
-  return parts.join(' · ') || 'no stats';
-}
-
 /**
- * Tracks list — the mobile counterpart of the web Sidebar's tracks: browse
- * saved/recorded/imported GPX tracks, toggle map visibility, rename, export
- * (share as GPX/KML), delete, and import GPX/KML/KMZ files from the device.
+ * Tracks — where tracks come *in*: import GPX/KML/KMZ files (or an iNatur permit
+ * boundary) into a chosen folder, and see every track flat in one list with its
+ * elevation profile. Filing a track in the collections tree, and its notes/tags,
+ * belong to Collections; this sheet keeps the quick per-track actions (rename,
+ * visibility, export, delete) beside the import it just ran.
  */
 export function TracksSheet({
   visible,
@@ -313,7 +306,13 @@ export function TracksSheet({
                   </Pressable>
                   <Pressable
                     style={[styles.button, styles.buttonQuiet]}
-                    onPress={() => onDelete(track.id)}
+                    onPress={() =>
+                      confirmDelete(
+                        `Delete “${track.name}”?`,
+                        'You can undo this right after.',
+                        () => onDelete(track.id),
+                      )
+                    }
                     testID={`track-delete-${track.id}`}
                   >
                     <Text style={styles.buttonQuietText}>Delete</Text>

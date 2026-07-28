@@ -22,7 +22,8 @@ import {
   type NearbyPlaceArticle,
   type VisibilityFolder,
 } from '@atlas/core';
-import { buildGpx } from '@atlas/gpx';
+import { buildGpx, trackBounds } from '@atlas/gpx';
+import type { TrackRecord } from '@atlas/storage';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
   isRoutingProfile,
@@ -694,6 +695,29 @@ function AppInner() {
     [data],
   );
 
+  // Frame a track on the map, from a row in either sheet — its whole shape,
+  // which is the only view that says which track this actually is. A track with
+  // no parseable geometry simply doesn't move the camera.
+  const showTrack = useCallback(
+    (track: TrackRecord) => {
+      void data.getTrackData(track.id).then((trackData) => {
+        if (!trackData) return;
+        const bounds = trackBounds(trackData);
+        if (!bounds) return;
+        cameraRef.current?.fitBounds([bounds.sw.lng, bounds.sw.lat, bounds.ne.lng, bounds.ne.lat], {
+          padding: {
+            top: topInset + 48,
+            right: side.right + 48,
+            bottom: bottomInset + 48,
+            left: side.left + 48,
+          },
+          duration: 700,
+        });
+      });
+    },
+    [data, topInset, bottomInset, side],
+  );
+
   // Resolve an iNatur permit link/id to its boundary and import it as a track
   // (GPX under the hood, so it draws/exports/syncs). Throws a user-facing
   // message on failure; TracksSheet's own try/catch surfaces it.
@@ -738,6 +762,17 @@ function AppInner() {
     const t = setTimeout(clearWriteError, 8000);
     return () => clearTimeout(t);
   }, [writeError, clearWriteError]);
+
+  // The undo window for a delete (web parity). Long enough to notice a mistake,
+  // short enough that the banner is not permanent chrome; a newer delete
+  // replaces the offer. Until this existed, the confirmation Alert's promise
+  // that "you can undo this right after" was the only undo on the device.
+  const { undoable, clearUndoable } = data;
+  useEffect(() => {
+    if (!undoable) return;
+    const t = setTimeout(clearUndoable, 10000);
+    return () => clearTimeout(t);
+  }, [undoable, clearUndoable]);
 
   // Whether the pack currently drawing the map has been rebuilt on the server.
   const freshness = usePackFreshness(packs);
@@ -975,6 +1010,38 @@ function AppInner() {
               <Text style={styles.bannerText}>{writeError} — the change was not saved.</Text>
             </Pressable>
           ) : null}
+          {/* Undo a delete. Not danger-coloured: nothing is wrong, and the
+              banner sits below the write-error one so a failed write — which
+              the user does need to act on — is never the thing that moves. */}
+          {undoable ? (
+            <View
+              style={[
+                styles.banner,
+                styles.undoBanner,
+                {
+                  top: topInset + 60 + (writeError ? 48 : 0),
+                  left: side.left + 12,
+                  right: side.right + 12,
+                },
+              ]}
+              testID="undo-banner"
+            >
+              <Text style={[styles.bannerText, styles.undoText]} numberOfLines={2}>
+                {undoable.message}
+              </Text>
+              <Pressable onPress={() => void undoable.undo()} hitSlop={8} testID="undo-action">
+                <Text style={styles.undoAction}>Undo</Text>
+              </Pressable>
+              <Pressable
+                onPress={clearUndoable}
+                hitSlop={8}
+                accessibilityLabel="Dismiss"
+                testID="undo-dismiss"
+              >
+                <Text style={styles.undoDismiss}>✕</Text>
+              </Pressable>
+            </View>
+          ) : null}
           {/* What the derive service is doing for the water on screen. Hidden
           mid-trip along with the rest of the idle chrome — a driver is not
           reading a fishing surface. */}
@@ -1177,6 +1244,7 @@ function AppInner() {
               setOfflineRegion({ corner: null, bbox: null });
             }}
             onPickDestination={dest.pick}
+            onShowTrack={showTrack}
             onImportTracks={importTracks}
             onImportInatur={importInatur}
           />
@@ -1319,4 +1387,16 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   bannerText: { color: theme.onAccent },
+  // Fixed slate, matching web's undo toast — a theme-following surface would
+  // have to carry a theme-following text colour, and the banner's own white
+  // text would then vanish into it in dark mode.
+  undoBanner: {
+    backgroundColor: '#26313a',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  undoText: { flexShrink: 1, flexGrow: 1 },
+  undoAction: { color: '#7cc4ff', fontWeight: '700' },
+  undoDismiss: { color: theme.onAccent, fontWeight: '700' },
 });

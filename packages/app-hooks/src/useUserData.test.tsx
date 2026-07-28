@@ -574,6 +574,28 @@ describe('useUserData', () => {
     expect(result.current.collections.every((c) => !c.visible)).toBe(true);
   });
 
+  it('setAllVisible hides tracks too, not only places and folders', async () => {
+    // Tracks are listed in the same tree the "Hide all" button sits above on
+    // both clients; leaving them drawn answered a different question.
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.importFiles([gpxFile('ride.gpx')]);
+    });
+    expect(result.current.tracks).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.setAllVisible(false);
+    });
+    expect(result.current.tracks.every((t) => !t.visible)).toBe(true);
+
+    await act(async () => {
+      await result.current.setAllVisible(true);
+    });
+    expect(result.current.tracks.every((t) => t.visible)).toBe(true);
+  });
+
   describe('storage lifecycle', () => {
     it('closes the storage on unmount', async () => {
       const { storage, platform } = createPlatform();

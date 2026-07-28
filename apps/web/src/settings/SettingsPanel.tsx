@@ -36,6 +36,8 @@ interface SettingsPanelProps {
   layers: LayerCatalog;
   mapZoom: number;
   profilePreferences: MapProfilePreferencesController;
+  /** Export everything (rule 5) — also offered on the Collections header. */
+  onExportAll: () => void;
   onClose: () => void;
 }
 
@@ -268,6 +270,7 @@ export function SettingsPanel({
   layers,
   mapZoom,
   profilePreferences,
+  onExportAll,
   onClose,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>('map');
@@ -366,6 +369,16 @@ export function SettingsPanel({
           <div className="settings-section">
             <h3>Account &amp; sync</h3>
             <AccountPanel sync={sync} storage={storage} />
+            {/* Also on the Collections header. Two homes on purpose: Android
+                keeps it here, and a user who learned it there should find it
+                here too (rule 5 is about the data, not one route to it). */}
+            <h3>Your data</h3>
+            <p className="settings-note">
+              Export everything — places, folders, tracks and settings — as a file.
+            </p>
+            <button type="button" onClick={onExportAll} disabled={storage.status !== 'ready'}>
+              Export all data
+            </button>
           </div>
         )}
 

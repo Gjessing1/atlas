@@ -114,3 +114,36 @@ test('a folder can be dragged into another folder', async ({ page }) => {
   await row('Alpha').locator(':scope > .item-line > .folder-name').click();
   await expect(row('Alpha').locator(':scope > .item-list .folder-name')).toHaveText('Beta');
 });
+
+test('a saved place goes straight from its row to the planner, and Export all has two homes', async ({
+  page,
+}) => {
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  // Save the pin so there is a collection row to act on. The editor opens on a
+  // coordinate-named pin to be named; fields auto-save on blur, so Tab commits.
+  await page.locator('.place-marker').click();
+  const card = page.locator('.place-card');
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.place-edit-dialog')).toBeVisible();
+  await page.locator('.place-edit-dialog').getByLabel('Name').fill('Cabin');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.place-edit-dialog')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  // Go is the whole trip: no place card in between, and the panel steps aside
+  // for the planner it just opened.
+  await page.getByRole('button', { name: 'Directions to Cabin' }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+  await expect(page.locator('.route-panel')).toBeVisible();
+
+  // "Export all" lives on the Collections header (web) *and* under Settings →
+  // Account (where Android keeps it) — same action, both homes.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Account', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export all data' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^atlas-export-\d{4}-\d{2}-\d{2}\./);
+});

@@ -1,9 +1,9 @@
 import { ancestorFolderIds, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
 import {
-  fmtKm,
   inaturSegments,
   inaturTrackName,
   resolveInaturOffer,
+  trackSummary,
   INATUR_UNAVAILABLE,
 } from '@atlas/core';
 import { buildGpx } from '@atlas/gpx';
@@ -28,6 +28,8 @@ interface SidebarProps {
   onRevealed?: () => void;
   onShowPlace: (place: PlaceRecord) => void;
   onShowTrack: (track: TrackRecord) => void;
+  /** Plan a trip to this place — the row's Go button (Android parity). */
+  onGoToPlace: (place: PlaceRecord) => void;
   onImported: (result: ImportResult) => void;
   onClose: () => void;
 }
@@ -102,6 +104,7 @@ export function Sidebar({
   onRevealed,
   onShowPlace,
   onShowTrack,
+  onGoToPlace,
   onImported,
   onClose,
 }: SidebarProps) {
@@ -215,8 +218,12 @@ export function Sidebar({
   };
 
   // "Show all" appears once anything is hidden; otherwise the button hides all.
-  const anyHidden = data.places.some((p) => !p.visible) || data.collections.some((c) => !c.visible);
-  const hasItems = data.places.length + data.collections.length > 0;
+  // Tracks count: they are in this list, and setAllVisible now flips them too.
+  const anyHidden =
+    data.places.some((p) => !p.visible) ||
+    data.tracks.some((t) => !t.visible) ||
+    data.collections.some((c) => !c.visible);
+  const hasItems = data.places.length + data.tracks.length + data.collections.length > 0;
 
   // Where an import lands, shared by the file import and the iNatur tool.
   const importOptions = (): ImportOptions =>
@@ -296,6 +303,17 @@ export function Sidebar({
             {place.name}
           </button>
           <span className="row-actions">
+            {/* Straight into the planner, as on Android. Without it the same
+                trip was row → card → Directions on this client alone. */}
+            <button
+              type="button"
+              className="row-go"
+              title={`Directions to ${place.name}`}
+              aria-label={`Directions to ${place.name}`}
+              onClick={() => onGoToPlace(place)}
+            >
+              Go
+            </button>
             <button
               type="button"
               className="icon-button"
@@ -343,11 +361,6 @@ export function Sidebar({
 
   const trackRow = (track: TrackRecord) => {
     const key = `track:${track.id}`;
-    const stats = track.stats;
-    const meta = [
-      stats['distanceM'] !== undefined ? fmtKm(stats['distanceM']) : null,
-      stats['ascentM'] ? `↗ ${Math.round(stats['ascentM'])} m` : null,
-    ].filter(Boolean);
     return (
       <li key={key} className={`item-row${selectedTrackId === track.id ? ' selected' : ''}`}>
         <div className="item-line">
@@ -380,7 +393,7 @@ export function Sidebar({
             <EyeIcon off={!track.visible} size={18} />
           </button>
         </div>
-        {meta.length > 0 && <div className="item-tags">{meta.join(' · ')}</div>}
+        <div className="item-tags">{trackSummary(track.stats)}</div>
         {expanded === key && (
           <ItemEditor
             name={track.name}
@@ -605,7 +618,7 @@ export function Sidebar({
             type="button"
             onClick={() => void data.setAllVisible(anyHidden)}
             disabled={data.status !== 'ready' || !hasItems}
-            title={anyHidden ? 'Show all places and folders' : 'Hide all places and folders'}
+            title={anyHidden ? 'Show everything on the map' : 'Hide everything from the map'}
           >
             {anyHidden ? 'Show all' : 'Hide all'}
           </button>

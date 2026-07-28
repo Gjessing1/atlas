@@ -107,3 +107,23 @@ export function fmtDuration(ms: number): string {
 export function fmtEta(durationMs: number, now = Date.now()): string {
   return fmtClock(now + durationMs);
 }
+
+/**
+ * The one-line summary under a track's name — "12.4 km · 3 h 10 min · ↗ 640 m".
+ *
+ * Both apps list tracks, and both had grown their own version of this line: web
+ * showed distance and ascent, Android distance, duration and ascent. Same track,
+ * two different subtitles. A track's `stats` is an open `Record<string, number>`
+ * (the importer writes whatever it could measure), so every absent key is a
+ * legitimate case rather than an error — a track with no measurable stats at all
+ * still needs something to say.
+ */
+export function trackSummary(stats: Record<string, number>): string {
+  const parts: string[] = [];
+  if (typeof stats['distanceM'] === 'number') parts.push(fmtKm(stats['distanceM']));
+  const durationMs = stats['durationMs'];
+  if (typeof durationMs === 'number' && durationMs > 0) parts.push(fmtDuration(durationMs));
+  const ascentM = stats['ascentM'];
+  if (typeof ascentM === 'number' && ascentM > 0) parts.push(`↗ ${Math.round(ascentM)} m`);
+  return parts.join(' · ') || 'no stats';
+}

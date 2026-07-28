@@ -881,6 +881,25 @@ button {
   opacity: 1;
 }
 
+/* "Go" — a place row straight into the planner, as on Android. A word rather
+   than a glyph: it is the one row action that leaves the panel entirely. */
+.row-go {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.row-go:hover {
+  background: var(--surface-selected);
+}
+
 /* Where the drop lands: a line above/below for reordering, a filled outline
    for dropping into a folder. */
 .item-line.drop-before {

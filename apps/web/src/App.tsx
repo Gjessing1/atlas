@@ -352,6 +352,16 @@ export function App() {
     },
     [directions],
   );
+  // The Go button on a collection row. The planner takes the bottom of the
+  // screen, so the panel that launched the trip steps aside — the same
+  // hand-off the Android favourites sheet makes.
+  const goToPlace = useCallback(
+    (place: PlaceRecord) => {
+      setSidebarOpen(false);
+      onDirectionsToTarget({ lat: place.lat, lng: place.lng }, place.name);
+    },
+    [onDirectionsToTarget],
+  );
   // The route elevation profile can be dismissed; it comes back per route session.
   const [routeProfileHidden, setRouteProfileHidden] = useState(false);
   useEffect(() => {
@@ -1039,6 +1049,7 @@ export function App() {
             onRevealed={onRevealed}
             onShowPlace={showPlace}
             onShowTrack={showTrack}
+            onGoToPlace={goToPlace}
             onImported={onImported}
             onClose={() => setSidebarOpen(false)}
           />
@@ -1053,6 +1064,7 @@ export function App() {
             layers={layers}
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}
+            onExportAll={() => void userData.exportAll()}
             onClose={() => setSettingsOpen(false)}
           />
         )}
