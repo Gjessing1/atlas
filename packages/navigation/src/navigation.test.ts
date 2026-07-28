@@ -1083,46 +1083,48 @@ describe('headingRateDegPerSec', () => {
   });
 });
 
-describe('NavigationSession adaptive ETA', () => {
-  it('stretches the ETA when actual pace falls behind the route estimate', () => {
+describe('NavigationSession stable ETA', () => {
+  it('keeps the arrival estimate steady while progress matches the route plan', () => {
     const s = new NavigationSession(route());
-    const still = { ...pointAtAlong(300), speedMps: 0 };
-    const base = s.update(still, 0).state.timeRemainingMs;
-    // Stuck for five minutes: the pace factor sinks to its clamp.
-    let remaining = base;
-    for (let t = 10_000; t <= 300_000; t += 10_000) {
-      remaining = s.update(still, t).state.timeRemainingMs;
-    }
-    expect(remaining).toBeGreaterThan(base * 2);
-    expect(remaining).toBeLessThanOrEqual(base * 2.6); // clamped, never runaway
+    const start = s.update(pointAtAlong(0), 1_000_000).state;
+    const halfwayThroughFirstLeg = s.update(pointAtAlong(routeCum[5]!), 1_030_000).state;
+
+    expect(halfwayThroughFirstLeg.timeRemainingMs).toBeCloseTo(90_000, -2);
+    expect(halfwayThroughFirstLeg.etaEpochMs).toBeCloseTo(start.etaEpochMs, -2);
   });
 
-  it('shrinks the ETA when running ahead of the route estimate', () => {
-    const s = new NavigationSession(route());
-    // ~30 m/s over legs the route budgeted ~9 m/s for.
-    let along = 100;
-    let state = s.update({ ...pointAtAlong(along), speedMps: 30 }, 0).state;
-    for (let t = 5000; t <= 25_000; t += 5000) {
-      along += 150;
-      state = s.update({ ...pointAtAlong(along), speedMps: 30 }, t).state;
+  it('adds only the delay incurred at a traffic light', () => {
+    const halfHourRoute: RoutePath = {
+      ...longRoute,
+      timeMs: 1_800_000,
+      instructions: [
+        {
+          ...longRoute.instructions![0]!,
+          timeMs: 1_500_000,
+        },
+        {
+          ...longRoute.instructions![1]!,
+          timeMs: 300_000,
+        },
+        longRoute.instructions![2]!,
+      ],
+    };
+    const s = new NavigationSession(halfHourRoute);
+    const atLight = {
+      ...pointAtDistance(longRoutePoints, longRouteCum, longRouteCum[2]!),
+      speedMps: 0,
+    };
+    const before = s.update(atLight, 1_000_000).state;
+    let after = before;
+    for (let t = 10_000; t <= 60_000; t += 10_000) {
+      after = s.update(atLight, 1_000_000 + t).state;
     }
-    const unadapted = new NavigationSession(route()).update(pointAtAlong(along), 0).state;
-    expect(state.timeRemainingMs).toBeLessThan(unadapted.timeRemainingMs * 0.9);
-  });
 
-  it('carries the learned pace into a replacement route session', () => {
-    const previous = new NavigationSession(route());
-    const still = { ...pointAtAlong(300), speedMps: 0 };
-    previous.update(still, 0);
-    for (let t = 10_000; t <= 180_000; t += 10_000) previous.update(still, t);
-
-    const replacement = new NavigationSession(route());
-    replacement.inheritPaceFrom(previous);
-    const carried = replacement.update(pointAtAlong(300), 200_000).state.timeRemainingMs;
-    const reset = new NavigationSession(route()).update(pointAtAlong(300), 200_000).state
-      .timeRemainingMs;
-
-    expect(carried).toBeGreaterThan(reset * 1.8);
+    // No progress means the route itself still needs the same driving time.
+    // Only the arrival clock moves by the minute actually spent waiting.
+    expect(after.timeRemainingMs).toBeCloseTo(before.timeRemainingMs, -2);
+    expect(after.etaEpochMs - before.etaEpochMs).toBeCloseTo(60_000, -2);
+    expect(after.timeRemainingMs).toBeLessThan(before.timeRemainingMs * 1.01);
   });
 });
 
@@ -1138,17 +1140,17 @@ describe('NavigationSession plannedRemainingMs', () => {
     expect(s.plannedRemainingMs()!).toBeCloseTo(90_000, -3);
   });
 
-  it('ignores the observed-pace adaptation, unlike the displayed ETA', () => {
+  it('matches the displayed route-progress estimate at a standstill', () => {
     const s = new NavigationSession(route());
     const still = { ...pointAtAlong(300), speedMps: 0 };
     const planned = (s.update(still, 0), s.plannedRemainingMs()!);
-    // Stuck for five minutes: the displayed ETA stretches, the baseline must not.
+    // Waiting does not change how long the untraveled route itself takes.
     let displayed = 0;
     for (let t = 10_000; t <= 300_000; t += 10_000) {
       displayed = s.update(still, t).state.timeRemainingMs;
     }
     expect(s.plannedRemainingMs()!).toBeCloseTo(planned, -1);
-    expect(displayed).toBeGreaterThan(planned * 1.5);
+    expect(displayed).toBeCloseTo(planned, -1);
   });
 });
 

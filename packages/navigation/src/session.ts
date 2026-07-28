@@ -39,11 +39,6 @@ function wrapDeg(d: number): number {
   const w = ((d % 360) + 540) % 360;
   return w - 180 === -180 ? 180 : w - 180;
 }
-/** Fix-to-fix intervals longer than this are gaps, not pace evidence. */
-const PACE_MAX_SAMPLE_MS = 30_000;
-/** The pace factor's effect on the ETA, clamped: one red light must not triple it. */
-const PACE_MIN = 0.4;
-const PACE_MAX = 2;
 /** Reckoned ticks (~s) the yaw divergence must persist before `wrongBranch`. */
 const WRONG_BRANCH_GRACE_TICKS = 5;
 /** Atlas turn code for a roundabout leg — both entering (26) and exiting (27). */
@@ -149,8 +144,6 @@ export class NavigationSession {
   private alongAtFixM: number | null = null;
   private lastSpeedMps: number | null = null;
   private lastState: NavState | null = null;
-  /** Observed speed over the route's expected speed, smoothed (1 = on pace). */
-  private paceFactor = 1;
   /** Sensor-measured heading change (deg) accumulated over the current GPS gap. */
   private yawActualDeg = 0;
   /** Route-tangent heading change (deg) over the same reckoned stretch. */
@@ -215,17 +208,6 @@ export class NavigationSession {
         i++;
       }
     }
-  }
-
-  /**
-   * Carry the trip's learned traffic pace into a replacement route session.
-   * A reroute changes the expected road-by-road timing, but the observed ratio
-   * between that timing and the driver's real progress is still evidence about
-   * the same trip. Keeping the value here avoids exposing mutable ETA state to
-   * platform controllers.
-   */
-  inheritPaceFrom(previous: NavigationSession): void {
-    this.paceFactor = previous.paceFactor;
   }
 
   /**
@@ -399,11 +381,10 @@ export class NavigationSession {
 
   /**
    * The engine's own remaining-time estimate (ms) at the last known
-   * along-route position, *without* the observed-pace adaptation. This is the
-   * honest baseline for judging a freshly fetched candidate route: the
-   * candidate's `timeMs` is equally pace-naive, so engine-vs-engine is the
-   * only comparison where a difference means the *roads* differ rather than
-   * the traffic estimate. Null before the first fix has anchored a position.
+   * along-route position. This is the honest baseline for judging a freshly
+   * fetched candidate route: the candidate's `timeMs` uses the same engine
+   * schedule, so a difference means the roads differ. Null before the first
+   * fix has anchored a position.
    */
   plannedRemainingMs(): number | null {
     if (this.lastAlongM === null) return null;
@@ -593,7 +574,6 @@ export class NavigationSession {
       }
     }
 
-    this.updatePace(nowMs, alongM, snap.crossTrackM);
     this.lastFixMs = nowMs;
     this.alongAtFixM = alongM;
     this.lastSpeedMps = speedMps;
@@ -1016,12 +996,12 @@ export class NavigationSession {
   }
 
   private remainingTimeMs(alongM: number, distanceRemainingM: number): number {
-    // Traffic adaptation: scale the route's static estimate by the observed
-    // pace so a jam (or a clear road) actually moves the ETA.
-    return (
-      this.baseRemainingMs(alongM, distanceRemainingM) /
-      Math.min(PACE_MAX, Math.max(PACE_MIN, this.paceFactor))
-    );
+    // Valhalla budgets every maneuver leg, so route progress already says how
+    // much of the departure estimate has been consumed. Keep that schedule
+    // intact: at planned pace `now + remaining` stays steady; a one-minute
+    // stop moves arrival by one minute and cannot reprice the whole remaining
+    // journey as though the current zero speed will last to the destination.
+    return this.baseRemainingMs(alongM, distanceRemainingM);
   }
 
   /**
@@ -1099,25 +1079,6 @@ export class NavigationSession {
     const next = this.maneuvers[this.currentManeuverIndex(alongM) + 1];
     const legM = (next?.alongStartM ?? this.totalM) - cur.alongStartM;
     return cur.timeMs > 0 && legM > 0 ? legM / (cur.timeMs / 1000) : null;
-  }
-
-  /**
-   * Blend the along-route progress rate since the previous fix into the pace
-   * factor. Along-route progress (not GPS speed) makes a standstill in a jam
-   * read as pace 0 — exactly the signal that should stretch the ETA.
-   */
-  private updatePace(nowMs: number, alongM: number, crossTrackM: number): void {
-    const prevMs = this.lastFixMs;
-    const prevAlong = this.alongAtFixM;
-    if (prevMs === null || prevAlong === null) return;
-    const dtMs = nowMs - prevMs;
-    // Only gap-free, on-route stretches are pace evidence.
-    if (dtMs <= 0 || dtMs > PACE_MAX_SAMPLE_MS || crossTrackM > this.opts.offRouteM) return;
-    const expectedMps = this.expectedSpeedAt(alongM);
-    if (expectedMps === null || expectedMps <= 0.5) return;
-    const sample = Math.min(4, Math.max(0, alongM - prevAlong) / (dtMs / 1000) / expectedMps);
-    const alpha = 1 - Math.exp(-dtMs / this.opts.paceTauMs);
-    this.paceFactor += alpha * (sample - this.paceFactor);
   }
 
   /**

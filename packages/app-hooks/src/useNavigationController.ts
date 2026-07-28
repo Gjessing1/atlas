@@ -675,14 +675,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
         traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
         // Rerouting happens mid-drive: never regress to the pre-departure
         // framing (calm camera / no snap-lock) the fresh session starts in.
-        const previousSession = sessionRef.current;
         const nextSession = new NavigationSession(
           path,
           navOptionsForProfile(profileRef.current, {
             startDeparted: lastStateRef.current?.departed ?? true,
           }),
         );
-        if (previousSession) nextSession.inheritPaceFrom(previousSession);
         sessionRef.current = nextSession;
         viasRef.current = remainingVias;
         setViaPoints(remainingVias);
@@ -827,8 +825,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   /** Take the offered faster route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {
     const offer = fasterOfferRef.current;
-    const previousSession = sessionRef.current;
-    if (!offer || !previousSession || !destRef.current) return;
+    if (!offer || !sessionRef.current || !destRef.current) return;
     clearFasterOffer();
     const { path, vias } = offer;
     // The old session dies here — bank its driven distance for the summary.
@@ -839,7 +836,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
         startDeparted: lastStateRef.current?.departed ?? true,
       }),
     );
-    nextSession.inheritPaceFrom(previousSession);
     sessionRef.current = nextSession;
     viasRef.current = vias;
     setViaPoints(vias);

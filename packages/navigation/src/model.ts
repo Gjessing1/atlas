@@ -333,8 +333,6 @@ export interface NavigationOptions {
   wrongBranchDeg?: number;
   /** Chain "…, then X" into a prompt when X follows within this distance (m). */
   chainManeuverM?: number;
-  /** Time constant (ms) of the observed-pace average that adapts the ETA. */
-  paceTauMs?: number;
   /** Cross-track distance (m) beyond which `snapped` shows the raw fix. */
   snapDisplayMaxM?: number;
   /** Tighter `snapDisplayMaxM` used before departure (pre-drive honesty). */
@@ -394,7 +392,6 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   deadReckonBlendTauMs: 45_000,
   wrongBranchDeg: 50, // an in-tunnel fork/roundabout exit turns well past this
   chainManeuverM: 300,
-  paceTauMs: 90_000,
   snapDisplayMaxM: 25,
   startSnapDisplayMaxM: 10,
   departMinSpeedMps: 3, // ~11 km/h: rolling out of a parking spot counts
