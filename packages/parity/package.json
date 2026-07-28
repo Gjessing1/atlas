@@ -1,0 +1,20 @@
+{
+  "name": "@atlas/parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas web ↔ Android parity checklist — which capability each client has, and why for every deliberate difference. Data plus the test that holds it to the source (ROADMAP §7.6).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

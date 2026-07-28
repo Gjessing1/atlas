@@ -13,6 +13,11 @@ export {
   type RouteWaypoint,
   type StoredRoutePlan,
 } from './useRoute.js';
+export {
+  planFromHash,
+  useRoutePlanPersistence,
+  type RoutePlanSettings,
+} from './useRoutePlanPersistence.js';
 export { useDirections, type Directions, type GetLocationFn } from './useDirections.js';
 export {
   useMapProfile,

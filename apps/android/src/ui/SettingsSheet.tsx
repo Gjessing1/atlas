@@ -66,9 +66,169 @@ const STATUS_LABEL: Record<SyncState['status'], string> = {
   error: 'Sync error',
 };
 
+/**
+ * Password rotation, kept collapsed until asked for — it is rare, and the
+ * common case (checking sync status) should not be buried under a form. Web's
+ * twin, down to the warning about other devices.
+ */
+function ChangePasswordForm({ sync }: { sync: SyncState }) {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  if (!open) {
+    return (
+      <Pressable onPress={() => setOpen(true)} testID="change-password-open">
+        <Text style={styles.linkAction}>Change password</Text>
+        {done ? <Text style={styles.muted}>Password changed.</Text> : null}
+      </Pressable>
+    );
+  }
+
+  const submit = () => {
+    if (!current || !next || busy) return;
+    setBusy(true);
+    setProblem(null);
+    void sync.changePassword(current, next).then((err) => {
+      setBusy(false);
+      setProblem(err);
+      if (!err) {
+        setDone(true);
+        setCurrent('');
+        setNext('');
+        setOpen(false);
+      }
+    });
+  };
+
+  return (
+    <View style={styles.subForm}>
+      <TextInput
+        style={styles.input}
+        placeholder="Current password"
+        secureTextEntry
+        value={current}
+        onChangeText={setCurrent}
+        testID="current-password"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="New password (min 8 characters)"
+        secureTextEntry
+        value={next}
+        onChangeText={setNext}
+        testID="new-password"
+      />
+      <Text style={styles.muted}>Your other devices will be signed out.</Text>
+      {problem ? <Text style={styles.error}>{problem}</Text> : null}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[styles.button, busy && styles.buttonDisabled]}
+          disabled={busy}
+          onPress={submit}
+          testID="change-password-submit"
+        >
+          <Text style={styles.buttonText}>Change password</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          disabled={busy}
+          onPress={() => setOpen(false)}
+        >
+          <Text style={styles.buttonQuietText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Account deletion: server-side data only, behind the password *and* a typed
+ * confirmation. Local places and tracks survive — the app just goes back to
+ * anonymous local-only — and the copy says so, because on a phone this is the
+ * button pressed by someone who means "stop syncing", not "erase my maps".
+ */
+function DeleteAccountForm({ sync }: { sync: SyncState }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <Pressable onPress={() => setOpen(true)} testID="delete-account-open">
+        <Text style={styles.linkDanger}>Delete account</Text>
+      </Pressable>
+    );
+  }
+
+  const submit = () => {
+    if (!password || confirm !== 'DELETE' || busy) return;
+    setBusy(true);
+    setProblem(null);
+    void sync.deleteAccount(password).then((err) => {
+      setBusy(false);
+      setProblem(err);
+      if (!err) setOpen(false);
+    });
+  };
+
+  return (
+    <View style={styles.subForm}>
+      <Text style={styles.muted}>
+        Deletes your account and everything synced to the server. Places and tracks on this phone
+        stay — export them first if this is your only copy.
+      </Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+        testID="delete-account-password"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Type DELETE to confirm"
+        autoCapitalize="characters"
+        value={confirm}
+        onChangeText={setConfirm}
+        testID="delete-account-confirm"
+      />
+      {problem ? <Text style={styles.error}>{problem}</Text> : null}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[
+            styles.button,
+            styles.buttonDanger,
+            (busy || confirm !== 'DELETE' || !password) && styles.buttonDisabled,
+          ]}
+          disabled={busy || confirm !== 'DELETE' || !password}
+          onPress={submit}
+          testID="delete-account-submit"
+        >
+          <Text style={styles.buttonText}>Delete account</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          disabled={busy}
+          onPress={() => setOpen(false)}
+        >
+          <Text style={styles.buttonQuietText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAvailability }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [invite, setInvite] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -76,12 +236,15 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
     async (mode: 'login' | 'register') => {
       setBusy(true);
       setMessage(null);
-      const problem = await sync.signIn(email.trim(), password, mode);
+      const problem = await sync.signIn(email.trim(), password, mode, invite.trim() || undefined);
       setBusy(false);
       setMessage(problem);
-      if (!problem) setPassword('');
+      if (!problem) {
+        setPassword('');
+        setInvite('');
+      }
     },
-    [sync, email, password],
+    [sync, email, password, invite],
   );
 
   if (sync.availability === 'disabled') {
@@ -111,6 +274,21 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
           {sync.lastSyncAt ? ` · ${fmtClock(sync.lastSyncAt)}` : ''}
         </Text>
         {sync.error ? <Text style={styles.error}>{sync.error}</Text> : null}
+        {/* What is still only on this phone. "Synced" answers when the last
+            push happened; this answers whether anything is waiting, which is
+            the question someone about to lose the device is actually asking. */}
+        <Text style={styles.muted}>
+          {sync.pending === 0
+            ? 'All changes are on the server'
+            : `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting to upload`}
+        </Text>
+        {/* A failure that has since recovered still gets said out loud — a sync
+            that silently stopped working is what this line is here to catch. */}
+        {sync.lastError && sync.status !== 'error' && sync.status !== 'authExpired' ? (
+          <Text style={styles.muted}>
+            Last problem {fmtClock(sync.lastError.at)}: {sync.lastError.message}
+          </Text>
+        ) : null}
         <View style={styles.buttonRow}>
           <Pressable style={styles.button} onPress={sync.syncNow} testID="sync-now">
             <Text style={styles.buttonText}>Sync now</Text>
@@ -118,6 +296,10 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
           <Pressable style={[styles.button, styles.buttonQuiet]} onPress={sync.signOut}>
             <Text style={styles.buttonQuietText}>Sign out</Text>
           </Pressable>
+        </View>
+        <View style={styles.accountManage}>
+          <ChangePasswordForm sync={sync} />
+          <DeleteAccountForm sync={sync} />
         </View>
       </View>
     );
@@ -141,6 +323,20 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
         onChangeText={setPassword}
         testID="account-password"
       />
+      {/* An invite-gated server refuses a registration without a code, and the
+          Atlas instance this app ships pointed at is exactly that — without
+          this field Register could only ever fail here, which is how it stood
+          until §7.6's checklist asked the question. */}
+      {sync.registration === 'invite' ? (
+        <TextInput
+          style={styles.input}
+          placeholder="Invite code (new accounts only)"
+          autoCapitalize="none"
+          value={invite}
+          onChangeText={setInvite}
+          testID="account-invite"
+        />
+      ) : null}
       {message ? <Text style={styles.error}>{message}</Text> : null}
       <View style={styles.buttonRow}>
         <Pressable
@@ -151,16 +347,23 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
         >
           <Text style={styles.buttonText}>Sign in</Text>
         </Pressable>
-        <Pressable
-          style={[styles.button, styles.buttonQuiet]}
-          disabled={busy || !sync.ready}
-          onPress={() => void submit('register')}
-          testID="account-register"
-        >
-          <Text style={styles.buttonQuietText}>Register</Text>
-        </Pressable>
+        {/* The server decides whether new accounts are possible; don't offer a
+            button it will refuse. */}
+        {sync.registration !== 'closed' ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            disabled={busy || !sync.ready}
+            onPress={() => void submit('register')}
+            testID="account-register"
+          >
+            <Text style={styles.buttonQuietText}>Register</Text>
+          </Pressable>
+        ) : null}
         {busy ? <ActivityIndicator /> : null}
       </View>
+      {sync.registration === 'closed' ? (
+        <Text style={styles.muted}>This server is not accepting new accounts.</Text>
+      ) : null}
       {/* A storage failure disables sign-in (an account's data syncs into the
           local database), so it has to be said here rather than left as an
           "Opening local storage…" that never finishes. */}
@@ -1154,6 +1357,13 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.5 },
   buttonQuiet: { backgroundColor: theme.surfaceMuted },
   buttonQuietText: { color: theme.text, fontWeight: '600' },
+  buttonDanger: { backgroundColor: theme.danger },
+  // Rare account actions read as links rather than buttons, so the two that
+  // matter daily (Sync now, Sign out) keep the visual weight.
+  linkAction: { color: theme.accent, fontWeight: '600', marginTop: 14 },
+  linkDanger: { color: theme.danger, fontWeight: '600', marginTop: 10 },
+  subForm: { marginTop: 14 },
+  accountManage: { marginTop: 4 },
   themeRow: { flexDirection: 'row', gap: 6 },
   widgetOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   themeOption: {

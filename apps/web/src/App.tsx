@@ -28,6 +28,8 @@ import {
   useNavPrefs,
   useBestSpots,
   useNavResume,
+  planFromHash,
+  useRoutePlanPersistence,
   usePotential,
   usePotentialExplain,
   useThemeMode,
@@ -79,7 +81,6 @@ import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useDirections } from './routing/useDirections.js';
 import { useRoute } from './routing/useRoute.js';
 import { useTransitPlan } from './routing/useTransit.js';
-import { planFromHash, useRoutePlanPersistence } from './routing/useRoutePlanPersistence.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { PlaceEditDialog } from './place/PlaceEditDialog.js';
 import { SearchBox } from './SearchBox.js';

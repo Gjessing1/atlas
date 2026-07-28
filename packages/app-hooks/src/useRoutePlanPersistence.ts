@@ -1,8 +1,8 @@
-import type { StoredRoutePlan } from '@atlas/app-hooks';
-import type { RoutePlanState } from '@atlas/core';
+import type { LatLng, RoutePlanState } from '@atlas/core';
 import { isRoutingProfile } from '@atlas/routing';
 import { useEffect, useRef } from 'react';
-import type { RoutePlanner } from './useRoute.js';
+
+import type { RoutePlanner, StoredRoutePlan } from './useRoute.js';
 
 /**
  * The plan lives on this device only: it is scratch state, not user data, so
@@ -11,7 +11,12 @@ import type { RoutePlanner } from './useRoute.js';
  */
 const PLAN_SETTING = 'local.route.plan';
 
-interface SettingsAccess {
+/**
+ * The settings seam this needs, which every client already has through
+ * `useUserData`. Narrow on purpose: a plan-restoring hook has no business with
+ * places, tracks or the storage handle.
+ */
+export interface RoutePlanSettings {
   status: string;
   getSetting: (key: string) => Promise<string | null | undefined>;
   setSetting: (key: string, value: string) => void;
@@ -24,7 +29,7 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
   if (!isRoutingProfile(hashPlan.profile) || hashPlan.points.length === 0) return null;
   const plan: StoredRoutePlan = {
     profile: hashPlan.profile,
-    waypoints: hashPlan.points.map((pos) => ({ pos })),
+    waypoints: hashPlan.points.map((pos: LatLng) => ({ pos })),
   };
   if (hashPlan.roundTripKm !== undefined) plan.roundTripKm = hashPlan.roundTripKm;
   if (hashPlan.roundTripDirection !== undefined) {
@@ -34,14 +39,20 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
 }
 
 /**
- * Keeps the open route plan across reloads: restores the saved plan on
- * startup, then writes every later change back. A plan carried by the URL
- * (a shared link) wins and is passed in as `fromLink` — restoring the local
- * plan over someone's link would be the wrong plan entirely.
+ * Keeps the open route plan across restarts: restores the saved plan on
+ * startup, then writes every later change back. A plan carried by a link (web's
+ * URL hash) wins and is passed in as `fromLink` — restoring the local plan over
+ * someone's link would be the wrong plan entirely.
+ *
+ * Shared because losing a half-built plan is *worse* on the phone, which is
+ * where the OS kills a backgrounded app: this lived in the web app for three
+ * releases while Android silently dropped every plan on restart (ROADMAP §7.6 —
+ * "prefer @atlas/app-hooks for anything with state" is exactly this shape of
+ * bug). Nothing in it was ever web-specific.
  */
 export function useRoutePlanPersistence(
   route: RoutePlanner,
-  settings: SettingsAccess,
+  settings: RoutePlanSettings,
   fromLink: StoredRoutePlan | null,
 ): void {
   const { status, getSetting, setSetting } = settings;

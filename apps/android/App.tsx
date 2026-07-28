@@ -10,6 +10,7 @@ import {
   useNavPrefs,
   useNavResume,
   usePotential,
+  useRoutePlanPersistence,
   usePotentialExplain,
   useThemeMode,
   type FetchNearbyFn,
@@ -164,6 +165,11 @@ function AppInner() {
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const nav = useNavigation();
   const route = useRoute();
+  // The half-built plan survives the app being killed in the background — the
+  // same hook the web app restores its plan with (§7.6). Android has no address
+  // bar to carry a plan, so there is never a link plan to prefer over the saved
+  // one; the day it handles an incoming atlas:// link, that goes here.
+  useRoutePlanPersistence(route, data, null);
   const transit = useTransitPlan(route);
   const directions = useDirections(route);
   // Geometry of the visible tracks, for the map's track line layer.
