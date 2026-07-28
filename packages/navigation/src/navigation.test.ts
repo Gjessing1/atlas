@@ -15,6 +15,7 @@ import { maneuverArrowsGeoJSON } from './overlays.js';
 import { laneGlyphs, laneLabel } from './lanes.js';
 import { headingRateDegPerSec } from './sensors.js';
 import { navOptionsForProfile } from './profiles.js';
+import { navLineProgress } from './model.js';
 import { NavigationSession } from './session.js';
 
 // A straight eastward route at lat 60: 21 points, lng 10.000 → 10.020.
@@ -423,6 +424,19 @@ describe('NavigationSession via stops (multi-stop trips)', () => {
   });
 });
 
+describe('navLineProgress', () => {
+  it('preserves fine-grained progress instead of rounding by trip percentage', () => {
+    expect(navLineProgress({ displayRouteProgress: 0.123_456 })).toBe(0.123_456);
+  });
+
+  it('defaults and clamps defensively', () => {
+    expect(navLineProgress(null)).toBe(0);
+    expect(navLineProgress({ displayRouteProgress: -0.2 })).toBe(0);
+    expect(navLineProgress({ displayRouteProgress: 1.2 })).toBe(1);
+    expect(navLineProgress({ displayRouteProgress: Number.NaN })).toBe(0);
+  });
+});
+
 describe('NavigationSession snapped state', () => {
   it('hugs the road for a near fix, keeping the raw fix as-is', () => {
     const s = new NavigationSession(route());
@@ -489,9 +503,12 @@ describe('NavigationSession snapped state', () => {
     const expected = pointAtAlong(220);
     expect(state.snapped.lng).toBeCloseTo(expected.lng, 5);
     expect(state.traveledM).toBeCloseTo(200, 0);
+    expect(state.routeProgress).toBeCloseTo(200 / routeTotal, 5);
+    expect(state.displayRouteProgress).toBeCloseTo(220 / routeTotal, 5);
     const still = new NavigationSession(route(), { startDeparted: true });
     const noSpeed = still.update(pointAtAlong(200), 0).state;
     expect(noSpeed.snapped.lng).toBeCloseTo(pointAtAlong(200).lng, 5);
+    expect(noSpeed.displayRouteProgress).toBeCloseTo(noSpeed.routeProgress, 10);
   });
 });
 

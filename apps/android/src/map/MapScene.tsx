@@ -19,7 +19,7 @@ import {
   type CameraRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
-import { maneuverArrowsGeoJSON } from '@atlas/navigation';
+import { maneuverArrowsGeoJSON, navLineProgress } from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -296,13 +296,12 @@ export function MapScene({
     () => (nav.activePath ? maneuverArrowsGeoJSON(nav.activePath) : null),
     [nav.activePath],
   );
-  // Quantized so the per-fix re-render only changes the filter/gradient when
-  // the values move visibly.
+  // Arrow filters can move in coarse metre steps. The route colour boundary
+  // cannot: rounding by a percentage of the whole route made it jump tens or
+  // hundreds of metres ahead on long trips. The core's display progress also
+  // follows its latency-compensated puck, so the grey trail ends underneath it.
   const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
-  const routeProgress = Math.min(
-    0.999,
-    Math.max(0.001, Math.round((nav.state?.routeProgress ?? 0) * 200) / 200),
-  );
+  const routeProgress = navLineProgress(nav.state);
 
   const planning = route.active;
   // The map itself stays edge-to-edge under the system bars, but the controls

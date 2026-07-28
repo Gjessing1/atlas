@@ -407,6 +407,7 @@ export class NavigationSession {
         ...this.lastState,
         status: 'arrived',
         routeProgress: 1,
+        displayRouteProgress: 1,
         upcoming: null,
         then: null,
         sustain: null,
@@ -608,6 +609,11 @@ export class NavigationSession {
     const snapDisplayM = this.departed ? this.opts.snapDisplayMaxM : this.opts.startSnapDisplayMaxM;
     let shown: LatLng;
     let shownCourse: number | null;
+    let displayRouteProgress = this.arrived
+      ? 1
+      : this.totalM > 0
+        ? Math.min(1, alongM / this.totalM)
+        : 0;
     if (snap.crossTrackM <= snapDisplayM && accurate) {
       let displayAlongM = alongM;
       if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
@@ -622,6 +628,11 @@ export class NavigationSession {
         displayAlongM = Math.min(this.totalM, turnM, alongM + aheadM);
       }
       shown = pointAtDistance(this.points, this.cum, displayAlongM);
+      displayRouteProgress = this.arrived
+        ? 1
+        : this.totalM > 0
+          ? Math.min(1, displayAlongM / this.totalM)
+          : 0;
       // Bearing from where the vehicle actually is, not from the projected
       // display point: the projection exists to cancel render latency in the
       // *position*, and letting it drive the bearing too made the course-up
@@ -642,6 +653,7 @@ export class NavigationSession {
       offRouteM: snap.crossTrackM,
       traveledM: alongM,
       routeProgress: this.arrived ? 1 : this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
+      displayRouteProgress,
       distanceRemainingM,
       timeRemainingMs: remainMs,
       etaEpochMs: nowMs + remainMs,
@@ -776,6 +788,7 @@ export class NavigationSession {
       offRouteM: 0,
       traveledM: alongM,
       routeProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
+      displayRouteProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
       distanceRemainingM,
       timeRemainingMs: remainMs,
       etaEpochMs: nowMs + remainMs,
@@ -854,6 +867,7 @@ export class NavigationSession {
       offRouteM: 0,
       traveledM: 0,
       routeProgress: 0,
+      displayRouteProgress: 0,
       distanceRemainingM: this.totalM,
       timeRemainingMs: this.totalTimeMs,
       etaEpochMs: nowMs + this.totalTimeMs,

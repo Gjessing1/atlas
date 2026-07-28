@@ -108,6 +108,14 @@ export interface NavState {
   traveledM: number;
   /** Fraction of the route completed, 0..1 (`traveledM / total`; 1 on arrival). */
   routeProgress: number;
+  /**
+   * Fraction of the route at which the rendered travelled/untravelled colour
+   * boundary should sit. Normally this is `routeProgress`; while the on-route
+   * puck is projected ahead to cancel GPS/render latency, it follows that
+   * displayed puck instead. Guidance and trip progress remain truthful in
+   * `traveledM` / `routeProgress`.
+   */
+  displayRouteProgress: number;
   /** Distance (m) still to travel to the destination. */
   distanceRemainingM: number;
   /** Estimated travel time (ms) still remaining. */
@@ -187,6 +195,20 @@ export interface NavState {
    * Null when the route is a single point.
    */
   courseDeg: number | null;
+}
+
+/**
+ * Exact progress value for the map's travelled-route colour boundary.
+ *
+ * Keep this shared so neither client reintroduces percentage rounding: 0.5%
+ * of a motorway trip can put the grey trail hundreds of metres ahead of the
+ * puck. Clamping is defensive only; session-produced values are already 0..1.
+ */
+export function navLineProgress(
+  state: Pick<NavState, 'displayRouteProgress'> | null | undefined,
+): number {
+  const progress = state?.displayRouteProgress ?? 0;
+  return Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
 }
 
 /** A spoken-guidance cue emitted as the traveller nears a maneuver. */

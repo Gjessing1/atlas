@@ -4,6 +4,7 @@ import {
   followZoom,
   maneuverArrowsGeoJSON,
   navCameraStyle,
+  navLineProgress,
   remainingRouteBounds,
 } from '@atlas/navigation';
 import maplibregl from 'maplibre-gl';
@@ -61,11 +62,13 @@ export function useNavLayers(
   const active = nav.phase === 'navigating' || nav.phase === 'rerouting';
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
-  // Quantized so the per-fix updates only touch the map when visible.
-  const routeProgress = Math.min(
-    0.999,
-    Math.max(0.001, Math.round((nav.state?.routeProgress ?? 0) * 200) / 200),
-  );
+  // This must stay exact: rounding by a percentage of the whole route made
+  // the colour boundary jump tens or hundreds of metres ahead on long trips.
+  // The core's display progress also follows its latency-compensated puck, so
+  // the grey trail ends directly underneath the marker.
+  const routeProgress = navLineProgress(nav.state);
+  const routeProgressRef = useRef(routeProgress);
+  routeProgressRef.current = routeProgress;
   const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
   useEffect(() => {
     if (!map) return;
@@ -98,7 +101,13 @@ export function useNavLayers(
           layout: line,
           paint: {
             'line-width': 10,
-            'line-gradient': ['step', ['line-progress'], '#7d8590', 0.001, '#1557b0'],
+            'line-gradient': [
+              'step',
+              ['line-progress'],
+              '#7d8590',
+              routeProgressRef.current,
+              '#1557b0',
+            ],
           },
         });
         map.addLayer({
@@ -108,7 +117,13 @@ export function useNavLayers(
           layout: line,
           paint: {
             'line-width': 6,
-            'line-gradient': ['step', ['line-progress'], '#aab2bd', 0.001, '#4285f4'],
+            'line-gradient': [
+              'step',
+              ['line-progress'],
+              '#aab2bd',
+              routeProgressRef.current,
+              '#4285f4',
+            ],
           },
         });
       }
