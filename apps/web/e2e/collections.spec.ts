@@ -142,7 +142,7 @@ test('a saved place goes straight from its row to the planner, and Export all ha
   // "Export all" lives on the Collections header (web) *and* under Settings →
   // Account (where Android keeps it) — same action, both homes.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('tab', { name: 'Account', exact: true }).click();
+  await page.getByRole('tab', { name: 'Account & data', exact: true }).click();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export all data' }).click();
   expect((await download).suggestedFilename()).toMatch(/^atlas-export-\d{4}-\d{2}-\d{2}\./);

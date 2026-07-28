@@ -1,13 +1,7 @@
-import {
-  circleFeature,
-  destinationPoint,
-  fmtKm,
-  haversineM,
-  pathLengthM,
-  type LatLng,
-} from '@atlas/core';
+import type { MeasureController } from '@atlas/app-hooks';
+import { fmtRadius, MEASURE_RADII_M, type LatLng } from '@atlas/core';
 import type maplibregl from 'maplibre-gl';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 const SOURCE_ID = 'atlas-measure';
 const RING_FILL = 'atlas-measure-ring-fill';
@@ -21,89 +15,30 @@ const ALL_LAYERS = [RING_FILL, RING_LINE, PATH_LINE, POINTS, LABELS];
 const MEASURE_COLOR = '#0e7490'; // cyan-700
 const LABEL_COLOR = '#0e7490';
 
-/** Radius presets, metres. Multi-select — a stand often wants two rings at once. */
-const RADIUS_PRESETS = [50, 100, 200, 300, 500] as const;
-
-type Mode = 'distance' | 'radius';
-
-function fmtRadius(m: number): string {
-  return m >= 1000 ? `${m / 1000} km` : `${m} m`;
-}
-
 /**
- * The radius / measure tool (roadmap §4.7b): a click-to-add distance ruler and
- * click-to-drop radius rings, for hunt line-of-sight and general planning. A
- * tool, not a catalog layer — it owns its own MapLibre GeoJSON source while
- * open and clears it on close. Geometry math is shared with Android via
- * `@atlas/core` (circleFeature/destinationPoint/pathLengthM), so a ring is the
- * same shape on both platforms.
+ * The radius / measure tool: a click-to-add distance ruler and click-to-drop
+ * radius rings, for hunt line-of-sight and general planning. A tool, not a
+ * catalog layer — it owns its own MapLibre GeoJSON source while open and clears
+ * it on close.
+ *
+ * The measurement itself lives in `useMeasure` (@atlas/app-hooks) over the
+ * `@atlas/core` measure model, so the Android tool draws the same geometry and
+ * says the same words; what stays here is purely MapLibre — the layers, and
+ * turning a map click into `addPoint`.
  */
-export function MeasureTool({ map, onClose }: { map: maplibregl.Map; onClose: () => void }) {
-  const [mode, setMode] = useState<Mode>('distance');
-  const [points, setPoints] = useState<LatLng[]>([]);
-  const [centers, setCenters] = useState<LatLng[]>([]);
-  const [radii, setRadii] = useState<number[]>([100, 200]);
+export function MeasureTool({
+  map,
+  measure,
+  onClose,
+}: {
+  map: maplibregl.Map;
+  measure: MeasureController;
+  onClose: () => void;
+}) {
+  const { mode, radii, features, readout, hasWork } = measure;
 
-  // The map handler is registered once; it reads the live mode via a ref.
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-
-  const totalM = useMemo(() => pathLengthM(points), [points]);
-  const straightM = useMemo(
-    () => (points.length >= 2 ? haversineM(points[0]!, points[points.length - 1]!) : 0),
-    [points],
-  );
-
-  // ---- feature collection derived from the current measurement ----
-  const fc = useMemo<GeoJSON.FeatureCollection>(() => {
-    const features: GeoJSON.Feature[] = [];
-    if (mode === 'distance') {
-      if (points.length >= 2) {
-        features.push({
-          type: 'Feature',
-          properties: { kind: 'path' },
-          geometry: { type: 'LineString', coordinates: points.map((p) => [p.lng, p.lat]) },
-        });
-      }
-      points.forEach((p, i) => {
-        features.push({
-          type: 'Feature',
-          properties: { kind: 'point' },
-          geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-        });
-        // Running total sits at each vertex from the second one on.
-        if (i > 0) {
-          features.push({
-            type: 'Feature',
-            properties: { kind: 'label', text: fmtKm(pathLengthM(points.slice(0, i + 1))) },
-            geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-          });
-        }
-      });
-    } else {
-      for (const c of centers) {
-        features.push({
-          type: 'Feature',
-          properties: { kind: 'point' },
-          geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-        });
-        for (const r of radii) {
-          features.push(circleFeature(c, r, { kind: 'ring' }));
-          // Label each ring at its top (due north of the centre).
-          const top = destinationPoint(c, 0, r);
-          features.push({
-            type: 'Feature',
-            properties: { kind: 'label', text: fmtRadius(r) },
-            geometry: { type: 'Point', coordinates: [top.lng, top.lat] },
-          });
-        }
-      }
-    }
-    return { type: 'FeatureCollection', features };
-  }, [mode, points, centers, radii]);
-
-  const fcRef = useRef(fc);
-  fcRef.current = fc;
+  const fcRef = useRef(features);
+  fcRef.current = features;
 
   // ---- layers: ensure once, re-ensure across style swaps, seed from fcRef ----
   useEffect(() => {
@@ -188,15 +123,15 @@ export function MeasureTool({ map, onClose }: { map: maplibregl.Map; onClose: ()
   // Push the current measurement into the source whenever it changes.
   useEffect(() => {
     const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-    source?.setData(fc);
-  }, [map, fc]);
+    source?.setData(features);
+  }, [map, features]);
 
   // ---- clicks add points/centres; crosshair cursor while the tool is open ----
+  const addPoint = measure.addPoint;
   useEffect(() => {
     const onClick = (e: maplibregl.MapMouseEvent) => {
-      const at = { lat: e.lngLat.lat, lng: e.lngLat.lng };
-      if (modeRef.current === 'distance') setPoints((prev) => [...prev, at]);
-      else setCenters((prev) => [...prev, at]);
+      const at: LatLng = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      addPoint(at);
     };
     map.on('click', onClick);
     const canvas = map.getCanvas();
@@ -206,21 +141,7 @@ export function MeasureTool({ map, onClose }: { map: maplibregl.Map; onClose: ()
       map.off('click', onClick);
       canvas.style.cursor = prevCursor;
     };
-  }, [map]);
-
-  const hasWork = mode === 'distance' ? points.length > 0 : centers.length > 0;
-  const undo = () => {
-    if (mode === 'distance') setPoints((p) => p.slice(0, -1));
-    else setCenters((c) => c.slice(0, -1));
-  };
-  const clear = () => {
-    setPoints([]);
-    setCenters([]);
-  };
-  const toggleRadius = (r: number) =>
-    setRadii((prev) =>
-      prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r].sort((a, b) => a - b),
-    );
+  }, [map, addPoint]);
 
   return (
     <div className="measure-panel" role="dialog" aria-label="Measure">
@@ -234,54 +155,43 @@ export function MeasureTool({ map, onClose }: { map: maplibregl.Map; onClose: ()
         <button
           type="button"
           aria-pressed={mode === 'distance'}
-          onClick={() => setMode('distance')}
+          onClick={() => measure.setMode('distance')}
         >
           Distance
         </button>
-        <button type="button" aria-pressed={mode === 'radius'} onClick={() => setMode('radius')}>
+        <button
+          type="button"
+          aria-pressed={mode === 'radius'}
+          onClick={() => measure.setMode('radius')}
+        >
           Radius
         </button>
       </div>
-      {mode === 'distance' ? (
-        <div className="measure-body">
-          {points.length >= 2 ? (
-            <>
-              <div className="measure-readout">{fmtKm(totalM)}</div>
-              {straightM > 0 && straightM !== totalM && (
-                <div className="measure-sub">straight line {fmtKm(straightM)}</div>
-              )}
-            </>
-          ) : (
-            <p className="measure-hint">Click the map to add points along a line.</p>
-          )}
-        </div>
-      ) : (
-        <div className="measure-body">
+      <div className="measure-body">
+        {mode === 'radius' && (
           <div className="measure-chips" role="group" aria-label="Ring radii">
-            {RADIUS_PRESETS.map((r) => (
+            {MEASURE_RADII_M.map((r) => (
               <button
                 key={r}
                 type="button"
                 className={radii.includes(r) ? 'measure-chip on' : 'measure-chip'}
                 aria-pressed={radii.includes(r)}
-                onClick={() => toggleRadius(r)}
+                onClick={() => measure.toggleRadius(r)}
               >
                 {fmtRadius(r)}
               </button>
             ))}
           </div>
-          <p className="measure-hint">
-            {centers.length === 0
-              ? 'Click the map to drop a circle.'
-              : `${centers.length} ${centers.length === 1 ? 'circle' : 'circles'}`}
-          </p>
-        </div>
-      )}
+        )}
+        {readout.headline && <div className="measure-readout">{readout.headline}</div>}
+        {readout.detail && <div className="measure-sub">{readout.detail}</div>}
+        {readout.hint && <p className="measure-hint">{readout.hint}</p>}
+      </div>
       <div className="measure-actions">
-        <button type="button" onClick={undo} disabled={!hasWork}>
+        <button type="button" onClick={measure.undo} disabled={!hasWork}>
           Undo
         </button>
-        <button type="button" onClick={clear} disabled={!hasWork}>
+        <button type="button" onClick={measure.clear} disabled={!hasWork}>
           Clear
         </button>
       </div>

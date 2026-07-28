@@ -18,6 +18,7 @@ export * from './geo.js';
 export * from './inatur.js';
 export * from './layers.js';
 export * from './maphash.js';
+export * from './measure.js';
 export * from './nav-widgets.js';
 export * from './packs.js';
 export * from './places.js';
@@ -26,6 +27,7 @@ export * from './profiles.js';
 export * from './recent-searches.js';
 export * from './routelabels.js';
 export * from './search.js';
+export * from './settings.js';
 export * from './share.js';
 export * from './wiki-language.js';
 

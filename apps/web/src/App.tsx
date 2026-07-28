@@ -23,6 +23,7 @@ import {
   useMapProfile,
   useMapProfilePreferences,
   useMapStyleEditor,
+  useMeasure,
   useNavAddStop,
   useNavPrefs,
   useBestSpots,
@@ -179,14 +180,15 @@ export function App() {
   // The place card's hand-off into the planner (seeds "My location" as start).
   const directions = useDirections(route);
 
-  // The radius / measure tool (§4.7b): while open it owns map clicks.
-  const [measureOpen, setMeasureOpen] = useState(false);
-  const measuringRef = useRef(measureOpen);
-  measuringRef.current = measureOpen;
+  // The radius / measure tool: while open it owns map clicks. State and geometry
+  // are shared with Android through useMeasure (@atlas/app-hooks).
+  const measure = useMeasure();
+  const measuringRef = useRef(measure.open);
+  measuringRef.current = measure.open;
   // Route mode or the measure tool own map clicks; identify, the POI card and
   // the route-click handler read this ref to yield.
   const blockPassiveClicksRef = useRef(false);
-  blockPassiveClicksRef.current = route.active || measureOpen;
+  blockPassiveClicksRef.current = route.active || measure.open;
 
   useRouteLayers(map, route, transit.enabled, measuringRef);
   useTransitLayers(map, transit.enabled ? transit.trip : null);
@@ -956,11 +958,11 @@ export function App() {
           <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
           <button
             type="button"
-            className={`map-measure-control${measureOpen ? ' on' : ''}`}
+            className={`map-measure-control${measure.open ? ' on' : ''}`}
             aria-label="Measure distance and radius"
             title="Measure"
-            aria-pressed={measureOpen}
-            onClick={() => setMeasureOpen((open) => !open)}
+            aria-pressed={measure.open}
+            onClick={measure.toggleOpen}
           >
             <RulerIcon size={19} />
           </button>
@@ -1001,8 +1003,8 @@ export function App() {
           </button>
         </div>
       )}
-      {map && measureOpen && nav.phase === 'idle' && (
-        <MeasureTool map={map} onClose={() => setMeasureOpen(false)} />
+      {map && measure.open && nav.phase === 'idle' && (
+        <MeasureTool map={map} measure={measure} onClose={() => measure.setOpen(false)} />
       )}
       {/* One card for pins, saved places, POIs and search hits. Hidden mid-trip
           along with the rest of the map chrome. */}

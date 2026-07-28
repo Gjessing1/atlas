@@ -147,7 +147,7 @@ test('a second tab explains itself and takes over when the first closes', async 
   // Account sign-in is blocked by this, and has to say so rather than sit on
   // "Opening local storage…" forever (the reported bug).
   await second.getByRole('button', { name: 'Settings' }).click();
-  await second.getByRole('tab', { name: 'Account' }).click();
+  await second.getByRole('tab', { name: 'Account & data' }).click();
   await expect(second.locator('.account-error')).toContainText('already open elsewhere');
   await second.getByRole('button', { name: 'Close panel' }).click();
 

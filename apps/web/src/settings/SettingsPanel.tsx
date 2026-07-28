@@ -16,6 +16,8 @@ import {
   MAP_PROFILES,
   MAX_NAV_WIDGETS,
   NAV_WIDGETS,
+  settingsSectionsFor,
+  type SettingsSectionId,
   type SystemStatus,
   type UpstreamStatus,
 } from '@atlas/core';
@@ -41,15 +43,12 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-type SettingsTab = 'map' | 'profiles' | 'navigation' | 'account' | 'system';
-
-const TABS: readonly { id: SettingsTab; label: string }[] = [
-  { id: 'map', label: 'Map' },
-  { id: 'profiles', label: 'Profiles' },
-  { id: 'navigation', label: 'Navigation' },
-  { id: 'account', label: 'Account' },
-  { id: 'system', label: 'System' },
-];
+/**
+ * The tabs, from the shared section list in `@atlas/core` — the same sections,
+ * names and order Android drills into (ROADMAP §7.5). Map tiles and Offline
+ * regions are filtered out there as Android-only, so this is the web six.
+ */
+const TABS = settingsSectionsFor('web');
 
 const STYLE_COLORS = [
   ['landColor', 'Land', '#f5f3ee'],
@@ -273,7 +272,7 @@ export function SettingsPanel({
   onExportAll,
   onClose,
 }: SettingsPanelProps) {
-  const [tab, setTab] = useState<SettingsTab>('map');
+  const [tab, setTab] = useState<SettingsSectionId>('appearance');
   // Do not wake every upstream status row until the user opens System.
   const status = useStatus('', tab === 'system');
 
@@ -293,6 +292,7 @@ export function SettingsPanel({
             aria-selected={tab === item.id}
             className={tab === item.id ? 'settings-tab settings-tab-on' : 'settings-tab'}
             onClick={() => setTab(item.id)}
+            title={item.hint}
             key={item.id}
           >
             {item.label}
@@ -301,10 +301,10 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-tab-body">
-        {tab === 'map' && (
+        {tab === 'appearance' && (
           <>
             <div className="settings-section">
-              <h3>Appearance</h3>
+              <h3>Theme</h3>
               <div className="theme-options" role="radiogroup" aria-label="Theme">
                 {(['system', 'light', 'dark'] as const).map((mode) => (
                   <button
@@ -324,10 +324,13 @@ export function SettingsPanel({
               <p className="settings-note">System follows this device’s light or dark setting.</p>
               <MapStyleSection editor={mapStyle} />
             </div>
-            <div className="settings-section">
-              <LayersPanel layers={layers} mapZoom={mapZoom} />
-            </div>
           </>
+        )}
+
+        {tab === 'layers' && (
+          <div className="settings-section">
+            <LayersPanel layers={layers} mapZoom={mapZoom} />
+          </div>
         )}
 
         {tab === 'profiles' && (

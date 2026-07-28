@@ -169,6 +169,10 @@ function transitStopsGeoJSON(trip: TransitTrip) {
   };
 }
 
+/** The measure tool's cyan — deliberately neither the route purple nor the
+ *  enforcement amber, and the same value the web tool draws with. */
+const MEASURE_COLOR = '#0e7490';
+
 /** The default boot view (Oslo) when no camera has been persisted yet. */
 export const DEFAULT_VIEW = { center: { lat: 59.91, lng: 10.75 }, zoom: 10 };
 
@@ -192,6 +196,8 @@ interface MapSceneProps {
   speedCameras: SpeedCameras | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
+  /** The measure tool's ruler/rings while it is open, else null. */
+  measure: GeoJSON.FeatureCollection | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   /** First corner and completed rectangle while drawing a custom offline region. */
@@ -259,6 +265,7 @@ export function MapScene({
   iceObservations,
   speedCameras,
   spots,
+  measure,
   trackGeo,
   offlineRegionCorner,
   offlineRegionBbox,
@@ -901,6 +908,72 @@ export function MapScene({
               />
             </GeoJSONSource>
           </>
+        ) : null}
+        {/* The measure tool's ruler and range rings, in a cyan distinct from the
+          route purple and the enforcement amber. Mounted last of the sources so
+          a measurement is always readable over whatever it is measuring, and
+          filtered on the same `kind` properties the web tool uses — both scenes
+          draw one `measureFeatures()` collection. */}
+        {measure ? (
+          <GeoJSONSource id="atlas-measure" data={measure}>
+            <Layer
+              type="fill"
+              id="atlas-measure-ring-fill"
+              filter={['==', ['get', 'kind'], 'ring']}
+              paint={{ 'fill-color': MEASURE_COLOR, 'fill-opacity': 0.08 }}
+            />
+            <Layer
+              type="line"
+              id="atlas-measure-ring-line"
+              filter={['==', ['get', 'kind'], 'ring']}
+              layout={{ 'line-join': 'round' }}
+              paint={{
+                'line-color': MEASURE_COLOR,
+                'line-width': 1.8,
+                'line-dasharray': [3, 2],
+              }}
+            />
+            <Layer
+              type="line"
+              id="atlas-measure-path"
+              filter={['==', ['get', 'kind'], 'path']}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': MEASURE_COLOR, 'line-width': 3 }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-measure-points"
+              filter={['==', ['get', 'kind'], 'point']}
+              paint={{
+                'circle-radius': 5,
+                'circle-color': '#ffffff',
+                'circle-stroke-color': MEASURE_COLOR,
+                'circle-stroke-width': 2.5,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-measure-labels"
+              filter={['==', ['get', 'kind'], 'label']}
+              layout={{
+                'text-field': ['get', 'text'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12.5,
+                'text-offset': [0, -1.2],
+                'text-anchor': 'bottom',
+                // A measure tool must always show its numbers: nearby rings
+                // (100/200 m) and dense vertices otherwise lose their labels
+                // to symbol collision.
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': MEASURE_COLOR,
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.6,
+              }}
+            />
+          </GeoJSONSource>
         ) : null}
         {/* Waypoints are draggable (long-press, then drag — MapLibre Native's
           annotation drag gesture); releasing re-routes through the new point.

@@ -7,6 +7,7 @@ export {
 } from './useSync.js';
 export {
   useRoute,
+  routePlanState,
   type RouteFn,
   type RoutePlanner,
   type RouteWaypoint,
@@ -100,6 +101,7 @@ export {
   type ExploreQuery,
   type ExploreState,
 } from './useExplore.js';
+export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
   useRouteStops,
   routeStopCategories,

@@ -10,7 +10,7 @@ test('register, sync status, sign out', async ({ page, baseURL }) => {
   await page.goto('/');
   await waitForMap(page);
   await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('tab', { name: 'Account' }).click();
+  await page.getByRole('tab', { name: 'Account & data' }).click();
 
   const create = page.getByRole('button', { name: 'Create account' });
   // Map readiness precedes OPFS/SQLite readiness on a cold browser. Wait for

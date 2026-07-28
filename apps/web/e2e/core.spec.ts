@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type maplibregl from 'maplibre-gl';
 import { cameraState, mockRouting, mockSearch, project, waitForMap } from './helpers';
 
 test('cold load shows the map at the default Oslo view', async ({ page }) => {
@@ -719,4 +720,51 @@ test('a round trip keeps the stops already planned and rides through them', asyn
   // The planned destination is a stop, not a shaping point.
   expect(loop[1]!.type).toBe('break');
   expect(loop.some((l) => l.type === 'through')).toBe(true);
+});
+
+test('the measure tool rules a line, drops range rings, and clears on close', async ({ page }) => {
+  await page.goto('/#map=13/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Measure distance and radius' }).click();
+  const panel = page.getByRole('dialog', { name: 'Measure' });
+  await expect(panel).toContainText('Add points along a line to measure it.');
+
+  // Two clicks make a distance; a third bend adds the straight-line comparison.
+  const [x1, y1] = await project(page, 59.905, 10.74);
+  const [x2, y2] = await project(page, 59.915, 10.74);
+  const [x3, y3] = await project(page, 59.915, 10.77);
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+  await expect(panel.locator('.measure-readout')).toHaveText('1.1 km');
+  await page.mouse.click(x3, y3);
+  await expect(panel.locator('.measure-sub')).toContainText('straight line');
+
+  // The ruler is drawn from the shared measure model: line, vertices, labels.
+  const ruler = await page.evaluate(async () => {
+    const source = window.__atlasMap!.getSource('atlas-measure') as maplibregl.GeoJSONSource;
+    const data = (await source.getData()) as GeoJSON.FeatureCollection;
+    return data.features.map((f) => f.properties?.['kind']);
+  });
+  expect(ruler.filter((kind) => kind === 'point')).toHaveLength(3);
+  expect(ruler.filter((kind) => kind === 'path')).toHaveLength(1);
+
+  // Radius mode: one drop, two default rings, and a third when 50 m is added.
+  await panel.getByRole('button', { name: 'Radius' }).click();
+  await page.mouse.click(x1, y1);
+  await expect(panel).toContainText('1 circle');
+  await panel.getByRole('button', { name: '50 m' }).click();
+  const rings = await page.evaluate(async () => {
+    const source = window.__atlasMap!.getSource('atlas-measure') as maplibregl.GeoJSONSource;
+    const data = (await source.getData()) as GeoJSON.FeatureCollection;
+    return data.features.filter((f) => f.properties?.['kind'] === 'ring');
+  });
+  expect(rings).toHaveLength(3);
+
+  // Closing the tool takes its layers with it — a stale ruler over a map that
+  // has since moved is not a measurement anyone wants back.
+  await panel.getByRole('button', { name: 'Close measure tool' }).click();
+  await expect(panel).toBeHidden();
+  expect(await page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-measure')))).toBe(
+    false,
+  );
 });

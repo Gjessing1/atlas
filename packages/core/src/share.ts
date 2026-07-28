@@ -11,11 +11,28 @@
 
 import { fmtCoords } from './format.js';
 import type { LatLng } from './geo.js';
-import { encodeMapHash } from './maphash.js';
+import { encodeMapHash, type RoutePlanState } from './maphash.js';
 
 /** An Atlas share link for a point: the map centred there, with the pin set. */
 export function atlasShareUrl(origin: string, point: LatLng, zoom: number): string {
   return `${origin}${encodeMapHash({ center: point, zoom, pin: point })}`;
+}
+
+/**
+ * An Atlas share link for a *plan*: the same view, with the stops in the hash
+ * so the recipient's app re-routes them for itself.
+ *
+ * The web app has the plan in its address bar already (see `useShareHash`), so
+ * "share this route" there is copying the URL. Android has no address bar and
+ * has to build the same link explicitly — which is why the link format is one
+ * function rather than a second hand-rolled hash string.
+ */
+export function atlasRouteUrl(
+  origin: string,
+  plan: RoutePlanState,
+  view: { center: LatLng; zoom: number },
+): string {
+  return `${origin}${encodeMapHash({ center: view.center, zoom: view.zoom, route: plan })}`;
 }
 
 /**

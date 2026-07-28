@@ -44,17 +44,20 @@ test('settings areas own layers and profile layout while map controls stay in on
 
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.locator('.settings-panel');
+  // The tab names come from the shared settings-section list, so they are also
+  // the row names Android shows (ROADMAP §7.5).
   await expect(settings.getByRole('tab')).toHaveText([
-    'Map',
-    'Profiles',
+    'Appearance',
+    'Map layers',
+    'Activity profiles',
     'Navigation',
-    'Account',
+    'Account & data',
     'System',
   ]);
-  await expect(settings.getByText('Map layers', { exact: true })).toBeVisible();
+  await settings.getByRole('tab', { name: 'Map layers' }).click();
   await expect(settings.getByText('Hillshade', { exact: true })).toBeVisible();
 
-  await settings.getByRole('tab', { name: 'Profiles' }).click();
+  await settings.getByRole('tab', { name: 'Activity profiles' }).click();
   const ski = settings.locator('.profile-settings-card').filter({ hasText: 'Ski' });
   await ski.getByRole('checkbox', { name: 'Quick switcher' }).uncheck();
   await expect(grid.getByRole('radio', { name: 'Ski' })).toHaveCount(0);

@@ -4,6 +4,8 @@ import {
   useMapProfilePreferences,
   useRegionPackJobs,
   useMapStyleEditor,
+  useMeasure,
+  routePlanState,
   useNavAddStop,
   useNavPrefs,
   useNavResume,
@@ -13,6 +15,7 @@ import {
   type FetchNearbyFn,
 } from '@atlas/app-hooks';
 import {
+  atlasRouteUrl,
   mapProfile,
   placeIsVisible,
   resolveInaturOffer,
@@ -44,6 +47,7 @@ import {
   Appearance,
   BackHandler,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useColorScheme,
@@ -56,7 +60,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
-import { MapScene } from './src/map/MapScene';
+import { DEFAULT_VIEW, MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
@@ -105,6 +109,7 @@ import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
 import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
+import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
 import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
@@ -196,6 +201,9 @@ function AppInner() {
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
   const [permitOpen, setPermitOpen] = useState(false);
+  // The measure / radius tool. While open it owns map taps — the same contract
+  // web gives it — and its state is the shared useMeasure controller.
+  const measure = useMeasure();
   useEffect(() => {
     if (profiles.profile.id !== 'fishhunt') setPermitOpen(false);
   }, [profiles.profile.id]);
@@ -452,7 +460,12 @@ function AppInner() {
   // A bottom sheet owns the lower screen while open. Hide the idle map chrome
   // below it instead of letting later-rendered buttons float over its content.
   const idleSheetOpen =
-    searchOpen || exploreOpen || menuOpen || dest.destination !== null || offlineRegion !== null;
+    searchOpen ||
+    exploreOpen ||
+    menuOpen ||
+    measure.open ||
+    dest.destination !== null ||
+    offlineRegion !== null;
   // Landscape is short, so several pieces of chrome move into the leading
   // guidance rail and route fits get a narrower bottom pad.
 
@@ -532,25 +545,39 @@ function AppInner() {
       };
     });
   }, []);
+  // `addPoint` keeps its identity across mode changes (it reads the mode through
+  // a ref), so these handlers stay stable while the tool is open.
+  const { open: measuring, addPoint: addMeasurePoint } = measure;
   const onMapPress = useCallback(
     (point: LatLng, pixel: { x: number; y: number }) => {
+      if (measuring) {
+        addMeasurePoint(point);
+        return;
+      }
       if (offlineRegion) {
         selectOfflineRegionPoint(point);
         return;
       }
       onRegularMapPress(point, pixel);
     },
-    [offlineRegion, onRegularMapPress, selectOfflineRegionPoint],
+    [measuring, addMeasurePoint, offlineRegion, onRegularMapPress, selectOfflineRegionPoint],
   );
   const onPickPoint = useCallback(
     (point: LatLng) => {
+      // A long press measures too, like it adds a stop while planning: a tool
+      // that owns the map must own both gestures, or the other one drops a
+      // destination pin behind the sheet.
+      if (measuring) {
+        addMeasurePoint(point);
+        return;
+      }
       if (offlineRegion) {
         selectOfflineRegionPoint(point);
         return;
       }
       onRegularPickPoint(point);
     },
-    [offlineRegion, onRegularPickPoint, selectOfflineRegionPoint],
+    [measuring, addMeasurePoint, offlineRegion, onRegularPickPoint, selectOfflineRegionPoint],
   );
 
   // A described place picked from the card's nearby list becomes the card's new
@@ -671,6 +698,14 @@ function AppInner() {
   // follow camera is running.
   const showIdleChrome = !planning && !navActive && !idleSheetOpen;
 
+  // Route planning and guidance both repurpose map taps, so the measure tool
+  // cannot stay open into either: its sheet is hidden there, and a hidden tool
+  // still owning taps would swallow every stop the planner expects.
+  const { open: measureOpen, setOpen: setMeasureOpen } = measure;
+  useEffect(() => {
+    if (measureOpen && (planning || navActive)) setMeasureOpen(false);
+  }, [measureOpen, planning, navActive, setMeasureOpen]);
+
   // Share the planned route as GPX (parity with the web RoutePanel export).
   const exportRoute = useCallback(
     (path: RoutePath) => {
@@ -683,6 +718,20 @@ function AppInner() {
     },
     [route.profile],
   );
+
+  // Share the plan as a link that reopens it — web copies the URL its address
+  // bar already carries, and an Android phone has neither an address bar nor a
+  // clipboard the recipient can reach, so the same link goes to the OS share
+  // sheet. The link is the *plan*, not the routed line: the recipient's app
+  // re-routes the stops with its own settings and current data.
+  const shareRouteLink = useCallback(() => {
+    const plan = route.plan;
+    if (!plan) return;
+    // Before the first settled camera event, the boot view is what the map is
+    // showing; DEFAULT_VIEW covers the moment before even that resolves.
+    const view = viewRef.current ?? initialView ?? DEFAULT_VIEW;
+    void Share.share({ message: atlasRouteUrl(`${serverOrigin}/`, routePlanState(plan), view) });
+  }, [route.plan, viewRef, initialView, serverOrigin]);
 
   // Pick GPX/KML/KMZ files from the device and import them (parser validates by
   // name/content, so we allow any type through the picker). `options` carries
@@ -863,6 +912,7 @@ function AppInner() {
         iceObservations={iceObservations}
         speedCameras={speedCameras}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
+        measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}
@@ -1155,7 +1205,16 @@ function AppInner() {
             onOpenTracks={() => setTracksOpen(true)}
             onOpenLayers={() => setLayersOpen(true)}
             onOpenExplore={() => setExploreOpen(true)}
+            onOpenMeasure={() => measure.setOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
+            bottomInset={bottomInset}
+          />
+
+          {/* The ruler and range rings. A map sheet, because the next tap is
+          meant to land on the map behind it. */}
+          <MeasureSheet
+            visible={measure.open && !planning && !navActive}
+            measure={measure}
             bottomInset={bottomInset}
           />
 
@@ -1372,6 +1431,7 @@ function AppInner() {
               getBias={getBias}
               fetchNearby={fetchNearbyStops}
               onExport={exportRoute}
+              onShareLink={shareRouteLink}
               onSaveTrack={async (trackData, name, collectionId) =>
                 (await data.saveTrack(trackData, name, collectionId)) !== null
               }

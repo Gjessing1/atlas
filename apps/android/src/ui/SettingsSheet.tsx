@@ -5,7 +5,9 @@ import {
   MAX_NAV_WIDGETS,
   NAV_WIDGETS,
   packFileEntries,
+  settingsSectionsFor,
   type RegionPackManifest,
+  type SettingsSectionId,
 } from '@atlas/core';
 import type { AtlasStorage } from '@atlas/storage';
 import { describeStorageUnavailable } from '@atlas/storage';
@@ -874,23 +876,12 @@ function ProfileSection({
   );
 }
 
-type SettingsSection =
-  'appearance' | 'layers' | 'tiles' | 'profiles' | 'navigation' | 'offline' | 'account' | 'system';
-
-const SETTINGS_SECTIONS: readonly {
-  id: SettingsSection;
-  label: string;
-  hint: string;
-}[] = [
-  { id: 'appearance', label: 'Appearance', hint: 'Theme, map colours and label sizes' },
-  { id: 'layers', label: 'Map layers', hint: 'Overlays drawn on top of the map' },
-  { id: 'tiles', label: 'Map tiles', hint: 'Streaming vs. downloaded basemap' },
-  { id: 'profiles', label: 'Activity profiles', hint: 'Switcher activities and their layers' },
-  { id: 'navigation', label: 'Navigation', hint: 'Readouts shown during guidance' },
-  { id: 'offline', label: 'Offline regions', hint: 'Download maps for offline use' },
-  { id: 'account', label: 'Account & data', hint: 'Sign in, sync and export' },
-  { id: 'system', label: 'System', hint: 'Server, status and app updates' },
-];
+/**
+ * The rows, from the shared section list in `@atlas/core` — the same sections,
+ * names and order the web tab strip shows (ROADMAP §7.5). Android keeps two
+ * more, Map tiles and Offline regions, which a browser cannot have.
+ */
+const SETTINGS_SECTIONS = settingsSectionsFor('android');
 
 export function SettingsSheet({
   visible,
@@ -942,7 +933,7 @@ export function SettingsSheet({
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
-  const [section, setSection] = useState<SettingsSection | null>(null);
+  const [section, setSection] = useState<SettingsSectionId | null>(null);
   const active = SETTINGS_SECTIONS.find((s) => s.id === section);
   return (
     <BottomSheet

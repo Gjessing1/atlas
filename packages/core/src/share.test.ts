@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { atlasShareUrl, geoUri, shareFormats, shareMessage } from './index.js';
+import {
+  atlasRouteUrl,
+  atlasShareUrl,
+  decodeMapHash,
+  geoUri,
+  shareFormats,
+  shareMessage,
+} from './index.js';
 
 const spot = { lat: 59.805_63, lng: 10.367_01 };
 
@@ -8,6 +15,35 @@ describe('atlasShareUrl', () => {
     expect(atlasShareUrl('https://atlas.example/', spot, 15)).toBe(
       'https://atlas.example/#map=15/59.80563/10.36701&pin=59.80563/10.36701',
     );
+  });
+});
+
+describe('atlasRouteUrl', () => {
+  const view = { center: { lat: 59.9, lng: 10.7 }, zoom: 11 };
+
+  it('carries the stops and the profile, and reopens as the same plan', () => {
+    const url = atlasRouteUrl(
+      'https://atlas.example/',
+      { profile: 'bike', points: [spot, { lat: 59.9, lng: 10.7 }] },
+      view,
+    );
+    expect(url).toBe(
+      'https://atlas.example/#map=11/59.9/10.7&route=bike/59.80563,10.36701/59.9,10.7',
+    );
+    const reopened = decodeMapHash(url);
+    expect(reopened?.route?.profile).toBe('bike');
+    expect(reopened?.route?.points).toHaveLength(2);
+  });
+
+  it('keeps a round trip a round trip', () => {
+    const url = atlasRouteUrl(
+      'https://atlas.example/',
+      { profile: 'run', points: [spot], roundTripKm: 12, roundTripDirection: 'clockwise' },
+      view,
+    );
+    const plan = decodeMapHash(url)?.route;
+    expect(plan?.roundTripKm).toBe(12);
+    expect(plan?.roundTripDirection).toBe('clockwise');
   });
 });
 

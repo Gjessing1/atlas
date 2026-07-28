@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import type { LatLng, RoutePlanState } from '@atlas/core';
 import {
   defaultRoutePreferences,
   optimizeWaypointOrder,
@@ -37,6 +37,25 @@ export interface StoredRoutePlan {
   roundTripDirection?: RoundTripDirection;
   /** Custom costing choices for this profile. */
   preferences?: Partial<RoutePreferences>;
+}
+
+/**
+ * A stored plan in shareable form: the stops as bare coordinates, plus the loop
+ * settings that shaped them. Stop *names* are deliberately dropped — they would
+ * dominate the URL and the coordinates are the plan.
+ *
+ * One conversion, because a share link must mean the same thing wherever it was
+ * built: web writes it into its address bar on every camera move, Android
+ * builds it on demand for the OS share sheet.
+ */
+export function routePlanState(plan: StoredRoutePlan): RoutePlanState {
+  const state: RoutePlanState = {
+    profile: plan.profile,
+    points: plan.waypoints.map((w) => w.pos),
+  };
+  if (plan.roundTripKm !== undefined) state.roundTripKm = plan.roundTripKm;
+  if (plan.roundTripDirection !== undefined) state.roundTripDirection = plan.roundTripDirection;
+  return state;
 }
 
 /**

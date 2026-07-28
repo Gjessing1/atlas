@@ -285,6 +285,7 @@ export function RoutePanel({
   getBias,
   fetchNearby,
   onExport,
+  onShareLink,
   onSaveTrack,
   onNavigate,
   onShowTransitTrip,
@@ -306,6 +307,12 @@ export function RoutePanel({
   fetchNearby: FetchNearbyFn;
   /** Share the selected path as GPX; App owns the build+share. */
   onExport: (path: RoutePath) => void;
+  /**
+   * Share a link that reopens this plan (web's "Share" button, which copies the
+   * URL its address bar already carries). App owns it because building the link
+   * needs the live camera, which lives up there with the map.
+   */
+  onShareLink: () => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
   /**
    * Start turn-by-turn to the last stop in the current profile, via the plan's
@@ -772,8 +779,8 @@ export function RoutePanel({
 
         {/* Each action appears only once it can do something, rather than sitting
           there greyed out: Reverse needs two ends, Optimize a tour to shorten,
-          Export a computed track, and Clear something to act on. With no stops
-          the whole row is gone rather than a strip of dead buttons. */}
+          Export a computed track, and Clear/Share something to act on. With no
+          stops the whole row is gone rather than a strip of dead buttons. */}
         {route.waypoints.length > 0 ? (
           <View style={styles.actionRow}>
             {/* Reverse works in transit mode too — swapping the ends is the
@@ -817,6 +824,16 @@ export function RoutePanel({
                 <Text style={styles.buttonQuietText}>Export GPX</Text>
               </Pressable>
             ) : null}
+            {/* A link needs stops, not a routed path: it carries the plan and
+              the recipient's app routes it — including a transit journey,
+              which reopens as the same endpoints in transit mode. */}
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={onShareLink}
+              testID="route-share-link"
+            >
+              <Text style={styles.buttonQuietText}>Share</Text>
+            </Pressable>
           </View>
         ) : null}
         {saveOpen && path && !transitMode ? (

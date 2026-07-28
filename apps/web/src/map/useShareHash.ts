@@ -1,5 +1,5 @@
 import { encodeMapHash, type LatLng } from '@atlas/core';
-import type { StoredRoutePlan } from '@atlas/app-hooks';
+import { routePlanState, type StoredRoutePlan } from '@atlas/app-hooks';
 import type maplibregl from 'maplibre-gl';
 import { useEffect } from 'react';
 
@@ -29,14 +29,7 @@ export function useShareHash(
           center: { lat: center.lat, lng: center.lng },
           zoom: map.getZoom(),
           pin: pin ?? undefined,
-          route: plan
-            ? {
-                profile: plan.profile,
-                points: plan.waypoints.map((w) => w.pos),
-                roundTripKm: plan.roundTripKm,
-                roundTripDirection: plan.roundTripDirection,
-              }
-            : undefined,
+          route: plan ? routePlanState(plan) : undefined,
         }),
       );
     };

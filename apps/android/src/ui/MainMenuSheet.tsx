@@ -18,6 +18,7 @@ export function MainMenuSheet({
   onOpenTracks,
   onOpenLayers,
   onOpenExplore,
+  onOpenMeasure,
   onOpenSettings,
   bottomInset,
 }: {
@@ -27,6 +28,7 @@ export function MainMenuSheet({
   onOpenTracks: () => void;
   onOpenLayers: () => void;
   onOpenExplore: () => void;
+  onOpenMeasure: () => void;
   onOpenSettings: () => void;
   bottomInset: number;
 }) {
@@ -56,6 +58,12 @@ export function MainMenuSheet({
       onPress: onOpenLayers,
     },
     {
+      label: 'Measure',
+      detail: 'Distance and range rings',
+      testID: 'open-measure',
+      onPress: onOpenMeasure,
+    },
+    {
       label: 'Settings',
       detail: 'Account, regions and app',
       testID: 'open-settings',
@@ -69,7 +77,7 @@ export function MainMenuSheet({
       mode="map"
       onClose={onClose}
       initialSnap="peek"
-      peekHeight={286}
+      peekHeight={330}
       bottomInset={bottomInset}
       testID="main-menu-sheet"
     >
