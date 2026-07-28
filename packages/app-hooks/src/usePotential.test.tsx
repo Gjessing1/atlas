@@ -127,6 +127,44 @@ describe('usePotential', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * A repair is a cell already on screen being derived again because an upstream
+   * it missed came back (ROADMAP N7). The surface stays up and the pill stays
+   * quiet — but the hook has to keep asking, because the tiles keep their URLs
+   * and the new ETags in `readyKey` are the only thing that moves the better
+   * surface onto the map.
+   */
+  it('keeps polling through a silent repair, saying nothing about it', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(
+            prepared({ cells: [cell({ manifest: manifest(), repairing: true })], repairing: 1 }),
+          ),
+        ),
+      )
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify(prepared({ cells: [cell({ manifest: manifest({ etag: 'def' }) })] })),
+        ),
+      );
+    const { result } = renderHook(() => usePotential('', selection, view(SEMSVANNET)));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.message).toBeNull();
+    const before = result.current.readyKey;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(result.current.readyKey).not.toBe(before));
+    // …and once the repair has landed, it goes quiet again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('reports a derived-but-blank area in the model’s own words', async () => {
     fetchMock.mockResolvedValue(
       new Response(

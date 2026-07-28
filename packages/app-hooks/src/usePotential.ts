@@ -193,7 +193,12 @@ export function usePotential(
         if (cancelled) return;
         setResponse(body);
         setFailed(false);
-        if (body.working > 0) {
+        // `repairing` counts cells that are already on screen and being derived
+        // again because an upstream they missed came back. Polling through that
+        // is what lets the better surface arrive without a pan — the tiles keep
+        // their URLs, so `readyKey` (the ETags) is the only thing that moves —
+        // and the pill deliberately says nothing about it.
+        if (body.working > 0 || (body.repairing ?? 0) > 0) {
           timer = setTimeout(() => void ask(), POLL_MS);
         } else {
           // Everything this viewport needs exists; stop asking until it moves.

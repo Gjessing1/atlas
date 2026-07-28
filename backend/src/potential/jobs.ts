@@ -1,7 +1,8 @@
+import type { PotentialCellState } from '@atlas/potential';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { cellId, parseCellId, type Cell } from './cells.js';
-import { deriveCell, readManifest, type CellManifest } from './derive.js';
+import { deriveCell, readManifest } from './derive.js';
 import type { PotentialContext } from './inputs.js';
 import type { DeriveModel } from './models.js';
 
@@ -16,6 +17,13 @@ import type { DeriveModel } from './models.js';
  */
 
 const MAX_QUEUE = 40;
+/**
+ * Repairs may only fill part of the queue. A country's worth of cells can go
+ * degraded in one outage, and every viewport that opens afterwards offers a few
+ * more of them; leaving room means a user who pans somewhere new never waits
+ * behind maintenance.
+ */
+const MAX_REPAIR_QUEUE = 8;
 /**
  * How long a finished job record lingers. Short, because the *manifest* is the
  * durable artefact — this record only exists to answer "is it being worked on?".
@@ -36,6 +44,14 @@ export interface DeriveJob {
   createdAt: number;
   updatedAt: number;
   error?: string;
+  /**
+   * A re-derive of a cell that already exists, because an upstream it was built
+   * without is answering again (ROADMAP N7 → health.ts). Two consequences: it
+   * must **not** take the "already derived" short-circuit, and it waits behind
+   * every fresh cell — someone staring at a blank viewport outranks the quiet
+   * improvement of a surface already on their screen.
+   */
+  repair?: boolean;
 }
 
 export interface DeriveQueueOptions {
@@ -115,8 +131,12 @@ export class DeriveQueue {
   }
 
   get pending(): number {
-    return [...this.jobs.values()].filter((j) => j.status === 'queued' || j.status === 'running')
-      .length;
+    return this.active().length;
+  }
+
+  /** Queued or running — everything that is still going to change. */
+  private active(): DeriveJob[] {
+    return [...this.jobs.values()].filter((j) => j.status === 'queued' || j.status === 'running');
   }
 
   /**
@@ -124,13 +144,27 @@ export class DeriveQueue {
    * queue is full — a full queue is a normal answer ("try again shortly"), not
    * an error, and the client's pill already has a place to say so.
    */
-  request(layer: string, target: string, cell: Cell): DeriveJob | null {
+  request(
+    layer: string,
+    target: string,
+    cell: Cell,
+    options: { repair?: boolean } = {},
+  ): DeriveJob | null {
     const key = jobKey(layer, target, cell);
     const existing = this.get(layer, target, cell);
-    // A failed job is retried on a fresh request: the usual cause is an upstream
-    // blip, and the user asking again is exactly the signal to try once more.
-    if (existing && existing.status !== 'failed') return existing;
-    if (this.pending >= MAX_QUEUE) return null;
+    if (existing) {
+      const busy = existing.status === 'queued' || existing.status === 'running';
+      // A failed job is retried on a fresh request: the usual cause is an
+      // upstream blip, and the user asking again is exactly the signal to try
+      // once more. A **repair** also re-queues over a `done` record — that
+      // record describes the derive it exists to replace, and mistaking it for
+      // work in progress is how a repair would silently never run for the ten
+      // minutes a finished job lingers.
+      if (busy || (existing.status === 'done' && !options.repair)) return existing;
+    }
+    const active = this.active();
+    if (active.length >= MAX_QUEUE) return null;
+    if (options.repair && active.filter((j) => j.repair).length >= MAX_REPAIR_QUEUE) return null;
     const at = this.now();
     const job: DeriveJob = {
       key,
@@ -140,6 +174,7 @@ export class DeriveQueue {
       status: 'queued',
       createdAt: at,
       updatedAt: at,
+      ...(options.repair ? { repair: true } : {}),
     };
     this.jobs.set(key, job);
     void this.persist(job);
@@ -180,7 +215,12 @@ export class DeriveQueue {
         if (this.closing) return;
         const next = [...this.jobs.values()]
           .filter((j) => j.status === 'queued')
-          .sort((a, b) => a.createdAt - b.createdAt)[0];
+          // Fresh cells first, oldest of them first. A repair improves a surface
+          // that is already drawn; a fresh cell is someone looking at nothing.
+          .sort(
+            (a, b) =>
+              Number(a.repair ?? false) - Number(b.repair ?? false) || a.createdAt - b.createdAt,
+          )[0];
         if (!next) return;
         await this.run(next);
       }
@@ -201,9 +241,14 @@ export class DeriveQueue {
     await this.persist(job);
     try {
       // Another worker (or an earlier run) may have finished this cell while the
-      // job sat in the queue.
+      // job sat in the queue. A repair is the one case that must derive anyway:
+      // its whole purpose is to replace the manifest that is already there.
       const already = await readManifest(this.dataDir, model, job.target, cell);
-      if (!already) await deriveCell(this.dataDir, model, job.target, cell, this.ctx);
+      if (!already || job.repair) {
+        await deriveCell(this.dataDir, model, job.target, cell, this.ctx, {
+          ...(job.repair ? { repairAttempt: (already?.repairs ?? 0) + 1 } : {}),
+        });
+      }
       await this.finish(job, 'done');
     } catch (err) {
       this.ctx.log.warn({ err, job: job.key }, 'derive failed');
@@ -219,11 +264,10 @@ export class DeriveQueue {
   }
 }
 
-/** What a client needs to know about one cell of a requested area. */
-export interface CellState {
-  readonly cell: string;
-  readonly status: DeriveJobStatus | 'ready';
-  readonly error?: string;
-  /** Present once derived: the coverage note and provenance for that cell. */
-  readonly manifest?: CellManifest;
-}
+/**
+ * What a client needs to know about one cell of a requested area. **The shape is
+ * the wire contract** — same as `CellManifest`, it lives in `@atlas/potential`
+ * and is only named here, so a field added for one side cannot go missing on the
+ * other.
+ */
+export type CellState = PotentialCellState;

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { norwegianLayers, type OverlayLayer } from './overlay/catalog.js';
+import { inputProbeIds } from './potential/inputs.js';
 import {
   allProbes,
   inputProbes,
@@ -52,6 +53,21 @@ describe('probe coverage', () => {
     expect(ids).toContain('input:dtm');
     expect(ids).toContain('input:streams');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  /**
+   * Every input a derive reads must report to a source the sweep visits.
+   *
+   * Not decoration: repairing a cell that was built during an outage asks the
+   * registry whether the input it missed is answering again (potential/health.ts),
+   * and an id nothing probes can never answer `ok` — so an unswept input is one
+   * whose cells stay degraded forever, silently. This caught `input:ar5`, which
+   * was a private id for the same NIBIO WMS the `land-cover` overlay already
+   * probes.
+   */
+  it('gives every derive input a source the sweep actually visits', () => {
+    const swept = new Set(allProbes(norwegianLayers(), {}).map((s) => s.id));
+    for (const id of inputProbeIds()) expect([...swept]).toContain(id);
   });
 
   it('covers the N5 inputs the engine reads', () => {

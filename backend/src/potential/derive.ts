@@ -235,6 +235,17 @@ export interface DeriveResult {
   readonly tiles: number;
 }
 
+export interface DeriveOptions {
+  /**
+   * This is a **repair** of a cell that already exists, and the value is the
+   * attempt number (1 for the first). It only reaches the manifest, where it is
+   * the backoff's clock: a cell that keeps coming back incomplete must be
+   * retried more slowly each time, and the manifest is the only thing that
+   * survives a restart to remember how often it has been tried.
+   */
+  readonly repairAttempt?: number;
+}
+
 /**
  * Derive one cell end to end. Throws only on a *pipeline* failure; an upstream
  * that did not answer is recorded in the manifest and left to the model, because
@@ -246,6 +257,7 @@ export async function deriveCell(
   requestedTarget: string,
   cell: Cell,
   ctx: PotentialContext,
+  options: DeriveOptions = {},
 ): Promise<DeriveResult> {
   const target = resolveTarget(model, requestedTarget);
   const raster = cellRaster(cell);
@@ -308,6 +320,10 @@ export async function deriveCell(
   }
 
   const valid = summary.contrast.validCells / (CELL_PIXELS * CELL_PIXELS);
+  // A repair that came back whole clears the counter by omitting it: the field
+  // describes a gap that is still there, not a scar.
+  const unreadInputs = inputs.records.some((r) => !r.ok);
+  const repairs = unreadInputs ? (options.repairAttempt ?? 0) : 0;
   const manifest: CellManifest = {
     cell: `${cell.z}/${cell.x}/${cell.y}`,
     layer: model.layer,
@@ -328,6 +344,7 @@ export async function deriveCell(
     notes: result.notes,
     coverage: Math.round(valid * 1000) / 1000,
     etag,
+    ...(repairs > 0 ? { repairs } : {}),
     vocabulary: model.vocabulary,
     signals,
   };

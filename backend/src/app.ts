@@ -23,7 +23,11 @@ import {
 import { NvdbStore } from './nvdb-db.js';
 import { registerPacksApi } from './packs-api.js';
 import { registerPlaceContentApi, type PlaceContentApiOptions } from './place-content-api.js';
-import { registerPotentialApi, type PotentialApiOptions } from './potential/index.js';
+import {
+  createCensusReporter,
+  registerPotentialApi,
+  type PotentialApiOptions,
+} from './potential/index.js';
 import { derivedLayerMetas } from './potential/catalog.js';
 import { allProbes, ProbeRunner, type ProbeRunnerOptions } from './probes.js';
 import type { RegionJobOptions } from './region-jobs.js';
@@ -205,13 +209,19 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // than over a value that does not exist yet.
   const probes: { runner?: ProbeRunner } = {};
 
-  /** Local, free checks: basemap freshness on disk and a Postgres ping. */
+  // The derived cells are our own artefacts, so their census is a local check
+  // like the basemap's — but it watches something the upstream probes cannot
+  // see: a cell built during an outage keeps that gap for good (ROADMAP N7).
+  const reportCells = createCensusReporter(opts.dataDir);
+
+  /** Local, free checks: basemap freshness, the derived cells, a Postgres ping. */
   const refreshLocalStatus = async (): Promise<void> => {
     const detail = await basemapDetail(path.join(opts.dataDir, 'tiles'));
     status.setDetail('basemap', detail ?? 'no local archive — using world tiles');
     // A present, readable archive counts as ok; its absence isn't a failure
     // (the world-tile upstream covers everything), so leave that unknown.
     if (detail) status.record('basemap', true);
+    await reportCells(status);
     if (syncStores) {
       try {
         await syncStores.ping();

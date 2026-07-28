@@ -215,6 +215,13 @@ export interface PotentialCellManifest {
   readonly coverage: number;
   /** Content ETag shared by every tile of this cell. */
   readonly etag: string;
+  /**
+   * How many **repair** derives have already been run on this cell and still
+   * left an input failed. Absent when the cell is whole, which is the normal
+   * case; present it is both the backoff's clock and the honest record that
+   * this surface has been retried and is still missing something.
+   */
+  readonly repairs?: number;
   /** Legend vocabulary, so a client renders the right words. */
   readonly vocabulary: SurfaceVocabulary;
   /**
@@ -248,6 +255,13 @@ export interface PotentialCellState {
   readonly cell: string;
   readonly status: PotentialCellStatus;
   readonly error?: string;
+  /**
+   * This cell is `ready` **and** being re-derived: it was built while one of its
+   * upstreams was down, and that upstream is answering again. The surface on
+   * screen stays the one it already had until the repair lands, so this is not a
+   * kind of "not ready" — it is a promise that a better one is coming.
+   */
+  readonly repairing?: boolean;
   /** Present once derived: the coverage note and provenance for that cell. */
   readonly manifest?: PotentialCellManifest;
 }
@@ -273,6 +287,14 @@ export interface PotentialPrepareResponse {
   readonly working: number;
   /** Cells whose derive gave up. Absent on servers older than this field. */
   readonly failed?: number;
+  /**
+   * Ready cells being re-derived because an upstream they missed has come back.
+   * A client polls while this is above zero — the tiles will change under the
+   * same URLs — but says nothing about it: the surface is already usable, and
+   * announcing maintenance on a working map only invites doubt. Absent on
+   * servers older than this field.
+   */
+  readonly repairing?: number;
   /** No cell of this viewport is inside the Norwegian envelope. */
   readonly outsideCoverage: boolean;
 }

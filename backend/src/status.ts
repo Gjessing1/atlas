@@ -118,6 +118,19 @@ export class StatusRegistry {
   }
 
   /**
+   * This source's health right now — the same verdict the status page renders,
+   * asked one id at a time.
+   *
+   * The derive service reads it to decide whether an upstream it missed is worth
+   * asking again (ROADMAP N7). An id nobody has registered or recorded answers
+   * `unknown`, which is the honest answer and, for that caller, a "no".
+   */
+  healthOf(id: string): UpstreamHealth {
+    const p = this.probes.get(id);
+    return p ? health(p, this.clock()) : 'unknown';
+  }
+
+  /**
    * Record one request's outcome. Auto-registers an unseen id. `latencyMs` is
    * only passed by the active prober — proxy traffic doesn't time itself, and a
    * user-facing request's duration would mix queueing and cache reads into a

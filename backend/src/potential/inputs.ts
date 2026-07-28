@@ -1141,7 +1141,11 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
   landCover: {
     label: 'Land cover',
     source: 'NIBIO AR5 Arealtype (WMS)',
-    probe: 'input:ar5',
+    // The same WMS the `land-cover` overlay serves, so it shares that row
+    // rather than opening a second one: the N7 sweep already asks it for an
+    // inked z14 tile over forest, which is a stronger check than anything a
+    // second id would get, and one upstream must not have two verdicts.
+    probe: 'overlay:land-cover',
   },
   catchments: {
     label: 'Catchments & discharge',
@@ -1184,6 +1188,24 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
     probe: 'input:harvest',
   },
 };
+
+/**
+ * Which status-page source speaks for one input.
+ *
+ * Exported because repairing a cell needs it: the question "is the upstream
+ * that this cell missed answering again?" is asked of the N7 registry, and the
+ * manifest only records the *input* id. `probes.test.ts` asserts every id here
+ * is one the sweep actually visits — an input nobody probes is an input whose
+ * cells could never be repaired.
+ */
+export function inputProbeId(input: string): string | undefined {
+  return INPUT_META[input]?.probe;
+}
+
+/** Every distinct source id the inputs report to. */
+export function inputProbeIds(): string[] {
+  return [...new Set(Object.values(INPUT_META).map((m) => m.probe))];
+}
 
 /** Pause before the one retry of a transient transport failure. */
 const RETRY_DELAY_MS = 750;

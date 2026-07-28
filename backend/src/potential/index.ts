@@ -15,8 +15,9 @@ import {
   parseCellId,
   type Cell,
 } from './cells.js';
-import { readManifest, tilePath } from './derive.js';
+import { readManifest, tilePath, type CellManifest } from './derive.js';
 import { explainSample, loadSignals, sampleIndexAt } from './explain.js';
+import { repairVerdict } from './health.js';
 import type { PotentialContext } from './inputs.js';
 import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './models.js';
 import { DeriveQueue, type CellState } from './jobs.js';
@@ -126,6 +127,46 @@ export async function registerPotentialApi(
     })),
   }));
 
+  /**
+   * Is this ready cell worth deriving again, and is one already under way?
+   *
+   * The repair itself is silent: the cell stays `ready` and keeps serving the
+   * surface it has, because a degraded surface is a usable one and the
+   * alternative — reporting it as "working" — would tell a user their map is
+   * unfinished when it is merely improvable. The flag exists so the client keeps
+   * polling long enough to pick up the better tiles (ROADMAP N7 → health.ts).
+   */
+  const repairIfDue = async (
+    model: DeriveModel,
+    target: string,
+    cell: Cell,
+    manifest: CellManifest,
+  ): Promise<boolean> => {
+    // Only work that is still going to happen counts as in flight. A `done`
+    // record lingers ten minutes after every derive, and reading it as "busy"
+    // would mean a cell can never be repaired in the window it is most likely
+    // to need it.
+    const inFlight = queue.get(model.layer, target, cell);
+    if (inFlight?.status === 'queued' || inFlight?.status === 'running') {
+      return inFlight.repair === true;
+    }
+    // A repair that *threw* rewrote nothing, so the manifest's timestamp — the
+    // backoff's whole clock — still says it is due, and the next poll two and a
+    // half seconds later would queue it again. The failed job record is the only
+    // memory that the attempt happened; while it stands, the cell is left alone.
+    if (inFlight?.status === 'failed') return false;
+    if (!status) return false;
+    const verdict = repairVerdict(manifest, (id) => status.healthOf(id), Date.now());
+    if (!verdict.repair) return false;
+    const job = queue.request(model.layer, target, cell, { repair: true });
+    if (!job) return false;
+    app.log.info(
+      { cell: cellId(cell), layer: model.layer, target },
+      `repairing cell: ${verdict.reason}`,
+    );
+    return true;
+  };
+
   /** State of one cell: ready (with its manifest), or whatever the queue says. */
   const stateOf = async (
     model: DeriveModel,
@@ -134,7 +175,10 @@ export async function registerPotentialApi(
     queueIt: boolean,
   ): Promise<CellState> => {
     const manifest = await readManifest(opts.dataDir, model, target, cell);
-    if (manifest) return { cell: cellId(cell), status: 'ready', manifest };
+    if (manifest) {
+      const repairing = queueIt && (await repairIfDue(model, target, cell, manifest));
+      return { cell: cellId(cell), status: 'ready', ...(repairing ? { repairing } : {}), manifest };
+    }
     const existing = queue.get(model.layer, target, cell);
     if (existing) {
       return {
@@ -180,6 +224,10 @@ export async function registerPotentialApi(
         // seconds — found by driving the real map, not by a test.
         working: states.filter((s) => s.status === 'queued' || s.status === 'running').length,
         failed: states.filter((s) => s.status === 'failed').length,
+        // Ready, and about to get better. A client polls on this too, because
+        // the repair rewrites the same tile URLs and the new ETags are what
+        // move the surface on screen — but it changes no words in the pill.
+        repairing: states.filter((s) => s.repairing).length,
         outsideCoverage: cells.length === 0,
       };
     },
@@ -401,6 +449,7 @@ export async function registerPotentialApi(
   return queue;
 }
 
+export { createCensusReporter } from './health.js';
 export { cellsForBbox, cellId, CELL_ZOOM } from './cells.js';
 export { DERIVE_MODELS } from './models.js';
 export const POTENTIAL_TILE_PREFIX = path.posix.join('/api/potential');
