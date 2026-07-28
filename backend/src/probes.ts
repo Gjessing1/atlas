@@ -740,6 +740,12 @@ export interface ProbeRunnerOptions {
    * teaches people to disbelieve it.
    */
   retryIntervalMs?: number;
+  /**
+   * How soon to confirm a transport failure that was seen for the first time.
+   * The scheduler ticks every 15 minutes, so the 10-minute default makes the
+   * next tick the confirmation without multiplying background traffic.
+   */
+  confirmIntervalMs?: number;
   /** Pause before the one retry of a transient transport error. */
   retryDelayMs?: number;
   /** How many probes run at once. Small: these are other people's servers. */
@@ -759,12 +765,17 @@ export class ProbeRunner {
   private readonly fetchImpl: typeof fetch;
   private readonly intervalMs: number;
   private readonly retryIntervalMs: number;
+  private readonly confirmIntervalMs: number;
   private readonly retryDelayMs: number;
   private readonly concurrency: number;
   private readonly now: () => number;
-  /** When each spec last ran, and whether that run was clean — the two things */
-  /** the due-filter needs to pick between `intervalMs` and `retryIntervalMs`. */
-  private readonly lastRun = new Map<string, { at: number; ok: boolean }>();
+  /** When each spec last ran and which cadence its next check should use. */
+  private readonly lastRun = new Map<
+    string,
+    { at: number; result: 'ok' | 'confirming' | 'failed' }
+  >();
+  /** Consecutive sweeps whose retry also ended in a transport failure. */
+  private readonly transportFailureSweeps = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private sweep: Promise<void> | undefined;
   private lastSweep: number | null = null;
@@ -779,6 +790,7 @@ export class ProbeRunner {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.intervalMs = options.intervalMs ?? 6 * 60 * 60 * 1000;
     this.retryIntervalMs = options.retryIntervalMs ?? 30 * 60_000;
+    this.confirmIntervalMs = options.confirmIntervalMs ?? 10 * 60_000;
     this.retryDelayMs = options.retryDelayMs ?? 2_000;
     this.concurrency = options.concurrency ?? 3;
     this.now = options.now ?? Date.now;
@@ -831,7 +843,12 @@ export class ProbeRunner {
     const due = this.specs.filter((spec) => {
       const last = this.lastRun.get(spec.id);
       if (force || last === undefined) return true;
-      const after = last.ok ? this.intervalMs : this.retryIntervalMs;
+      const after =
+        last.result === 'ok'
+          ? this.intervalMs
+          : last.result === 'confirming'
+            ? this.confirmIntervalMs
+            : this.retryIntervalMs;
       return this.now() - last.at >= after;
     });
     let next = 0;
@@ -849,7 +866,8 @@ export class ProbeRunner {
 
   /**
    * Run one probe, retrying **once** if it failed for a reason that says
-   * nothing about the upstream.
+   * nothing about the upstream. If that retry also fails, a later sweep must
+   * confirm the transport failure before it is reported as an outage.
    *
    * This exists because a single refused connection used to paint a source red
    * until the next sweep six hours later. Five Miljødirektoratet probes tripped
@@ -874,21 +892,53 @@ export class ProbeRunner {
 
   private async runOne(spec: ProbeSpec): Promise<void> {
     const started = this.now();
+    const hadPendingTransportFailure = this.transportFailureSweeps.has(spec.id);
     let outcome: ProbeOutcome;
+    let confirming = false;
     try {
       outcome = await this.attempt(spec);
+      this.transportFailureSweeps.delete(spec.id);
     } catch (err) {
       // A TLS or DNS failure surfaces as a bare "fetch failed"; the cause code
       // is what actually identifies it, and it is the difference between "their
       // certificate broke" and "our network is down".
       const reason = causeCode(err) ?? (err instanceof Error ? err.message : String(err));
       outcome = { ok: false, message: reason, warning: null };
+      if (isTransient(err)) {
+        const failedSweeps = (this.transportFailureSweeps.get(spec.id) ?? 0) + 1;
+        this.transportFailureSweeps.set(spec.id, failedSweeps);
+        confirming = failedSweeps === 1;
+      } else {
+        this.transportFailureSweeps.delete(spec.id);
+      }
     }
-    this.lastRun.set(spec.id, { at: started, ok: outcome.ok });
+    this.lastRun.set(spec.id, {
+      at: started,
+      result: outcome.ok ? 'ok' : confirming ? 'confirming' : 'failed',
+    });
     const latency = this.now() - started;
+
+    // One sweep has already made two connection attempts. That is enough to
+    // schedule a prompt confirmation, but not enough to claim an upstream is
+    // down: the production failure that prompted this lasted through both
+    // fixed-delay attempts and all five rows recovered together. Keeping the
+    // row unknown (or at its earlier success) is the honest interim verdict.
+    if (confirming) {
+      this.status.setDetail(
+        spec.id,
+        `${outcome.message ?? 'transport failure'} twice — rechecking before reporting down`,
+      );
+      this.log.warn(
+        { probe: spec.id, message: outcome.message },
+        'upstream transport failure awaiting confirmation',
+      );
+      return;
+    }
+
     this.status.record(spec.id, outcome.ok, outcome.message, latency);
     if (outcome.warning !== undefined) this.status.warn(spec.id, outcome.warning);
     if (outcome.detail !== undefined) this.status.setDetail(spec.id, outcome.detail);
+    else if (hadPendingTransportFailure) this.status.setDetail(spec.id, null);
     if (!outcome.ok) {
       this.log.warn({ probe: spec.id, message: outcome.message }, 'upstream probe failed');
     } else if (outcome.warning) {

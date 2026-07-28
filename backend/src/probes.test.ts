@@ -247,7 +247,11 @@ describe('ProbeRunner', () => {
 
   function runner(
     specs: ProbeSpec[],
-    opts: { intervalMs?: number; retryIntervalMs?: number } = {},
+    opts: {
+      intervalMs?: number;
+      retryIntervalMs?: number;
+      confirmIntervalMs?: number;
+    } = {},
   ) {
     let now = 1_700_000_000_000;
     const status = new StatusRegistry(() => now);
@@ -255,6 +259,7 @@ describe('ProbeRunner', () => {
       now: () => now,
       intervalMs: opts.intervalMs ?? 1000,
       retryIntervalMs: opts.retryIntervalMs ?? 1000,
+      confirmIntervalMs: opts.confirmIntervalMs ?? 100,
       // No real pause between the retry attempts — the delay is not under test.
       retryDelayMs: 0,
       fetchImpl: vi.fn<typeof fetch>(),
@@ -351,12 +356,45 @@ describe('ProbeRunner', () => {
     expect(status.toStatus()[0]).toMatchObject({ health: 'ok', detail: '922 features' });
   });
 
-  it('reports a transient failure that survives the retry', async () => {
+  it('reports a transient failure only after a later sweep confirms it', async () => {
     const run = vi.fn().mockRejectedValue(transportError('ECONNREFUSED'));
     const { r, status } = runner([{ id: 'a', label: 'a', group: 'Test', run }]);
     await r.run(true);
     expect(run).toHaveBeenCalledTimes(2);
+    expect(status.toStatus()[0]).toMatchObject({
+      health: 'unknown',
+      lastFailure: null,
+      detail: 'ECONNREFUSED twice — rechecking before reporting down',
+    });
+    await r.run(true);
+    expect(run).toHaveBeenCalledTimes(4);
     expect(status.toStatus()[0]).toMatchObject({ health: 'down', message: 'ECONNREFUSED' });
+  });
+
+  it('clears a pending transport failure when the confirmation succeeds', async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(transportError('ECONNREFUSED'))
+      .mockRejectedValueOnce(transportError('ECONNREFUSED'))
+      .mockResolvedValue({ ok: true });
+    const { r, status, tick } = runner([{ id: 'a', label: 'a', group: 'Test', run }], {
+      confirmIntervalMs: 10_000,
+    });
+    await r.run(false);
+    expect(status.toStatus()[0]?.health).toBe('unknown');
+
+    tick(9_999);
+    await r.run(false);
+    expect(run).toHaveBeenCalledTimes(2);
+    tick(1);
+    await r.run(false);
+
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(status.toStatus()[0]).toMatchObject({
+      health: 'ok',
+      message: null,
+      detail: null,
+    });
   });
 
   /**
