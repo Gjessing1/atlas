@@ -102,6 +102,7 @@ const SyncChangeSchema = Type.Object({
   deleted: Type.Boolean(),
   // Arbitrary entity payload — never stripped (no additionalProperties:false).
   data: Type.Union([Type.Null(), Type.Object({}, { additionalProperties: true })]),
+  partial: Type.Optional(Type.Boolean()),
 });
 
 const PushBodySchema = Type.Object({
@@ -283,7 +284,12 @@ export async function registerSyncApi(
       // one mis-set device clock must not permanently out-rank every later
       // edit from correctly configured devices (see @atlas/sync).
       const changes = clampFutureStamps(request.body.changes as SyncChange[], Date.now());
-      return stores.sync.apply(request.user.sub, deviceId, changes);
+      const result = await stores.sync.apply(request.user.sub, deviceId, changes);
+      // An empty push doubles as a backwards-compatible capability probe:
+      // older servers accept it but omit this flag, so new clients keep
+      // sending complete track records until the active backend confirms it
+      // can materialize metadata-only changes.
+      return changes.length === 0 ? { ...result, acceptsTrackMetadata: true as const } : result;
     },
   );
 

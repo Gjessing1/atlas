@@ -124,6 +124,13 @@ export interface TrackPatch {
 export type SyncEntity = 'collection' | 'place' | 'track' | 'setting';
 
 /**
+ * How much of a record an outbox upsert needs to send. Track metadata can be
+ * merged into the server's existing full payload without carrying the GPX
+ * document again; every create/bootstrap/restore remains a full snapshot.
+ */
+export type SyncPayloadScope = 'full' | 'track-metadata';
+
+/**
  * A pending local mutation awaiting push. One entry per record — last-write-wins
  * means only the latest state matters, so newer mutations overwrite older entries.
  */
@@ -133,11 +140,14 @@ export interface OutboxEntry {
   id: string;
   op: 'upsert' | 'delete';
   updatedAt: number;
+  scope: SyncPayloadScope;
 }
 
 /**
  * One record state travelling through sync, in either direction.
- * `data` holds the full record payload (minus id/updatedAt); null for deletes.
+ * `data` normally holds the full record payload (minus id/updatedAt); null for
+ * deletes. A track metadata edit sets `partial`, omits only `gpx`, and is
+ * materialized into a full record by the server before it is stored or pulled.
  */
 export interface SyncChange {
   entity: SyncEntity;
@@ -145,6 +155,7 @@ export interface SyncChange {
   updatedAt: number;
   deleted: boolean;
   data: Record<string, unknown> | null;
+  partial?: boolean;
 }
 
 /**

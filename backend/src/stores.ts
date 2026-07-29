@@ -45,6 +45,30 @@ export interface Stores {
 }
 
 /**
+ * Turn a metadata-only change into the full record every sync store persists.
+ * Null means the partial has no usable base and the client must resend it in
+ * full. In particular, a track base without GPX is not a base at all.
+ */
+export function materializeSyncChange(
+  change: SyncChange,
+  base: SyncChange | null,
+): SyncChange | null {
+  if (!change.partial) return change;
+  if (
+    change.deleted ||
+    change.data === null ||
+    !base ||
+    base.deleted ||
+    base.data === null ||
+    (change.entity === 'track' && typeof base.data['gpx'] !== 'string')
+  ) {
+    return null;
+  }
+  const { partial: _partial, ...full } = change;
+  return { ...full, data: { ...base.data, ...change.data } };
+}
+
+/**
  * In-memory stores: unit tests and `DATABASE_URL=memory` dev/e2e runs.
  * Everything is lost on restart — never for production.
  */
@@ -107,6 +131,7 @@ export function createMemoryStores(): Stores {
         const m = userRows(userId);
         let applied = 0;
         let skipped = 0;
+        const requiresFull: { entity: SyncChange['entity']; id: string }[] = [];
         for (const change of changes) {
           const key = `${change.entity}|${change.id}`;
           const existing = m.get(key);
@@ -115,13 +140,22 @@ export function createMemoryStores(): Stores {
             ? { updatedAt: existing.change.updatedAt, deviceId: existing.deviceId }
             : null;
           if (lwwWins(incoming, stored)) {
-            m.set(key, { change, seq: ++seq, deviceId });
+            const materialized = materializeSyncChange(change, existing?.change ?? null);
+            if (!materialized) {
+              requiresFull.push({ entity: change.entity, id: change.id });
+              continue;
+            }
+            m.set(key, { change: materialized, seq: ++seq, deviceId });
             applied++;
           } else {
             skipped++;
           }
         }
-        return Promise.resolve({ applied, skipped });
+        return Promise.resolve({
+          applied,
+          skipped,
+          ...(requiresFull.length > 0 ? { requiresFull } : {}),
+        });
       },
       changesSince(userId, since, deviceId, limit) {
         const all = [...userRows(userId).values()]

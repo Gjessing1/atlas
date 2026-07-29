@@ -378,6 +378,50 @@ describe('AtlasStorage', () => {
       expect((await storage.readSyncRecord('setting', 'theme'))!.data).toEqual({ value: 'dark' });
     });
 
+    it('queues track metadata edits without GPX, while pending creates stay full', async () => {
+      const track = await storage.createTrack({
+        name: 'Long recording',
+        gpx: '<gpx>many megabytes in reality</gpx>',
+        stats: { d: 1 },
+      });
+      await storage.updateTrack(track.id, { name: 'Renamed before first sync' });
+      expect((await storage.listOutbox())[0]).toMatchObject({
+        entity: 'track',
+        scope: 'full',
+      });
+
+      await storage.clearOutbox(await storage.listOutbox());
+      await storage.updateTrack(track.id, { notes: 'metadata only' });
+      const entry = (await storage.listOutbox())[0]!;
+      expect(entry.scope).toBe('track-metadata');
+      const partial = await storage.readSyncRecord('track', track.id, entry.scope);
+      expect(partial!.data).toMatchObject({
+        name: 'Renamed before first sync',
+        notes: 'metadata only',
+      });
+      expect(partial!.data).not.toHaveProperty('gpx');
+
+      await storage.enqueueFullState();
+      expect((await storage.listOutbox())[0]!.scope).toBe('full');
+    });
+
+    it('merges a defensive partial track pull without erasing its GPX body', async () => {
+      const track = await storage.createTrack({ name: 'Original', gpx: '<gpx/>', stats: { d: 1 } });
+      await storage.applyRemoteChange({
+        entity: 'track',
+        id: track.id,
+        updatedAt: track.updatedAt + 1,
+        deleted: false,
+        partial: true,
+        data: { name: 'Remote rename', notes: 'kept small' },
+      });
+      expect((await storage.listTracks())[0]).toMatchObject({
+        name: 'Remote rename',
+        notes: 'kept small',
+      });
+      expect(await storage.getTrackGpx(track.id)).toBe('<gpx/>');
+    });
+
     it('applies newer remote changes and skips older ones', async () => {
       const place = await storage.createPlace({ name: 'Local', lat: 1, lng: 2 });
 

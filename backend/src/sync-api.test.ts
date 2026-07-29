@@ -327,6 +327,76 @@ describe('sync push/pull', () => {
     expect(body.changes[0]!.data).toMatchObject({ name: 'Pin' });
   });
 
+  it('materializes track metadata patches and requests a full missing base', async () => {
+    const token = await register('track-patch@example.com');
+    const auth = { authorization: `Bearer ${token}` };
+    const capabilities = await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: { deviceId: 'a', changes: [] },
+    });
+    expect(capabilities.json() as SyncPushResponse).toEqual({
+      applied: 0,
+      skipped: 0,
+      acceptsTrackMetadata: true,
+    });
+    const full: SyncChange = {
+      entity: 'track',
+      id: 'track-1',
+      updatedAt: 1000,
+      deleted: false,
+      data: { name: 'Original', gpx: '<gpx/>', stats: {}, createdAt: 900 },
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: { deviceId: 'a', changes: [full] },
+    });
+    const patch = await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: {
+        deviceId: 'a',
+        changes: [
+          {
+            ...full,
+            updatedAt: 2000,
+            partial: true,
+            data: { name: 'Renamed', notes: 'metadata only' },
+          },
+        ],
+      },
+    });
+    expect(patch.json() as SyncPushResponse).toEqual({ applied: 1, skipped: 0 });
+
+    const pull = await app.inject({ url: '/api/sync/pull?since=0&device=b', headers: auth });
+    const stored = (pull.json() as SyncPullResponse).changes.find((c) => c.id === 'track-1')!;
+    expect(stored.partial).toBeUndefined();
+    expect(stored.data).toMatchObject({
+      name: 'Renamed',
+      notes: 'metadata only',
+      gpx: '<gpx/>',
+    });
+
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth,
+      payload: {
+        deviceId: 'a',
+        changes: [{ ...full, id: 'missing', partial: true, data: { name: 'No base' } }],
+      },
+    });
+    expect(missing.json() as SyncPushResponse).toEqual({
+      applied: 0,
+      skipped: 0,
+      requiresFull: [{ entity: 'track', id: 'missing' }],
+    });
+  });
+
   it('breaks equal-stamp ties on device id, independent of push order', async () => {
     const token = await register('tie@example.com');
     const auth = { authorization: `Bearer ${token}` };

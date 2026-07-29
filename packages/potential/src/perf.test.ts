@@ -31,8 +31,12 @@ import type { SamplePoint } from './index.js';
 
 const N = 1024;
 const CELL_M = 9.6;
-/** Generous: the design target is ~50 ms; this catches complexity blowups only. */
-const CEILING_MS = 1500;
+/**
+ * Generous by design: the loaded release host can stretch the IDW primitive
+ * past 5 s, while the accidental O(n²) regressions this guards against take
+ * minutes at 1024². The per-test 30 s timeout remains the hard hang ceiling.
+ */
+const CEILING_MS = 10_000;
 
 function timed(name: string, run: () => unknown): number {
   const started = performance.now();

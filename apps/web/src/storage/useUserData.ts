@@ -27,6 +27,14 @@ function download(fileName: string, bytes: Uint8Array, type: string): void {
 const platform: UserDataPlatform<File> = {
   openStorage,
   awaitAvailability,
+  subscribeStorageLifecycle: ({ pause, resume }) => {
+    window.addEventListener('pagehide', pause);
+    window.addEventListener('pageshow', resume);
+    return () => {
+      window.removeEventListener('pagehide', pause);
+      window.removeEventListener('pageshow', resume);
+    };
+  },
   readFile: async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }),
   saveTextFile: (name, body, mime) => {
     download(name, new TextEncoder().encode(body), mime);

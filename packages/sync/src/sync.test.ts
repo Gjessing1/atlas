@@ -10,10 +10,12 @@ import { MAX_CLOCK_SKEW_MS, clampFutureStamps, lwwWins } from './protocol.js';
 class FakeServer {
   online = true;
   authorized = true;
+  acceptsTrackMetadata = true;
   pushes = 0;
   /** Mirrors Fastify's bodyLimit: an oversized push is rejected with 413. */
   bodyLimit = Infinity;
   rejections = 0;
+  pushedChanges: SyncChange[][] = [];
   private rows = new Map<string, { change: SyncChange; seq: number; deviceId: string }>();
   private seq = 0;
 
@@ -37,8 +39,19 @@ class FakeServer {
         return Promise.resolve(Response.json({ error: 'too large' }, { status: 413 }));
       }
       const body = JSON.parse(String(init?.body)) as SyncPushRequest;
+      this.pushedChanges.push(body.changes);
+      if (body.changes.length === 0) {
+        return Promise.resolve(
+          Response.json({
+            applied: 0,
+            skipped: 0,
+            ...(this.acceptsTrackMetadata ? { acceptsTrackMetadata: true } : {}),
+          }),
+        );
+      }
       let applied = 0;
       let skipped = 0;
+      const requiresFull: { entity: SyncChange['entity']; id: string }[] = [];
       for (const change of body.changes) {
         const key = `${change.entity}|${change.id}`;
         const existing = this.rows.get(key);
@@ -46,13 +59,37 @@ class FakeServer {
           ? { updatedAt: existing.change.updatedAt, deviceId: existing.deviceId }
           : null;
         if (lwwWins({ updatedAt: change.updatedAt, deviceId: body.deviceId }, stored)) {
-          this.rows.set(key, { change, seq: ++this.seq, deviceId: body.deviceId });
+          if (
+            change.partial &&
+            (!existing ||
+              existing.change.deleted ||
+              existing.change.data === null ||
+              change.data === null ||
+              (change.entity === 'track' && typeof existing.change.data['gpx'] !== 'string'))
+          ) {
+            requiresFull.push({ entity: change.entity, id: change.id });
+            continue;
+          }
+          const storedChange = change.partial
+            ? {
+                ...change,
+                partial: undefined,
+                data: { ...existing!.change.data!, ...change.data! },
+              }
+            : change;
+          this.rows.set(key, { change: storedChange, seq: ++this.seq, deviceId: body.deviceId });
           applied++;
         } else {
           skipped++;
         }
       }
-      return Promise.resolve(Response.json({ applied, skipped }));
+      return Promise.resolve(
+        Response.json({
+          applied,
+          skipped,
+          ...(requiresFull.length > 0 ? { requiresFull } : {}),
+        }),
+      );
     }
     if (url.pathname === '/api/sync/pull') {
       const since = Number(url.searchParams.get('since'));
@@ -157,6 +194,71 @@ describe('SyncEngine', () => {
     expect(await b.storage.getSetting('theme')).toBe('dark');
     // Nothing echoes back: b's pull created no outbox entries.
     expect(await b.storage.listOutbox()).toEqual([]);
+  });
+
+  it('syncs a track rename as metadata only and preserves GPX on every device', async () => {
+    const server = new FakeServer();
+    const a = await createDevice(server);
+    const b = await createDevice(server);
+    const gpx = `<gpx>${'point'.repeat(20_000)}</gpx>`;
+    const track = await a.storage.createTrack({ name: 'Original', gpx, stats: { d: 1 } });
+    await a.engine.sync();
+    await b.engine.sync();
+
+    server.pushedChanges = [];
+    await a.storage.updateTrack(track.id, { name: 'Renamed', notes: 'small change' });
+    await a.engine.sync();
+
+    const sent = server.pushedChanges.flat().find((change) => change.id === track.id)!;
+    expect(sent.partial).toBe(true);
+    expect(sent.data).toMatchObject({ name: 'Renamed', notes: 'small change' });
+    expect(sent.data).not.toHaveProperty('gpx');
+
+    await b.engine.sync();
+    expect((await b.storage.listTracks())[0]).toMatchObject({
+      name: 'Renamed',
+      notes: 'small change',
+    });
+    expect(await b.storage.getTrackGpx(track.id)).toBe(gpx);
+  });
+
+  it('sends a full track rename until the active server confirms partial support', async () => {
+    const server = new FakeServer();
+    server.acceptsTrackMetadata = false;
+    const a = await createDevice(server);
+    const gpx = `<gpx>${'legacy-compatible'.repeat(1000)}</gpx>`;
+    const track = await a.storage.createTrack({ name: 'Original', gpx, stats: {} });
+    await a.engine.sync();
+
+    server.pushedChanges = [];
+    await a.storage.updateTrack(track.id, { name: 'Safe rolling deploy' });
+    await a.engine.sync();
+
+    const sent = server.pushedChanges.flat().find((change) => change.id === track.id)!;
+    expect(sent.partial).toBeUndefined();
+    expect(sent.data).toMatchObject({ name: 'Safe rolling deploy', gpx });
+  });
+
+  it('retries a metadata-only track as full when the server has no base', async () => {
+    const server = new FakeServer();
+    const a = await createDevice(server);
+    const track = await a.storage.createTrack({ name: 'Local', gpx: '<gpx/>', stats: {} });
+    // Simulate a previously-synced row whose server-side base was lost.
+    await a.storage.clearOutbox(await a.storage.listOutbox());
+    await a.storage.updateTrack(track.id, { name: 'Needs full fallback' });
+
+    const result = await a.engine.sync();
+    expect(result).toMatchObject({ pushed: 1, failed: [] });
+    const pushes = server.pushedChanges.flat().filter((change) => change.id === track.id);
+    expect(pushes).toHaveLength(2);
+    expect(pushes[0]).toMatchObject({ partial: true });
+    expect(pushes[0]!.data).not.toHaveProperty('gpx');
+    expect(pushes[1]!.partial).toBeUndefined();
+    expect(pushes[1]!.data).toMatchObject({ gpx: '<gpx/>' });
+
+    const b = await createDevice(server);
+    await b.engine.sync();
+    expect(await b.storage.getTrackGpx(track.id)).toBe('<gpx/>');
   });
 
   it('does not re-download changes this device pushed', async () => {

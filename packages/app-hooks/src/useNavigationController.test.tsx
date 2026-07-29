@@ -2,7 +2,7 @@
 import type { LatLng } from '@atlas/core';
 import type { Position } from '@atlas/navigation';
 import type { RoutePath, RouteQuery, RouteResult } from '@atlas/routing';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNavigationController, type NavPlatform } from './useNavigationController.js';
@@ -99,6 +99,14 @@ async function drive(h: Harness) {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+});
+
+// Vitest APIs are imported rather than installed as globals in this project,
+// so Testing Library cannot register its implicit global afterEach cleanup.
+// Navigation hooks own real intervals and must be unmounted explicitly before
+// jsdom tears down `window`.
+afterEach(() => {
+  cleanup();
 });
 
 describe('useNavigationController — preview', () => {
@@ -567,6 +575,11 @@ describe('useNavigationController — faster-route watch', () => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    // Unmount while the timers are still fake so the hook can cancel the exact
+    // interval handles it installed. Switching clocks first lets them escape
+    // into the next test (or past jsdom teardown).
+    cleanup();
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 

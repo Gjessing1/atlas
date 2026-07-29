@@ -94,6 +94,11 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE tracks ADD COLUMN area TEXT;
   `,
+  // Track metadata edits can sync without re-uploading the GPX document. Any
+  // outbox row written by an older build is conservatively a full snapshot.
+  `
+  ALTER TABLE outbox ADD COLUMN scope TEXT NOT NULL DEFAULT 'full';
+  `,
 ];
 
 /**

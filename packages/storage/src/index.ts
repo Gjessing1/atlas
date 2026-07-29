@@ -11,6 +11,7 @@ export type {
   PlaceRecord,
   SyncChange,
   SyncEntity,
+  SyncPayloadScope,
   TrackAreaOverlay,
   TrackPatch,
   TrackRecord,

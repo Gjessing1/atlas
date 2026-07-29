@@ -32,7 +32,7 @@ describe('createWorkerSqlDriver', () => {
     vi.useRealTimers();
   });
 
-  it('resolves on ready and round-trips query, batch and script requests', async () => {
+  it('round-trips queries, writes, and pause/resume lifecycle requests', async () => {
     const worker = new FakeWorker();
     const ready = createWorkerSqlDriver(worker.asWorker());
     worker.emit({ type: 'ready' });
@@ -41,18 +41,26 @@ describe('createWorkerSqlDriver', () => {
     const query = driver.query('SELECT 1', [7]);
     const batch = driver.batch([{ sql: 'INSERT', params: ['a'] }, { sql: 'UPDATE' }]);
     const script = driver.execScript('PRAGMA x');
+    const pause = driver.pause!();
+    const resume = driver.resume!();
     expect(worker.requests).toMatchObject([
       { id: 1, kind: 'query', sql: 'SELECT 1', params: [7] },
       { id: 2, kind: 'batch', statements: [{ sql: 'INSERT', params: ['a'] }, { sql: 'UPDATE' }] },
       { id: 3, kind: 'script', sql: 'PRAGMA x' },
+      { id: 4, kind: 'pause' },
+      { id: 5, kind: 'resume' },
     ]);
 
     worker.emit({ type: 'result', id: 1, rows: [{ n: 1 }] });
     worker.emit({ type: 'error', id: 2, error: 'constraint failed' });
     worker.emit({ type: 'result', id: 3, rows: [] });
+    worker.emit({ type: 'result', id: 4, rows: [] });
+    worker.emit({ type: 'result', id: 5, rows: [] });
     expect(await query).toEqual([{ n: 1 }]);
     await expect(batch).rejects.toThrow('constraint failed');
     await expect(script).resolves.toBeUndefined();
+    await expect(pause).resolves.toBeUndefined();
+    await expect(resume).resolves.toBeUndefined();
   });
 
   it('terminates the worker when initialisation fails', async () => {

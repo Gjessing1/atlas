@@ -5,6 +5,8 @@ export type StorageWorkerRequest =
   | { id: number; kind: 'query'; sql: string; params: SqlValue[] }
   | { id: number; kind: 'batch'; statements: SqlStatement[] }
   | { id: number; kind: 'script'; sql: string }
+  | { id: number; kind: 'pause' }
+  | { id: number; kind: 'resume' }
   | { id: number; kind: 'close' };
 
 /** Worker → main thread. */

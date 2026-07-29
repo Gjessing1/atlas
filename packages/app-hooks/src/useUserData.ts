@@ -50,6 +50,13 @@ export interface UserDataPlatform<TFile> {
    * Rejection (including on abort) means "stop waiting", never "retry now".
    */
   awaitAvailability?: (signal: AbortSignal) => Promise<void>;
+  /**
+   * Platform page lifecycle. Web uses pagehide/pageshow so an entry kept alive
+   * in the back/forward cache releases OPFS while frozen and reacquires it on
+   * return. The callbacks themselves initiate the handover imperatively; they
+   * do not depend on a React cleanup running before the page is frozen.
+   */
+  subscribeStorageLifecycle?: (callbacks: { pause: () => void; resume: () => void }) => () => void;
   /** Read a picked/dropped file into its name + raw bytes. */
   readFile: (file: TFile) => Promise<{ name: string; bytes: Uint8Array }>;
   /** Deliver a single exported file (browser download / OS share sheet). */
@@ -386,6 +393,61 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
   useEffect(() => {
     let cancelled = false;
     const waiting = new AbortController();
+    let removeLifecycle: () => void = () => undefined;
+    let pauseFinished: Promise<unknown> = Promise.resolve();
+    let resuming = false;
+
+    const showStorageError = (err: unknown): StorageUnavailableReason => {
+      console.error('Persistent storage unavailable', err);
+      const reason = storageUnavailableReason(err);
+      setStorage(null);
+      setError(err instanceof Error ? err.message : String(err));
+      setErrorReason(reason);
+      setStatus('error');
+      return reason;
+    };
+
+    const loadStorageState = async (s: AtlasStorage): Promise<void> => {
+      const [c, p, t] = await Promise.all([s.listCollections(), s.listPlaces(), s.listTracks()]);
+      if (cancelled) return;
+      storageRef.current = s;
+      setCollections(c);
+      setPlaces(p);
+      setTracks(t);
+      setStorage(s);
+      setError(null);
+      setErrorReason(null);
+      setStatus('ready');
+    };
+
+    const resumeStorage = (s: AtlasStorage): void => {
+      if (cancelled || resuming) return;
+      resuming = true;
+      void (async () => {
+        let waitAgain = false;
+        try {
+          // A synthetic or very quick pageshow can arrive before the worker
+          // has answered pause. Reacquisition is strictly ordered behind it.
+          await pauseFinished;
+          await s.resume();
+          if (!cancelled) await loadStorageState(s);
+        } catch (err) {
+          if (!cancelled) {
+            const reason = showStorageError(err);
+            waitAgain = reason === 'busy' && Boolean(platform.awaitAvailability);
+          }
+        } finally {
+          resuming = false;
+        }
+        if (waitAgain && !cancelled) {
+          platform.awaitAvailability!(waiting.signal).then(
+            () => resumeStorage(s),
+            () => undefined,
+          );
+        }
+      })();
+    };
+
     // Retrying in the background behind a stated error keeps the error stated:
     // flipping back to 'loading' on every attempt made the banner blink.
     if (attempt.manual || statusRef.current !== 'error') setStatus('loading');
@@ -393,24 +455,30 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     opened.then(
       async (s) => {
         if (cancelled) return;
-        storageRef.current = s;
-        const [c, p, t] = await Promise.all([s.listCollections(), s.listPlaces(), s.listTracks()]);
+        await loadStorageState(s);
         if (cancelled) return;
-        setCollections(c);
-        setPlaces(p);
-        setTracks(t);
-        setStorage(s);
-        setError(null);
-        setErrorReason(null);
-        setStatus('ready');
+        removeLifecycle =
+          platform.subscribeStorageLifecycle?.({
+            pause: () => {
+              if (cancelled) return;
+              // Stop every app-level consumer immediately, then post the pause
+              // request in this event turn. A React effect cleanup is too late
+              // for a page the browser is about to freeze into its BFCache.
+              storageRef.current = null;
+              setStorage(null);
+              setStatus('loading');
+              pauseFinished = s.pause().catch((err: unknown) => {
+                // resume() is still attempted: a failed pause may mean the VFS
+                // remained active, in which case resume is safely a no-op.
+                console.error('Pausing persistent storage failed', err);
+              });
+            },
+            resume: () => resumeStorage(s),
+          }) ?? (() => undefined);
       },
       (err: unknown) => {
         if (cancelled) return;
-        console.error('Persistent storage unavailable', err);
-        const reason = storageUnavailableReason(err);
-        setError(err instanceof Error ? err.message : String(err));
-        setErrorReason(reason);
-        setStatus('error');
+        const reason = showStorageError(err);
         // Somebody else has it: wait for them to let go and take over, rather
         // than making the user work out that a second tab is the problem.
         if (reason === 'busy' && platform.awaitAvailability) {
@@ -426,6 +494,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     return () => {
       cancelled = true;
       waiting.abort();
+      removeLifecycle();
       storageRef.current = null;
       // Close whatever this effect opened — even when the open resolves after
       // cleanup, the chained close still releases it (no leaked instance, no

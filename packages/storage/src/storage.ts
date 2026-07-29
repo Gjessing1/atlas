@@ -15,6 +15,7 @@ import type {
   PlaceRecord,
   SyncChange,
   SyncEntity,
+  SyncPayloadScope,
   TrackAreaOverlay,
   TrackPatch,
   TrackRecord,
@@ -200,6 +201,20 @@ export class AtlasStorage {
    */
   async close(): Promise<void> {
     await this.driver.close?.();
+  }
+
+  /**
+   * Temporarily relinquish a platform's exclusive database resources while
+   * keeping this repository instance resumable. A no-op on drivers such as
+   * Android and node SQLite that have no cross-page ownership constraint.
+   */
+  async pause(): Promise<void> {
+    await this.driver.pause?.();
+  }
+
+  /** Reacquire resources released by pause(). */
+  async resume(): Promise<void> {
+    await this.driver.resume?.();
   }
 
   // ---- collections ----
@@ -502,13 +517,22 @@ export class AtlasStorage {
   }
 
   async updateTrack(id: string, patch: TrackPatch): Promise<void> {
-    await this.applyPatch('tracks', 'track', id, {
-      name: patch.name,
-      collection_id: patch.collectionId,
-      notes: patch.notes,
-      tags: patch.tags === undefined ? undefined : JSON.stringify(patch.tags),
-      visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
-    });
+    const now = this.tick();
+    const statements = this.patchStmts(
+      'tracks',
+      'track',
+      id,
+      {
+        name: patch.name,
+        collection_id: patch.collectionId,
+        notes: patch.notes,
+        tags: patch.tags === undefined ? undefined : JSON.stringify(patch.tags),
+        visible: patch.visible === undefined ? undefined : patch.visible ? 1 : 0,
+      },
+      now,
+      'track-metadata',
+    );
+    if (statements.length > 0) await this.driver.batch(statements);
   }
 
   /** Delete a track, returning a snapshot for undo (null when unknown). */
@@ -726,6 +750,7 @@ export class AtlasStorage {
       id: String(r['id']),
       op: String(r['op']) as OutboxEntry['op'],
       updatedAt: Number(r['updated_at']),
+      scope: (r['scope'] === 'track-metadata' ? 'track-metadata' : 'full') as SyncPayloadScope,
     }));
   }
 
@@ -761,6 +786,7 @@ export class AtlasStorage {
   async readSyncRecord(
     entity: SyncEntity,
     id: string,
+    scope: SyncPayloadScope = 'full',
   ): Promise<{ updatedAt: number; data: Record<string, unknown> } | null> {
     if (entity === 'setting') {
       const rows = await this.driver.query('SELECT value, updated_at FROM settings WHERE key = ?', [
@@ -815,7 +841,7 @@ export class AtlasStorage {
       updatedAt,
       data: {
         name: t.name,
-        gpx: String(r['gpx']),
+        ...(scope === 'track-metadata' ? {} : { gpx: String(r['gpx']) }),
         stats: t.stats,
         collectionId: t.collectionId,
         notes: t.notes,
@@ -843,6 +869,15 @@ export class AtlasStorage {
     if (change.entity === 'setting' && change.id.startsWith(LOCAL_SETTING_PREFIX)) return 'skipped';
     const local = await this.localUpdatedAt(change.entity, change.id);
     if (local !== null && local > change.updatedAt) return 'skipped';
+    // Servers materialize partial track changes before storing them. Merge
+    // defensively as well so a compatible proxy or future store cannot make a
+    // metadata edit erase the local GPX body.
+    if (change.partial) {
+      if (change.deleted || change.entity !== 'track' || change.data === null) return 'skipped';
+      const base = await this.readSyncRecord('track', change.id);
+      if (!base) return 'skipped';
+      change = { ...change, partial: undefined, data: { ...base.data, ...change.data } };
+    }
     const statements: SqlStatement[] = [];
     if (change.deleted) {
       if (change.entity === 'setting') {
@@ -1001,10 +1036,19 @@ export class AtlasStorage {
     id: string,
     op: OutboxEntry['op'],
     updatedAt: number,
+    scope: SyncPayloadScope = 'full',
   ): SqlStatement {
     return {
-      sql: 'INSERT OR REPLACE INTO outbox (entity, id, op, updated_at) VALUES (?, ?, ?, ?)',
-      params: [entity, id, op, updatedAt],
+      sql: `INSERT INTO outbox (entity, id, op, updated_at, scope) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(entity, id) DO UPDATE SET
+              op = excluded.op,
+              updated_at = excluded.updated_at,
+              scope = CASE
+                WHEN outbox.op = 'upsert' AND outbox.scope = 'full'
+                  AND excluded.op = 'upsert' THEN 'full'
+                ELSE excluded.scope
+              END`,
+      params: [entity, id, op, updatedAt, scope],
     };
   }
 
@@ -1015,6 +1059,7 @@ export class AtlasStorage {
     id: string,
     columns: Record<string, SqlValue | undefined>,
     now: number,
+    scope: SyncPayloadScope = 'full',
   ): SqlStatement[] {
     const entries = Object.entries(columns).filter(([, v]) => v !== undefined) as [
       string,
@@ -1027,7 +1072,7 @@ export class AtlasStorage {
         sql: `UPDATE ${table} SET ${sets}, updated_at = ? WHERE id = ?`,
         params: [...entries.map(([, v]) => v), now, id],
       },
-      this.enqueueStmt(entity, id, 'upsert', now),
+      this.enqueueStmt(entity, id, 'upsert', now, scope),
     ];
   }
 

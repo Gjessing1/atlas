@@ -48,6 +48,18 @@ export interface SyncPushResponse {
   applied: number;
   /** Stale changes the server already had newer state for. */
   skipped: number;
+  /**
+   * Returned by a zero-change capability probe. A client must see this before
+   * sending a metadata-only track: an older server would otherwise mistake
+   * the patch for a complete record and discard its GPX body.
+   */
+  acceptsTrackMetadata?: true;
+  /**
+   * Partial changes whose server-side base is absent (for example after a
+   * server restore). The client immediately retries these records as full
+   * snapshots rather than letting a metadata-only track become body-less.
+   */
+  requiresFull?: { entity: SyncChange['entity']; id: string }[];
 }
 
 /** GET /api/sync/pull?since=<cursor>&device=<deviceId>&limit=<n> */

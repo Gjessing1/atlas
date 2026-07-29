@@ -53,6 +53,12 @@ export function createWorkerSqlDriver(worker: Worker): Promise<SqlDriver> {
     execScript: async (sql) => {
       await send({ kind: 'script', sql });
     },
+    pause: async () => {
+      await send({ kind: 'pause' });
+    },
+    resume: async () => {
+      await send({ kind: 'resume' });
+    },
     close: async () => {
       if (closed) return;
       // Let the worker close the database first (flushes and releases the

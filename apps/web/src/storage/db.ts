@@ -136,13 +136,83 @@ async function openOnce(ownership: Ownership): Promise<AtlasStorage> {
   // Armed only once the open has succeeded: a failed attempt tears its own
   // worker down and must keep the lock for the retry behind it.
   let handOver: () => void = () => undefined;
+  let ownsLock = false;
+  let wantsStorage = true;
+  let pauseBarrier: Promise<unknown> = Promise.resolve();
+  let resumeInFlight: Promise<void> | null = null;
   const owned: SqlDriver = {
     ...driver,
-    close: async () => {
+    pause: () => {
+      if (!wantsStorage) return pauseBarrier.then(() => undefined);
+      wantsStorage = false;
+      // Calling the async driver method posts its worker message immediately.
+      // Do that in the pagehide event turn, before dropping the advisory lock:
+      // a `.then(() => driver.pause())` here is too late because the browser may
+      // freeze a BFCache-bound page before that microtask gets another turn.
+      let pausing: Promise<void>;
       try {
+        pausing = driver.pause?.() ?? Promise.resolve();
+      } catch (err) {
+        pausing = Promise.reject(err);
+      }
+      handOver();
+      handOver = () => undefined;
+      ownsLock = false;
+      pauseBarrier = pausing.catch(() => undefined);
+      return pausing.then(() => undefined);
+    },
+    resume: () => {
+      if (wantsStorage && ownsLock) return Promise.resolve();
+      wantsStorage = true;
+      if (resumeInFlight) return resumeInFlight;
+      const resuming = (async () => {
+        // A very quick pageshow can arrive before the worker has acknowledged
+        // pagehide. Keep worker message ordering explicit before trying to
+        // take the origin lock back.
+        await pauseBarrier;
+        if (!wantsStorage) return;
+        const nextOwnership = await acquireOwnership();
+        if (!nextOwnership) throw new StorageUnavailableError('busy');
+        if (!wantsStorage) {
+          nextOwnership.release();
+          return;
+        }
+        try {
+          await driver.resume?.();
+        } catch (err) {
+          nextOwnership.release();
+          throw new StorageUnavailableError(
+            isBusyFailure(err) ? 'busy' : 'failed',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        // pagehide may have fired while unpauseVfs() was pending. Its pause
+        // message is queued behind resume in the worker; do not retain the Web
+        // Lock when that page is about to become frozen again.
+        if (!wantsStorage) {
+          nextOwnership.release();
+          return;
+        }
+        handOver = nextOwnership.release;
+        ownsLock = true;
+      })();
+      resumeInFlight = resuming.finally(() => {
+        resumeInFlight = null;
+      });
+      return resumeInFlight;
+    },
+    close: async () => {
+      wantsStorage = false;
+      handOver();
+      handOver = () => undefined;
+      ownsLock = false;
+      try {
+        await pauseBarrier;
+        await resumeInFlight?.catch(() => undefined);
         await driver.close?.();
       } finally {
         handOver();
+        handOver = () => undefined;
       }
     },
   };
@@ -154,6 +224,7 @@ async function openOnce(ownership: Ownership): Promise<AtlasStorage> {
     throw err;
   }
   handOver = ownership.release;
+  ownsLock = true;
   return storage;
 }
 

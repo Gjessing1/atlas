@@ -87,7 +87,12 @@ async function poolIsFree(): Promise<boolean> {
 }
 
 interface OpenDatabase {
-  db: WorkerDb;
+  /** The connection is absent while the VFS is paused. */
+  db: WorkerDb | null;
+  /** Close SQLite and release the pool's handles without destroying the worker. */
+  pause: () => void;
+  /** Reacquire the pool and reopen SQLite after pause(). */
+  resume: () => Promise<void>;
   /** Close the database and give the pool's file handles back. */
   release: () => void;
 }
@@ -96,18 +101,40 @@ async function openDatabase(fileName: string): Promise<OpenDatabase> {
   if (!(await poolIsFree())) throw new PoolBusyError();
   const sqlite3 = await sqlite3InitModule();
   const poolUtil = await sqlite3.installOpfsSAHPoolVfs({});
-  const db = new poolUtil.OpfsSAHPoolDb(fileName) as unknown as WorkerDb;
-  return {
-    db,
+  let vfsPaused = false;
+  const open: OpenDatabase = {
+    db: new poolUtil.OpfsSAHPoolDb(fileName) as unknown as WorkerDb,
+    pause: () => {
+      if (open.db === null) return;
+      // pauseVfs() requires every SQLite file to be closed first. The worker
+      // stays alive so pageshow can unpause the same pool and reopen the DB.
+      open.db.close();
+      open.db = null;
+      poolUtil.pauseVfs();
+      vfsPaused = true;
+    },
+    resume: async () => {
+      if (open.db !== null) return;
+      if (vfsPaused) {
+        await poolUtil.unpauseVfs();
+        vfsPaused = false;
+      }
+      open.db = new poolUtil.OpfsSAHPoolDb(fileName) as unknown as WorkerDb;
+    },
     release: () => {
-      db.close();
+      open.db?.close();
+      open.db = null;
       // Closing the database returns its file to the pool, but the pool keeps
       // an access handle on *every* file until it is paused. Releasing them
       // here means the next opener finds them free the moment close() resolves,
       // instead of racing a worker teardown nobody can observe.
-      poolUtil.pauseVfs();
+      if (!vfsPaused) {
+        poolUtil.pauseVfs();
+        vfsPaused = true;
+      }
     },
   };
+  return open;
 }
 
 function runScript(db: WorkerDb, sql: string): void {
@@ -159,22 +186,31 @@ export function runStorageWorker(fileName = '/atlas.db'): void {
     const request = event.data;
     try {
       const open = await openPromise;
-      const db = open.db;
       let rows: SqlRow[] = [];
       switch (request.kind) {
-        case 'query':
-          rows = db.exec({
+        case 'query': {
+          if (!open.db) throw new Error('storage is paused');
+          rows = open.db.exec({
             sql: request.sql,
             bind: request.params.length > 0 ? request.params : undefined,
             rowMode: 'object',
             returnValue: 'resultRows',
           });
           break;
+        }
         case 'batch':
-          runBatch(db, request.statements);
+          if (!open.db) throw new Error('storage is paused');
+          runBatch(open.db, request.statements);
           break;
         case 'script':
-          runScript(db, request.sql);
+          if (!open.db) throw new Error('storage is paused');
+          runScript(open.db, request.sql);
+          break;
+        case 'pause':
+          open.pause();
+          break;
+        case 'resume':
+          await open.resume();
           break;
         case 'close':
           // Releases the SAH-pool file handles before the main thread

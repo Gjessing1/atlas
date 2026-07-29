@@ -77,6 +77,37 @@ describe.skipIf(!url)('createPgStores', () => {
     expect(stale.skipped).toBe(1);
   });
 
+  it('merges track metadata patches and asks for a full absent base', async () => {
+    const full: SyncChange = {
+      entity: 'track',
+      id: 'patched-track',
+      updatedAt: 5100,
+      deleted: false,
+      data: { name: 'Original', gpx: '<gpx/>', stats: {} },
+    };
+    await stores.sync.apply(userId, 'writer', [full]);
+    expect(
+      await stores.sync.apply(userId, 'writer', [
+        { ...full, updatedAt: 5200, partial: true, data: { name: 'Renamed' } },
+      ]),
+    ).toEqual({ applied: 1, skipped: 0 });
+
+    const pull = await stores.sync.changesSince(userId, 0, 'reader', 100);
+    const stored = pull.changes.find((c) => c.id === full.id)!;
+    expect(stored.partial).toBeUndefined();
+    expect(stored.data).toMatchObject({ name: 'Renamed', gpx: '<gpx/>' });
+
+    expect(
+      await stores.sync.apply(userId, 'writer', [
+        { ...full, id: 'missing-track', partial: true, data: { name: 'Missing' } },
+      ]),
+    ).toEqual({
+      applied: 0,
+      skipped: 0,
+      requiresFull: [{ entity: 'track', id: 'missing-track' }],
+    });
+  });
+
   it('breaks equal-stamp ties on device id, and replays stay no-ops', async () => {
     // Smaller device id first: the larger one wins the tie.
     await stores.sync.apply(userId, 'dev-a', [

@@ -220,6 +220,71 @@ describe('useUserData', () => {
       unmount();
       expect(aborted).toHaveBeenCalledTimes(1);
     });
+
+    it('pauses on pagehide and resumes the same storage on pageshow', async () => {
+      const { storage, platform: base } = createPlatform();
+      const pause = vi.spyOn(storage, 'pause');
+      const resume = vi.spyOn(storage, 'resume');
+      let lifecycle!: { pause: () => void; resume: () => void };
+      const unsubscribe = vi.fn();
+      const platform: UserDataPlatform<MemFile> = {
+        ...base,
+        subscribeStorageLifecycle: (callbacks) => {
+          lifecycle = callbacks;
+          return unsubscribe;
+        },
+      };
+      const { result, unmount } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+
+      act(() => lifecycle.pause());
+      await waitFor(() => expect(result.current.status).toBe('loading'));
+      expect(result.current.storage).toBeNull();
+      expect(pause).toHaveBeenCalledTimes(1);
+
+      act(() => lifecycle.resume());
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      expect(resume).toHaveBeenCalledTimes(1);
+      expect(result.current.storage).toBe(storage);
+
+      unmount();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it('waits when a restored page cannot reacquire storage, then resumes itself', async () => {
+      const { storage, platform: base } = createPlatform();
+      vi.spyOn(storage, 'resume')
+        .mockRejectedValueOnce(new StorageUnavailableError('busy'))
+        .mockResolvedValueOnce();
+      let lifecycle!: { pause: () => void; resume: () => void };
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const platform: UserDataPlatform<MemFile> = {
+        ...base,
+        awaitAvailability: () => released,
+        subscribeStorageLifecycle: (callbacks) => {
+          lifecycle = callbacks;
+          return () => undefined;
+        },
+      };
+      const { result } = renderHook(() => useUserData(platform));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+
+      act(() => lifecycle.pause());
+      act(() => lifecycle.resume());
+      await waitFor(() => expect(result.current.errorReason).toBe('busy'));
+      expect(result.current.storage).toBeNull();
+
+      await act(async () => {
+        release();
+        await released;
+      });
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      expect(storage.resume).toHaveBeenCalledTimes(2);
+      expect(result.current.storage).toBe(storage);
+    });
   });
 
   it('writes through mutations and surfaces failed writes', async () => {

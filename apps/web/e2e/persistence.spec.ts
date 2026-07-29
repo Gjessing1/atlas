@@ -157,3 +157,45 @@ test('a second tab explains itself and takes over when the first closes', async 
   await second.getByRole('button', { name: 'Collections', exact: true }).click();
   await expect(second.locator('.item-name')).toContainText(COORDS);
 });
+
+test('a BFCache page hands storage over and reacquires it when restored', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(150_000);
+  await page.goto('/');
+  await waitForMap(page);
+  await saveCentrePin(page);
+
+  // Drive the exact browser lifecycle deterministically while keeping the
+  // document alive. The pagehide handler must close SQLite + pause the SAH
+  // pool in this event turn; no React unmount occurs to rescue it.
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
+  );
+
+  const second = await context.newPage();
+  await second.goto('/');
+  await waitForMap(second);
+  await second.getByRole('button', { name: 'Collections', exact: true }).click();
+  // No error banner also describes the initial loading state. A storage-backed
+  // action becoming enabled proves this page has actually opened and read the
+  // handed-over database before its rows are asserted.
+  await expect(second.getByRole('button', { name: 'New folder' })).toBeEnabled({
+    timeout: 30_000,
+  });
+  await expect(second.locator('.item-name')).toContainText(COORDS, { timeout: 30_000 });
+
+  // Restoring the first document while the second owns OPFS is a normal busy
+  // state, not data loss. It waits, then resumes itself when the owner closes.
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+  );
+  await expect(page.locator('.storage-banner')).toContainText('Atlas is open in another window');
+
+  await second.close();
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'New folder' })).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator('.storage-banner')).toBeHidden();
+  await expect(page.locator('.item-name')).toContainText(COORDS, { timeout: 30_000 });
+});

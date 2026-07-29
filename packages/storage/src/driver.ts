@@ -27,5 +27,14 @@ export interface SqlDriver {
   batch(statements: SqlStatement[]): Promise<void>;
   /** Execute a multi-statement script (no parameters, no results) — used for migrations. */
   execScript(sql: string): Promise<void>;
+  /**
+   * Temporarily release external resources without making the driver
+   * unusable. The web OPFS driver uses this to hand its exclusive SAH-pool
+   * handles to another page while this page is frozen in the back/forward
+   * cache. Other drivers do not need to implement it.
+   */
+  pause?(): Promise<void>;
+  /** Reacquire resources released by pause(). */
+  resume?(): Promise<void>;
   close?(): Promise<void>;
 }

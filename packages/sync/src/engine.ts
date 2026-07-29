@@ -131,6 +131,9 @@ export class SyncEngine {
    */
   private async push(deviceId: string): Promise<{ pushed: number; failed: SyncFailure[] }> {
     const outbox = await this.storage.listOutbox();
+    const sendTrackMetadata =
+      !outbox.some((entry) => entry.scope === 'track-metadata') ||
+      (await this.serverAcceptsTrackMetadata(deviceId));
     let pushed = 0;
     const failed: SyncFailure[] = [];
 
@@ -152,7 +155,7 @@ export class SyncEngine {
     };
 
     for (const entry of outbox) {
-      const change = await this.entryToChange(entry);
+      const change = await this.entryToChange(entry, sendTrackMetadata);
       if (change) {
         const size = changeBytes(change);
         // Close the batch *before* adding an overflowing change; a change that
@@ -174,6 +177,21 @@ export class SyncEngine {
   }
 
   /**
+   * Negotiate the additive partial-record extension before using it. The
+   * empty push is valid against every older Atlas backend, whose response
+   * simply lacks the capability and makes this client fall back to a full
+   * snapshot. Probe on every sync that contains a partial so a rolling deploy
+   * or server rollback cannot leave a stale capability cached in the app.
+   */
+  private async serverAcceptsTrackMetadata(deviceId: string): Promise<boolean> {
+    const response = await this.request<SyncPushResponse>('POST', '/api/sync/push', {
+      deviceId,
+      changes: [],
+    } satisfies SyncPushRequest);
+    return response.acceptsTrackMetadata === true;
+  }
+
+  /**
    * Push one batch, halving it on a 413 until either it fits or a lone change is
    * identified as un-pushable. That change is then abandoned (its outbox entry
    * clears with the batch) and reported, because keeping it queued would block
@@ -185,8 +203,35 @@ export class SyncEngine {
   ): Promise<{ pushed: number; failed: SyncFailure[] }> {
     const body: SyncPushRequest = { deviceId, changes };
     try {
-      await this.request<SyncPushResponse>('POST', '/api/sync/push', body);
-      return { pushed: changes.length, failed: [] };
+      const response = await this.request<SyncPushResponse>('POST', '/api/sync/push', body);
+      const requested = response.requiresFull ?? [];
+      if (requested.length === 0) return { pushed: changes.length, failed: [] };
+
+      const wanted = new Set(requested.map((r) => `${r.entity}\u0000${r.id}`));
+      const full: SyncChange[] = [];
+      for (const change of changes) {
+        if (!wanted.has(`${change.entity}\u0000${change.id}`)) continue;
+        const record = await this.storage.readSyncRecord(change.entity, change.id, 'full');
+        // A newer local delete may have landed while this push was in flight.
+        // Its guarded outbox row remains for the next sync; there is no stale
+        // full snapshot to manufacture here.
+        if (!record) continue;
+        full.push({
+          entity: change.entity,
+          id: change.id,
+          updatedAt: record.updatedAt,
+          deleted: false,
+          data: record.data,
+        });
+      }
+      const retry =
+        full.length > 0
+          ? await this.sendChanges(deviceId, full)
+          : { pushed: 0, failed: [] as SyncFailure[] };
+      return {
+        pushed: changes.length - requested.length + retry.pushed,
+        failed: retry.failed,
+      };
     } catch (err) {
       if (!(err instanceof SyncError) || err.kind !== 'too-large') throw err;
       const only = changes[0];
@@ -206,7 +251,10 @@ export class SyncEngine {
     }
   }
 
-  private async entryToChange(entry: OutboxEntry): Promise<SyncChange | null> {
+  private async entryToChange(
+    entry: OutboxEntry,
+    sendTrackMetadata: boolean,
+  ): Promise<SyncChange | null> {
     if (entry.op === 'delete') {
       return {
         entity: entry.entity,
@@ -216,7 +264,8 @@ export class SyncEngine {
         data: null,
       };
     }
-    const record = await this.storage.readSyncRecord(entry.entity, entry.id);
+    const scope = sendTrackMetadata ? entry.scope : 'full';
+    const record = await this.storage.readSyncRecord(entry.entity, entry.id, scope);
     if (record === null) return null; // record vanished since enqueue; nothing to say
     return {
       entity: entry.entity,
@@ -224,6 +273,7 @@ export class SyncEngine {
       updatedAt: record.updatedAt,
       deleted: false,
       data: record.data,
+      ...(scope === 'track-metadata' ? { partial: true } : {}),
     };
   }
 
