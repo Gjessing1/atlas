@@ -580,6 +580,107 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   expect(hasRouteSource).toBe(true);
 });
 
+test('transit stop search plans from the exact Entur stops selected', async ({ page }) => {
+  await mockRouting(page);
+  const now = Date.now();
+  let transitBody: {
+    from?: { lat: number; lng: number; stopId?: string };
+    to?: { lat: number; lng: number; stopId?: string };
+  } | null = null;
+
+  await page.route('**/api/search**', (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+    const national = q.toLowerCase().includes('national');
+    route.fulfill({
+      json: {
+        results: [
+          {
+            // Photon knows an OSM station too. The Entur result below must win
+            // and this nearby duplicate must not become a second ambiguous row.
+            name: national ? 'Nationaltheatret' : 'Oslo S',
+            label: 'Photon address',
+            position: national ? { lat: 59.9147, lng: 10.7333 } : { lat: 59.9104, lng: 10.7531 },
+          },
+          {
+            name: national ? 'Nationaltheatret café' : 'Oslo City',
+            label: 'General place',
+            position: national ? { lat: 59.915, lng: 10.734 } : { lat: 59.912, lng: 10.751 },
+          },
+        ],
+      },
+    });
+  });
+  await page.route('**/api/transit/stops**', (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+    const national = q.toLowerCase().includes('national');
+    route.fulfill({
+      json: {
+        results: [
+          {
+            name: national ? 'Nationaltheatret' : 'Oslo S',
+            label: national ? 'Train · Tram · Oslo' : 'Bus · Train · Oslo',
+            position: national
+              ? { lat: 59.9147, lng: 10.7333 }
+              : { lat: 59.910357, lng: 10.753051 },
+            transitStopId: national ? 'NSR:StopPlace:58404' : 'NSR:StopPlace:59872',
+          },
+        ],
+      },
+    });
+  });
+  await page.route('**/api/transit', (route) => {
+    transitBody = route.request().postDataJSON() as typeof transitBody;
+    route.fulfill({
+      json: {
+        trips: [
+          {
+            startMs: now,
+            endMs: now + 600_000,
+            durationMs: 600_000,
+            walkDistanceM: 0,
+            legs: [],
+          },
+        ],
+        problems: [],
+      },
+    });
+  });
+
+  await page.goto('/#map=13/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Route' }).click();
+  await page.getByRole('button', { name: /Transit/ }).click();
+
+  const search = page.locator('.route-stop-search');
+  await search.getByRole('searchbox', { name: 'Search for a start' }).fill('Oslo');
+  await expect(search.locator('li').first()).toContainText('Bus · Train · Oslo');
+  await expect(search.getByRole('button', { name: /Oslo S/ })).toHaveCount(1);
+  await search.getByRole('button', { name: /Oslo S/ }).click();
+
+  await search.getByRole('searchbox', { name: 'Search for a destination' }).fill('National');
+  await expect(search.locator('li').first()).toContainText('Train · Tram · Oslo');
+  await search
+    .getByRole('button', { name: /Nationaltheatret/ })
+    .first()
+    .click();
+
+  await expect
+    .poll(() => transitBody)
+    .toMatchObject({
+      from: {
+        lat: 59.910357,
+        lng: 10.753051,
+        stopId: 'NSR:StopPlace:59872',
+      },
+      to: {
+        lat: 59.9147,
+        lng: 10.7333,
+        stopId: 'NSR:StopPlace:58404',
+      },
+    });
+  await expect(page.locator('.transit-results')).toBeVisible();
+});
+
 test('a planned route saves as a track and reopens as an editable route', async ({ page }) => {
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');

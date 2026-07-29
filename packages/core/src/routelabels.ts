@@ -80,4 +80,6 @@ export interface StopHit {
   position: LatLng;
   /** True for the user's saved places — listed first, marked with a star. */
   saved: boolean;
+  /** Exact Entur/NSR stop selected, when this was a public-transport result. */
+  transitStopId?: string;
 }

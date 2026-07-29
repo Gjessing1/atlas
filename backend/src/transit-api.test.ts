@@ -75,7 +75,9 @@ beforeEach(async () => {
       captured = {
         url: String(url),
         headers: init.headers as Record<string, string>,
-        body: JSON.parse(String(init.body)),
+        body: init.body
+          ? (JSON.parse(String(init.body)) as Captured['body'])
+          : { query: '', variables: {} },
       };
       return respond();
     }) as unknown as typeof fetch,
@@ -91,6 +93,29 @@ const plan = (payload: unknown) =>
   app.inject({ method: 'POST', url: '/api/transit', payload: payload as object });
 
 describe('POST /api/transit', () => {
+  it('pins a searched endpoint to its exact NSR StopPlace id', async () => {
+    await plan({
+      from: { ...asker, stopId: 'NSR:StopPlace:59872' },
+      to: { ...nationaltheatret, stopId: 'NSR:StopPlace:58404' },
+    });
+
+    expect(captured?.body.variables).toMatchObject({
+      from: { place: 'NSR:StopPlace:59872' },
+      to: { place: 'NSR:StopPlace:58404' },
+    });
+  });
+
+  it('falls back to coordinates when optional stop metadata is malformed', async () => {
+    await plan({
+      from: { ...asker, stopId: 'not-a-stop' },
+      to: nationaltheatret,
+    });
+
+    expect(captured?.body.variables.from).toEqual({
+      coordinates: { latitude: asker.lat, longitude: asker.lng },
+    });
+  });
+
   it('asks again with a full-day window when the planner returned nothing', async () => {
     // Measured against live Entur: Å i Lofoten → Svolvær at 23:30 comes back
     // empty although a 04:24 bus exists, because Entur's own look-ahead is a
@@ -225,5 +250,72 @@ describe('POST /api/transit', () => {
         status: 200,
       });
     expect((await plan({ from: asker, to: nationaltheatret })).statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/transit/stops', () => {
+  const geocoderReply = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        geometry: { type: 'Point', coordinates: [10.753051, 59.910357] },
+        properties: {
+          id: 'NSR:StopPlace:59872',
+          name: 'Oslo S',
+          label: 'Oslo S, Oslo',
+          layer: 'venue',
+          category: ['onstreetBus', 'railStation'],
+          locality: 'Oslo',
+        },
+      },
+    ],
+  };
+
+  it('searches Norwegian NSR stops with Entur identification and viewport bias', async () => {
+    respond = () => new Response(JSON.stringify(geocoderReply), { status: 200 });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/transit/stops?q=Oslo%20S&limit=3&lat=59.91&lon=10.75',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      results: [
+        {
+          name: 'Oslo S',
+          label: 'Bus · Train · Oslo',
+          position: { lat: 59.910357, lng: 10.753051 },
+          kind: 'public_transport/onstreetBus',
+          transitStopId: 'NSR:StopPlace:59872',
+        },
+      ],
+    });
+    const upstream = new URL(captured!.url);
+    expect(upstream.pathname).toBe('/geocoder/v1/autocomplete');
+    expect(Object.fromEntries(upstream.searchParams)).toMatchObject({
+      text: 'Oslo S',
+      lang: 'en',
+      size: '3',
+      layers: 'venue',
+      'boundary.country': 'NOR',
+      multiModal: 'parent',
+      'focus.point.lat': '59.91',
+      'focus.point.lon': '10.75',
+    });
+    expect(captured?.headers['ET-Client-Name']).toBe('atlas-journeyplanner');
+  });
+
+  it('rejects tiny queries without calling Entur', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/transit/stops?q=O' });
+    expect(res.statusCode).toBe(400);
+    expect(captured).toBeUndefined();
+  });
+
+  it('reports an unavailable Entur geocoder without leaking its response', async () => {
+    respond = () => new Response('rate limited', { status: 429 });
+    const res = await app.inject({ method: 'GET', url: '/api/transit/stops?q=Oslo' });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ error: 'public transport stop search unavailable' });
   });
 });

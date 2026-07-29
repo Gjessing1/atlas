@@ -21,6 +21,8 @@ export interface StopGeocodeQuery {
   /** Photon-formatted route bounds, when the search is corridor-constrained. */
   bbox?: string;
   limit?: number;
+  /** Ask the platform seam to rank Entur stops before the general geocoder. */
+  transit?: boolean;
   /** Aborted when the query is superseded; implementations should honour it. */
   signal: AbortSignal;
 }
@@ -57,7 +59,13 @@ const savedHits = (places: StopSearchPlace[], query: string, limit: number): Sto
   }));
 
 const remoteHits = (results: SearchResult[]): StopHit[] =>
-  results.map((r) => ({ name: r.name, label: r.label, position: r.position, saved: false }));
+  results.map((r) => ({
+    name: r.name,
+    label: r.label,
+    position: r.position,
+    saved: false,
+    ...(r.transitStopId ? { transitStopId: r.transitStopId } : {}),
+  }));
 
 export interface StopSearch {
   query: string;
@@ -78,6 +86,7 @@ export function useStopSearch({
   debounceMs = 250,
   limit = 6,
   savedLimit = 4,
+  transit = false,
 }: {
   geocode: StopGeocodeFn;
   places: StopSearchPlace[];
@@ -88,6 +97,8 @@ export function useStopSearch({
   limit?: number;
   /** Of those, at most this many saved places. */
   savedLimit?: number;
+  /** Use Entur stop-aware autocomplete ahead of general address results. */
+  transit?: boolean;
 }): StopSearch {
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<StopHit[]>([]);
@@ -106,7 +117,9 @@ export function useStopSearch({
         const saved = savedHits(placesRef.current, q, savedLimit);
         let remote: StopHit[] = [];
         try {
-          remote = remoteHits(await geocodeRef.current({ text: q, signal: controller.signal }));
+          remote = remoteHits(
+            await geocodeRef.current({ text: q, signal: controller.signal, transit }),
+          );
         } catch {
           // Aborted or offline — saved places still match.
         }
@@ -117,7 +130,7 @@ export function useStopSearch({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, placesRef, geocodeRef, debounceMs, limit, savedLimit]);
+  }, [query, placesRef, geocodeRef, debounceMs, limit, savedLimit, transit]);
 
   const reset = useCallback(() => {
     setQuery('');

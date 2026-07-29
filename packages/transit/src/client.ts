@@ -1,4 +1,5 @@
 import { TransitError, parseEnturResponse } from './entur.js';
+import type { LatLng, SearchResult } from '@atlas/core';
 import { transitCoverage } from './model.js';
 import type { TransitQuery, TransitResult } from './model.js';
 
@@ -8,6 +9,48 @@ export interface FetchTransitOptions {
   signal?: AbortSignal;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
+}
+
+export interface FetchTransitStopsOptions extends FetchTransitOptions {
+  limit?: number;
+  bias?: LatLng | null;
+}
+
+/**
+ * Search Entur's National Stop Register through Atlas's identifying proxy.
+ * Results carry `transitStopId`, which must stay attached to the selected route
+ * waypoint so the subsequent journey query can use the exact StopPlace.
+ */
+export async function fetchTransitStops(
+  text: string,
+  opts: FetchTransitStopsOptions = {},
+): Promise<SearchResult[]> {
+  const params = new URLSearchParams({ q: text });
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.bias) {
+    params.set('lat', String(opts.bias.lat));
+    params.set('lon', String(opts.bias.lng));
+  }
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/stops?${params}`, {
+    signal: opts.signal,
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json !== null && typeof json === 'object' && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : `stop search failed (HTTP ${res.status})`;
+    throw new TransitError(message, res.status);
+  }
+  if (
+    !json ||
+    typeof json !== 'object' ||
+    !Array.isArray((json as { results?: unknown }).results)
+  ) {
+    return [];
+  }
+  return (json as { results: SearchResult[] }).results;
 }
 
 /**

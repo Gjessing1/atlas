@@ -90,6 +90,29 @@ describe('useTransitPlan', () => {
     expect(r.current.transit.trips).toHaveLength(1);
   });
 
+  it('plans from the exact NSR stops selected in transit search', async () => {
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
+    const view = renderHook(() => {
+      const route = useRoute(emptyRoute);
+      return { route, transit: useTransitPlan(route, transit) };
+    });
+    act(() =>
+      view.result.current.route.restore({
+        profile: 'car',
+        waypoints: [
+          { pos: OSLO, name: 'Oslo S', transitStopId: 'NSR:StopPlace:59872' },
+          { pos: BERGEN, name: 'Bergen', transitStopId: 'NSR:StopPlace:58366' },
+        ],
+      }),
+    );
+
+    await settle();
+    expect(transit.mock.calls[0]![0]).toMatchObject({
+      from: { ...OSLO, stopId: 'NSR:StopPlace:59872' },
+      to: { ...BERGEN, stopId: 'NSR:StopPlace:58366' },
+    });
+  });
+
   it('plans between the ends only, ignoring via points a timetable cannot honour', async () => {
     const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
     const mid: LatLng = { lat: 60.0, lng: 9.0 };

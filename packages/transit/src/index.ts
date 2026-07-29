@@ -1,5 +1,6 @@
 export type {
   TransitMode,
+  TransitLocation,
   TransitPlace,
   TransitQuay,
   TransitLine,
@@ -53,4 +54,15 @@ export {
   type TripSummary,
 } from './labels.js';
 export { ENTUR_TRIP_QUERY, TransitError, buildEnturRequest, parseEnturResponse } from './entur.js';
-export { fetchTransitTrips, type FetchTransitOptions } from './client.js';
+export {
+  isTransitStopId,
+  mergeTransitSearchResults,
+  parseEnturGeocoderResponse,
+  type TransitStopSearchQuery,
+} from './geocoder.js';
+export {
+  fetchTransitStops,
+  fetchTransitTrips,
+  type FetchTransitOptions,
+  type FetchTransitStopsOptions,
+} from './client.js';

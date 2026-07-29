@@ -294,13 +294,16 @@ describe('useRoute', () => {
     expect(result.current.plan).toBeNull(); // route mode closed
 
     act(() => result.current.start(A, 'Home'));
-    act(() => void result.current.addWaypoint(B));
+    act(() => void result.current.addWaypoint(B, 'Oslo S', 'NSR:StopPlace:59872'));
     act(() => result.current.setProfile('bike'));
     act(() => result.current.setPreference('preferTrails', true));
 
     expect(result.current.plan).toEqual({
       profile: 'bike',
-      waypoints: [{ pos: A, name: 'Home' }, { pos: B }],
+      waypoints: [
+        { pos: A, name: 'Home' },
+        { pos: B, name: 'Oslo S', transitStopId: 'NSR:StopPlace:59872' },
+      ],
       preferences: { preferTrails: true },
     });
 
@@ -312,6 +315,7 @@ describe('useRoute', () => {
     expect(reloaded.result.current.preferences.preferTrails).toBe(true);
     expect(reloaded.result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
     expect(reloaded.result.current.waypoints[0]!.name).toBe('Home');
+    expect(reloaded.result.current.waypoints[1]!.transitStopId).toBe('NSR:StopPlace:59872');
     // Restored stops still get distinct ids, so markers and rows stay keyed.
     expect(reloaded.result.current.waypoints[0]!.id).not.toBe(
       reloaded.result.current.waypoints[1]!.id,

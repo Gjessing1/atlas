@@ -8,8 +8,13 @@ import { useStopSearch, type StopGeocodeFn, type StopSearchPlace } from './useSt
 const OSLO_S: StopSearchPlace = { name: 'Oslo S', lat: 59.9106, lng: 10.7522 };
 const HOME: StopSearchPlace = { name: 'Home', lat: 59.92, lng: 10.75 };
 
-function hit(name: string, lat: number, lng: number): SearchResult {
-  return { name, label: 'Oslo', position: { lat, lng } };
+function hit(name: string, lat: number, lng: number, transitStopId?: string): SearchResult {
+  return {
+    name,
+    label: 'Oslo',
+    position: { lat, lng },
+    ...(transitStopId ? { transitStopId } : {}),
+  };
 }
 
 beforeEach(() => {
@@ -74,6 +79,25 @@ describe('useStopSearch', () => {
 
     expect(geocode).toHaveBeenCalledTimes(1);
     expect(geocode.mock.calls[0]![0]!.text).toBe('Oslo');
+  });
+
+  it('switches to stop-aware search and preserves the selected NSR identity', async () => {
+    const geocode = vi
+      .fn<StopGeocodeFn>()
+      .mockResolvedValue([hit('Oslo S', 59.910357, 10.753051, 'NSR:StopPlace:59872')]);
+    const { result, rerender } = renderHook(
+      ({ transit }: { transit: boolean }) => useStopSearch({ geocode, places: [], transit }),
+      { initialProps: { transit: false } },
+    );
+
+    act(() => result.current.setQuery('Oslo'));
+    await settle();
+    expect(geocode.mock.calls[0]![0]!.transit).toBe(false);
+
+    rerender({ transit: true });
+    await settle();
+    expect(geocode.mock.calls[1]![0]!.transit).toBe(true);
+    expect(result.current.hits[0]?.transitStopId).toBe('NSR:StopPlace:59872');
   });
 
   it('aborts the in-flight request when the query moves on', async () => {

@@ -1,6 +1,6 @@
-import type { LatLng } from '@atlas/core';
 import { RIDE_MODES, TransitError, transitCoverage, transitCoversPoint } from '@atlas/transit';
 import type {
+  TransitLocation,
   TransitMode,
   TransitProblem,
   TransitQuery,
@@ -83,8 +83,8 @@ export interface TransitPlanner {
  */
 export function useTransit(
   transit: TransitFn,
-  from: LatLng | null,
-  to: LatLng | null,
+  from: TransitLocation | null,
+  to: TransitLocation | null,
   active: boolean,
 ): TransitPlanner {
   const [trips, setTrips] = useState<TransitTrip[] | null>(null);
@@ -109,8 +109,8 @@ export function useTransit(
   const covered = from !== null && to !== null && transitCoverage(from, to);
   // Endpoints are objects rebuilt on every render upstream; depend on their
   // values so a re-render doesn't re-ask the planner.
-  const fromKey = from ? `${from.lat},${from.lng}` : '';
-  const toKey = to ? `${to.lat},${to.lng}` : '';
+  const fromKey = from ? `${from.lat},${from.lng},${from.stopId ?? ''}` : '';
+  const toKey = to ? `${to.lat},${to.lng},${to.stopId ?? ''}` : '';
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -260,8 +260,15 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   const [enabled, setEnabled] = useState(false);
   const [selected, select] = useState<number | null>(0);
 
-  const from = route.waypoints[0]?.pos ?? null;
-  const to = route.waypoints.length >= 2 ? route.waypoints[route.waypoints.length - 1]!.pos : null;
+  const first = route.waypoints[0];
+  const last =
+    route.waypoints.length >= 2 ? route.waypoints[route.waypoints.length - 1] : undefined;
+  const from: TransitLocation | null = first
+    ? { ...first.pos, ...(first.transitStopId ? { stopId: first.transitStopId } : {}) }
+    : null;
+  const to: TransitLocation | null = last
+    ? { ...last.pos, ...(last.transitStopId ? { stopId: last.transitStopId } : {}) }
+    : null;
   // Offer the mode unless we positively *know* it cannot answer. Gating on
   // `covered` instead would hide the chip until both endpoints exist — which
   // is exactly when someone is looking for the travel mode, and reads as the

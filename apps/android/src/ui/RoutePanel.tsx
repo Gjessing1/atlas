@@ -60,8 +60,13 @@ import { TransitResults } from './TransitResults';
  */
 function useGeocode(packs: LocalPack[], getBias: SearchBias): StopGeocodeFn {
   return useCallback(
-    async ({ text, bbox, limit }) => {
-      const { results } = await geoSearch(packs, text, bbox ? undefined : getBias, { bbox, limit });
+    async ({ text, bbox, limit, signal, transit }) => {
+      const { results } = await geoSearch(packs, text, bbox ? undefined : getBias, {
+        bbox,
+        limit,
+        signal,
+        transit,
+      });
       return results;
     },
     [packs, getBias],
@@ -75,6 +80,7 @@ function StopSearch({
   placeholder,
   initialQuery = '',
   autoFocus = false,
+  transit,
   onPick,
   onCancel,
 }: {
@@ -89,8 +95,9 @@ function StopSearch({
    */
   initialQuery?: string;
   autoFocus?: boolean;
+  transit: boolean;
   /** The hit's name rides along: a stop the user chose by name should keep it. */
-  onPick: (position: LatLng, name: string) => void;
+  onPick: (position: LatLng, name: string, transitStopId?: string) => void;
   /** Present when this box is editing an existing stop — leaves it unchanged. */
   onCancel?: () => void;
 }) {
@@ -99,6 +106,7 @@ function StopSearch({
     places,
     initialQuery,
     debounceMs: 300,
+    transit,
   });
 
   return (
@@ -137,7 +145,7 @@ function StopSearch({
               testID={`route-stop-result-${i}`}
               onPress={() => {
                 Keyboard.dismiss();
-                onPick(hit.position, hit.name);
+                onPick(hit.position, hit.name, hit.transitStopId);
                 reset();
               }}
             >
@@ -625,7 +633,10 @@ export function RoutePanel({
                   ? 'Add a stop'
                   : 'Destination: address or saved place'
             }
-            onPick={(position, name) => route.addWaypoint(position, name)}
+            transit={transitMode}
+            onPick={(position, name, transitStopId) =>
+              route.addWaypoint(position, name, transitStopId)
+            }
           />
         ) : null}
 
@@ -676,8 +687,9 @@ export function RoutePanel({
                       placeholder="Change this stop"
                       initialQuery={w.name ?? ''}
                       autoFocus
-                      onPick={(position, name) => {
-                        route.replaceWaypoint(w.id, position, name);
+                      transit={transitMode}
+                      onPick={(position, name, transitStopId) => {
+                        route.replaceWaypoint(w.id, position, name, transitStopId);
                         setEditing(null);
                       }}
                       onCancel={() => setEditing(null)}

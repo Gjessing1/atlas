@@ -38,6 +38,15 @@ describe('buildEnturRequest', () => {
     expect(variables.walkSpeed).toBe(1.1);
   });
 
+  it('uses an exact searched stop id instead of re-snapping its coordinate', () => {
+    const { variables } = buildEnturRequest({
+      from: { ...asker, stopId: 'NSR:StopPlace:59872' },
+      to: { ...nationaltheatret, stopId: 'NSR:StopPlace:58404' },
+    });
+    expect(variables.from).toEqual({ place: 'NSR:StopPlace:59872' });
+    expect(variables.to).toEqual({ place: 'NSR:StopPlace:58404' });
+  });
+
   it('sends no mode filter unless the traveller picked modes', () => {
     // An unfiltered query must not pin `modes`: Entur then uses every mode,
     // and an empty selection means "all", never "none".

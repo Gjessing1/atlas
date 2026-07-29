@@ -29,6 +29,7 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
+import { fetchTransitStops, mergeTransitSearchResults } from '@atlas/transit';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
@@ -53,20 +54,31 @@ function downloadText(fileName: string, text: string, type: string): void {
  */
 function useGeocode(getBias: () => LatLng | null): StopGeocodeFn {
   return useCallback(
-    async ({ text, bbox, limit, signal }) => {
+    async ({ text, bbox, limit, signal, transit }) => {
       const params = new URLSearchParams({ q: text });
       if (limit !== undefined) params.set('limit', String(limit));
+      const bias = bbox ? null : getBias();
       if (bbox) params.set('bbox', bbox);
-      else {
-        const bias = getBias();
-        if (bias) {
-          params.set('lat', String(bias.lat));
-          params.set('lon', String(bias.lng));
-        }
+      else if (bias) {
+        params.set('lat', String(bias.lat));
+        params.set('lon', String(bias.lng));
       }
-      const res = await fetch(`/api/search?${params}`, { signal });
-      if (!res.ok) return [];
-      return ((await res.json()) as { results: SearchResult[] }).results;
+      const general = async (): Promise<SearchResult[]> => {
+        const res = await fetch(`/api/search?${params}`, { signal });
+        if (!res.ok) return [];
+        return ((await res.json()) as { results: SearchResult[] }).results;
+      };
+      if (!transit) return general();
+
+      const [stops, addresses] = await Promise.allSettled([
+        fetchTransitStops(text, { signal, bias, limit }),
+        general(),
+      ]);
+      return mergeTransitSearchResults(
+        stops.status === 'fulfilled' ? stops.value : [],
+        addresses.status === 'fulfilled' ? addresses.value : [],
+        limit ?? 8,
+      );
     },
     [getBias],
   );
@@ -80,6 +92,7 @@ function StopSearch({
   ariaLabel,
   initialQuery = '',
   autoFocus = false,
+  transit,
   onPick,
   onCancel,
 }: {
@@ -94,7 +107,8 @@ function StopSearch({
    */
   initialQuery?: string;
   autoFocus?: boolean;
-  onPick: (position: LatLng, name: string) => void;
+  transit: boolean;
+  onPick: (position: LatLng, name: string, transitStopId?: string) => void;
   /** Present when this box is re-pointing an existing stop — leaves it as is. */
   onCancel?: () => void;
 }) {
@@ -103,6 +117,7 @@ function StopSearch({
     places,
     initialQuery,
     limit: 8,
+    transit,
   });
   const input = useRef<HTMLInputElement>(null);
 
@@ -132,7 +147,7 @@ function StopSearch({
               <button
                 type="button"
                 onClick={() => {
-                  onPick(hit.position, hit.name);
+                  onPick(hit.position, hit.name, hit.transitStopId);
                   reset();
                   // Stay in the box: picking a result moves focus to the button
                   // that then disappears, so every further stop cost a click
@@ -569,8 +584,9 @@ export function RoutePanel({
                         ariaLabel="Change this stop"
                         initialQuery={w.name ?? ''}
                         autoFocus
-                        onPick={(position, name) => {
-                          route.replaceWaypoint(w.id, position, name);
+                        transit={transitMode}
+                        onPick={(position, name, transitStopId) => {
+                          route.replaceWaypoint(w.id, position, name, transitStopId);
                           setEditing(null);
                         }}
                         onCancel={() => setEditing(null)}
@@ -639,7 +655,10 @@ export function RoutePanel({
                   ? 'Search for a stop on the loop'
                   : 'Search for a destination'
             }
-            onPick={(position, name) => route.addWaypoint(position, name)}
+            transit={transitMode}
+            onPick={(position, name, transitStopId) =>
+              route.addWaypoint(position, name, transitStopId)
+            }
           />
         )}
 

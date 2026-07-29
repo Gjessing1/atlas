@@ -94,6 +94,13 @@ function modesArgument(modes: readonly TransitMode[] | undefined): Record<string
   return { accessMode: 'foot', egressMode: 'foot', directMode: 'foot', transportModes };
 }
 
+/** Prefer an exact NSR stop, retaining coordinates in Atlas for fallback and coverage only. */
+function locationArgument(location: TransitQuery['from']): Record<string, unknown> {
+  return location.stopId
+    ? { place: location.stopId }
+    : { coordinates: { latitude: location.lat, longitude: location.lng } };
+}
+
 /** Build the GraphQL request body for a journey query. */
 export function buildEnturRequest(query: TransitQuery): {
   query: string;
@@ -103,8 +110,8 @@ export function buildEnturRequest(query: TransitQuery): {
   return {
     query: ENTUR_TRIP_QUERY,
     variables: {
-      from: { coordinates: { latitude: query.from.lat, longitude: query.from.lng } },
-      to: { coordinates: { latitude: query.to.lat, longitude: query.to.lng } },
+      from: locationArgument(query.from),
+      to: locationArgument(query.to),
       // Omitted entirely when unset so Entur applies its own "now".
       dateTime: query.dateTimeMs === undefined ? null : new Date(query.dateTimeMs).toISOString(),
       arriveBy: query.arriveBy ?? false,

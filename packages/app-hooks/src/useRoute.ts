@@ -23,6 +23,11 @@ export interface RouteWaypoint {
    * platform resolves one; the UI falls back to coordinates.
    */
   name?: string;
+  /**
+   * Exact NSR StopPlace selected in transit search. It is metadata beside the
+   * coordinate, ignored by road routing and dropped whenever the point moves.
+   */
+  transitStopId?: string;
 }
 
 /**
@@ -32,7 +37,7 @@ export interface RouteWaypoint {
  */
 export interface StoredRoutePlan {
   profile: RoutingProfile;
-  waypoints: { pos: LatLng; name?: string }[];
+  waypoints: { pos: LatLng; name?: string; transitStopId?: string }[];
   roundTripKm?: number;
   roundTripDirection?: RoundTripDirection;
   /** Custom costing choices for this profile. */
@@ -122,7 +127,7 @@ export interface RoutePlanner {
    * Append a stop — or move the start when planning a round trip. Returns the
    * new stop's id, so a caller can label it once a lookup resolves.
    */
-  addWaypoint: (pos: LatLng, name?: string) => number;
+  addWaypoint: (pos: LatLng, name?: string, transitStopId?: string) => number;
   /**
    * Append a stop *and* leave loop mode in one update — "Directions to here"
    * from a place card. Doing it as two calls looks equivalent and is not:
@@ -130,8 +135,8 @@ export interface RoutePlanner {
    * so a preceding `setRoundTrip(false)` has not landed yet and the loop's
    * anchor — the traveller's start — is replaced instead of kept.
    */
-  addDestination: (pos: LatLng, name?: string) => number;
-  insertWaypoint: (index: number, pos: LatLng, name?: string) => number;
+  addDestination: (pos: LatLng, name?: string, transitStopId?: string) => number;
+  insertWaypoint: (index: number, pos: LatLng, name?: string, transitStopId?: string) => number;
   /** Move a stop; its label is dropped, since it no longer describes the spot. */
   moveWaypointTo: (id: number, pos: LatLng) => void;
   /**
@@ -140,7 +145,7 @@ export interface RoutePlanner {
    * and then deleting would briefly route through both and shuffle the letters
    * on the map, so the swap has to be one operation.
    */
-  replaceWaypoint: (id: number, pos: LatLng, name?: string) => void;
+  replaceWaypoint: (id: number, pos: LatLng, name?: string, transitStopId?: string) => void;
   /**
    * Attach a label to an existing stop (e.g. an async reverse geocode). `at` is
    * the position the label was looked up for — a stop that has since moved or
@@ -190,9 +195,15 @@ export function useRoute(route: RouteFn): RoutePlanner {
   const routeRef = useRef(route);
   routeRef.current = route;
 
-  const nextWaypoint = useCallback((pos: LatLng, name?: string): RouteWaypoint => {
-    return name === undefined ? { id: idRef.current++, pos } : { id: idRef.current++, pos, name };
-  }, []);
+  const nextWaypoint = useCallback(
+    (pos: LatLng, name?: string, transitStopId?: string): RouteWaypoint => ({
+      id: idRef.current++,
+      pos,
+      ...(name === undefined ? {} : { name }),
+      ...(transitStopId === undefined ? {} : { transitStopId }),
+    }),
+    [],
+  );
 
   // Re-route (debounced) whenever anything that affects the route changes.
   useEffect(() => {
@@ -331,16 +342,18 @@ export function useRoute(route: RouteFn): RoutePlanner {
         setRoundTripKm(plan.roundTripKm!);
         setRoundTripDirection(plan.roundTripDirection ?? 'either');
       }
-      setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name)));
+      setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name, w.transitStopId)));
     },
     [nextWaypoint],
   );
 
   const plan = useMemo<StoredRoutePlan | null>(() => {
     if (!active || waypoints.length === 0) return null;
-    const stops = waypoints.map((w) =>
-      w.name === undefined ? { pos: w.pos } : { pos: w.pos, name: w.name },
-    );
+    const stops = waypoints.map((w) => ({
+      pos: w.pos,
+      ...(w.name === undefined ? {} : { name: w.name }),
+      ...(w.transitStopId === undefined ? {} : { transitStopId: w.transitStopId }),
+    }));
     const custom = preferencesByProfile[profile];
     const base =
       custom && Object.keys(custom).length > 0
@@ -380,8 +393,8 @@ export function useRoute(route: RouteFn): RoutePlanner {
   // burn two ids per call under StrictMode's double-invoke, and the caller
   // needs the id back to label the stop once a reverse geocode resolves.
   const addWaypoint = useCallback(
-    (pos: LatLng, name?: string) => {
-      const wp = nextWaypoint(pos, name);
+    (pos: LatLng, name?: string, transitStopId?: string) => {
+      const wp = nextWaypoint(pos, name, transitStopId);
       // Loops take stops like any other plan — they are places to ride past on
       // the way round, and the route returns to the start regardless.
       setWaypoints((wps) => [...wps, wp]);
@@ -393,8 +406,8 @@ export function useRoute(route: RouteFn): RoutePlanner {
   // Both halves of "route me there" in one commit, so neither reads the
   // other's stale state: a loop's anchor becomes the start it always was.
   const addDestination = useCallback(
-    (pos: LatLng, name?: string) => {
-      const wp = nextWaypoint(pos, name);
+    (pos: LatLng, name?: string, transitStopId?: string) => {
+      const wp = nextWaypoint(pos, name, transitStopId);
       setRoundTripState(false);
       setWaypoints((wps) => [...wps, wp]);
       return wp.id;
@@ -403,8 +416,8 @@ export function useRoute(route: RouteFn): RoutePlanner {
   );
 
   const insertWaypoint = useCallback(
-    (index: number, pos: LatLng, name?: string) => {
-      const wp = nextWaypoint(pos, name);
+    (index: number, pos: LatLng, name?: string, transitStopId?: string) => {
+      const wp = nextWaypoint(pos, name, transitStopId);
       setWaypoints((wps) => [...wps.slice(0, index), wp, ...wps.slice(index)]);
       return wp.id;
     },
@@ -416,13 +429,23 @@ export function useRoute(route: RouteFn): RoutePlanner {
     setWaypoints((wps) => wps.map((w) => (w.id === id ? { id: w.id, pos } : w)));
   }, []);
 
-  const replaceWaypoint = useCallback((id: number, pos: LatLng, name?: string) => {
-    setWaypoints((wps) =>
-      wps.map((w) =>
-        w.id === id ? (name === undefined ? { id: w.id, pos } : { id: w.id, pos, name }) : w,
-      ),
-    );
-  }, []);
+  const replaceWaypoint = useCallback(
+    (id: number, pos: LatLng, name?: string, transitStopId?: string) => {
+      setWaypoints((wps) =>
+        wps.map((w) =>
+          w.id === id
+            ? {
+                id: w.id,
+                pos,
+                ...(name === undefined ? {} : { name }),
+                ...(transitStopId === undefined ? {} : { transitStopId }),
+              }
+            : w,
+        ),
+      );
+    },
+    [],
+  );
 
   const nameWaypoint = useCallback((id: number, name: string, at: LatLng) => {
     setWaypoints((wps) => {

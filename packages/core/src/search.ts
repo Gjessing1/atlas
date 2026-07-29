@@ -16,6 +16,13 @@ export interface SearchResult {
   kind?: string;
   /** Distance from a browse/explore centre; ordinary text search leaves it absent. */
   distanceM?: number;
+  /**
+   * Stable NSR StopPlace id when this result came from Entur's stop search.
+   * Ordinary addresses and saved places remain coordinate-only. Keeping the id
+   * beside the coordinate lets the transit planner board the exact stop the
+   * traveller chose instead of asking Entur to guess the nearest one again.
+   */
+  transitStopId?: string;
 }
 
 /**

@@ -1,6 +1,8 @@
 import {
   buildEnturRequest,
+  isTransitStopId,
   parseEnturResponse,
+  parseEnturGeocoderResponse,
   transitCoverage,
   RIDE_MODES,
   WIDE_SEARCH_WINDOW_MINUTES,
@@ -30,6 +32,7 @@ import type { StatusRegistry } from './status.js';
  */
 
 const ENTUR_URL = 'https://api.entur.io/journey-planner/v3/graphql';
+const ENTUR_GEOCODER_URL = 'https://api.entur.io/geocoder/v1/autocomplete';
 const TRANSIT_PROBE = 'entur';
 /** Entur asks consumers to identify themselves; this is that identity. */
 const CLIENT_NAME = 'atlas-journeyplanner';
@@ -38,6 +41,8 @@ const UPSTREAM_TIMEOUT_MS = 10_000;
 export interface TransitApiOptions {
   /** Entur Journey Planner GraphQL endpoint (ENTUR_URL to override). */
   enturUrl?: string;
+  /** Entur autocomplete endpoint (ENTUR_GEOCODER_URL to override). */
+  geocoderUrl?: string;
   /** Value for the mandatory ET-Client-Name header (ENTUR_CLIENT_NAME to override). */
   clientName?: string;
   /** Test seam: upstream HTTP. */
@@ -50,13 +55,17 @@ export interface TransitApiOptions {
 function parseQuery(body: unknown): { query: TransitQuery } | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'expected a JSON object' };
   const raw = body as Record<string, unknown>;
-  const point = (value: unknown): { lat: number; lng: number } | null => {
+  const point = (value: unknown): TransitQuery['from'] | null => {
     if (!value || typeof value !== 'object') return null;
-    const { lat, lng } = value as { lat?: unknown; lng?: unknown };
+    const { lat, lng, stopId } = value as { lat?: unknown; lng?: unknown; stopId?: unknown };
     if (typeof lat !== 'number' || typeof lng !== 'number') return null;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-    return { lat, lng };
+    return {
+      lat,
+      lng,
+      ...(isTransitStopId(stopId) ? { stopId } : {}),
+    };
   };
   const from = point(raw.from);
   const to = point(raw.to);
@@ -111,7 +120,64 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
   const status = opts.status;
   status?.register(TRANSIT_PROBE, 'Entur (public transport)', 'Public transport');
   const enturUrl = opts.enturUrl ?? process.env.ENTUR_URL ?? ENTUR_URL;
+  const geocoderUrl = opts.geocoderUrl ?? process.env.ENTUR_GEOCODER_URL ?? ENTUR_GEOCODER_URL;
   const clientName = opts.clientName ?? process.env.ENTUR_CLIENT_NAME ?? CLIENT_NAME;
+
+  app.get('/api/transit/stops', async (request, reply) => {
+    const raw = request.query as {
+      q?: unknown;
+      limit?: unknown;
+      lat?: unknown;
+      lon?: unknown;
+    };
+    if (typeof raw.q !== 'string' || raw.q.trim().length < 2 || raw.q.trim().length > 100) {
+      return reply.code(400).send({ error: 'q must be between 2 and 100 characters' });
+    }
+    const requestedLimit =
+      typeof raw.limit === 'string' && /^\d+$/.test(raw.limit) ? Number(raw.limit) : 6;
+    const limit = Math.min(Math.max(requestedLimit, 1), 10);
+    const lat = typeof raw.lat === 'string' ? Number(raw.lat) : NaN;
+    const lon = typeof raw.lon === 'string' ? Number(raw.lon) : NaN;
+    const hasBias =
+      Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+
+    const url = new URL(geocoderUrl);
+    url.searchParams.set('text', raw.q.trim());
+    url.searchParams.set('lang', 'en');
+    url.searchParams.set('size', String(limit));
+    url.searchParams.set('layers', 'venue');
+    url.searchParams.set('boundary.country', 'NOR');
+    url.searchParams.set('multiModal', 'parent');
+    if (hasBias) {
+      url.searchParams.set('focus.point.lat', String(lat));
+      url.searchParams.set('focus.point.lon', String(lon));
+    }
+
+    try {
+      const response = await fetchImpl(url, {
+        headers: {
+          Accept: 'application/json',
+          'ET-Client-Name': clientName,
+        },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        request.log.error({ status: response.status }, 'entur geocoder error');
+        status?.record(TRANSIT_PROBE, false, `HTTP ${response.status}`);
+        return reply.code(502).send({ error: 'public transport stop search unavailable' });
+      }
+      const results = parseEnturGeocoderResponse(await response.json());
+      status?.record(TRANSIT_PROBE, true);
+      // NSR stop identities are stable; a short browser cache keeps
+      // autocomplete responsive without making a changed name linger all day.
+      reply.header('cache-control', 'private, max-age=300');
+      return { results };
+    } catch (err) {
+      request.log.error({ err }, 'entur geocoder unreachable');
+      status?.record(TRANSIT_PROBE, false, 'unreachable');
+      return reply.code(502).send({ error: 'public transport stop search unavailable' });
+    }
+  });
 
   app.post('/api/transit', async (request, reply) => {
     const parsed = parseQuery(request.body);

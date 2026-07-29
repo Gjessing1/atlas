@@ -241,10 +241,19 @@ export function tripLineCodes(trip: TransitTrip): string[] {
   return trip.legs.flatMap((leg) => (leg.line ? [leg.line.publicCode] : []));
 }
 
+/**
+ * One end of a journey. Coordinates are always retained for coverage checks,
+ * map framing and a safe fallback; `stopId` pins the query to the exact NSR
+ * StopPlace selected in Entur search instead of re-snapping that coordinate.
+ */
+export interface TransitLocation extends LatLng {
+  stopId?: string;
+}
+
 /** A journey request in app terms, decoupled from Entur's GraphQL. */
 export interface TransitQuery {
-  from: LatLng;
-  to: LatLng;
+  from: TransitLocation;
+  to: TransitLocation;
   /**
    * Epoch ms to plan around; defaults to now at the server. Interpreted as the
    * desired *departure* unless `arriveBy` is set, in which case it is the
