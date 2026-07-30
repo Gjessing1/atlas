@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import type { TransitProblem, TransitTrip } from '@atlas/transit';
 import { describe, expect, it, vi } from 'vitest';

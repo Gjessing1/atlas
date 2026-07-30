@@ -5,6 +5,7 @@ import {
   buildEnturRequest,
   parseEnturDeparturesResponse,
   parseEnturResponse,
+  parseEnturStopLinesResponse,
   TransitError,
 } from './entur.js';
 import { fetchTransitDepartures, fetchTransitTrips } from './client.js';
@@ -118,6 +119,36 @@ describe('buildEnturRequest', () => {
       modes: ['foot', 'unknown'],
     });
     expect(variables.modes).toBeNull();
+  });
+
+  /**
+   * Measured against the live planner on 2026-07-30, and the reason this is
+   * asserted rather than assumed: `filters: []` is **not** "no filter". It reads
+   * as "match none of these", and Engelsrud → Nationaltheatret — five journeys
+   * with `filters: null` — answers `noTransitConnection` with the empty array.
+   * So a commute with nothing ticked yet must send null, or the honest default
+   * reports the corridor as unserved.
+   */
+  it('sends no line filter as null, never as an empty array', () => {
+    for (const lineFilter of [undefined, { select: [] }, { select: [], exclude: [] }]) {
+      expect(
+        buildEnturRequest({ from: asker, to: nationaltheatret, lineFilter }).variables.filters,
+      ).toBeNull();
+    }
+  });
+
+  it('asks the planner for the chosen lines, and against the excluded ones', () => {
+    const { variables } = buildEnturRequest({
+      from: asker,
+      to: nationaltheatret,
+      lineFilter: { select: ['RUT:Line:280', 'VYG:Line:RE10'], exclude: ['VYG:Line:L1'] },
+    });
+    expect(variables.filters).toEqual([
+      {
+        select: [{ lines: ['RUT:Line:280', 'VYG:Line:RE10'] }],
+        not: [{ lines: ['VYG:Line:L1'] }],
+      },
+    ]);
   });
 
   it('defaults the time to the planner (null) and clamps the trip count', () => {
@@ -472,6 +503,7 @@ describe('departure boards', () => {
       id: 'NSR:StopPlace:59872',
       start: '2026-07-21T05:30:00.000Z',
       limit: 50,
+      range: 3600,
     });
 
     const nearest = buildEnturDeparturesRequest(asker);
@@ -481,6 +513,7 @@ describe('departure boards', () => {
       lat: asker.lat,
       lng: asker.lng,
       limit: 30,
+      range: 3600,
     });
   });
 
@@ -620,6 +653,130 @@ describe('departure boards', () => {
         data: { nearest: null },
       }),
     ).toThrow('LOCATION_NOT_FOUND somewhere else entirely');
+  });
+});
+
+/**
+ * Recorded from the live planner on 2026-07-30 for Engelsrud
+ * (`NSR:StopPlace:3369`) — the stop the old board's hard-coded `['280','71']`
+ * was really about. Two facts here matter more than the shape: the same two
+ * lines are published under *both* stands, and the "71" is `BRA:Line:4_6071`
+ * (Brakar), not the Ruter line anybody typing "71" would mean.
+ */
+const stopLinesWire = {
+  data: {
+    stopPlace: {
+      id: 'NSR:StopPlace:3369',
+      name: 'Engelsrud',
+      latitude: 59.819858,
+      longitude: 10.36596,
+      quays: [
+        {
+          lines: [
+            {
+              id: 'RUT:Line:280',
+              publicCode: '280',
+              name: 'Asker - Dikemark - Heggedal',
+              transportMode: 'bus',
+              presentation: { colour: '76A300', textColour: 'FFFFFF' },
+              authority: { name: 'Ruter' },
+            },
+            {
+              id: 'BRA:Line:4_6071',
+              publicCode: '71',
+              name: 'Drammen - Stoppen - Lierbyen - Asker',
+              transportMode: 'bus',
+              presentation: { colour: null, textColour: null },
+              authority: { name: 'Brakar' },
+            },
+          ],
+        },
+        {
+          lines: [
+            {
+              id: 'BRA:Line:4_6071',
+              publicCode: '71',
+              name: 'Drammen - Stoppen - Lierbyen - Asker',
+              transportMode: 'bus',
+              authority: { name: 'Brakar' },
+            },
+            { id: 'RUT:Line:280', publicCode: '280', transportMode: 'bus' },
+          ],
+        },
+      ],
+    },
+  },
+};
+
+describe('stop lines', () => {
+  it('dedupes the lines a stop publishes under every quay', () => {
+    const { stop, lines } = parseEnturStopLinesResponse(stopLinesWire);
+    expect(stop).toEqual({
+      id: 'NSR:StopPlace:3369',
+      name: 'Engelsrud',
+      position: { lat: 59.819858, lng: 10.36596 },
+    });
+    expect(lines).toHaveLength(2);
+    expect(lines.map((line) => line.id)).toEqual(['BRA:Line:4_6071', 'RUT:Line:280']);
+  });
+
+  it('keeps the identity a code cannot carry', () => {
+    const { lines } = parseEnturStopLinesResponse(stopLinesWire);
+    // "71" here is Brakar's, not Ruter's — the whole reason a saved commute
+    // stores ids and only shows codes.
+    expect(lines[0]).toEqual({
+      id: 'BRA:Line:4_6071',
+      publicCode: '71',
+      mode: 'bus',
+      name: 'Drammen - Stoppen - Lierbyen - Asker',
+      operator: 'Brakar',
+    });
+  });
+
+  it('sorts codes as a timetable reads them, not as text', () => {
+    const wire = {
+      data: {
+        stopPlace: {
+          id: 'x',
+          name: 'x',
+          quays: [
+            {
+              lines: [
+                { id: 'a', publicCode: '280', transportMode: 'bus' },
+                { id: 'b', publicCode: '71', transportMode: 'bus' },
+                { id: 'c', publicCode: 'RE10', transportMode: 'rail' },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(parseEnturStopLinesResponse(wire).lines.map((line) => line.publicCode)).toEqual([
+      // Buses before trains (chip order), and 71 before 280.
+      '71',
+      '280',
+      'RE10',
+    ]);
+  });
+
+  it('drops a line with no id — a chip that cannot filter is a dead control', () => {
+    const wire = {
+      data: { stopPlace: { id: 'x', name: 'x', quays: [{ lines: [{ publicCode: '9' }] }] } },
+    };
+    expect(parseEnturStopLinesResponse(wire).lines).toEqual([]);
+  });
+
+  it('reports an unknown stop as an empty picker rather than an error', () => {
+    expect(parseEnturStopLinesResponse({ data: { stopPlace: null } })).toEqual({
+      stop: null,
+      lines: [],
+    });
+  });
+
+  it('surfaces a GraphQL error', () => {
+    expect(() => parseEnturStopLinesResponse({ errors: [{ message: 'boom' }] })).toThrow(
+      TransitError,
+    );
   });
 });
 

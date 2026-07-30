@@ -1,78 +1,182 @@
-import type { CommuteConfig, CommuteController } from '@atlas/app-hooks';
-import { liveTimetableLabel, tripSummary, type TransitTrip } from '@atlas/transit';
+import {
+  useCommuteEditor,
+  type CommuteController,
+  type CommuteEditor,
+  type CommuteEndKey,
+  type CommuteLineOption,
+  type StopLinesFn,
+} from '@atlas/app-hooks';
+import type { LatLng } from '@atlas/core';
+import {
+  defaultCommuteDirection,
+  emptyDirectionNote,
+  fetchTransitStopLines,
+  liveTimetableLabel,
+  minutesOfDayLabel,
+  tripSummary,
+  type TransitCommuteDirection,
+  type TransitTrip,
+} from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 
-function FilterInput({
+import { useGeocode } from '../routing/useGeocode.js';
+
+const fetchStopLines: StopLinesFn = (stopId, signal) => fetchTransitStopLines(stopId, { signal });
+
+/** One end of the commute: what it is now, and a search box to change it. */
+function EndField({
+  field,
   label,
-  values,
-  placeholder,
-  disabled = false,
-  onCommit,
+  editor,
+  places,
 }: {
+  field: CommuteEndKey;
   label: string;
-  values: string[];
-  placeholder: string;
-  disabled?: boolean;
-  onCommit: (values: string[]) => void;
+  editor: CommuteEditor;
+  places: readonly PlaceRecord[];
 }) {
-  const [text, setText] = useState(values.join(', '));
-  useEffect(() => setText(values.join(', ')), [values]);
-  const commit = () =>
-    onCommit(
-      text
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean),
-    );
+  const open = editor.editing === field;
+  const end = editor.config[field];
   return (
-    <label className="commute-filter">
-      <span>{label}</span>
-      <input
-        value={text}
-        placeholder={placeholder}
-        disabled={disabled}
-        onChange={(event) => setText(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur();
-        }}
-      />
-    </label>
+    <div className="commute-end">
+      <span className="commute-end-label">{label}</span>
+      {open ? (
+        <div className="commute-end-search">
+          <input
+            type="search"
+            autoFocus
+            value={editor.search.query}
+            placeholder="Search for a stop…"
+            aria-label={`Search for the ${label} stop`}
+            onChange={(event) => editor.search.setQuery(event.target.value)}
+          />
+          <ul className="commute-hits">
+            {editor.search.hits.map((hit) => (
+              <li key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}>
+                <button type="button" onClick={() => editor.pickHit(field, hit)}>
+                  <strong>{hit.name}</strong>
+                  <span>{hit.transitStopId ? 'Stop' : hit.label}</span>
+                </button>
+              </li>
+            ))}
+            {/* Favorites stay a shortcut — they are just no longer the only
+                path. Offered only before anything is typed: `useStopSearch`
+                matches saved places into its own hits, so showing both would
+                list every favorite twice. */}
+            {editor.search.query.trim().length === 0 &&
+              places.slice(0, 4).map((place) => (
+                <li key={place.id}>
+                  <button type="button" onClick={() => editor.pickPlace(field, place)}>
+                    <strong>{place.name}</strong>
+                    <span>Saved place</span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+          <div className="commute-end-actions">
+            <button type="button" onClick={() => editor.edit(null)}>
+              Cancel
+            </button>
+            {end && (
+              <button type="button" onClick={() => editor.clear(field)}>
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="commute-end-button"
+          disabled={!editor.ready}
+          onClick={() => editor.edit(field)}
+        >
+          <span>{editor.endLabel(field)}</span>
+          {end && !editor.isStop(field) && <em>coordinate</em>}
+        </button>
+      )}
+    </div>
   );
 }
 
-function FavoriteSelect({
-  label,
-  value,
-  places,
-  allowNone = false,
-  disabled = false,
-  onChange,
-}: {
-  label: string;
-  value: string | null;
-  places: readonly PlaceRecord[];
-  allowNone?: boolean;
-  disabled?: boolean;
-  onChange: (id: string | null) => void;
-}) {
+/**
+ * A ticked line, never a typed code. Left-click requires the line, the small
+ * button avoids it — "not the local train that stops everywhere" is a line
+ * choice, which is what replaced substring-matching a station name.
+ */
+function LineChip({ line, editor }: { line: CommuteLineOption; editor: CommuteEditor }) {
   return (
-    <label className="commute-favorite">
-      <span>{label}</span>
-      <select
-        value={value ?? ''}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value || null)}
+    <span className={`commute-line commute-line-${line.state}`}>
+      <button
+        type="button"
+        onClick={() => editor.toggleSelect(line)}
+        title={[line.name, line.operator].filter(Boolean).join(' · ')}
+        aria-pressed={line.state === 'select'}
       >
-        <option value="">{allowNone ? 'No interchange' : 'Choose a favorite…'}</option>
-        {places.map((place) => (
-          <option value={place.id} key={place.id}>
-            {place.name}
-          </option>
-        ))}
-      </select>
-    </label>
+        <strong>{line.publicCode}</strong>
+        {line.seen && <em title="Runs between your stops">✓</em>}
+      </button>
+      <button
+        type="button"
+        className="commute-line-not"
+        onClick={() => editor.toggleExclude(line)}
+        aria-pressed={line.state === 'exclude'}
+        aria-label={`Avoid ${line.publicCode}`}
+        title={`Avoid ${line.publicCode}`}
+      >
+        ✕
+      </button>
+    </span>
+  );
+}
+
+/** "Leave at 07:10" / "Arrive by 08:30", per direction. */
+function TimeField({
+  direction,
+  label,
+  editor,
+}: {
+  direction: TransitCommuteDirection;
+  label: string;
+  editor: CommuteEditor;
+}) {
+  const time = direction === 'outbound' ? editor.config.outboundTime : editor.config.inboundTime;
+  return (
+    <div className="commute-time">
+      <span className="commute-end-label">{label}</span>
+      <div className="commute-time-row">
+        <select
+          value={time.arriveBy ? 'arrive' : 'leave'}
+          disabled={!editor.ready}
+          aria-label={`${label}: leave at or arrive by`}
+          onChange={(event) => editor.setArriveBy(direction, event.target.value === 'arrive')}
+        >
+          <option value="leave">Leave at</option>
+          <option value="arrive">Arrive by</option>
+        </select>
+        <input
+          type="time"
+          value={time.minutesOfDay === null ? '' : minutesOfDayLabel(time.minutesOfDay)}
+          disabled={!editor.ready}
+          aria-label={`${label} time`}
+          onChange={(event) => {
+            const [hours, minutes] = event.target.value.split(':');
+            editor.setTime(
+              direction,
+              event.target.value && hours !== undefined && minutes !== undefined
+                ? Number(hours) * 60 + Number(minutes)
+                : null,
+            );
+          }}
+        />
+        {time.minutesOfDay !== null && (
+          <button type="button" onClick={() => editor.setTime(direction, null)}>
+            Now
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -98,84 +202,115 @@ function TripRow({ trip }: { trip: TransitTrip }) {
 export function CommutePanel({
   commute,
   places,
+  getBias,
   onClose,
 }: {
   commute: CommuteController;
   places: readonly PlaceRecord[];
+  /** Map centre, so a stop search resolves near where the user is looking. */
+  getBias: () => LatLng | null;
   onClose: () => void;
 }) {
-  const [direction, setDirection] = useState<'outbound' | 'inbound'>('outbound');
-  const patch = (next: Partial<CommuteConfig>) => commute.setConfig({ ...commute.config, ...next });
+  const geocode = useGeocode(getBias);
+  const editor = useCommuteEditor({ commute, places, geocode, fetchStopLines });
+  // The way out before the outbound time, the way home after it — the answer a
+  // board opened at 16:30 is being opened for.
+  const initialDirection = useMemo(
+    () => (commute.query ? defaultCommuteDirection(commute.query, Date.now()) : 'outbound'),
+    [commute.query],
+  );
+  const [pinned, setPinned] = useState<TransitCommuteDirection | null>(null);
+  const direction = pinned ?? initialDirection;
   const trips = commute.result?.[direction].trips ?? [];
-  const fromName = direction === 'outbound' ? commute.query?.from.name : commute.query?.to.name;
-  const toName = direction === 'outbound' ? commute.query?.to.name : commute.query?.from.name;
+  const reason = commute.emptyReason(direction);
+  const [from, to] =
+    direction === 'outbound'
+      ? [editor.endLabel('from'), editor.endLabel('to')]
+      : [editor.endLabel('to'), editor.endLabel('from')];
 
   return (
     <aside className="commute-panel" aria-label="Commute board">
       <div className="commute-header">
         <div>
           <strong>Commute</strong>
-          <span>Favorite-to-favorite live journeys</span>
+          <span>Your saved journey, both ways</span>
         </div>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close panel">
           ✕
         </button>
       </div>
       <div className="commute-body">
-        {places.length < 2 && (
-          <p className="commute-state">
-            Save at least two favorite destinations in Collections to build this board.
-          </p>
-        )}
         {!commute.ready && <p className="commute-state">Loading saved commute…</p>}
         <div className="commute-fields">
-          <FavoriteSelect
-            label="From"
-            value={commute.config.fromId}
-            places={places}
-            disabled={!commute.ready}
-            onChange={(fromId) => patch({ fromId })}
-          />
-          <FavoriteSelect
-            label="Via"
-            value={commute.config.viaId}
-            places={places}
-            allowNone
-            disabled={!commute.ready}
-            onChange={(viaId) => patch({ viaId })}
-          />
-          <FavoriteSelect
-            label="To"
-            value={commute.config.toId}
-            places={places}
-            disabled={!commute.ready}
-            onChange={(toId) => patch({ toId })}
-          />
-          <FilterInput
-            label="Only bus lines"
-            values={commute.config.allowedBusLines}
-            placeholder="280, 71"
-            disabled={!commute.ready}
-            onCommit={(allowedBusLines) => patch({ allowedBusLines })}
-          />
-          <FilterInput
-            label="Train must skip"
-            values={commute.config.excludedRailStops}
-            placeholder="Hvalstad"
-            disabled={!commute.ready}
-            onCommit={(excludedRailStops) => patch({ excludedRailStops })}
-          />
+          <EndField field="from" label="From" editor={editor} places={places} />
+          <EndField field="via" label="Via" editor={editor} places={places} />
+          <EndField field="to" label="To" editor={editor} places={places} />
         </div>
-        <p className="commute-rule">
-          Walking transfers are allowed. Other bus lines and trains calling at an excluded stop are
-          hidden.
-        </p>
+        <div className="commute-times">
+          <TimeField direction="outbound" label="Outbound" editor={editor} />
+          <TimeField direction="inbound" label="Return" editor={editor} />
+        </div>
+        <div className="commute-days" role="group" aria-label="Days this commute runs">
+          {editor.days.map((day) => (
+            <button
+              type="button"
+              key={day.day}
+              aria-pressed={day.on}
+              className={day.on ? 'on' : ''}
+              onClick={() => editor.toggleDay(day.day)}
+            >
+              {day.label}
+            </button>
+          ))}
+        </div>
+        {editor.missing && <p className="commute-state">{editor.missing}</p>}
+        {editor.lineGroups.length > 0 && (
+          <div className="commute-services">
+            <div className="commute-services-head">
+              <span className="commute-end-label">Lines</span>
+              {(editor.config.select.length > 0 || editor.config.exclude.length > 0) && (
+                <button type="button" onClick={editor.clearLines}>
+                  Any line
+                </button>
+              )}
+            </div>
+            {editor.lineGroups.map((group) => (
+              <div className="commute-line-group" key={group.mode}>
+                <span>{group.label}</span>
+                <div className="commute-line-chips">
+                  {group.lines.map((line) => (
+                    <LineChip line={line} editor={editor} key={line.id} />
+                  ))}
+                </div>
+              </div>
+            ))}
+            <p className="commute-rule">
+              Tick the lines you use, or leave them all untouched for any service. ✓ marks a line
+              that runs between your stops; ✕ avoids one.
+            </p>
+          </div>
+        )}
+        {editor.linesLoading && <p className="commute-state">Reading the lines at your stops…</p>}
+        {editor.linesError && <p className="commute-state">{editor.linesError}</p>}
+        <div className="commute-modes" role="group" aria-label="Ride modes">
+          {editor.modes.map((mode) => (
+            <button
+              type="button"
+              key={mode.mode}
+              aria-pressed={mode.on}
+              className={mode.on ? 'on' : ''}
+              onClick={() => editor.toggleMode(mode.mode)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
         <div className="commute-directions" role="tablist" aria-label="Commute direction">
           <button
             type="button"
             role="tab"
             aria-selected={direction === 'outbound'}
-            onClick={() => setDirection('outbound')}
+            onClick={() => setPinned('outbound')}
           >
             Outbound
           </button>
@@ -183,27 +318,32 @@ export function CommutePanel({
             type="button"
             role="tab"
             aria-selected={direction === 'inbound'}
-            onClick={() => setDirection('inbound')}
+            onClick={() => setPinned('inbound')}
           >
             Return
           </button>
         </div>
-        {commute.query && (
+        {editor.askable && (
           <div className="commute-route">
             <strong>
-              {fromName} → {toName}
+              {from} → {to}
             </strong>
-            {commute.query.via.length > 0 && <span>via {commute.query.via[0]!.name}</span>}
+            <span>{editor.timeLabel(direction)}</span>
           </div>
         )}
         {commute.loading && <p className="commute-state">Checking upcoming journeys…</p>}
         {commute.error && <p className="commute-state commute-error">{commute.error}</p>}
-        {!commute.query && places.length >= 2 && (
-          <p className="commute-state">Choose both ends and at least one allowed bus line.</p>
-        )}
         {commute.result && trips.length === 0 && (
           <p className="commute-state">
-            No upcoming journey matches these exact line and stop rules.
+            {emptyDirectionNote(reason === 'filtered' ? 'filtered' : 'upstream')}.
+            {reason === 'filtered' && (
+              <>
+                {' '}
+                <button type="button" className="link-button" onClick={editor.clearLines}>
+                  Allow any line
+                </button>
+              </>
+            )}
           </p>
         )}
         {trips.length > 0 && (
@@ -218,7 +358,7 @@ export function CommutePanel({
           <button
             type="button"
             onClick={commute.refresh}
-            disabled={commute.loading || !commute.query}
+            disabled={commute.loading || !editor.askable}
           >
             Refresh
           </button>

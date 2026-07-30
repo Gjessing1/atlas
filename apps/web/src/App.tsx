@@ -2,6 +2,7 @@ import {
   atlasShareUrl,
   clampExploreRadiusM,
   decodeMapHash,
+  decodePanelLink,
   fmtDistanceM,
   haversineM,
   mapProfile,
@@ -131,6 +132,9 @@ const hashView = decodeMapHash(window.location.hash);
 const initialView = hashView ?? DEFAULT_VIEW;
 // A plan carried by the link the user opened; restored once storage is ready.
 const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
+// `#panel=commute` — the link the Android commute widget's tap follows, read
+// here too so one URL opens the same board in a browser and on a phone.
+const linkedPanel = decodePanelLink(window.location.hash);
 
 function useSystemColorScheme(): ColorScheme {
   const query = '(prefers-color-scheme: dark)';
@@ -165,7 +169,7 @@ export function App() {
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [revealPlaceId, setRevealPlaceId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [commuteOpen, setCommuteOpen] = useState(false);
+  const [commuteOpen, setCommuteOpen] = useState(linkedPanel === 'commute');
   const [exploreOpen, setExploreOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
@@ -1161,6 +1165,7 @@ export function App() {
           <CommutePanel
             commute={commute}
             places={userData.places}
+            getBias={getBias}
             onClose={() => setCommuteOpen(false)}
           />
         )}

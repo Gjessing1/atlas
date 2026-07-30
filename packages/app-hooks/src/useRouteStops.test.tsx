@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { SearchResult } from '@atlas/core';
 import { cumulativeDistances } from '@atlas/navigation';
 import type { RoutePath } from '@atlas/routing';

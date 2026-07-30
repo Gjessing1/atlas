@@ -5,110 +5,95 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import org.json.JSONArray
 import org.json.JSONObject
 
+/**
+ * Fetches one widget instance's board and stores it verbatim.
+ *
+ * There is deliberately no formatting in this file. Its predecessor built
+ * `"HH:mm–HH:mm  line → line"` with `SimpleDateFormat` — a second implementation
+ * of `tripSummary` in Kotlin, which broke rule 1 and dropped the delay, the
+ * cancellation, the platform and every disruption notice the trip model already
+ * carried. `POST /api/transit/widget` now returns rows that are ready to paint,
+ * so this worker only moves bytes and decides when to ask again.
+ */
 class CommuteWidgetWorker(
   context: Context,
   params: WorkerParameters,
 ) : Worker(context, params) {
   override fun doWork(): Result {
-    val query = CommuteWidgetStore.query(applicationContext)
+    val widgetId = inputData.getInt(WIDGET_ID, -1)
+    // One instance when the request named one (the normal path: every refresh is
+    // scheduled per widget), otherwise all of them — the app's own "the saved
+    // commute changed" nudge has no particular instance in mind.
+    val ids =
+      if (widgetId >= 0) intArrayOf(widgetId)
+      else CommuteWidgetProvider.widgetIds(applicationContext)
+    if (ids.isEmpty()) return Result.success()
+
     val baseUrl = CommuteWidgetStore.baseUrl(applicationContext)
+    // Parsed once, and defensively: the stored commute is written by the app, but
+    // a truncated or half-migrated value must read as "no commute set up" rather
+    // than throw out of the worker and leave every instance stuck on its last
+    // rows with no way to recover.
+    val query = CommuteWidgetStore.query(applicationContext)?.let {
+      runCatching { JSONObject(it) }.getOrNull()
+    }
     if (query == null || baseUrl == null) {
-      CommuteWidgetStore.save(
-        applicationContext,
-        emptyList(),
-        emptyList(),
-        "Open Atlas to set up your commute",
-      )
+      ids.forEach {
+        CommuteWidgetStore.saveStatus(applicationContext, it, "Open Atlas to set up your commute")
+      }
       CommuteWidgetProvider.renderAll(applicationContext)
       return Result.success()
     }
 
-    return try {
-      val connection = URL("$baseUrl/api/transit/commute").openConnection() as HttpURLConnection
-      connection.requestMethod = "POST"
-      connection.connectTimeout = 10_000
-      // An evening refresh is the case where the board has to widen its search
-      // window, asking Entur up to three times per direction; measured end to
-      // end at 2.4–3.2 s, but the backend allows each of those upstream calls
-      // 10 s. Read well past that so a real upstream failure arrives as an
-      // error to show, rather than as this worker giving up on an answer that
-      // was on its way — which would blank exactly the "what is my morning bus"
-      // check the widget exists for.
-      connection.readTimeout = 25_000
-      connection.doOutput = true
-      connection.setRequestProperty("Accept", "application/json")
-      connection.setRequestProperty("Content-Type", "application/json")
-      connection.outputStream.use { it.write(query.toByteArray(Charsets.UTF_8)) }
-      if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
-      val response = connection.inputStream.bufferedReader().use { it.readText() }
-      val root = JSONObject(response)
-      val outbound = tripRows(root.getJSONObject("outbound").optJSONArray("trips"))
-      val inbound = tripRows(root.getJSONObject("inbound").optJSONArray("trips"))
-      val checked = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-      CommuteWidgetStore.save(
-        applicationContext,
-        outbound,
-        inbound,
-        if (outbound.isEmpty() && inbound.isEmpty()) {
-          "No matching journeys · checked $checked"
-        } else {
-          "Entur live · checked $checked"
-        },
-      )
-      CommuteWidgetProvider.renderAll(applicationContext)
-      Result.success()
-    } catch (_: Exception) {
-      val cached = CommuteWidgetStore.snapshot(applicationContext)
-      CommuteWidgetStore.save(
-        applicationContext,
-        cached.outbound,
-        cached.inbound,
-        "Couldn’t refresh · tap ↻",
-      )
-      CommuteWidgetProvider.renderAll(applicationContext)
-      Result.retry()
-    }
-  }
-
-  private fun tripRows(trips: JSONArray?): List<String> {
-    if (trips == null) return emptyList()
-    return (0 until minOf(trips.length(), 2)).map { index ->
-      val trip = trips.getJSONObject(index)
-      val start = clock(trip.optLong("startMs"))
-      val end = clock(trip.optLong("endMs"))
-      val legs = trip.optJSONArray("legs")
-      val lines = mutableListOf<String>()
-      if (legs != null) {
-        for (legIndex in 0 until legs.length()) {
-          val line = legs.optJSONObject(legIndex)?.optJSONObject("line")?.optString("publicCode")
-          if (!line.isNullOrBlank()) lines.add(line)
-        }
+    var failed = false
+    for (id in ids) {
+      val body = JSONObject()
+        .put("kind", "commute")
+        .put("commute", query)
+        .put("direction", CommuteWidgetStore.direction(applicationContext, id))
+        .put("maxRows", ROWS_PER_DIRECTION)
+        .toString()
+      try {
+        val board = post("$baseUrl/api/transit/widget", body)
+        CommuteWidgetStore.saveBoard(applicationContext, id, board)
+        // Ask again when the answer stops being true, not on a wall clock: two
+        // minutes before the next departure, or — with nothing upcoming — before
+        // the commute's own window reopens. A fixed fifteen-minute period asked
+        // all night and all weekend and could still be stale at 08:05.
+        val nextRefreshMs = JSONObject(board).optLong("nextRefreshMs", 0L)
+        CommuteWidgetProvider.scheduleNext(applicationContext, id, nextRefreshMs)
+      } catch (_: Exception) {
+        failed = true
+        // Keep the last good rows; only the status line admits the failure.
+        CommuteWidgetStore.saveStatus(applicationContext, id, "Couldn’t refresh · tap ↻")
       }
-      "$start–$end  ${lines.joinToString(" → ")}".trim()
     }
+    CommuteWidgetProvider.renderAll(applicationContext)
+    return if (failed) Result.retry() else Result.success()
   }
 
-  private fun clock(epochMs: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMs))
+  private fun post(url: String, body: String): String {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.requestMethod = "POST"
+    connection.connectTimeout = 10_000
+    // The backend allows each upstream Entur call 10 s. Read well past that so a
+    // slow answer arrives rather than being given up on — which would blank
+    // exactly the "what is my morning bus" check the widget exists for.
+    connection.readTimeout = 25_000
+    connection.doOutput = true
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("Content-Type", "application/json")
+    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+    if (connection.responseCode !in 200..299) {
+      throw IllegalStateException("HTTP ${connection.responseCode}")
+    }
+    return connection.inputStream.bufferedReader().use { it.readText() }
+  }
 
   companion object {
-    fun routeNames(query: String?): String? {
-      if (query == null) return null
-      return try {
-        val root = JSONObject(query)
-        val from = root.getJSONObject("from").getString("name")
-        val to = root.getJSONObject("to").getString("name")
-        val via = root.optJSONArray("via")?.optJSONObject(0)?.optString("name")
-        if (via.isNullOrBlank()) "$from ↔ $to" else "$from ↔ $to · via $via"
-      } catch (_: Exception) {
-        null
-      }
-    }
+    const val WIDGET_ID = "widgetId"
+    const val ROWS_PER_DIRECTION = 3
   }
 }

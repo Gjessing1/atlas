@@ -614,29 +614,42 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'planner-commute-board',
     surface: 'planner',
-    capability:
-      'A saved two-way commute between favorites, filtered to the lines and stops that count',
-    hook: 'useCommute',
-    web: {
-      file: 'apps/web/src/transit/CommutePanel.tsx',
-      contains: 'Favorite-to-favorite live journeys',
-    },
-    android: {
-      file: 'apps/android/src/ui/CommuteSheet.tsx',
-      contains: 'Favorite-to-favorite live journeys',
-    },
+    capability: 'A saved two-way commute between stops, on the lines you actually ride',
+    hook: 'useCommuteEditor',
+    // The seam, not a spelling. This row used to resolve the sentence
+    // "Favorite-to-favorite live journeys" inside two hand-written forms — which
+    // stayed green while the deployed server had no endpoint to answer them, and
+    // said nothing about the two forms already wording their rules differently.
+    // Now each side has to be built on the shared editor to pass.
+    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteEditor' },
+    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteEditor' },
+    route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/commute'" },
     note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The saved configuration is one synced setting (`transit.commute`), so the board is the same on both clients.',
+  },
+  {
+    id: 'planner-commute-lines',
+    surface: 'planner',
+    capability: 'Pick the commute’s lines from what actually calls at your stops',
+    hook: 'useCommuteEditor',
+    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'fetchTransitStopLines' },
+    android: { file: 'apps/android/App.tsx', contains: 'fetchTransitStopLines' },
+    route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/stop-lines'" },
+    note: 'A line is ticked, never typed: a `publicCode` matches three lines nationally, so the saved commute stores Entur line ids and shows codes. Android builds the seam in App.tsx (it needs the server origin); web can default to same-origin inside the panel.',
   },
   {
     id: 'planner-commute-widget',
     surface: 'planner',
-    capability: 'The next two journeys each way on the home screen, without opening the app',
+    capability:
+      'The next departures for the saved commute on the home screen, without opening the app',
     web: null,
     android: {
       file: 'apps/android/modules/commutewidget/android/src/main/java/io/gjessing/atlas/commutewidget/CommuteWidgetProvider.kt',
       contains: 'atlas_commute_widget',
     },
-    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, so there is no second configuration to drift.',
+    // The dependency that was invisible: the widget renders nothing it computes
+    // itself, so without this route it is a permanent "Couldn't refresh".
+    route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/widget'" },
+    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift.',
   },
 
   // ---------------------------------------------------------- navigation ---

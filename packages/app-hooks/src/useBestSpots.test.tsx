@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { WeatherForecast, WeatherPoint } from '@atlas/conditions';
 import type { LngLatBbox } from '@atlas/core';

@@ -29,7 +29,7 @@ import {
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Keyboard,
@@ -44,34 +44,14 @@ import {
 import type { LocalPack } from '../regions/packs';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { TransitPlan } from '../routing/useTransit';
-import { geoSearch, type SearchBias } from '../search/geoSearch';
+import type { SearchBias } from '../search/geoSearch';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
+import { useGeocode } from './useGeocode';
 import { PROFILE_ICON, TramIcon } from './modeIcons';
 import { theme } from './theme';
 import { TransitResults } from './TransitResults';
-
-/**
- * Geocoding for the stop searches: the server's Photon proxy when reachable,
- * the downloaded packs' FTS index when it isn't — so a stop can be searched
- * for with no network at all. Viewport bias applies only to the free stop
- * search; an along-route search is already constrained by the route's bbox.
- */
-function useGeocode(packs: LocalPack[], getBias: SearchBias): StopGeocodeFn {
-  return useCallback(
-    async ({ text, bbox, limit, signal, transit }) => {
-      const { results } = await geoSearch(packs, text, bbox ? undefined : getBias, {
-        bbox,
-        limit,
-        signal,
-        transit,
-      });
-      return results;
-    },
-    [packs, getBias],
-  );
-}
 
 /** Search box that adds a stop by name: saved places first, then addresses. */
 function StopSearch({

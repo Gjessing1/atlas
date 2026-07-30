@@ -10,7 +10,6 @@ import {
   stopTitle,
   waypointLabel,
   type LatLng,
-  type SearchResult,
 } from '@atlas/core';
 import {
   routeStopCategories,
@@ -29,11 +28,11 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
-import { fetchTransitStops, mergeTransitSearchResults } from '@atlas/transit';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
 import { TransitResults } from './TransitResults.js';
+import { useGeocode } from './useGeocode.js';
 import type { RoutePlanner } from './useRoute.js';
 import type { TransitPlan } from './useTransit.js';
 
@@ -44,44 +43,6 @@ function downloadText(fileName: string, text: string, type: string): void {
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-/**
- * Geocoding for the stop search: the same-origin Photon proxy, biased towards
- * the current viewport so a typed street resolves near where the user is
- * looking. Browsing for stops *on the route* does not come through here — it is
- * a category query against the explore endpoint (see AlongRouteStops).
- */
-function useGeocode(getBias: () => LatLng | null): StopGeocodeFn {
-  return useCallback(
-    async ({ text, bbox, limit, signal, transit }) => {
-      const params = new URLSearchParams({ q: text });
-      if (limit !== undefined) params.set('limit', String(limit));
-      const bias = bbox ? null : getBias();
-      if (bbox) params.set('bbox', bbox);
-      else if (bias) {
-        params.set('lat', String(bias.lat));
-        params.set('lon', String(bias.lng));
-      }
-      const general = async (): Promise<SearchResult[]> => {
-        const res = await fetch(`/api/search?${params}`, { signal });
-        if (!res.ok) return [];
-        return ((await res.json()) as { results: SearchResult[] }).results;
-      };
-      if (!transit) return general();
-
-      const [stops, addresses] = await Promise.allSettled([
-        fetchTransitStops(text, { signal, bias, limit }),
-        general(),
-      ]);
-      return mergeTransitSearchResults(
-        stops.status === 'fulfilled' ? stops.value : [],
-        addresses.status === 'fulfilled' ? addresses.value : [],
-        limit ?? 8,
-      );
-    },
-    [getBias],
-  );
 }
 
 /** Search box that adds a stop by name: saved places first, then addresses (Photon). */

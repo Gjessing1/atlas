@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { SearchResult } from '@atlas/core';
 import type { RoutePath } from '@atlas/routing';
 import { act, renderHook, waitFor } from '@testing-library/react';

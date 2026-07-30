@@ -1,6 +1,8 @@
 import { decodePolyline, type LatLng } from '@atlas/core';
-import { expandModeFilter } from './model.js';
+import { expandModeFilter, RIDE_MODES } from './model.js';
 import type {
+  TransitLineRef,
+  TransitStopLines,
   TransitBooking,
   TransitBookingMethod,
   TransitDeparture,
@@ -39,15 +41,15 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[TripViaLocationInput!],$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int,$pageCursor:String){
- trip(from:$from,to:$to,via:$via,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow,pageCursor:$pageCursor){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[TripViaLocationInput!],$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$filters:[TripFilterInput!],$searchWindow:Int,$pageCursor:String){
+ trip(from:$from,to:$to,via:$via,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,filters:$filters,searchWindow:$searchWindow,pageCursor:$pageCursor){
   nextPageCursor previousPageCursor
   routingErrors{ code inputField }
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance emission{co2}
    legs{ mode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
     pointsOnLink{points}
-    line{ publicCode name presentation{colour textColour} }
+    line{ id publicCode name presentation{colour textColour} }
     authority{name}
     fromEstimatedCall{ destinationDisplay{frontText} }
     fromPlace{ name latitude longitude quay{id publicCode name} }
@@ -58,17 +60,29 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[
    }}}}`;
 
 const DEPARTURE_FIELDS = `id name latitude longitude
- estimatedCalls(startTime:$start,timeRange:3600,numberOfDepartures:$limit,arrivalDeparture:departures,includeCancelledTrips:true){
+ estimatedCalls(startTime:$start,timeRange:$range,numberOfDepartures:$limit,arrivalDeparture:departures,includeCancelledTrips:true,whiteListed:$lines){
   aimedDepartureTime expectedDepartureTime realtime cancellation forBoarding
   destinationDisplay{frontText}
   quay{id publicCode name}
-  serviceJourney{id publicCode transportMode line{publicCode name presentation{colour textColour} operator{name}}}
+  serviceJourney{id publicCode transportMode directionType line{id publicCode name presentation{colour textColour} operator{name}}}
   situations{ situationNumber severity reportType summary{value language} description{value language} advice{value language} infoLinks{uri} }
  }`;
 
 /** Exact-stop board: used when an Entur search result retained its NSR StopPlace id. */
-export const ENTUR_STOP_DEPARTURES_QUERY = `query StopDepartures($id:String!,$start:DateTime,$limit:Int!){
+export const ENTUR_STOP_DEPARTURES_QUERY = `query StopDepartures($id:String!,$start:DateTime,$limit:Int!,$range:Int!,$lines:InputWhiteListed){
  stopPlace(id:$id){${DEPARTURE_FIELDS}}
+}`;
+
+/**
+ * Every line calling at one stop — the picker's whole source of truth, so a
+ * commute's services are ticked rather than typed. Asked per stop place and not
+ * per quay: a traveller picks "the 280", not "the 280 from the northbound
+ * stand", and the same line appears under every quay it uses.
+ */
+export const ENTUR_STOP_LINES_QUERY = `query StopLines($id:String!){
+ stopPlace(id:$id){ id name latitude longitude
+  quays{ lines{ id publicCode name transportMode presentation{colour textColour} authority{name} } }
+ }
 }`;
 
 /**
@@ -77,7 +91,7 @@ export const ENTUR_STOP_DEPARTURES_QUERY = `query StopDepartures($id:String!,$st
  * every platform/stand at an interchange, not whichever side of the road was
  * a few metres closer.
  */
-export const ENTUR_NEAREST_DEPARTURES_QUERY = `query NearestDepartures($lat:Float!,$lng:Float!,$start:DateTime,$limit:Int!){
+export const ENTUR_NEAREST_DEPARTURES_QUERY = `query NearestDepartures($lat:Float!,$lng:Float!,$start:DateTime,$limit:Int!,$range:Int!,$lines:InputWhiteListed){
  nearest(latitude:$lat,longitude:$lng,maximumDistance:1500,maximumResults:1,filterByPlaceTypes:[stopPlace],filterByInUse:true,first:1){
   edges{node{distance place{... on StopPlace{${DEPARTURE_FIELDS}}}}}
  }
@@ -87,6 +101,9 @@ const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
 const DEFAULT_DEPARTURE_LIMIT = 30;
 const MAX_DEPARTURE_LIMIT = 50;
+/** One hour of departures is a board; a widget filtered to one line needs longer. */
+const DEFAULT_DEPARTURE_RANGE_S = 3600;
+const MAX_DEPARTURE_RANGE_S = 24 * 3600;
 const DEFAULT_WALK_SPEED_MPS = 1.3;
 
 /**
@@ -132,6 +149,29 @@ function locationArgument(location: TransitQuery['from']): Record<string, unknow
     : { coordinates: { latitude: location.lat, longitude: location.lng } };
 }
 
+/**
+ * `trip(filters:)` for an exact line selection, or null for "no line filter".
+ *
+ * Null and `[]` are emphatically **not** the same thing upstream, which is the
+ * trap this function exists to close: measured 2026-07-30, `filters: []`
+ * answers `noTransitConnection` on a corridor that returns five journeys with
+ * `filters: null`. An empty array reads as "match none of these", so a filter
+ * built from an empty selection must disappear entirely rather than be sent
+ * empty — otherwise the honest default (a commute with no lines ticked yet)
+ * reports the route as unserved.
+ */
+function filtersArgument(filter: TransitQuery['lineFilter']): Record<string, unknown>[] | null {
+  const select = filter?.select ?? [];
+  const exclude = filter?.exclude ?? [];
+  if (select.length === 0 && exclude.length === 0) return null;
+  return [
+    {
+      ...(select.length > 0 ? { select: [{ lines: [...select] }] } : {}),
+      ...(exclude.length > 0 ? { not: [{ lines: [...exclude] }] } : {}),
+    },
+  ];
+}
+
 /** Build the GraphQL request body for a journey query. */
 export function buildEnturRequest(query: TransitQuery): {
   query: string;
@@ -160,6 +200,7 @@ export function buildEnturRequest(query: TransitQuery): {
       num: limit,
       walkSpeed: query.walkSpeedMps ?? DEFAULT_WALK_SPEED_MPS,
       modes: modesArgument(query.modes),
+      filters: filtersArgument(query.lineFilter),
       // Null lets Entur pick its own (dynamic, a few hours). Widened only on a
       // retry — see WIDE_SEARCH_WINDOW_MINUTES.
       searchWindow: query.searchWindowMinutes ?? null,
@@ -182,9 +223,21 @@ export function buildEnturDeparturesRequest(query: TransitDeparturesQuery): {
   // resolver reads the argument unconditionally and a null one crashes it
   // server-side, which arrives as a GraphQL error and would make every board
   // ("Departures" on a card, with no time chosen) look like a network failure.
-  const common: Record<string, unknown> = { limit };
+  const common: Record<string, unknown> = {
+    limit,
+    range: Math.min(
+      Math.max(Math.trunc(query.timeRangeSeconds ?? DEFAULT_DEPARTURE_RANGE_S), 60),
+      MAX_DEPARTURE_RANGE_S,
+    ),
+  };
   if (query.startTimeMs !== undefined) {
     common.start = new Date(query.startTimeMs).toISOString();
+  }
+  // Same rule as `startTime`: an unset variable must be *absent*, not null.
+  // `whiteListed:null` is tolerated where `startTime:null` is not, but relying
+  // on that difference is how the Departures 502 got shipped once already.
+  if (query.lines && query.lines.length > 0) {
+    common.lines = { lines: [...query.lines] };
   }
   return query.stopId
     ? {
@@ -261,6 +314,7 @@ function toPlace(wire: WirePlace | null | undefined): TransitPlace {
 function toLine(wire: unknown, authority: unknown): TransitLine | undefined {
   if (!wire || typeof wire !== 'object') return undefined;
   const line = wire as {
+    id?: unknown;
     publicCode?: unknown;
     name?: unknown;
     presentation?: { colour?: unknown; textColour?: unknown } | null;
@@ -275,6 +329,7 @@ function toLine(wire: unknown, authority: unknown): TransitLine | undefined {
         ? line.name
         : '';
   return {
+    ...(typeof line.id === 'string' && line.id ? { id: line.id } : {}),
     publicCode,
     ...(typeof line.name === 'string' ? { name: line.name } : {}),
     ...(typeof operator === 'string' ? { operator } : {}),
@@ -591,6 +646,85 @@ export function parseEnturDeparturesResponse(body: unknown): TransitDeparturesRe
       ...(distanceM === undefined ? {} : { distanceM }),
     },
     departures,
+  };
+}
+
+/**
+ * Presentation order for a line picker: by mode in the order the mode chips
+ * appear, then by public code read as a number where it is one. Sorting `"280"`
+ * as text puts it after `"71"`, which looks like a bug to anyone who has ever
+ * read a timetable.
+ */
+function compareLineRefs(a: TransitLineRef, b: TransitLineRef): number {
+  const rank = (mode: TransitMode) => {
+    const index = RIDE_MODES.indexOf(mode);
+    return index === -1 ? RIDE_MODES.length : index;
+  };
+  if (rank(a.mode) !== rank(b.mode)) return rank(a.mode) - rank(b.mode);
+  const numeric = (code: string) => {
+    const digits = /^\d+/.exec(code);
+    return digits ? Number(digits[0]) : Number.POSITIVE_INFINITY;
+  };
+  if (numeric(a.publicCode) !== numeric(b.publicCode)) {
+    return numeric(a.publicCode) - numeric(b.publicCode);
+  }
+  return a.publicCode.localeCompare(b.publicCode, 'nb-NO');
+}
+
+/**
+ * Every distinct line calling at a stop, deduped across its quays.
+ *
+ * Deduping is the whole job: Engelsrud publishes the same two lines under both
+ * of its stands, and an interchange the size of Asker stasjon repeats each of
+ * its eleven rail lines across a dozen platforms. A picker showing a line once
+ * per quay would be unusable.
+ */
+export function parseEnturStopLinesResponse(body: unknown): TransitStopLines {
+  const root = body as {
+    errors?: { message?: unknown }[];
+    data?: { stopPlace?: unknown } | null;
+  } | null;
+  if (Array.isArray(root?.errors) && root.errors.length > 0) {
+    const first = root.errors[0]?.message;
+    throw new TransitError(typeof first === 'string' ? first : 'stop lines error');
+  }
+  const wire = root?.data?.stopPlace;
+  if (!wire || typeof wire !== 'object') return { stop: null, lines: [] };
+  const stop = wire as Record<string, unknown>;
+  const quays = Array.isArray(stop.quays) ? stop.quays : [];
+  const byId = new Map<string, TransitLineRef>();
+  for (const quay of quays) {
+    const lines = (quay as { lines?: unknown } | null)?.lines;
+    if (!Array.isArray(lines)) continue;
+    for (const item of lines) {
+      const line = (item ?? {}) as Record<string, unknown>;
+      const id = typeof line.id === 'string' ? line.id : '';
+      // A line with no id cannot be filtered on, so offering it would be a
+      // control that silently does nothing.
+      if (!id || byId.has(id)) continue;
+      const operator = (line.authority as { name?: unknown } | null)?.name;
+      const publicCode =
+        typeof line.publicCode === 'string' && line.publicCode.trim()
+          ? line.publicCode
+          : typeof line.name === 'string'
+            ? line.name
+            : id;
+      byId.set(id, {
+        id,
+        publicCode,
+        mode: toMode(line.transportMode),
+        ...(typeof line.name === 'string' && line.name.trim() ? { name: line.name } : {}),
+        ...(typeof operator === 'string' ? { operator } : {}),
+      });
+    }
+  }
+  return {
+    stop: {
+      id: typeof stop.id === 'string' ? stop.id : '',
+      name: typeof stop.name === 'string' ? stop.name : '',
+      position: { lat: toNumber(stop.latitude), lng: toNumber(stop.longitude) },
+    },
+    lines: [...byId.values()].sort(compareLineRefs),
   };
 }
 

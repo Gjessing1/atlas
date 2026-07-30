@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { AtlasStorage } from '@atlas/storage';
 import type { SyncChange } from '@atlas/storage';
 import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';

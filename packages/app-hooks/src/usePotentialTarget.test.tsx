@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { LayerMeta } from '@atlas/core';
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';

@@ -11,5 +11,20 @@
         android:name="android.appwidget.provider"
         android:resource="@xml/atlas_commute_widget_info" />
     </receiver>
+    <!--
+      Exported because the launcher starts it: it is the `android:configure`
+      target the widget picker and the widget's own ⚙ open. It writes nothing but
+      this instance's chosen direction.
+    -->
+    <activity
+      android:name=".CommuteWidgetConfigureActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:label="@string/atlas_commute_widget_name"
+      android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+      </intent-filter>
+    </activity>
   </application>
 </manifest>

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { LatLng } from '@atlas/core';
 import { RoutingError, type RouteQuery, type RouteResult } from '@atlas/routing';
 import { act, renderHook } from '@testing-library/react';

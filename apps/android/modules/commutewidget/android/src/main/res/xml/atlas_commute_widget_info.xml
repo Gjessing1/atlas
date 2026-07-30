@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  `updatePeriodMillis="0"`: the refresh is scheduled by the board itself
+  (`nextRefreshMs` → a one-time WorkManager request two minutes before the next
+  departure, inside the commute's own day/time window). A platform update period
+  would ask on a wall clock as well — all night and all weekend — which is the
+  cadence this rework removed.
+
+  Configuration is deliberately required on placement. Android does not
+  guarantee the first `onUpdate` when a provider names a configure activity,
+  and Pixel Launcher can otherwise bind only this static layout without giving
+  the provider the instance id. One tap on the preselected "whichever is next"
+  option is the reliable hand-off; later changes use the same screen through ⚙.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:configure="io.gjessing.atlas.commutewidget.CommuteWidgetConfigureActivity"
   android:description="@string/atlas_commute_widget_description"
   android:initialLayout="@layout/atlas_commute_widget"
   android:minWidth="250dp"
@@ -7,5 +21,6 @@
   android:resizeMode="horizontal|vertical"
   android:targetCellWidth="4"
   android:targetCellHeight="3"
-  android:updatePeriodMillis="1800000"
-  android:widgetCategory="home_screen" />
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen"
+  android:widgetFeatures="reconfigurable" />

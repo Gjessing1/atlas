@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { LatLng } from '@atlas/core';
 import type { TransitResult, TransitTrip } from '@atlas/transit';
 import { act, renderHook } from '@testing-library/react';

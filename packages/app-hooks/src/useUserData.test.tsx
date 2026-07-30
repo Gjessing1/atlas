@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { AtlasStorage, StorageUnavailableError } from '@atlas/storage';
 import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
 import { parseGpx, parseKmz } from '@atlas/gpx';

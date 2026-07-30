@@ -130,14 +130,20 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await page.getByRole('button', { name: 'Commute', exact: true }).click();
 
   const panel = page.locator('.commute-panel');
-  const from = panel.getByLabel('From');
-  await expect(from).toBeEnabled({ timeout: 90_000 });
-  await from.selectOption('engelsrud');
-  await panel.getByLabel('Via').selectOption('asker');
-  await panel.getByLabel('To').selectOption('national');
-  await expect(panel.getByLabel('From')).toHaveValue('engelsrud');
-  await expect(panel.getByLabel('Via')).toHaveValue('asker');
-  await expect(panel.getByLabel('To')).toHaveValue('national');
+  // Ends are chosen through the stop picker now, with saved places offered as the
+  // shortcut rather than as the only path. Nothing is pre-filled: the previous
+  // build shipped one developer's favorites and bus lines as defaults.
+  const pick = async (field: string, name: string) => {
+    await panel.getByRole('button', { name: field }).click();
+    await panel.locator('.commute-hits').getByRole('button', { name }).click();
+  };
+  await expect(panel.getByRole('button', { name: 'Choose a From stop…' })).toBeEnabled({
+    timeout: 90_000,
+  });
+  await pick('Choose a From stop…', 'Engelsrud');
+  await pick('No interchange', 'Asker');
+  await pick('Choose a To stop…', 'Nationaltheatret');
+
   await expect(panel).toContainText('280');
   await expect(panel).toContainText('R14');
   await expect
@@ -146,8 +152,8 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
       from: { name: 'Engelsrud' },
       via: [{ name: 'Asker' }],
       to: { name: 'Nationaltheatret' },
-      allowedBusLines: ['280', '71'],
-      excludedRailStops: ['Hvalstad'],
+      // No line rules until the user ticks some, and no mode ban at all.
+      filter: { select: [], exclude: [], modes: [] },
     });
 
   await panel.getByRole('tab', { name: 'Return' }).click();

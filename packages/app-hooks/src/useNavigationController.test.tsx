@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { LatLng } from '@atlas/core';
 import type { Position } from '@atlas/navigation';
 import type { RoutePath, RouteQuery, RouteResult } from '@atlas/routing';

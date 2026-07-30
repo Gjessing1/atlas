@@ -1,17 +1,81 @@
 import { TransitError } from '@atlas/transit';
-import type { TransitCommuteQuery, TransitCommuteResult } from '@atlas/transit';
+import type {
+  CommuteEmptyReason,
+  TransitCommuteDirection,
+  TransitCommutePlace,
+  TransitCommuteQuery,
+  TransitCommuteResult,
+  TransitCommuteTime,
+  TransitLineRef,
+  TransitMode,
+  TransitWeekday,
+} from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+/**
+ * The saved commute: one synced setting, read by the web board, the Android
+ * board and the home-screen widget, so those three cannot disagree.
+ *
+ * What changed in the rework, and why it had to:
+ *  - **Ends are stops, not favorites.** The previous config held three
+ *    `PlaceRecord` ids, so every commute was planned by walking from a house
+ *    coordinate — on the one transit surface in Atlas that could not name a
+ *    stop, added in the release straight after stop search shipped.
+ *  - **Lines are picked, not typed.** `allowedBusLines: ['280','71']` matched
+ *    `publicCode`, which is ambiguous nationally (three lines answer to "280"),
+ *    unvalidatable and silently wrong. Lines now carry their Entur ids.
+ *  - **No defaults belong to a person.** The old `EMPTY_CONFIG` shipped one
+ *    developer's bus lines and excluded stop in a shared package, and
+ *    `defaultCommuteConfig` grepped every user's favorites for "engelsrud".
+ *    A first-run commute is empty, and its first screen is the picker.
+ */
+
 export const COMMUTE_SETTING_KEY = 'transit.commute';
 
-export interface CommuteConfig {
-  fromId: string | null;
-  viaId: string | null;
-  toId: string | null;
-  allowedBusLines: string[];
-  excludedRailStops: string[];
+/** The shape written today. Bumped when a migration has to tell versions apart. */
+const CONFIG_VERSION = 2;
+
+/**
+ * One end of the commute. Coordinates and a stop id are stored *and* a favorite
+ * reference is kept when the user picked one, so a renamed or moved favorite
+ * follows the board while a stop picked from search needs no favorite at all.
+ */
+export interface CommuteEnd {
+  name: string;
+  position?: { lat: number; lng: number };
+  /** NSR StopPlace id — present whenever the user actually picked a stop. */
+  stopId?: string;
+  /** Saved place this end came from; its current name and position win. */
+  placeId?: string;
 }
+
+export interface CommuteConfig {
+  from: CommuteEnd | null;
+  via: CommuteEnd | null;
+  to: CommuteEnd | null;
+  /** Lines the journey must use; empty means any line. */
+  select: TransitLineRef[];
+  /** Lines it must not use. */
+  exclude: TransitLineRef[];
+  /** Ride modes accepted; empty means all of them. */
+  modes: TransitMode[];
+  outboundTime: TransitCommuteTime;
+  inboundTime: TransitCommuteTime;
+  days: TransitWeekday[];
+}
+
+export const EMPTY_COMMUTE_CONFIG: CommuteConfig = {
+  from: null,
+  via: null,
+  to: null,
+  select: [],
+  exclude: [],
+  modes: [],
+  outboundTime: { minutesOfDay: null, arriveBy: false },
+  inboundTime: { minutesOfDay: null, arriveBy: false },
+  days: [],
+};
 
 export interface CommuteSettings {
   status: 'loading' | 'ready' | 'error';
@@ -35,60 +99,187 @@ export interface CommuteController {
   error: string | null;
   updatedMs: number | null;
   refresh: () => void;
+  /** Why a direction is empty, so a board can offer the way out of its own filter. */
+  emptyReason: (direction: TransitCommuteDirection) => CommuteEmptyReason;
 }
 
-const EMPTY_CONFIG: CommuteConfig = {
-  fromId: null,
-  viaId: null,
-  toId: null,
-  allowedBusLines: ['280', '71'],
-  excludedRailStops: ['Hvalstad'],
-};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object';
 
-const findNamed = (places: readonly PlaceRecord[], needle: string): string | null => {
-  const normalizedNeedle = needle.toLocaleLowerCase('nb-NO');
-  return (
-    places.find((place) => place.name.toLocaleLowerCase('nb-NO').includes(normalizedNeedle))?.id ??
-    null
-  );
-};
+const trimmed = (value: unknown, max: number): string | undefined =>
+  typeof value === 'string' && value.trim() && value.trim().length <= max
+    ? value.trim()
+    : undefined;
 
-/** First-run defaults for the commute requested by this Atlas installation. */
-export function defaultCommuteConfig(places: readonly PlaceRecord[]): CommuteConfig {
+function parseEnd(value: unknown): CommuteEnd | null {
+  if (!isRecord(value)) return null;
+  const name = trimmed(value.name, 100);
+  const position = isRecord(value.position) ? value.position : null;
+  const lat = position?.lat;
+  const lng = position?.lng;
+  const hasPosition = typeof lat === 'number' && typeof lng === 'number';
+  const placeId = trimmed(value.placeId, 100);
+  // An end with neither coordinates nor a favorite to resolve is not an end.
+  if (!hasPosition && !placeId) return null;
   return {
-    ...EMPTY_CONFIG,
-    fromId: findNamed(places, 'engelsrud'),
-    viaId: findNamed(places, 'asker'),
-    toId:
-      findNamed(places, 'nationaltheatret') ??
-      findNamed(places, 'nationalteater') ??
-      findNamed(places, 'national'),
+    name: name ?? '',
+    ...(hasPosition ? { position: { lat, lng } } : {}),
+    ...(trimmed(value.stopId, 128) ? { stopId: trimmed(value.stopId, 128)! } : {}),
+    ...(placeId ? { placeId } : {}),
   };
 }
 
+function parseLineRefs(value: unknown): TransitLineRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const id = trimmed(item.id, 128);
+    if (!id) return [];
+    return [
+      {
+        id,
+        publicCode: trimmed(item.publicCode, 24) ?? id,
+        mode: (trimmed(item.mode, 20) ?? 'unknown') as TransitMode,
+        ...(trimmed(item.name, 120) ? { name: trimmed(item.name, 120)! } : {}),
+        ...(trimmed(item.operator, 60) ? { operator: trimmed(item.operator, 60)! } : {}),
+        ...(trimmed(item.towards, 60) ? { towards: trimmed(item.towards, 60)! } : {}),
+      },
+    ];
+  });
+}
+
+function parseTime(value: unknown): TransitCommuteTime {
+  const raw = isRecord(value) ? value : {};
+  const minutes = raw.minutesOfDay;
+  const valid =
+    typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0 && minutes < 24 * 60;
+  return { minutesOfDay: valid ? Math.trunc(minutes) : null, arriveBy: raw.arriveBy === true };
+}
+
+/**
+ * Read the saved setting, migrating the pre-rework shape on the way through.
+ *
+ * The migration is deliberately lossy in one place: `allowedBusLines` held
+ * public codes, and a code cannot be turned into a line id without asking Entur
+ * which of the three lines answering to "280" was meant. So the ends survive
+ * (as favorite references, exactly what they were) and the line rules do not —
+ * the board opens on its picker with the corridor already filled in, which is
+ * one tap of honest work instead of a filter nobody can audit.
+ *
+ * Idempotent by construction: a v2 payload is parsed, never re-migrated, and
+ * writing v2 back drops the old fields rather than carrying them along. An older
+ * client reading the new value sees an unconfigured commute — honest, and it is
+ * about to be updated anyway — rather than someone else's bus lines.
+ */
 export function parseCommuteConfig(value: string | null): CommuteConfig | null {
   if (!value) return null;
+  let raw: unknown;
   try {
-    const raw = JSON.parse(value) as Partial<CommuteConfig>;
-    const id = (candidate: unknown): string | null =>
-      typeof candidate === 'string' && candidate ? candidate : null;
-    const strings = (candidate: unknown, fallback: string[]): string[] =>
-      Array.isArray(candidate)
-        ? candidate
-            .filter((item): item is string => typeof item === 'string')
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : fallback;
-    return {
-      fromId: id(raw.fromId),
-      viaId: id(raw.viaId),
-      toId: id(raw.toId),
-      allowedBusLines: strings(raw.allowedBusLines, EMPTY_CONFIG.allowedBusLines),
-      excludedRailStops: strings(raw.excludedRailStops, EMPTY_CONFIG.excludedRailStops),
-    };
+    raw = JSON.parse(value);
   } catch {
     return null;
   }
+  if (!isRecord(raw)) return null;
+  if (raw.version === CONFIG_VERSION || raw.from !== undefined || raw.to !== undefined) {
+    return {
+      from: parseEnd(raw.from),
+      via: parseEnd(raw.via),
+      to: parseEnd(raw.to),
+      select: parseLineRefs(raw.select),
+      exclude: parseLineRefs(raw.exclude),
+      modes: Array.isArray(raw.modes)
+        ? raw.modes.filter((mode): mode is TransitMode => typeof mode === 'string')
+        : [],
+      outboundTime: parseTime(raw.outboundTime),
+      inboundTime: parseTime(raw.inboundTime),
+      days: Array.isArray(raw.days)
+        ? [
+            ...new Set(
+              raw.days.filter(
+                (day): day is TransitWeekday =>
+                  typeof day === 'number' && Number.isInteger(day) && day >= 1 && day <= 7,
+              ),
+            ),
+          ].sort((a, b) => a - b)
+        : [],
+    };
+  }
+  // v1: three favorite ids plus two lists of hand-typed text.
+  const favorite = (id: unknown): CommuteEnd | null => {
+    const placeId = trimmed(id, 100);
+    return placeId ? { name: '', placeId } : null;
+  };
+  return {
+    ...EMPTY_COMMUTE_CONFIG,
+    from: favorite(raw.fromId),
+    via: favorite(raw.viaId),
+    to: favorite(raw.toId),
+  };
+}
+
+/** Whether a parsed config still needs writing back in the current shape. */
+export function isLegacyCommuteSetting(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    const raw: unknown = JSON.parse(value);
+    return isRecord(raw) && raw.version !== CONFIG_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+export function serializeCommuteConfig(config: CommuteConfig): string {
+  return JSON.stringify({ version: CONFIG_VERSION, ...config });
+}
+
+/** Resolve one end against the current favorites, preferring live place data. */
+function resolveEnd(
+  end: CommuteEnd | null,
+  byId: Map<string, PlaceRecord>,
+): TransitCommutePlace | null {
+  if (!end) return null;
+  const place = end.placeId ? byId.get(end.placeId) : undefined;
+  const position = place ? { lat: place.lat, lng: place.lng } : end.position;
+  if (!position) return null;
+  const name = place?.name ?? end.name;
+  return {
+    name: name || 'Stop',
+    lat: position.lat,
+    lng: position.lng,
+    ...(end.stopId ? { stopId: end.stopId } : {}),
+  };
+}
+
+/**
+ * The query a configuration means, or null when it is not askable yet.
+ *
+ * Note what is *not* required any more: the old build refused to ask unless at
+ * least one bus line had been typed, which is why a fresh install saw nothing
+ * but a hint. An unfiltered commute is a perfectly good question — it is also
+ * the one whose answer becomes the line picker's shortlist.
+ */
+export function commuteQueryFrom(
+  config: CommuteConfig,
+  places: readonly PlaceRecord[],
+): TransitCommuteQuery | null {
+  const byId = new Map(places.map((place) => [place.id, place]));
+  const from = resolveEnd(config.from, byId);
+  const to = resolveEnd(config.to, byId);
+  const via = resolveEnd(config.via, byId);
+  if (!from || !to) return null;
+  const samePlace = (a: TransitCommutePlace, b: TransitCommutePlace) =>
+    (a.stopId && b.stopId && a.stopId === b.stopId) || (a.lat === b.lat && a.lng === b.lng);
+  if (samePlace(from, to)) return null;
+  return {
+    from,
+    via: via && !samePlace(via, from) && !samePlace(via, to) ? [via] : [],
+    to,
+    filter: { select: config.select, exclude: config.exclude, modes: config.modes },
+    outboundTime: config.outboundTime,
+    inboundTime: config.inboundTime,
+    days: config.days,
+    limit: 6,
+  };
 }
 
 /** Saved commute state shared by the web board, Android board and widget bridge. */
@@ -99,7 +290,7 @@ export function useCommute(
   active: boolean,
 ): CommuteController {
   const { status, getSetting, setSetting: saveSetting } = settings;
-  const [config, setConfigState] = useState<CommuteConfig>(EMPTY_CONFIG);
+  const [config, setConfigState] = useState<CommuteConfig>(EMPTY_COMMUTE_CONFIG);
   const [loaded, setLoaded] = useState(false);
   const [result, setResult] = useState<TransitCommuteResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -113,34 +304,21 @@ export function useCommute(
     let current = true;
     void getSetting(COMMUTE_SETTING_KEY).then((saved) => {
       if (!current) return;
-      const next = parseCommuteConfig(saved) ?? defaultCommuteConfig(places);
+      const next = parseCommuteConfig(saved) ?? EMPTY_COMMUTE_CONFIG;
       setConfigState(next);
-      if (!saved) saveSetting(COMMUTE_SETTING_KEY, JSON.stringify(next));
+      // Write back only to finish a migration. A first run writes nothing: an
+      // empty commute is not worth a synced row on every device.
+      if (saved && isLegacyCommuteSetting(saved)) {
+        saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
+      }
       setLoaded(true);
     });
     return () => {
       current = false;
     };
-  }, [getSetting, loaded, places, saveSetting, status]);
+  }, [getSetting, loaded, saveSetting, status]);
 
-  const byId = useMemo(() => new Map(places.map((place) => [place.id, place])), [places]);
-  const query = useMemo<TransitCommuteQuery | null>(() => {
-    const from = config.fromId ? byId.get(config.fromId) : undefined;
-    const via = config.viaId ? byId.get(config.viaId) : undefined;
-    const to = config.toId ? byId.get(config.toId) : undefined;
-    if (!from || !to || from.id === to.id || config.allowedBusLines.length === 0) return null;
-    return {
-      from: { name: from.name, lat: from.lat, lng: from.lng },
-      via:
-        via && via.id !== from.id && via.id !== to.id
-          ? [{ name: via.name, lat: via.lat, lng: via.lng }]
-          : [],
-      to: { name: to.name, lat: to.lat, lng: to.lng },
-      allowedBusLines: config.allowedBusLines,
-      excludedRailStops: config.excludedRailStops,
-      limit: 10,
-    };
-  }, [byId, config]);
+  const query = useMemo(() => commuteQueryFrom(config, places), [config, places]);
   const queryKey = query ? JSON.stringify(query) : '';
 
   useEffect(() => {
@@ -185,11 +363,30 @@ export function useCommute(
   const setConfig = useCallback(
     (next: CommuteConfig) => {
       setConfigState(next);
-      saveSetting(COMMUTE_SETTING_KEY, JSON.stringify(next));
+      saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
     },
     [saveSetting],
   );
   const refresh = useCallback(() => setSeed((value) => value + 1), []);
+  const emptyReason = useCallback(
+    (direction: TransitCommuteDirection): CommuteEmptyReason => {
+      if (!result) return 'none';
+      if (result[direction].trips.length > 0) return 'none';
+      return result.emptyReason?.[direction] ?? 'upstream';
+    },
+    [result],
+  );
 
-  return { ready: loaded, config, setConfig, query, result, loading, error, updatedMs, refresh };
+  return {
+    ready: loaded,
+    config,
+    setConfig,
+    query,
+    result,
+    loading,
+    error,
+    updatedMs,
+    refresh,
+    emptyReason,
+  };
 }

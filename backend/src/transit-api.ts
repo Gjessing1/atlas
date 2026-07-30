@@ -1,25 +1,42 @@
 import {
   buildEnturDeparturesRequest,
   buildEnturRequest,
+  commuteEmptyReason,
+  commuteRefreshAtMs,
   commuteTransitQueries,
+  defaultCommuteDirection,
+  departureWidgetRow,
+  emptyDirectionNote,
   filterCommuteResult,
+  isTransitLineId,
   isTransitStopId,
+  norwayClock,
+  commuteWidgetBoard,
   parseEnturDeparturesResponse,
   parseEnturResponse,
   parseEnturGeocoderResponse,
+  parseEnturStopLinesResponse,
   transitCoverage,
   transitCoversPoint,
+  ENTUR_STOP_LINES_QUERY,
+  MINUTES_PER_DAY,
   RIDE_MODES,
   SEARCH_WINDOW_RETRY_MINUTES,
   WIDE_SEARCH_WINDOW_MINUTES,
 } from '@atlas/transit';
 import type {
+  TransitCommuteDirection,
   TransitCommutePlace,
   TransitCommuteQuery,
+  TransitCommuteTime,
+  TransitDeparturesResult,
+  TransitLineRef,
   TransitLocation,
   TransitMode,
   TransitQuery,
   TransitResult,
+  TransitWeekday,
+  TransitWidgetBoard,
 } from '@atlas/transit';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from './status.js';
@@ -143,10 +160,64 @@ function parseCommutePlace(value: unknown): TransitCommutePlace | null {
   return { ...point, name: name.trim() };
 }
 
-function parseStringList(value: unknown, maxItems: number, maxLength: number): string[] | null {
-  if (!Array.isArray(value) || value.length > maxItems) return null;
-  const values = value.map((item) => (typeof item === 'string' ? item.trim() : ''));
-  return values.every((item) => item.length > 0 && item.length <= maxLength) ? values : null;
+const text = (value: unknown, maxLength: number): string | undefined =>
+  typeof value === 'string' && value.trim() && value.trim().length <= maxLength
+    ? value.trim()
+    : undefined;
+
+/**
+ * A picked line. The id is the only field that reaches Entur; the rest is what
+ * the client will render, kept so a board can label a chip without re-asking
+ * the stop. Anything without a valid id is dropped rather than rejected — a
+ * newer client sending a shape this build does not know should still get a
+ * board, and a line that cannot be filtered on is not a filter.
+ */
+function parseLineRef(value: unknown): TransitLineRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (!isTransitLineId(raw.id)) return null;
+  const mode = RIDE_MODES.includes(raw.mode as TransitMode) ? (raw.mode as TransitMode) : 'unknown';
+  return {
+    id: raw.id,
+    publicCode: text(raw.publicCode, 24) ?? raw.id,
+    mode,
+    ...(text(raw.name, 120) ? { name: text(raw.name, 120)! } : {}),
+    ...(text(raw.operator, 60) ? { operator: text(raw.operator, 60)! } : {}),
+    ...(text(raw.towards, 60) ? { towards: text(raw.towards, 60)! } : {}),
+  };
+}
+
+function parseLineRefs(value: unknown, maxItems: number): TransitLineRef[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((item) => {
+      const line = parseLineRef(item);
+      return line ? [line] : [];
+    })
+    .slice(0, maxItems);
+}
+
+function parseCommuteTime(value: unknown): TransitCommuteTime {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const minutes = raw.minutesOfDay;
+  const valid =
+    typeof minutes === 'number' &&
+    Number.isFinite(minutes) &&
+    minutes >= 0 &&
+    minutes < MINUTES_PER_DAY;
+  return {
+    minutesOfDay: valid ? Math.trunc(minutes) : null,
+    arriveBy: raw.arriveBy === true,
+  };
+}
+
+function parseWeekdays(value: unknown): TransitWeekday[] {
+  if (!Array.isArray(value)) return [];
+  const days = value.filter(
+    (day): day is TransitWeekday =>
+      typeof day === 'number' && Number.isInteger(day) && day >= 1 && day <= 7,
+  );
+  return [...new Set(days)].sort((a, b) => a - b);
 }
 
 function parseCommuteQuery(body: unknown): { query: TransitCommuteQuery } | { error: string } {
@@ -155,29 +226,83 @@ function parseCommuteQuery(body: unknown): { query: TransitCommuteQuery } | { er
   const from = parseCommutePlace(raw.from);
   const to = parseCommutePlace(raw.to);
   const via = Array.isArray(raw.via) ? raw.via.map(parseCommutePlace) : [];
-  const allowedBusLines = parseStringList(raw.allowedBusLines, 10, 12);
-  const excludedRailStops = parseStringList(raw.excludedRailStops, 20, 100);
   if (!from || !to || via.some((place) => place === null) || via.length > 8) {
     return { error: 'commute places must be named, valid coordinates' };
-  }
-  if (!allowedBusLines || allowedBusLines.length === 0 || !excludedRailStops) {
-    return { error: 'commute filters must contain valid bus lines and train stop names' };
   }
   const allPlaces = [from, ...(via as TransitCommutePlace[]), to];
   if (allPlaces.some((place) => !transitCoversPoint(place))) {
     return { error: 'public transport is available for journeys within Norway only' };
   }
+  const rawFilter = (raw.filter ?? {}) as Record<string, unknown>;
+  // No mode ban by default: the previous board hard-coded bus+rail, which
+  // silently deleted every journey finishing on the T-bane.
+  const modes = Array.isArray(rawFilter.modes)
+    ? rawFilter.modes.filter((mode): mode is TransitMode =>
+        RIDE_MODES.includes(mode as TransitMode),
+      )
+    : [];
   return {
     query: {
       from,
       via: via as TransitCommutePlace[],
       to,
-      allowedBusLines,
-      excludedRailStops,
+      filter: {
+        select: parseLineRefs(rawFilter.select, 20),
+        exclude: parseLineRefs(rawFilter.exclude, 20),
+        modes,
+      },
+      outboundTime: parseCommuteTime(raw.outboundTime),
+      inboundTime: parseCommuteTime(raw.inboundTime),
+      days: parseWeekdays(raw.days),
       ...(typeof raw.limit === 'number' && Number.isFinite(raw.limit)
         ? { limit: Math.min(Math.max(Math.trunc(raw.limit), 1), 10) }
         : {}),
     },
+  };
+}
+
+/**
+ * A one-stop widget board, in the same shape as the commute one so the widget
+ * renders both with one code path. The refresh follows the next departure just
+ * as the commute board does — the point of this kind is that it costs one
+ * upstream call, not that it is checked less carefully.
+ */
+function stopWidgetBoard({
+  departures,
+  label,
+  nowMs,
+  maxRows,
+}: {
+  departures: TransitDeparturesResult;
+  label: string;
+  nowMs: number;
+  maxRows: number;
+}): TransitWidgetBoard {
+  const rows = departures.departures.slice(0, maxRows).map((d) => departureWidgetRow(d, nowMs));
+  const name = departures.stop?.name || label || 'Stop';
+  const note = rows.length === 0 ? emptyDirectionNote('upstream') : null;
+  return {
+    route: name,
+    directions: [{ key: 'outbound', label: name, rows, note }],
+    status:
+      rows.length > 0
+        ? `Entur live · checked ${norwayClock(nowMs)}`
+        : `${note} · checked ${norwayClock(nowMs)}`,
+    // No saved commute window here, so an empty board is simply asked again
+    // later; the shared helper's floor and ceiling still apply.
+    nextRefreshMs: commuteRefreshAtMs(
+      {
+        from: { name, lat: 0, lng: 0 },
+        via: [],
+        to: { name, lat: 0, lng: 0 },
+        filter: { select: [], exclude: [], modes: [] },
+        outboundTime: { minutesOfDay: null, arriveBy: false },
+        inboundTime: { minutesOfDay: null, arriveBy: false },
+        days: [],
+      },
+      rows,
+      nowMs,
+    ),
   };
 }
 
@@ -375,11 +500,25 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     }
   });
 
-  app.post('/api/transit/commute', async (request, reply) => {
-    const parsed = parseCommuteQuery(request.body);
-    if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
-    const queries = commuteTransitQueries(parsed.query);
-    const ask = (query: TransitQuery) =>
+  /**
+   * One direction of a saved commute, asked *as* the commute.
+   *
+   * The lines are in the question (`trip(filters:)`), so there is normally one
+   * upstream call per direction where the previous board made up to three:
+   * unfiltered, then 6 h, then a 24 h window measured at 7.5 s, discarding most
+   * of each answer locally. The widening retry survives only for a commute with
+   * no time of day — "leave now" on a sparse route genuinely can mean tomorrow
+   * morning — and never when a time was asked about, because "nothing runs at
+   * 07:10" is then the true answer rather than a window too narrow.
+   */
+  const askDirection = async (
+    query: TransitQuery,
+    filter: TransitCommuteQuery['filter'],
+  ): Promise<
+    | { ok: true; result: TransitResult; emptyReason: 'upstream' | 'filtered' }
+    | { ok: false; status: number }
+  > => {
+    const ask = (attempt: TransitQuery) =>
       fetchImpl(enturUrl, {
         method: 'POST',
         headers: {
@@ -387,43 +526,35 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
           Accept: 'application/json',
           'ET-Client-Name': clientName,
         },
-        body: JSON.stringify(buildEnturRequest(query)),
+        body: JSON.stringify(buildEnturRequest(attempt)),
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
 
-    /**
-     * One direction, filtered to the commute's own services.
-     *
-     * The wide-window retry is keyed on the *filtered* list, not the planner's
-     * raw one — which is where this differs from `/api/transit`. A commute is a
-     * question about two or three named lines, so Entur's default look-ahead
-     * routinely comes back full of journeys the filter then throws away: asked
-     * in the evening, Engelsrud → Nationaltheatret answers
-     * `noTransitConnectionInSearchWindow` outright, and asked between the 280s
-     * it answers with the services this commute excludes. Retrying only on an
-     * empty *upstream* answer would leave both cases showing "no journey
-     * matches your rules" while the next 280 is on tomorrow's timetable — the
-     * one thing a board checked the night before must not say.
-     */
-    const direction = async (
-      query: TransitQuery,
-    ): Promise<{ ok: true; result: TransitResult } | { ok: false; status: number }> => {
-      const first = await ask(query);
-      if (!first.ok) return { ok: false, status: first.status };
-      let filtered = filterCommuteResult(parseEnturResponse(await first.json()), parsed.query);
+    const first = await ask(query);
+    if (!first.ok) return { ok: false, status: first.status };
+    let upstream = parseEnturResponse(await first.json());
+    if (upstream.trips.length === 0 && query.dateTimeMs === undefined) {
       for (const searchWindowMinutes of SEARCH_WINDOW_RETRY_MINUTES) {
-        if (filtered.trips.length > 0) break;
         const wider = await ask({ ...query, searchWindowMinutes });
         if (!wider.ok) return { ok: false, status: wider.status };
-        filtered = filterCommuteResult(parseEnturResponse(await wider.json()), parsed.query);
+        upstream = parseEnturResponse(await wider.json());
+        if (upstream.trips.length > 0) break;
       }
-      return { ok: true, result: filtered };
-    };
+    }
+    const result = filterCommuteResult(upstream, filter);
+    const reason = commuteEmptyReason(result, filter, upstream.trips.length);
+    return { ok: true, result, emptyReason: reason === 'filtered' ? 'filtered' : 'upstream' };
+  };
+
+  app.post('/api/transit/commute', async (request, reply) => {
+    const parsed = parseCommuteQuery(request.body);
+    if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+    const queries = commuteTransitQueries(parsed.query, Date.now());
 
     try {
       const [outbound, inbound] = await Promise.all([
-        direction(queries.outbound),
-        direction(queries.inbound),
+        askDirection(queries.outbound, parsed.query.filter),
+        askDirection(queries.inbound, parsed.query.filter),
       ]);
       // Checked one at a time so each stays narrowed: `!a.ok || !b.ok` tells
       // TypeScript nothing about `b` inside the branch.
@@ -436,9 +567,169 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       if (!inbound.ok) return unavailable(inbound.status);
       status?.record(TRANSIT_PROBE, true);
       reply.header('cache-control', 'private, max-age=30');
-      return { outbound: outbound.result, inbound: inbound.result };
+      return {
+        outbound: outbound.result,
+        inbound: inbound.result,
+        // Which nothing it was, per direction, so a board can offer the way out
+        // of its own filter instead of blaming the timetable.
+        emptyReason: { outbound: outbound.emptyReason, inbound: inbound.emptyReason },
+      };
     } catch (err) {
       request.log.error({ err }, 'entur commute unreachable');
+      status?.record(TRANSIT_PROBE, false, 'unreachable');
+      return reply.code(502).send({ error: 'commute board unavailable' });
+    }
+  });
+
+  /**
+   * GET /api/transit/stop-lines?stopId=NSR:StopPlace:3369 — every line calling
+   * at one stop, so a commute's services are *ticked* rather than typed. A
+   * `publicCode` is not a line: `lines(publicCode:"280")` matches three of them
+   * nationally, and Engelsrud's "71" is Brakar's `BRA:Line:4_6071`.
+   *
+   * The one transit answer worth a real cache: a stop's line set changes with
+   * the timetable, not the minute.
+   */
+  app.get('/api/transit/stop-lines', async (request, reply) => {
+    const raw = request.query as { stopId?: unknown };
+    if (!isTransitStopId(raw.stopId)) {
+      return reply.code(400).send({ error: 'stopId must be an NSR StopPlace id' });
+    }
+    try {
+      const response = await fetchImpl(enturUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'ET-Client-Name': clientName,
+        },
+        body: JSON.stringify({ query: ENTUR_STOP_LINES_QUERY, variables: { id: raw.stopId } }),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        request.log.error({ status: response.status }, 'entur stop lines error');
+        status?.record(TRANSIT_PROBE, false, `HTTP ${response.status}`);
+        return reply.code(502).send({ error: 'stop lines unavailable' });
+      }
+      const result = parseEnturStopLinesResponse(await response.json());
+      status?.record(TRANSIT_PROBE, true);
+      reply.header('cache-control', 'private, max-age=21600');
+      return result;
+    } catch (err) {
+      request.log.error({ err }, 'entur stop lines unreachable');
+      status?.record(TRANSIT_PROBE, false, 'unreachable');
+      return reply.code(502).send({ error: 'stop lines unavailable' });
+    }
+  });
+
+  /**
+   * POST /api/transit/widget — the home-screen widget's rows, rendered here.
+   *
+   * The widget used to format its own with `SimpleDateFormat`, a second
+   * implementation of `tripSummary` in Kotlin that dropped the delay, the
+   * cancellation, the platform and every situation notice the trip model
+   * already carried. Now the rows arrive ready to paint — which also means the
+   * times are Norwegian wall-clock times computed by `@atlas/transit` rather
+   * than by a container whose own clock is UTC.
+   *
+   * Two board kinds, one response shape, because the widget renders them
+   * identically:
+   *  - `commute` — the saved two-way board, one `trip` call per direction asked.
+   *  - `stop` — "when is my next 280", which is one line-filtered
+   *    `estimatedCalls` call instead of two to six `trip` calls.
+   */
+  app.post('/api/transit/widget', async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const nowMs = Date.now();
+    const maxRows =
+      typeof body.maxRows === 'number' && Number.isFinite(body.maxRows)
+        ? Math.min(Math.max(Math.trunc(body.maxRows), 1), 6)
+        : 3;
+
+    if (body.kind === 'stop') {
+      const point = parsePoint(body.stop);
+      if (!point) return reply.code(400).send({ error: 'stop must be {lat, lng, stopId?}' });
+      if (!transitCoversPoint(point)) {
+        return reply.code(400).send({ error: 'departure boards are available within Norway only' });
+      }
+      const lines = Array.isArray(body.lines)
+        ? body.lines.filter((line): line is string => isTransitLineId(line)).slice(0, 20)
+        : [];
+      const label = typeof body.label === 'string' ? body.label.trim().slice(0, 100) : '';
+      try {
+        const response = await fetchImpl(enturUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'ET-Client-Name': clientName,
+          },
+          body: JSON.stringify(
+            buildEnturDeparturesRequest({
+              ...point,
+              limit: maxRows,
+              // A board filtered to one line has to look past the next hour:
+              // four 280s from Engelsrud span nearly three.
+              ...(lines.length > 0 ? { lines, timeRangeSeconds: 6 * 3600 } : {}),
+            }),
+          ),
+          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          request.log.error({ status: response.status }, 'entur widget stop error');
+          status?.record(TRANSIT_PROBE, false, `HTTP ${response.status}`);
+          return reply.code(502).send({ error: 'departure board unavailable' });
+        }
+        const departures = parseEnturDeparturesResponse(await response.json());
+        status?.record(TRANSIT_PROBE, true);
+        reply.header('cache-control', 'private, max-age=15');
+        return stopWidgetBoard({ departures, label, nowMs, maxRows });
+      } catch (err) {
+        request.log.error({ err }, 'entur widget stop unreachable');
+        status?.record(TRANSIT_PROBE, false, 'unreachable');
+        return reply.code(502).send({ error: 'departure board unavailable' });
+      }
+    }
+
+    const parsed = parseCommuteQuery(body.commute);
+    if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+    // "auto" is the honest default for a widget: before the outbound time it
+    // shows the way out, after it the way home — which is what a glance at 16:30
+    // is for. A widget configured for one direction costs one upstream call.
+    const requested = body.direction;
+    const directions: TransitCommuteDirection[] =
+      requested === 'outbound' || requested === 'inbound'
+        ? [requested]
+        : requested === 'both'
+          ? ['outbound', 'inbound']
+          : [defaultCommuteDirection(parsed.query, nowMs)];
+    const queries = commuteTransitQueries({ ...parsed.query, limit: maxRows }, nowMs);
+
+    try {
+      const answers = await Promise.all(
+        directions.map(async (key) => ({
+          key,
+          answer: await askDirection(queries[key], parsed.query.filter),
+        })),
+      );
+      const failed = answers.find((entry) => !entry.answer.ok);
+      if (failed && !failed.answer.ok) {
+        request.log.error({ status: failed.answer.status }, 'entur widget commute error');
+        status?.record(TRANSIT_PROBE, false, `HTTP ${failed.answer.status}`);
+        return reply.code(502).send({ error: 'commute board unavailable' });
+      }
+      status?.record(TRANSIT_PROBE, true);
+      reply.header('cache-control', 'private, max-age=15');
+      return commuteWidgetBoard({
+        query: parsed.query,
+        results: answers.flatMap(({ key, answer }) =>
+          answer.ok ? [{ key, result: answer.result, emptyReason: answer.emptyReason }] : [],
+        ),
+        nowMs,
+        maxRows,
+      });
+    } catch (err) {
+      request.log.error({ err }, 'entur widget commute unreachable');
       status?.record(TRANSIT_PROBE, false, 'unreachable');
       return reply.code(502).send({ error: 'commute board unavailable' });
     }

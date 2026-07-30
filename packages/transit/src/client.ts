@@ -8,6 +8,7 @@ import type {
   TransitCommuteResult,
   TransitQuery,
   TransitResult,
+  TransitStopLines,
 } from './model.js';
 
 export interface FetchTransitOptions {
@@ -141,7 +142,35 @@ export async function fetchTransitDepartures(
     : parseEnturDeparturesResponse(json);
 }
 
-/** Fetch the saved commute's filtered upcoming journeys in both directions. */
+/**
+ * Every line calling at one stop, for the commute editor's line picker. A
+ * stop's line set changes with the timetable rather than the minute, so this is
+ * the one transit answer worth caching for hours.
+ */
+export async function fetchTransitStopLines(
+  stopId: string,
+  opts: FetchTransitOptions = {},
+): Promise<TransitStopLines> {
+  const params = new URLSearchParams({ stopId });
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/stop-lines?${params}`, {
+    signal: opts.signal,
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json !== null && typeof json === 'object' && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : `stop lines failed (HTTP ${res.status})`;
+    throw new TransitError(message, res.status);
+  }
+  if (!json || typeof json !== 'object' || !Array.isArray((json as { lines?: unknown }).lines)) {
+    return { stop: null, lines: [] };
+  }
+  return json as TransitStopLines;
+}
+
+/** Fetch the saved commute's upcoming journeys in both directions. */
 export async function fetchTransitCommute(
   query: TransitCommuteQuery,
   opts: FetchTransitOptions = {},

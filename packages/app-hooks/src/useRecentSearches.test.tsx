@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { MAX_RECENT_SEARCHES, type SearchResult } from '@atlas/core';
 import { describe, expect, it, vi } from 'vitest';

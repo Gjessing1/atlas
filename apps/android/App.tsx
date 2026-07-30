@@ -17,6 +17,7 @@ import {
   useThemeMode,
   type FetchNearbyFn,
   type CommuteFn,
+  type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
   atlasRouteUrl,
@@ -40,7 +41,12 @@ import {
   trackToRoutePoints,
   type RoutePath,
 } from '@atlas/routing';
-import { fetchTransitCommute, transitTripBounds, type TransitTrip } from '@atlas/transit';
+import {
+  fetchTransitCommute,
+  fetchTransitStopLines,
+  transitTripBounds,
+  type TransitTrip,
+} from '@atlas/transit';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
@@ -114,6 +120,7 @@ import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
 import { CommuteSheet } from './src/ui/CommuteSheet';
+import { useGeocode } from './src/ui/useGeocode';
 import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
@@ -210,6 +217,13 @@ function AppInner() {
     () => (query, signal) => fetchTransitCommute(query, { baseUrl: serverOrigin, signal }),
     [serverOrigin],
   );
+  // The commute board picks stops and lines with the same seams the route
+  // planner uses — one stop search, one line list, so the two cannot disagree
+  // about what a stop is.
+  const stopLinesFetch = useMemo<StopLinesFn>(
+    () => (stopId, signal) => fetchTransitStopLines(stopId, { baseUrl: serverOrigin, signal }),
+    [serverOrigin],
+  );
   const commute = useCommute(data, data.places, commuteFetch, commuteOpen);
   // Only speak for the home-screen widget once the saved commute has actually
   // been read. Every launch passes through `query === null` first, and handing
@@ -295,8 +309,15 @@ function AppInner() {
     setWeatherTarget((cur) => (cur ? { lat: pickedLat, lng: pickedLng } : cur));
   }, [pickedLat, pickedLng]);
   // Where the map opens, where it is now, and remembering that for next launch.
-  const camera = useBootCamera(data, cameraRef, onLinkPin);
+  // The commute widget's tap arrives as `#panel=commute` — open the board it was
+  // showing, rather than dropping the user wherever the app was last.
+  const onLinkPanel = useCallback((panel: 'commute') => {
+    if (panel === 'commute') setCommuteOpen(true);
+  }, []);
+  const camera = useBootCamera(data, cameraRef, onLinkPin, onLinkPanel);
   const { initialView, viewRef, mapZoom, getBias } = camera;
+  // Stop search for the commute board's ends, biased to where the map is looking.
+  const stopGeocode = useGeocode(packs, getBias);
   // The half-built plan survives the app being killed in the background, and a
   // plan someone sent by link wins over it — the same hook, with the same
   // precedence, as the web app (§7.6). It sits below useBootCamera because the
@@ -1228,6 +1249,8 @@ function AppInner() {
             visible={commuteOpen && !planning && !navActive}
             commute={commute}
             places={data.places}
+            geocode={stopGeocode}
+            fetchStopLines={stopLinesFetch}
             onClose={() => setCommuteOpen(false)}
             bottomInset={bottomInset}
           />

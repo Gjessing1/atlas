@@ -425,14 +425,20 @@ describe('GET /api/transit/departures', () => {
 
 describe('POST /api/transit/commute', () => {
   const payload = {
-    from: { name: 'Engelsrud', lat: 59.82, lng: 10.42 },
-    via: [{ name: 'Asker', ...asker }],
-    to: { name: 'Nationaltheatret', ...nationaltheatret },
-    allowedBusLines: ['280', '71'],
-    excludedRailStops: ['Hvalstad'],
+    from: { name: 'Engelsrud', lat: 59.82, lng: 10.42, stopId: 'NSR:StopPlace:3369' },
+    via: [{ name: 'Asker stasjon', ...asker, stopId: 'NSR:StopPlace:59616' }],
+    to: { name: 'Nationaltheatret', ...nationaltheatret, stopId: 'NSR:StopPlace:58404' },
+    filter: {
+      select: [{ id: 'VYG:Line:R14', publicCode: 'R14', mode: 'rail' }],
+      exclude: [{ id: 'VYG:Line:L1', publicCode: 'L1', mode: 'rail' }],
+      modes: [],
+    },
+    outboundTime: { minutesOfDay: null, arriveBy: false },
+    inboundTime: { minutesOfDay: null, arriveBy: false },
+    days: [],
   };
 
-  it('returns matching journeys in both directions', async () => {
+  it('returns journeys in both directions', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -441,60 +447,395 @@ describe('POST /api/transit/commute', () => {
     expect(res.headers['cache-control']).toBe('private, max-age=30');
   });
 
-  it('rejects a commute without an allowed bus line', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/transit/commute',
-      payload: { ...payload, allowedBusLines: [] },
-    });
-    expect(res.statusCode).toBe(400);
+  /**
+   * The rework's whole point: the lines go *into* the question. The previous
+   * board asked unfiltered, discarded most of the answer locally, then re-asked
+   * at 6 h and 24 h windows — up to three upstream calls per direction, six per
+   * widget refresh.
+   */
+  it('asks Entur for the chosen lines rather than filtering the answer', async () => {
+    const filters: unknown[] = [];
+    respond = () => {
+      filters.push(captured!.body.variables.filters);
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
+    expect(filters).toHaveLength(2);
+    expect(filters[0]).toEqual([
+      { select: [{ lines: ['VYG:Line:R14'] }], not: [{ lines: ['VYG:Line:L1'] }] },
+    ]);
   });
 
   /**
-   * Measured against live Entur: Engelsrud → Nationaltheatret asked at 22:30
-   * answers `noTransitConnectionInSearchWindow`, and asked between the 280s
-   * answers with services this commute excludes. Both must widen — a board
-   * checked the night before has to show tomorrow's 03:20, not "nothing
-   * matches your rules". So the retry is keyed on the filtered list, unlike
-   * `/api/transit`, which only ever sees an empty planner answer.
+   * `filters: []` is not "no filter" upstream — it reads as "match none of
+   * these" and answers `noTransitConnection` on a corridor with five journeys.
+   * A commute with nothing ticked yet is the *default*, so getting this wrong
+   * would make a fresh board report the route as unserved.
    */
-  it('widens the window when the filter, not the planner, emptied the board', async () => {
-    // The narrow window offers only a bus this commute excludes.
-    const wrongBus = structuredClone(enturReply);
-    wrongBus.data.trip.tripPatterns[0]!.legs[1] = {
-      ...wrongBus.data.trip.tripPatterns[0]!.legs[1]!,
-      mode: 'bus',
-      line: { publicCode: '999', name: 'Not this commute' },
+  it('sends no filter at all for a commute with no lines chosen', async () => {
+    const filters: unknown[] = [];
+    respond = () => {
+      filters.push(captured!.body.variables.filters);
+      return new Response(JSON.stringify(enturReply), { status: 200 });
     };
+    await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, filter: { select: [], exclude: [], modes: [] } },
+    });
+    expect(filters).toEqual([null, null]);
+  });
+
+  it('accepts a commute with no lines chosen — it is the honest first run', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, filter: { select: [], exclude: [], modes: [] } },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('bans no ride mode by default, so a metro leg is not secretly disqualified', async () => {
+    const modes: unknown[] = [];
+    respond = () => {
+      modes.push(captured!.body.variables.modes);
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
+    expect(modes).toEqual([null, null]);
+  });
+
+  it('drops a line reference that could never be filtered on', async () => {
+    const filters: unknown[] = [];
+    respond = () => {
+      filters.push(captured!.body.variables.filters);
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: {
+        ...payload,
+        filter: {
+          select: [{ publicCode: '280', mode: 'bus' }, { id: 'nonsense' }],
+          exclude: [],
+          modes: [],
+        },
+      },
+    });
+    expect(filters).toEqual([null, null]);
+  });
+
+  /**
+   * A commute defined by a time of day answers about *that* time. The old board
+   * reached tomorrow morning by widening a search window until something fell
+   * out; asking about tomorrow's 07:10 is one call.
+   */
+  it('asks about the commute’s own time, and then never widens the window', async () => {
+    const asked: { dateTime: unknown; window: unknown }[] = [];
+    respond = () => {
+      asked.push({
+        dateTime: captured!.body.variables.dateTime,
+        window: captured!.body.variables.searchWindow,
+      });
+      // Nothing matches — the old code would have escalated to 6 h and 24 h.
+      return new Response(JSON.stringify({ data: { trip: { tripPatterns: [] } } }), {
+        status: 200,
+      });
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, outboundTime: { minutesOfDay: 430, arriveBy: false } },
+    });
+    const outbound = asked.filter((call) => call.dateTime !== null);
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0]!.window).toBeNull();
+  });
+
+  /**
+   * The retry survives only for "leave now": on a sparse route the next
+   * departure genuinely can be tomorrow morning, and Entur's default look-ahead
+   * reports nothing. Measured: Å i Lofoten → Svolvær at 23:30.
+   */
+  it('still widens the window for a commute with no time of day', async () => {
     const windows: unknown[] = [];
     respond = () => {
       const window = captured!.body.variables.searchWindow;
       windows.push(window);
-      return new Response(JSON.stringify(window === null ? wrongBus : enturReply), { status: 200 });
+      return new Response(
+        JSON.stringify(window === null ? { data: { trip: { tripPatterns: [] } } } : enturReply),
+        { status: 200 },
+      );
     };
-
     const res = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
-
     expect(res.statusCode).toBe(200);
-    // Two directions, each asked at the default window and then one step wider —
-    // the 6 h step matches, so neither direction pays for a full day.
     expect(windows.filter((value) => value === null)).toHaveLength(2);
     expect(windows.filter((value) => value === 6 * 60)).toHaveLength(2);
     expect(windows).not.toContain(24 * 60);
-    expect(res.json().outbound.trips).toHaveLength(1);
-    expect(res.json().inbound.trips).toHaveLength(1);
   });
 
-  it('leaves a board that already matched alone', async () => {
+  it('leaves a board that already answered alone', async () => {
     let calls = 0;
     respond = () => {
       calls += 1;
       return new Response(JSON.stringify(enturReply), { status: 200 });
     };
-
     await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
-
-    // One question per direction: a wide window costs the planner real work.
+    // One question per direction, where the old board made up to three.
     expect(calls).toBe(2);
+  });
+
+  /**
+   * "Nothing runs" and "your lines removed everything" call for opposite
+   * reactions, and the previous board rendered both as one sentence about
+   * "these exact line and stop rules".
+   */
+  it('says which nothing an empty direction was', async () => {
+    respond = () =>
+      new Response(
+        JSON.stringify({
+          data: { trip: { tripPatterns: [], routingErrors: [{ code: 'noTransitConnection' }] } },
+        }),
+        { status: 200 },
+      );
+    const res = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
+    expect(res.json().emptyReason).toEqual({ outbound: 'filtered', inbound: 'filtered' });
+
+    respond = () =>
+      new Response(
+        JSON.stringify({
+          data: { trip: { tripPatterns: [], routingErrors: [{ code: 'noTransitConnection' }] } },
+        }),
+        { status: 200 },
+      );
+    const unfiltered = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, filter: { select: [], exclude: [], modes: [] } },
+    });
+    expect(unfiltered.json().emptyReason.outbound).toBe('upstream');
+  });
+
+  it('refuses a commute outside Norway, and one with no ends', async () => {
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/transit/commute',
+          payload: { ...payload, to: { name: 'Berlin', lat: 52.5, lng: 13.4 } },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject({ method: 'POST', url: '/api/transit/commute', payload: {} })).statusCode,
+    ).toBe(400);
+  });
+});
+
+describe('GET /api/transit/stop-lines', () => {
+  const stopLinesReply = {
+    data: {
+      stopPlace: {
+        id: 'NSR:StopPlace:3369',
+        name: 'Engelsrud',
+        latitude: 59.819858,
+        longitude: 10.36596,
+        quays: [
+          {
+            lines: [
+              {
+                id: 'RUT:Line:280',
+                publicCode: '280',
+                name: 'Asker - Dikemark - Heggedal',
+                transportMode: 'bus',
+                authority: { name: 'Ruter' },
+              },
+            ],
+          },
+          {
+            // The same line under the other stand — deduped, or the picker shows
+            // every line once per platform.
+            lines: [{ id: 'RUT:Line:280', publicCode: '280', transportMode: 'bus' }],
+          },
+        ],
+      },
+    },
+  };
+
+  it('lists the lines calling at a stop, cacheable for hours', async () => {
+    respond = () => new Response(JSON.stringify(stopLinesReply), { status: 200 });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/transit/stop-lines?stopId=NSR:StopPlace:3369',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lines).toEqual([
+      {
+        id: 'RUT:Line:280',
+        publicCode: '280',
+        mode: 'bus',
+        name: 'Asker - Dikemark - Heggedal',
+        operator: 'Ruter',
+      },
+    ]);
+    // A stop's line set changes with the timetable, not the minute.
+    expect(res.headers['cache-control']).toBe('private, max-age=21600');
+  });
+
+  it('rejects anything that is not an NSR stop id', async () => {
+    for (const stopId of ['', 'nonsense', 'NSR:Quay:5964']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/transit/stop-lines?stopId=${encodeURIComponent(stopId)}`,
+      });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+});
+
+describe('POST /api/transit/widget', () => {
+  const commute = {
+    from: { name: 'Engelsrud', lat: 59.82, lng: 10.42, stopId: 'NSR:StopPlace:3369' },
+    via: [],
+    to: { name: 'Nationaltheatret', ...nationaltheatret, stopId: 'NSR:StopPlace:58404' },
+    filter: { select: [], exclude: [], modes: [] },
+    outboundTime: { minutesOfDay: null, arriveBy: false },
+    inboundTime: { minutesOfDay: null, arriveBy: false },
+    days: [],
+  };
+
+  /**
+   * The rows are rendered here so Kotlin formats nothing — deleting the widget's
+   * own `SimpleDateFormat` copy of `tripSummary` is the point of the route.
+   */
+  it('renders rows the widget only has to paint', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute, direction: 'outbound' },
+    });
+    expect(res.statusCode).toBe(200);
+    const board = res.json();
+    expect(board.route).toBe('Engelsrud ↔ Nationaltheatret');
+    expect(board.directions).toHaveLength(1);
+    expect(board.directions[0].label).toBe('Engelsrud → Nationaltheatret');
+    // Norwegian wall-clock time, not the container's UTC: the fixture's train
+    // leaves 07:33+02:00, and a UTC clock would render 05:33.
+    expect(board.directions[0].rows[0].text).toMatch(/^07:33 · /);
+    expect(board.directions[0].rows[0].text).toContain('R14');
+    expect(board.status).toContain('Entur live');
+    expect(board.nextRefreshMs).toBeGreaterThan(Date.now());
+  });
+
+  it('asks one direction only when the widget shows one', async () => {
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute, direction: 'inbound' },
+    });
+    expect(calls).toBe(1);
+  });
+
+  it('answers both directions when asked for both', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute, direction: 'both' },
+    });
+    expect(res.json().directions.map((d: { key: string }) => d.key)).toEqual([
+      'outbound',
+      'inbound',
+    ]);
+  });
+
+  it('defaults to whichever direction is next', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute },
+    });
+    expect(res.json().directions).toHaveLength(1);
+  });
+
+  /**
+   * The cheaper sibling: "when is my next 280" is one line-filtered
+   * `estimatedCalls` call, where a trip board costs two to six `trip` calls.
+   * Each row states its direction because one line at one stop runs both ways.
+   */
+  it('answers a one-stop board from a single departures call', async () => {
+    const departures = {
+      data: {
+        stopPlace: {
+          id: 'NSR:StopPlace:3369',
+          name: 'Engelsrud',
+          latitude: 59.82,
+          longitude: 10.36,
+          estimatedCalls: [
+            {
+              aimedDepartureTime: '2026-07-21T07:22:00+02:00',
+              expectedDepartureTime: '2026-07-21T07:22:00+02:00',
+              realtime: true,
+              cancellation: false,
+              forBoarding: true,
+              destinationDisplay: { frontText: 'Dikemark' },
+              quay: { id: 'NSR:Quay:5964', publicCode: '1' },
+              serviceJourney: {
+                id: 'RUT:ServiceJourney:1',
+                transportMode: 'bus',
+                line: { id: 'RUT:Line:280', publicCode: '280' },
+              },
+            },
+          ],
+        },
+      },
+    };
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      return new Response(JSON.stringify(departures), { status: 200 });
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: {
+        kind: 'stop',
+        stop: { lat: 59.82, lng: 10.36, stopId: 'NSR:StopPlace:3369' },
+        lines: ['RUT:Line:280'],
+      },
+    });
+    expect(calls).toBe(1);
+    expect(captured!.body.variables.lines).toEqual({ lines: ['RUT:Line:280'] });
+    const board = res.json();
+    expect(board.route).toBe('Engelsrud');
+    // The clock and the direction are fixed by the fixture; the countdown is
+    // relative to now, so it is not asserted against a recorded departure time.
+    expect(board.directions[0].rows[0].text).toMatch(/^07:22 · .* · 280 → Dikemark · plt 1$/);
+  });
+
+  it('refuses a stop board outside Norway and a commute it cannot read', async () => {
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/transit/widget',
+          payload: { kind: 'stop', stop: { lat: 52.5, lng: 13.4 } },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/transit/widget',
+          payload: { kind: 'commute', commute: {} },
+        })
+      ).statusCode,
+    ).toBe(400);
   });
 });

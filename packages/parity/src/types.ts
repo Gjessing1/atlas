@@ -91,6 +91,17 @@ export interface ParityCapability {
    * Recorded so a reviewer does not "fix" it back into drift.
    */
   readonly note?: string;
+  /**
+   * A backend route this capability cannot work without.
+   *
+   * Added because the checklist's first real miss was not a client difference at
+   * all: v0.132.0 shipped a commute board and a home-screen widget whose routes
+   * had never been deployed, and the row stayed green because it only ever
+   * checked that a *sentence* appeared in two files. A client capability that
+   * depends on a route it does not own has half its evidence on the server, so
+   * that half is named here and resolved by the same gate.
+   */
+  readonly route?: ParityEvidence;
 }
 
 /** Which clients have a capability. */

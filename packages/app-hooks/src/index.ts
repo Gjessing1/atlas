@@ -86,14 +86,26 @@ export {
 } from './useTransitDepartures.js';
 export {
   COMMUTE_SETTING_KEY,
-  defaultCommuteConfig,
+  EMPTY_COMMUTE_CONFIG,
+  commuteQueryFrom,
+  isLegacyCommuteSetting,
   parseCommuteConfig,
+  serializeCommuteConfig,
   useCommute,
   type CommuteConfig,
   type CommuteController,
+  type CommuteEnd,
   type CommuteFn,
   type CommuteSettings,
 } from './useCommute.js';
+export {
+  useCommuteEditor,
+  type CommuteEditor,
+  type CommuteEndKey,
+  type CommuteLineGroup,
+  type CommuteLineOption,
+  type StopLinesFn,
+} from './useCommuteEditor.js';
 export {
   useStopSearch,
   type StopGeocodeFn,

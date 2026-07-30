@@ -20,6 +20,7 @@ interface EnturGeocoderFeature {
 }
 
 const STOP_ID = /^[A-Z0-9_-]+:StopPlace:[A-Za-z0-9_-]+$/;
+const LINE_ID = /^[A-Z0-9_-]+:Line:[A-Za-z0-9_.:-]+$/;
 const CATEGORY_LABEL: Record<string, string> = {
   onstreetBus: 'Bus',
   busStation: 'Bus',
@@ -39,6 +40,15 @@ const CATEGORY_LABEL: Record<string, string> = {
 /** Whether a string is a bounded, syntactically valid NSR-style StopPlace id. */
 export function isTransitStopId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 128 && STOP_ID.test(value);
+}
+
+/**
+ * Whether a string is a bounded, syntactically valid line id. Codespaces vary
+ * more than for stops — `RUT:Line:280`, `BRA:Line:4_6071`, `VYG:Line:RE10` —
+ * so this checks the shape a saved commute may send upstream, nothing more.
+ */
+export function isTransitLineId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 128 && LINE_ID.test(value);
 }
 
 function resultLabel(properties: NonNullable<EnturGeocoderFeature['properties']>): string {

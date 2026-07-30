@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget paints; it formats nothing. Every string below is set from the rows
+  the backend rendered (`POST /api/transit/widget`), so a row reads
+  "07:16 (+6) · in 6 min · 280 → RE10 · plt 2" without Kotlin owning a second
+  copy of the trip labels. Three rows per direction rather than two: a commute
+  board that shows only the next departure is useless the moment you miss it.
+-->
 <LinearLayout
   xmlns:android="http://schemas.android.com/apk/res/android"
   android:id="@+id/atlas_commute_widget_root"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
   android:background="@drawable/atlas_commute_widget_background"
-  android:gravity="center_vertical"
   android:orientation="vertical">
 
   <LinearLayout
@@ -25,8 +31,16 @@
       android:textSize="16sp"
       android:textStyle="bold" />
     <TextView
+      android:id="@+id/atlas_commute_configure"
+      android:layout_width="34dp"
+      android:layout_height="32dp"
+      android:gravity="center"
+      android:text="⚙"
+      android:textColor="#FF9EABB9"
+      android:textSize="15sp" />
+    <TextView
       android:id="@+id/atlas_commute_refresh"
-      android:layout_width="36dp"
+      android:layout_width="34dp"
       android:layout_height="32dp"
       android:gravity="center"
       android:text="↻"
@@ -41,60 +55,93 @@
     android:layout_height="wrap_content"
     android:ellipsize="end"
     android:maxLines="1"
+    android:text="Choose your stops in Atlas"
     android:textColor="#FF9EABB9"
     android:textSize="11sp" />
 
-  <TextView
+  <LinearLayout
+    android:id="@+id/atlas_commute_block_1"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="8dp"
-    android:text="OUTBOUND"
-    android:textColor="#FF6CA8F7"
-    android:textSize="10sp"
-    android:textStyle="bold" />
-  <TextView
-    android:id="@+id/atlas_commute_outbound_1"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:ellipsize="end"
-    android:maxLines="1"
-    android:textColor="#FFFFFFFF"
-    android:textSize="13sp"
-    android:textStyle="bold" />
-  <TextView
-    android:id="@+id/atlas_commute_outbound_2"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:ellipsize="end"
-    android:maxLines="1"
-    android:textColor="#FFD3D9E0"
-    android:textSize="12sp" />
+    android:orientation="vertical">
+    <TextView
+      android:id="@+id/atlas_commute_label_1"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FF6CA8F7"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+    <TextView
+      android:id="@+id/atlas_commute_row_1_1"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFFFFFFF"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+    <TextView
+      android:id="@+id/atlas_commute_row_1_2"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFD3D9E0"
+      android:textSize="12sp" />
+    <TextView
+      android:id="@+id/atlas_commute_row_1_3"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFB9C2CC"
+      android:textSize="12sp" />
+  </LinearLayout>
 
-  <TextView
+  <LinearLayout
+    android:id="@+id/atlas_commute_block_2"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="7dp"
-    android:text="RETURN"
-    android:textColor="#FF6CA8F7"
-    android:textSize="10sp"
-    android:textStyle="bold" />
-  <TextView
-    android:id="@+id/atlas_commute_inbound_1"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:ellipsize="end"
-    android:maxLines="1"
-    android:textColor="#FFFFFFFF"
-    android:textSize="13sp"
-    android:textStyle="bold" />
-  <TextView
-    android:id="@+id/atlas_commute_inbound_2"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:ellipsize="end"
-    android:maxLines="1"
-    android:textColor="#FFD3D9E0"
-    android:textSize="12sp" />
+    android:orientation="vertical">
+    <TextView
+      android:id="@+id/atlas_commute_label_2"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FF6CA8F7"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+    <TextView
+      android:id="@+id/atlas_commute_row_2_1"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFFFFFFF"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+    <TextView
+      android:id="@+id/atlas_commute_row_2_2"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFD3D9E0"
+      android:textSize="12sp" />
+    <TextView
+      android:id="@+id/atlas_commute_row_2_3"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:textColor="#FFB9C2CC"
+      android:textSize="12sp" />
+  </LinearLayout>
 
   <TextView
     android:id="@+id/atlas_commute_status"
@@ -102,7 +149,8 @@
     android:layout_height="wrap_content"
     android:layout_marginTop="7dp"
     android:ellipsize="end"
-    android:maxLines="1"
+    android:maxLines="2"
+    android:text="Open Atlas to set up your commute"
     android:textColor="#FF8996A4"
     android:textSize="10sp" />
 </LinearLayout>

@@ -1,5 +1,7 @@
 import type { LatLng } from '@atlas/core';
 
+import type { TransitWeekday } from './clock.js';
+
 /**
  * Public transport is a *travel mode*, not a fifth `RoutingProfile`, and this
  * file is where that decision lives. A transit journey is an ordered set of
@@ -67,6 +69,12 @@ export interface TransitQuay {
 
 /** The service being ridden. */
 export interface TransitLine {
+  /**
+   * Entur's line id, e.g. `"RUT:Line:280"` — the only unambiguous name a line
+   * has, and what a saved commute filters on. Absent only when the wire omitted
+   * it.
+   */
+  id?: string;
   /** What the traveller calls it and what is on the front of the vehicle: `"280"`, `"R14"`. */
   publicCode: string;
   /** Full line name, e.g. `"Asker-Oslo S-Kongsvinger"`. */
@@ -79,6 +87,64 @@ export interface TransitLine {
   colour?: string;
   /** Legible foreground for `colour`, also `#RRGGBB`. */
   textColour?: string;
+}
+
+/**
+ * A line as something a user can *pick*, rather than type.
+ *
+ * The identity is `id`. A `publicCode` is not a line: probed on 2026-07-30,
+ * `lines(publicCode:"280")` returns three — `RUT:Line:280` (Asker–Dikemark),
+ * `TRO:Line:1_280` (Harstad) and `FIN:Line:6280` (Nuorgam–Tana bru) — and the
+ * "71" calling at Engelsrud is `BRA:Line:4_6071`, not the Ruter 71 anyone would
+ * guess. So a saved commute stores ids and shows codes, and the code is display
+ * only: it can be re-labelled by an operator without breaking the filter.
+ */
+export interface TransitLineRef {
+  /** `"RUT:Line:280"`. Stable, and what `filters` on the wire takes. */
+  id: string;
+  /** `"280"`, `"RE10"` — how it is labelled everywhere a human reads it. */
+  publicCode: string;
+  mode: TransitMode;
+  /**
+   * The line's own name, which in Norway is its corridor:
+   * `"Asker - Dikemark - Heggedal"`. The picker's second line of text — it is
+   * what tells two lines sharing a code apart.
+   */
+  name?: string;
+  operator?: string;
+  /**
+   * Where a *particular* departure on it was headed. Only ever from a
+   * departure's `destinationDisplay`: a line's own `journeyPatterns` are not
+   * reliably named — Ruter publishes `"Dikemark-Asker stasjon"`, Brakar
+   * publishes `"2-1x"` — so there is no honest per-line direction label, and a
+   * board that needs one reads it off the calls.
+   */
+  towards?: string;
+}
+
+/** Every line calling at one stop, for a picker that offers only real services. */
+export interface TransitStopLines {
+  stop: TransitDepartureStop | null;
+  lines: TransitLineRef[];
+}
+
+/**
+ * Lines a journey may and may not be built from, as ids on the wire.
+ *
+ * Measured against Entur's `trip(filters:)` on 2026-07-30, because the
+ * semantics are not what the field names suggest:
+ *  - `select` is **not** "contains one of these". *Every* ride leg must match:
+ *    selecting only `RUT:Line:280` on Engelsrud → Nationaltheatret answers
+ *    `noTransitConnection`, because the train at the other end is not in the
+ *    list. That is exactly the allow-list a commute wants, but it means an
+ *    incomplete selection returns nothing rather than something partial.
+ *  - `exclude` (`not:` on the wire) composes with it: select the bus plus all
+ *    five rail lines and exclude `VYG:Line:R13`, and the R13 journeys vanish
+ *    while the rest stay.
+ */
+export interface TransitLineFilter {
+  select?: readonly string[];
+  exclude?: readonly string[];
 }
 
 /**
@@ -285,10 +351,23 @@ export interface TransitDepartureStop {
  * other targets that do not carry National Stop Register identity.
  */
 export interface TransitDeparturesQuery extends TransitLocation {
-  /** Start of the one-hour board window; omitted means Entur's current time. */
+  /** Start of the board window; omitted means Entur's current time. */
   startTimeMs?: number;
   /** Maximum rows returned after time filtering (default 30, capped at 50). */
   limit?: number;
+  /**
+   * How far ahead to look, in seconds (default one hour, capped at a day). An
+   * unfiltered board only ever wants the next hour; a board filtered to one
+   * line needs longer, because four 280s can span three.
+   */
+  timeRangeSeconds?: number;
+  /**
+   * Line ids to restrict the board to. This is the cheap way to answer "when is
+   * my next 280": one `estimatedCalls` call with `whiteListed` returns four
+   * upcoming 280s with their realtime flags, where a trip board costs two to six
+   * `trip` calls.
+   */
+  lines?: readonly string[];
 }
 
 /** The next-hour board for one stop. `stop: null` means no stop was found nearby. */
@@ -329,6 +408,13 @@ export interface TransitQuery {
    */
   modes?: readonly TransitMode[];
   /**
+   * Exact lines to plan with, by id — asked *inside* the question instead of
+   * filtered out of the answer. A saved commute is a question about two or
+   * three named services, and letting the planner apply that turns up to three
+   * widening retries per direction into one 0.6 s call.
+   */
+  lineFilter?: TransitLineFilter;
+  /**
    * How far past `dateTimeMs` to look for departures, in minutes. Omitted means
    * "let the planner decide", which is a dynamic window of a few hours — fine
    * on a busy corridor, but on a sparse route it reports *no service* when the
@@ -345,35 +431,85 @@ export interface TransitQuery {
   pageCursor?: string;
 }
 
-/** A named favorite used as one end (or interchange) of a saved commute. */
+/**
+ * One end (or interchange) of a saved commute. `stopId` is what the picker
+ * produces — a commute between two *stops* is planned from the platform, not
+ * from a house coordinate several minutes' walk away — while the coordinates
+ * remain for coverage checks and for the ends a user picked off the map.
+ */
 export interface TransitCommutePlace extends TransitLocation {
   name: string;
 }
 
 /**
- * The deliberately narrow service filter for a regular commute. Bus lines are
- * allow-listed; trains are allowed only when none of their calls matches an
- * excluded stop. Other ride modes are rejected so an apparently suitable
- * result cannot quietly substitute a tram or ferry.
+ * The service filter for a regular commute: ticked lines, not typed codes, and
+ * no mode ban.
+ *
+ * The predecessor of this type allow-listed *bus codes* and excluded trains by
+ * a substring of a stop name, then rejected every leg that was not bus or rail —
+ * which silently deleted any journey finishing on the T-bane or a trikk, the
+ * normal way to arrive at Nationaltheatret. Modes are now a plain selection
+ * (empty = all of them) and the line lists carry identity, so "not the local
+ * train that stops everywhere" is stated as "not L1 or L2" and enforced by the
+ * planner.
  */
 export interface TransitCommuteFilter {
-  allowedBusLines: readonly string[];
-  excludedRailStops: readonly string[];
+  /** Lines the journey must be built from; empty means any line. */
+  select: readonly TransitLineRef[];
+  /** Lines no leg may use; applied on top of `select`. */
+  exclude: readonly TransitLineRef[];
+  /** Ride modes accepted; empty means all of them, which is the default. */
+  modes: readonly TransitMode[];
 }
 
-/** One saved, reversible commute between favorites. */
-export interface TransitCommuteQuery extends TransitCommuteFilter {
+/**
+ * When one direction of a commute is travelled. A commute is defined by a time
+ * of day, so the evening board can answer about tomorrow's 07:12 by *asking*
+ * about it rather than by widening a search window until yesterday's answer
+ * falls out.
+ */
+export interface TransitCommuteTime {
+  /** Minutes past local midnight (07:10 → 430); null means "leave now". */
+  minutesOfDay: number | null;
+  /** Treat the time as the latest acceptable arrival instead of the departure. */
+  arriveBy: boolean;
+}
+
+/** Which direction of a commute a board is about. */
+export type TransitCommuteDirection = 'outbound' | 'inbound';
+
+/** One saved, reversible commute. */
+export interface TransitCommuteQuery {
   from: TransitCommutePlace;
   via: readonly TransitCommutePlace[];
   to: TransitCommutePlace;
-  /** Journey options Entur should inspect before applying the strict filter. */
+  filter: TransitCommuteFilter;
+  outboundTime: TransitCommuteTime;
+  inboundTime: TransitCommuteTime;
+  /**
+   * ISO weekdays the commute runs (1 = Monday); empty means every day. Used to
+   * resolve "tomorrow's 07:12" onto a day it actually runs, and to stop the
+   * widget asking all night and all weekend.
+   */
+  days: readonly TransitWeekday[];
+  /** Journey options per direction. */
   limit?: number;
 }
 
-/** Filtered upcoming journeys in both directions. */
+/**
+ * Why a direction has no journeys, told apart from each other. `upstream` is
+ * the planner saying nothing runs; `filtered` is the commute's own line
+ * selection having removed every option — two answers that call for opposite
+ * reactions and were previously rendered as one sentence.
+ */
+export type CommuteEmptyReason = 'none' | 'upstream' | 'filtered';
+
+/** Upcoming journeys in both directions. */
 export interface TransitCommuteResult {
   outbound: TransitResult;
   inbound: TransitResult;
+  /** Which nothing it was, per direction; absent from an older backend. */
+  emptyReason?: Record<TransitCommuteDirection, CommuteEmptyReason>;
 }
 
 /**

@@ -117,7 +117,33 @@ describe('parity checklist', () => {
           true,
         );
       }
+      if (cap.route) {
+        expect(cap.route.file.startsWith('backend/'), `${cap.id}: ${cap.route.file}`).toBe(true);
+      }
     }
+  });
+
+  /**
+   * The half of the evidence that lives on the server. `backend/` is in the
+   * docker build context, so unlike the Android tree this always runs — which is
+   * the point: a capability whose route has been renamed or removed reddens the
+   * build where the image is made, instead of shipping as a blank widget.
+   */
+  it('finds every route a capability depends on', () => {
+    const problems: string[] = [];
+    for (const cap of PARITY_CHECKLIST) {
+      if (!cap.route) continue;
+      const source = read(cap.route.file);
+      if (source === null) {
+        problems.push(`${cap.id}: route file ${cap.route.file} does not exist`);
+      } else if (!source.includes(cap.route.contains)) {
+        problems.push(
+          `${cap.id}: ${cap.route.file} no longer registers ${JSON.stringify(cap.route.contains)} — ` +
+            `the clients would show this capability against a route that answers 404`,
+        );
+      }
+    }
+    expect(problems).toEqual([]);
   });
 
   it.runIf(trees.web)('finds every web capability in the web app', () => {
