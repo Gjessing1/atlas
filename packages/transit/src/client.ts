@@ -1,7 +1,14 @@
-import { TransitError, parseEnturResponse } from './entur.js';
+import { TransitError, parseEnturDeparturesResponse, parseEnturResponse } from './entur.js';
 import type { LatLng, SearchResult } from '@atlas/core';
-import { transitCoverage } from './model.js';
-import type { TransitQuery, TransitResult } from './model.js';
+import { transitCoverage, transitCoversPoint } from './model.js';
+import type {
+  TransitDeparturesQuery,
+  TransitDeparturesResult,
+  TransitCommuteQuery,
+  TransitCommuteResult,
+  TransitQuery,
+  TransitResult,
+} from './model.js';
 
 export interface FetchTransitOptions {
   /** Origin of the Atlas backend; defaults to same-origin (browser). */
@@ -72,6 +79,9 @@ export async function fetchTransitTrips(
   if (!transitCoverage(query.from, query.to)) {
     throw new TransitError('public transport is available for journeys within Norway only');
   }
+  if (query.via?.some((place) => !transitCoversPoint(place))) {
+    throw new TransitError('public transport is available for journeys within Norway only');
+  }
   const doFetch = opts.fetchImpl ?? fetch;
   const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit`, {
     method: 'POST',
@@ -92,4 +102,71 @@ export async function fetchTransitTrips(
   return json !== null && typeof json === 'object' && 'trips' in json
     ? (json as TransitResult)
     : parseEnturResponse(json);
+}
+
+/**
+ * Fetch the next hour at an exact NSR stop or, for coordinate-only targets,
+ * the nearest stop within walking distance. This is intentionally separate
+ * from journey planning: no destination is required and no `RoutePath` exists.
+ */
+export async function fetchTransitDepartures(
+  query: TransitDeparturesQuery,
+  opts: FetchTransitOptions = {},
+): Promise<TransitDeparturesResult> {
+  if (!transitCoversPoint(query)) {
+    throw new TransitError('departure boards are available within Norway only');
+  }
+  const params = new URLSearchParams({
+    lat: String(query.lat),
+    lon: String(query.lng),
+  });
+  if (query.stopId) params.set('stopId', query.stopId);
+  if (query.startTimeMs !== undefined) params.set('startTimeMs', String(query.startTimeMs));
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/departures?${params}`, {
+    signal: opts.signal,
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json !== null && typeof json === 'object' && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : `departure board failed (HTTP ${res.status})`;
+    throw new TransitError(message, res.status);
+  }
+  return json !== null && typeof json === 'object' && 'departures' in json
+    ? (json as TransitDeparturesResult)
+    : parseEnturDeparturesResponse(json);
+}
+
+/** Fetch the saved commute's filtered upcoming journeys in both directions. */
+export async function fetchTransitCommute(
+  query: TransitCommuteQuery,
+  opts: FetchTransitOptions = {},
+): Promise<TransitCommuteResult> {
+  const places = [query.from, ...query.via, query.to];
+  if (places.some((place) => !transitCoversPoint(place))) {
+    throw new TransitError('public transport is available for journeys within Norway only');
+  }
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/commute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(query),
+    signal: opts.signal,
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json !== null && typeof json === 'object' && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : `commute board failed (HTTP ${res.status})`;
+    throw new TransitError(message, res.status);
+  }
+  if (!json || typeof json !== 'object' || !('outbound' in json) || !('inbound' in json)) {
+    throw new TransitError('commute board returned an invalid response');
+  }
+  return json as TransitCommuteResult;
 }

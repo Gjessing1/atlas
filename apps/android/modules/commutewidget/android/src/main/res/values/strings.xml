@@ -1,0 +1,4 @@
+<resources>
+  <string name="atlas_commute_widget_name">Atlas commute</string>
+  <string name="atlas_commute_widget_description">Live filtered journeys between your favorite destinations</string>
+</resources>

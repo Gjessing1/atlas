@@ -19,6 +19,7 @@ export function MainMenuSheet({
   onOpenLayers,
   onOpenExplore,
   onOpenMeasure,
+  onOpenCommute,
   onOpenSettings,
   bottomInset,
 }: {
@@ -29,6 +30,7 @@ export function MainMenuSheet({
   onOpenLayers: () => void;
   onOpenExplore: () => void;
   onOpenMeasure: () => void;
+  onOpenCommute: () => void;
   onOpenSettings: () => void;
   bottomInset: number;
 }) {
@@ -62,6 +64,12 @@ export function MainMenuSheet({
       detail: 'Distance and range rings',
       testID: 'open-measure',
       onPress: onOpenMeasure,
+    },
+    {
+      label: 'Commute',
+      detail: 'Live favorite journeys',
+      testID: 'open-commute',
+      onPress: onOpenCommute,
     },
     {
       label: 'Settings',

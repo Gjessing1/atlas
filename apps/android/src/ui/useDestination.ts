@@ -113,6 +113,7 @@ export function useDestination(
         address: result.address,
         detail: result.address ? undefined : result.label || undefined,
         canSave: true,
+        transitStopId: result.transitStopId,
       });
     },
     [pick],

@@ -6,6 +6,7 @@ import {
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
 } from '@atlas/core';
+import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import { useEffect, useRef, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -16,6 +17,7 @@ import type { LocalPack } from '../regions/packs';
 import { useServerOrigin } from '../serverOrigin';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { PotentialExplainCard } from './PotentialExplainCard';
+import { StopDepartures } from './StopDepartures';
 import { WeatherIcon } from './icons';
 import { theme } from './theme';
 
@@ -50,6 +52,8 @@ export interface DestinationTarget {
   unnamed?: boolean;
   /** Set when the target is a saved place — enables the Edit action. */
   placeId?: string;
+  /** Exact National Stop Register identity, when picked from Entur stop search. */
+  transitStopId?: string;
   /**
    * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
    * depth, a parcel's number). Arrives after the card opens — the network round
@@ -166,12 +170,14 @@ export function DestinationCard({
   // decoration. Nothing is downloaded until that action is opened.
   const photos = useNearbyPhotos(at, photosOpen);
   const [nearbyOpen, setNearbyOpen] = useState(false);
+  const [departuresOpen, setDeparturesOpen] = useState(false);
   const nearby = useNearbyPlaces(packs, at, nearbyOpen);
   // Every point is a new question — a list left open from the previous card
   // would describe somewhere the user has already moved on from.
   useEffect(() => {
     setNearbyOpen(false);
     setPhotosOpen(false);
+    setDeparturesOpen(false);
   }, [target.lat, target.lng]);
   /**
    * Reading is a bigger sheet than tapping "Directions".
@@ -461,6 +467,19 @@ export function DestinationCard({
           <WeatherIcon />
           <Text style={styles.saveText}>Weather</Text>
         </Pressable>
+        {transitCoversPoint(at) ? (
+          <Pressable
+            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+            onPress={() => {
+              setDeparturesOpen((open) => !open);
+              sheet.current?.snapTo('full');
+            }}
+            accessibilityState={{ expanded: departuresOpen }}
+            testID="destination-departures"
+          >
+            <Text style={styles.saveText}>Departures</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           style={({ pressed }) => [styles.save, pressed && styles.pressed]}
           onPress={onShare}
@@ -469,6 +488,15 @@ export function DestinationCard({
           <Text style={styles.saveText}>Share</Text>
         </Pressable>
       </View>
+      {departuresOpen ? (
+        <StopDepartures
+          location={{
+            ...at,
+            ...(target.transitStopId ? { stopId: target.transitStopId } : {}),
+          }}
+          onClose={() => setDeparturesOpen(false)}
+        />
+      ) : null}
     </BottomSheet>
   );
 }

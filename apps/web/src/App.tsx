@@ -24,6 +24,7 @@ import {
   useMapProfilePreferences,
   useMapStyleEditor,
   useMeasure,
+  useCommute,
   useNavAddStop,
   useNavPrefs,
   useBestSpots,
@@ -37,6 +38,7 @@ import {
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
+import { fetchTransitCommute, type TransitCommuteQuery } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
@@ -53,6 +55,7 @@ import {
   SettingsIcon,
   StarIcon,
   SunIcon,
+  TrainIcon,
 } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
@@ -106,6 +109,12 @@ const WeatherPanel = lazy(() =>
 const SettingsPanel = lazy(() =>
   import('./settings/SettingsPanel.js').then((m) => ({ default: m.SettingsPanel })),
 );
+const CommutePanel = lazy(() =>
+  import('./transit/CommutePanel.js').then((m) => ({ default: m.CommutePanel })),
+);
+
+const fetchCommute = (query: TransitCommuteQuery, signal: AbortSignal) =>
+  fetchTransitCommute(query, { signal });
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 
@@ -156,6 +165,7 @@ export function App() {
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [revealPlaceId, setRevealPlaceId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [commuteOpen, setCommuteOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
@@ -164,6 +174,7 @@ export function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userData = useUserData();
   const sync = useSync(userData);
+  const commute = useCommute(userData, userData.places, fetchCommute, commuteOpen);
   const appearance = useThemeMode(userData, useSystemColorScheme());
   const mapStyleEditor = useMapStyleEditor(userData);
   useEffect(() => {
@@ -436,6 +447,7 @@ export function App() {
         name: result.name,
         address: result.address,
         category: result.address ? undefined : result.label || undefined,
+        transitStopId: result.transitStopId,
       });
       followPin(result.position);
       const map = mapRef.current;
@@ -802,6 +814,21 @@ export function App() {
         <button
           type="button"
           className="sidebar-toggle"
+          aria-label="Commute"
+          title="Commute"
+          aria-expanded={commuteOpen}
+          onClick={() => {
+            setExploreOpen(false);
+            setSettingsOpen(false);
+            setSidebarOpen(false);
+            setCommuteOpen((open) => !open);
+          }}
+        >
+          <TrainIcon size={18} />
+        </button>
+        <button
+          type="button"
+          className="sidebar-toggle"
           aria-label="Explore nearby places"
           title="Explore"
           aria-expanded={exploreOpen}
@@ -810,6 +837,7 @@ export function App() {
             setTarget(null);
             setSidebarOpen(false);
             setSettingsOpen(false);
+            setCommuteOpen(false);
           }}
         >
           <CompassIcon size={18} />
@@ -822,6 +850,7 @@ export function App() {
           aria-expanded={sidebarOpen}
           onClick={() => {
             setExploreOpen(false);
+            setCommuteOpen(false);
             setSidebarOpen((open) => !open);
           }}
         >
@@ -874,6 +903,7 @@ export function App() {
           aria-expanded={settingsOpen}
           onClick={() => {
             setExploreOpen(false);
+            setCommuteOpen(false);
             setSettingsOpen((open) => !open);
           }}
         >
@@ -1125,6 +1155,13 @@ export function App() {
             profilePreferences={profilePreferences}
             onExportAll={() => void userData.exportAll()}
             onClose={() => setSettingsOpen(false)}
+          />
+        )}
+        {commuteOpen && (
+          <CommutePanel
+            commute={commute}
+            places={userData.places}
+            onClose={() => setCommuteOpen(false)}
           />
         )}
         {/* Route detail samples terrain heights; outside coverage, skip the

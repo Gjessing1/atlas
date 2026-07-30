@@ -12,12 +12,14 @@ import {
   type PlaceTarget,
   type ShareFormat,
 } from '@atlas/core';
+import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
 import { usePlaceContent } from './usePlaceContent.js';
+import { StopDepartures } from '../transit/StopDepartures.js';
 
 interface PlaceCardProps {
   target: PlaceTarget;
@@ -335,6 +337,7 @@ export function PlaceCard({
 }: PlaceCardProps) {
   const [copied, setCopied] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [departuresOpen, setDeparturesOpen] = useState(false);
   // Clear the "Copied" confirmation; a second copy restarts the timer.
   useEffect(() => {
     if (!copied) return;
@@ -345,6 +348,7 @@ export function PlaceCard({
   // the old one's coordinates.
   useEffect(() => {
     setShareOpen(false);
+    setDeparturesOpen(false);
   }, [target.position.lat, target.position.lng]);
 
   const coords = fmtCoords(target.position);
@@ -455,6 +459,15 @@ export function PlaceCard({
         <button type="button" onClick={onWeather}>
           Weather
         </button>
+        {transitCoversPoint(target.position) && (
+          <button
+            type="button"
+            aria-expanded={departuresOpen}
+            onClick={() => setDeparturesOpen((open) => !open)}
+          >
+            Departures
+          </button>
+        )}
         <button
           type="button"
           aria-expanded={shareOpen}
@@ -468,6 +481,14 @@ export function PlaceCard({
           </button>
         )}
       </div>
+      {departuresOpen && (
+        <StopDepartures
+          location={{
+            ...target.position,
+            ...(target.transitStopId ? { stopId: target.transitStopId } : {}),
+          }}
+        />
+      )}
       {shareOpen && (
         <ShareChooser
           // Built when the chooser opens rather than per render: the link

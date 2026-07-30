@@ -128,6 +128,8 @@ export interface PlaceTarget {
   address?: string;
   /** Set when the target *is* a saved place — the card then offers Edit, not Save. */
   placeId?: string;
+  /** Exact National Stop Register identity, when the target came from Entur search. */
+  transitStopId?: string;
   /**
    * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
    * depth, a parcel's number). Arrives *after* the card opens — the network

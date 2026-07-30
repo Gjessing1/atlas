@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import fixture from './__fixtures__/entur-asker-nationaltheatret.json' with { type: 'json' };
-import { buildEnturRequest, parseEnturResponse, TransitError } from './entur.js';
-import { fetchTransitTrips } from './client.js';
+import {
+  buildEnturDeparturesRequest,
+  buildEnturRequest,
+  parseEnturDeparturesResponse,
+  parseEnturResponse,
+  TransitError,
+} from './entur.js';
+import { fetchTransitDepartures, fetchTransitTrips } from './client.js';
 import {
   isRideMode,
   legDelayMs,
@@ -21,6 +27,33 @@ import {
 
 const asker = { lat: 59.8337, lng: 10.4348 };
 const nationaltheatret = { lat: 59.9147, lng: 10.7333 };
+
+const departureCall = {
+  aimedDepartureTime: '2026-07-21T07:33:00+02:00',
+  expectedDepartureTime: '2026-07-21T07:36:00+02:00',
+  realtime: true,
+  cancellation: false,
+  forBoarding: true,
+  destinationDisplay: { frontText: 'Kongsvinger' },
+  quay: { id: 'NSR:Quay:700', publicCode: '2', name: 'Asker stasjon' },
+  serviceJourney: {
+    id: 'NSB:ServiceJourney:123',
+    transportMode: 'rail',
+    line: {
+      publicCode: 'R14',
+      name: 'Asker-Oslo S-Kongsvinger',
+      presentation: { colour: 'DF2027', textColour: 'FFFFFF' },
+      operator: { name: 'Vy' },
+    },
+  },
+  situations: [
+    {
+      situationNumber: 'VY:Situation:1',
+      severity: 'normal',
+      summary: [{ value: 'Signalfeil', language: 'no' }],
+    },
+  ],
+};
 
 describe('buildEnturRequest', () => {
   it('maps an Atlas query onto Entur variables', () => {
@@ -426,6 +459,170 @@ describe('parseEnturResponse — degenerate payloads', () => {
   });
 });
 
+describe('departure boards', () => {
+  it('queries an exact stop id, or the nearest whole stop for a coordinate', () => {
+    const exact = buildEnturDeparturesRequest({
+      ...asker,
+      stopId: 'NSR:StopPlace:59872',
+      startTimeMs: Date.UTC(2026, 6, 21, 5, 30),
+      limit: 99,
+    });
+    expect(exact.query).toContain('stopPlace(id:$id)');
+    expect(exact.variables).toEqual({
+      id: 'NSR:StopPlace:59872',
+      start: '2026-07-21T05:30:00.000Z',
+      limit: 50,
+    });
+
+    const nearest = buildEnturDeparturesRequest(asker);
+    expect(nearest.query).toContain('filterByPlaceTypes:[stopPlace]');
+    expect(nearest.query).toContain('maximumDistance:1500');
+    expect(nearest.variables).toEqual({
+      lat: asker.lat,
+      lng: asker.lng,
+      limit: 30,
+    });
+  });
+
+  /**
+   * Measured against the live planner: `estimatedCalls(startTime:)` is not like
+   * `trip(dateTime:)`. Passing an explicit null crashes Entur's resolver
+   * ("Cannot invoke java.lang.Long.longValue()"), so "now" has to be an absent
+   * variable — the case every card hits, since no card picks a time.
+   */
+  it('omits startTime entirely rather than sending null for "now"', () => {
+    for (const request of [
+      buildEnturDeparturesRequest(asker),
+      buildEnturDeparturesRequest({ ...asker, stopId: 'NSR:StopPlace:59872' }),
+    ]) {
+      expect(request.variables).not.toHaveProperty('start');
+      expect(Object.keys(request.variables)).not.toContain('start');
+    }
+  });
+
+  it('maps live departure, platform, line and disruption details', () => {
+    const result = parseEnturDeparturesResponse({
+      data: {
+        stopPlace: {
+          id: 'NSR:StopPlace:59872',
+          name: 'Asker stasjon',
+          latitude: asker.lat,
+          longitude: asker.lng,
+          estimatedCalls: [
+            { ...departureCall, forBoarding: false },
+            departureCall,
+            {
+              ...departureCall,
+              aimedDepartureTime: '2026-07-21T07:30:00+02:00',
+              expectedDepartureTime: '2026-07-21T07:30:00+02:00',
+              cancellation: true,
+              destinationDisplay: { frontText: 'Oslo S' },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.stop).toEqual({
+      id: 'NSR:StopPlace:59872',
+      name: 'Asker stasjon',
+      position: asker,
+    });
+    // Sorted by the time the vehicle is now expected, not upstream order.
+    expect(result.departures.map((departure) => departure.destination)).toEqual([
+      'Oslo S',
+      'Kongsvinger',
+    ]);
+    expect(result.departures[0]!.cancelled).toBe(true);
+    expect(result.departures[1]).toMatchObject({
+      mode: 'rail',
+      aimedDepartureMs: Date.parse('2026-07-21T07:33:00+02:00'),
+      expectedDepartureMs: Date.parse('2026-07-21T07:36:00+02:00'),
+      realtime: true,
+      line: {
+        publicCode: 'R14',
+        operator: 'Vy',
+        colour: '#DF2027',
+        textColour: '#FFFFFF',
+      },
+      quay: { id: 'NSR:Quay:700', publicCode: '2' },
+      situations: [{ summary: 'Signalfeil', severity: 'warning' }],
+    });
+  });
+
+  it('keeps nearest-stop distance and treats no nearby stop as an empty answer', () => {
+    const nearest = parseEnturDeparturesResponse({
+      data: {
+        nearest: {
+          edges: [
+            {
+              node: {
+                distance: 314.4,
+                place: {
+                  id: 'NSR:StopPlace:1',
+                  name: 'Torget',
+                  latitude: 60,
+                  longitude: 10,
+                  estimatedCalls: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(nearest.stop?.distanceM).toBe(314.4);
+    expect(nearest.departures).toEqual([]);
+    expect(parseEnturDeparturesResponse({ data: { nearest: { edges: [] } } })).toEqual({
+      stop: null,
+      departures: [],
+    });
+  });
+
+  it('throws on a departure-board GraphQL error', () => {
+    expect(() => parseEnturDeparturesResponse({ errors: [{ message: 'Unknown stop' }] })).toThrow(
+      'Unknown stop',
+    );
+  });
+
+  /**
+   * The live shape for a coordinate with nothing near it. Entur answers with a
+   * resolver error, not an empty edge list, so an untranslated version of this
+   * tells a hiker their connection is broken.
+   */
+  it('reads "no stop within range" as an empty board, not a failure', () => {
+    expect(
+      parseEnturDeparturesResponse({
+        errors: [
+          {
+            message:
+              'Exception while fetching data (/nearest) : RoutingError{code: LOCATION_NOT_FOUND, inputField: FROM_PLACE}',
+            path: ['nearest'],
+            extensions: { classification: 'DataFetchingException' },
+          },
+        ],
+        data: { nearest: null },
+      }),
+    ).toEqual({ stop: null, departures: [] });
+  });
+
+  it('still fails loudly when the planner itself is broken', () => {
+    expect(() =>
+      parseEnturDeparturesResponse({
+        errors: [
+          { message: 'LOCATION_NOT_FOUND somewhere else entirely', path: ['stopPlace'] },
+          {
+            message:
+              'Exception while fetching data (/nearest) : RoutingError{code: LOCATION_NOT_FOUND}',
+            path: ['nearest'],
+          },
+        ],
+        data: { nearest: null },
+      }),
+    ).toThrow('LOCATION_NOT_FOUND somewhere else entirely');
+  });
+});
+
 describe('transitCoverage', () => {
   it('covers journeys inside Norway', () => {
     expect(transitCoverage(asker, nationaltheatret)).toBe(true);
@@ -475,5 +672,39 @@ describe('fetchTransitTrips', () => {
     await expect(
       fetchTransitTrips({ from: asker, to: nationaltheatret }, { fetchImpl }),
     ).rejects.toMatchObject({ name: 'TransitError', status: 502 });
+  });
+});
+
+describe('fetchTransitDepartures', () => {
+  it('gets a next-hour board from the Atlas proxy', async () => {
+    let seen = '';
+    const result = await fetchTransitDepartures(
+      { ...asker, stopId: 'NSR:StopPlace:59872', limit: 12 },
+      {
+        baseUrl: 'https://atlas.test',
+        fetchImpl: (async (url: string) => {
+          seen = String(url);
+          return new Response(JSON.stringify({ stop: null, departures: [] }), { status: 200 });
+        }) as unknown as typeof fetch,
+      },
+    );
+    const url = new URL(seen);
+    expect(url.pathname).toBe('/api/transit/departures');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      lat: String(asker.lat),
+      lon: String(asker.lng),
+      stopId: 'NSR:StopPlace:59872',
+      limit: '12',
+    });
+    expect(result).toEqual({ stop: null, departures: [] });
+  });
+
+  it('refuses an outside-Norway board without calling the backend', async () => {
+    const fetchImpl = (() => {
+      throw new Error('should not be called');
+    }) as unknown as typeof fetch;
+    await expect(fetchTransitDepartures({ lat: 52.52, lng: 13.4 }, { fetchImpl })).rejects.toThrow(
+      /within Norway/,
+    );
   });
 });

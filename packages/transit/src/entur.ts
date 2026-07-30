@@ -3,6 +3,9 @@ import { expandModeFilter } from './model.js';
 import type {
   TransitBooking,
   TransitBookingMethod,
+  TransitDeparture,
+  TransitDeparturesQuery,
+  TransitDeparturesResult,
   TransitLeg,
   TransitLine,
   TransitMode,
@@ -36,8 +39,8 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int,$pageCursor:String){
- trip(from:$from,to:$to,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow,pageCursor:$pageCursor){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[TripViaLocationInput!],$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$searchWindow:Int,$pageCursor:String){
+ trip(from:$from,to:$to,via:$via,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,searchWindow:$searchWindow,pageCursor:$pageCursor){
   nextPageCursor previousPageCursor
   routingErrors{ code inputField }
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance emission{co2}
@@ -54,8 +57,36 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$dateT
     bookingArrangements{ bookingMethods latestBookingTime latestBookingDay bookingNote bookingContact{phone url} }
    }}}}`;
 
+const DEPARTURE_FIELDS = `id name latitude longitude
+ estimatedCalls(startTime:$start,timeRange:3600,numberOfDepartures:$limit,arrivalDeparture:departures,includeCancelledTrips:true){
+  aimedDepartureTime expectedDepartureTime realtime cancellation forBoarding
+  destinationDisplay{frontText}
+  quay{id publicCode name}
+  serviceJourney{id publicCode transportMode line{publicCode name presentation{colour textColour} operator{name}}}
+  situations{ situationNumber severity reportType summary{value language} description{value language} advice{value language} infoLinks{uri} }
+ }`;
+
+/** Exact-stop board: used when an Entur search result retained its NSR StopPlace id. */
+export const ENTUR_STOP_DEPARTURES_QUERY = `query StopDepartures($id:String!,$start:DateTime,$limit:Int!){
+ stopPlace(id:$id){${DEPARTURE_FIELDS}}
+}`;
+
+/**
+ * Coordinate fallback for map pins, saved places and ordinary search results.
+ * `nearest` selects a StopPlace rather than one quay so the answer includes
+ * every platform/stand at an interchange, not whichever side of the road was
+ * a few metres closer.
+ */
+export const ENTUR_NEAREST_DEPARTURES_QUERY = `query NearestDepartures($lat:Float!,$lng:Float!,$start:DateTime,$limit:Int!){
+ nearest(latitude:$lat,longitude:$lng,maximumDistance:1500,maximumResults:1,filterByPlaceTypes:[stopPlace],filterByInUse:true,first:1){
+  edges{node{distance place{... on StopPlace{${DEPARTURE_FIELDS}}}}}
+ }
+}`;
+
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
+const DEFAULT_DEPARTURE_LIMIT = 30;
+const MAX_DEPARTURE_LIMIT = 50;
 const DEFAULT_WALK_SPEED_MPS = 1.3;
 
 /**
@@ -112,6 +143,17 @@ export function buildEnturRequest(query: TransitQuery): {
     variables: {
       from: locationArgument(query.from),
       to: locationArgument(query.to),
+      via:
+        query.via && query.via.length > 0
+          ? query.via.map((place) => ({
+              visit: {
+                ...(place.stopId
+                  ? { stopLocationIds: [place.stopId] }
+                  : { coordinate: { latitude: place.lat, longitude: place.lng } }),
+                minimumWaitTime: 'PT0S',
+              },
+            }))
+          : null,
       // Omitted entirely when unset so Entur applies its own "now".
       dateTime: query.dateTimeMs === undefined ? null : new Date(query.dateTimeMs).toISOString(),
       arriveBy: query.arriveBy ?? false,
@@ -124,6 +166,35 @@ export function buildEnturRequest(query: TransitQuery): {
       pageCursor: query.pageCursor ?? null,
     },
   };
+}
+
+/** Build a next-hour departure-board request, preferring an exact NSR stop id. */
+export function buildEnturDeparturesRequest(query: TransitDeparturesQuery): {
+  query: string;
+  variables: Record<string, unknown>;
+} {
+  const limit = Math.min(
+    Math.max(Math.trunc(query.limit ?? DEFAULT_DEPARTURE_LIMIT), 1),
+    MAX_DEPARTURE_LIMIT,
+  );
+  // `startTime` must be *absent*, not null, when we mean "now". `trip(dateTime:)`
+  // tolerates an explicit null; `estimatedCalls(startTime:)` does not — Entur's
+  // resolver reads the argument unconditionally and a null one crashes it
+  // server-side, which arrives as a GraphQL error and would make every board
+  // ("Departures" on a card, with no time chosen) look like a network failure.
+  const common: Record<string, unknown> = { limit };
+  if (query.startTimeMs !== undefined) {
+    common.start = new Date(query.startTimeMs).toISOString();
+  }
+  return query.stopId
+    ? {
+        query: ENTUR_STOP_DEPARTURES_QUERY,
+        variables: { ...common, id: query.stopId },
+      }
+    : {
+        query: ENTUR_NEAREST_DEPARTURES_QUERY,
+        variables: { ...common, lat: query.lat, lng: query.lng },
+      };
 }
 
 /** Entur transport modes Atlas renders; anything else degrades to `unknown`. */
@@ -211,6 +282,17 @@ function toLine(wire: unknown, authority: unknown): TransitLine | undefined {
     ...(toColour(line.presentation?.textColour)
       ? { textColour: toColour(line.presentation?.textColour) }
       : {}),
+  };
+}
+
+function toQuay(wire: unknown): TransitDeparture['quay'] {
+  const quay = (wire ?? {}) as { id?: unknown; publicCode?: unknown; name?: unknown };
+  return {
+    ...(typeof quay.id === 'string' ? { id: quay.id } : {}),
+    ...(typeof quay.publicCode === 'string' && quay.publicCode.trim()
+      ? { publicCode: quay.publicCode }
+      : {}),
+    ...(typeof quay.name === 'string' && quay.name.trim() ? { name: quay.name } : {}),
   };
 }
 
@@ -408,6 +490,108 @@ export class TransitError extends Error {
     super(message);
     this.name = 'TransitError';
   }
+}
+
+/**
+ * Entur's way of saying the coordinate has no stop near it: a resolver error on
+ * the `nearest` field carrying OTP's LOCATION_NOT_FOUND. Matched on the field
+ * *and* the code so a genuine upstream fault still reaches the user as one.
+ */
+function isNoStopNearbyError(error: { message?: unknown; path?: unknown }): boolean {
+  const onNearest = Array.isArray(error.path) && error.path[0] === 'nearest';
+  return (
+    onNearest && typeof error.message === 'string' && error.message.includes('LOCATION_NOT_FOUND')
+  );
+}
+
+/**
+ * Map either exact-stop or nearest-stop Entur GraphQL output onto one board.
+ * Drop-off-only calls are excluded: a departure a traveller cannot board is
+ * operationally real but does not belong on their board.
+ */
+export function parseEnturDeparturesResponse(body: unknown): TransitDeparturesResult {
+  const root = body as {
+    errors?: { message?: unknown; path?: unknown }[];
+    data?: {
+      stopPlace?: unknown;
+      nearest?: { edges?: unknown } | null;
+    } | null;
+  } | null;
+  if (Array.isArray(root?.errors) && root.errors.length > 0) {
+    // "There is no stop within 1500 m" is not a failure, but Entur reports it as
+    // one: `nearest` raises LOCATION_NOT_FOUND instead of resolving to an empty
+    // edge list. Left as a thrown error it would tell someone standing on a
+    // mountain to check their connection, so it becomes the empty board the
+    // cards already have copy for.
+    if (root.errors.every(isNoStopNearbyError)) return { stop: null, departures: [] };
+    const first = root.errors[0]?.message;
+    throw new TransitError(typeof first === 'string' ? first : 'departure board error');
+  }
+
+  let distanceM: number | undefined;
+  let stopWire = root?.data?.stopPlace;
+  if (!stopWire) {
+    const edges = root?.data?.nearest?.edges;
+    const node = Array.isArray(edges)
+      ? ((edges[0] as { node?: { distance?: unknown; place?: unknown } } | undefined)?.node ?? null)
+      : null;
+    stopWire = node?.place;
+    if (typeof node?.distance === 'number' && Number.isFinite(node.distance)) {
+      distanceM = node.distance;
+    }
+  }
+  if (!stopWire || typeof stopWire !== 'object') return { stop: null, departures: [] };
+
+  const wire = stopWire as Record<string, unknown>;
+  const id = typeof wire.id === 'string' ? wire.id : '';
+  const name = typeof wire.name === 'string' ? wire.name : '';
+  const calls = Array.isArray(wire.estimatedCalls) ? wire.estimatedCalls : [];
+  const departures = calls.flatMap((item): TransitDeparture[] => {
+    if (!item || typeof item !== 'object') return [];
+    const call = item as Record<string, unknown>;
+    if (call.forBoarding === false) return [];
+    const aimedDepartureMs = toMs(call.aimedDepartureTime);
+    const service = (call.serviceJourney ?? {}) as Record<string, unknown>;
+    const line = toLine(
+      service.line,
+      (service.line as { operator?: unknown } | null)?.operator,
+    ) ?? {
+      publicCode:
+        typeof service.publicCode === 'string' && service.publicCode.trim()
+          ? service.publicCode
+          : '—',
+    };
+    const destination = (call.destinationDisplay as { frontText?: unknown } | null)?.frontText;
+    const quay = toQuay(call.quay);
+    const serviceId = typeof service.id === 'string' ? service.id : line.publicCode;
+    return [
+      {
+        id: `${serviceId}:${quay.id ?? ''}:${aimedDepartureMs}`,
+        mode: toMode(service.transportMode),
+        aimedDepartureMs,
+        expectedDepartureMs: toMs(call.expectedDepartureTime, aimedDepartureMs),
+        realtime: call.realtime === true,
+        cancelled: call.cancellation === true,
+        destination:
+          typeof destination === 'string' && destination.trim()
+            ? destination
+            : 'Destination unknown',
+        line,
+        quay,
+        situations: toSituations(call.situations),
+      },
+    ];
+  });
+  departures.sort((a, b) => a.expectedDepartureMs - b.expectedDepartureMs);
+  return {
+    stop: {
+      id,
+      name,
+      position: { lat: toNumber(wire.latitude), lng: toNumber(wire.longitude) },
+      ...(distanceM === undefined ? {} : { distanceM }),
+    },
+    departures,
+  };
 }
 
 /**

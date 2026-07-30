@@ -86,6 +86,7 @@ export function useTransit(
   from: TransitLocation | null,
   to: TransitLocation | null,
   active: boolean,
+  via: readonly TransitLocation[] = [],
 ): TransitPlanner {
   const [trips, setTrips] = useState<TransitTrip[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,6 +112,7 @@ export function useTransit(
   // values so a re-render doesn't re-ask the planner.
   const fromKey = from ? `${from.lat},${from.lng},${from.stopId ?? ''}` : '';
   const toKey = to ? `${to.lat},${to.lng},${to.stopId ?? ''}` : '';
+  const viaKey = via.map((point) => `${point.lat},${point.lng},${point.stopId ?? ''}`).join(';');
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -128,6 +130,7 @@ export function useTransit(
     setLoading(true);
     const timer = setTimeout(async () => {
       const query: TransitQuery = { from, to };
+      if (via.length > 0) query.via = via;
       if (timeMs !== null) query.dateTimeMs = timeMs;
       if (arriveBy) query.arriveBy = true;
       if (modes.length > 0) query.modes = modes;
@@ -168,7 +171,7 @@ export function useTransit(
     // `from`/`to` enter the deps through their value keys above: callers rebuild
     // the objects each render, and re-asking a national planner on every render
     // would be both wrong and rude.
-  }, [active, covered, fromKey, toKey, timeMs, arriveBy, modeKey, cursor, seed, transit]);
+  }, [active, covered, fromKey, toKey, viaKey, timeMs, arriveBy, modeKey, cursor, seed, transit]);
 
   // Every control that changes the question also drops the cursor: paging is
   // only ever relative to the answer currently on screen.
@@ -248,9 +251,8 @@ export interface TransitPlan extends TransitPlanner {
 }
 
 /**
- * Public transport for the current plan. It travels between the *ends* of the
- * plan only: a timetable has no way to honour via points, so intermediate
- * stops are deliberately ignored rather than silently approximated.
+ * Public transport for the current plan. Every intermediate waypoint is an
+ * ordered timetable visit, matching the road planner's visible route.
  *
  * Shared by web and Android — the platforms differ only in the `transit`
  * fetcher they pass (same-origin vs. an absolute server origin), which is not
@@ -269,6 +271,10 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   const to: TransitLocation | null = last
     ? { ...last.pos, ...(last.transitStopId ? { stopId: last.transitStopId } : {}) }
     : null;
+  const via: TransitLocation[] = route.waypoints.slice(1, -1).map((waypoint) => ({
+    ...waypoint.pos,
+    ...(waypoint.transitStopId ? { stopId: waypoint.transitStopId } : {}),
+  }));
   // Offer the mode unless we positively *know* it cannot answer. Gating on
   // `covered` instead would hide the chip until both endpoints exist — which
   // is exactly when someone is looking for the travel mode, and reads as the
@@ -285,7 +291,7 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   // then paints departures already in hand instead of re-asking. `useTransit`
   // itself declines to fetch without both endpoints and coverage, so this
   // costs nothing on a half-built plan.
-  const planner = useTransit(transit, from, to, offered && route.active);
+  const planner = useTransit(transit, from, to, offered && route.active, via);
 
   useEffect(() => {
     if (!offered) setEnabled(false);

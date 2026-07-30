@@ -113,7 +113,7 @@ describe('useTransitPlan', () => {
     });
   });
 
-  it('plans between the ends only, ignoring via points a timetable cannot honour', async () => {
+  it('sends every intermediate waypoint as an ordered timetable visit', async () => {
     const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
     const mid: LatLng = { lat: 60.0, lng: 9.0 };
     const { result: r } = renderPlan(transit, [OSLO, mid, BERGEN]);
@@ -121,7 +121,11 @@ describe('useTransitPlan', () => {
     act(() => r.current.transit.setEnabled(true));
     await settle();
 
-    expect(transit.mock.calls[0]![0]).toMatchObject({ from: OSLO, to: BERGEN });
+    expect(transit.mock.calls[0]![0]).toMatchObject({
+      from: OSLO,
+      via: [mid],
+      to: BERGEN,
+    });
   });
 
   it('offers the mode before a destination exists, so it is findable at all', () => {

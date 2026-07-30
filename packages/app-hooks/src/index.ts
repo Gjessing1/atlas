@@ -80,6 +80,21 @@ export {
 } from './useTransit.js';
 export { useTransitBoard, type TransitBoard, type TransitTiming } from './useTransitBoard.js';
 export {
+  useTransitDepartures,
+  type TransitDepartures,
+  type TransitDeparturesFn,
+} from './useTransitDepartures.js';
+export {
+  COMMUTE_SETTING_KEY,
+  defaultCommuteConfig,
+  parseCommuteConfig,
+  useCommute,
+  type CommuteConfig,
+  type CommuteController,
+  type CommuteFn,
+  type CommuteSettings,
+} from './useCommute.js';
+export {
   useStopSearch,
   type StopGeocodeFn,
   type StopGeocodeQuery,

@@ -5,6 +5,7 @@ import {
   useRegionPackJobs,
   useMapStyleEditor,
   useMeasure,
+  useCommute,
   routePlanState,
   useNavAddStop,
   useNavPrefs,
@@ -15,6 +16,7 @@ import {
   usePotentialTarget,
   useThemeMode,
   type FetchNearbyFn,
+  type CommuteFn,
 } from '@atlas/app-hooks';
 import {
   atlasRouteUrl,
@@ -38,7 +40,7 @@ import {
   trackToRoutePoints,
   type RoutePath,
 } from '@atlas/routing';
-import { transitTripBounds, type TransitTrip } from '@atlas/transit';
+import { fetchTransitCommute, transitTripBounds, type TransitTrip } from '@atlas/transit';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
@@ -97,6 +99,7 @@ import { useAutoPackUpdate, usePackFreshness } from './src/regions/usePackFreshn
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
+import { configureCommuteWidget } from './src/commuteWidget';
 import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
 import { useDirections } from './src/routing/useDirections';
@@ -110,6 +113,7 @@ import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
 import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
+import { CommuteSheet } from './src/ui/CommuteSheet';
 import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
@@ -196,11 +200,27 @@ function AppInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [commuteOpen, setCommuteOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [tracksOpen, setTracksOpen] = useState(false);
+  const commuteFetch = useMemo<CommuteFn>(
+    () => (query, signal) => fetchTransitCommute(query, { baseUrl: serverOrigin, signal }),
+    [serverOrigin],
+  );
+  const commute = useCommute(data, data.places, commuteFetch, commuteOpen);
+  // Only speak for the home-screen widget once the saved commute has actually
+  // been read. Every launch passes through `query === null` first, and handing
+  // that to the widget clears its stored question and blanks it to "Open Atlas
+  // to set up your commute" — for a moment normally, and permanently if the app
+  // is killed before storage answers. A widget's whole point is working without
+  // the app, so it must never be reset by the app merely starting.
+  useEffect(() => {
+    if (!commute.ready) return;
+    void configureCommuteWidget(serverOrigin, commute.query);
+  }, [commute.query, commute.ready, serverOrigin]);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
   const measure = useMeasure();
@@ -468,6 +488,7 @@ function AppInner() {
     exploreOpen ||
     menuOpen ||
     measure.open ||
+    commuteOpen ||
     dest.destination !== null ||
     offlineRegion !== null;
   // Landscape is short, so several pieces of chrome move into the leading
@@ -1191,6 +1212,7 @@ function AppInner() {
             onOpenLayers={() => setLayersOpen(true)}
             onOpenExplore={() => setExploreOpen(true)}
             onOpenMeasure={() => measure.setOpen(true)}
+            onOpenCommute={() => setCommuteOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             bottomInset={bottomInset}
           />
@@ -1200,6 +1222,13 @@ function AppInner() {
           <MeasureSheet
             visible={measure.open && !planning && !navActive}
             measure={measure}
+            bottomInset={bottomInset}
+          />
+          <CommuteSheet
+            visible={commuteOpen && !planning && !navActive}
+            commute={commute}
+            places={data.places}
+            onClose={() => setCommuteOpen(false)}
             bottomInset={bottomInset}
           />
 

@@ -335,6 +335,149 @@ button {
   color: var(--text-muted) !important;
 }
 
+/* Destination-free public-transport board. It lives in the place card because
+   "what leaves near here?" starts with a point, not a route. The row stays a
+   compact three-column board: time, recognisable line pill, destination. */
+.stop-departures {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.stop-departures-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stop-departures-head > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stop-departures-head strong {
+  font-size: 13px;
+}
+
+.stop-departures-head span,
+.stop-departures-live,
+.stop-departures-state {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.stop-departures-head button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.stop-departures-list {
+  max-height: 260px;
+  margin: 7px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.stop-departures-list li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 7px;
+  padding: 7px 1px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stop-departure-time,
+.stop-departure-service {
+  display: flex;
+  flex-direction: column;
+}
+
+.stop-departure-time strong {
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.stop-departure-time del,
+.stop-departure-time span,
+.stop-departure-meta,
+.stop-departure-notice {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.stop-departure-time.late strong,
+.stop-departure-time.late span {
+  color: var(--warning);
+}
+
+.stop-departure-time.early strong,
+.stop-departure-time.early span {
+  color: var(--info);
+}
+
+.stop-departure-service {
+  position: relative;
+  padding-left: 40px;
+  min-height: 30px;
+}
+
+.stop-departure-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-width: 32px;
+  max-width: 36px;
+  padding: 2px 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  /* Only shows for a line with no official colour of its own — the inline
+     style wins otherwise. `--surface-muted` is the palette's real sunken
+     surface in both themes; `--surface-sunken` has never been defined, which
+     is why .spots-window carries a literal fallback for it. */
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stop-departure-destination {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stop-departure-notice {
+  color: var(--warning);
+}
+
+.stop-departure-cancelled {
+  background: var(--danger-bg);
+}
+
+.stop-departure-cancelled .stop-departure-destination {
+  color: var(--danger);
+}
+
+.stop-departures-state {
+  margin: 10px 0;
+}
+
+.stop-departures-error {
+  color: var(--danger);
+}
+
+.stop-departures-live {
+  margin: 6px 0 0;
+}
+
 .place-card-content {
   padding: 8px 9px;
   border-radius: 8px;
@@ -4839,6 +4982,196 @@ button.transit-notice-summary {
   overflow: hidden;
 }
 
+/* --- Saved commute board --- */
+
+.commute-panel {
+  position: absolute;
+  z-index: 6;
+  top: 60px;
+  right: 12px;
+  bottom: 12px;
+  width: min(360px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.commute-header,
+.commute-live,
+.commute-trip-head,
+.commute-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commute-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.commute-header > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.commute-header span,
+.commute-route span,
+.commute-trip-head span,
+.commute-rule,
+.commute-live {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.commute-body {
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.commute-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.commute-favorite,
+.commute-filter {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.commute-favorite select,
+.commute-filter input {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: inherit;
+  font: inherit;
+}
+
+.commute-rule {
+  margin: 8px 0 12px;
+  line-height: 1.35;
+}
+
+.commute-directions {
+  display: flex;
+  gap: 6px;
+}
+
+.commute-directions button {
+  flex: 1;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.commute-directions button[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.commute-route {
+  margin-top: 12px;
+}
+
+.commute-route {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.commute-state {
+  padding: 12px 8px;
+  margin: 8px 0 0;
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.commute-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.commute-trips {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  margin: 10px 0;
+  list-style: none;
+}
+
+.commute-trips li {
+  position: relative;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.commute-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.commute-lines span {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.commute-delay,
+.commute-warning {
+  display: inline-block;
+  margin: 6px 6px 0 0;
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.commute-live {
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
+.commute-live span {
+  flex: 1;
+}
+
+.commute-live button {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .settings-header {
   position: sticky;
   top: 0;
@@ -5351,6 +5684,7 @@ button.transit-notice-summary {
      the now two-row topbar. */
   .sidebar,
   .settings-panel,
+  .commute-panel,
   .explore-panel {
     left: 8px;
     right: 8px;

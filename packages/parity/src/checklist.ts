@@ -136,6 +136,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/DestinationCard.tsx', contains: 'onWeather' },
   },
   {
+    id: 'card-transit-departures',
+    surface: 'card',
+    capability: 'The next hour of departures from the stop nearest this spot',
+    hook: 'useTransitDepartures',
+    web: { file: 'apps/web/src/transit/StopDepartures.tsx', contains: 'useTransitDepartures' },
+    android: { file: 'apps/android/src/ui/StopDepartures.tsx', contains: 'useTransitDepartures' },
+    note: 'Offered only inside Norway on both clients (`transitCoversPoint`) — §3’s defined non-Norway behaviour is absence, not a button that fails.',
+  },
+  {
     id: 'card-share-chooser',
     surface: 'card',
     capability: 'Share the spot, choosing what the recipient gets',
@@ -601,6 +610,33 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useTransit',
     web: { file: 'apps/web/src/routing/TransitResults.tsx', contains: 'useTransit' },
     android: { file: 'apps/android/src/ui/TransitResults.tsx', contains: 'legTimeParts' },
+  },
+  {
+    id: 'planner-commute-board',
+    surface: 'planner',
+    capability:
+      'A saved two-way commute between favorites, filtered to the lines and stops that count',
+    hook: 'useCommute',
+    web: {
+      file: 'apps/web/src/transit/CommutePanel.tsx',
+      contains: 'Favorite-to-favorite live journeys',
+    },
+    android: {
+      file: 'apps/android/src/ui/CommuteSheet.tsx',
+      contains: 'Favorite-to-favorite live journeys',
+    },
+    note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The saved configuration is one synced setting (`transit.commute`), so the board is the same on both clients.',
+  },
+  {
+    id: 'planner-commute-widget',
+    surface: 'planner',
+    capability: 'The next two journeys each way on the home screen, without opening the app',
+    web: null,
+    android: {
+      file: 'apps/android/modules/commutewidget/android/src/main/java/io/gjessing/atlas/commutewidget/CommuteWidgetProvider.kt',
+      contains: 'atlas_commute_widget',
+    },
+    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, so there is no second configuration to drift.',
   },
 
   // ---------------------------------------------------------- navigation ---

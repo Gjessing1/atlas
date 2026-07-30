@@ -15,6 +15,14 @@ export type {
   TransitProblem,
   TransitProblemCode,
   TransitTripBounds,
+  TransitDeparture,
+  TransitDepartureStop,
+  TransitDeparturesQuery,
+  TransitDeparturesResult,
+  TransitCommutePlace,
+  TransitCommuteFilter,
+  TransitCommuteQuery,
+  TransitCommuteResult,
 } from './model.js';
 export {
   isRideMode,
@@ -30,6 +38,7 @@ export {
   filterModeOf,
   transitTripBounds,
   WIDE_SEARCH_WINDOW_MINUTES,
+  SEARCH_WINDOW_RETRY_MINUTES,
   RIDE_MODES,
 } from './model.js';
 export {
@@ -53,7 +62,16 @@ export {
   type TransitTimeTone,
   type TripSummary,
 } from './labels.js';
-export { ENTUR_TRIP_QUERY, TransitError, buildEnturRequest, parseEnturResponse } from './entur.js';
+export {
+  ENTUR_TRIP_QUERY,
+  ENTUR_STOP_DEPARTURES_QUERY,
+  ENTUR_NEAREST_DEPARTURES_QUERY,
+  TransitError,
+  buildEnturRequest,
+  buildEnturDeparturesRequest,
+  parseEnturResponse,
+  parseEnturDeparturesResponse,
+} from './entur.js';
 export {
   isTransitStopId,
   mergeTransitSearchResults,
@@ -63,6 +81,9 @@ export {
 export {
   fetchTransitStops,
   fetchTransitTrips,
+  fetchTransitDepartures,
+  fetchTransitCommute,
   type FetchTransitOptions,
   type FetchTransitStopsOptions,
 } from './client.js';
+export { commuteTripMatches, filterCommuteResult, commuteTransitQueries } from './commute.js';

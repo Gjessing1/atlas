@@ -250,10 +250,63 @@ export interface TransitLocation extends LatLng {
   stopId?: string;
 }
 
+/**
+ * One departure shown on a stop board. This deliberately reuses the same line,
+ * quay and disruption models as a ride leg: "R14 to Kongsvinger, platform 2,
+ * six minutes late" must mean the same thing before and after a destination is
+ * chosen.
+ */
+export interface TransitDeparture {
+  /** Stable-enough row identity: service journey + quay + aimed departure. */
+  id: string;
+  mode: TransitMode;
+  aimedDepartureMs: number;
+  expectedDepartureMs: number;
+  realtime: boolean;
+  cancelled: boolean;
+  destination: string;
+  line: TransitLine;
+  quay: TransitQuay;
+  situations: TransitSituation[];
+}
+
+/** The stop whose board was selected, either exactly by NSR id or nearest to a coordinate. */
+export interface TransitDepartureStop {
+  id: string;
+  name: string;
+  position: LatLng;
+  /** Present only for a nearest-stop lookup; exact stop selections are already at their stop. */
+  distanceM?: number;
+}
+
+/**
+ * A stop-board request. `stopId` wins when present; coordinates remain required
+ * for Norway coverage and are the explicit fallback for pins, saved places and
+ * other targets that do not carry National Stop Register identity.
+ */
+export interface TransitDeparturesQuery extends TransitLocation {
+  /** Start of the one-hour board window; omitted means Entur's current time. */
+  startTimeMs?: number;
+  /** Maximum rows returned after time filtering (default 30, capped at 50). */
+  limit?: number;
+}
+
+/** The next-hour board for one stop. `stop: null` means no stop was found nearby. */
+export interface TransitDeparturesResult {
+  stop: TransitDepartureStop | null;
+  departures: TransitDeparture[];
+}
+
 /** A journey request in app terms, decoupled from Entur's GraphQL. */
 export interface TransitQuery {
   from: TransitLocation;
   to: TransitLocation;
+  /**
+   * Ordered places the journey must visit. Unlike a visual waypoint, each one
+   * is sent to the timetable planner, so a saved commute through an
+   * interchange (for example Asker) cannot silently bypass it.
+   */
+  via?: readonly TransitLocation[];
   /**
    * Epoch ms to plan around; defaults to now at the server. Interpreted as the
    * desired *departure* unless `arriveBy` is set, in which case it is the
@@ -290,6 +343,37 @@ export interface TransitQuery {
    * set, the planner ignores `dateTimeMs`, `arriveBy` and `searchWindowMinutes`.
    */
   pageCursor?: string;
+}
+
+/** A named favorite used as one end (or interchange) of a saved commute. */
+export interface TransitCommutePlace extends TransitLocation {
+  name: string;
+}
+
+/**
+ * The deliberately narrow service filter for a regular commute. Bus lines are
+ * allow-listed; trains are allowed only when none of their calls matches an
+ * excluded stop. Other ride modes are rejected so an apparently suitable
+ * result cannot quietly substitute a tram or ferry.
+ */
+export interface TransitCommuteFilter {
+  allowedBusLines: readonly string[];
+  excludedRailStops: readonly string[];
+}
+
+/** One saved, reversible commute between favorites. */
+export interface TransitCommuteQuery extends TransitCommuteFilter {
+  from: TransitCommutePlace;
+  via: readonly TransitCommutePlace[];
+  to: TransitCommutePlace;
+  /** Journey options Entur should inspect before applying the strict filter. */
+  limit?: number;
+}
+
+/** Filtered upcoming journeys in both directions. */
+export interface TransitCommuteResult {
+  outbound: TransitResult;
+  inbound: TransitResult;
 }
 
 /**
@@ -445,6 +529,21 @@ const inNorway = transitCoversPoint;
  * and on a busy corridor the default already answers.
  */
 export const WIDE_SEARCH_WINDOW_MINUTES = 24 * 60;
+
+/**
+ * The look-ahead escalation for an empty answer, widest last.
+ *
+ * Measured against live Entur (Engelsrud → Nationaltheatret, asked 22:30, the
+ * evening case that made this necessary): the default window costs 1.2 s and
+ * finds nothing, 6 h costs 1.2 s, 12 h costs 3.3 s and a full day costs 7.5 s —
+ * all three returning the *same* first journey, 03:20. Cost scales with the
+ * width, so jumping straight to 24 h pays six times over for an answer a few
+ * hours out and lands close enough to the proxy's 10 s upstream timeout to fail
+ * intermittently. Stepping asks the cheap question first and keeps the full day
+ * as the backstop for a genuinely sparse route (Å i Lofoten → Svolvær), where
+ * the next departure really is tomorrow.
+ */
+export const SEARCH_WINDOW_RETRY_MINUTES: readonly number[] = [6 * 60, WIDE_SEARCH_WINDOW_MINUTES];
 
 /**
  * Whether a transit answer is possible for these endpoints — the defined
