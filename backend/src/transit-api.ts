@@ -25,6 +25,7 @@ import {
   WIDE_SEARCH_WINDOW_MINUTES,
 } from '@atlas/transit';
 import type {
+  CommuteEmptyReason,
   TransitCommuteDirection,
   TransitCommutePlace,
   TransitCommuteQuery,
@@ -515,7 +516,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     query: TransitQuery,
     filter: TransitCommuteQuery['filter'],
   ): Promise<
-    | { ok: true; result: TransitResult; emptyReason: 'upstream' | 'filtered' }
+    | { ok: true; result: TransitResult; emptyReason: CommuteEmptyReason }
     | { ok: false; status: number }
   > => {
     const ask = (attempt: TransitQuery) =>
@@ -543,7 +544,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     }
     const result = filterCommuteResult(upstream, filter);
     const reason = commuteEmptyReason(result, filter, upstream.trips.length);
-    return { ok: true, result, emptyReason: reason === 'filtered' ? 'filtered' : 'upstream' };
+    return { ok: true, result, emptyReason: reason };
   };
 
   app.post('/api/transit/commute', async (request, reply) => {

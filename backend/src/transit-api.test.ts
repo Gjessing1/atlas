@@ -444,6 +444,7 @@ describe('POST /api/transit/commute', () => {
     const body = res.json();
     expect(body.outbound.trips).toHaveLength(1);
     expect(body.inbound.trips).toHaveLength(1);
+    expect(body.emptyReason).toEqual({ outbound: 'none', inbound: 'none' });
     expect(res.headers['cache-control']).toBe('private, max-age=30');
   });
 

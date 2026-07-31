@@ -221,12 +221,13 @@ describe('commuteWidgetBoard', () => {
   it('names the route and the direction, and dates its own answer', () => {
     const board = commuteWidgetBoard({
       query: commute({ via: [{ name: 'Asker stasjon', lat: 59.83, lng: 10.43 }] }),
-      results: [{ key: 'outbound', result, emptyReason: 'upstream' }],
+      results: [{ key: 'outbound', result, emptyReason: 'none' }],
       nowMs: NOW,
     });
     expect(board.route).toBe('Engelsrud ↔ Nationaltheatret · via Asker stasjon');
     expect(board.directions[0]!.label).toBe('Engelsrud → Nationaltheatret');
     expect(board.directions[0]!.rows[0]!.text).toBe('07:12 · in 12 min · 280 · plt 2');
+    expect(board.directions[0]!.note).toBeNull();
     expect(board.status).toBe('Entur live · checked 07:00');
   });
 

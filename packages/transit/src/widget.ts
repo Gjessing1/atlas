@@ -28,6 +28,7 @@ import {
   norwayTime,
   runsOnWeekday,
 } from './clock.js';
+import type { CommuteEmptyReason } from './commute.js';
 import { DELAY_THRESHOLD_MS } from './labels.js';
 import { isRideMode, legDelayMs } from './model.js';
 import type {
@@ -288,7 +289,7 @@ export function commuteWidgetBoard({
   results: readonly {
     key: TransitCommuteDirection;
     result: TransitResult;
-    emptyReason: 'upstream' | 'filtered';
+    emptyReason: CommuteEmptyReason;
   }[];
   nowMs: number;
   maxRows?: number;
@@ -299,7 +300,7 @@ export function commuteWidgetBoard({
       key,
       label: commuteDirectionLabel(query, key),
       rows,
-      note: rows.length === 0 ? emptyDirectionNote(emptyReason) : null,
+      note: rows.length === 0 && emptyReason !== 'none' ? emptyDirectionNote(emptyReason) : null,
     };
   });
   const allRows = directions.flatMap((direction) => direction.rows);
