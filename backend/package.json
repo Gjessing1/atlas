@@ -17,6 +17,7 @@
     "@atlas/core": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
+    "@atlas/traffic": "*",
     "@atlas/transit": "*",
     "@fastify/jwt": "^10.2.0",
     "@fastify/rate-limit": "^11.1.0",

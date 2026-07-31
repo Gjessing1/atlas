@@ -20,6 +20,7 @@
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
+    "@atlas/traffic": "*",
     "@atlas/transit": "*",
     "maplibre-gl": "^5.0.0",
     "pmtiles": "^4.4.1",

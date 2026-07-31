@@ -11,6 +11,7 @@ import {
   httpRouteProvider,
   httpTraceTransport,
 } from '@atlas/routing';
+import { httpTrafficClosures, trafficAwareRouteProvider } from '@atlas/traffic';
 import { useMemo } from 'react';
 
 /** Promisified single geolocation fix. */
@@ -99,9 +100,11 @@ function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void
  * `useNavigationController`, which Android drives through the same seam.
  */
 export function useWebNavigation(): NavController {
-  const platform = useMemo<NavPlatform>(
-    () => ({
-      provider: httpRouteProvider(),
+  const platform = useMemo<NavPlatform>(() => {
+    const trafficClosures = httpTrafficClosures();
+    return {
+      provider: trafficAwareRouteProvider(httpRouteProvider(), trafficClosures),
+      trafficClosures,
       trace: httpTraceTransport(),
       nvdbLimits: httpNvdbLimits(),
       nvdbCameras: httpNvdbCameras(),
@@ -132,9 +135,8 @@ export function useWebNavigation(): NavController {
       },
       keepAwake,
       watchFacing,
-    }),
-    [],
-  );
+    };
+  }, []);
 
   return useNavigationController(platform);
 }

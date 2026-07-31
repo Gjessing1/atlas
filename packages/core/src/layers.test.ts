@@ -8,6 +8,7 @@ import {
   identifyOverlays,
   huntingFieldIdentify,
   speedCameraIdentify,
+  trafficIdentify,
   layerOptionSignature,
   normalizeLayerOptions,
   overlayIdentifyUrl,
@@ -305,6 +306,24 @@ describe('local overlay identify groups', () => {
       properties: {},
     });
     expect(speedCameraIdentify(undefined)).toBeNull();
+  });
+
+  it('identifies DATEX traffic without changing the Norwegian message', () => {
+    expect(
+      trafficIdentify({
+        kind: 'closure',
+        location: 'E18 ved Oslo',
+        message: 'Vegen er stengt.|Omkjøring er skiltet.',
+        endTime: '2026-07-31T18:00:00+02:00',
+      }),
+    ).toEqual({
+      title: 'Road closure',
+      properties: {
+        Location: 'E18 ved Oslo',
+        'Details (Norwegian)': 'Vegen er stengt.|Omkjøring er skiltet.',
+        'Valid until': '2026-07-31T18:00:00+02:00',
+      },
+    });
   });
 
   it('shows the exact Regobs observation clock and useful report context', () => {

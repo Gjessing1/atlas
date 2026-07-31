@@ -40,6 +40,13 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     },
   },
   {
+    id: 'map-live-traffic',
+    surface: 'map',
+    capability: 'Show and identify live road closures, roadworks and incidents',
+    web: { file: 'apps/web/src/map/useTrafficLayer.ts', contains: 'useTrafficLayer' },
+    android: { file: 'apps/android/src/layers/useTraffic.ts', contains: 'useTraffic' },
+  },
+  {
     id: 'map-potential-target',
     surface: 'map',
     capability: 'Pick what you are after — the Fish & Hunt sub-profile — in one tap',
@@ -690,6 +697,14 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useNavigationController',
     web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'acceptFasterRoute' },
     android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'acceptFasterRoute' },
+  },
+  {
+    id: 'nav-road-closures',
+    surface: 'navigation',
+    capability: 'Avoid live road closures and reroute when one appears ahead',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/nav/useWebNavigation.ts', contains: 'trafficClosures' },
+    android: { file: 'apps/android/src/nav/useNavigation.ts', contains: 'trafficClosures' },
   },
   {
     id: 'nav-off-route',

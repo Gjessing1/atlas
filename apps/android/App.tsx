@@ -76,6 +76,7 @@ import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useIceObservations } from './src/layers/useIceObservations';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
+import { useTraffic } from './src/layers/useTraffic';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
 import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
@@ -414,6 +415,7 @@ function AppInner() {
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
   // is only the drawn layer.
   const speedCameras = useSpeedCameras(overlays, serverOrigin);
+  const traffic = useTraffic(overlays, serverOrigin);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -957,6 +959,7 @@ function AppInner() {
         huntingFields={huntingFields}
         iceObservations={iceObservations}
         speedCameras={speedCameras}
+        traffic={traffic}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}

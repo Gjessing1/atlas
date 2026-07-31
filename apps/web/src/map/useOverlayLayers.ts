@@ -6,6 +6,7 @@ import {
   overlayTileUrl,
   snapLabelBbox,
   speedCameraIdentify,
+  trafficIdentify,
 } from '@atlas/core';
 import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
 import type maplibregl from 'maplibre-gl';
@@ -13,6 +14,7 @@ import { useEffect, useRef } from 'react';
 import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
 import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
+import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -329,6 +331,7 @@ export function useOverlayIdentify(
       const local = [
         iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
+        trafficIdentify(drawn(TRAFFIC_IDENTIFY_LAYERS)),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);
       // Served same-origin, so the shared helper needs no origin prefix. The

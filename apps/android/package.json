@@ -20,6 +20,7 @@
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
+    "@atlas/traffic": "*",
     "@maplibre/maplibre-react-native": "^11.3.6",
     "@react-native-community/datetimepicker": "^8.6.0",
     "expo": "~57.0.6",

@@ -26,6 +26,7 @@
     "@atlas/routing": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
+    "@atlas/traffic": "*",
     "@atlas/transit": "*",
     "fflate": "^0.8.2"
   },

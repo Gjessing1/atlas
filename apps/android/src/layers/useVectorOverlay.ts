@@ -28,6 +28,8 @@ export function useVectorOverlay(
   overlays: ActiveOverlay[],
   origin: string,
   layerId: string,
+  /** Rolling feeds refetch on this cadence; static datasets omit it. */
+  refreshMs?: number,
 ): VectorOverlayData | null {
   const active = overlays.find((o) => o.meta.id === layerId && o.meta.vector);
   const present = Boolean(active);
@@ -48,10 +50,10 @@ export function useVectorOverlay(
     if (!present || !meta) return;
     if (cache.current?.rev === rev) {
       setData(cache.current.data);
-      return;
+      if (!refreshMs) return;
     }
     let cancelled = false;
-    void (async () => {
+    const refresh = async () => {
       try {
         const res = await fetch(overlayFeaturesUrl(origin, meta));
         if (!res.ok || cancelled) return;
@@ -61,11 +63,14 @@ export function useVectorOverlay(
       } catch {
         // Offline/transient: leave the overlay undrawn until the next attempt.
       }
-    })();
+    };
+    void refresh();
+    const timer = refreshMs ? setInterval(() => void refresh(), refreshMs) : undefined;
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
-  }, [present, rev, origin]);
+  }, [present, rev, origin, refreshMs]);
 
   if (!present || !data) return null;
   return { data, opacity };

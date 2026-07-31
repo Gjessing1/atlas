@@ -629,6 +629,22 @@ describe('useNavigationController — faster-route watch', () => {
     expect(h.spoken.filter((t) => t.startsWith('A faster route'))).toHaveLength(0);
   });
 
+  it('reroutes proactively when a closure appears on the active road', async () => {
+    const trafficClosures = vi.fn(async () => [
+      { id: 'closed', position: points[10]!, message: 'Vegen er stengt.' },
+    ]);
+    const h = harness(undefined, { trafficClosures });
+    const hook = await fakeDrive(h);
+    const calls = h.route.mock.calls.length;
+
+    await driveFor(h, 181);
+
+    expect(trafficClosures).toHaveBeenCalled();
+    expect(h.route.mock.calls.length).toBe(calls + 1);
+    expect(h.spoken).toContain('Road closure ahead. Rerouting.');
+    expect(hook.result.current.fasterRoute).toBeNull();
+  });
+
   it('accepting swaps to the offered route without a second route request', async () => {
     const h = harness();
     const hook = await fakeDrive(h);

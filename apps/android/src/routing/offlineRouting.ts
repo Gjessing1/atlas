@@ -8,6 +8,7 @@ import {
   type RouteQuery,
   type ValhallaTransport,
 } from '@atlas/routing';
+import { httpTrafficClosures, trafficAwareRouteProvider } from '@atlas/traffic';
 
 import { Valhalla } from '../../modules/valhalla';
 import { listLocalPacks, type LocalPack } from '../regions/packs';
@@ -83,7 +84,7 @@ export function makeRouteProvider(serverOrigin: string): RouteProvider {
   const offline = valhallaRouteProvider(async (request) => {
     return JSON.parse(await Valhalla!.route(JSON.stringify(request))) as unknown;
   });
-  return {
+  const base: RouteProvider = {
     async route(query, signal) {
       if (Valhalla) {
         try {
@@ -100,6 +101,7 @@ export function makeRouteProvider(serverOrigin: string): RouteProvider {
       return online.route(query, signal);
     },
   };
+  return trafficAwareRouteProvider(base, httpTrafficClosures(serverOrigin));
 }
 
 /** The shape a trace_attributes request walks, as plain points. */

@@ -42,6 +42,7 @@ import {
   type IceObservationsApiOptions,
 } from './ice-observations-api.js';
 import { registerTransitApi, type TransitApiOptions } from './transit-api.js';
+import { registerTrafficApi, type TrafficApiOptions } from './traffic-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
 import {
@@ -90,6 +91,8 @@ export interface AppOptions {
   weatherApi?: WeatherApiOptions;
   /** Test seams for the Entur public-transport proxy. */
   transitApi?: TransitApiOptions;
+  /** Test seams for the authenticated NPRA DATEX traffic proxy. */
+  trafficApi?: TrafficApiOptions;
   /** Test seams for the iNatur permit-boundary resolver. */
   inaturApi?: InaturApiOptions;
   /** Test seams for the public NVE Regobs ice-observation feed. */
@@ -549,6 +552,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     return reply.send({ type: 'FeatureCollection', features });
   });
 
+  // Authenticated NPRA DATEX II snapshot: cached server-side, exposed as a
+  // vector overlay and as route-matched closure points. Credentials never
+  // leave this one registered-egress backend.
+  const traffic = registerTrafficApi(app, status, opts.trafficApi);
+
   // Map tiles, two ways:
   // - /api/tiles/<area>/{z}/{x}/{y}.pbf — merged endpoint the map style uses:
   //   local archive tiles where available, streamed from an upstream world
@@ -585,6 +593,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // served by the derive service registered below.
     extraMeta: [
       ...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []),
+      ...(traffic.meta ? [traffic.meta] : []),
       iceObservationLayerMeta(),
       ...derivedLayerMetas(),
     ],

@@ -34,6 +34,7 @@ import {
   type RoutingProfile,
   type ValhallaTransport,
 } from '@atlas/routing';
+import type { TrafficClosureTransport } from '@atlas/traffic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type NavPhase =
@@ -80,6 +81,8 @@ export interface NavPlatform {
    * the pre-camera behaviour and the everywhere-outside-Norway behaviour.
    */
   nvdbCameras?: NvdbCameraTransport;
+  /** Live route-matched DATEX closures, for proactive mid-drive rerouting. */
+  trafficClosures?: TrafficClosureTransport;
   /**
    * One fix now, for the preview origin. Should reject with a
    * user-presentable message — it becomes the error phase's text — and must
@@ -781,11 +784,31 @@ export function useNavigationController(platform: NavPlatform): NavController {
     // Only a settled, on-route, live-fix drive is worth second-guessing; and a
     // trip nearly over cannot save enough to matter.
     if (state.status !== 'navigating' || state.fix !== 'live' || !state.departed) return;
-    const plannedMs = session.plannedRemainingMs();
-    if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) return;
     const trip = tripSeq.current;
     fasterCheckInFlight.current = true;
     try {
+      // A closure appearing on the line already being followed is not an
+      // optional faster-route offer: the old route has become invalid, so
+      // recalculate proactively. The provider adds the same closure to
+      // Valhalla's exclude_locations when it builds the replacement.
+      const closureTransport = platformRef.current.trafficClosures;
+      const currentPath = activePathRef.current;
+      if (closureTransport && currentPath) {
+        const fromIndex = Math.max(
+          0,
+          Math.floor(state.routeProgress * Math.max(0, currentPath.points.length - 1)) - 2,
+        );
+        const closures = await closureTransport(currentPath.points.slice(fromIndex));
+        if (closures.length > 0) {
+          clearFasterOffer();
+          rerouteBackoffUntil.current = 0;
+          speak('Road closure ahead. Rerouting.');
+          await reroute(fix);
+          return;
+        }
+      }
+      const plannedMs = session.plannedRemainingMs();
+      if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) return;
       const heading =
         typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
       const passed = state.viasPassed;
@@ -820,7 +843,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     } finally {
       if (trip === tripSeq.current) fasterCheckInFlight.current = false;
     }
-  }, [fetchPath, speak, clearFasterOffer]);
+  }, [platformRef, activePathRef, fetchPath, speak, clearFasterOffer, reroute]);
 
   /** Take the offered faster route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {

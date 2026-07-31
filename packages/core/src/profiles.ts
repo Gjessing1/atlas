@@ -51,7 +51,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     label: 'Drive',
     routing: 'car',
     layerTags: ['driving'],
-    defaultLayers: ['speed-cameras'],
+    defaultLayers: ['traffic', 'speed-cameras'],
   },
   { id: 'bike', label: 'Cycle', routing: 'bike', layerTags: ['bike'] },
   {

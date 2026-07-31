@@ -449,6 +449,28 @@ export function speedCameraIdentify(
   };
 }
 
+/** A tapped live DATEX marker, preserving NPRA's Norwegian wording verbatim. */
+export function trafficIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const kind = str(properties['kind']);
+  const titles: Record<string, string> = {
+    closure: 'Road closure',
+    roadworks: 'Roadworks',
+    incident: 'Traffic incident',
+    restriction: 'Traffic restriction',
+  };
+  const rows: Record<string, string> = {};
+  const location = str(properties['location']);
+  const message = str(properties['message']);
+  const endTime = str(properties['endTime']);
+  if (location) rows['Location'] = location;
+  if (message) rows['Details (Norwegian)'] = message;
+  if (endTime) rows['Valid until'] = endTime;
+  return { title: titles[kind ?? ''] ?? 'Traffic information', properties: rows };
+}
+
 /**
  * How much of an identify answer a place card shows: at most this many
  * overlays, and this many attributes from each.

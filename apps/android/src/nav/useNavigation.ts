@@ -5,6 +5,7 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
+import { httpTrafficClosures } from '@atlas/traffic';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -193,6 +194,7 @@ export function useNavigation(): NavController {
   const platform = useMemo<NavPlatform>(
     () => ({
       provider: makeRouteProvider(serverOrigin),
+      trafficClosures: httpTrafficClosures(serverOrigin),
       trace: makeTraceTransport(serverOrigin),
       // NVDB speed limits + ATK/OSM cameras, offline-first (ROADMAP §2.1): a
       // downloaded pack that ships nvdb.sqlite answers from its own copy of the

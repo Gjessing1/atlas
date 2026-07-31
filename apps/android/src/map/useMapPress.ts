@@ -6,6 +6,7 @@ import {
   identifyOverlays,
   POI_LAYER_IDS,
   speedCameraIdentify,
+  trafficIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
 } from '@atlas/core';
@@ -18,6 +19,7 @@ import type { RefObject } from 'react';
 import { STATSKOG_JAKTFELT_ID } from '../layers/useHuntingFields';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import { SPEED_CAMERAS_ID } from '../layers/useSpeedCameras';
+import { TRAFFIC_ID } from '../layers/useTraffic';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import {
@@ -26,6 +28,7 @@ import {
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
   SPEED_CAMERA_LAYER_IDS,
+  TRAFFIC_LAYER_IDS,
 } from './MapScene';
 
 /** Finger-sized query box for layer hit-tests (a 1 px point is too strict). */
@@ -233,7 +236,7 @@ export function useMapPress({
                   .catch(() => undefined)
               : undefined;
           void (async () => {
-            const [serverGroups, iceHits, huntHits, cameraHits] = await Promise.all([
+            const [serverGroups, iceHits, huntHits, cameraHits, trafficHits] = await Promise.all([
               identifyOverlays(
                 origin,
                 overlays.map((o) => o.meta),
@@ -246,12 +249,14 @@ export function useMapPress({
               query(vectorOn('ice-observations'), ICE_OBSERVATION_LAYER_IDS),
               query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
               query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
+              query(vectorOn(TRAFFIC_ID), TRAFFIC_LAYER_IDS),
             ]);
             // Local groups lead: they are what the user aimed at, and the
             // server rows are ambient context for the same point.
             const groups = [
               iceObservationIdentify(hitProps(iceHits)),
               speedCameraIdentify(hitProps(cameraHits)),
+              trafficIdentify(hitProps(trafficHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);

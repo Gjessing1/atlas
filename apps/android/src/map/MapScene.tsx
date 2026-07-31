@@ -92,6 +92,9 @@ export const SPEED_CAMERA_LAYER_IDS = [
   'atlas-cameras-section-casing',
 ];
 
+/** Live DATEX markers hit-tested for their verbatim NPRA message. */
+export const TRAFFIC_LAYER_IDS = ['atlas-traffic-symbol', 'atlas-traffic-dot'];
+
 /** Regobs marker layers hit-tested for exact observation time and details. */
 export const ICE_OBSERVATION_LAYER_IDS = [
   'atlas-ice-observations-symbol',
@@ -194,6 +197,8 @@ interface MapSceneProps {
   iceObservations: VectorOverlayData | null;
   /** ATK speed-camera coverage to draw (null = overlay off / not loaded). */
   speedCameras: SpeedCameras | null;
+  /** Live DATEX traffic markers (null when the layer is off/offline). */
+  traffic: VectorOverlayData | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
   /** The measure tool's ruler/rings while it is open, else null. */
@@ -264,6 +269,7 @@ export function MapScene({
   huntingFields,
   iceObservations,
   speedCameras,
+  traffic,
   spots,
   measure,
   trackGeo,
@@ -638,6 +644,38 @@ export function MapScene({
                 'text-halo-width': 1.4,
                 'text-opacity': speedCameras.opacity,
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Live DATEX II closures, works and incidents. NPRA message text is
+          shown verbatim by the tap card; marker colour/type is shared with web. */}
+        {traffic ? (
+          <GeoJSONSource id="atlas-traffic" data={traffic.data}>
+            <Layer
+              type="circle"
+              id="atlas-traffic-dot"
+              minzoom={6}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 11, 8, 16, 11],
+                'circle-color': ['get', 'markerColor'],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': traffic.opacity,
+                'circle-stroke-opacity': traffic.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-traffic-symbol"
+              minzoom={6}
+              layout={{
+                'text-field': ['get', 'symbol'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 11, 14, 16, 17],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff', 'text-opacity': traffic.opacity }}
             />
           </GeoJSONSource>
         ) : null}

@@ -256,7 +256,8 @@ describe('layer catalog', () => {
     // vocabularies against the *real* catalog (a synthetic meta in the core
     // test cannot — it doesn't know a layer's actual tags). Rolling Regobs is
     // catalog-injected by its own route rather than in `norwegianLayers`; add
-    // that always-present row here. Speed cameras are data-gated, so allow them.
+    // that always-present row here. Speed cameras and live DATEX traffic are
+    // data/config-gated, so allow them.
     const byId = new Map(
       [...norwegianLayers().map((l) => l.meta), iceObservationLayerMeta()].map((meta) => [
         meta.id,
@@ -265,7 +266,7 @@ describe('layer catalog', () => {
     );
     for (const profile of MAP_PROFILES) {
       for (const id of profile.defaultLayers ?? []) {
-        if (id === 'speed-cameras') continue;
+        if (id === 'speed-cameras' || id === 'traffic') continue;
         const meta = byId.get(id);
         expect(meta, `${profile.id} default layer ${id} missing from catalog`).toBeDefined();
         expect(
