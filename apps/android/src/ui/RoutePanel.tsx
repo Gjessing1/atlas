@@ -28,6 +28,7 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
+import { formatTrafficDelay } from '@atlas/traffic';
 import type { TransitTrip } from '@atlas/transit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -911,6 +912,11 @@ export function RoutePanel({
               <Text style={styles.stats}>
                 {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
                 {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+                {/* The measured part of that time, named rather than silently
+                    folded in — an ETA that moved for a reason should say so. */}
+                {formatTrafficDelay(path.trafficDelayMs)
+                  ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
+                  : ''}
               </Text>
               {profileData ? (
                 <Pressable

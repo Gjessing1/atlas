@@ -707,6 +707,17 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/useNavigation.ts', contains: 'trafficClosures' },
   },
   {
+    id: 'nav-traffic-eta',
+    surface: 'navigation',
+    capability: 'Include measured congestion in the ETA, and say how much of it is traffic',
+    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'formatTrafficDelay' },
+    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'formatTrafficDelay' },
+    // The route is the capability, not a detail of it: without it every client
+    // shows the engine's own schedule and nothing anywhere looks broken.
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
+    note: 'Both clients wrap their provider in `trafficAwareRouteProvider(…, httpTrafficDelay())`, so the correction lands in `RoutePath.timeMs` before any UI sees it and the shared `formatTrafficDelay` is the only wording. Norway-only by data (§2.1): outside NPRA’s 202 measured corridors nothing is added and no client says anything.',
+  },
+  {
     id: 'nav-off-route',
     surface: 'navigation',
     capability: 'Notice the driver has left the route and reroute',

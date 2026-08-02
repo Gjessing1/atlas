@@ -105,4 +105,60 @@ describe('DATEX II traffic', () => {
     await aware.route({ profile: 'foot', points: path.points });
     expect(route).toHaveBeenCalledTimes(1);
   });
+
+  it('prices every offered path, so a preview compares like with like', async () => {
+    const leg = (timeMs: number) => ({
+      points: [
+        { lat: 59.9, lng: 10.7 },
+        { lat: 59.91, lng: 10.7 },
+      ],
+      distanceM: 1000,
+      timeMs,
+      ascentM: 0,
+      descentM: 0,
+    });
+    const provider: RouteProvider = {
+      route: async (): Promise<RouteResult> => ({ paths: [leg(600_000), leg(660_000)] }),
+    };
+    const aware = trafficAwareRouteProvider(
+      provider,
+      async () => [],
+      async () => ({
+        delayMs: 120_000,
+        measuredAt: 'now',
+        segments: [
+          { corridorId: 'a', name: 'E18', startM: 0, endM: 1000, delayMs: 120_000, status: 'slow' },
+        ],
+      }),
+    );
+    const result = await aware.route({ profile: 'car', points: leg(0).points });
+    expect(result.paths.map((path) => path.timeMs)).toEqual([720_000, 780_000]);
+    expect(result.paths.map((path) => path.trafficDelayMs)).toEqual([120_000, 120_000]);
+  });
+
+  it('keeps the engine estimate standing when the travel-time feed fails', async () => {
+    const path = {
+      points: [
+        { lat: 59.9, lng: 10.7 },
+        { lat: 59.91, lng: 10.7 },
+      ],
+      distanceM: 1000,
+      timeMs: 60_000,
+      ascentM: 0,
+      descentM: 0,
+    };
+    const provider: RouteProvider = {
+      route: async (): Promise<RouteResult> => ({ paths: [path] }),
+    };
+    const aware = trafficAwareRouteProvider(
+      provider,
+      async () => [],
+      async () => {
+        throw new Error('offline');
+      },
+    );
+    const result = await aware.route({ profile: 'car', points: path.points });
+    expect(result.paths[0]?.timeMs).toBe(60_000);
+    expect(result.paths[0]?.trafficDelayMs).toBeUndefined();
+  });
 });

@@ -19,52 +19,103 @@ const A = 6378137;
 const F = 1 / 298.257223563;
 const K0 = 0.9996;
 const FALSE_EASTING = 500000;
-/** UTM zone 33's central meridian. */
-const LON0 = (15 * Math.PI) / 180;
+/** UTM zone 33's central meridian, in degrees. */
+const LON0_DEG = 15;
+const DEG = Math.PI / 180;
 
 /**
- * Forward transverse-Mercator to EPSG:25833, in metres. Accurate to well under
- * a metre across Norway, which is far more than a query envelope needs.
+ * Both directions use the Krüger series in the third flattening `n`, not the
+ * older USGS series in eccentricity.
+ *
+ * The reason is Norway, not elegance: zone 33 nominally spans 12°–18° E, and
+ * Norway uses it from Rogaland (≈ 4.5° E) to Kirkenes (≈ 30.5° E) — up to 15°
+ * off the central meridian, five times the width the classic series is
+ * written for. Checked against NVE's own reprojection of lake 209007 in
+ * Finnmark, the USGS inverse lands **32 m** out there while its forward stays
+ * within half a metre; the error is invisible in Oslo and grows silently
+ * eastwards. Krüger converges in powers of `n` ≈ 1/598, so four terms hold
+ * millimetres across the whole country.
  */
+const N = F / (2 - F);
+/** Rectifying radius: the sphere whose meridian arc matches the ellipsoid's. */
+const RECTIFYING_RADIUS = (A / (1 + N)) * (1 + N ** 2 / 4 + N ** 4 / 64 + N ** 6 / 256) * K0;
+
+/** Geodetic → conformal (Krüger α). */
+const ALPHA = [
+  N / 2 - (2 * N ** 2) / 3 + (5 * N ** 3) / 16 + (41 * N ** 4) / 180,
+  (13 * N ** 2) / 48 - (3 * N ** 3) / 5 + (557 * N ** 4) / 1440,
+  (61 * N ** 3) / 240 - (103 * N ** 4) / 140,
+  (49561 * N ** 4) / 161280,
+];
+/** Conformal → geodetic (Krüger β), the inverse of {@link ALPHA}. */
+const BETA = [
+  N / 2 - (2 * N ** 2) / 3 + (37 * N ** 3) / 96 - N ** 4 / 360,
+  N ** 2 / 48 + N ** 3 / 15 - (437 * N ** 4) / 1440,
+  (17 * N ** 3) / 480 - (37 * N ** 4) / 840,
+  (4397 * N ** 4) / 161280,
+];
+/** Conformal latitude → geodetic latitude (Krüger δ). */
+const DELTA = [
+  2 * N - (2 * N ** 2) / 3 - 2 * N ** 3 + (116 * N ** 4) / 45,
+  (7 * N ** 2) / 3 - (8 * N ** 3) / 5 - (227 * N ** 4) / 45,
+  (56 * N ** 3) / 15 - (136 * N ** 4) / 35,
+  (4279 * N ** 4) / 630,
+];
+
+/** Forward transverse-Mercator to EPSG:25833, in metres. */
 export function wgs84ToUtm33(lng: number, lat: number): { x: number; y: number } {
-  const e2 = F * (2 - F);
-  const ep2 = e2 / (1 - e2);
-  const phi = (lat * Math.PI) / 180;
-  const lam = (lng * Math.PI) / 180;
+  const e = Math.sqrt(F * (2 - F));
+  const phi = lat * DEG;
+  const dLambda = (lng - LON0_DEG) * DEG;
 
+  // Geodetic latitude → conformal latitude, on the sphere Krüger works on.
   const sinPhi = Math.sin(phi);
-  const cosPhi = Math.cos(phi);
-  const tanPhi = Math.tan(phi);
+  const conformal = Math.atan(Math.sinh(Math.asinh(Math.tan(phi)) - e * Math.atanh(e * sinPhi)));
 
-  const n = A / Math.sqrt(1 - e2 * sinPhi * sinPhi);
-  const t = tanPhi * tanPhi;
-  const c = ep2 * cosPhi * cosPhi;
-  const a = cosPhi * (lam - LON0);
+  let xi = Math.atan2(Math.sin(conformal), Math.cos(conformal) * Math.cos(dLambda));
+  let eta = Math.asinh(
+    (Math.cos(conformal) * Math.sin(dLambda)) /
+      Math.hypot(Math.sin(conformal), Math.cos(conformal) * Math.cos(dLambda)),
+  );
+  const xi0 = xi;
+  const eta0 = eta;
+  for (let j = 1; j <= ALPHA.length; j++) {
+    xi += ALPHA[j - 1]! * Math.sin(2 * j * xi0) * Math.cosh(2 * j * eta0);
+    eta += ALPHA[j - 1]! * Math.cos(2 * j * xi0) * Math.sinh(2 * j * eta0);
+  }
 
-  const m =
-    A *
-    ((1 - e2 / 4 - (3 * e2 * e2) / 64 - (5 * e2 * e2 * e2) / 256) * phi -
-      ((3 * e2) / 8 + (3 * e2 * e2) / 32 + (45 * e2 * e2 * e2) / 1024) * Math.sin(2 * phi) +
-      ((15 * e2 * e2) / 256 + (45 * e2 * e2 * e2) / 1024) * Math.sin(4 * phi) -
-      ((35 * e2 * e2 * e2) / 3072) * Math.sin(6 * phi));
+  return { x: RECTIFYING_RADIUS * eta + FALSE_EASTING, y: RECTIFYING_RADIUS * xi };
+}
 
-  const x =
-    K0 *
-      n *
-      (a +
-        ((1 - t + c) * a * a * a) / 6 +
-        ((5 - 18 * t + t * t + 72 * c - 58 * ep2) * a ** 5) / 120) +
-    FALSE_EASTING;
-  const y =
-    K0 *
-    (m +
-      n *
-        tanPhi *
-        ((a * a) / 2 +
-          ((5 - t + 9 * c + 4 * c * c) * a ** 4) / 24 +
-          ((61 - 58 * t + t * t + 600 * c - 330 * ep2) * a ** 6) / 720));
+/**
+ * Inverse transverse-Mercator from EPSG:25833 metres back to WGS84 degrees.
+ *
+ * Needed because some Norwegian services answer in the national grid rather
+ * than accepting a projection: NPRA's DATEX corridor geometry is a GML
+ * `posList` in UTM33, and western Norway sits far enough west of the central
+ * meridian that its eastings go **negative** (Bergen ≈ −30 000). A reader that
+ * assumes the false easting keeps coordinates positive puts Bergen in the
+ * North Sea.
+ */
+export function utm33ToWgs84(x: number, y: number): LatLng {
+  const xi = y / RECTIFYING_RADIUS;
+  const eta = (x - FALSE_EASTING) / RECTIFYING_RADIUS;
 
-  return { x, y };
+  let xi0 = xi;
+  let eta0 = eta;
+  for (let j = 1; j <= BETA.length; j++) {
+    xi0 -= BETA[j - 1]! * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    eta0 -= BETA[j - 1]! * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+  }
+
+  const conformal = Math.asin(Math.sin(xi0) / Math.cosh(eta0));
+  let phi = conformal;
+  for (let j = 1; j <= DELTA.length; j++) phi += DELTA[j - 1]! * Math.sin(2 * j * conformal);
+
+  return {
+    lat: phi / DEG,
+    lng: LON0_DEG + Math.atan2(Math.sinh(eta0), Math.cos(xi0)) / DEG,
+  };
 }
 
 /**

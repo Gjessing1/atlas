@@ -28,6 +28,7 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
+import { formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import { ROUTING_ICON, TrainIcon } from '../icons.js';
@@ -780,6 +781,14 @@ export function RoutePanel({
           <div className="route-stats">
             <strong>{fmtKm(path.distanceM)}</strong> · {fmtDuration(path.timeMs)} · ETA{' '}
             {fmtEta(path.timeMs)}
+            {/* The measured part of that time, named rather than silently
+                folded in — an ETA that moved for a reason should say so. */}
+            {formatTrafficDelay(path.trafficDelayMs) && (
+              <span className="route-traffic-delay">
+                {' '}
+                · {formatTrafficDelay(path.trafficDelayMs)}
+              </span>
+            )}
             {/* The profile adapter fills terrain heights where coverage exists;
                 0/0 still means "unknown" elsewhere. */}
             {path.ascentM > 0 || path.descentM > 0

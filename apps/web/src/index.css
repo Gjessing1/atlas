@@ -1744,6 +1744,13 @@ button {
   font-size: 13px;
 }
 
+/* Measured congestion already inside the ETA — coloured because it is the one
+   part of that number the road, not the router, decided. */
+.route-traffic-delay {
+  color: var(--warning);
+  font-weight: 600;
+}
+
 /* A ferry crossing is timetabled — a route stat that needs words, not a number. */
 .route-ferry-note {
   margin-top: 4px;

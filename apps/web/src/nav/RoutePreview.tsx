@@ -1,6 +1,7 @@
 import type { NavController } from '@atlas/app-hooks';
 import { fmtDuration, fmtEta, fmtKm } from '@atlas/core';
 import { pathViaLabels, ROUTING_PROFILES, type RoutePath } from '@atlas/routing';
+import { formatTrafficDelay } from '@atlas/traffic';
 import { useMemo } from 'react';
 import { ROUTING_ICON } from '../icons.js';
 
@@ -68,6 +69,9 @@ export function RoutePreview({ nav }: { nav: NavController }) {
                 <span className="nav-preview-detail">
                   {fmtKm(path.distanceM)} · {fmtEta(path.timeMs)}
                   {vias[i] ? ` · via ${vias[i]}` : i === 0 ? ' · fastest' : ''}
+                  {formatTrafficDelay(path.trafficDelayMs)
+                    ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
+                    : ''}
                 </span>
               </button>
             </li>

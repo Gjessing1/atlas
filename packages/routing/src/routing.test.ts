@@ -242,4 +242,14 @@ describe('sortRouteChoices', () => {
     sortRouteChoices(paths);
     expect(paths.map((p) => p.timeMs)).toEqual([600_000, 300_000]);
   });
+
+  it('ranks on the engine schedule, so a measured jam cannot promote an unmeasured route', () => {
+    // 202 instrumented corridors are not a network. The measured route is
+    // slower on the clock and still the quicker road; ordering on the adjusted
+    // time would recommend the other one for having no measurement at all.
+    const measured = { ...choice(660_000), trafficDelayMs: 180_000 };
+    const unmeasured = choice(600_000);
+    const sorted = sortRouteChoices([measured, unmeasured]);
+    expect(sorted[0]).toBe(measured);
+  });
 });

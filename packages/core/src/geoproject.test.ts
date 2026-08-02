@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { bboxToUtm33, polygonLabelPoint, snapLabelBbox, wgs84ToUtm33 } from './geoproject.js';
+import {
+  bboxToUtm33,
+  polygonLabelPoint,
+  snapLabelBbox,
+  utm33ToWgs84,
+  wgs84ToUtm33,
+} from './geoproject.js';
 
 describe('snapLabelBbox', () => {
   it('rounds outwards so the viewport stays covered', () => {
@@ -50,6 +56,47 @@ describe('wgs84ToUtm33', () => {
     const south = wgs84ToUtm33(10, 58);
     const north = wgs84ToUtm33(10, 70);
     expect(north.y).toBeGreaterThan(south.y);
+  });
+});
+
+describe('utm33ToWgs84', () => {
+  it('round-trips the whole Norwegian span of zone 33 to the millimetre', () => {
+    // The eastern and western extremes are the point: they are 15° off the
+    // central meridian, where a classic USGS inverse drifts tens of metres.
+    for (const [lng, lat] of [
+      [4.6, 58.9], // Rogaland, the western extreme
+      [5.32, 60.39], // Bergen — a negative easting
+      [10.75, 59.91], // Oslo
+      [18.96, 69.65], // Tromsø
+      [30.05, 69.73], // Kirkenes, the eastern extreme
+    ] as const) {
+      const { x, y } = wgs84ToUtm33(lng, lat);
+      const back = utm33ToWgs84(x, y);
+      const offM = Math.hypot(
+        (back.lng - lng) * 111320 * Math.cos(lat * (Math.PI / 180)),
+        (back.lat - lat) * 110540,
+      );
+      expect(offM).toBeLessThan(0.001);
+    }
+  });
+
+  it('agrees with NVE’s own reprojection in eastern Finnmark', () => {
+    // Independent reference: Innsjodatabase2 layer 5 returns lake 209007's
+    // first ring vertex as (1097035.90, 7795119.83) in EPSG:25833 and as
+    // (30.4755496, 69.5795068) in EPSG:4326. This is the check that caught a
+    // 32 m error in the first, series-truncated inverse.
+    const point = utm33ToWgs84(1097035.9, 7795119.83);
+    expect(point.lng).toBeCloseTo(30.4755496, 6);
+    expect(point.lat).toBeCloseTo(69.5795068, 6);
+  });
+
+  it('reads a negative easting as western Norway, not as the North Sea', () => {
+    // Straight from NPRA's corridor table: the first vertex of "Åsanevegen -
+    // Eikås" in Bergen. Zone 33's false easting does not keep the coordinate
+    // positive that far west, and dropping the sign lands ~60 km offshore.
+    const bergen = utm33ToWgs84(-30621, 6742669);
+    expect(bergen.lng).toBeCloseTo(5.3264, 3);
+    expect(bergen.lat).toBeCloseTo(60.4682, 3);
   });
 });
 

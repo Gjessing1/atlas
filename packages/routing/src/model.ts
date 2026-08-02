@@ -243,6 +243,15 @@ export interface RoutePath {
    * shape through RouteEnrichment.
    */
   enrichment?: RouteEnrichment;
+  /**
+   * How much of `timeMs` is measured congestion rather than the engine's own
+   * schedule (§2.2). Set from NPRA's corridor travel times where the route runs
+   * on a measured stretch, and **already included in `timeMs`** — it is the
+   * part a UI may name, not a number to add on. Absent means no measurement
+   * covered this route, which is the normal case outside the Norwegian
+   * corridors and everywhere without a live traffic feed.
+   */
+  trafficDelayMs?: number;
 }
 
 /** Road attributes that hold over one stretch of a routed path. */

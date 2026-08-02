@@ -11,7 +11,7 @@ import {
   httpRouteProvider,
   httpTraceTransport,
 } from '@atlas/routing';
-import { httpTrafficClosures, trafficAwareRouteProvider } from '@atlas/traffic';
+import { httpTrafficClosures, httpTrafficDelay, trafficAwareRouteProvider } from '@atlas/traffic';
 import { useMemo } from 'react';
 
 /** Promisified single geolocation fix. */
@@ -103,7 +103,7 @@ export function useWebNavigation(): NavController {
   const platform = useMemo<NavPlatform>(() => {
     const trafficClosures = httpTrafficClosures();
     return {
-      provider: trafficAwareRouteProvider(httpRouteProvider(), trafficClosures),
+      provider: trafficAwareRouteProvider(httpRouteProvider(), trafficClosures, httpTrafficDelay()),
       trafficClosures,
       trace: httpTraceTransport(),
       nvdbLimits: httpNvdbLimits(),
