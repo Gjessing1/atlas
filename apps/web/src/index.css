@@ -3817,6 +3817,18 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
+/* Traffic still ahead, in the same warning colour the planner uses for it —
+   the one part of the ETA the road decided rather than the router. Last in the
+   row and never allowed to squeeze the clock. */
+.nav-traffic-delay {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* No bar behind the controls — each one is its own floating chip, so the map
    shows through the gaps instead of a full-width slab. */
 .nav-actions {

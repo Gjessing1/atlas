@@ -718,6 +718,22 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Both clients wrap their provider in `trafficAwareRouteProvider(…, httpTrafficDelay())`, so the correction lands in `RoutePath.timeMs` before any UI sees it and the shared `formatTrafficDelay` is the only wording. Norway-only by data (§2.1): outside NPRA’s 202 measured corridors nothing is added and no client says anything.',
   },
   {
+    id: 'nav-traffic-live',
+    surface: 'navigation',
+    capability: 'Re-price the running trip as traffic changes, naming the delay still ahead',
+    hook: 'useNavigationController',
+    web: {
+      file: 'apps/web/src/nav/NavBanner.tsx',
+      contains: 'formatTrafficDelay(state.trafficDelayMs)',
+    },
+    android: {
+      file: 'apps/android/src/nav/NavBanner.tsx',
+      contains: 'formatTrafficDelay(state.trafficDelayMs)',
+    },
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
+    note: 'Both clients pass the same `httpTrafficDelay` transport as `NavPlatform.trafficDelay`; the shared controller re-prices on the 3-minute watch and `NavigationSession.setSchedule` swaps the maneuver schedule without restarting the trip. The banner shows only the traffic still *ahead*, so it falls away as the queue is driven through.',
+  },
+  {
     id: 'nav-off-route',
     surface: 'navigation',
     capability: 'Notice the driver has left the route and reroute',

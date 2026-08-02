@@ -290,6 +290,28 @@ export function trafficDelayForRoute(
 }
 
 /**
+ * The engine's own schedule again: whatever measurement a path is carrying,
+ * taken back off. Every priced maneuver states its own share
+ * (`RouteInstruction.trafficDelayMs`), so this is exact rather than a
+ * proportional guess — which is what lets a route be re-priced mid-drive
+ * without the corrections compounding.
+ */
+function stripTrafficDelay(path: RoutePath): RoutePath {
+  if (path.trafficDelayMs === undefined) return path;
+  const base: RoutePath = { ...path, timeMs: path.timeMs - path.trafficDelayMs };
+  delete base.trafficDelayMs;
+  if (path.instructions?.length) {
+    base.instructions = path.instructions.map((instruction) => {
+      if (instruction.trafficDelayMs === undefined) return instruction;
+      const plain = { ...instruction, timeMs: instruction.timeMs - instruction.trafficDelayMs };
+      delete plain.trafficDelayMs;
+      return plain;
+    });
+  }
+  return base;
+}
+
+/**
  * Fold a measured delay into a routed path.
  *
  * The delay is spread over the maneuvers it actually sits on, not added to the
@@ -297,22 +319,29 @@ export function trafficDelayForRoute(
  * schedule: a jam charged to the whole route would still be charged after the
  * driver had passed it. Placed on its own maneuvers, the ETA sheds it on the
  * way through — the same way the schedule already sheds distance.
+ *
+ * Applying is *idempotent in the measurement*: a path that already carries one
+ * is stripped back to the engine's schedule first, so the same route can be
+ * re-priced against a newer snapshot as often as the driver's trip lasts and
+ * the corrections never stack. An empty delay is therefore not a no-op — it is
+ * "the road is clear now", and takes an earlier jam back off.
  */
 export function applyTrafficDelay(path: RoutePath, delay: TrafficDelay): RoutePath {
-  if (delay.delayMs <= 0) return path;
+  const base = stripTrafficDelay(path);
+  if (delay.delayMs <= 0) return base;
   const updated: RoutePath = {
-    ...path,
-    timeMs: path.timeMs + delay.delayMs,
+    ...base,
+    timeMs: base.timeMs + delay.delayMs,
     trafficDelayMs: delay.delayMs,
   };
-  if (!path.instructions?.length) return updated;
+  if (!base.instructions?.length) return updated;
 
-  const alongM = cumulative(path.points).alongM;
-  const legs = path.instructions.map((instruction) => ({
+  const alongM = cumulative(base.points).alongM;
+  const legs = base.instructions.map((instruction) => ({
     startM: alongM[Math.min(instruction.interval[0], alongM.length - 1)] ?? 0,
     endM: alongM[Math.min(instruction.interval[1], alongM.length - 1)] ?? 0,
   }));
-  const added = new Array<number>(path.instructions.length).fill(0);
+  const added = new Array<number>(base.instructions.length).fill(0);
   for (const segment of delay.segments) {
     const spans = legs.map((leg) =>
       Math.max(0, Math.min(leg.endM, segment.endM) - Math.max(leg.startM, segment.startM)),
@@ -328,10 +357,12 @@ export function applyTrafficDelay(path: RoutePath, delay: TrafficDelay): RoutePa
   // Anything that fell outside every maneuver leg (a delay matched past the
   // last instruction) is scaled back in, so the schedule still sums to timeMs.
   const scale = delay.delayMs / placed;
-  updated.instructions = path.instructions.map((instruction, index) => ({
-    ...instruction,
-    timeMs: instruction.timeMs + Math.round(added[index]! * scale),
-  }));
+  updated.instructions = base.instructions.map((instruction, index) => {
+    const legDelayMs = Math.round(added[index]! * scale);
+    return legDelayMs === 0
+      ? instruction
+      : { ...instruction, timeMs: instruction.timeMs + legDelayMs, trafficDelayMs: legDelayMs };
+  });
   return updated;
 }
 

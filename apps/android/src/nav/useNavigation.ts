@@ -5,7 +5,7 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
-import { httpTrafficClosures } from '@atlas/traffic';
+import { httpTrafficClosures, httpTrafficDelay } from '@atlas/traffic';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -195,6 +195,9 @@ export function useNavigation(): NavController {
     () => ({
       provider: makeRouteProvider(serverOrigin),
       trafficClosures: httpTrafficClosures(serverOrigin),
+      // The same corridor measurements the provider prices a new route with,
+      // asked again mid-drive so the trip being followed is re-priced too.
+      trafficDelay: httpTrafficDelay(serverOrigin),
       trace: makeTraceTransport(serverOrigin),
       // NVDB speed limits + ATK/OSM cameras, offline-first (ROADMAP §2.1): a
       // downloaded pack that ships nvdb.sqlite answers from its own copy of the

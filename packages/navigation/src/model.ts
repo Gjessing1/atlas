@@ -122,6 +122,14 @@ export interface NavState {
   timeRemainingMs: number;
   /** Absolute arrival time estimate (epoch ms). */
   etaEpochMs: number;
+  /**
+   * How much of `timeRemainingMs` is measured congestion rather than the
+   * engine's own schedule — the traffic still *ahead*, so it falls away as the
+   * jam is driven through and reaches zero on a clear road. 0 wherever nothing
+   * is measured, which is the normal case outside Norway's corridors and
+   * everywhere without a live feed.
+   */
+  trafficDelayMs: number;
   /** The next maneuver, or null once past the final turn. */
   upcoming: UpcomingManeuver | null;
   /** The maneuver after `upcoming` (for "then …" hints), or null. */

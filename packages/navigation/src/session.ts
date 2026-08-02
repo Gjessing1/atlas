@@ -97,7 +97,8 @@ export class NavigationSession {
   private readonly points: LatLng[];
   private readonly cum: number[];
   private readonly totalM: number;
-  private readonly totalTimeMs: number;
+  /** Not readonly: {@link setSchedule} re-prices the trip without restarting it. */
+  private totalTimeMs: number;
   private readonly maneuvers: Maneuver[];
   /** Along-route positions of the trip's via stops (sign-5 maneuvers), ascending. */
   private readonly viaAlongM: number[];
@@ -112,6 +113,8 @@ export class NavigationSession {
   private readonly ringEntryByExit = new Map<number, number>();
   /** suffixTimeMs[i] = total instruction time of maneuvers after i. */
   private readonly suffixTimeMs: number[];
+  /** The same, counting only the measured-congestion share of each leg. */
+  private readonly suffixTrafficMs: number[];
   private readonly opts: Required<NavigationOptions>;
 
   private offRouteCount = 0;
@@ -193,9 +196,8 @@ export class NavigationSession {
       .filter((m) => m.instruction.sign === 5)
       .map((m) => m.alongStartM);
     this.suffixTimeMs = new Array<number>(this.maneuvers.length).fill(0);
-    for (let i = this.maneuvers.length - 2; i >= 0; i--) {
-      this.suffixTimeMs[i] = this.suffixTimeMs[i + 1]! + this.maneuvers[i + 1]!.timeMs;
-    }
+    this.suffixTrafficMs = new Array<number>(this.maneuvers.length).fill(0);
+    this.rebuildSuffixes();
     // Valhalla emits a roundabout as enter-then-exit, always adjacent; consume
     // them in pairs so two rings in a row can't be mistaken for one long one.
     for (let i = 0; i < this.maneuvers.length - 1; i++) {
@@ -226,6 +228,70 @@ export class NavigationSession {
         ...this.lastState,
         speedLimitKph: speedLimitKphAt(enrichment, this.lastState.traveledM),
         tunnel: this.tunnelState(this.lastState.traveledM),
+      };
+    }
+    return this.lastState;
+  }
+
+  /** Recompute both suffix sums from the maneuvers' current times. */
+  private rebuildSuffixes(): void {
+    for (let i = this.maneuvers.length - 2; i >= 0; i--) {
+      const next = this.maneuvers[i + 1]!;
+      this.suffixTimeMs[i] = this.suffixTimeMs[i + 1]! + next.timeMs;
+      this.suffixTrafficMs[i] =
+        this.suffixTrafficMs[i + 1]! + (next.instruction.trafficDelayMs ?? 0);
+    }
+  }
+
+  /**
+   * Re-price the trip in flight: same roads, same turns, a newer estimate of
+   * how long they take.
+   *
+   * The schedule was fixed at construction, so a jam that formed after
+   * departure could only reach the driver by tearing the trip down and
+   * starting a new session — losing the prompts already fired, the distance
+   * bank and the section-control anchor to report a number. This accepts the
+   * revised maneuver times instead, and everything else about the trip
+   * continues untouched.
+   *
+   * `route` must be *this* route: same geometry, same maneuvers at the same
+   * points. A schedule that does not describe it is refused rather than
+   * half-applied — a mismatch means the caller has a different line in hand,
+   * and the honest response to that is a reroute, not a re-priced fiction.
+   * Returns the refreshed state (so the ETA moves now rather than at the next
+   * fix, which stopped in a queue may be a while), or null when refused.
+   */
+  setSchedule(route: RoutePath, nowMs: number = Date.now()): NavState | null {
+    const revised = route.instructions ?? [];
+    if (route.points.length !== this.points.length) return null;
+    if (revised.length !== this.maneuvers.length) return null;
+    if (!Number.isFinite(route.timeMs) || route.timeMs < 0) return null;
+    for (let i = 0; i < revised.length; i++) {
+      const before = this.maneuvers[i]!.instruction.interval;
+      const after = revised[i]!.interval;
+      if (before[0] !== after[0] || before[1] !== after[1]) return null;
+    }
+
+    this.totalTimeMs = route.timeMs;
+    for (let i = 0; i < revised.length; i++) {
+      const maneuver = this.maneuvers[i]!;
+      maneuver.instruction = revised[i]!;
+      maneuver.timeMs = revised[i]!.timeMs;
+    }
+    this.rebuildSuffixes();
+
+    // An arrived trip has no remaining time to re-price, and a state whose
+    // upcoming/sustain fields were cleared on arrival must not be rebuilt.
+    if (this.lastState && this.lastState.status !== 'arrived') {
+      const remainMs = this.remainingTimeMs(
+        this.lastState.traveledM,
+        this.lastState.distanceRemainingM,
+      );
+      this.lastState = {
+        ...this.lastState,
+        timeRemainingMs: remainMs,
+        etaEpochMs: nowMs + remainMs,
+        trafficDelayMs: this.remainingTrafficMs(this.lastState.traveledM),
       };
     }
     return this.lastState;
@@ -408,6 +474,7 @@ export class NavigationSession {
         status: 'arrived',
         routeProgress: 1,
         displayRouteProgress: 1,
+        trafficDelayMs: 0,
         upcoming: null,
         then: null,
         sustain: null,
@@ -657,6 +724,7 @@ export class NavigationSession {
       distanceRemainingM,
       timeRemainingMs: remainMs,
       etaEpochMs: nowMs + remainMs,
+      trafficDelayMs: this.arrived ? 0 : this.remainingTrafficMs(alongM),
       upcoming,
       then,
       sustain: this.arrived ? null : this.sustainAt(alongM, speedMps),
@@ -792,6 +860,7 @@ export class NavigationSession {
       distanceRemainingM,
       timeRemainingMs: remainMs,
       etaEpochMs: nowMs + remainMs,
+      trafficDelayMs: this.remainingTrafficMs(alongM),
       upcoming,
       then,
       sustain: this.sustainAt(alongM, speed),
@@ -871,6 +940,7 @@ export class NavigationSession {
       distanceRemainingM: this.totalM,
       timeRemainingMs: this.totalTimeMs,
       etaEpochMs: nowMs + this.totalTimeMs,
+      trafficDelayMs: this.remainingTrafficMs(0),
       upcoming,
       then,
       sustain: this.sustainAt(0, null),
@@ -1007,6 +1077,25 @@ export class NavigationSession {
     const fractionLeft =
       legM > 0 ? Math.max(0, (next?.alongStartM ?? this.totalM) - alongM) / legM : 0;
     return fractionLeft * cur.timeMs + this.suffixTimeMs[current]!;
+  }
+
+  /**
+   * The measured-congestion part of what is still ahead — the same suffix walk
+   * as {@link baseRemainingMs}, over the traffic share of each leg. This is
+   * what lets the banner name the delay honestly while it is still coming and
+   * stop naming it once it has been driven through.
+   */
+  private remainingTrafficMs(alongM: number): number {
+    if (this.maneuvers.length === 0) return 0;
+    const current = this.currentManeuverIndex(alongM);
+    const cur = this.maneuvers[current]!;
+    const next = this.maneuvers[current + 1];
+    const legM = (next?.alongStartM ?? this.totalM) - cur.alongStartM;
+    const fractionLeft =
+      legM > 0 ? Math.max(0, (next?.alongStartM ?? this.totalM) - alongM) / legM : 0;
+    return Math.round(
+      fractionLeft * (cur.instruction.trafficDelayMs ?? 0) + this.suffixTrafficMs[current]!,
+    );
   }
 
   private remainingTimeMs(alongM: number, distanceRemainingM: number): number {

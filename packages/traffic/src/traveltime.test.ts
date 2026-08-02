@@ -2,7 +2,12 @@ import { wgs84ToUtm33, type LatLng } from '@atlas/core';
 import type { RouteInstruction, RoutePath } from '@atlas/routing';
 import { describe, expect, it } from 'vitest';
 
-import { applyTrafficDelay, formatTrafficDelay, trafficDelayForRoute } from './delay.js';
+import {
+  applyTrafficDelay,
+  formatTrafficDelay,
+  trafficDelayForRoute,
+  type TrafficDelay,
+} from './delay.js';
 import {
   parseTravelTimeCorridors,
   parseTravelTimeSnapshot,
@@ -302,6 +307,38 @@ describe('applyTrafficDelay', () => {
 
   it('is a no-op when nothing was measured', () => {
     expect(applyTrafficDelay(path, { delayMs: 0, segments: [], measuredAt: '' })).toBe(path);
+  });
+
+  it('re-prices an already-priced path instead of stacking corrections', () => {
+    const jam = (delayMs: number): TrafficDelay => ({
+      delayMs,
+      measuredAt: 'now',
+      segments: [{ corridorId: 'a', name: 'A', startM: 0, endM: 1000, delayMs, status: 'slow' }],
+    });
+    const first = applyTrafficDelay(path, jam(60_000));
+    const worse = applyTrafficDelay(first, jam(180_000));
+
+    // The second measurement replaces the first — it does not add to it.
+    expect(worse.timeMs).toBe(380_000);
+    expect(worse.trafficDelayMs).toBe(180_000);
+    expect(worse.instructions?.[0]?.timeMs).toBeCloseTo(280_000, -3);
+    expect(worse.instructions?.[0]?.trafficDelayMs).toBeCloseTo(180_000, -3);
+    // …and re-applying the same one changes nothing at all.
+    expect(applyTrafficDelay(worse, jam(180_000))).toEqual(worse);
+  });
+
+  it('takes a cleared jam back off', () => {
+    const jammed = applyTrafficDelay(path, {
+      delayMs: 60_000,
+      measuredAt: 'now',
+      segments: [
+        { corridorId: 'a', name: 'A', startM: 0, endM: 1000, delayMs: 60_000, status: 'slow' },
+      ],
+    });
+    // An empty measurement is not "no news": the road is running freely again,
+    // and the trip must not keep paying for a queue that has dispersed.
+    const cleared = applyTrafficDelay(jammed, { delayMs: 0, segments: [], measuredAt: 'now' });
+    expect(cleared).toEqual(path);
   });
 });
 

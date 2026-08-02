@@ -682,6 +682,52 @@ describe('useNavigationController — faster-route watch', () => {
     expect(hook.result.current.fasterRoute).not.toBeNull();
   });
 
+  it('re-prices the route being driven from the newest measurements', async () => {
+    const trafficDelay = vi.fn(async () => ({
+      delayMs: 120_000,
+      measuredAt: '2026-08-02T16:10:00+02:00',
+      segments: [
+        {
+          corridorId: 'e18',
+          name: 'Asker - Sandvika',
+          startM: 0,
+          endM: 1113,
+          delayMs: 120_000,
+          status: 'queuing' as const,
+        },
+      ],
+    }));
+    const h = harness(undefined, { trafficDelay });
+    const hook = await fakeDrive(h);
+    const before = hook.result.current.state!;
+    expect(before.trafficDelayMs).toBe(0);
+
+    await driveFor(h, 181);
+
+    // A jam that formed after departure now reaches the driver: the followed
+    // route is re-priced in place, the trip is not restarted, and the banner
+    // can say how much of the new ETA is traffic.
+    expect(trafficDelay).toHaveBeenCalled();
+    expect(hook.result.current.activePath?.timeMs).toBe(720_000);
+    expect(hook.result.current.state!.trafficDelayMs).toBeGreaterThan(90_000);
+    expect(hook.result.current.state!.timeRemainingMs).toBeGreaterThan(before.timeRemainingMs);
+    expect(hook.result.current.phase).toBe('navigating');
+    expect(hook.result.current.fasterRoute).toBeNull();
+  });
+
+  it('keeps the schedule it departed with when the traffic feed is unreachable', async () => {
+    const trafficDelay = vi.fn(() => Promise.reject(new Error('offline')));
+    const h = harness(undefined, { trafficDelay });
+    const hook = await fakeDrive(h);
+
+    await driveFor(h, 181);
+
+    expect(trafficDelay).toHaveBeenCalled();
+    expect(hook.result.current.activePath?.timeMs).toBe(600_000);
+    expect(hook.result.current.state!.trafficDelayMs).toBe(0);
+    expect(hook.result.current.phase).toBe('navigating');
+  });
+
   it('never second-guesses a walking trip', async () => {
     const h = harness();
     const hook = renderHook(() => useNavigationController(h.platform));

@@ -1145,6 +1145,93 @@ describe('NavigationSession stable ETA', () => {
   });
 });
 
+describe('NavigationSession setSchedule (re-pricing a running trip)', () => {
+  /** The same route, with a 3-minute jam charged to the second leg. */
+  const jammed: RoutePath = {
+    ...route(),
+    timeMs: 300_000,
+    trafficDelayMs: 180_000,
+    instructions: [
+      instructions[0]!,
+      { ...instructions[1]!, timeMs: 240_000, trafficDelayMs: 180_000 },
+      instructions[2]!,
+    ],
+  };
+
+  it('moves the ETA without restarting the trip', () => {
+    const s = new NavigationSession(route());
+    const before = s.update(pointAtAlong(0), 1_000_000).state;
+    expect(before.timeRemainingMs).toBeCloseTo(120_000, -3);
+    expect(before.trafficDelayMs).toBe(0);
+
+    const after = s.setSchedule(jammed, 1_000_000)!;
+    expect(after.timeRemainingMs).toBeCloseTo(300_000, -3);
+    expect(after.etaEpochMs).toBeCloseTo(1_300_000, -3);
+    expect(after.trafficDelayMs).toBeCloseTo(180_000, -3);
+    // Everything else about the trip is untouched — same position, same turn.
+    expect(after.traveledM).toBe(before.traveledM);
+    expect(after.upcoming?.instruction.text).toBe(before.upcoming?.instruction.text);
+  });
+
+  it('sheds the delay as the jammed stretch is driven through', () => {
+    const s = new NavigationSession(route());
+    s.update(pointAtAlong(0), 0);
+    s.setSchedule(jammed, 0);
+
+    // Start of the jammed leg: all of it still ahead. Past its end: none.
+    const entering = s.update(pointAtAlong(routeCum[10]!), 60_000).state;
+    const through = s.update(pointAtAlong(routeCum[20]!), 300_000).state;
+    expect(entering.trafficDelayMs).toBeCloseTo(180_000, -3);
+    expect(through.trafficDelayMs).toBe(0);
+  });
+
+  it('keeps prompts, camera state and the matcher across the change', () => {
+    const s = new NavigationSession(route());
+    s.update(pointAtAlong(0), 0);
+    // Fire the first leg's approach cue, then re-price.
+    const spoken = s.update(pointAtAlong(routeCum[10]! - 60), 20_000).prompts;
+    expect(spoken.length).toBeGreaterThan(0);
+    s.setSchedule(jammed, 20_000);
+    // The same cue must not be spoken again just because the schedule changed.
+    expect(s.update(pointAtAlong(routeCum[10]! - 50), 24_000).prompts).toEqual([]);
+  });
+
+  it('refuses a schedule that does not describe this route', () => {
+    const s = new NavigationSession(route());
+    s.update(pointAtAlong(0), 0);
+    const before = s.update(pointAtAlong(100), 5_000).state.timeRemainingMs;
+
+    // A different line, and the same line with the maneuvers moved.
+    expect(s.setSchedule({ ...longRoute, timeMs: 60_000 }, 5_000)).toBeNull();
+    expect(
+      s.setSchedule(
+        {
+          ...route(),
+          timeMs: 60_000,
+          instructions: [
+            { ...instructions[0]!, interval: [0, 12] as [number, number] },
+            instructions[1]!,
+            instructions[2]!,
+          ],
+        },
+        5_000,
+      ),
+    ).toBeNull();
+    expect(s.update(pointAtAlong(100), 6_000).state.timeRemainingMs).toBeCloseTo(before, -2);
+  });
+
+  it('leaves an arrived trip alone', () => {
+    const s = new NavigationSession(route());
+    s.update(pointAtAlong(0), 0);
+    const arrived = s.update(pointAtAlong(routeTotal), 60_000).state;
+    expect(arrived.status).toBe('arrived');
+    const after = s.setSchedule(jammed, 60_000)!;
+    expect(after.status).toBe('arrived');
+    expect(after.trafficDelayMs).toBe(0);
+    expect(after.etaEpochMs).toBe(arrived.etaEpochMs);
+  });
+});
+
 describe('NavigationSession plannedRemainingMs', () => {
   it('is null before any fix has anchored a position', () => {
     expect(new NavigationSession(route()).plannedRemainingMs()).toBeNull();

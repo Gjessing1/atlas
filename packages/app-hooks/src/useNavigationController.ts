@@ -34,7 +34,11 @@ import {
   type RoutingProfile,
   type ValhallaTransport,
 } from '@atlas/routing';
-import type { TrafficClosureTransport } from '@atlas/traffic';
+import {
+  applyTrafficDelay,
+  type TrafficClosureTransport,
+  type TrafficDelayTransport,
+} from '@atlas/traffic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type NavPhase =
@@ -83,6 +87,14 @@ export interface NavPlatform {
   nvdbCameras?: NvdbCameraTransport;
   /** Live route-matched DATEX closures, for proactive mid-drive rerouting. */
   trafficClosures?: TrafficClosureTransport;
+  /**
+   * Live corridor travel times matched onto a route, for re-pricing the trip
+   * being driven (§2.2). Optional and best-effort in exactly the way the other
+   * traffic seam is: without it the trip keeps the schedule it departed with,
+   * which is the pre-v0.136.0 behaviour and the behaviour everywhere the feed
+   * has nothing to say.
+   */
+  trafficDelay?: TrafficDelayTransport;
   /**
    * One fix now, for the preview origin. Should reject with a
    * user-presentable message — it becomes the error phase's text — and must
@@ -769,6 +781,50 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   /**
+   * Re-price the route being driven against the newest corridor measurements.
+   *
+   * The correction used to be applied only when a route was *built*, so a jam
+   * that formed after departure reached the driver at the next reroute or not
+   * at all — on a motorway with no turns left, "not at all" was the usual
+   * answer. The roads do not change here and the trip does not restart: only
+   * the maneuver schedule is replaced, which the session now accepts in place
+   * (`setSchedule`), so prompts already fired, the banked distance and the
+   * section-control anchor all survive.
+   *
+   * Deliberately re-priced over the *whole* line rather than the part ahead:
+   * the schedule already sheds a delay as its maneuvers are passed, and asking
+   * only about the remainder would make the same jam count twice for anything
+   * reading the path's own total.
+   */
+  const repriceTraffic = useCallback(async (): Promise<void> => {
+    const session = sessionRef.current;
+    const path = activePathRef.current;
+    const delays = platformRef.current.trafficDelay;
+    // Car only: the corridors measure motor traffic, and it is the only
+    // profile whose provider prices a route in the first place.
+    if (!session || !path || !delays || profileRef.current !== 'car') return;
+    const trip = tripSeq.current;
+    let priced: RoutePath;
+    try {
+      priced = applyTrafficDelay(path, await delays(path.points));
+    } catch {
+      // Offline, or the feed is down: the trip keeps the schedule it has.
+      return;
+    }
+    // A reroute (or End) during the request leaves this measurement describing
+    // a line nobody is driving any more.
+    if (trip !== tripSeq.current) return;
+    if (sessionRef.current !== session || activePathRef.current !== path) return;
+    if (priced.timeMs === path.timeMs) return;
+    const refreshed = session.setSchedule(priced, Date.now());
+    setActivePath(priced);
+    if (refreshed) {
+      setState(refreshed);
+      lastStateRef.current = refreshed;
+    }
+  }, [platformRef, activePathRef]);
+
+  /**
    * The faster-route watch: ask the engine for today's best route from where
    * the car actually is, and compare engine estimate against engine estimate.
    * Anything better by a real margin becomes an *offer* — never a silent
@@ -807,6 +863,15 @@ export function useNavigationController(platform: NavPlatform): NavController {
           return;
         }
       }
+      // Before comparing anything: bring the followed route's schedule up to
+      // the current measurements. It is the point of the poll in its own right
+      // — the ETA moves without the driver doing anything — and it is what
+      // makes the comparison below fair, since the candidate is priced by the
+      // provider against *now* while the followed route was priced at
+      // departure. Judging one against the other was measuring a jam that has
+      // since cleared against one that has not.
+      await repriceTraffic();
+      if (trip !== tripSeq.current || !sessionRef.current) return;
       const plannedMs = session.plannedRemainingMs();
       if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) return;
       const heading =
@@ -843,7 +908,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     } finally {
       if (trip === tripSeq.current) fasterCheckInFlight.current = false;
     }
-  }, [platformRef, activePathRef, fetchPath, speak, clearFasterOffer, reroute]);
+  }, [platformRef, activePathRef, fetchPath, speak, clearFasterOffer, reroute, repriceTraffic]);
 
   /** Take the offered faster route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {

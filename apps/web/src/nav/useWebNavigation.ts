@@ -102,9 +102,13 @@ function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void
 export function useWebNavigation(): NavController {
   const platform = useMemo<NavPlatform>(() => {
     const trafficClosures = httpTrafficClosures();
+    const trafficDelay = httpTrafficDelay();
     return {
-      provider: trafficAwareRouteProvider(httpRouteProvider(), trafficClosures, httpTrafficDelay()),
+      provider: trafficAwareRouteProvider(httpRouteProvider(), trafficClosures, trafficDelay),
       trafficClosures,
+      // The same corridor measurements the provider prices a new route with,
+      // asked again mid-drive so the trip being followed is re-priced too.
+      trafficDelay,
       trace: httpTraceTransport(),
       nvdbLimits: httpNvdbLimits(),
       nvdbCameras: httpNvdbCameras(),

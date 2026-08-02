@@ -113,6 +113,18 @@ export interface RouteInstruction {
   sign: number;
   streetName?: string;
   interval: [number, number];
+  /**
+   * How much of this maneuver's `timeMs` is measured congestion rather than
+   * the engine's schedule — this leg's share of `RoutePath.trafficDelayMs`,
+   * and like it **already included** in `timeMs`.
+   *
+   * Recorded per maneuver, not just per route, because a delay only stays
+   * honest while it can be *removed*: re-pricing a route mid-drive means
+   * dropping the measurement it was built with and applying the current one,
+   * and navigation can only say how much of the *remaining* time is traffic if
+   * it knows which legs the jam sits on.
+   */
+  trafficDelayMs?: number;
   /** Which exit to take, for roundabout maneuvers (`sign === 6`). */
   exitNumber?: number;
   /**
