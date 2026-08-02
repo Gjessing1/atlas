@@ -140,10 +140,15 @@ export function registerTrafficApi(
   const situations = cachedFeed('datex', cacheTtlMs, async (): Promise<DatexSnapshot> => {
     try {
       const parsed = parseDatexSnapshot(await pull(SITUATION_URL), now());
-      status.record('datex', true, `${parsed.situations.length} current situations`);
+      status.record('datex', true);
+      // The count goes through setDetail, not record: `record` keeps its
+      // message only for failures, so a healthy source described that way says
+      // nothing at all on the status page.
+      status.setDetail('datex', `${parsed.situations.length} current situations`);
       return parsed;
     } catch (error) {
       status.record('datex', false, 'unreachable');
+      status.setDetail('datex', null);
       throw error;
     }
   });
@@ -160,6 +165,7 @@ export function registerTrafficApi(
         // dead corridor table *is* this capability being down, and a second
         // status row would let it read healthy while answering nothing.
         status.record('datex-traveltime', false, 'corridor table unreachable');
+        status.setDetail('datex-traveltime', null);
         throw error;
       }
     },
@@ -172,14 +178,18 @@ export function registerTrafficApi(
       try {
         const parsed = parseTravelTimeSnapshot(await pull(TRAVEL_TIME_URL));
         const measured = parsed.measurements.filter((entry) => entry.durationS !== undefined);
-        status.record(
+        status.record('datex-traveltime', true);
+        // Worth stating rather than reducing to "ok": a third of the corridors
+        // routinely report nothing, so the useful health question is how many
+        // are actually measuring, not whether the feed answered.
+        status.setDetail(
           'datex-traveltime',
-          true,
           `${measured.length} of ${parsed.measurements.length} corridors measuring`,
         );
         return parsed;
       } catch (error) {
         status.record('datex-traveltime', false, 'unreachable');
+        status.setDetail('datex-traveltime', null);
         throw error;
       }
     },

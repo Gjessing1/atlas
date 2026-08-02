@@ -170,6 +170,38 @@ describe('DATEX traffic API', () => {
     await app.close();
   });
 
+  it('says on the status page how many corridors are actually measuring', async () => {
+    // A healthy source whose detail line is empty is the weak half of N7: the
+    // useful question is not "did the feed answer" but "how much of it is
+    // reporting", and `record`'s message is dropped on success.
+    const registry = new StatusRegistry();
+    const app = Fastify();
+    registerTrafficApi(app, registry, {
+      username: 'user',
+      password: 'secret',
+      fetchImpl: datexFetch(),
+      now: () => new Date('2026-07-31T10:00:00+02:00'),
+    });
+    await app.ready();
+    await app.inject({
+      method: 'POST',
+      url: '/api/traffic/travel-times',
+      payload: {
+        points: [
+          { lat: 59.9, lng: 10.7 },
+          { lat: 59.91, lng: 10.7 },
+        ],
+      },
+    });
+    const sources = registry.toStatus();
+    expect(sources.find((source) => source.id === 'datex-traveltime')).toMatchObject({
+      health: 'ok',
+      detail: '1 of 1 corridors measuring',
+    });
+    expect(sources.find((source) => source.id === 'datex')?.detail).toBe('1 current situations');
+    await app.close();
+  });
+
   it('rejects a request without a route and reports an upstream failure', async () => {
     const fetchImpl = datexFetch({
       travelTimes: () => new Response('nope', { status: 503 }),
