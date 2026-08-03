@@ -277,6 +277,7 @@ export function RoutePanel({
   onShareLink,
   onSaveTrack,
   onNavigate,
+  onExplore,
   onShowTransitTrip,
   getMyLocation,
   locatingOrigin = false,
@@ -310,6 +311,8 @@ export function RoutePanel({
    * points here.
    */
   onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
+  /** Start a destination-free live map in the selected travel mode. */
+  onExplore: () => void;
   /** Collapse the planner and frame this selected journey on the map. */
   onShowTransitTrip: (trip: TransitTrip) => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
@@ -507,6 +510,18 @@ export function RoutePanel({
             </Pressable>
           ) : null}
         </View>
+
+        {!transitMode ? (
+          <Pressable
+            style={[styles.exploreButton, styles.buttonQuiet]}
+            onPress={onExplore}
+            accessibilityRole="button"
+            accessibilityLabel="Follow my position without a destination"
+            testID="route-explore"
+          >
+            <Text style={styles.buttonQuietText}>Follow my position · no destination</Text>
+          </Pressable>
+        ) : null}
 
         {!transitMode ? (
           <>
@@ -991,6 +1006,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.border,
     backgroundColor: theme.surfaceMuted,
+  },
+  exploreButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    marginBottom: 4,
   },
   customOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   // Icon-only mode picker: equal-width tabs under a shared rule, with the

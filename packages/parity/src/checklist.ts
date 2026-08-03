@@ -679,6 +679,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/useNavigation.ts', contains: 'useNavigationController' },
   },
   {
+    id: 'nav-explorer-mode',
+    surface: 'navigation',
+    capability:
+      'Follow the live GPS position in any road or pedestrian profile without a destination',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'onExplore' },
+    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'onExplore' },
+    note: 'The shared controller owns one destination-free `exploring` phase: raw GPS drives the same follow camera and readouts, while route requests, instructions, voice, rerouting and arrival stay absent by construction.',
+  },
+  {
     id: 'nav-voice',
     surface: 'navigation',
     capability: 'Spoken prompts',

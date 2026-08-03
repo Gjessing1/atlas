@@ -300,7 +300,8 @@ export function MapScene({
 }: MapSceneProps) {
   // The follow camera itself lives in useNavCamera (App drives it through
   // cameraRef) — the scene only renders the puck and reports gestures.
-  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following =
+    nav.phase === 'exploring' || nav.phase === 'navigating' || nav.phase === 'rerouting';
   // The trip isn't over until the traveller taps Done: the arrival card stays
   // up while they finish the last few metres on foot or hunt for the entrance,
   // and a position marker that vanishes the moment we say "you have arrived"

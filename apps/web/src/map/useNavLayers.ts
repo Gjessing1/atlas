@@ -60,6 +60,7 @@ export function useNavLayers(
   const [followPaused, setFollowPaused] = useState(false);
   const [overview, setOverview] = useState(false);
   const active = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following = active || nav.phase === 'exploring';
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
   // This must stay exact: rounding by a percentage of the whole route made
@@ -359,7 +360,8 @@ export function useNavLayers(
     if (!map) return;
     // Arrival keeps the fix watch running until Done, so the puck stays too:
     // the last stretch to the door is exactly where it is being watched.
-    const snapped = active || nav.phase === 'arrived' ? nav.state?.snapped : undefined;
+    const snapped =
+      following || nav.phase === 'arrived' ? (nav.state?.snapped ?? nav.position) : undefined;
     if (snapped) {
       if (!puckRef.current) {
         const el = document.createElement('div');
@@ -393,7 +395,17 @@ export function useNavLayers(
       destRef.current?.remove();
       destRef.current = null;
     }
-  }, [map, active, previewing, nav.phase, nav.state?.snapped, nav.state?.fix, nav.destination]);
+  }, [
+    map,
+    active,
+    following,
+    previewing,
+    nav.phase,
+    nav.state?.snapped,
+    nav.state?.fix,
+    nav.position,
+    nav.destination,
+  ]);
   // Via stops still ahead on a multi-stop trip, as small dots along the line:
   // each disappears once driven past. Deliberately keyed on the passed-count,
   // not the fix, so the markers are rebuilt when a stop is reached rather
@@ -424,7 +436,7 @@ export function useNavLayers(
   // A user gesture pauses the follow (and closes the overview); the recenter
   // button resumes it.
   useEffect(() => {
-    if (!map || !active) return;
+    if (!map || !following) return;
     const pause = (e: { originalEvent?: unknown }) => {
       if (e.originalEvent) {
         setFollowPaused(true);
@@ -439,28 +451,29 @@ export function useNavLayers(
       map.off('rotatestart', pause);
       map.off('zoomstart', pause);
     };
-  }, [map, active]);
+  }, [map, following]);
 
   // Follow state resets with each trip.
   useEffect(() => {
-    if (!active) {
+    if (!following) {
       setFollowPaused(false);
       setOverview(false);
     }
-  }, [active]);
+  }, [following]);
 
   // Course-up bearing from the route tangent (stable), not the raw GPS course
   // (wobbles) — held over states where the tangent is unavailable.
   const courseRef = useRef(0);
   useEffect(() => {
-    if (nav.state?.courseDeg != null) courseRef.current = nav.state.courseDeg;
-  }, [nav.state?.courseDeg]);
+    const course = nav.state?.courseDeg ?? nav.position?.headingDeg;
+    if (course != null) courseRef.current = course;
+  }, [nav.state?.courseDeg, nav.position?.headingDeg]);
 
   useEffect(() => {
-    if (!map || !active || followPaused || overview) return;
+    if (!map || !following || followPaused || overview) return;
     const state = nav.state;
-    const snapped = state?.snapped;
-    if (!state || !snapped) return;
+    const snapped = state?.snapped ?? nav.position;
+    if (!snapped) return;
     // Course-up from the first fix, before the drive has demonstrably begun
     // (Android parity): the route tangent gives a stable bearing standing
     // still, so the driving frame is up the moment guidance starts.
@@ -483,7 +496,7 @@ export function useNavLayers(
       zoom: followZoom(
         nav.speedMps,
         snapped.lat,
-        state.upcoming?.distanceToM ?? null,
+        state?.upcoming?.distanceToM ?? null,
         forwardPx,
         camStyle,
       ),
@@ -494,7 +507,17 @@ export function useNavLayers(
       // Linear easing keeps back-to-back fixes from stuttering.
       easing: (t) => t,
     });
-  }, [map, active, followPaused, overview, followMode, nav.state, nav.speedMps, nav.profile]);
+  }, [
+    map,
+    following,
+    followPaused,
+    overview,
+    followMode,
+    nav.state,
+    nav.position,
+    nav.speedMps,
+    nav.profile,
+  ]);
 
   // Overview: fit the whole remaining route flat and north-up; back to the
   // follow on tap (toggle/recenter), a map gesture, or by itself on timeout.
@@ -524,11 +547,11 @@ export function useNavLayers(
   // Restore a north-up, unpitched, unpadded camera when the trip ends.
   const wasActive = useRef(false);
   useEffect(() => {
-    if (wasActive.current && !active && map) {
+    if (wasActive.current && !following && map) {
       map.easeTo({ bearing: 0, pitch: 0, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
     }
-    wasActive.current = active;
-  }, [map, active]);
+    wasActive.current = following;
+  }, [map, following]);
 
   return {
     followPaused,
@@ -538,6 +561,7 @@ export function useNavLayers(
     },
     overview,
     toggleOverview: () => {
+      if (!active) return;
       setOverview((o) => !o);
       setFollowPaused(false);
     },

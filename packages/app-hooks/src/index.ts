@@ -49,6 +49,7 @@ export {
 } from './useNavPrefs.js';
 export {
   useNavigationController,
+  type NavActivity,
   type NavController,
   type NavFasterRoute,
   type NavOriginFix,

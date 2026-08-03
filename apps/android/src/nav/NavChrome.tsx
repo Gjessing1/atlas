@@ -51,7 +51,8 @@ export function useNavPuck(
   followMode: NavFollowMode,
   viewport: NavViewport,
 ): NavPuck {
-  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following =
+    nav.phase === 'exploring' || nav.phase === 'navigating' || nav.phase === 'rerouting';
   // Arrival keeps the trip's own BestForNavigation watch running until Done,
   // so it keeps the trip's own marker too. Handing the last hundred metres —
   // across the car park, round the courtyard — back to the native puck's fuzzy
@@ -61,12 +62,13 @@ export function useNavPuck(
   // Walking modes keep a flat, centred camera even course-up (useNavCamera);
   // only the pitched driving frame bottom-anchors the puck.
   const bottomAnchored = courseUp && navCameraStyle(nav.profile).pitchDeg > 0;
-  const visible = following && !navCam.followPaused && !navCam.overview && nav.state !== null;
+  const livePosition = nav.state?.snapped ?? nav.position;
+  const visible = following && !navCam.followPaused && !navCam.overview && livePosition !== null;
   const anchor = bottomAnchored ? viewport.courseAnchor : viewport.flatAnchor;
   return {
     visible,
-    dot: live && nav.state !== null && !visible ? nav.state.snapped : null,
-    suppressNative: live && nav.state !== null,
+    dot: live && livePosition !== null && !visible ? livePosition : null,
+    suppressNative: live && livePosition !== null,
     // Anchor point of the follow camera (see useNavCamera): course-up puts it
     // low for look-ahead; north-up centres it vertically. Landscape centres
     // both in the unobstructed right map pane. Track the exact same geometry so
@@ -78,7 +80,9 @@ export function useNavPuck(
     // where the *traveller* points: the compass facing while one is on offer
     // (walking modes at walking pace — the walker turning at a junction sees
     // the arrow turn with them), else the route course as before.
-    rotation: courseUp ? 0 : Math.round(nav.facingDeg ?? nav.state?.courseDeg ?? 0),
+    rotation: courseUp
+      ? 0
+      : Math.round(nav.facingDeg ?? nav.state?.courseDeg ?? nav.position?.headingDeg ?? 0),
   };
 }
 
@@ -97,7 +101,8 @@ export interface NavChromeProps {
  * collision-free layout. All of this appears only while guidance is running.
  */
 export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChromeProps) {
-  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following =
+    nav.phase === 'exploring' || nav.phase === 'navigating' || nav.phase === 'rerouting';
   if (!following) return null;
   const roadLabel = nav.state?.tunnel ? tunnelChipLabel(nav.state.tunnel) : nav.state?.currentRoad;
   // ATK camera guidance (web NavBanner's twin): a section in progress outranks

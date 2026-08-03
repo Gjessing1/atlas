@@ -8,7 +8,7 @@ import {
   shortManeuverText,
   tunnelChipLabel,
 } from '@atlas/navigation';
-import { formatExitSign, type RouteLane } from '@atlas/routing';
+import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
 import { formatTrafficDelay } from '@atlas/traffic';
 import { TurnIcon } from './TurnIcon.js';
 
@@ -141,8 +141,10 @@ export function NavBanner({
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
   const { state } = nav;
   const maneuver = state?.upcoming;
-  const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const sustain = moving ? (state?.sustain ?? null) : null;
+  const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const exploring = nav.phase === 'exploring';
+  const moving = guiding || exploring;
+  const sustain = guiding ? (state?.sustain ?? null) : null;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — or the distant maneuver demoted below a long-road sustain cue.
   const thenManeuver =
@@ -154,17 +156,17 @@ export function NavBanner({
   // Inside a mapped tunnel the chip names the tunnel and counts it down — the
   // road underneath is still E6, but "Brynstunnelen · 1.2 km" is what the
   // driver can check against the world outside the windscreen.
-  const tunnel = moving ? (state?.tunnel ?? null) : null;
-  const road = tunnel ? tunnelChipLabel(tunnel) : moving ? (state?.currentRoad ?? null) : null;
+  const tunnel = guiding ? (state?.tunnel ?? null) : null;
+  const road = tunnel ? tunnelChipLabel(tunnel) : guiding ? (state?.currentRoad ?? null) : null;
   const walking = nav.profile === 'foot' || nav.profile === 'hike';
   // No speed-limit roundel on foot: the 80 km/h sign on the road a footpath
   // parallels is driving furniture, not guidance.
-  const speedLimit = moving && !walking ? (state?.speedLimitKph ?? null) : null;
+  const speedLimit = guiding && !walking ? (state?.speedLimitKph ?? null) : null;
   // ATK camera guidance (car routes in Norway only — elsewhere the data is
   // simply absent, so no chip: the §2.1 rule). A section in progress outranks
   // the next point camera; the average is what section control is about.
-  const sectionControl = moving && !walking ? (state?.sectionControl ?? null) : null;
-  const speedCamera = !sectionControl && moving && !walking ? (state?.speedCamera ?? null) : null;
+  const sectionControl = guiding && !walking ? (state?.sectionControl ?? null) : null;
+  const speedCamera = !sectionControl && guiding && !walking ? (state?.speedCamera ?? null) : null;
   const sectionOver =
     sectionControl?.avgKph != null &&
     sectionControl.limitKph != null &&
@@ -182,20 +184,34 @@ export function NavBanner({
   // where "I've arrived" is the one thing the traveller knows better than we do.
   // Deliberately distinct from End: this completes the trip rather than
   // abandoning it, so it banks the summary.
-  const canDeclareArrival = moving && state != null && state.distanceRemainingM <= 150;
+  const canDeclareArrival = guiding && state != null && state.distanceRemainingM <= 150;
+  const profileLabel = ROUTING_PROFILES.find((candidate) => candidate.id === nav.profile)?.label;
+  const shownWidgets: NavWidgetId[] = exploring ? ['speed', 'altitude'] : widgets;
 
   return (
     <>
       <div className="nav-banner" role="status">
         <div className="nav-card">
-          {nav.phase === 'starting' ? (
+          {exploring ? (
+            <div className="nav-state-block">
+              <span className="nav-state-eyebrow">Explorer mode</span>
+              <span className="nav-maneuver">
+                {nav.position
+                  ? `${profileLabel ?? 'Travel'} · Following your position`
+                  : 'Finding your position…'}
+              </span>
+              <span className="nav-arrival-summary">No destination or turn-by-turn guidance</span>
+            </div>
+          ) : nav.phase === 'starting' ? (
             <div className="nav-state-block">
               <span className="nav-state-eyebrow">Navigation</span>
               <span className="nav-maneuver">Finding the best route…</span>
             </div>
           ) : nav.phase === 'error' ? (
             <div className="nav-state-block">
-              <span className="nav-state-eyebrow">Navigation unavailable</span>
+              <span className="nav-state-eyebrow">
+                {nav.activity === 'explorer' ? 'Explorer unavailable' : 'Navigation unavailable'}
+              </span>
               <span className="nav-error">{nav.error ?? 'Navigation error'}</span>
             </div>
           ) : nav.phase === 'arrived' ? (
@@ -326,7 +342,7 @@ export function NavBanner({
         <div className={`nav-actions${canDeclareArrival ? ' nav-actions-arrival' : ''}`}>
           {moving ? (
             <div className="nav-widgets" aria-label="Navigation widgets">
-              {widgets.map((widget) => {
+              {shownWidgets.map((widget) => {
                 const display = widgetValue(widget, nav);
                 return (
                   <span className="nav-widget" key={widget}>
@@ -358,7 +374,7 @@ export function NavBanner({
                 <NavActionIcon kind="recenter" />
               </button>
             ) : null}
-            {moving ? (
+            {guiding ? (
               <button
                 type="button"
                 className="nav-action-button"
@@ -372,7 +388,7 @@ export function NavBanner({
                 </svg>
               </button>
             ) : null}
-            {moving ? (
+            {guiding ? (
               <button
                 type="button"
                 className="nav-action-button"
@@ -395,7 +411,7 @@ export function NavBanner({
                 {followMode === 'course' ? 'N' : <NavActionIcon kind="follow" />}
               </button>
             ) : null}
-            {moving ? (
+            {guiding ? (
               <button
                 type="button"
                 className="nav-action-button"

@@ -82,7 +82,10 @@ async function currentFix(timeoutMs: number): Promise<NavOriginFix> {
  * The background task cannot touch React state, so it forwards through the
  * module-level handler in `locationTask`.
  */
-async function watchFixes(onFix: (fix: Position) => void): Promise<() => void> {
+async function watchFixes(
+  onFix: (fix: Position) => void,
+  activity: 'guidance' | 'explorer' = 'guidance',
+): Promise<() => void> {
   setLocationHandler(onFix);
   const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
   if (!already) {
@@ -94,8 +97,11 @@ async function watchFixes(onFix: (fix: Position) => void): Promise<() => void> {
       distanceInterval: 0,
       showsBackgroundLocationIndicator: true,
       foregroundService: {
-        notificationTitle: 'Atlas navigation',
-        notificationBody: 'Guiding you to your destination',
+        notificationTitle: activity === 'explorer' ? 'Atlas Explorer' : 'Atlas navigation',
+        notificationBody:
+          activity === 'explorer'
+            ? 'Following your position without a destination'
+            : 'Guiding you to your destination',
       },
     });
   }

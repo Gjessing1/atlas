@@ -373,6 +373,13 @@ export function App() {
     },
     [route.profile, route.preferences, startNav, stopRoute],
   );
+  const onStartExplorer = useCallback(() => {
+    setPin(null);
+    setTarget(null);
+    const profile = route.profile;
+    stopRoute();
+    void nav.explore(profile);
+  }, [nav, route.profile, stopRoute]);
   // "Directions" on the place card opens the planner with that point as the
   // destination (Android parity): the planner is the one travel-mode picker, so
   // public transport is offered there whether the trip started from a map pin
@@ -1139,6 +1146,7 @@ export function App() {
             locatingOrigin={directions.locatingOrigin}
             fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
+            onExplore={onStartExplorer}
             onSaveTrack={async (data, name, collectionId) =>
               (await userData.saveTrack(data, name, collectionId)) !== null
             }

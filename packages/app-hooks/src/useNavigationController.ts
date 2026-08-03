@@ -42,7 +42,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type NavPhase =
-  'idle' | 'starting' | 'preview' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+  'idle' | 'starting' | 'preview' | 'exploring' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+
+/** Whether the location watch is following a route or simply following the traveller. */
+export type NavActivity = 'guidance' | 'explorer' | null;
 
 /** What the arrival card shows once the trip is over. */
 export interface NavTripSummary {
@@ -106,7 +109,10 @@ export interface NavPlatform {
    * because Android's foreground service is, and a failure to start it is a
    * real error rather than a silent no-fix trip.
    */
-  watchFixes(onFix: (fix: Position) => void): Promise<() => void>;
+  watchFixes(
+    onFix: (fix: Position) => void,
+    activity?: Exclude<NavActivity, null>,
+  ): Promise<() => void>;
   /** Speak a prompt. Muting is handled here, so this is called only when audible. */
   speak(text: string): void;
   /** Cut off anything queued or playing (on mute, and at the end of a trip). */
@@ -135,7 +141,11 @@ export interface NavPlatform {
 
 export interface NavController {
   phase: NavPhase;
+  /** The kind of live-location session, retained on its error card until End. */
+  activity: NavActivity;
   state: NavState | null;
+  /** Latest raw GPS fix. Explorer mode follows this without manufacturing a route. */
+  position: Position | null;
   /** Active route geometry as [lng, lat] pairs, for the map line source. */
   routeCoords: number[][];
   /** The route being followed (instructions included, for on-map turn arrows). */
@@ -223,6 +233,8 @@ export interface NavController {
     preferences?: Partial<RoutePreferences>,
     vias?: LatLng[],
   ) => Promise<void>;
+  /** Follow the live position without a destination, route, prompts or rerouting. */
+  explore: (profile?: RoutingProfile) => Promise<void>;
   /** Pick one of the preview route choices (preview phase only). */
   selectPreview: (index: number) => void;
   /** Switch profile and refetch the preview choices (preview phase only). */
@@ -289,7 +301,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const platformRef = useLatest(platform);
 
   const [phase, setPhase] = useState<NavPhase>('idle');
+  const [activity, setActivity] = useState<NavActivity>(null);
   const [state, setState] = useState<NavState | null>(null);
+  const [position, setPosition] = useState<Position | null>(null);
   const [routeCoords, setRouteCoords] = useState<number[][]>([]);
   const [activePath, setActivePath] = useState<RoutePath | null>(null);
   const [profile, setProfileState] = useState<RoutingProfile>('car');
@@ -577,6 +591,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       fasterCheckInFlight.current = false;
       setRouteCoords([]);
       setActivePath(null);
+      setPosition(null);
       setSpeedMps(null);
       setAltitudeM(null);
       setFacing(null);
@@ -587,6 +602,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         setState(null);
         setDestination(null);
         setTripSummary(null);
+        setActivity(null);
       }
       tripStartRef.current = null;
       traveledBaseRef.current = 0;
@@ -610,6 +626,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setPreferencesState(null);
       clearFasterOffer();
       setDestination(null);
+      setPosition(null);
+      startInFlight.current = false;
       setError(message(err));
       setPhase('error');
     },
@@ -957,7 +975,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const onFix = useCallback(
     (fix: Position) => {
       const session = sessionRef.current;
-      if (!session) return;
       lastFixRef.current = fix;
       // A faster-route offer describes a branch from where the car *was*; once
       // stale it may already be behind, so it quietly lapses.
@@ -967,6 +984,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setAltitudeM(
         typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
       );
+      setPosition(fix);
+      // Explorer mode is deliberately only a live fix and follow camera. It
+      // has no synthetic route state, so no arrival/off-route/reroute logic can
+      // accidentally leak into a destination-free trip.
+      if (!session) return;
       // Runs on every GPS fix (incl. Android's headless background task); an
       // uncaught throw here would take the whole app down in a release build.
       try {
@@ -1013,6 +1035,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       startInFlight.current = true;
       const seq = ++previewSeq.current;
       setError(null);
+      setActivity('guidance');
       setPhase('starting');
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
@@ -1052,6 +1075,59 @@ export function useNavigationController(platform: NavPlatform): NavController {
       }
     },
     [platformRef, fetchChoices, fail],
+  );
+
+  /**
+   * Start a destination-free live map. The one-off fix both obtains the
+   * platform permission and gives the camera an immediate position; the same
+   * continuous watch as guidance then keeps it current (and, on Android,
+   * keeps doing so under the foreground location service).
+   */
+  const explore = useCallback(
+    async (prof: RoutingProfile = 'car') => {
+      if (startInFlight.current) return;
+      startInFlight.current = true;
+      stopWatch();
+      sessionRef.current = null;
+      clearPreview();
+      const seq = ++previewSeq.current;
+      setError(null);
+      setActivity('explorer');
+      setPhase('exploring');
+      profileRef.current = prof;
+      setProfileState(prof);
+      setPreferencesState(null);
+      preferencesRef.current = undefined;
+      destRef.current = null;
+      setDestination(null);
+      viasRef.current = [];
+      setViaPoints([]);
+      setState(null);
+      lastStateRef.current = null;
+      setRouteCoords([]);
+      setActivePath(null);
+      setTripSummary(null);
+      setSpeedMps(null);
+      setAltitudeM(null);
+      setPosition(null);
+      try {
+        const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
+        if (seq !== previewSeq.current) return;
+        onFix(origin.fix);
+        const stopFixes = await platformRef.current.watchFixes(onFix, 'explorer');
+        if (seq !== previewSeq.current) {
+          stopFixes();
+          return;
+        }
+        watchStopRef.current = stopFixes;
+      } catch (err) {
+        if (seq !== previewSeq.current) return;
+        fail(err);
+      } finally {
+        if (seq === previewSeq.current) startInFlight.current = false;
+      }
+    },
+    [platformRef, stopWatch, clearPreview, onFix, fail],
   );
 
   // Profile switch on the preview card: refetch the choices for the same trip.
@@ -1097,6 +1173,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const beginGuidance = useCallback(
     async (path: RoutePath, origin: NavOriginFix | null) => {
       tripSeq.current++;
+      setActivity('guidance');
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
       offRouteSpokenRef.current = false;
@@ -1112,7 +1189,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       clearPreview();
 
       stopWatch();
-      const stopFixes = await platformRef.current.watchFixes(onFix);
+      const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
       // End (or another trip) while the watch was starting: don't leave one live.
       if (sessionRef.current !== session) {
         stopFixes();
@@ -1233,6 +1310,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   const guiding = phase === 'navigating' || phase === 'rerouting';
+  const liveFollowing = guiding || phase === 'exploring';
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.
@@ -1285,10 +1363,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
   // hysteresis (compass while walking, GPS course when moving fast enough for
   // it to be trustworthy) and drops readings the sensor itself flags as bad —
   // Google's degrade-to-a-dot behaviour, minus the figure-8 nag.
-  const walkingProfile = profile === 'foot' || profile === 'hike';
+  const walkingProfile = profile === 'foot' || profile === 'hike' || profile === 'run';
   const speedRef = useLatest(speedMps);
   useEffect(() => {
-    if (!guiding || !walkingProfile) return;
+    if (!liveFollowing || !walkingProfile) return;
     const watch = platformRef.current.watchFacing;
     if (!watch) return;
     const blender = facingBlender.current;
@@ -1323,7 +1401,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       unsubscribe();
       setFacing(null);
     };
-  }, [guiding, walkingProfile, platformRef, speedRef]);
+  }, [liveFollowing, walkingProfile, platformRef, speedRef]);
 
   // Speeding up leans the puck onto the course even between compass events (a
   // cyclist pushing off from a walk would otherwise keep a stale facing); a
@@ -1337,16 +1415,18 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   // A navigating device is a dashboard: keep the screen on for the whole trip.
   useEffect(() => {
-    if (!guiding) return;
+    if (!liveFollowing) return;
     return platformRef.current.keepAwake?.();
-  }, [guiding, platformRef]);
+  }, [liveFollowing, platformRef]);
 
   // Drop the fix watch if the app unmounts mid-trip.
   useEffect(() => stopWatch, [stopWatch]);
 
   return {
     phase,
+    activity,
     state,
+    position,
     routeCoords,
     activePath,
     profile,
@@ -1374,6 +1454,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     rerouteFailed,
     error,
     start,
+    explore,
     selectPreview: setPreviewIndex,
     setProfile,
     go,

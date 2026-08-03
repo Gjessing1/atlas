@@ -46,6 +46,7 @@ interface Harness {
   route: ReturnType<typeof vi.fn>;
   currentFix: ReturnType<typeof vi.fn>;
   watchStopped: () => number;
+  watchActivities: Array<'guidance' | 'explorer' | undefined>;
 }
 
 function harness(
@@ -55,6 +56,7 @@ function harness(
   const spoken: string[] = [];
   let sink: ((fix: Position) => void) | null = null;
   let stopped = 0;
+  const watchActivities: Array<'guidance' | 'explorer' | undefined> = [];
   const route = vi.fn(
     routeImpl ?? (() => Promise.resolve({ paths: [path(600_000), path(900_000, 0.0001)] })),
   );
@@ -64,7 +66,8 @@ function harness(
   const platform: NavPlatform = {
     provider: { route: route as unknown as NavPlatform['provider']['route'] },
     currentFix: currentFix as unknown as NavPlatform['currentFix'],
-    watchFixes: (onFix) => {
+    watchFixes: (onFix, activity) => {
+      watchActivities.push(activity);
       sink = onFix;
       return Promise.resolve(() => {
         stopped++;
@@ -82,6 +85,7 @@ function harness(
     route,
     currentFix,
     watchStopped: () => stopped,
+    watchActivities,
   };
 }
 
@@ -253,6 +257,50 @@ describe('useNavigationController — guidance', () => {
     hook.unmount();
 
     expect(h.watchStopped()).toBe(1);
+  });
+});
+
+describe('useNavigationController — Explorer mode', () => {
+  it('follows raw fixes without requesting a route or creating guidance state', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => result.current.explore('hike'));
+
+    expect(result.current.phase).toBe('exploring');
+    expect(result.current.activity).toBe('explorer');
+    expect(result.current.profile).toBe('hike');
+    expect(result.current.position).toEqual(onLine(0, { speedMps: 0 }));
+    expect(result.current.state).toBeNull();
+    expect(result.current.destination).toBeNull();
+    expect(result.current.routeCoords).toEqual([]);
+    expect(h.route).not.toHaveBeenCalled();
+    expect(h.spoken).toEqual([]);
+    expect(h.watchActivities).toEqual(['explorer']);
+
+    const next = onLine(4, { speedMps: 1.4, altitudeM: 312, headingDeg: 85 });
+    act(() => h.emit(next));
+    expect(result.current.position).toEqual(next);
+    expect(result.current.speedMps).toBe(1.4);
+    expect(result.current.altitudeM).toBe(312);
+
+    act(() => result.current.stop());
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.position).toBeNull();
+    expect(h.watchStopped()).toBe(1);
+  });
+
+  it('keeps Explorer identity on a location-permission error', async () => {
+    const h = harness();
+    h.currentFix.mockRejectedValueOnce(new Error('Location permission is required'));
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => result.current.explore('bike'));
+
+    expect(result.current.phase).toBe('error');
+    expect(result.current.activity).toBe('explorer');
+    expect(result.current.error).toBe('Location permission is required');
+    expect(h.route).not.toHaveBeenCalled();
   });
 });
 

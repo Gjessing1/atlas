@@ -27,7 +27,8 @@ const WIDGETS_SETTING = 'local.nav.widgets';
 export type NavFollowMode = 'course' | 'north';
 
 /** Modes where the traveller is a pedestrian, not a vehicle. */
-const isWalking = (profile: RoutingProfile): boolean => profile === 'foot' || profile === 'hike';
+const isWalking = (profile: RoutingProfile): boolean =>
+  profile === 'foot' || profile === 'hike' || profile === 'run';
 
 export interface NavPrefsSettings {
   status: string;

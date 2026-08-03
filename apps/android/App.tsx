@@ -439,7 +439,8 @@ function AppInner() {
   // was covering both). `following` also turns the map course-up (issue: no map
   // orientation while travelling).
   const navActive = nav.phase !== 'idle';
-  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following = nav.phase === 'exploring' || guiding;
   const win = useWindowDimensions();
   // Leaving Atlas mid-trip shrinks it into a floating mini window instead of
   // hiding guidance. That window is its own tiny screen: no system bars, no
@@ -527,10 +528,10 @@ function AppInner() {
   // the card at the zoom the user is already on (pickOnMap).
   const pickPressTarget = useCallback(
     (target: DestinationTarget) => {
-      if (following) dest.pickQuiet(target);
-      else dest.pickOnMap(target);
+      if (guiding) dest.pickQuiet(target);
+      else if (nav.phase !== 'exploring') dest.pickOnMap(target);
     },
-    [following, dest],
+    [guiding, nav.phase, dest],
   );
   // Picking a spot — from the sheet or from its marker — opens the *same* card
   // a tap on the water opens, so the reasoning and Save are the ones the user
@@ -742,6 +743,11 @@ function AppInner() {
     },
     [nav, route],
   );
+  const startExplorer = useCallback(() => {
+    const profile = route.profile;
+    route.stop();
+    void nav.explore(profile);
+  }, [nav, route]);
 
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
@@ -1268,7 +1274,7 @@ function AppInner() {
           {/* Mid-drive quick add-a-stop: category sheet from the banner's +, and a
           one-question card for a tapped place. */}
           <AddStopSheet ctl={navAddStop} bottomInset={bottomInset} />
-          {destination && following && !navAddStop.open ? (
+          {destination && guiding && !navAddStop.open ? (
             <NavStopTapCard
               name={destination.name}
               bottom={bottomInset + 16}
@@ -1483,6 +1489,7 @@ function AppInner() {
                 (await data.saveTrack(trackData, name, collectionId)) !== null
               }
               onNavigate={startNavigation}
+              onExplore={startExplorer}
               onShowTransitTrip={showTransitTrip}
               getMyLocation={directions.getMyLocation}
               locatingOrigin={directions.locatingOrigin}

@@ -49,7 +49,8 @@ export function useNavCamera(
   guidanceHeight: number,
 ): NavCameraControls {
   const win = useWindowDimensions();
-  const following = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const following =
+    nav.phase === 'exploring' || nav.phase === 'navigating' || nav.phase === 'rerouting';
 
   const [followPaused, setFollowPaused] = useState(false);
   const [overview, setOverview] = useState(false);
@@ -132,12 +133,15 @@ export function useNavCamera(
   }, [overview, cameraRef, viewport]);
 
   const state = nav.state;
+  const position = nav.position;
   useEffect(() => {
-    if (!following || followPaused || overview || !state) return;
-    const snapped = state.snapped;
+    if (!following || followPaused || overview) return;
+    const snapped = state?.snapped ?? position;
+    if (!snapped) return;
     // Fold this fix's route course into the fused heading (the gyro has been
     // turning it in the meantime) and keep the result as the camera bearing.
-    const fused = fuser.current.syncTo(state.courseDeg, nav.speedMps);
+    const courseDeg = state?.courseDeg ?? position?.headingDeg ?? null;
+    const fused = fuser.current.syncTo(courseDeg, nav.speedMps);
     if (fused !== null) bearingRef.current = fused;
     // Course-up from the first fix, not from the first movement: the driving
     // frame is what "Start" promises, and the route tangent already gives a
@@ -167,7 +171,7 @@ export function useNavCamera(
       zoom: followZoom(
         nav.speedMps,
         snapped.lat,
-        state.upcoming?.distanceToM ?? null,
+        state?.upcoming?.distanceToM ?? null,
         forwardDp,
         camStyle,
       ),
@@ -190,6 +194,7 @@ export function useNavCamera(
     followPaused,
     overview,
     state,
+    position,
     navFollow,
     nav.speedMps,
     nav.profile,

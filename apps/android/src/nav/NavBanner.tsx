@@ -8,7 +8,7 @@ import {
   remainingAscentM,
   shortManeuverText,
 } from '@atlas/navigation';
-import { formatExitSign, type RouteLane } from '@atlas/routing';
+import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
 import { formatTrafficDelay } from '@atlas/traffic';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -186,12 +186,14 @@ export function NavBanner({
 
   const { state } = nav;
   const maneuver = state?.upcoming;
-  const moving = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const sustain = moving ? (state?.sustain ?? null) : null;
+  const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
+  const exploring = nav.phase === 'exploring';
+  const moving = guiding || exploring;
+  const sustain = guiding ? (state?.sustain ?? null) : null;
   const walking = nav.profile === 'foot' || nav.profile === 'hike';
   // No speed-limit roundel on foot: the 80 km/h sign on the road a footpath
   // parallels is driving furniture, not guidance.
-  const speedLimit = moving && !walking ? (state?.speedLimitKph ?? null) : null;
+  const speedLimit = guiding && !walking ? (state?.speedLimitKph ?? null) : null;
   // Walking modes offer the reroute instead of performing it — and for the
   // hiker who lost the trail with no network, the straight line back to it is
   // the half that still works offline.
@@ -205,7 +207,7 @@ export function NavBanner({
   // where "I've arrived" is the one thing the traveller knows better than we do.
   // Deliberately distinct from End: this completes the trip rather than
   // abandoning it, so it banks the summary.
-  const canDeclareArrival = moving && state != null && state.distanceRemainingM <= 150;
+  const canDeclareArrival = guiding && state != null && state.distanceRemainingM <= 150;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — or the distant maneuver demoted below a long-road sustain cue.
   const thenManeuver =
@@ -214,6 +216,8 @@ export function NavBanner({
       : maneuver && state?.then && state.then.distanceToM - maneuver.distanceToM < 300
         ? state.then
         : null;
+  const profileLabel = ROUTING_PROFILES.find((candidate) => candidate.id === nav.profile)?.label;
+  const shownWidgets: NavWidgetId[] = exploring ? ['speed', 'altitude'] : widgets;
 
   return (
     <View
@@ -238,14 +242,26 @@ export function NavBanner({
           onRect?.({ x: viewport.guidanceLeft + x, y: topInset + 8 + y, width, height });
         }}
       >
-        {nav.phase === 'starting' ? (
+        {exploring ? (
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>Explorer mode</Text>
+            <Text style={styles.maneuver}>
+              {nav.position
+                ? `${profileLabel ?? 'Travel'} · Following your position`
+                : 'Finding your position…'}
+            </Text>
+            <Text style={styles.arrivalSummary}>No destination or turn-by-turn guidance</Text>
+          </View>
+        ) : nav.phase === 'starting' ? (
           <View style={styles.stateBlock}>
             <Text style={styles.eyebrow}>Navigation</Text>
             <Text style={styles.maneuver}>Finding the best route…</Text>
           </View>
         ) : nav.phase === 'error' ? (
           <View style={styles.stateBlock}>
-            <Text style={styles.eyebrow}>Navigation unavailable</Text>
+            <Text style={styles.eyebrow}>
+              {nav.activity === 'explorer' ? 'Explorer unavailable' : 'Navigation unavailable'}
+            </Text>
             <Text style={styles.error}>{nav.error ?? 'Navigation error'}</Text>
           </View>
         ) : nav.phase === 'arrived' ? (
@@ -423,7 +439,13 @@ export function NavBanner({
             landscape ? styles.mapControlsSlotLandscape : styles.mapControlsSlotPortrait,
           ]}
         >
-          <View style={[styles.mapControlGroup, landscape && styles.mapControlGroupLandscape]}>
+          <View
+            style={[
+              styles.mapControlGroup,
+              landscape && styles.mapControlGroupLandscape,
+              exploring && styles.mapControlGroupExplorer,
+            ]}
+          >
             <Pressable
               style={styles.mapControlButton}
               onPress={onToggleFollowMode}
@@ -439,39 +461,48 @@ export function NavBanner({
                 <NavArrowIcon notchColor={theme.surfaceOverlay} />
               )}
             </Pressable>
-            <View
-              style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
-            />
-            <Pressable
-              style={[styles.mapControlButton, navCam.overview && styles.mapControlButtonActive]}
-              onPress={navCam.toggleOverview}
-              testID="toggle-overview"
-              accessibilityRole="button"
-              accessibilityLabel={navCam.overview ? 'Back to follow view' : 'Show route overview'}
-              accessibilityState={{ selected: navCam.overview }}
-            >
-              <MapOverviewIcon />
-            </Pressable>
-            <View
-              style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
-            />
-            <Pressable
-              style={styles.mapControlButton}
-              onPress={onAddStop}
-              testID="nav-add-stop"
-              accessibilityRole="button"
-              accessibilityLabel="Add a stop"
-            >
-              <Svg width={22} height={22} viewBox="0 0 24 24">
-                <Path
-                  d="M12 5v14M5 12h14"
-                  fill="none"
-                  stroke={theme.text}
-                  strokeWidth={1.9}
-                  strokeLinecap="round"
+            {guiding ? (
+              <>
+                <View
+                  style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
                 />
-              </Svg>
-            </Pressable>
+                <Pressable
+                  style={[
+                    styles.mapControlButton,
+                    navCam.overview && styles.mapControlButtonActive,
+                  ]}
+                  onPress={navCam.toggleOverview}
+                  testID="toggle-overview"
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    navCam.overview ? 'Back to follow view' : 'Show route overview'
+                  }
+                  accessibilityState={{ selected: navCam.overview }}
+                >
+                  <MapOverviewIcon />
+                </Pressable>
+                <View
+                  style={[styles.mapControlDivider, landscape && styles.mapControlDividerLandscape]}
+                />
+                <Pressable
+                  style={styles.mapControlButton}
+                  onPress={onAddStop}
+                  testID="nav-add-stop"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a stop"
+                >
+                  <Svg width={22} height={22} viewBox="0 0 24 24">
+                    <Path
+                      d="M12 5v14M5 12h14"
+                      fill="none"
+                      stroke={theme.text}
+                      strokeWidth={1.9}
+                      strokeLinecap="round"
+                    />
+                  </Svg>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
       ) : (
@@ -481,7 +512,7 @@ export function NavBanner({
       <View style={[styles.actionRow, landscape && styles.actionRowLandscape]}>
         {moving && !canDeclareArrival ? (
           <View style={styles.speedGroup} accessibilityLabel="Navigation widgets">
-            {widgets.map((widget) => {
+            {shownWidgets.map((widget) => {
               const display = widgetValue(widget, nav);
               return (
                 <View style={styles.speedDial} key={widget}>
@@ -502,7 +533,7 @@ export function NavBanner({
           <View style={styles.actionSpacer} />
         )}
         <View style={styles.actionButtons}>
-          {moving ? (
+          {guiding ? (
             <Pressable
               style={styles.muteButton}
               onPress={nav.toggleMute}
@@ -531,7 +562,9 @@ export function NavBanner({
             onPress={nav.stop}
             testID="stop-nav"
             accessibilityRole="button"
-            accessibilityLabel={nav.phase === 'arrived' ? 'Done' : 'End navigation'}
+            accessibilityLabel={
+              nav.phase === 'arrived' ? 'Done' : exploring ? 'End Explorer mode' : 'End navigation'
+            }
           >
             <Text style={styles.stopText}>{nav.phase === 'arrived' ? 'Done' : 'End'}</Text>
           </Pressable>
@@ -719,6 +752,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   mapControlGroupLandscape: { width: 144, flexDirection: 'row' },
+  mapControlGroupExplorer: { width: 48 },
   mapControlButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   mapControlButtonActive: { backgroundColor: theme.surfaceActive },
   mapControlDivider: {

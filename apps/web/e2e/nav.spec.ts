@@ -11,6 +11,45 @@ test.use({
   permissions: ['geolocation'],
 });
 
+test('Explorer mode follows live GPS without creating a route', async ({ page, context }) => {
+  let routeRequests = 0;
+  await page.route('**/api/route', (route) => {
+    routeRequests++;
+    return route.fulfill({ status: 500, json: { message: 'Explorer must not route' } });
+  });
+  await page.goto('/#map=13/59.91/10.75');
+  await waitForMap(page);
+
+  await page.locator('.topbar button[aria-label="Route"]').click();
+  await page.getByRole('button', { name: 'Hike' }).click();
+  await page.getByRole('button', { name: 'Follow my position · no destination' }).click();
+
+  await expect(page.getByText('Explorer mode')).toBeVisible();
+  await expect(page.getByText('Hike · Following your position')).toBeVisible();
+  await expect(page.getByText('No destination or turn-by-turn guidance')).toBeVisible();
+  await expect(page.locator('.nav-puck')).toBeVisible();
+  await expect(page.locator('.nav-widget')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Add a stop' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Show route overview' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Mute guidance' })).toHaveCount(0);
+  expect(routeRequests).toBe(0);
+  expect(await page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-nav')))).toBe(false);
+
+  await context.setGeolocation({ latitude: 59.915, longitude: 10.755 });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const center = window.__atlasMap!.getCenter();
+        return Math.abs(center.lat - 59.915) < 0.001 && Math.abs(center.lng - 10.755) < 0.001;
+      }),
+    )
+    .toBe(true);
+
+  await page.getByRole('button', { name: 'End' }).click();
+  await expect(page.locator('.nav-banner')).toHaveCount(0);
+  await expect(page.locator('.topbar')).toBeVisible();
+});
+
 test('navigate to a dropped pin: banner, route line, live progress, End', async ({
   page,
   context,

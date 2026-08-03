@@ -247,6 +247,7 @@ export function RoutePanel({
   locatingOrigin,
   fetchNearby,
   onNavigate,
+  onExplore,
   onSaveTrack,
 }: {
   route: RoutePlanner;
@@ -270,6 +271,8 @@ export function RoutePanel({
    * guidance starts from here.
    */
   onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
+  /** Start a destination-free live map in the selected travel mode. */
+  onExplore: () => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -442,6 +445,12 @@ export function RoutePanel({
             </button>
           )}
         </div>
+
+        {!transitMode && (
+          <button type="button" className="route-navigate" onClick={onExplore}>
+            Follow my position · no destination
+          </button>
+        )}
 
         {!transitMode && (
           <details className="route-custom">
