@@ -1,6 +1,8 @@
 import {
   createGrid,
   renderRamp,
+  STAND_DIRECTIONS,
+  STAND_MAX_RANGE_M,
   summariseSurface,
   type Grid,
   type PotentialCellManifest,
@@ -299,21 +301,51 @@ export async function deriveCell(
   // *why* (D4). Written before the manifest for the same reason the tiles are:
   // a manifest on disk promises that everything it describes is already there.
   const terms = result.terms ?? [];
+  const standPlanes = result.standPlan
+    ? [
+        { name: 'stand-score', grid: result.standPlan.score },
+        { name: 'stand-vantage', grid: result.standPlan.vantage },
+        ...STAND_DIRECTIONS.flatMap((direction) => [
+          { name: `stand-lane-${direction.key}`, grid: result.standPlan!.lanes[direction.key] },
+          { name: `stand-pair-${direction.key}`, grid: result.standPlan!.pairs[direction.key] },
+          { name: `stand-aim-${direction.key}`, grid: result.standPlan!.aims[direction.key] },
+        ]),
+      ]
+    : [];
   const signals: CellManifest['signals'] =
     terms.length === 0
       ? null
       : {
           pixels: SIGNAL_PIXELS,
-          planes: [RANK_PLANE, ...terms.map((t) => t.key)],
+          planes: [RANK_PLANE, ...terms.map((t) => t.key), ...standPlanes.map((p) => p.name)],
           terms: terms.map((t) => ({
             key: t.key,
             label: t.label,
             weight: t.weight,
             ...(t.exclusive ? { exclusive: true } : {}),
           })),
+          ...(result.standPlan
+            ? {
+                standPlan: {
+                  maxRangeM: STAND_MAX_RANGE_M,
+                  score: 'stand-score',
+                  vantage: 'stand-vantage',
+                  directions: STAND_DIRECTIONS.map((direction) => ({
+                    ...direction,
+                    lane: `stand-lane-${direction.key}`,
+                    pair: `stand-pair-${direction.key}`,
+                    aim: `stand-aim-${direction.key}`,
+                  })),
+                },
+              }
+            : {}),
         };
   if (signals) {
-    const planes = [rank, ...terms.map((t) => cropToCell(t.grid, raster.pad))].map(quantisePlane);
+    const planes = [
+      rank,
+      ...terms.map((t) => cropToCell(t.grid, raster.pad)),
+      ...standPlanes.map((plane) => cropToCell(plane.grid, raster.pad)),
+    ].map(quantisePlane);
     const blob = Buffer.alloc(planes.length * SIGNAL_PIXELS * SIGNAL_PIXELS);
     planes.forEach((plane, i) => blob.set(plane, i * SIGNAL_PIXELS * SIGNAL_PIXELS));
     await writeAtomic(signalsPath(dataDir, model, target, cell), gzipSync(blob));

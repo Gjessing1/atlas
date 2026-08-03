@@ -14,6 +14,7 @@ import {
   useRoutePlanPersistence,
   usePotentialExplain,
   usePotentialTarget,
+  usePlanningAreas,
   useThemeMode,
   type FetchNearbyFn,
   type CommuteFn,
@@ -161,6 +162,7 @@ function AppInner() {
   // of chrome reads the same insets for itself — see src/ui/insets.ts).
   const side = useSideInsets();
   const data = useUserData();
+  const planningAreas = usePlanningAreas(data.tracks, data.getTrackData);
   const systemColorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const appearance = useThemeMode(data, systemColorScheme);
   const mapStyleEditor = useMapStyleEditor(data);
@@ -382,6 +384,7 @@ function AppInner() {
     enabled: spotsOpen,
     readyKey: potential.readyKey,
     vocabulary: overlaysCtl.derived?.meta.derived?.vocabulary,
+    areas: planningAreas,
   });
   // "Keep this area offline" (§N5 → E7). Offered only for a derived surface
   // that is switched on and has a settled viewport, because what it keeps is
@@ -539,8 +542,8 @@ function AppInner() {
       pickOnMap({
         lat: spot.position.lat,
         lng: spot.position.lng,
-        name: `Spot ${index + 1}`,
-        detail: spot.bandLabel,
+        name: `${spot.stand ? 'Stand' : 'Spot'} ${index + 1}`,
+        detail: spot.stand ? spot.reason : spot.bandLabel,
         canSave: true,
       });
     },
@@ -1216,6 +1219,7 @@ function AppInner() {
               top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0)}
               left={side.left + 12}
               onPress={() => setSpotsOpen(true)}
+              hunting={overlaysCtl.derived.meta.derived?.vocabulary === 'hunt'}
             />
           ) : null}
           <UpdateNotices storage={data.storage} topInset={topInset} />

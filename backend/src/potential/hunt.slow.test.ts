@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import Fastify from 'fastify';
 import { gunzipSync } from 'node:zlib';
 import { writeArrayBuffer } from 'geotiff';
 import { PNG } from 'pngjs';
@@ -8,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cellRaster, type Cell } from './cells.js';
 import { deriveCell, readSignal, signalsPath, type CellManifest } from './derive.js';
 import { huntModel, wildlifeAreaValue } from './hunt.js';
+import { registerPotentialApi } from './index.js';
 import type { PotentialContext } from './inputs.js';
 
 /**
@@ -294,6 +296,32 @@ describe('the hunt adapter', () => {
     // Unlike a shore band or a river corridor, hunt ground is most of the cell.
     expect(result.manifest.coverage).toBeGreaterThan(0.9);
     expect(result.manifest.vocabulary).toBe('hunt');
+    expect(result.manifest.signals!.standPlan?.maxRangeM).toBe(150);
+    expect(result.manifest.signals!.standPlan?.directions).toHaveLength(8);
+    expect(result.manifest.signals!.planes).toContain('stand-score');
+    expect(result.manifest.signals!.planes).toContain('stand-lane-se');
+
+    const app = Fastify({ logger: false });
+    await registerPotentialApi(app, {
+      dataDir,
+      cacheDir,
+      fetchImpl: upstreamStub(),
+      models: [huntModel],
+      concurrency: 1,
+    });
+    const response = await app.inject({
+      url: `/api/potential/hunt/radyr/spots?bbox=${result.manifest.bounds.join(',')}`,
+    });
+    const body = response.json() as {
+      mode: string;
+      spots: { stand: { maxRangeM: number; lanes: unknown[]; aim: { distanceM: number } } }[];
+    };
+    expect(body.mode).toBe('stands');
+    expect(body.spots.length).toBeGreaterThan(0);
+    expect(body.spots[0]!.stand.maxRangeM).toBe(150);
+    expect(body.spots[0]!.stand.lanes).toHaveLength(8);
+    expect(body.spots[0]!.stand.aim.distanceM).toBeLessThanOrEqual(150);
+    await app.close();
 
     const keys = result.manifest.signals!.terms.map((t) => t.key);
     expect(keys).toContain('edge-farmland');

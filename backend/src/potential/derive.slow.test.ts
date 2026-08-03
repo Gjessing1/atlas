@@ -14,7 +14,15 @@ import { writeArrayBuffer } from 'geotiff';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { burnPaths, CELL_PIXELS, cellRaster, type Cell } from './cells.js';
-import { cropToCell, deriveCell, manifestPath, readManifest, tilePath } from './derive.js';
+import {
+  cropToCell,
+  deriveCell,
+  manifestPath,
+  readManifest,
+  readPlane,
+  tilePath,
+} from './derive.js';
+import { loadSignals, sampleCentre } from './explain.js';
 import { gatherInputs, type PotentialContext } from './inputs.js';
 import { registerPotentialApi } from './index.js';
 import type { DeriveModel, ModelResult } from './models.js';
@@ -729,6 +737,7 @@ describe('best spots in view', () => {
       cell: string;
       position: { lat: number; lng: number };
       rank: number;
+      cellRank: number;
       score: number;
       band: string;
       bandLabel: string;
@@ -740,6 +749,7 @@ describe('best spots in view', () => {
     flat: number;
     accessAvailable: boolean;
     note: string | null;
+    mode: 'habitat' | 'stands';
   }
 
   const spotsUrl = (layer = 'spots', bbox = VIEW, limit?: number) =>
@@ -761,6 +771,7 @@ describe('best spots in view', () => {
     expect(body.spots).toHaveLength(PEAK_CENTRES.length);
     expect(body.pending).toBe(0);
     expect(body.flat).toBe(0);
+    expect(body.mode).toBe('habitat');
     const ranks = body.spots.map((s) => s.rank);
     expect([...ranks].sort((a, b) => b - a)).toEqual(ranks);
 
@@ -800,6 +811,33 @@ describe('best spots in view', () => {
       expect(spot.position.lng).toBeLessThanOrEqual(WEST_ONLY[2]!);
       expect(spot.position.lng).toBeGreaterThanOrEqual(WEST_ONLY[0]!);
     }
+  });
+
+  it('ranks inside a sub-cell view before spending the shortlist limit', async () => {
+    await start();
+    const { manifest } = await deriveCell(dataDir, spotsModel, 'first', CELL, ctx);
+    const blob = (await loadSignals(dataDir, spotsModel, 'first', CELL, manifest))!;
+    const pixels = manifest.signals!.pixels;
+    const rank = readPlane(blob, 0, (manifest.cellSizeM * CELL_PIXELS) / pixels);
+    // Frame a modest shoulder which is explicitly not prime in the 78 km²
+    // cell. This is the Sleikebekk shape: the permit area's best ground is not
+    // among the wider cell's eight winners, but it still needs an answer.
+    const index = rank.data.findIndex((value) => value > 0.7 && value < 0.85);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const sx = index % pixels;
+    const sy = Math.floor(index / pixels);
+    const a = sampleCentre(manifest, Math.max(0, sx - 3), Math.max(0, sy - 3));
+    const b = sampleCentre(manifest, Math.min(pixels - 1, sx + 3), Math.min(pixels - 1, sy + 3));
+    const bbox = [
+      Math.min(a.lng, b.lng),
+      Math.min(a.lat, b.lat),
+      Math.max(a.lng, b.lng),
+      Math.max(a.lat, b.lat),
+    ];
+    const body = await ask('spots', bbox);
+    expect(body.spots.length).toBeGreaterThan(0);
+    expect(body.spots[0]!.rank).toBeGreaterThanOrEqual(0.95);
+    expect(body.spots[0]!.cellRank).toBeLessThan(0.95);
   });
 
   it('walks each spot in from the nearest road', async () => {

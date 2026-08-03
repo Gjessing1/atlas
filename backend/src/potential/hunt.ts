@@ -5,6 +5,7 @@ import {
   describeHuntSignal,
   fillRings,
   huntQuality,
+  huntStandPlan,
   huntSurface,
   HUNT_SEASON_REFERENCE,
   quarry as findQuarry,
@@ -14,6 +15,7 @@ import {
   WILDLIFE_ACT_REFERENCE,
   AR5_DEVELOPED,
   AR5_FOREST,
+  AR5_WATER,
   type Grid,
   type HuntInputs,
   type HuntSignalKey,
@@ -167,6 +169,33 @@ function paintDisturbance(raster: CellRaster, landCover: Grid | null): Mask {
 }
 
 /**
+ * Turn AR5 + SR16 into the two hard inputs a shooting-lane trace needs.
+ *
+ * Forest whose SR16 height is absent stays unknown/closed, never magically
+ * open. Outside forest the height is zero: myr, farmland and open fastmark are
+ * exactly the long views this planner is meant to find. Water/developed ground
+ * may be looked across but is never offered as a place to stand.
+ */
+function standGeometry(
+  landCover: Grid,
+  treeHeight: Grid | null,
+): {
+  screenHeightM: Grid;
+  standable: Mask;
+} {
+  const screenHeightM = createGrid(landCover.width, landCover.height, landCover.cellSizeM);
+  const standable = createMask(landCover.width, landCover.height, landCover.cellSizeM);
+  for (let i = 0; i < landCover.data.length; i++) {
+    const cover = landCover.data[i]!;
+    if (!Number.isFinite(cover)) continue;
+    const forest = AR5_FOREST.includes(cover);
+    screenHeightM.data[i] = forest ? (treeHeight?.data[i] ?? Number.NaN) : 0;
+    standable.data[i] = !AR5_WATER.includes(cover) && !AR5_DEVELOPED.includes(cover) ? 1 : 0;
+  }
+  return { screenHeightM, standable };
+}
+
+/**
  * Hunt potential — the Fish & Hunt profile's dry-ground surface.
  *
  * The target is a quarry because the same hillside is read completely
@@ -180,12 +209,12 @@ export const huntModel: DeriveModel = {
   label: 'Hunt potential',
   targets: HUNT_TARGETS.map((q) => ({
     value: q.id,
-    label: q.nameNo,
+    label: 'targetLabel' in q ? q.targetLabel : q.nameNo,
     caption: weightsCaption(q.nameEn, q.weights, 'terrain and cover'),
   })),
-  // v2: roe deer now values mature daytime bedding cover, and derived
-  // explanations name a zero field-edge signal as confirmed absence.
-  rev: 2,
+  // v3: every hunt cell also persists hunter-side terrain/canopy sight lines
+  // and their pairing with the quarry-specific habitat surface (E8).
+  rev: 3,
   catalog: true,
   inputs: {
     terrain: true,
@@ -236,6 +265,19 @@ export const huntModel: DeriveModel = {
       treeLineM: treeLine?.elevationM ?? null,
     };
     const surface = huntSurface(modelInputs, { quarry });
+    const geometry =
+      inputs.landCover && inputs.terrain
+        ? standGeometry(inputs.landCover, inputs.treeHeight)
+        : null;
+    const standPlan =
+      geometry && inputs.terrain
+        ? huntStandPlan({
+            habitat: surface.score,
+            terrain: inputs.terrain,
+            screenHeightM: geometry.screenHeightM,
+            standable: geometry.standable,
+          })
+        : undefined;
 
     const felt = inputs.harvest?.felt[quarry.id] ?? null;
     return {
@@ -250,6 +292,7 @@ export const huntModel: DeriveModel = {
         }),
       ],
       terms: surface.terms,
+      standPlan,
     };
   },
 };

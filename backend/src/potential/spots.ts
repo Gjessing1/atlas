@@ -1,6 +1,9 @@
-import { haversineM, type LatLng, type LngLatBbox } from '@atlas/core';
+import { destinationPoint, haversineM, type LatLng, type LngLatBbox } from '@atlas/core';
 import {
+  createGrid,
+  decodeStandVantage,
   localMaxima,
+  percentileRank,
   SPOT_LIMIT,
   SPOT_MIN_RANK,
   SPOT_MIN_SEPARATION_M,
@@ -8,9 +11,10 @@ import {
   BAND_LABELS,
   type PotentialSpot,
   type PotentialSpotAccess,
+  type PotentialStandPlan,
 } from '@atlas/potential';
 import { CELL_PIXELS, cellId, type Cell } from './cells.js';
-import { readPlane, type CellManifest } from './derive.js';
+import { readPlane, readSignal, type CellManifest } from './derive.js';
 import { explainSample, sampleCentre } from './explain.js';
 import type { DeriveModel } from './models.js';
 
@@ -51,16 +55,44 @@ const ROUTER_TIMEOUT_MS = 8000;
 /** A candidate before the merge — a maximum of one cell's rank plane. */
 interface Candidate {
   readonly position: LatLng;
+  /** Rank inside the requested view — the shortlist's actual question. */
   readonly rank: number;
+  /** Rank inside the full ~78 km² derive cell — what the heatmap colours mean. */
+  readonly cellRank: number;
   readonly cell: Cell;
   readonly sx: number;
   readonly sy: number;
+  readonly stand: PotentialStandPlan | null;
 }
 
 /** Does a point fall inside the requested viewport? */
 function inBbox(at: LatLng, bbox: LngLatBbox): boolean {
   const [west, south, east, north] = bbox;
   return at.lng >= west && at.lng <= east && at.lat >= south && at.lat <= north;
+}
+
+/**
+ * Restrict a plane before finding or ranking maxima.
+ *
+ * This order is the Sleikebekk fix: spending the eight-candidate limit on the
+ * whole 78 km² cell and filtering afterwards returned zero points in a 7.7 km²
+ * permit area. A rank plane is monotonic with the raw score, so ranking its
+ * clipped values again gives the honest order inside the requested area.
+ */
+function rankInsideView(
+  grid: ReturnType<typeof readPlane>,
+  manifest: CellManifest,
+  bbox: LngLatBbox,
+) {
+  const clipped = createGrid(grid.width, grid.height, grid.cellSizeM);
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (inBbox(sampleCentre(manifest, x, y), bbox)) {
+        clipped.data[y * grid.width + x] = grid.data[y * grid.width + x]!;
+      }
+    }
+  }
+  return percentileRank(clipped);
 }
 
 /**
@@ -84,24 +116,111 @@ export function cellCandidates(
   // A signal sample covers several derive pixels; separation in metres is what
   // makes it comparable with the cross-cell merge below.
   const sampleSizeM = (manifest.cellSizeM * CELL_PIXELS) / pixels;
-  const rank = readPlane(blob, 0, sampleSizeM);
-  return (
-    localMaxima(rank, {
-      minSeparationCells: Math.max(1, SPOT_MIN_SEPARATION_M / sampleSizeM),
-      minValue: SPOT_MIN_RANK,
-      limit,
-    })
-      .map((max) => ({
-        position: sampleCentre(manifest, max.x, max.y),
+  const cellRank = readPlane(blob, 0, sampleSizeM);
+  const rank = rankInsideView(cellRank, manifest, bbox);
+  return localMaxima(rank, {
+    minSeparationCells: Math.max(1, SPOT_MIN_SEPARATION_M / sampleSizeM),
+    minValue: SPOT_MIN_RANK,
+    limit,
+  }).map((max) => ({
+    position: sampleCentre(manifest, max.x, max.y),
+    rank: max.value,
+    cellRank: cellRank.data[max.y * cellRank.width + max.x]!,
+    cell,
+    sx: max.x,
+    sy: max.y,
+    stand: null,
+  }));
+}
+
+function planeIndex(manifest: CellManifest, name: string): number {
+  return manifest.signals?.planes.indexOf(name) ?? -1;
+}
+
+function laneSummary(lanes: PotentialStandPlan['lanes']): string {
+  const open = lanes.filter((lane) => lane.rangeM >= 80);
+  if (open.length === 0) return 'No long lane';
+  const best = Math.max(...open.map((lane) => lane.rangeM));
+  return `Open ${open.map((lane) => lane.label).join('–')} to ${best} m`;
+}
+
+/** Hunter-side maxima from the LOS planes persisted by hunt model v3. */
+export function standCandidates(
+  manifest: CellManifest,
+  blob: Buffer,
+  cell: Cell,
+  bbox: LngLatBbox,
+  limit: number,
+): Candidate[] {
+  const plan = manifest.signals?.standPlan;
+  if (!manifest.contrast.standout || !plan || !manifest.signals) return [];
+  const sampleSizeM = (manifest.cellSizeM * CELL_PIXELS) / manifest.signals.pixels;
+  const scoreIndex = planeIndex(manifest, plan.score);
+  const vantageIndex = planeIndex(manifest, plan.vantage);
+  if (scoreIndex < 0 || vantageIndex < 0) return [];
+  const raw = readPlane(blob, scoreIndex, sampleSizeM);
+  const cellRank = percentileRank(raw);
+  const viewRank = rankInsideView(raw, manifest, bbox);
+
+  return localMaxima(viewRank, {
+    minSeparationCells: Math.max(1, SPOT_MIN_SEPARATION_M / sampleSizeM),
+    minValue: SPOT_MIN_RANK,
+    limit,
+  }).flatMap((max): Candidate[] => {
+    const position = sampleCentre(manifest, max.x, max.y);
+    const lanes = plan.directions.map((direction) => {
+      const index = planeIndex(manifest, direction.lane);
+      const value = index >= 0 ? readSignal(blob, index, max.x, max.y) : 0;
+      return {
+        key: direction.key,
+        label: direction.label,
+        bearing: direction.bearing,
+        rangeM: Math.round((value * plan.maxRangeM) / 5) * 5,
+      };
+    });
+    const paired = plan.directions
+      .map((direction) => {
+        const pairIndex = planeIndex(manifest, direction.pair);
+        const aimIndex = planeIndex(manifest, direction.aim);
+        return {
+          direction,
+          pair: pairIndex >= 0 ? readSignal(blob, pairIndex, max.x, max.y) : 0,
+          distanceM:
+            aimIndex >= 0
+              ? Math.round((readSignal(blob, aimIndex, max.x, max.y) * plan.maxRangeM) / 5) * 5
+              : 0,
+        };
+      })
+      .sort((a, b) => b.pair - a.pair)[0];
+    if (!paired || !(paired.pair > 0) || !(paired.distanceM > 0)) return [];
+    const encodedVantage = readSignal(blob, vantageIndex, max.x, max.y);
+    const vantageM = Math.round(decodeStandVantage(encodedVantage));
+    const aimPosition = destinationPoint(position, paired.direction.bearing, paired.distanceM);
+    const stand: PotentialStandPlan = {
+      maxRangeM: plan.maxRangeM,
+      vantageM,
+      lanes,
+      aim: {
+        label: paired.direction.label,
+        bearing: paired.direction.bearing,
+        distanceM: paired.distanceM,
+        position: aimPosition,
+      },
+      warning:
+        'Terrain and canopy visibility only — verify a safe backstop and shooting direction on site.',
+    };
+    return [
+      {
+        position,
         rank: max.value,
+        cellRank: cellRank.data[max.y * cellRank.width + max.x]!,
         cell,
         sx: max.x,
         sy: max.y,
-      }))
-      // Cells stretch ~10 km beyond a phone-sized viewport, so this is the
-      // difference between "best spots in view" and "best spots somewhere near".
-      .filter((candidate) => inBbox(candidate.position, bbox))
-  );
+        stand,
+      },
+    ];
+  });
 }
 
 function capitalise(text: string): string {
@@ -123,17 +242,21 @@ export function describeCandidate(
     position: candidate.position,
     cell: cellId(candidate.cell),
     rank: candidate.rank,
+    cellRank: candidate.cellRank,
     score: Math.round(candidate.rank * 100),
     band,
-    bandLabel: BAND_LABELS[model.vocabulary][band],
+    bandLabel: candidate.stand ? 'Calling stand' : BAND_LABELS[model.vocabulary][band],
     // The strongest factor's own sentence. `explainPoint` sorts by weighted
     // contribution, so this is the reason the point is hot, not the first term
     // the model happened to declare. Capitalised here because the model writes
     // these to be *embedded* ("Prime. The bank is strongly steep…") and a list
     // row is a sentence of its own.
-    reason: capitalise(explanation.factors[0]?.detail ?? explanation.summary),
+    reason: candidate.stand
+      ? `${laneSummary(candidate.stand.lanes)}; habitat ${candidate.stand.aim.distanceM} m ${candidate.stand.aim.label}.`
+      : capitalise(explanation.factors[0]?.detail ?? explanation.summary),
     factors: explanation.factors,
     access: null,
+    stand: candidate.stand,
   };
 }
 

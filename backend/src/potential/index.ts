@@ -23,7 +23,14 @@ import type { PotentialContext } from './inputs.js';
 import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './models.js';
 import { DeriveQueue, type CellState } from './jobs.js';
 import { PotentialPackBuilder, PotentialPackError } from './packs.js';
-import { cellCandidates, describeCandidate, spotsNote, walkAccess, SPOT_LIMIT } from './spots.js';
+import {
+  cellCandidates,
+  describeCandidate,
+  spotsNote,
+  standCandidates,
+  walkAccess,
+  SPOT_LIMIT,
+} from './spots.js';
 
 /**
  * The derived-potential HTTP surface (ROADMAP § N5 → E2, E3).
@@ -377,11 +384,11 @@ export async function registerPotentialApi(
             const manifest = entry.manifest!;
             const blob = await loadSignals(opts.dataDir, model, target, entry.cell, manifest);
             if (!blob) return [];
-            return cellCandidates(manifest, blob, entry.cell, bbox, limit).map((candidate) => ({
-              candidate,
-              manifest,
-              blob,
-            }));
+            const found =
+              model.vocabulary === 'hunt'
+                ? standCandidates(manifest, blob, entry.cell, bbox, limit)
+                : cellCandidates(manifest, blob, entry.cell, bbox, limit);
+            return found.map((candidate) => ({ candidate, manifest, blob }));
           }),
         )
       ).flat();
@@ -409,18 +416,22 @@ export async function registerPotentialApi(
         layer: model.layer,
         target,
         vocabulary: model.vocabulary,
+        mode: model.vocabulary === 'hunt' ? 'stands' : 'habitat',
         spots: withAccess,
         pending,
         flat,
         accessAvailable: access !== null,
-        note: spotsNote({
-          spots: withAccess.length,
-          cells: cells.length,
-          pending,
-          flat,
-          derived: derived.length,
-          hunt: model.vocabulary === 'hunt',
-        }),
+        note:
+          model.vocabulary === 'hunt' && withAccess.length > 0
+            ? 'Stand markers are ranked within this view; the heatmap remains roe-deer habitat. White spokes are modelled visibility, and orange points toward paired habitat.'
+            : spotsNote({
+                spots: withAccess.length,
+                cells: cells.length,
+                pending,
+                flat,
+                derived: derived.length,
+                hunt: model.vocabulary === 'hunt',
+              }),
       });
     },
   );

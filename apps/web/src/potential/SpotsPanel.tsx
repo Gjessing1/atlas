@@ -1,4 +1,9 @@
-import { spotWalkLabel, spotWindowLabel, type BestSpotsState } from '@atlas/app-hooks';
+import {
+  spotWalkLabel,
+  spotWindowLabel,
+  standWindRisk,
+  type BestSpotsState,
+} from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
 import { spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 
@@ -27,10 +32,16 @@ import { spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential'
  * would both cost work nobody asked for and take over a map the user may be
  * reading for something else.
  */
-export function SpotsButton({ onOpen }: { onOpen: () => void }) {
+export function SpotsButton({
+  onOpen,
+  hunting = false,
+}: {
+  onOpen: () => void;
+  hunting?: boolean;
+}) {
   return (
     <button type="button" className="spots-button" onClick={onOpen}>
-      Best spots in view
+      {hunting ? 'Plan stands in view' : 'Best spots in view'}
     </button>
   );
 }
@@ -55,7 +66,7 @@ export function SpotsPanel({
   return (
     <aside className="spots-panel" aria-label="Best spots in view">
       <div className="spots-head">
-        <strong>Best spots in view</strong>
+        <strong>{state.mode === 'stands' ? 'Calling stands in view' : 'Best spots in view'}</strong>
         {targetLabel && <span className="spots-target">{targetLabel}</span>}
         <button type="button" className="spots-close" aria-label="Close" onClick={onClose}>
           ✕
@@ -83,12 +94,14 @@ export function SpotsPanel({
       {(state.status === 'empty' || state.status === 'error') && (
         <p className="spots-note">{state.note ?? 'Nothing to show here.'}</p>
       )}
+      {state.status === 'ready' && state.note && <p className="spots-note">{state.note}</p>}
 
       <ol className="spots-list">
         {spots.map((spot, index) => {
           const walk = spotWalkLabel(spot);
+          const wind = standWindRisk(spot, conditions);
           return (
-            <li key={spot.id}>
+            <li key={spot.id} className={wind === 'blown' ? 'stand-blown' : undefined}>
               <button
                 type="button"
                 className="spots-row"
@@ -104,6 +117,19 @@ export function SpotsPanel({
                     {walk && <span className="spots-walk"> · {walk}</span>}
                   </span>
                   <span className="spots-reason">{spot.reason}</span>
+                  {spot.stand && (
+                    <span className="spots-reason">
+                      Vantage {spot.stand.vantageM >= 0 ? '+' : ''}
+                      {spot.stand.vantageM} m ·{' '}
+                      {wind === 'blown'
+                        ? 'wind carries scent toward habitat — avoid'
+                        : wind === 'good'
+                          ? 'wind carries scent away from habitat'
+                          : wind === 'crosswind'
+                            ? 'crosswind — check locally'
+                            : 'verify wind and backstop on site'}
+                    </span>
+                  )}
                 </span>
               </button>
               <button

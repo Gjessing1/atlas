@@ -17,12 +17,14 @@ function spot(overrides: Partial<PotentialSpot> = {}): PotentialSpot {
     position: { lat: 59.85, lng: 10.42 },
     cell: '11/1083/596',
     rank: 0.98,
+    cellRank: 0.98,
     score: 98,
     band: 'prime',
     bandLabel: 'Prime',
     reason: 'Inflow mouth right here.',
     factors: [],
     access: null,
+    stand: null,
     ...overrides,
   };
 }
@@ -90,6 +92,26 @@ describe('spotsFeatureCollection', () => {
     expect(fc.features[0]!.properties.id).toBe('a');
     expect(fc.features[0]!.geometry.coordinates).toEqual([10.42, 59.85]);
   });
+
+  it('draws the stand rose and paired-habitat bearing as lines', () => {
+    const at = spot({
+      stand: {
+        maxRangeM: 150,
+        vantageM: 4,
+        lanes: [
+          { key: 'e', label: 'E', bearing: 90, rangeM: 120 },
+          { key: 'w', label: 'W', bearing: 270, rangeM: 10 },
+        ],
+        aim: { label: 'E', bearing: 90, distanceM: 100, position: { lat: 59.85, lng: 10.422 } },
+        warning: 'Verify backstop.',
+      },
+    });
+    const fc = spotsFeatureCollection([at]);
+    expect(fc.features.map((feature) => feature.properties.kind)).toEqual(['spot', 'lane', 'aim']);
+    expect(fc.features.slice(1).every((feature) => feature.geometry.type === 'LineString')).toBe(
+      true,
+    );
+  });
 });
 
 describe('spotPlaceDraft', () => {
@@ -115,6 +137,25 @@ describe('spotPlaceDraft', () => {
       0,
     );
     expect(draft.notes).toContain('≈12 min walk');
+  });
+
+  it('saves a stand with its habitat bearing and safety caveat', () => {
+    const draft = spotPlaceDraft(
+      spot({
+        stand: {
+          maxRangeM: 150,
+          vantageM: 6,
+          lanes: [],
+          aim: { label: 'SE', bearing: 135, distanceM: 115, position: { lat: 59.85, lng: 10.42 } },
+          warning: 'Verify backstop.',
+        },
+      }),
+      0,
+      { targetLabel: 'Rådyrbukk' },
+    );
+    expect(draft.name).toBe('Rådyrbukk stand 1');
+    expect(draft.notes).toContain('115 m SE');
+    expect(draft.notes).toContain('Verify backstop');
   });
 });
 

@@ -4410,6 +4410,13 @@ button.transit-notice-summary {
   gap: 4px;
 }
 
+/* Forecast wind carrying scent from the caller toward the paired habitat makes
+   the geometry unusable for that window. Keep it inspectable, but visibly out
+   of the shortlist rather than silently ranking it beside viable stands. */
+.spots-list li.stand-blown {
+  opacity: 0.48;
+}
+
 .spots-row {
   flex: 1;
   display: flex;

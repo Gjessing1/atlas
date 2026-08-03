@@ -245,6 +245,24 @@ export interface PotentialCellManifest {
        */
       readonly exclusive?: boolean;
     }[];
+    /**
+     * Hunter-side planning planes appended after the ordinary explain terms.
+     * Optional so cells from pre-E8 models and every fishing model retain the
+     * same wire shape.
+     */
+    readonly standPlan?: {
+      readonly maxRangeM: number;
+      readonly score: string;
+      readonly vantage: string;
+      readonly directions: readonly {
+        readonly key: string;
+        readonly label: string;
+        readonly bearing: number;
+        readonly lane: string;
+        readonly pair: string;
+        readonly aim: string;
+      }[];
+    };
   } | null;
 }
 
@@ -338,6 +356,32 @@ export interface PotentialSpotAccess {
   readonly from: LatLng;
 }
 
+/** One spoke of a hunting stand's terrain/canopy shooting-lane rose. */
+export interface PotentialStandLane {
+  readonly key: string;
+  readonly label: string;
+  readonly bearing: number;
+  /** Modelled visible open ground, capped at the planner's maximum. */
+  readonly rangeM: number;
+}
+
+/** Hunter-side half of a paired habitat/stand recommendation (E8). */
+export interface PotentialStandPlan {
+  readonly maxRangeM: number;
+  /** Elevation above/below the mean ground within maxRangeM. */
+  readonly vantageM: number;
+  readonly lanes: readonly PotentialStandLane[];
+  /** Direction and distance of the quarry habitat this stand is paired with. */
+  readonly aim: {
+    readonly label: string;
+    readonly bearing: number;
+    readonly distanceM: number;
+    readonly position: LatLng;
+  };
+  /** The safety boundary: terrain/canopy visibility is not a backstop check. */
+  readonly warning: string;
+}
+
 /** One numbered recommendation from "best spots in view". */
 export interface PotentialSpot {
   /** Stable within a response, and the id the map markers carry. */
@@ -347,6 +391,8 @@ export interface PotentialSpot {
   readonly cell: string;
   /** Percentile rank within its own cell, 0..1. */
   readonly rank: number;
+  /** Rank over the wider derive cell; `rank` is recomputed for the requested view. */
+  readonly cellRank: number;
   /** `rank` as 0..100, the same number the explain card quotes. */
   readonly score: number;
   readonly band: SurfaceBandKey;
@@ -357,6 +403,8 @@ export interface PotentialSpot {
   readonly factors: readonly ConditionFactor[];
   /** Null when the router could not be asked, or found no road at all. */
   readonly access: PotentialSpotAccess | null;
+  /** Present for hunting: the marker is a stand paired with the habitat heatmap. */
+  readonly stand: PotentialStandPlan | null;
 }
 
 /** GET /api/potential/:layer/:target/spots?bbox=w,s,e,n */
@@ -364,6 +412,8 @@ export interface PotentialSpotsResponse {
   readonly layer: string;
   readonly target: string;
   readonly vocabulary: SurfaceVocabulary;
+  /** Hunting returns stands over the habitat heatmap; fishing returns habitat spots. */
+  readonly mode: 'habitat' | 'stands';
   /** Strongest first, already thinned to real alternatives. */
   readonly spots: readonly PotentialSpot[];
   /**

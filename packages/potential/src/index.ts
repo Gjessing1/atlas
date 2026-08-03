@@ -149,6 +149,19 @@ export {
 export { explainPoint, type ExplainContext, type PotentialExplanation } from './explain.js';
 
 export {
+  decodeStandVantage,
+  huntStandPlan,
+  STAND_DIRECTIONS,
+  STAND_MAX_RANGE_M,
+  STAND_SCREEN_M,
+  STAND_VANTAGE_MAX_M,
+  STAND_VANTAGE_MIN_M,
+  type HuntStandInputs,
+  type HuntStandPlan,
+  type StandDirectionKey,
+} from './stands.js';
+
+export {
   CELL_MAX_TILE_ZOOM,
   CELL_ZOOM,
   cellAt,
@@ -177,6 +190,8 @@ export {
   type PotentialSpot,
   type PotentialSpotAccess,
   type PotentialSpotsResponse,
+  type PotentialStandLane,
+  type PotentialStandPlan,
   type PotentialTarget,
 } from './api.js';
 

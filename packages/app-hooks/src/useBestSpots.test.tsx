@@ -4,24 +4,27 @@ import type { LngLatBbox } from '@atlas/core';
 import type { PotentialSpot, PotentialSpotsResponse } from '@atlas/potential';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useBestSpots, windowForToday } from './useBestSpots.js';
+import { standWindRisk, useBestSpots, windowForToday } from './useBestSpots.js';
 import type { PotentialView } from './usePotential.js';
 
 const SEMSVANNET: LngLatBbox = [10.4, 59.84, 10.44, 59.87];
 const view = (bbox: LngLatBbox = SEMSVANNET, zoom = 12.4): PotentialView => ({ bbox, zoom });
 const selection = { layer: 'lake-fishing', target: 'orret' };
+const huntSelection = { layer: 'hunt', target: 'radyr' };
 
 const spot = (over: Partial<PotentialSpot> = {}): PotentialSpot => ({
   id: '11/1083/596/72/82',
   position: { lat: 59.858, lng: 10.421 },
   cell: '11/1083/596',
   rank: 0.98,
+  cellRank: 0.98,
   score: 98,
   band: 'prime',
   bandLabel: 'Prime',
   reason: 'Inflow mouth right here.',
   factors: [],
   access: { distanceM: 900, durationS: 720, approximate: false, from: { lat: 59.86, lng: 10.4 } },
+  stand: null,
   ...over,
 });
 
@@ -29,6 +32,7 @@ const spots = (over: Partial<PotentialSpotsResponse> = {}): PotentialSpotsRespon
   layer: 'lake-fishing',
   target: 'orret',
   vocabulary: 'fishing',
+  mode: 'habitat',
   spots: [spot()],
   pending: 0,
   flat: 0,
@@ -171,6 +175,55 @@ describe('useBestSpots', () => {
     expect(result.current.note).toMatch(/No standout water/);
   });
 
+  it('keeps both stand and paired habitat inside a visible saved permit area', async () => {
+    const stand = (id: string, aimLng: number) =>
+      spot({
+        id,
+        position: { lat: 59.85, lng: 10.42 },
+        stand: {
+          maxRangeM: 150,
+          vantageM: 3,
+          lanes: [],
+          aim: { label: 'E', bearing: 90, distanceM: 100, position: { lat: 59.85, lng: aimLng } },
+          warning: 'check',
+        },
+      });
+    stubFetch({
+      spots: spots({
+        layer: 'hunt',
+        target: 'radyr',
+        vocabulary: 'hunt',
+        mode: 'stands',
+        spots: [stand('inside', 10.43), stand('aim-outside', 10.46)],
+      }),
+    });
+    const area = {
+      id: 'sleikebekk',
+      name: 'Delområde Sleikebekk',
+      bbox: SEMSVANNET,
+      polygons: [
+        [
+          [
+            [10.4, 59.84],
+            [10.44, 59.84],
+            [10.44, 59.87],
+            [10.4, 59.87],
+            [10.4, 59.84],
+          ] as [number, number][],
+        ],
+      ],
+    };
+    const { result } = renderHook(() =>
+      useBestSpots('', huntSelection, view(), { enabled: true, vocabulary: 'hunt', areas: [area] }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.spots.map((candidate) => candidate.id)).toEqual(['inside']);
+    expect(result.current.note).toContain('Delområde Sleikebekk');
+  });
+
   it('asks again when a derived cell lands under the same viewport', async () => {
     const { rerender } = renderHook(
       ({ readyKey }: { readyKey: string }) =>
@@ -250,5 +303,24 @@ describe('windowForToday', () => {
     expect(window).not.toBeNull();
     expect(new Date(window!.startMs).getHours()).toBeGreaterThanOrEqual(17);
     expect(window!.summary.length).toBeGreaterThan(0);
+  });
+});
+
+describe('stand wind', () => {
+  const callingStand = spot({
+    stand: {
+      maxRangeM: 150,
+      vantageM: 4,
+      lanes: [],
+      aim: { label: 'E', bearing: 90, distanceM: 110, position: { lat: 59.85, lng: 10.42 } },
+      warning: 'check',
+    },
+  });
+
+  it('greys a stand when scent travels toward its paired habitat', () => {
+    // Wind from west travels east, the same bearing as the habitat.
+    expect(standWindRisk(callingStand, { windFromDeg: 270 })).toBe('blown');
+    expect(standWindRisk(callingStand, { windFromDeg: 90 })).toBe('good');
+    expect(standWindRisk(callingStand, { windFromDeg: 0 })).toBe('crosswind');
   });
 });

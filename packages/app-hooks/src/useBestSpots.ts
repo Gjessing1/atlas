@@ -44,6 +44,7 @@ import {
 } from '@atlas/potential';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PotentialTargetSelection, PotentialView } from './usePotential.js';
+import type { PlanningArea } from './usePlanningAreas.js';
 
 /** The stretch of today worth planning around, at the top spot's coordinates. */
 export interface SpotsWindow {
@@ -56,12 +57,34 @@ export interface SpotsWindow {
   readonly rating: ActivityRating;
   /** The peak hour's one-line takeaway, naming driver and limiter. */
   readonly summary: string;
+  /** Meteorological direction the wind comes from at the peak hour. */
+  readonly windFromDeg: number | null;
+}
+
+export type StandWindRisk = 'good' | 'crosswind' | 'blown' | null;
+
+/**
+ * Does the forecast carry the caller's scent from the stand toward the paired
+ * habitat? A 60° cone is deliberately broad: forecast direction and forest
+ * wind are not precise enough to bless a marginal angle.
+ */
+export function standWindRisk(
+  spot: Pick<PotentialSpot, 'stand'>,
+  window: Pick<SpotsWindow, 'windFromDeg'> | null,
+): StandWindRisk {
+  if (!spot.stand || window?.windFromDeg === null || window?.windFromDeg === undefined) return null;
+  const windTo = (window.windFromDeg + 180) % 360;
+  const delta = Math.abs(((windTo - spot.stand.aim.bearing + 540) % 360) - 180);
+  if (delta <= 60) return 'blown';
+  if (delta >= 120) return 'good';
+  return 'crosswind';
 }
 
 export type BestSpotsStatus = 'off' | 'loading' | 'ready' | 'empty' | 'error';
 
 export interface BestSpotsState {
   readonly status: BestSpotsStatus;
+  readonly mode: 'habitat' | 'stands';
   readonly spots: readonly PotentialSpot[];
   /** Today's window at the top spot, or null when today has none. */
   readonly window: SpotsWindow | null;
@@ -82,6 +105,7 @@ export interface BestSpotsState {
 
 const IDLE: BestSpotsState = {
   status: 'off',
+  mode: 'habitat',
   spots: [],
   window: null,
   windowNote: null,
@@ -138,12 +162,47 @@ export function windowForToday(
     score: Math.round(assessment.score),
     rating: assessment.rating,
     summary: assessment.summary,
+    windFromDeg: peak.point.windFromDir ?? null,
   };
 }
 
 /** The bbox as a key, so a pan of a few metres is not a new request. */
 function viewKey(bbox: LngLatBbox | undefined): string {
   return bbox ? bbox.map((n) => n.toFixed(4)).join(',') : '';
+}
+
+function intersects(a: LngLatBbox, b: LngLatBbox): boolean {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+function inRing(
+  position: { lat: number; lng: number },
+  ring: readonly (readonly [number, number])[],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]!;
+    const [xj, yj] = ring[j]!;
+    if (
+      yi > position.lat !== yj > position.lat &&
+      position.lng < ((xj - xi) * (position.lat - yi)) / (yj - yi) + xi
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Exterior ring contains the point and no hole removes it. */
+function inArea(position: { lat: number; lng: number }, area: PlanningArea): boolean {
+  return area.polygons.some((polygon) => {
+    const exterior = polygon[0];
+    return Boolean(
+      exterior &&
+      inRing(position, exterior) &&
+      !polygon.slice(1).some((hole) => inRing(position, hole)),
+    );
+  });
 }
 
 export function useBestSpots(
@@ -157,6 +216,8 @@ export function useBestSpots(
     readonly readyKey?: string;
     readonly vocabulary?: SurfaceVocabulary;
     readonly limit?: number;
+    /** Visible saved permit areas; hunting stands and their aim are clipped to them. */
+    readonly areas?: readonly PlanningArea[];
   },
 ): BestSpotsState {
   const [response, setResponse] = useState<PotentialSpotsResponse | null>(null);
@@ -172,10 +233,14 @@ export function useBestSpots(
   const bbox = view?.bbox;
   const zoom = view?.zoom ?? 0;
   const active = opts.enabled && layer !== null && bbox !== undefined && zoom >= CELL_ZOOM;
+  const relevantAreas = bbox
+    ? (opts.areas ?? []).filter((area) => intersects(area.bbox, bbox))
+    : [];
+  const areasKey = relevantAreas.map((area) => `${area.id}:${area.bbox.join(',')}`).join('|');
   // Everything the request is made of, so the effect below can depend on the
   // *request* rather than on a bbox array that is new on every render.
   const key = active
-    ? `${layer}/${target}/${limit}/${viewKey(bbox)}/${opts.readyKey ?? ''}/${nonce}`
+    ? `${layer}/${target}/${limit}/${viewKey(bbox)}/${areasKey}/${opts.readyKey ?? ''}/${nonce}`
     : '';
 
   // A new area, target or nonce starts a fresh answer: the counts and the
@@ -196,9 +261,28 @@ export function useBestSpots(
         try {
           const res = await fetch(potentialSpotsUrl(origin, layer!, target, bbox, limit));
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const body = (await res.json()) as PotentialSpotsResponse;
+          const received = (await res.json()) as PotentialSpotsResponse;
           if (cancelled) return;
-          setResponse(body);
+          if (received.mode === 'stands' && relevantAreas.length > 0) {
+            const clipped = received.spots.filter(
+              (spot) =>
+                spot.stand &&
+                relevantAreas.some(
+                  (area) => inArea(spot.position, area) && inArea(spot.stand!.aim.position, area),
+                ),
+            );
+            const names = relevantAreas.map((area) => area.name).join(', ');
+            setResponse({
+              ...received,
+              spots: clipped,
+              note:
+                clipped.length > 0
+                  ? `Clipped to saved area: ${names}. ${received.note ?? ''}`.trim()
+                  : `No paired stand falls fully inside the visible saved area: ${names}.`,
+            });
+          } else {
+            setResponse(received);
+          }
           setFailed(false);
         } catch {
           if (!cancelled) setFailed(true);
@@ -255,6 +339,7 @@ export function useBestSpots(
   return useMemo((): BestSpotsState => {
     if (!active) return { ...IDLE, refresh };
     const base = {
+      mode: response?.mode ?? (vocabulary === 'hunt' ? 'stands' : 'habitat'),
       spots: response?.spots ?? [],
       window,
       windowNote:

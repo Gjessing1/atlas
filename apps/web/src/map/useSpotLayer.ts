@@ -3,10 +3,12 @@ import type maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef } from 'react';
 
 const SOURCE_ID = 'atlas-spots';
+const LANES = 'atlas-spots-lanes';
+const AIM = 'atlas-spots-aim';
 const HALO = 'atlas-spots-halo';
 const DISC = 'atlas-spots-disc';
 const NUMBER = 'atlas-spots-number';
-const ALL_LAYERS = [HALO, DISC, NUMBER];
+const ALL_LAYERS = [LANES, AIM, HALO, DISC, NUMBER];
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
@@ -76,9 +78,33 @@ export function useSpotLayer(
       }
       if (!map.getLayer(HALO)) {
         map.addLayer({
+          id: LANES,
+          type: 'line',
+          source: SOURCE_ID,
+          filter: ['==', ['get', 'kind'], 'lane'],
+          paint: {
+            'line-color': '#ffffff',
+            'line-width': 2,
+            'line-opacity': 0.72,
+          },
+        });
+        map.addLayer({
+          id: AIM,
+          type: 'line',
+          source: SOURCE_ID,
+          filter: ['==', ['get', 'kind'], 'aim'],
+          paint: {
+            'line-color': '#f59e0b',
+            'line-width': 3,
+            'line-opacity': 0.95,
+            'line-dasharray': [2, 1.5],
+          },
+        });
+        map.addLayer({
           id: HALO,
           type: 'circle',
           source: SOURCE_ID,
+          filter: ['==', ['get', 'kind'], 'spot'],
           paint: {
             'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 17],
             'circle-color': '#ffffff',
@@ -89,6 +115,7 @@ export function useSpotLayer(
           id: DISC,
           type: 'circle',
           source: SOURCE_ID,
+          filter: ['==', ['get', 'kind'], 'spot'],
           paint: {
             'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9.5, 14, 14],
             // The band's own colour, so a spot is visibly the hot end of the
@@ -102,6 +129,7 @@ export function useSpotLayer(
           id: NUMBER,
           type: 'symbol',
           source: SOURCE_ID,
+          filter: ['==', ['get', 'kind'], 'spot'],
           layout: {
             'text-field': ['get', 'label'],
             'text-font': ['Noto Sans Bold'],

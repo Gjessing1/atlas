@@ -733,8 +733,30 @@ export function MapScene({
         {spots.length > 0 ? (
           <GeoJSONSource id="atlas-spots" data={spotsFeatureCollection(spots)}>
             <Layer
+              type="line"
+              id="atlas-spots-lanes"
+              filter={['==', ['get', 'kind'], 'lane']}
+              paint={{
+                'line-color': '#ffffff',
+                'line-width': 2,
+                'line-opacity': 0.72,
+              }}
+            />
+            <Layer
+              type="line"
+              id="atlas-spots-aim"
+              filter={['==', ['get', 'kind'], 'aim']}
+              paint={{
+                'line-color': '#f59e0b',
+                'line-width': 3,
+                'line-opacity': 0.95,
+                'line-dasharray': [2, 1.5],
+              }}
+            />
+            <Layer
               type="circle"
               id="atlas-spots-halo"
+              filter={['==', ['get', 'kind'], 'spot']}
               paint={{
                 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 18],
                 'circle-color': '#ffffff',
@@ -744,6 +766,7 @@ export function MapScene({
             <Layer
               type="circle"
               id={SPOT_LAYER_ID}
+              filter={['==', ['get', 'kind'], 'spot']}
               paint={{
                 // The band's own colour, so a spot reads as the hot end of the
                 // ramp it was found on.
@@ -756,6 +779,7 @@ export function MapScene({
             <Layer
               type="symbol"
               id="atlas-spots-number"
+              filter={['==', ['get', 'kind'], 'spot']}
               layout={{
                 'text-field': ['get', 'label'],
                 'text-font': ['Noto Sans Bold'],

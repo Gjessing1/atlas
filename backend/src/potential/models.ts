@@ -7,6 +7,7 @@ import {
   slopePercent,
   type CombineTerm,
   type Grid,
+  type HuntStandPlan,
   type Mask,
   type PotentialTarget,
 } from '@atlas/potential';
@@ -103,6 +104,12 @@ export interface ModelResult {
    * and nothing more.
    */
   readonly terms?: readonly CombineTerm[];
+  /**
+   * Hunter-side LOS/habitat pairing, persisted beside the explanation planes.
+   * Only the hunt model supplies it; keeping the shape here lets the shared
+   * derive pipeline store it without learning quarry arithmetic.
+   */
+  readonly standPlan?: HuntStandPlan;
 }
 
 /** Scale a grid to 0..1 by its own range, preserving NaN. Diagnostics only. */

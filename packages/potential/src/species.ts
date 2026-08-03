@@ -393,6 +393,8 @@ export interface Quarry {
   readonly id: string;
   readonly nameNo: string;
   readonly nameEn: string;
+  /** Optional picker wording when the model is intentionally tactic/season-specific. */
+  readonly targetLabel?: string;
   /**
    * SR16 `SRRHOYDEO` dominant tree height band, in metres — the stand maturity
    * this quarry uses. Null for species that live above the forest.
@@ -429,7 +431,8 @@ export const QUARRIES = [
   {
     id: 'radyr',
     nameNo: 'Rådyr',
-    nameEn: 'Roe deer',
+    nameEn: 'Roe buck calling',
+    targetLabel: 'Rådyrbukk · lokkejakt',
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 8, max: 16 },
     treeLineBandM: null,
     disturbanceBufferM: 100,

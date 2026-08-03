@@ -21,7 +21,7 @@
  *   different places.
  */
 
-import { haversineM, type LatLng } from '@atlas/core';
+import { destinationPoint, haversineM, type LatLng } from '@atlas/core';
 import type { PotentialSpot } from './api.js';
 import { BAND_LABELS, SURFACE_BANDS, type SurfaceVocabulary } from './surface.js';
 
@@ -78,24 +78,70 @@ export function spotColor(spot: Pick<PotentialSpot, 'band'>): string {
 export function spotsFeatureCollection(spots: readonly PotentialSpot[]) {
   return {
     type: 'FeatureCollection' as const,
-    features: spots.map((spot, index) => ({
-      type: 'Feature' as const,
-      id: index + 1,
-      properties: {
-        id: spot.id,
-        /** 1-based rank in the shortlist — what the marker reads. */
-        number: index + 1,
-        label: String(index + 1),
-        band: spot.band,
-        bandLabel: spot.bandLabel,
-        color: spotColor(spot),
-        reason: spot.reason,
-      },
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [spot.position.lng, spot.position.lat],
-      },
-    })),
+    features: [
+      ...spots.map((spot, index) => ({
+        type: 'Feature' as const,
+        id: index + 1,
+        properties: {
+          id: spot.id,
+          kind: 'spot',
+          /** 1-based rank in the shortlist — what the marker reads. */
+          number: index + 1,
+          label: String(index + 1),
+          band: spot.band,
+          bandLabel: spot.bandLabel,
+          color: spotColor(spot),
+          reason: spot.reason,
+        },
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [spot.position.lng, spot.position.lat],
+        },
+      })),
+      ...spots.flatMap((spot, index) => {
+        if (!spot.stand) return [];
+        const lineProperties = (kind: 'lane' | 'aim', id: string, color: string) => ({
+          id,
+          kind,
+          number: index + 1,
+          label: '',
+          band: spot.band,
+          bandLabel: spot.bandLabel,
+          color,
+          reason: spot.reason,
+        });
+        const laneFeatures = spot.stand.lanes
+          .filter((lane) => lane.rangeM >= 20)
+          .map((lane) => {
+            const end = destinationPoint(spot.position, lane.bearing, lane.rangeM);
+            return {
+              type: 'Feature' as const,
+              properties: lineProperties('lane', `${spot.id}/lane/${lane.key}`, '#f8fafc'),
+              geometry: {
+                type: 'LineString' as const,
+                coordinates: [
+                  [spot.position.lng, spot.position.lat],
+                  [end.lng, end.lat],
+                ],
+              },
+            };
+          });
+        return [
+          ...laneFeatures,
+          {
+            type: 'Feature' as const,
+            properties: lineProperties('aim', `${spot.id}/aim`, '#f59e0b'),
+            geometry: {
+              type: 'LineString' as const,
+              coordinates: [
+                [spot.position.lng, spot.position.lat],
+                [spot.stand.aim.position.lng, spot.stand.aim.position.lat],
+              ],
+            },
+          },
+        ];
+      }),
+    ],
   };
 }
 
@@ -131,8 +177,15 @@ export function spotPlaceDraft(
     );
   }
   lines.push(`Atlas ${vocabulary === 'hunt' ? 'hunt' : 'fishing'} potential, ${spot.bandLabel}.`);
+  if (spot.stand) {
+    lines.unshift(
+      `Calling stand: ${spot.stand.aim.distanceM} m ${spot.stand.aim.label} toward habitat; ` +
+        `vantage ${spot.stand.vantageM >= 0 ? '+' : ''}${spot.stand.vantageM} m.`,
+    );
+    lines.push(spot.stand.warning);
+  }
   return {
-    name: `${what} spot ${index + 1}`,
+    name: `${what} ${spot.stand ? 'stand' : 'spot'} ${index + 1}`,
     lat: spot.position.lat,
     lng: spot.position.lng,
     notes: lines.join(' '),

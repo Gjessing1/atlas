@@ -35,6 +35,7 @@ import {
   usePotential,
   usePotentialExplain,
   usePotentialTarget,
+  usePlanningAreas,
   useThemeMode,
   type FetchNearbyFn,
   type PotentialView,
@@ -291,10 +292,12 @@ export function App() {
   useEffect(() => {
     if (!layers.derived) setSpotsOpen(false);
   }, [layers.derived]);
+  const planningAreas = usePlanningAreas(userData.tracks, userData.getTrackData);
   const bestSpots = useBestSpots('', layers.derived, mapViewport, {
     enabled: spotsOpen,
     readyKey: potential.readyKey,
     vocabulary: layers.derived?.meta.derived?.vocabulary,
+    areas: planningAreas,
   });
   // Picking a spot — from the list or from its marker — opens the *same* card a
   // tap on the water opens, so the reasoning, the elevation, the weather and
@@ -307,8 +310,8 @@ export function App() {
       setTarget({
         source: 'poi',
         position: spot.position,
-        name: `Spot ${index + 1}`,
-        category: spot.bandLabel,
+        name: `${spot.stand ? 'Stand' : 'Spot'} ${index + 1}`,
+        category: spot.stand ? spot.reason : spot.bandLabel,
       });
       map?.easeTo({ center: [spot.position.lng, spot.position.lat], duration: 500 });
     },
@@ -958,7 +961,12 @@ export function App() {
           {layers.derived &&
             !spotsOpen &&
             potential.status !== 'zoom-in' &&
-            potential.status !== 'outside' && <SpotsButton onOpen={() => setSpotsOpen(true)} />}
+            potential.status !== 'outside' && (
+              <SpotsButton
+                onOpen={() => setSpotsOpen(true)}
+                hunting={layers.derived.meta.derived?.vocabulary === 'hunt'}
+              />
+            )}
           {layers.derived && spotsOpen && (
             <SpotsPanel
               state={bestSpots}

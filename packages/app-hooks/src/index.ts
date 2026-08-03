@@ -212,9 +212,12 @@ export {
 export {
   useBestSpots,
   spotWalkLabel,
+  standWindRisk,
   spotWindowLabel,
   windowForToday,
   type BestSpotsState,
   type BestSpotsStatus,
   type SpotsWindow,
+  type StandWindRisk,
 } from './useBestSpots.js';
+export { planningArea, usePlanningAreas, type PlanningArea } from './usePlanningAreas.js';

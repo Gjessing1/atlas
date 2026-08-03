@@ -1,4 +1,9 @@
-import { spotWalkLabel, spotWindowLabel, type BestSpotsState } from '@atlas/app-hooks';
+import {
+  spotWalkLabel,
+  spotWindowLabel,
+  standWindRisk,
+  type BestSpotsState,
+} from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
 import { spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -17,14 +22,18 @@ export function SpotsButton({
   top,
   left,
   onPress,
+  hunting = false,
 }: {
   top: number;
   left: number;
   onPress: () => void;
+  hunting?: boolean;
 }) {
   return (
     <Pressable style={[styles.button, { top, left }]} onPress={onPress} testID="spots-button">
-      <Text style={styles.buttonText}>Best spots in view</Text>
+      <Text style={styles.buttonText}>
+        {hunting ? 'Plan stands in view' : 'Best spots in view'}
+      </Text>
     </Pressable>
   );
 }
@@ -74,7 +83,9 @@ export function SpotsSheet({
     >
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.heading}>Best spots in view</Text>
+          <Text style={styles.heading}>
+            {state.mode === 'stands' ? 'Calling stands in view' : 'Best spots in view'}
+          </Text>
           {targetLabel ? <Text style={styles.muted}>{targetLabel}</Text> : null}
         </View>
         <Pressable onPress={onClose} hitSlop={10} testID="spots-close">
@@ -105,12 +116,16 @@ export function SpotsSheet({
       {state.status === 'empty' || state.status === 'error' ? (
         <Text style={styles.note}>{state.note ?? 'Nothing to show here.'}</Text>
       ) : null}
+      {state.status === 'ready' && state.note ? (
+        <Text style={styles.note}>{state.note}</Text>
+      ) : null}
 
       <ScrollView style={styles.list}>
         {state.spots.map((spot, index) => {
           const walk = spotWalkLabel(spot);
+          const wind = standWindRisk(spot, conditions);
           return (
-            <View style={styles.row} key={spot.id}>
+            <View style={[styles.row, wind === 'blown' && styles.rowBlown]} key={spot.id}>
               <Pressable
                 style={styles.rowMain}
                 onPress={() => onPick(spot, index)}
@@ -127,6 +142,19 @@ export function SpotsSheet({
                   <Text style={styles.reason} numberOfLines={2}>
                     {spot.reason}
                   </Text>
+                  {spot.stand ? (
+                    <Text style={styles.reason} numberOfLines={1}>
+                      Vantage {spot.stand.vantageM >= 0 ? '+' : ''}
+                      {spot.stand.vantageM} m ·{' '}
+                      {wind === 'blown'
+                        ? 'wind carries scent toward habitat — avoid'
+                        : wind === 'good'
+                          ? 'wind carries scent away from habitat'
+                          : wind === 'crosswind'
+                            ? 'crosswind — check locally'
+                            : 'verify wind and backstop on site'}
+                    </Text>
+                  ) : null}
                 </View>
               </Pressable>
               <Pressable
@@ -179,6 +207,7 @@ const styles = StyleSheet.create({
   note: { color: theme.textMuted, fontSize: 12, marginTop: 12 },
   list: { marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  rowBlown: { opacity: 0.48 },
   rowMain: {
     flex: 1,
     minHeight: 56,
