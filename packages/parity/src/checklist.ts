@@ -104,6 +104,21 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/PotentialExplainCard.tsx', contains: 'export function' },
   },
   {
+    id: 'card-saved-stand-plan',
+    surface: 'card',
+    capability:
+      'A saved hunting stand shows the way it faces, its rose and the approach it was saved with',
+    web: { file: 'apps/web/src/place/StandBlock.tsx', contains: 'standCardModel' },
+    android: { file: 'apps/android/src/ui/StandBlock.tsx', contains: 'standCardModel' },
+  },
+  {
+    id: 'map-saved-stand-rose',
+    surface: 'map',
+    capability: 'A visible saved stand draws its own rose, dimmer than the live shortlist',
+    web: { file: 'apps/web/src/map/useSavedStandLayer.ts', contains: 'savedStandFeatures' },
+    android: { file: 'apps/android/src/map/MapScene.tsx', contains: 'savedStandFeatures' },
+  },
+  {
     id: 'card-encyclopaedia',
     surface: 'card',
     capability: 'Wikipedia/Wikivoyage extract for a named place',

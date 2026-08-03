@@ -202,6 +202,7 @@ export {
   spotApproachLabel,
   spotColor,
   spotPlaceDraft,
+  spotStandRecord,
   spotsFeatureCollection,
   SPOT_LIMIT,
   SPOT_MIN_RANK,

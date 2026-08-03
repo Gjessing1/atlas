@@ -109,8 +109,10 @@ export function parseGpx(xml: string): TrackData {
     if (point.ele !== undefined) waypoint.ele = point.ele;
     const name = text(wpt['name']);
     if (name !== undefined) waypoint.name = name;
-    const address = text(wpt['desc']);
+    const address = text(wpt['cmt']);
     if (address !== undefined) waypoint.address = address;
+    const notes = text(wpt['desc']);
+    if (notes !== undefined) waypoint.notes = notes;
     data.waypoints.push(waypoint);
   }
 
@@ -148,7 +150,7 @@ function collectKml(node: Node, data: TrackData): void {
   for (const placemark of asNodes(node['Placemark'])) {
     const name = text(placemark['name']);
     const address = text(placemark['address']);
-    collectGeometry(placemark, name, data, address);
+    collectGeometry(placemark, name, data, address, text(placemark['description']));
   }
 }
 
@@ -158,6 +160,7 @@ function collectGeometry(
   name: string | undefined,
   data: TrackData,
   address?: string,
+  notes?: string,
 ): void {
   for (const line of asNodes(node['LineString'])) {
     const points = parseKmlCoordinates(line['coordinates']);
@@ -197,12 +200,13 @@ function collectGeometry(
     if (p.ele !== undefined) waypoint.ele = p.ele;
     if (name !== undefined) waypoint.name = name;
     if (address !== undefined) waypoint.address = address;
+    if (notes !== undefined) waypoint.notes = notes;
     data.waypoints.push(waypoint);
   }
 
   const multi = node['MultiGeometry'];
   if (typeof multi === 'object' && multi !== null) {
-    collectGeometry(multi as Node, name, data, address);
+    collectGeometry(multi as Node, name, data, address, notes);
   }
 }
 

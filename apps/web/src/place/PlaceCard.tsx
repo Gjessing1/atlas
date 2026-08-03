@@ -17,6 +17,7 @@ import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
+import { StandBlock } from './StandBlock.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
 import { usePlaceContent } from './usePlaceContent.js';
 import { StopDepartures } from '../transit/StopDepartures.js';
@@ -404,6 +405,11 @@ export function PlaceCard({
           encyclopaedia content on purpose: the user tapped the water they were
           looking at, and the answer to *that* comes before a Wikipedia article
           about the lake. */}
+      {/* And above that again when this pin *is* a stand: the surface explains
+          the ground, but the reason the user saved this exact point — which way
+          to face, and whether the walk in burns it — is the stand plan, and it
+          is the answer they came back for. */}
+      {saved?.stand && <StandBlock stand={saved.stand} />}
       {potential && <PotentialExplain data={potential} targetLabel={potentialTarget} />}
       {/* And above the overlays' own answers, for the same reason. */}
       <IdentifyBlock groups={target.identify} />

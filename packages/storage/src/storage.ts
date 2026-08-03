@@ -1,4 +1,9 @@
-import { DEFAULT_PLACE_COLOR, DEFAULT_PLACE_ICON } from '@atlas/core';
+import {
+  DEFAULT_PLACE_COLOR,
+  DEFAULT_PLACE_ICON,
+  parsePlaceStand,
+  type PlaceStand,
+} from '@atlas/core';
 
 import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from './driver.js';
 import { migrate } from './migrations.js';
@@ -55,6 +60,27 @@ function parseStats(value: SqlValue | undefined): Record<string, number> {
   } catch {
     return {};
   }
+}
+
+/**
+ * A stored stand payload, validated on the way out (`@atlas/core` owns the
+ * shape). A malformed value reads as "no stand" rather than throwing: this row
+ * may have been written by a newer build or arrived over sync, and one bad
+ * payload must not make the whole place list unreadable.
+ */
+function parsePlaceStandColumn(value: SqlValue | undefined): PlaceStand | null {
+  if (value == null || value === '') return null;
+  try {
+    return parsePlaceStand(JSON.parse(String(value)));
+  } catch {
+    return null;
+  }
+}
+
+/** The column value for a stand arriving over sync or from a dump: valid, or NULL. */
+function standJson(value: unknown): string | null {
+  const stand = parsePlaceStand(value);
+  return stand ? JSON.stringify(stand) : null;
 }
 
 function parseTrackArea(value: SqlValue | undefined): TrackAreaOverlay | null {
@@ -125,6 +151,7 @@ function rowToPlace(r: SqlRow): PlaceRecord {
     color: r['color'] == null ? DEFAULT_PLACE_COLOR : String(r['color']),
     visible: r['visible'] == null ? true : Number(r['visible']) !== 0,
     sortIndex: r['sort_index'] == null ? 0 : Number(r['sort_index']),
+    stand: parsePlaceStandColumn(r['stand']),
     createdAt: Number(r['created_at']),
     updatedAt: Number(r['updated_at']),
   };
@@ -378,14 +405,15 @@ export class AtlasStorage {
       visible: true,
       // created_at dwarfs the renumbered ranks (1..n), so new rows list last.
       sortIndex: now,
+      stand: input.stand ?? null,
       createdAt: now,
       updatedAt: now,
     };
     await this.driver.batch([
       {
         sql: `INSERT INTO places (id, name, lat, lng, address, collection_id, notes, tags,
-                                  created_at, updated_at, icon, color, visible, sort_index)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  created_at, updated_at, icon, color, visible, sort_index, stand)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [
           record.id,
           record.name,
@@ -401,6 +429,7 @@ export class AtlasStorage {
           record.color,
           record.visible ? 1 : 0,
           record.sortIndex,
+          record.stand ? JSON.stringify(record.stand) : null,
         ],
       },
       this.enqueueStmt('place', record.id, 'upsert', now),
@@ -650,7 +679,10 @@ export class AtlasStorage {
         into.skipped += 1;
         return;
       }
-      statements.push(this.upsertStmt({ entity, id, updatedAt, deleted: false, data }));
+      // Same rule as a pull: a dump written before stands existed says nothing
+      // about them, and restoring it must not strip a plan off a local pin.
+      const change = await this.withLocalStand({ entity, id, updatedAt, deleted: false, data });
+      statements.push(this.upsertStmt(change));
       statements.push(this.enqueueStmt(entity, id, 'upsert', updatedAt));
       // Observe the dump's stamp, as with a pulled change: later local edits
       // must out-rank what was just restored.
@@ -691,6 +723,7 @@ export class AtlasStorage {
           color: p.color,
           visible: p.visible,
           sortIndex: p.sortIndex,
+          stand: p.stand,
           createdAt: p.createdAt,
         },
         summary.places,
@@ -832,6 +865,7 @@ export class AtlasStorage {
           color: p.color,
           visible: p.visible,
           sortIndex: p.sortIndex,
+          stand: p.stand,
           createdAt: p.createdAt,
         },
       };
@@ -878,6 +912,7 @@ export class AtlasStorage {
       if (!base) return 'skipped';
       change = { ...change, partial: undefined, data: { ...base.data, ...change.data } };
     }
+    change = await this.withLocalStand(change);
     const statements: SqlStatement[] = [];
     if (change.deleted) {
       if (change.entity === 'setting') {
@@ -979,8 +1014,8 @@ export class AtlasStorage {
         return {
           sql: `INSERT OR REPLACE INTO places
                   (id, name, lat, lng, address, collection_id, notes, tags,
-                   created_at, updated_at, icon, color, visible, sort_index)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   created_at, updated_at, icon, color, visible, sort_index, stand)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           params: [
             change.id,
             str('name', '(unnamed)'),
@@ -996,6 +1031,12 @@ export class AtlasStorage {
             str('color', DEFAULT_PLACE_COLOR),
             d['visible'] === false ? 0 : 1,
             num('sortIndex', createdAt),
+            // Validated here rather than stored raw: an unparseable payload from
+            // a peer would otherwise be read back as null on every load, and a
+            // rewritten-then-pushed null is how one bad device erases a real
+            // stand everywhere. Storing only what parses keeps the column and
+            // the record agreeing about what this row holds.
+            standJson(d['stand']),
           ],
         };
       case 'track':
@@ -1021,6 +1062,28 @@ export class AtlasStorage {
       case 'setting':
         return this.settingUpsertStmt(change.id, str('value'), change.updatedAt);
     }
+  }
+
+  /**
+   * Keep a local stand that the incoming payload simply does not mention.
+   *
+   * Places sync as whole snapshots, so a peer that has never heard of stands —
+   * an Android still on the bundle before this shipped, or an older backup being
+   * restored — pushes a complete place with no `stand` key at all, and a plain
+   * INSERT OR REPLACE would erase a plan the user spent an evening on. Renaming
+   * a pin on the old phone must not cost the rose on the new one.
+   *
+   * The distinction is *absent* versus *explicitly null*: a client that knows
+   * about stands always sends the key (null for an ordinary pin), so clearing a
+   * stand still works and only silence is treated as "no opinion".
+   */
+  private async withLocalStand(change: SyncChange): Promise<SyncChange> {
+    if (change.entity !== 'place' || change.deleted || change.data === null) return change;
+    if (change.data['stand'] !== undefined) return change;
+    const rows = await this.driver.query('SELECT stand FROM places WHERE id = ?', [change.id]);
+    const local = parsePlaceStandColumn(rows[0]?.['stand']);
+    if (!local) return change;
+    return { ...change, data: { ...change.data, stand: local } };
   }
 
   private settingUpsertStmt(key: string, value: string, updatedAt: number): SqlStatement {

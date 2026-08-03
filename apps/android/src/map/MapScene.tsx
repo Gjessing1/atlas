@@ -3,6 +3,7 @@ import {
   bboxOutlinesFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  savedStandFeatures,
   waypointLabel,
   type BBox,
   type LatLng,
@@ -370,6 +371,12 @@ export function MapScene({
   const pinScaleStyle = useMemo(
     () => ({ transform: [{ scale: markerScale }], transformOrigin: '50% 100%' }),
     [markerScale],
+  );
+  // Memoised because it is a source's `data`: rebuilding the collection on every
+  // render of the place list would re-upload the geometry on every render too.
+  const savedStands = useMemo(
+    () => savedStandFeatures(visiblePlaces.filter((place) => place.stand)),
+    [visiblePlaces],
   );
 
   return (
@@ -1164,6 +1171,33 @@ export function MapScene({
           >
             <PlacePin color="#d33939" />
           </ViewAnnotation>
+        ) : null}
+        {/* A saved stand's own rose, so which way it faces is visible on the map
+          that planned it (§E12). Deliberately dimmer and thinner than the live
+          shortlist above: both are on screen while planning a new area with last
+          season's stands visible, and a proposal being considered must not read
+          as a decision already made. Geometry comes from the shared
+          `savedStandFeatures` — the same builder the web map and the card use. */}
+        {savedStands.features.length > 0 ? (
+          <GeoJSONSource id="atlas-saved-stands" data={savedStands}>
+            <Layer
+              type="line"
+              id="atlas-saved-stands-lanes"
+              filter={['==', ['get', 'kind'], 'lane']}
+              paint={{ 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.4 }}
+            />
+            <Layer
+              type="line"
+              id="atlas-saved-stands-aim"
+              filter={['==', ['get', 'kind'], 'aim']}
+              paint={{
+                'line-color': '#f59e0b',
+                'line-width': 2,
+                'line-opacity': 0.55,
+                'line-dasharray': [2, 1.5],
+              }}
+            />
+          </GeoJSONSource>
         ) : null}
         {/* Saved places as colour-badged teardrop pins (web-parity markers).
           The marker view itself never handles touches (they aren't delivered

@@ -1,3 +1,4 @@
+import { parsePlaceStand } from '@atlas/core';
 import { describe, expect, it } from 'vitest';
 import type { PotentialSpot } from './api.js';
 import { FISH_SPECIES } from './species.js';
@@ -5,6 +6,7 @@ import {
   spotApproachLabel,
   spotColor,
   spotPlaceDraft,
+  spotStandRecord,
   spotsFeatureCollection,
   SPOT_MIN_RANK,
   SPOT_MIN_SEPARATION_M,
@@ -29,6 +31,18 @@ function spot(overrides: Partial<PotentialSpot> = {}): PotentialSpot {
     ...overrides,
   };
 }
+
+/** The hunter-side half of a paired recommendation, as the engine returns it. */
+const STAND = {
+  maxRangeM: 150,
+  vantageM: 6,
+  lanes: [
+    { key: 'e', label: 'E', bearing: 90, rangeM: 120 },
+    { key: 'se', label: 'SE', bearing: 135, rangeM: 85 },
+  ],
+  aim: { label: 'SE', bearing: 135, distanceM: 115, position: { lat: 59.85, lng: 10.42 } },
+  warning: 'Verify backstop.',
+};
 
 /** ~metres north of a point, for readable separation cases. */
 function north(from: { lat: number; lng: number }, metres: number) {
@@ -185,6 +199,64 @@ describe('spotPlaceDraft', () => {
     expect(draft.notes).toContain('115 m SE');
     expect(draft.notes).toContain('Verify backstop');
     expect(draft.tags).toContain('stand');
+  });
+
+  // Four claims — direction, rose, walk-in, safety — are four statements, and
+  // the notes field is free text, so newlines cost nothing.
+  it('writes the reasoning as lines rather than one run-on paragraph', () => {
+    const draft = spotPlaceDraft(spot({ stand: STAND }), 0, { targetLabel: 'Rådyrbukk' });
+    expect(draft.notes.split('\n').length).toBeGreaterThan(2);
+  });
+});
+
+describe('spotStandRecord', () => {
+  const at = spot({
+    stand: STAND,
+    access: {
+      distanceM: 900,
+      durationS: 720,
+      approximate: false,
+      from: { lat: 59.84, lng: 10.4 },
+      approach: { risk: 'caution', basis: 'mapped-route', holdingCoverM: 64, assessedM: 860 },
+    },
+  });
+
+  it('structures what the prose could only describe', () => {
+    const record = spotStandRecord(at, { targetLabel: 'Rådyrbukk · lokkejakt', now: 1_700_000 });
+    expect(record).toMatchObject({
+      kind: 'stand',
+      source: 'atlas-potential',
+      target: 'Rådyrbukk · lokkejakt',
+      vantageM: 6,
+      maxRangeM: 150,
+      bandLabel: 'Prime',
+      savedAt: 1_700_000,
+    });
+    expect(record!.lanes).toHaveLength(2);
+    expect(record!.aim.bearing).toBe(135);
+  });
+
+  it('is the record the card and the map read — it must parse as one', () => {
+    expect(parsePlaceStand(spotStandRecord(at))).not.toBeNull();
+  });
+
+  // The verdict judges the route's cover; the minutes are how long it takes.
+  // Reading both off `approach` would have made every walk zero.
+  it('takes the walk-in minutes from the access reading, not the verdict', () => {
+    expect(spotStandRecord(at)!.approach).toMatchObject({
+      risk: 'caution',
+      walkMinutes: 12,
+      approximate: false,
+    });
+  });
+
+  it('records no approach when nothing routed the walk in', () => {
+    expect(spotStandRecord(spot({ stand: STAND }))!.approach).toBeNull();
+  });
+
+  it('is null for fishing water — only a hunt spot is a stand', () => {
+    expect(spotStandRecord(spot())).toBeNull();
+    expect(spotPlaceDraft(spot(), 0).stand).toBeNull();
   });
 });
 

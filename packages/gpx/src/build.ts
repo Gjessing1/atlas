@@ -31,7 +31,14 @@ export function buildGpx(data: TrackData): string {
     lines.push(`  <wpt lat="${coord(w.lat)}" lon="${coord(w.lng)}">`);
     if (w.ele !== undefined) lines.push(`    <ele>${w.ele}</ele>`);
     if (w.name) lines.push(`    <name>${escapeXml(w.name)}</name>`);
-    if (w.address) lines.push(`    <desc>${escapeXml(w.address)}</desc>`);
+    // `<cmt>` carries the address and `<desc>` the notes, rather than both
+    // competing for one element. `<desc>` is what other apps show, and on a
+    // saved hunting stand the notes are the reason the pin exists — the way it
+    // faces, its rose, the walk in — while its address is empty. Two elements
+    // also make the pair round-trip: one joined `<desc>` could not be split
+    // back into the two fields it came from.
+    if (w.address) lines.push(`    <cmt>${escapeXml(w.address)}</cmt>`);
+    if (w.notes) lines.push(`    <desc>${escapeXml(w.notes)}</desc>`);
     lines.push('  </wpt>');
   }
 
@@ -69,6 +76,7 @@ function placemarks(data: TrackData, pad: string): string[] {
     lines.push(`${pad}<Placemark>`);
     if (w.name) lines.push(`${pad}  <name>${escapeXml(w.name)}</name>`);
     if (w.address) lines.push(`${pad}  <address>${escapeXml(w.address)}</address>`);
+    if (w.notes) lines.push(`${pad}  <description>${escapeXml(w.notes)}</description>`);
     const ele = w.ele !== undefined ? `,${w.ele}` : '';
     lines.push(
       `${pad}  <Point><coordinates>${coord(w.lng)},${coord(w.lat)}${ele}</coordinates></Point>`,

@@ -99,6 +99,13 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE outbox ADD COLUMN scope TEXT NOT NULL DEFAULT 'full';
   `,
+  // A place may be a planned hunting stand: which way it faces, its visibility
+  // rose and the walk-in verdict, as JSON. Prose in `notes` stays the
+  // exportable form; this is what the card and the map read (see @atlas/core
+  // PlaceStand). Existing pins are NULL — an ordinary place has no stand.
+  `
+  ALTER TABLE places ADD COLUMN stand TEXT;
+  `,
 ];
 
 /**

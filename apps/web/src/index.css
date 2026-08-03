@@ -246,6 +246,123 @@ button {
   min-width: 0;
 }
 
+/* The saved hunting stand's plan (ROADMAP § E12). Sits above the surface's
+   explain block: the ground is context, the direction to face is the answer.
+   The rose is a fixed square beside the rows, so the block's height does not
+   change with how open the stand is. */
+.stand-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.stand-block-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.stand-block-head strong {
+  font-size: 13px;
+}
+
+.stand-block-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.stand-block-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.stand-block-rows > div {
+  display: flex;
+  gap: 6px;
+}
+
+.stand-block-rows dt {
+  flex: 0 0 62px;
+  color: var(--text-muted);
+}
+
+.stand-block-rows dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.stand-rose {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 84px;
+}
+
+.stand-rose-ring {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.stand-rose-lane {
+  stroke: var(--text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.stand-rose-aim {
+  stroke: #f59e0b;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 6 4;
+}
+
+.stand-rose-centre {
+  fill: var(--text);
+}
+
+.stand-rose-north {
+  fill: var(--text-muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.stand-block-approach,
+.stand-block-warning {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.stand-block-approach {
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.stand-block-approach-clear {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.stand-block-approach-caution {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.stand-block-approach-high {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 /* What the visible overlays say is here (tap-to-identify). Scrolls inside its
    own height, like the Android card's block: a chatty upstream must never push
    the card's actions out of reach. */

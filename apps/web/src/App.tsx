@@ -74,6 +74,7 @@ import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
+import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
 import { useTransitLayers } from './map/useTransitLayers.js';
@@ -417,6 +418,9 @@ export function App() {
     );
     return userData.places.filter((p) => placeIsVisible(p, folders));
   }, [userData.places, userData.collections]);
+  // A saved stand draws its own rose, so which way it faces is visible on the
+  // map that planned it — and it follows the same visibility rules as its pin.
+  useSavedStandLayer(map, visiblePlaces);
 
   const routePath = route.active ? route.paths?.[route.selectedPath] : undefined;
   const routeTrackData = useMemo(

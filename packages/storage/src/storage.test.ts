@@ -26,6 +26,27 @@ const PERMIT_AREA = {
   bbox: [10, 60, 11, 61] as [number, number, number, number],
 };
 
+/** A stand as the Fish & Hunt shortlist saves it (@atlas/core PlaceStand). */
+const ROE_STAND = {
+  kind: 'stand' as const,
+  source: 'atlas-potential' as const,
+  target: 'Rådyrbukk · lokkejakt',
+  aim: { label: 'SE', bearing: 135, distanceM: 48, position: { lat: 59.851, lng: 10.421 } },
+  vantageM: 6,
+  maxRangeM: 150,
+  lanes: [{ key: 'e', label: 'E', bearing: 90, rangeM: 120 }],
+  approach: {
+    risk: 'caution' as const,
+    basis: 'mapped-route' as const,
+    holdingCoverM: 64,
+    walkMinutes: 12,
+    approximate: false,
+  },
+  bandLabel: 'Prime ground',
+  warning: 'Terrain visibility is not a backstop check.',
+  savedAt: 1_757_656_800_000,
+};
+
 /**
  * Delegate driver that rewrites the first batch statement matching `match`
  * into invalid SQL, so the failure happens *inside* the transaction — the
@@ -57,6 +78,109 @@ describe('AtlasStorage', () => {
   it('init is idempotent (migrations only run once)', async () => {
     await storage.init();
     expect(await storage.listPlaces()).toEqual([]);
+  });
+
+  describe('a place saved as a hunting stand', () => {
+    it('keeps the plan on the record, not only as prose in the notes', async () => {
+      await storage.createPlace({ name: 'Stand 1', lat: 59.85, lng: 10.42, stand: ROE_STAND });
+      expect((await storage.listPlaces())[0]!.stand).toEqual(ROE_STAND);
+    });
+
+    it('leaves an ordinary pin without one', async () => {
+      await storage.createPlace({ name: 'Home', lat: 59.9, lng: 10.7 });
+      expect((await storage.listPlaces())[0]!.stand).toBeNull();
+    });
+
+    it('survives a rename — editing the pin must not drop the plan', async () => {
+      const place = await storage.createPlace({
+        name: 'Stand 1',
+        lat: 59.85,
+        lng: 10.42,
+        stand: ROE_STAND,
+      });
+      await storage.updatePlace(place.id, { name: 'Bjørkekanten' });
+      expect((await storage.listPlaces())[0]!.stand).toEqual(ROE_STAND);
+    });
+
+    it("pushes the plan to the user's other devices", async () => {
+      const place = await storage.createPlace({
+        name: 'Stand 1',
+        lat: 59.85,
+        lng: 10.42,
+        stand: ROE_STAND,
+      });
+      const payload = await storage.readSyncRecord('place', place.id);
+      expect(payload!.data['stand']).toEqual(ROE_STAND);
+    });
+
+    it('applies a stand arriving from another device', async () => {
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'remote-1',
+        updatedAt: Date.now(),
+        deleted: false,
+        data: { name: 'Their stand', lat: 59.85, lng: 10.42, stand: ROE_STAND, createdAt: 1 },
+      });
+      expect((await storage.listPlaces())[0]!.stand).toEqual(ROE_STAND);
+    });
+
+    // A rose the surface never produced is worse than no rose: the block exists
+    // to be trusted about which way to face.
+    it('stores nothing rather than half a plan from a malformed payload', async () => {
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: 'remote-2',
+        updatedAt: Date.now(),
+        deleted: false,
+        data: {
+          name: 'Bad stand',
+          lat: 59.85,
+          lng: 10.42,
+          stand: { ...ROE_STAND, lanes: 'E 120 m' },
+          createdAt: 1,
+        },
+      });
+      expect((await storage.listPlaces())[0]!.stand).toBeNull();
+    });
+
+    // A phone still on the previous bundle pushes whole places with no `stand`
+    // key at all. Renaming a pin there must not erase the rose here.
+    it('keeps the local plan when an older peer says nothing about stands', async () => {
+      const place = await storage.createPlace({
+        name: 'Stand 1',
+        lat: 59.85,
+        lng: 10.42,
+        stand: ROE_STAND,
+      });
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: place.updatedAt + 1000,
+        deleted: false,
+        data: { name: 'Renamed on the old phone', lat: 59.85, lng: 10.42, createdAt: 1 },
+      });
+      const stored = (await storage.listPlaces())[0]!;
+      expect(stored.name).toBe('Renamed on the old phone');
+      expect(stored.stand).toEqual(ROE_STAND);
+    });
+
+    // …while a client that *does* know about stands can still clear one.
+    it('clears the plan when a peer explicitly sends none', async () => {
+      const place = await storage.createPlace({
+        name: 'Stand 1',
+        lat: 59.85,
+        lng: 10.42,
+        stand: ROE_STAND,
+      });
+      await storage.applyRemoteChange({
+        entity: 'place',
+        id: place.id,
+        updatedAt: place.updatedAt + 1000,
+        deleted: false,
+        data: { name: 'Now just a pin', lat: 59.85, lng: 10.42, stand: null, createdAt: 1 },
+      });
+      expect((await storage.listPlaces())[0]!.stand).toBeNull();
+    });
   });
 
   it('creates, lists, updates and deletes places', async () => {

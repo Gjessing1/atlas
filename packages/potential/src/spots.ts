@@ -21,7 +21,13 @@
  *   different places.
  */
 
-import { destinationPoint, haversineM, type LatLng } from '@atlas/core';
+import {
+  destinationPoint,
+  haversineM,
+  standApproachNote,
+  type LatLng,
+  type PlaceStand,
+} from '@atlas/core';
 import type { PotentialSpot } from './api.js';
 import { BAND_LABELS, SURFACE_BANDS, type SurfaceVocabulary } from './surface.js';
 
@@ -33,13 +39,7 @@ import { BAND_LABELS, SURFACE_BANDS, type SurfaceVocabulary } from './surface.js
 export function spotApproachLabel(spot: Pick<PotentialSpot, 'access'>): string | null {
   const approach = spot.access?.approach;
   if (!approach) return null;
-  const metres = Math.max(10, Math.round(approach.holdingCoverM / 10) * 10);
-  const subject = approach.basis === 'direct-line' ? 'Direct off-path approach' : 'Mapped approach';
-  if (approach.risk === 'clear') return `${subject} stays outside likely holding cover.`;
-  if (approach.risk === 'caution') {
-    return `${subject} clips about ${metres} m of likely holding cover — move quietly.`;
-  }
-  return `${subject} crosses about ${metres} m of likely holding cover — consider another way in.`;
+  return standApproachNote(approach);
 }
 
 /**
@@ -172,6 +172,58 @@ export interface SpotPlaceDraft {
   readonly lng: number;
   readonly notes: string;
   readonly tags: string[];
+  /** The stand plan, structured, for hunting spots; null for fishing water. */
+  readonly stand: PlaceStand | null;
+}
+
+/**
+ * The stand plan as the record keeps it (ROADMAP § E12).
+ *
+ * Only what cannot be recovered later goes in. The rose comes from a terrain and
+ * canopy trace over rasters no client holds, and the approach verdict was true
+ * of one route on one day — both are history the moment they are saved, which is
+ * why `savedAt` is part of the payload rather than left to the row's timestamps:
+ * a place can be renamed and refiled long after its plan stopped being current.
+ */
+export function spotStandRecord(
+  spot: PotentialSpot,
+  opts: { targetLabel?: string; now?: number } = {},
+): PlaceStand | null {
+  if (!spot.stand) return null;
+  const approach = spot.access?.approach ?? null;
+  return {
+    kind: 'stand',
+    source: 'atlas-potential',
+    target: opts.targetLabel ?? 'hunting',
+    aim: {
+      label: spot.stand.aim.label,
+      bearing: spot.stand.aim.bearing,
+      distanceM: spot.stand.aim.distanceM,
+      position: spot.stand.aim.position,
+    },
+    vantageM: spot.stand.vantageM,
+    maxRangeM: spot.stand.maxRangeM,
+    lanes: spot.stand.lanes.map((lane) => ({
+      key: lane.key,
+      label: lane.label,
+      bearing: lane.bearing,
+      rangeM: lane.rangeM,
+    })),
+    approach: approach
+      ? {
+          risk: approach.risk,
+          basis: approach.basis,
+          holdingCoverM: approach.holdingCoverM,
+          // The walk is the access reading, not the approach's: the verdict
+          // judges the route's cover, the minutes are how long it takes.
+          walkMinutes: spot.access ? Math.round(spot.access.durationS / 60) : null,
+          approximate: spot.access?.approximate ?? false,
+        }
+      : null,
+    bandLabel: spot.bandLabel,
+    warning: spot.stand.warning,
+    savedAt: opts.now ?? Date.now(),
+  };
 }
 
 /**
@@ -181,11 +233,18 @@ export interface SpotPlaceDraft {
  * offline, so months later — on the water, with no network and no surface
  * derived — this is the *only* surviving record of why the pin is there. A pin
  * called "59.85, 10.42" would have thrown that away.
+ *
+ * A hunting stand additionally carries the structured `stand` payload the card
+ * and the map read. The prose is kept as well rather than replaced: it is what
+ * a GPX `<desc>` and a printout carry, and the "everything exportable" rule
+ * means the reasoning must not become readable only inside Atlas. It is joined
+ * on newlines because the field is free text and the four claims — direction,
+ * rose, walk-in, safety — are four statements, not one sentence.
  */
 export function spotPlaceDraft(
   spot: PotentialSpot,
   index: number,
-  opts: { targetLabel?: string; vocabulary?: SurfaceVocabulary } = {},
+  opts: { targetLabel?: string; vocabulary?: SurfaceVocabulary; now?: number } = {},
 ): SpotPlaceDraft {
   const vocabulary = opts.vocabulary ?? 'fishing';
   const what = opts.targetLabel ?? (vocabulary === 'hunt' ? 'hunting' : 'fishing');
@@ -212,8 +271,12 @@ export function spotPlaceDraft(
     name: `${what} ${spot.stand ? 'stand' : 'spot'} ${index + 1}`,
     lat: spot.position.lat,
     lng: spot.position.lng,
-    notes: lines.join(' '),
+    notes: lines.join('\n'),
     tags: [vocabulary === 'hunt' ? 'hunt' : 'fishing', 'spot', ...(spot.stand ? ['stand'] : [])],
+    stand: spotStandRecord(spot, {
+      ...(opts.targetLabel === undefined ? {} : { targetLabel: opts.targetLabel }),
+      ...(opts.now === undefined ? {} : { now: opts.now }),
+    }),
   };
 }
 

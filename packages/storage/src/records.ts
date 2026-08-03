@@ -1,3 +1,5 @@
+import type { PlaceStand } from '@atlas/core';
+
 /** A folder for organizing places and tracks; collections may nest via parentId. */
 export interface CollectionRecord {
   id: string;
@@ -30,6 +32,13 @@ export interface PlaceRecord {
   visible: boolean;
   /** Manual list position (drag-and-drop); lists sort by this, then name. */
   sortIndex: number;
+  /**
+   * The hunting stand this place was saved *as*, when it came from the Fish &
+   * Hunt shortlist. Same precedent as `TrackRecord.area`: a typed payload on the
+   * record, so the plan syncs through the ordinary LWW row and survives offline
+   * instead of being prose in `notes` that only the editor ever renders.
+   */
+  stand: PlaceStand | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -77,6 +86,8 @@ export interface NewPlace {
   tags?: string[];
   icon?: string;
   color?: string;
+  /** Set when this pin is a planned hunting stand rather than an ordinary place. */
+  stand?: PlaceStand | null;
 }
 
 export interface NewTrack {

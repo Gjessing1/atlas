@@ -93,7 +93,7 @@ describe('buildKml', () => {
   });
 });
 
-describe('waypoint addresses', () => {
+describe('waypoint addresses and notes', () => {
   it('round-trips through GPX and KML', () => {
     const original = {
       segments: [],
@@ -101,6 +101,34 @@ describe('waypoint addresses', () => {
     };
     expect(parseGpx(buildGpx(original)).waypoints).toEqual(original.waypoints);
     expect(parseKml(buildKml(original)).waypoints).toEqual(original.waypoints);
+  });
+
+  // A saved hunting stand's plan lives in its notes and its address is empty:
+  // a file carrying only the pin's name would strip the reason it exists.
+  it('carries the notes out and back, beside the address rather than instead of it', () => {
+    const original = {
+      segments: [],
+      waypoints: [
+        {
+          lat: 59.85,
+          lng: 10.42,
+          name: 'Rådyrbukk stand 1',
+          address: 'Skogsvegen 4',
+          notes: 'Calling stand: 48 m SE toward habitat.\nVerify your backstop.',
+        },
+      ],
+    };
+    expect(parseGpx(buildGpx(original)).waypoints).toEqual(original.waypoints);
+    expect(parseKml(buildKml(original)).waypoints).toEqual(original.waypoints);
+  });
+
+  it('puts the notes in <desc>, the element other apps show', () => {
+    const gpx = buildGpx({
+      segments: [],
+      waypoints: [{ lat: 59.85, lng: 10.42, address: 'Skogsvegen 4', notes: 'Face SE.' }],
+    });
+    expect(gpx).toContain('<desc>Face SE.</desc>');
+    expect(gpx).toContain('<cmt>Skogsvegen 4</cmt>');
   });
 });
 

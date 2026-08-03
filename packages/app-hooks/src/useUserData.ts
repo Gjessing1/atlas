@@ -86,9 +86,15 @@ function buildLibraryKmz(dump: ExportedData): Uint8Array {
         : record.collectionId === collectionId;
 
     const items: TrackData[] = [];
-    const waypoints = dump.places
-      .filter(inFolder)
-      .map((p) => ({ lat: p.lat, lng: p.lng, name: p.name, address: p.address || undefined }));
+    const waypoints = dump.places.filter(inFolder).map((p) => ({
+      lat: p.lat,
+      lng: p.lng,
+      name: p.name,
+      address: p.address || undefined,
+      // A saved hunting stand's plan lives in its notes; a file that carried
+      // only the pin's name would strip the reason it exists.
+      notes: p.notes || undefined,
+    }));
     if (waypoints.length > 0) items.push({ segments: [], waypoints });
     for (const track of dump.tracks.filter(inFolder)) {
       try {
@@ -687,6 +693,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
                   lat: w.lat,
                   lng: w.lng,
                   address: w.address,
+                  notes: w.notes,
                   collectionId: await resolveTargetCollection(),
                 }),
               );
@@ -929,6 +936,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
             lng: p.lng,
             name: p.name,
             address: p.address || undefined,
+            notes: p.notes || undefined,
           })),
         }),
       );

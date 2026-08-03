@@ -5,6 +5,7 @@ import {
   WIKIMEDIA_USER_AGENT,
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
+  type PlaceStand,
 } from '@atlas/core';
 import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
@@ -17,6 +18,7 @@ import type { LocalPack } from '../regions/packs';
 import { useServerOrigin } from '../serverOrigin';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { PotentialExplainCard } from './PotentialExplainCard';
+import { StandBlock } from './StandBlock';
 import { StopDepartures } from './StopDepartures';
 import { WeatherIcon } from './icons';
 import { theme } from './theme';
@@ -124,6 +126,7 @@ export function DestinationCard({
   packs,
   potential,
   potentialTarget,
+  stand,
   onDirections,
   onSave,
   onEdit,
@@ -143,6 +146,13 @@ export function DestinationCard({
   potential?: PotentialExplainResponse | null;
   /** Display name of the surface's target, e.g. "Ørret". */
   potentialTarget?: string;
+  /**
+   * The stand plan this pin was saved as, when it came from the Fish & Hunt
+   * shortlist. Read from the saved place rather than from the live surface: it
+   * is the decision the user recorded, and it must still read months later with
+   * nothing derived and no network.
+   */
+  stand?: PlaceStand | null;
   /** Downloaded regions supply article text before the network is tried. */
   packs: LocalPack[];
   /** Open the route planner with this point as the destination. */
@@ -253,6 +263,10 @@ export function DestinationCard({
       </View>
 
       <PlaceFacts {...facts} />
+
+      {/* Above the surface's own reading when this pin *is* a stand: the ground
+        is context, but which way to face is what the user came back for. */}
+      {stand ? <StandBlock stand={stand} /> : null}
 
       {/* Why the derived surface reads this spot the way it does. Above the
         overlays' own answers: the user tapped the water they were looking at. */}

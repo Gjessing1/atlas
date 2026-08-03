@@ -18,6 +18,13 @@ export interface Waypoint {
   name?: string;
   /** Postal/street address for an exported favorite. */
   address?: string;
+  /**
+   * The saved place's own notes. Exported because a hunting stand's plan — the
+   * way it faces, its rose, the walk-in verdict — lives here in sentences, and
+   * a GPX that carried only the pin's name would strip the reason it exists
+   * (rule: everything exportable).
+   */
+  notes?: string;
 }
 
 /** Parsed contents of a track file, normalized across GPX/KML/KMZ. */

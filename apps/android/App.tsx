@@ -1307,6 +1307,7 @@ function AppInner() {
               packs={packs}
               potential={potentialExplain.data}
               potentialTarget={potentialTargetLabel}
+              stand={savedAtDestination?.stand ?? null}
               onPickNearby={onPickNearbyPlace}
               onDirections={() => {
                 dest.clear();
