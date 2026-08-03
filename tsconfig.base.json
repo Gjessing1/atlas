@@ -1,5 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment_composite": "Every workspace is a composite project so `tsc -b` can skip the ones whose inputs have not changed. Without it each of build / typecheck / dev recompiled all twelve packages from cold (~6.5 min a run, paid three or four times a session). The cross-package `references` in each tsconfig are derived from that package's @atlas/* dependencies and verified by scripts/build-packages.mjs — never hand-maintained. Build outputs (dist/ + *.tsbuildinfo) are dockerignored, so image builds stay cold and honest.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -15,6 +16,7 @@
     "resolveJsonModule": true,
     "declaration": true,
     "sourceMap": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "composite": true
   }
 }

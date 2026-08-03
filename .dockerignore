@@ -1,6 +1,12 @@
 **/node_modules
 **/dist
 **/build
+# Incremental build state. Every emitting project keeps its .tsbuildinfo inside
+# dist/ (enforced by scripts/build-packages.mjs), but apps/web is noEmit and has
+# nowhere to put it — and a host's build state inside the image makes `tsc -b`
+# skip projects whose dist/ was ignored, i.e. compile against types that were
+# never emitted.
+**/*.tsbuildinfo
 .git
 .env
 # React Native app is not part of the server image; the workspaces glob
@@ -8,7 +14,10 @@
 apps/android
 .env.*
 !.env.example
+# Local-only planning docs (both are gitignored, so CI's context never has them —
+# without this line a local `docker build` format-checks files CI cannot see).
 CLAUDE.md
+AGENTS.md
 docs
 data
 # Dev-only symlink to the host data dir (/mnt/data/atlas).

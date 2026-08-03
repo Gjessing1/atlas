@@ -19,7 +19,9 @@ COPY . .
 # Quality gate baked into the image build: format, lint, build, types, tests.
 # If any fail the build fails, so nothing gets tagged or pushed.
 # `build` runs before `typecheck` because web/backend typecheck against @atlas/core's dist.
-RUN npm run format:check && npm run lint && npm run build && npm run typecheck && npm test
+# `test:all` — not `test` — because this is the run that decides whether a deploy
+# happens: the local pre-push gate may skip *.slow.test.ts, this one never does.
+RUN npm run format:check && npm run lint && npm run build && npm run typecheck && npm run test:all
 # GIT_SHA (CI build-arg; .git is dockerignored so it can't be derived here) is exposed
 # by /api/health so the deployed version is identifiable.
 ARG GIT_SHA=

@@ -8,5 +8,40 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  "references": [
+    {
+      "path": "../../packages/app-hooks"
+    },
+    {
+      "path": "../../packages/conditions"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/gpx"
+    },
+    {
+      "path": "../../packages/navigation"
+    },
+    {
+      "path": "../../packages/potential"
+    },
+    {
+      "path": "../../packages/routing"
+    },
+    {
+      "path": "../../packages/storage"
+    },
+    {
+      "path": "../../packages/sync"
+    },
+    {
+      "path": "../../packages/traffic"
+    },
+    {
+      "path": "../../packages/transit"
+    }
+  ]
 }

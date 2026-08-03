@@ -2,8 +2,41 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "references": [
+    {
+      "path": "../conditions"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../gpx"
+    },
+    {
+      "path": "../navigation"
+    },
+    {
+      "path": "../potential"
+    },
+    {
+      "path": "../routing"
+    },
+    {
+      "path": "../storage"
+    },
+    {
+      "path": "../sync"
+    },
+    {
+      "path": "../traffic"
+    },
+    {
+      "path": "../transit"
+    }
+  ]
 }

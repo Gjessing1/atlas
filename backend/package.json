@@ -7,8 +7,8 @@
   "scripts": {
     "_comment:dev": "NODE_EXTRA_CA_CERTS mirrors the Dockerfile: without it kart.miljodirektoratet.no is unreachable from Node (broken upstream chain — see certs/upstream-cas.pem), so overlays that work in dev would 502 and vice versa.",
     "dev": "NODE_EXTRA_CA_CERTS=certs/upstream-cas.pem tsx watch src/index.ts",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "test": "vitest run --maxWorkers=1",
     "start": "node dist/index.js"
   },

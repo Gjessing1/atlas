@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Atlas app hooks \u2014 the web/Android-shared React state layer (sync, routing, user data), parameterized by platform seams.",
+  "description": "Atlas app hooks — the web/Android-shared React state layer (sync, routing, user data), parameterized by platform seams.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,8 +13,8 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "test": "vitest run"
   },
   "dependencies": {

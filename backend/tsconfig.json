@@ -3,8 +3,29 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["node"],
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../packages/conditions"
+    },
+    {
+      "path": "../packages/core"
+    },
+    {
+      "path": "../packages/storage"
+    },
+    {
+      "path": "../packages/sync"
+    },
+    {
+      "path": "../packages/traffic"
+    },
+    {
+      "path": "../packages/transit"
+    }
+  ]
 }

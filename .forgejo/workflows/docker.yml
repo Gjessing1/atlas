@@ -26,6 +26,8 @@ env:
 jobs:
   # Single job: the quality gate (format, lint, types, tests) lives INSIDE the image
   # build (backend/Dockerfile), so a failure means nothing is tagged or pushed.
+  # This is the run that decides a deploy, so it runs `npm run test:all` — the local
+  # `npm run gate` may skip *.slow.test.ts, this never does.
   build-and-push:
     runs-on: docker
     permissions:

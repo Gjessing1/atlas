@@ -1,6 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // Not composite like the rest of the tree (this one extends Expo's base and
+    // is never emitted), but incremental all the same: a cold `tsc --noEmit`
+    // over the RN app is ~65 s, and it ran on every typecheck.
+    "incremental": true
   }
 }

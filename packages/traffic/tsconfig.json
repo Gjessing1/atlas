@@ -3,7 +3,15 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../routing"
+    }
+  ]
 }
