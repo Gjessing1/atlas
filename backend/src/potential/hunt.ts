@@ -183,7 +183,9 @@ export const huntModel: DeriveModel = {
     label: q.nameNo,
     caption: weightsCaption(q.nameEn, q.weights, 'terrain and cover'),
   })),
-  rev: 1,
+  // v2: roe deer now values mature daytime bedding cover, and derived
+  // explanations name a zero field-edge signal as confirmed absence.
+  rev: 2,
   catalog: true,
   inputs: {
     terrain: true,

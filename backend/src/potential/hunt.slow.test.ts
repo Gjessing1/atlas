@@ -297,10 +297,14 @@ describe('the hunt adapter', () => {
 
     const keys = result.manifest.signals!.terms.map((t) => t.key);
     expect(keys).toContain('edge-farmland');
-    // A roe deer weights young cover and never mature timber, so the surface
-    // carries the one and not the other — the weights are the model.
+    // The fixture contains both young edge cover and mature daytime bedding,
+    // and an August buck's model must carry both without applying both at the
+    // same pixel (the signal metadata records that exclusivity).
     expect(keys).toContain('cover-young');
-    expect(keys).not.toContain('cover-mature');
+    expect(keys).toContain('cover-mature');
+    expect(
+      result.manifest.signals!.terms.find((term) => term.key === 'cover-mature')?.exclusive,
+    ).toBe(true);
     expect(keys).toContain('quiet');
 
     // The field edge is the roe deer's lead, and it must be where the fixture

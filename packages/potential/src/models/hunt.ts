@@ -204,7 +204,7 @@ export function describeHuntSignal(
     case 'edge-farmland':
       return value > 0.05
         ? `${strength(value)} inside the pull of a forest–farmland edge`
-        : 'no field edge near here';
+        : `no field edge within ${FARM_EDGE_MAX_M} m — confirmed absent, not missing data`;
     case 'edge-myr':
       return value > 0.05
         ? `${strength(value)} inside a bog fringe, on the forest side of it`

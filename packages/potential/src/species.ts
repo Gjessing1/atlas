@@ -443,6 +443,10 @@ export const QUARRIES = [
       slope: 0.5,
       artfunksjon: 0.5,
       browse: 0.4,
+      // August bucks feed and patrol the edges, but bed in closed timber
+      // through the heat of the day. Less than thicket cover because it is
+      // shelter rather than forage, but never absent from the model.
+      'cover-mature': 0.4,
       quiet: 0.3,
     },
   },

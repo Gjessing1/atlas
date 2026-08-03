@@ -21,6 +21,7 @@ import {
   createGrid,
   createMask,
   describeHuntSignal,
+  explainPoint,
   gridOf,
   HUNT_SIGNALS,
   huntQuality,
@@ -127,6 +128,46 @@ describe('hunt surface — young and mature cover are exclusive', () => {
     const capped = weighted / weights;
     expect(at(surface.score, timber.x, timber.y)).toBeGreaterThan(capped);
     expect(STAND_SPLIT_M).toBeGreaterThan(0);
+  });
+});
+
+describe('hunt surface — roe-deer rut habitat', () => {
+  const surface = huntSurface(
+    inputs({
+      // A buck patrols the young edge but beds in closed timber through the
+      // heat of an August day, so both halves must survive as evidence.
+      treeHeightM: gridOf(SIZE, SIZE, CELL_M, (_x, y) => (y < 60 ? 4 : 20)),
+    }),
+    { quarry: RADYR },
+  );
+  const term = (key: HuntSignalKey) => surface.terms.find((candidate) => candidate.key === key)!;
+
+  it('counts mature timber as modest bedding cover', () => {
+    expect(RADYR.weights['cover-mature']).toBe(0.4);
+    expect(RADYR.weights['cover-mature']).toBeLessThan(RADYR.weights['cover-young']!);
+    expect(term('cover-mature').exclusive).toBe(true);
+    expect(at(term('cover-mature').grid, 30, 90)).toBeGreaterThan(0.9);
+    expect(at(surface.score, 30, 90)).toBeGreaterThan(0);
+  });
+
+  it('keeps a hard-zero field edge as evidence, not missing data', () => {
+    const why = describeHuntSignal('edge-farmland', 0, { quarry: RADYR });
+    expect(why).toContain('within 600 m');
+    expect(why).toContain('confirmed absent');
+
+    const edge = term('edge-farmland');
+    expect(at(edge.grid, 30, 90)).toBe(0);
+    expect(Number.isFinite(at(edge.grid, 30, 90))).toBe(true);
+
+    const card = explainPoint(surface.terms, 30, 90, {
+      rank: surface.score,
+      vocabulary: 'hunt',
+    });
+    expect(card.missing).not.toContain(edge.label);
+    expect(card.factors.find((factor) => factor.key === edge.key)).toMatchObject({
+      score: 0,
+      detail: expect.stringContaining('confirmed absent'),
+    });
   });
 });
 
