@@ -40,7 +40,7 @@ describe('corridor flow classification', () => {
     // Faster than the reference is normal — half the table is — and must not
     // become its own state.
     expect(corridorFlow(measurement('a', 190, 300)).level).toBe('flowing');
-    expect(corridorFlow(measurement('a', 345, 300)).level).toBe('busy');
+    expect(corridorFlow(measurement('a', 375, 300)).level).toBe('busy');
     expect(corridorFlow(measurement('a', 450, 300)).level).toBe('slow');
     expect(corridorFlow(measurement('a', 700, 300)).level).toBe('queuing');
     // Helsfyr–Ryen as measured live on 2026-08-03 at 07:30, while NPRA's own
@@ -49,6 +49,20 @@ describe('corridor flow classification', () => {
       level: 'slow',
       delayS: 206,
     });
+  });
+
+  it('does not colour a corridor for a delay the ETA would not mention', () => {
+    // Filipstad–Skøyen as measured live: 1.19x, and 29 seconds. Ratio alone
+    // called it busy, and the card then had to say "3 min (normally 3 min)".
+    expect(corridorFlow(measurement('a', 182, 153))).toMatchObject({
+      level: 'flowing',
+      delayS: 29,
+    });
+    // The same ratio on a corridor long enough for it to cost real time.
+    expect(corridorFlow(measurement('a', 1785, 1500)).level).toBe('busy');
+    // The floor never *promotes* a corridor: a minute lost on a short stretch
+    // is a large ratio, and still reads as the queue it is.
+    expect(corridorFlow(measurement('a', 180, 120)).level).toBe('slow');
   });
 
   it('never reads a missing measurement as a clear road', () => {

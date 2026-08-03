@@ -42,6 +42,19 @@ const SLOW_RATIO = 1.4;
 const QUEUING_RATIO = 2;
 
 /**
+ * A ratio is not enough on its own: the corridors are 0.8–30 km, so 1.19× is
+ * six minutes on the longest and **twenty-nine seconds** on the shortest. Ratio
+ * alone painted the second one amber and then had nothing to show for it — the
+ * first live tap on the deployed build read "Busy · 3 min (normally 3 min)",
+ * which is a card arguing with itself.
+ *
+ * The floor is the same minute `formatTrafficDelay` refuses to go below when
+ * naming a delay in the ETA. If the trip's own banner would not mention it,
+ * the map has no business colouring it.
+ */
+const MIN_NOTICEABLE_DELAY_S = 60;
+
+/**
  * One colour per level, decided here rather than per client so the two maps
  * cannot drift — the same reason `trafficFeatureCollection` carries
  * `markerColor`. Grey is deliberately dull: "no reading" must not read as a
@@ -78,6 +91,7 @@ export function corridorFlow(measurement: TravelTimeMeasurement | undefined): Tr
   const ratio = durationS / freeFlowS;
   if (ratio > MAX_CONGESTION_RATIO) return { level: 'unmeasured' };
   const delayS = Math.max(0, durationS - freeFlowS);
+  if (delayS < MIN_NOTICEABLE_DELAY_S) return { level: 'flowing', ratio, delayS };
   if (ratio >= QUEUING_RATIO) return { level: 'queuing', ratio, delayS };
   if (ratio >= SLOW_RATIO) return { level: 'slow', ratio, delayS };
   if (ratio >= BUSY_RATIO) return { level: 'busy', ratio, delayS };
