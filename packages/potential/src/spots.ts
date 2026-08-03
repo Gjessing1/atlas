@@ -26,6 +26,23 @@ import type { PotentialSpot } from './api.js';
 import { BAND_LABELS, SURFACE_BANDS, type SurfaceVocabulary } from './surface.js';
 
 /**
+ * The walk-in verdict in field language, shared by both clients and saved pins.
+ * Distances stay rounded because the source signal pixels are about 38 m wide;
+ * single-metre precision would imply knowledge the surface does not have.
+ */
+export function spotApproachLabel(spot: Pick<PotentialSpot, 'access'>): string | null {
+  const approach = spot.access?.approach;
+  if (!approach) return null;
+  const metres = Math.max(10, Math.round(approach.holdingCoverM / 10) * 10);
+  const subject = approach.basis === 'direct-line' ? 'Direct off-path approach' : 'Mapped approach';
+  if (approach.risk === 'clear') return `${subject} stays outside likely holding cover.`;
+  if (approach.risk === 'caution') {
+    return `${subject} clips about ${metres} m of likely holding cover — move quietly.`;
+  }
+  return `${subject} crosses about ${metres} m of likely holding cover — consider another way in.`;
+}
+
+/**
  * The rank a point must reach to be offered as a spot: the ramp's hot band, read
  * from the ramp itself so the shortlist and the pixels can never disagree about
  * what "prime" means.
@@ -175,12 +192,16 @@ export function spotPlaceDraft(
       `${spot.access.approximate ? '≈' : ''}${Math.round(spot.access.durationS / 60)} min walk ` +
         `from the nearest road.`,
     );
+    const approach = spotApproachLabel(spot);
+    if (approach) lines.push(approach);
   }
   lines.push(`Atlas ${vocabulary === 'hunt' ? 'hunt' : 'fishing'} potential, ${spot.bandLabel}.`);
   if (spot.stand) {
+    const visibility = spot.stand.lanes.map((lane) => `${lane.label} ${lane.rangeM} m`).join(' · ');
     lines.unshift(
       `Calling stand: ${spot.stand.aim.distanceM} m ${spot.stand.aim.label} toward habitat; ` +
         `vantage ${spot.stand.vantageM >= 0 ? '+' : ''}${spot.stand.vantageM} m.`,
+      ...(visibility ? [`Visibility rose (terrain/canopy): ${visibility}.`] : []),
     );
     lines.push(spot.stand.warning);
   }
@@ -189,7 +210,7 @@ export function spotPlaceDraft(
     lat: spot.position.lat,
     lng: spot.position.lng,
     notes: lines.join(' '),
-    tags: [vocabulary === 'hunt' ? 'hunt' : 'fishing', 'spot'],
+    tags: [vocabulary === 'hunt' ? 'hunt' : 'fishing', 'spot', ...(spot.stand ? ['stand'] : [])],
   };
 }
 

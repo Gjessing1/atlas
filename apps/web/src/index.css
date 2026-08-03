@@ -4417,6 +4417,13 @@ button.transit-notice-summary {
   opacity: 0.48;
 }
 
+/* The route crossed the same high-ranked young/mature cover the buck may hold
+   in. Unlike a wind verdict this is not day-specific, so keep the row legible
+   and mark the approach itself as the problem. */
+.spots-list li.stand-approach-high .spots-row {
+  box-shadow: inset 3px 0 #d83e30;
+}
+
 .spots-row {
   flex: 1;
   display: flex;
@@ -4474,6 +4481,15 @@ button.transit-notice-summary {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.spots-approach-caution {
+  color: #b37608;
+}
+
+.spots-approach-high {
+  color: #c83227;
+  font-weight: 600;
 }
 
 .spots-save {

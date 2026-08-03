@@ -24,6 +24,7 @@ import { DERIVE_MODELS, deriveModel, resolveTarget, type DeriveModel } from './m
 import { DeriveQueue, type CellState } from './jobs.js';
 import { PotentialPackBuilder, PotentialPackError } from './packs.js';
 import {
+  assessHuntApproach,
   cellCandidates,
   describeCandidate,
   spotsNote,
@@ -378,20 +379,21 @@ export async function registerPotentialApi(
       // Candidates from every standout cell, then one geographic merge: cells
       // are derived independently, so a lake straddling two of them offers the
       // same bay twice until they are compared in metres.
-      const candidates = (
-        await Promise.all(
-          derived.map(async (entry) => {
-            const manifest = entry.manifest!;
-            const blob = await loadSignals(opts.dataDir, model, target, entry.cell, manifest);
-            if (!blob) return [];
-            const found =
-              model.vocabulary === 'hunt'
-                ? standCandidates(manifest, blob, entry.cell, bbox, limit)
-                : cellCandidates(manifest, blob, entry.cell, bbox, limit);
-            return found.map((candidate) => ({ candidate, manifest, blob }));
-          }),
-        )
-      ).flat();
+      const cellData = await Promise.all(
+        derived.map(async (entry) => {
+          const manifest = entry.manifest!;
+          const blob = await loadSignals(opts.dataDir, model, target, entry.cell, manifest);
+          if (!blob) return { manifest, blob: null, found: [] };
+          const found =
+            model.vocabulary === 'hunt'
+              ? standCandidates(manifest, blob, entry.cell, bbox, limit)
+              : cellCandidates(manifest, blob, entry.cell, bbox, limit);
+          return { manifest, blob, found };
+        }),
+      );
+      const candidates = cellData.flatMap(({ manifest, blob, found }) =>
+        blob ? found.map((candidate) => ({ candidate, manifest, blob })) : [],
+      );
 
       const chosen = thinSpots(
         candidates.map((c) => ({ ...c, position: c.candidate.position, rank: c.candidate.rank })),
@@ -401,12 +403,30 @@ export async function registerPotentialApi(
         describeCandidate(c.candidate, c.manifest, c.blob, model, target),
       );
 
-      // Walk-in times last, and never fatal: a shortlist without them is still
-      // the feature, and the router is a separate service that can be down.
+      const approachSurfaces = cellData.flatMap(({ manifest, blob }) =>
+        blob ? [{ manifest, blob }] : [],
+      );
+
+      // Walk-in times last, and never fatal. Hunt stands also read the actual
+      // route geometry against their persisted cover planes; an approximate
+      // off-trail fallback is deliberately left unassessed.
       const access = opts.valhallaUrl
         ? await walkAccess(
             spots.map((spot) => spot.position),
-            { valhallaUrl: opts.valhallaUrl, fetchImpl: ctx.fetchImpl, log: ctx.log },
+            {
+              valhallaUrl: opts.valhallaUrl,
+              fetchImpl: ctx.fetchImpl,
+              log: ctx.log,
+              ...(model.vocabulary === 'hunt'
+                ? {
+                    assessApproach: (
+                      path: Parameters<typeof assessHuntApproach>[0],
+                      _spotIndex: number,
+                      basis: Parameters<typeof assessHuntApproach>[2],
+                    ) => assessHuntApproach(path, approachSurfaces, basis),
+                  }
+                : {}),
+            },
           )
         : null;
       const withAccess = spots.map((spot, i) => ({ ...spot, access: access?.[i] ?? null }));

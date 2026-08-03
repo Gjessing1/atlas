@@ -5,7 +5,7 @@ import {
   type BestSpotsState,
 } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
-import { spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
+import { spotApproachLabel, spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
@@ -124,8 +124,17 @@ export function SpotsSheet({
         {state.spots.map((spot, index) => {
           const walk = spotWalkLabel(spot);
           const wind = standWindRisk(spot, conditions);
+          const approach = spotApproachLabel(spot);
+          const approachRisk = spot.access?.approach?.risk;
           return (
-            <View style={[styles.row, wind === 'blown' && styles.rowBlown]} key={spot.id}>
+            <View
+              style={[
+                styles.row,
+                wind === 'blown' && styles.rowBlown,
+                approachRisk === 'high' && styles.rowApproachHigh,
+              ]}
+              key={spot.id}
+            >
               <Pressable
                 style={styles.rowMain}
                 onPress={() => onPick(spot, index)}
@@ -153,6 +162,21 @@ export function SpotsSheet({
                           : wind === 'crosswind'
                             ? 'crosswind — check locally'
                             : 'verify wind and backstop on site'}
+                    </Text>
+                  ) : null}
+                  {spot.stand && spot.access ? (
+                    <Text
+                      style={[
+                        styles.reason,
+                        approachRisk === 'caution' && styles.approachCaution,
+                        approachRisk === 'high' && styles.approachHigh,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {approach ??
+                        (spot.access.approximate
+                          ? 'Direct off-path approach has too little cover data to assess.'
+                          : 'Approach cover could not be assessed.')}
                     </Text>
                   ) : null}
                 </View>
@@ -208,6 +232,7 @@ const styles = StyleSheet.create({
   list: { marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   rowBlown: { opacity: 0.48 },
+  rowApproachHigh: { borderLeftWidth: 3, borderLeftColor: theme.danger, paddingLeft: 4 },
   rowMain: {
     flex: 1,
     minHeight: 56,
@@ -228,6 +253,8 @@ const styles = StyleSheet.create({
   rowHead: { color: theme.text, fontSize: 14, fontWeight: '700' },
   walk: { color: theme.textMuted, fontWeight: '400' },
   reason: { color: theme.textMuted, fontSize: 12, marginTop: 2 },
+  approachCaution: { color: theme.warning },
+  approachHigh: { color: theme.danger, fontWeight: '700' },
   save: { color: theme.accent, fontSize: 18, paddingHorizontal: 8, paddingVertical: 8 },
   saveDisabled: { color: theme.textMuted, opacity: 0.5 },
 });

@@ -354,6 +354,25 @@ export interface PotentialSpotAccess {
   readonly approximate: boolean;
   /** Where the walk starts — the nearest point on a road a car can reach. */
   readonly from: LatLng;
+  /**
+   * Hunter-only reading of the mapped walk-in against the habitat signals.
+   * Null when route geometry was unavailable or the derived surface does not
+   * cover enough of either the route or direct fallback to make a claim.
+   */
+  readonly approach?: PotentialApproachAssessment | null;
+}
+
+export type PotentialApproachRisk = 'clear' | 'caution' | 'high';
+
+/** Whether a mapped approach enters likely holding cover before the stand. */
+export interface PotentialApproachAssessment {
+  readonly risk: PotentialApproachRisk;
+  /** Whether this follows Valhalla geometry or the stated direct off-path fallback. */
+  readonly basis: 'mapped-route' | 'direct-line';
+  /** Route metres crossing strong habitat with young or mature cover. */
+  readonly holdingCoverM: number;
+  /** Route metres for which the persisted habitat signals could be read. */
+  readonly assessedM: number;
 }
 
 /** One spoke of a hunting stand's terrain/canopy shooting-lane rose. */

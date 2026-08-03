@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PotentialSpot } from './api.js';
 import { FISH_SPECIES } from './species.js';
 import {
+  spotApproachLabel,
   spotColor,
   spotPlaceDraft,
   spotsFeatureCollection,
@@ -139,13 +140,36 @@ describe('spotPlaceDraft', () => {
     expect(draft.notes).toContain('≈12 min walk');
   });
 
+  it('carries a disturbed approach into the field note', () => {
+    const at = spot({
+      access: {
+        distanceM: 900,
+        durationS: 720,
+        approximate: false,
+        from: spot().position,
+        approach: {
+          risk: 'high',
+          basis: 'direct-line',
+          holdingCoverM: 184,
+          assessedM: 860,
+        },
+      },
+    });
+    expect(spotApproachLabel(at)).toContain('about 180 m');
+    expect(spotApproachLabel(at)).toContain('Direct off-path');
+    expect(spotPlaceDraft(at, 0).notes).toContain('consider another way in');
+  });
+
   it('saves a stand with its habitat bearing and safety caveat', () => {
     const draft = spotPlaceDraft(
       spot({
         stand: {
           maxRangeM: 150,
           vantageM: 6,
-          lanes: [],
+          lanes: [
+            { key: 'e', label: 'E', bearing: 90, rangeM: 120 },
+            { key: 'se', label: 'SE', bearing: 135, rangeM: 85 },
+          ],
           aim: { label: 'SE', bearing: 135, distanceM: 115, position: { lat: 59.85, lng: 10.42 } },
           warning: 'Verify backstop.',
         },
@@ -154,8 +178,13 @@ describe('spotPlaceDraft', () => {
       { targetLabel: 'Rådyrbukk' },
     );
     expect(draft.name).toBe('Rådyrbukk stand 1');
+    expect(draft.lat).toBe(spot().position.lat);
+    expect(draft.lng).toBe(spot().position.lng);
+    expect(draft.notes).toContain('vantage +6 m');
+    expect(draft.notes).toContain('Visibility rose (terrain/canopy): E 120 m · SE 85 m');
     expect(draft.notes).toContain('115 m SE');
     expect(draft.notes).toContain('Verify backstop');
+    expect(draft.tags).toContain('stand');
   });
 });
 

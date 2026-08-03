@@ -5,7 +5,7 @@ import {
   type BestSpotsState,
 } from '@atlas/app-hooks';
 import { fmtClock } from '@atlas/core';
-import { spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
+import { spotApproachLabel, spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 
 /**
  * "Best spots in view" — the shortlist beside the map (ROADMAP § N5 → E6).
@@ -100,8 +100,18 @@ export function SpotsPanel({
         {spots.map((spot, index) => {
           const walk = spotWalkLabel(spot);
           const wind = standWindRisk(spot, conditions);
+          const approach = spotApproachLabel(spot);
+          const approachRisk = spot.access?.approach?.risk;
           return (
-            <li key={spot.id} className={wind === 'blown' ? 'stand-blown' : undefined}>
+            <li
+              key={spot.id}
+              className={[
+                wind === 'blown' ? 'stand-blown' : '',
+                approachRisk === 'high' ? 'stand-approach-high' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
               <button
                 type="button"
                 className="spots-row"
@@ -128,6 +138,14 @@ export function SpotsPanel({
                           : wind === 'crosswind'
                             ? 'crosswind — check locally'
                             : 'verify wind and backstop on site'}
+                    </span>
+                  )}
+                  {spot.stand && spot.access && (
+                    <span className={`spots-reason spots-approach-${approachRisk ?? 'unknown'}`}>
+                      {approach ??
+                        (spot.access.approximate
+                          ? 'Direct off-path approach has too little cover data to assess.'
+                          : 'Approach cover could not be assessed.')}
                     </span>
                   )}
                 </span>

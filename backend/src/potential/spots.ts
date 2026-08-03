@@ -1,4 +1,10 @@
-import { destinationPoint, haversineM, type LatLng, type LngLatBbox } from '@atlas/core';
+import {
+  decodePolyline,
+  destinationPoint,
+  haversineM,
+  type LatLng,
+  type LngLatBbox,
+} from '@atlas/core';
 import {
   createGrid,
   decodeStandVantage,
@@ -11,11 +17,12 @@ import {
   BAND_LABELS,
   type PotentialSpot,
   type PotentialSpotAccess,
+  type PotentialApproachAssessment,
   type PotentialStandPlan,
 } from '@atlas/potential';
 import { CELL_PIXELS, cellId, type Cell } from './cells.js';
 import { readPlane, readSignal, type CellManifest } from './derive.js';
-import { explainSample, sampleCentre } from './explain.js';
+import { explainSample, sampleCentre, sampleIndexAt } from './explain.js';
 import type { DeriveModel } from './models.js';
 
 /**
@@ -51,6 +58,15 @@ const ROUGH_WALK_MS = 1.2;
 
 /** The router gets a short leash: a shortlist must not wait on it. */
 const ROUTER_TIMEOUT_MS = 8000;
+
+/** One persisted sample is ~38 m; finer thresholds would be false precision. */
+const APPROACH_SAMPLE_M = 20;
+/** Upper-quartile habitat with at least moderate structural cover. */
+const HOLDING_HABITAT_MIN_RANK = 0.75;
+const HOLDING_COVER_MIN = 0.4;
+/** Less than one signal pixel is treated as raster edge noise. */
+const HOLDING_COVER_MIN_M = 40;
+const HOLDING_COVER_HIGH_M = 100;
 
 /** A candidate before the merge — a maximum of one cell's rank plane. */
 interface Candidate {
@@ -142,6 +158,91 @@ function laneSummary(lanes: PotentialStandPlan['lanes']): string {
   if (open.length === 0) return 'No long lane';
   const best = Math.max(...open.map((lane) => lane.rangeM));
   return `Open ${open.map((lane) => lane.label).join('–')} to ${best} m`;
+}
+
+export interface HuntApproachSurface {
+  readonly manifest: CellManifest;
+  readonly blob: Buffer;
+}
+
+/** Read a persisted signal at one route sample, from whichever cell owns it. */
+function approachSignalsAt(
+  at: LatLng,
+  surfaces: readonly HuntApproachSurface[],
+): { rank: number; cover: number } | null {
+  for (const { manifest, blob } of surfaces) {
+    const [west, south, east, north] = manifest.bounds;
+    if (at.lng < west || at.lng > east || at.lat < south || at.lat > north) continue;
+    const { sx, sy } = sampleIndexAt(manifest, at);
+    const rank = readSignal(blob, 0, sx, sy);
+    // A point exactly on a shared east/south boundary may round outside this
+    // cell; let the neighbouring surface own it instead of calling it unknown.
+    if (!Number.isFinite(rank)) continue;
+    const cover = ['cover-young', 'cover-mature'].reduce((best, key) => {
+      const term = manifest.signals?.terms.findIndex((candidate) => candidate.key === key) ?? -1;
+      if (term < 0) return best;
+      const value = readSignal(blob, term + 1, sx, sy);
+      return Number.isFinite(value) ? Math.max(best, value) : best;
+    }, Number.NEGATIVE_INFINITY);
+    return { rank, cover };
+  }
+  return null;
+}
+
+/**
+ * Score an actual mapped walk-in against the roe-deer habitat planes.
+ *
+ * The route is resampled by distance rather than by its arbitrary vertex
+ * density. "Holding cover" requires both a strong habitat rank and measured
+ * young/mature structure: a path across an open prime field is activity ground,
+ * but it is not mislabeled as the bedding cover this warning is about.
+ */
+export function assessHuntApproach(
+  path: readonly LatLng[],
+  surfaces: readonly HuntApproachSurface[],
+  basis: PotentialApproachAssessment['basis'] = 'mapped-route',
+): PotentialApproachAssessment | null {
+  if (path.length < 2 || surfaces.length === 0) return null;
+  let routeM = 0;
+  let assessedM = 0;
+  let holdingCoverM = 0;
+  for (let i = 1; i < path.length; i++) {
+    const from = path[i - 1]!;
+    const to = path[i]!;
+    const segmentM = haversineM(from, to);
+    if (!(segmentM > 0)) continue;
+    routeM += segmentM;
+    const steps = Math.max(1, Math.ceil(segmentM / APPROACH_SAMPLE_M));
+    const stepM = segmentM / steps;
+    for (let step = 0; step < steps; step++) {
+      const share = (step + 0.5) / steps;
+      const sample = {
+        lat: from.lat + (to.lat - from.lat) * share,
+        lng: from.lng + (to.lng - from.lng) * share,
+      };
+      const signals = approachSignalsAt(sample, surfaces);
+      if (!signals || !Number.isFinite(signals.cover)) continue;
+      assessedM += stepM;
+      if (signals.rank >= HOLDING_HABITAT_MIN_RANK && signals.cover >= HOLDING_COVER_MIN) {
+        holdingCoverM += stepM;
+      }
+    }
+  }
+  // Do not turn a small covered tail into a verdict over a mostly unknown route.
+  if (assessedM < HOLDING_COVER_MIN_M || assessedM < routeM * 0.5) return null;
+  const coveredShare = holdingCoverM / assessedM;
+  const risk =
+    holdingCoverM < HOLDING_COVER_MIN_M
+      ? 'clear'
+      : holdingCoverM >= HOLDING_COVER_HIGH_M || coveredShare >= 0.3
+        ? 'high'
+        : 'caution';
+  return {
+    risk,
+    basis,
+    holdingCoverM: Math.round(holdingCoverM),
+    assessedM: Math.round(assessedM),
+  };
 }
 
 /** Hunter-side maxima from the LOS planes persisted by hunt model v3. */
@@ -270,20 +371,33 @@ interface LocateResult {
 interface MatrixEntry {
   distance?: number | null;
   time?: number | null;
+  /** Present when Valhalla's selected matrix algorithm can return geometry. */
+  shape?: string | null;
+}
+interface RouteResult {
+  trip?: { legs?: { shape?: string }[] };
 }
 
 export interface WalkAccessOptions {
   readonly valhallaUrl: string;
   readonly fetchImpl: typeof fetch;
   readonly log?: { warn(obj: unknown, msg: string): void };
+  /** Hunting supplies this; fishing needs no route geometry beyond time/distance. */
+  readonly assessApproach?: (
+    path: readonly LatLng[],
+    spotIndex: number,
+    basis: PotentialApproachAssessment['basis'],
+  ) => PotentialApproachAssessment | null;
 }
 
 /**
  * How far each spot is from the nearest road, on foot.
  *
- * Two Valhalla calls for the whole list, not two per spot: `/locate` correlates
- * every spot to the nearest **drivable** edge (where the car stops), then one
- * pedestrian matrix walks each of those road points to its own spot.
+ * Two Valhalla calls cover time and distance for the whole list: `/locate`
+ * correlates every spot to the nearest **drivable** edge (where the car stops),
+ * then one pedestrian matrix walks each road point to its own spot. Hunting
+ * additionally needs the path: it uses matrix shapes when available, otherwise
+ * one short `/route` call for each stand the matrix genuinely reached.
  *
  * The straight-line floor is the honest part. A lake shore usually has no
  * mapped path, so Valhalla snaps the *destination* to whatever edge is nearest —
@@ -332,9 +446,13 @@ export async function walkAccess(
       targets: indices.map((i) => ({ lat: spots[i]!.lat, lon: spots[i]!.lng })),
       costing: 'pedestrian',
       units: 'kilometers',
+      // CostMatrix can answer these in the existing batched call. The server's
+      // current TimeDistanceMatrix cannot, so hunting falls back to one short
+      // /route request per reachable stand below.
+      shape_format: opts.assessApproach ? 'polyline6' : 'no_shape',
     })) as { sources_to_targets?: MatrixEntry[][] };
 
-    return spots.map((spot, i) => {
+    const accesses: (PotentialSpotAccess | null)[] = spots.map((spot, i) => {
       const road = roads.get(i);
       if (!road) return null;
       const row = indices.indexOf(i);
@@ -350,8 +468,44 @@ export async function walkAccess(
         durationS: Math.round(reached ? routeS! : straightM / ROUGH_WALK_MS),
         approximate: !reached,
         from: road,
+        approach: null,
       };
     });
+
+    if (!opts.assessApproach) return accesses;
+    return Promise.all(
+      accesses.map(async (access, i) => {
+        if (!access) return access;
+        if (access.approximate) {
+          return {
+            ...access,
+            approach: opts.assessApproach!([access.from, spots[i]!], i, 'direct-line'),
+          };
+        }
+        const row = indices.indexOf(i);
+        const entry = matrix.sources_to_targets?.[row]?.[row];
+        let encoded = typeof entry?.shape === 'string' ? entry.shape : null;
+        if (!encoded) {
+          try {
+            const route = (await post('/route', {
+              locations: [
+                { lat: access.from.lat, lon: access.from.lng },
+                { lat: spots[i]!.lat, lon: spots[i]!.lng },
+              ],
+              costing: 'pedestrian',
+              units: 'kilometers',
+              shape_format: 'polyline6',
+            })) as RouteResult;
+            encoded = route.trip?.legs?.[0]?.shape ?? null;
+          } catch (err) {
+            opts.log?.warn({ err, spot: i }, 'walk-in geometry unavailable for hunting stand');
+          }
+        }
+        if (!encoded) return access;
+        const path = decodePolyline(encoded, 6).map(([lat, lng]) => ({ lat, lng }));
+        return { ...access, approach: opts.assessApproach!(path, i, 'mapped-route') };
+      }),
+    );
   } catch (err) {
     // The shortlist is still worth having without walk times, so this degrades
     // to an absence rather than failing the request.

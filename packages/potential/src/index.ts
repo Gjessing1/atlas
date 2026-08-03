@@ -187,6 +187,8 @@ export {
   type PotentialLayersResponse,
   type PotentialPrepareRequest,
   type PotentialPrepareResponse,
+  type PotentialApproachAssessment,
+  type PotentialApproachRisk,
   type PotentialSpot,
   type PotentialSpotAccess,
   type PotentialSpotsResponse,
@@ -197,6 +199,7 @@ export {
 
 export {
   spotBandLabel,
+  spotApproachLabel,
   spotColor,
   spotPlaceDraft,
   spotsFeatureCollection,
