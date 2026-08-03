@@ -6,14 +6,17 @@ import {
   overlayTileUrl,
   snapLabelBbox,
   speedCameraIdentify,
+  trafficFlowIdentify,
   trafficIdentify,
 } from '@atlas/core';
 import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
+import { tappedFlowProperties } from '@atlas/traffic';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
 import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
+import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
 import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
@@ -317,21 +320,26 @@ export function useOverlayIdentify(
       const click = ++clickSeq.current;
       const at = { lat: e.lngLat.lat, lng: e.lngLat.lng };
       // Answered from what is already drawn, before the network is involved.
-      const drawn = (layers: string[]): Record<string, unknown> | null => {
+      const hits = (layers: string[]): maplibregl.MapGeoJSONFeature[] => {
         const present = layers.filter((id) => map.getLayer(id));
-        if (present.length === 0) return null;
+        if (present.length === 0) return [];
         // Finger/mouse-sized target: Regobs points and camera dots should not
         // require a pixel-perfect click on their centre.
         const box: [[number, number], [number, number]] = [
           [e.point.x - 10, e.point.y - 10],
           [e.point.x + 10, e.point.y + 10],
         ];
-        return map.queryRenderedFeatures(box, { layers: present })[0]?.properties ?? null;
+        return map.queryRenderedFeatures(box, { layers: present });
       };
+      const drawn = (layers: string[]): Record<string, unknown> | null =>
+        hits(layers)[0]?.properties ?? null;
       const local = [
         iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
         trafficIdentify(drawn(TRAFFIC_IDENTIFY_LAYERS)),
+        // Not `drawn`: a box over the corridor layer catches both directions of
+        // the same road, so the tapped one has to be chosen rather than taken.
+        trafficFlowIdentify(tappedFlowProperties(at, hits(TRAFFIC_FLOW_IDENTIFY_LAYERS))),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);
       // Served same-origin, so the shared helper needs no origin prefix. The

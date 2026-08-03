@@ -593,7 +593,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // served by the derive service registered below.
     extraMeta: [
       ...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []),
-      ...(traffic.meta ? [traffic.meta] : []),
+      ...traffic.metas,
       iceObservationLayerMeta(),
       ...derivedLayerMetas(),
     ],

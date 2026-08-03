@@ -23,6 +23,7 @@ const RENDERABLE_VECTOR_IDS = new Set([
   'speed-cameras',
   'ice-observations',
   'traffic',
+  'traffic-flow',
 ]);
 
 // Visibility/opacity are device-local preferences (`local.` keys never sync).

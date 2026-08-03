@@ -1,6 +1,7 @@
 import { haversineM, type LatLng } from '@atlas/core';
 import type { RoutePath } from '@atlas/routing';
 
+import { MAX_CONGESTION_RATIO } from './flow.js';
 import type { TravelTimeCorridor, TravelTimeMeasurement, TravelTimeStatus } from './traveltime.js';
 
 /** One measured corridor, matched onto a stretch of the routed line. */
@@ -35,12 +36,6 @@ export interface TrafficDelay {
 const MATCH_TOLERANCE_M = 60;
 /** Below this the route only clips a corridor — a crossing road, not a shared one. */
 const MIN_COVERAGE = 0.5;
-/**
- * A corridor's measurement is discarded past this ratio to its own free-flow
- * reference. Six times the free-flow time is not a queue, it is a broken
- * detector, and an ETA is a worse lie than an unadjusted one.
- */
-const MAX_CONGESTION_RATIO = 6;
 
 const DEG_M = 111_320;
 /** Grid cell edge, ≈ 550 m — comfortably wider than {@link MATCH_TOLERANCE_M}. */

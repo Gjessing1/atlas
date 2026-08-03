@@ -71,6 +71,7 @@ import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/us
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
+import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -316,6 +317,7 @@ export function App() {
   useSpotLayer(map, bestSpots.spots, onPickSpot, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
   useSpeedCameraLayer(map, overlays);
+  useTrafficFlowLayer(map, overlays);
   useTrafficLayer(map, overlays);
   useHuntingFieldsLayer(map, overlays);
   useIceObservationsLayer(map, overlays);

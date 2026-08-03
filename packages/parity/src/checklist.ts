@@ -45,6 +45,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Show and identify live road closures, roadworks and incidents',
     web: { file: 'apps/web/src/map/useTrafficLayer.ts', contains: 'useTrafficLayer' },
     android: { file: 'apps/android/src/layers/useTraffic.ts', contains: 'useTraffic' },
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/overlay/traffic/features'" },
+  },
+  {
+    id: 'map-traffic-flow',
+    surface: 'map',
+    capability: 'See how the measured road corridors are running, and tap one for its travel time',
+    web: { file: 'apps/web/src/map/useTrafficFlowLayer.ts', contains: 'useTrafficFlowLayer' },
+    android: { file: 'apps/android/src/layers/useTrafficFlow.ts', contains: 'useTrafficFlow' },
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/overlay/traffic-flow/features'" },
+    note: 'Both draw the same server-classified colours (`@atlas/traffic` owns the levels) and both offset the line right of the direction of travel, because every corridor has a reverse twin over the same road. Off by default on both: the ETA already carries the measurement, so this layer answers "why", which is a question you ask rather than one you want asked for you.',
   },
   {
     id: 'map-potential-target',

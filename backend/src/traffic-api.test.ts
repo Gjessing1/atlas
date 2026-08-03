@@ -77,9 +77,57 @@ const datexFetch = (overrides: Record<string, () => Response> = {}) =>
 describe('DATEX traffic API', () => {
   it('stays absent without credentials', async () => {
     const app = Fastify();
-    expect(registerTrafficApi(app, new StatusRegistry(), {})).toEqual({ enabled: false });
+    expect(registerTrafficApi(app, new StatusRegistry(), {})).toEqual({
+      enabled: false,
+      metas: [],
+    });
     await app.ready();
     expect((await app.inject('/api/overlay/traffic/features')).statusCode).toBe(404);
+    expect((await app.inject('/api/overlay/traffic-flow/features')).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('draws the corridors it measures, and says which it is not measuring', async () => {
+    const app = Fastify();
+    expect(
+      registerTrafficApi(app, new StatusRegistry(), {
+        username: 'user',
+        password: 'secret',
+        fetchImpl: datexFetch(),
+        now: () => new Date('2026-07-31T10:00:00+02:00'),
+      }).metas.map((meta) => meta.id),
+    ).toEqual(['traffic', 'traffic-flow']);
+    await app.ready();
+    const flow = await app.inject('/api/overlay/traffic-flow/features');
+    expect(flow.statusCode).toBe(200);
+    const [feature] = flow.json().features as Array<{
+      properties: Record<string, unknown>;
+      geometry: { coordinates: [number, number][] };
+    }>;
+    // 180 s against a 120 s reference is 1.5× — slow, whatever the feed's own
+    // `trafficStatusValue` says (the fixture says `slow` too, but the live one
+    // says `freeFlow` for every corridor it measures).
+    expect(feature!.properties).toMatchObject({
+      id: '100',
+      name: 'Teststrekning nord',
+      level: 'slow',
+      durationS: 180,
+      freeFlowS: 120,
+      delayS: 60,
+    });
+    expect(feature!.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  it('reports an unreachable corridor table as a failure, not an empty road network', async () => {
+    const app = Fastify();
+    registerTrafficApi(app, new StatusRegistry(), {
+      username: 'user',
+      password: 'secret',
+      fetchImpl: datexFetch({ corridors: () => new Response('nope', { status: 503 }) }),
+    });
+    await app.ready();
+    expect((await app.inject('/api/overlay/traffic-flow/features')).statusCode).toBe(502);
     await app.close();
   });
 

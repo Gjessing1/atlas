@@ -95,6 +95,9 @@ export const SPEED_CAMERA_LAYER_IDS = [
 /** Live DATEX markers hit-tested for their verbatim NPRA message. */
 export const TRAFFIC_LAYER_IDS = ['atlas-traffic-symbol', 'atlas-traffic-dot'];
 
+/** Measured congestion corridors hit-tested for their travel time. */
+export const TRAFFIC_FLOW_LAYER_IDS = ['atlas-traffic-flow-line'];
+
 /** Regobs marker layers hit-tested for exact observation time and details. */
 export const ICE_OBSERVATION_LAYER_IDS = [
   'atlas-ice-observations-symbol',
@@ -199,6 +202,8 @@ interface MapSceneProps {
   speedCameras: SpeedCameras | null;
   /** Live DATEX traffic markers (null when the layer is off/offline). */
   traffic: VectorOverlayData | null;
+  /** Measured corridor congestion (null when the layer is off/offline). */
+  trafficFlow: VectorOverlayData | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
   /** The measure tool's ruler/rings while it is open, else null. */
@@ -270,6 +275,7 @@ export function MapScene({
   iceObservations,
   speedCameras,
   traffic,
+  trafficFlow,
   spots,
   measure,
   trackGeo,
@@ -643,6 +649,47 @@ export function MapScene({
                 'text-halo-color': '#ffffff',
                 'text-halo-width': 1.4,
                 'text-opacity': speedCameras.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* How the measured corridors are running. Drawn before the incident
+          markers so those stay on top, and offset right of the direction of
+          travel: every corridor has a reverse twin over the same road (median
+          13 m apart), so without the offset one direction hides the other. */}
+        {trafficFlow ? (
+          <GeoJSONSource id="atlas-traffic-flow" data={trafficFlow.data}>
+            <Layer
+              type="line"
+              id="atlas-traffic-flow-line"
+              minzoom={6}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{
+                'line-color': ['get', 'color'],
+                // Thinner and fainter where NPRA has no reading: the line has
+                // to be visible (its absence would read as "no corridor here")
+                // without competing with the corridors that measured something.
+                // The `case` goes inside the zoom stops because a `zoom`
+                // expression may only be the direct input of a top-level
+                // interpolate — wrapping it in a multiply is rejected outright.
+                'line-width': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  6,
+                  ['case', ['==', ['get', 'level'], 'unmeasured'], 1.4, 2.5],
+                  11,
+                  ['case', ['==', ['get', 'level'], 'unmeasured'], 2.2, 4],
+                  16,
+                  ['case', ['==', ['get', 'level'], 'unmeasured'], 3.8, 7],
+                ],
+                'line-offset': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 11, 2.5, 16, 4.5],
+                'line-opacity': [
+                  'case',
+                  ['==', ['get', 'level'], 'unmeasured'],
+                  trafficFlow.opacity * 0.5,
+                  trafficFlow.opacity,
+                ],
               }}
             />
           </GeoJSONSource>

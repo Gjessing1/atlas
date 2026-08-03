@@ -10,6 +10,8 @@ const DOT_ID = 'atlas-traffic-dot';
 const SYMBOL_ID = 'atlas-traffic-symbol';
 const REFRESH_MS = 3 * 60_000;
 export const TRAFFIC_IDENTIFY_LAYERS = [SYMBOL_ID, DOT_ID];
+/** Insertion anchor for the flow lines, so the markers stay on top of them. */
+export const TRAFFIC_DOT_LAYER = DOT_ID;
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 

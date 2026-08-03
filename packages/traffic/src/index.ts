@@ -13,6 +13,17 @@ export {
   type TrafficDelaySegment,
 } from './delay.js';
 export {
+  corridorFlow,
+  simplifyLine,
+  tappedFlowProperties,
+  trafficFlowFeatureCollection,
+  type TrafficFlowFeatureCollection,
+  type TrafficFlowHit,
+  type TrafficFlowLevel,
+  type TrafficFlowProperties,
+  type TrafficFlowReading,
+} from './flow.js';
+export {
   closuresNearRoute,
   distanceToTrafficRouteM,
   trafficFeatureCollection,

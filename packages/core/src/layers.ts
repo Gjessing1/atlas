@@ -1,5 +1,6 @@
 /** Overlay layer catalog: the client-side layer registry and its map style. */
 
+import { fmtClock, fmtDuration } from './format.js';
 import type { LatLng } from './geo.js';
 import type { LngLatBbox } from './geoproject.js';
 
@@ -374,6 +375,17 @@ function str(v: unknown): string | null {
 }
 
 /**
+ * Finite number, or null. MapLibre hands feature properties back as whatever
+ * the source encoded, and Android's native bridge can turn a JSON number into
+ * its string form on the way through — so a numeric property is parsed here
+ * rather than trusted.
+ */
+function num(v: unknown): number | null {
+  const value = typeof v === 'string' ? Number(v) : v;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
  * Regobs timestamps carry the observer's local offset. Preserve the date and
  * clock they submitted rather than silently converting it to the viewer's
  * timezone — the timestamp is evidence about the observation, not a countdown.
@@ -469,6 +481,47 @@ export function trafficIdentify(
   if (message) rows['Details (Norwegian)'] = message;
   if (endTime) rows['Valid until'] = endTime;
   return { title: titles[kind ?? ''] ?? 'Traffic information', properties: rows };
+}
+
+/**
+ * A tapped congestion corridor: how the stretch is running, what it is costing
+ * against NPRA's own reference, and when that was measured.
+ *
+ * The freshness row is not decoration. The measurements cover a five-minute
+ * window and the client redraws on its own cadence, so a reader deciding
+ * whether to set off needs to know whether the colour is one minute old or
+ * twenty. `@atlas/traffic` decides the levels; the wording is here, beside
+ * every other identify answer, so a tap reads the same on both clients.
+ */
+export function trafficFlowIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const level = str(properties['level']);
+  const levels: Record<string, string> = {
+    flowing: 'Flowing freely',
+    busy: 'Busy',
+    slow: 'Slow',
+    queuing: 'Queuing',
+    unmeasured: 'Not measured right now',
+  };
+  const rows: Record<string, string> = {};
+  const name = str(properties['name']);
+  if (name) rows['Stretch'] = name;
+  rows['Traffic'] = levels[level ?? ''] ?? 'Unknown';
+  const durationS = num(properties['durationS']);
+  const freeFlowS = num(properties['freeFlowS']);
+  if (durationS !== null) {
+    // Whole minutes, and the reference beside the reading: "6 min" alone says
+    // nothing about a stretch a stranger has never driven.
+    rows['Travel time'] =
+      freeFlowS !== null
+        ? `${fmtDuration(durationS * 1000)} (normally ${fmtDuration(freeFlowS * 1000)})`
+        : fmtDuration(durationS * 1000);
+  }
+  const measuredAt = Date.parse(str(properties['measuredAt']) ?? '');
+  if (Number.isFinite(measuredAt)) rows['Measured'] = fmtClock(measuredAt);
+  return { title: 'Traffic flow', properties: rows };
 }
 
 /**

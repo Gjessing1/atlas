@@ -6,6 +6,7 @@ import {
   parseTravelTimeSnapshot,
   trafficDelayForRoute,
   trafficFeatureCollection,
+  trafficFlowFeatureCollection,
   type DatexSnapshot,
   type TravelTimeCorridor,
   type TravelTimeSnapshot,
@@ -55,6 +56,36 @@ export function trafficLayerMeta(): LayerMeta {
   };
 }
 
+/**
+ * The congestion overlay — a second row beside the incident one, because they
+ * answer different questions from different publications: that one says what
+ * has *happened* on the road, this one how it is *running*. A driver who wants
+ * roadworks marked does not necessarily want the whole motorway network
+ * washed in colour.
+ */
+export function trafficFlowLayerMeta(): LayerMeta {
+  return {
+    id: 'traffic-flow',
+    rev: 1,
+    title: 'Traffic flow',
+    description:
+      'Measured travel times on Statens vegvesen’s corridors — how the main roads are running now.',
+    group: 'Driving',
+    attribution: '© Statens vegvesen (NLOD)',
+    metadataUrl: 'https://www.vegvesen.no/fag/teknologi/nasjonal-vegdatabank/',
+    // The corridors are motorway-scale (median 5.4 km) and there are only 202
+    // of them, so the national view is the useful one; below z6 they are noise.
+    minzoom: 6,
+    maxzoom: 18,
+    defaultOpacity: 1,
+    identify: false,
+    coverageNote:
+      'Only the 202 stretches Statens vegvesen measures, in Norway; an internet connection is required.',
+    profiles: ['driving'],
+    vector: true,
+  };
+}
+
 const routeShape = (raw: unknown): LatLng[] =>
   Array.isArray(raw)
     ? raw
@@ -77,10 +108,10 @@ export function registerTrafficApi(
   app: FastifyInstance,
   status: StatusRegistry,
   options: TrafficApiOptions = {},
-): { enabled: boolean; meta?: LayerMeta } {
+): { enabled: boolean; metas: LayerMeta[] } {
   const username = options.username ?? process.env.DATEX_USERNAME;
   const password = options.password ?? process.env.DATEX_PASSWORD;
-  if (!username || !password) return { enabled: false };
+  if (!username || !password) return { enabled: false, metas: [] };
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
@@ -209,6 +240,23 @@ export function registerTrafficApi(
     }
   });
 
+  app.get('/api/overlay/traffic-flow/features', async (request, reply) => {
+    try {
+      const [table, measured] = await Promise.all([corridors.get(), travelTimes.get()]);
+      return (
+        reply
+          // Matched to the one-minute measurement cache behind it: a client
+          // asking twice inside a window gets the same answer either way, and
+          // the stale window covers a slow upstream without going blank.
+          .header('cache-control', 'public, max-age=60, stale-while-revalidate=120')
+          .send(trafficFlowFeatureCollection(table, measured.measurements))
+      );
+    } catch (error) {
+      request.log.error({ err: error }, 'DATEX travel-time snapshot failed');
+      return reply.code(502).send({ error: 'traffic unavailable' });
+    }
+  });
+
   app.post<{ Body: { points?: unknown } }>('/api/traffic/closures', async (request, reply) => {
     const points = routeShape(request.body?.points);
     if (points.length < 2) return reply.code(400).send({ error: 'route points are required' });
@@ -243,5 +291,5 @@ export function registerTrafficApi(
   void corridors
     .refresh()
     .catch((error) => app.log.warn({ err: error }, 'initial DATEX corridor fetch failed'));
-  return { enabled: true, meta: trafficLayerMeta() };
+  return { enabled: true, metas: [trafficLayerMeta(), trafficFlowLayerMeta()] };
 }

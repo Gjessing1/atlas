@@ -6,11 +6,13 @@ import {
   identifyOverlays,
   POI_LAYER_IDS,
   speedCameraIdentify,
+  trafficFlowIdentify,
   trafficIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
 } from '@atlas/core';
 import { viaInsertIndex } from '@atlas/routing';
+import { tappedFlowProperties } from '@atlas/traffic';
 import type { MapRef } from '@maplibre/maplibre-react-native';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useRef } from 'react';
@@ -20,6 +22,7 @@ import { STATSKOG_JAKTFELT_ID } from '../layers/useHuntingFields';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import { SPEED_CAMERAS_ID } from '../layers/useSpeedCameras';
 import { TRAFFIC_ID } from '../layers/useTraffic';
+import { TRAFFIC_FLOW_ID } from '../layers/useTrafficFlow';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
 import {
@@ -28,6 +31,7 @@ import {
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
   SPEED_CAMERA_LAYER_IDS,
+  TRAFFIC_FLOW_LAYER_IDS,
   TRAFFIC_LAYER_IDS,
 } from './MapScene';
 
@@ -236,27 +240,32 @@ export function useMapPress({
                   .catch(() => undefined)
               : undefined;
           void (async () => {
-            const [serverGroups, iceHits, huntHits, cameraHits, trafficHits] = await Promise.all([
-              identifyOverlays(
-                origin,
-                overlays.map((o) => o.meta),
-                { lat, lng },
-                zoom,
-                // Same variant the tiles are drawn with, so a species-filtered
-                // layer never answers with what it is not drawing.
-                (meta) => overlays.find((o) => o.meta.id === meta.id)?.options,
-              ),
-              query(vectorOn('ice-observations'), ICE_OBSERVATION_LAYER_IDS),
-              query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
-              query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
-              query(vectorOn(TRAFFIC_ID), TRAFFIC_LAYER_IDS),
-            ]);
+            const [serverGroups, iceHits, huntHits, cameraHits, trafficHits, flowHits] =
+              await Promise.all([
+                identifyOverlays(
+                  origin,
+                  overlays.map((o) => o.meta),
+                  { lat, lng },
+                  zoom,
+                  // Same variant the tiles are drawn with, so a species-filtered
+                  // layer never answers with what it is not drawing.
+                  (meta) => overlays.find((o) => o.meta.id === meta.id)?.options,
+                ),
+                query(vectorOn('ice-observations'), ICE_OBSERVATION_LAYER_IDS),
+                query(vectorOn(STATSKOG_JAKTFELT_ID), [HUNT_FIELDS_FILL_LAYER_ID]),
+                query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
+                query(vectorOn(TRAFFIC_ID), TRAFFIC_LAYER_IDS),
+                query(vectorOn(TRAFFIC_FLOW_ID), TRAFFIC_FLOW_LAYER_IDS),
+              ]);
             // Local groups lead: they are what the user aimed at, and the
             // server rows are ambient context for the same point.
             const groups = [
               iceObservationIdentify(hitProps(iceHits)),
               speedCameraIdentify(hitProps(cameraHits)),
               trafficIdentify(hitProps(trafficHits)),
+              // Not `hitProps`: the tap box catches both directions of the
+              // same road, so the corridor to describe is chosen, not taken.
+              trafficFlowIdentify(tappedFlowProperties({ lat, lng }, flowHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);
