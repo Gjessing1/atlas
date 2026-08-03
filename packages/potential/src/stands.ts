@@ -14,6 +14,7 @@
  */
 
 import { createGrid, focalMean, type Grid, type Mask } from './raster.js';
+import { membership, type Band } from './signals.js';
 
 /** Typical big-game planning distance requested by E8 and the field workflow. */
 export const STAND_MAX_RANGE_M = 150;
@@ -99,7 +100,7 @@ export function decodeStandVantage(value: number): number {
  */
 export function huntStandPlan(
   inputs: HuntStandInputs,
-  opts: { sampleStride?: number; maxRangeM?: number } = {},
+  opts: { sampleStride?: number; maxRangeM?: number; distanceBandM?: Band } = {},
 ): HuntStandPlan {
   const { habitat, terrain, screenHeightM, standable } = inputs;
   if (
@@ -174,9 +175,12 @@ export function huntStandPlan(
             visibleOpenM = Math.max(visibleOpenM, Math.min(maxRangeM, actualM));
             const habitatValue = habitat.data[targetIndex]!;
             if (Number.isFinite(habitatValue)) {
-              // A 100–150 m pairing earns full distance value; close cover is
-              // still useful for calling, but not mistaken for a shooting lane.
-              const distanceValue = Math.min(1, actualM / 100);
+              // Pairing distance is a quarry/tactic property. A regular field
+              // sit values the long visible edge; a roe-rut caller expects the
+              // buck to step out close and must not be pushed toward 150 m.
+              const distanceValue = opts.distanceBandM
+                ? membership(actualM, opts.distanceBandM)
+                : Math.min(1, actualM / 100);
               const pair = habitatValue * distanceValue;
               if (pair > bestPair) {
                 bestPair = pair;

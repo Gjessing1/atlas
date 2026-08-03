@@ -12,6 +12,7 @@ import {
   pressureTrend,
   type ConditionAssessment,
   type ConditionsKind,
+  type HuntConditionsProfile,
 } from './conditions.js';
 import { sunPosition } from './sun.js';
 import type { WeatherForecast, WeatherPoint } from './weather.js';
@@ -34,6 +35,8 @@ export interface PlannerOptions {
   kind?: ConditionsKind | null;
   /** Species tag for the fishing temperature band (perch/pike/trout/char). */
   species?: string | null;
+  /** Hunting tactic profile; omitted for the established general model. */
+  huntProfile?: HuntConditionsProfile;
   /** Forecast horizon in hours (default 72 — met.no turns 6-hourly beyond ~3 days anyway). */
   maxHours?: number;
   /** "Now" override for tests. */
@@ -46,7 +49,7 @@ export interface PlannerOptions {
  * an activity kind is given — attach the transparent assessment.
  */
 export function buildPlanner(forecast: WeatherForecast, opts: PlannerOptions = {}): PlannerHour[] {
-  const { kind, species, maxHours = 72 } = opts;
+  const { kind, species, huntProfile, maxHours = 72 } = opts;
   const nowMs = (opts.now ?? new Date()).getTime();
   const rows: PlannerHour[] = [];
   let startMs: number | null = null;
@@ -71,6 +74,8 @@ export function buildPlanner(forecast: WeatherForecast, opts: PlannerOptions = {
               sunAltitudeDeg,
               pressureTrendHpa: trendHpa,
               species,
+              huntProfile,
+              latitude: forecast.lat,
             }),
           }
         : {}),

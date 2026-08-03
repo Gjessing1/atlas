@@ -73,4 +73,24 @@ describe('hunt stand planning', () => {
     const encoded = result.vantage.data[centre * size + centre]!;
     expect(decodeStandVantage(encoded)).toBeGreaterThan(5);
   });
+
+  it('lets a rut tactic prefer close calling cover over a long field-edge view', () => {
+    const habitat = createGrid(size, size, metres, 0);
+    habitat.data[centre * size + centre + 4] = 1;
+    habitat.data[centre * size + centre + 12] = 1;
+    const inputs = {
+      habitat,
+      terrain: gridOf(size, size, metres, () => 100),
+      screenHeightM: gridOf(size, size, metres, () => 0),
+      standable: maskOf(size, size, metres, () => true),
+    };
+    const regular = huntStandPlan(inputs, { sampleStride: 1 });
+    const rut = huntStandPlan(inputs, {
+      sampleStride: 1,
+      distanceBandM: { min: 10, peakMin: 20, peakMax: 60, max: 150 },
+    });
+    const i = centre * size + centre;
+    expect(regular.aims.e.data[i]! * STAND_MAX_RANGE_M).toBeCloseTo(120);
+    expect(rut.aims.e.data[i]! * STAND_MAX_RANGE_M).toBeCloseTo(40);
+  });
 });

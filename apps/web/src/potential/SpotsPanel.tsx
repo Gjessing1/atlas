@@ -73,6 +73,14 @@ export function SpotsPanel({
         </button>
       </div>
 
+      {state.huntPhase && (
+        <p className="spots-phase">
+          <strong>{state.huntPhase.label}</strong>
+          <span>{state.huntPhase.detail}</span>
+          <small>{state.huntPhase.guidance}</small>
+        </p>
+      )}
+
       {/* The when, once — one forecast covers a viewport this size, and met.no
           asks not to be polled per point. */}
       {conditions && (

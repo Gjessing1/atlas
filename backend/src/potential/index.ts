@@ -1,5 +1,5 @@
 import type { LngLatBbox } from '@atlas/core';
-import { thinSpots, type PotentialSpot } from '@atlas/potential';
+import { HUNT_STAND_MIN_SEPARATION_M, thinSpots, type PotentialSpot } from '@atlas/potential';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
@@ -397,7 +397,10 @@ export async function registerPotentialApi(
 
       const chosen = thinSpots(
         candidates.map((c) => ({ ...c, position: c.candidate.position, rank: c.candidate.rank })),
-        { limit },
+        {
+          limit,
+          ...(model.vocabulary === 'hunt' ? { minSeparationM: HUNT_STAND_MIN_SEPARATION_M } : {}),
+        },
       );
       const spots: PotentialSpot[] = chosen.map((c) =>
         describeCandidate(c.candidate, c.manifest, c.blob, model, target),
@@ -443,7 +446,7 @@ export async function registerPotentialApi(
         accessAvailable: access !== null,
         note:
           model.vocabulary === 'hunt' && withAccess.length > 0
-            ? 'Stand markers are ranked within this view; the heatmap remains roe-deer habitat. White spokes are modelled visibility, and orange points toward paired habitat.'
+            ? `Stand markers are ranked within this view; the heatmap remains ${model.targets.find((candidate) => candidate.value === target)?.label ?? target} habitat. White spokes are modelled visibility, and orange points toward paired habitat.`
             : spotsNote({
                 spots: withAccess.length,
                 cells: cells.length,

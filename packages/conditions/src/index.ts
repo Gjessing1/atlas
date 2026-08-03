@@ -12,8 +12,10 @@ export {
   type FactorRating,
   type FishingConditionsInput,
   type HuntConditionsInput,
+  type HuntConditionsProfile,
 } from './conditions.js';
 export { describeSunDay, symbolEmoji, windArrow } from './display.js';
+export { roePhenologyAt, type RoePhenology, type RoePhenologyPhase } from './phenology.js';
 export {
   forecastTable,
   type DayPeriod,

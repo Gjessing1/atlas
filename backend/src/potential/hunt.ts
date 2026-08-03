@@ -51,7 +51,7 @@ import type { DeriveModel, ModelResult } from './models.js';
  * not be read without.
  */
 
-/** Every quarry is a target — the model is one arithmetic, eight weightings. */
+/** Every quarry/tactic is a target — the model is one arithmetic, nine weightings. */
 const HUNT_TARGETS = QUARRIES;
 
 function project(raster: CellRaster, [lng, lat]: readonly [number, number]): [number, number] {
@@ -214,7 +214,7 @@ export const huntModel: DeriveModel = {
   })),
   // v3: every hunt cell also persists hunter-side terrain/canopy sight lines
   // and their pairing with the quarry-specific habitat surface (E8).
-  rev: 3,
+  rev: 4,
   catalog: true,
   inputs: {
     terrain: true,
@@ -229,12 +229,12 @@ export const huntModel: DeriveModel = {
   },
   vocabulary: 'hunt',
   describeSignal(key, value, target) {
-    const quarry = findQuarry(target) ?? HUNT_TARGETS[0]!;
+    const quarry: Quarry = findQuarry(target) ?? HUNT_TARGETS[0]!;
     return describeHuntSignal(key as HuntSignalKey, value, { quarry });
   },
   run(inputs: CellInputs, target: string): ModelResult {
     const { raster } = inputs;
-    const quarry = findQuarry(target) ?? HUNT_TARGETS[0]!;
+    const quarry: Quarry = findQuarry(target) ?? HUNT_TARGETS[0]!;
 
     // AR5 decides three separate things here — which ground is huntable at all,
     // where the edges are, and where the forest stops — so a *failed* fetch
@@ -271,15 +271,18 @@ export const huntModel: DeriveModel = {
         : null;
     const standPlan =
       geometry && inputs.terrain
-        ? huntStandPlan({
-            habitat: surface.score,
-            terrain: inputs.terrain,
-            screenHeightM: geometry.screenHeightM,
-            standable: geometry.standable,
-          })
+        ? huntStandPlan(
+            {
+              habitat: surface.score,
+              terrain: inputs.terrain,
+              screenHeightM: geometry.screenHeightM,
+              standable: geometry.standable,
+            },
+            { distanceBandM: quarry.standDistanceBandM },
+          )
         : undefined;
 
-    const felt = inputs.harvest?.felt[quarry.id] ?? null;
+    const felt = inputs.harvest?.felt[quarry.harvestKey ?? quarry.id] ?? null;
     return {
       score: surface.score,
       absolute: huntQuality({ harvest: felt, strongHarvest: quarry.strongHarvest }),
@@ -336,7 +339,7 @@ function describeCell(
     notes.push(describeProtection(inputs.protectedAreas));
   }
 
-  const felt = ctx.harvest?.felt[quarry.id] ?? null;
+  const felt = ctx.harvest?.felt[quarry.harvestKey ?? quarry.id] ?? null;
   if (ctx.harvest?.kommuneName && felt !== null) {
     notes.push(
       `${ctx.harvest.kommuneName} felled ${felt} ${quarry.nameNo.toLowerCase()} in ${ctx.harvest.season} (SSB). ` +

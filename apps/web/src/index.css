@@ -4380,6 +4380,21 @@ button.transit-notice-summary {
   color: var(--text-muted);
 }
 
+.spots-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.spots-phase span,
+.spots-phase small {
+  color: var(--text-muted);
+}
+
 .spots-window-prime {
   border-left-color: #d83e30;
 }

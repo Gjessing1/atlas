@@ -112,6 +112,7 @@ describe('quarry profiles', () => {
       quarry('lirype')!.treeLineBandM!.peakMin,
     );
     expect(quarry('radyr')!.treeLineBandM).toBeNull();
+    expect(quarry('radyr-generell')!.treeLineBandM).toBeNull();
   });
 
   it('keeps the shy quarry further from roads than the tolerant one', () => {
@@ -126,6 +127,19 @@ describe('quarry profiles', () => {
     expect(leading('elg')).toBe('browse');
     expect(leading('storfugl')).toBe('pine-mature');
     expect(leading('radyr')).toBe('edge-farmland');
+    expect(leading('radyr-generell')).toBe('edge-farmland');
+  });
+
+  it('keeps rut calling distinct from the general roe-deer profile', () => {
+    const rut = quarry('radyr')!;
+    const general = quarry('radyr-generell')!;
+    expect(rut.targetLabel).toBe('Rådyr ▸ brunst');
+    expect(general.targetLabel).toBe('Rådyr ▸ generell');
+    expect(rut.conditionsProfile).toBe('roe-rut');
+    expect(rut.weights.warmth).toBeUndefined();
+    expect(general.weights.warmth).toBeGreaterThan(0);
+    expect(rut.standDistanceBandM.peakMax).toBe(60);
+    expect(general.standDistanceBandM.peakMin).toBe(100);
   });
 });
 

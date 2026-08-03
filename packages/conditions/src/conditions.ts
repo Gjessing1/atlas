@@ -14,6 +14,7 @@
  * engine never branches on a specific species.
  */
 import { compass16 } from './sun.js';
+import { roePhenologyAt } from './phenology.js';
 import type { WeatherPoint } from './weather.js';
 
 /** How a single factor reads right now. */
@@ -108,6 +109,12 @@ export interface FishingConditionsInput {
   pressureTrendHpa?: number | null;
   /** Species tag (perch/pike/trout/char) for the temperature comfort band. */
   species?: string | null;
+  /** Hunting-only tactic profile; ignored by the fishing model. */
+  huntProfile?: HuntConditionsProfile;
+  /** Hunting-only point latitude for phenology. */
+  latitude?: number;
+  /** Hunting-only terrain elevation for phenology. */
+  elevationM?: number | null;
 }
 
 /**
@@ -273,7 +280,15 @@ export interface HuntConditionsInput {
   slopeDeg?: number | null;
   /** Downhill azimuth (0–360° clockwise from N) at the stand — the way cold air drains. */
   aspectDeg?: number | null;
+  /** Tactic-specific activity model; ordinary hunting keeps the established defaults. */
+  profile?: HuntConditionsProfile;
+  /** Point latitude for the rut's broad north/south phenology adjustment. */
+  latitude?: number;
+  /** Optional terrain elevation for the rut's small altitude adjustment. */
+  elevationM?: number | null;
 }
+
+export type HuntConditionsProfile = 'general' | 'roe-rut';
 
 /**
  * Assess roe-deer stand conditions for one forecast step — the same transparency as the fishing
@@ -290,6 +305,10 @@ export interface HuntConditionsInput {
  */
 export function assessHuntStand(input: HuntConditionsInput): ConditionAssessment {
   const { point: p, sunAltitudeDeg: alt, slopeDeg, aspectDeg } = input;
+  const rut =
+    input.profile === 'roe-rut'
+      ? roePhenologyAt(new Date(p.time), input.latitude ?? 60, input.elevationM)
+      : null;
   const factors: ConditionFactor[] = [];
   const add = (key: string, label: string, score: number, weight: number, detail: string): void => {
     factors.push({ key, label, score, weight, rating: ratingFor(score), detail });
@@ -329,11 +348,36 @@ export function assessHuntStand(input: HuntConditionsInput): ConditionAssessment
     } else if (alt <= 25) {
       s = 0.6;
       detail = 'Sun up — movement easing; watch shaded feeding edges.';
+    } else if (rut) {
+      s = rut.middayActivity;
+      detail =
+        rut.middayActivity >= 0.7
+          ? `High sun, but ${rut.label.toLowerCase()} keeps bucks searching through midday.`
+          : `High sun — ${rut.label.toLowerCase()} does not remove the usual bedding lull.`;
     } else {
       s = 0.4;
       detail = 'High sun — deer bedded in cover.';
     }
     add('light', 'Activity (light)', s, 0.3, detail);
+  }
+
+  if (rut) {
+    const temp = p.temp;
+    const temperatureScore = temp <= 12 ? 0.95 : temp <= 18 ? 0.78 : temp <= 23 ? 0.5 : 0.25;
+    add(
+      'temp',
+      'Heat',
+      temperatureScore,
+      0.15,
+      `${Math.round(temp)}°C — ${
+        temperatureScore >= 0.75
+          ? 'cool enough for sustained movement.'
+          : temperatureScore >= 0.45
+            ? 'warm; shaded edges and the cooler hours improve the sit.'
+            : 'hot enough to suppress daytime movement; favour the coolest hours and cover.'
+      }`,
+    );
+    add('rut', 'Calling phase', rut.calling, 0.15, `${rut.label}. ${rut.detail}`);
   }
 
   // Thermal (terrain-driven slope flow) — only on a defined slope. In light winds the slope's own
@@ -401,7 +445,13 @@ export function assessConditions(
   input: FishingConditionsInput,
 ): ConditionAssessment {
   return kind === 'hunting'
-    ? assessHuntStand({ point: input.point, sunAltitudeDeg: input.sunAltitudeDeg })
+    ? assessHuntStand({
+        point: input.point,
+        sunAltitudeDeg: input.sunAltitudeDeg,
+        profile: input.huntProfile,
+        latitude: input.latitude,
+        elevationM: input.elevationM,
+      })
     : assessFishingBite(input);
 }
 

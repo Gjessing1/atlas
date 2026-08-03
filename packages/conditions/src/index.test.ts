@@ -8,6 +8,7 @@ import {
   describeSunDay,
   forecastTable,
   pressureTrend,
+  roePhenologyAt,
   sunDay,
   sunPosition,
   windArrow,
@@ -182,6 +183,45 @@ describe('assessHuntStand', () => {
     });
     const thermal = slope.factors.find((f) => f.key === 'thermal')!;
     expect(thermal.detail).toContain('drains downhill to the E');
+  });
+
+  it('keeps a cool rut-peak midday active and penalises August heat', () => {
+    const point = mkPoint({ time: '2026-08-02T11:00:00Z', temp: 11 });
+    const general = assessHuntStand({ point, sunAltitudeDeg: 35 });
+    const rut = assessHuntStand({
+      point,
+      sunAltitudeDeg: 35,
+      profile: 'roe-rut',
+      latitude: 60,
+    });
+    expect(general.factors.find((factor) => factor.key === 'light')!.score).toBe(0.4);
+    expect(rut.factors.find((factor) => factor.key === 'light')!.score).toBe(0.9);
+    expect(rut.factors.find((factor) => factor.key === 'rut')!.score).toBe(1);
+    const hot = assessHuntStand({
+      point: { ...point, temp: 26 },
+      sunAltitudeDeg: 35,
+      profile: 'roe-rut',
+      latitude: 60,
+    });
+    expect(hot.factors.find((factor) => factor.key === 'temp')!.score).toBe(0.25);
+    expect(hot.score).toBeLessThan(rut.score);
+  });
+});
+
+describe('roe phenology', () => {
+  it('marks 10 August as late rut in southern lowland Norway', () => {
+    const phase = roePhenologyAt(new Date('2026-08-10T12:00:00Z'), 60, 0);
+    expect(phase.phase).toBe('late-rut');
+    expect(phase.calling).toBeGreaterThan(0.8);
+    expect(phase.guidance).toContain('legal season');
+  });
+
+  it('moves the broad phase later in the north and at altitude', () => {
+    const south = roePhenologyAt(new Date('2026-08-10T12:00:00Z'), 60, 0);
+    const north = roePhenologyAt(new Date('2026-08-10T12:00:00Z'), 69, 300);
+    expect(south.phase).toBe('late-rut');
+    expect(north.phase).toBe('rut-peak');
+    expect(north.shiftDays).toBeGreaterThan(south.shiftDays);
   });
 });
 

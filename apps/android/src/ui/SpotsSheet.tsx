@@ -93,6 +93,14 @@ export function SpotsSheet({
         </Pressable>
       </View>
 
+      {state.huntPhase ? (
+        <View style={styles.phase}>
+          <Text style={styles.windowTitle}>{state.huntPhase.label}</Text>
+          <Text style={styles.muted}>{state.huntPhase.detail}</Text>
+          <Text style={styles.muted}>{state.huntPhase.guidance}</Text>
+        </View>
+      ) : null}
+
       {conditions ? (
         <View style={styles.window}>
           <Text style={styles.windowTitle}>
@@ -225,6 +233,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderLeftWidth: 3,
     borderLeftColor: theme.accent,
+    backgroundColor: theme.surfaceMuted,
+  },
+  phase: {
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
     backgroundColor: theme.surfaceMuted,
   },
   windowTitle: { color: theme.text, fontSize: 13, fontWeight: '700' },

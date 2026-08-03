@@ -52,6 +52,9 @@ export const SPOT_MIN_RANK = SURFACE_BANDS[SURFACE_BANDS.length - 1]!.minRank;
 /** Below this apart, two candidates are the same piece of water (see above). */
 export const SPOT_MIN_SEPARATION_M = 300;
 
+/** Hunting stands a shot-width apart can differ in wind, approach and cover. */
+export const HUNT_STAND_MIN_SEPARATION_M = 150;
+
 /** Most spots a shortlist may carry — eight is already more than a day's fishing. */
 export const SPOT_LIMIT = 8;
 

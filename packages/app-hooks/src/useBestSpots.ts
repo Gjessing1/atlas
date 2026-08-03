@@ -29,7 +29,10 @@ import {
   assessConditions,
   bestWindows,
   buildPlanner,
+  roePhenologyAt,
   type ActivityRating,
+  type HuntConditionsProfile,
+  type RoePhenology,
   type WeatherForecast,
 } from '@atlas/conditions';
 import type { LngLatBbox } from '@atlas/core';
@@ -37,6 +40,7 @@ import {
   CELL_ZOOM,
   fishSpecies,
   potentialSpotsUrl,
+  quarry,
   SPOT_LIMIT,
   type PotentialSpot,
   type PotentialSpotsResponse,
@@ -93,6 +97,8 @@ export interface BestSpotsState {
    * flat forecast says nothing about whether the *water* is any good.
    */
   readonly windowNote: string | null;
+  /** Biological phase for the roe-rut tactic; never a legal-season claim. */
+  readonly huntPhase: RoePhenology | null;
   /** Why the list is empty or short — the surface's own words. */
   readonly note: string | null;
   /** Cells under this view that are still being derived. */
@@ -109,6 +115,7 @@ const IDLE: BestSpotsState = {
   spots: [],
   window: null,
   windowNote: null,
+  huntPhase: null,
   note: null,
   pending: 0,
   accessAvailable: false,
@@ -133,13 +140,21 @@ function endOfDay(now: Date): number {
  */
 export function windowForToday(
   forecast: WeatherForecast,
-  opts: { vocabulary: SurfaceVocabulary; species?: string | null; now?: Date },
+  opts: {
+    vocabulary: SurfaceVocabulary;
+    species?: string | null;
+    huntProfile?: HuntConditionsProfile;
+    now?: Date;
+  },
 ): SpotsWindow | null {
   const now = opts.now ?? new Date();
   const kind = opts.vocabulary === 'hunt' ? 'hunting' : 'fishing';
-  const rows = buildPlanner(forecast, { kind, species: opts.species ?? null, now }).filter(
-    (row) => row.timeMs <= endOfDay(now),
-  );
+  const rows = buildPlanner(forecast, {
+    kind,
+    species: opts.species ?? null,
+    huntProfile: opts.huntProfile,
+    now,
+  }).filter((row) => row.timeMs <= endOfDay(now));
   const window = bestWindows(rows, { count: 1 })[0];
   if (!window) return null;
   const peak = rows[window.peakIdx]!;
@@ -152,6 +167,8 @@ export function windowForToday(
       sunAltitudeDeg: peak.sunAltitudeDeg,
       pressureTrendHpa: peak.pressureTrendHpa,
       species: opts.species ?? null,
+      huntProfile: opts.huntProfile,
+      latitude: forecast.lat,
     });
   return {
     startMs: start.timeMs,
@@ -302,6 +319,7 @@ export function useBestSpots(
   const top = response?.spots[0]?.position;
   const forecastLat = top ? Number(top.lat.toFixed(2)) : null;
   const forecastLng = top ? Number(top.lng.toFixed(2)) : null;
+  const huntProfile = vocabulary === 'hunt' ? quarry(target)?.conditionsProfile : undefined;
   useEffect(() => {
     if (forecastLat === null || forecastLng === null) {
       setForecast(null);
@@ -331,8 +349,14 @@ export function useBestSpots(
     return windowForToday(forecast, {
       vocabulary,
       species: fishSpecies(target)?.conditionsSpecies ?? null,
+      huntProfile,
     });
-  }, [forecast, vocabulary, target]);
+  }, [forecast, vocabulary, target, huntProfile]);
+
+  const huntPhase = useMemo(
+    () => (huntProfile === 'roe-rut' && top ? roePhenologyAt(new Date(), top.lat) : null),
+    [huntProfile, top],
+  );
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -342,6 +366,7 @@ export function useBestSpots(
       mode: response?.mode ?? (vocabulary === 'hunt' ? 'stands' : 'habitat'),
       spots: response?.spots ?? [],
       window,
+      huntPhase,
       windowNote:
         forecast && !window
           ? vocabulary === 'hunt'
@@ -359,7 +384,7 @@ export function useBestSpots(
     }
     // An empty shortlist is a finding, not a failure — the note says which one.
     return { ...base, status: base.spots.length === 0 ? 'empty' : 'ready' };
-  }, [active, response, window, forecast, failed, loading, vocabulary, refresh]);
+  }, [active, response, window, huntPhase, forecast, failed, loading, vocabulary, refresh]);
 }
 
 /**

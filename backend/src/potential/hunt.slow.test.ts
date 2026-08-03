@@ -314,9 +314,11 @@ describe('the hunt adapter', () => {
     });
     const body = response.json() as {
       mode: string;
+      note: string;
       spots: { stand: { maxRangeM: number; lanes: unknown[]; aim: { distanceM: number } } }[];
     };
     expect(body.mode).toBe('stands');
+    expect(body.note).toContain('Rådyr ▸ brunst habitat');
     expect(body.spots.length).toBeGreaterThan(0);
     expect(body.spots[0]!.stand.maxRangeM).toBe(150);
     expect(body.spots[0]!.stand.lanes).toHaveLength(8);

@@ -222,6 +222,7 @@ describe('useBestSpots', () => {
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.spots.map((candidate) => candidate.id)).toEqual(['inside']);
     expect(result.current.note).toContain('Delområde Sleikebekk');
+    expect(result.current.huntPhase?.phase).toBe('pre-rut');
   });
 
   it('asks again when a derived cell lands under the same viewport', async () => {

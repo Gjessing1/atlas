@@ -20,6 +20,7 @@
  *   links `lakseregURL` per stretch instead and stays honest about reading
  *   channel character rather than today's legality.
  */
+import type { HuntConditionsProfile } from '@atlas/conditions';
 import type { Band } from './signals.js';
 import { shiftBand } from './signals.js';
 
@@ -395,6 +396,10 @@ export interface Quarry {
   readonly nameEn: string;
   /** Optional picker wording when the model is intentionally tactic/season-specific. */
   readonly targetLabel?: string;
+  /** Conditions model used when the shortlist decides when this tactic is on. */
+  readonly conditionsProfile?: HuntConditionsProfile;
+  /** SSB harvest key when two tactic rows describe the same quarry. */
+  readonly harvestKey?: string;
   /**
    * SR16 `SRRHOYDEO` dominant tree height band, in metres — the stand maturity
    * this quarry uses. Null for species that live above the forest.
@@ -424,25 +429,34 @@ export interface Quarry {
   readonly strongHarvest: number | null;
   /** Ground the quarry uses, as a slope band in percent. */
   readonly slopeBandPercent: Band;
+  /** Stand-to-habitat distance that suits this quarry and tactic, in metres. */
+  readonly standDistanceBandM: Band;
   readonly weights: Partial<Record<HuntSignalKey, number>>;
 }
+
+/** The original big-game stand rule: long visible pairings earn full value. */
+const GENERAL_STAND_DISTANCE_M: Band = { min: 0, peakMin: 100, peakMax: 150, max: 151 };
+
+/** A called roe buck is expected to appear close to the watched edge. */
+const ROE_RUT_STAND_DISTANCE_M: Band = { min: 10, peakMin: 20, peakMax: 60, max: 150 };
 
 export const QUARRIES = [
   {
     id: 'radyr',
     nameNo: 'Rådyr',
-    nameEn: 'Roe buck calling',
-    targetLabel: 'Rådyrbukk · lokkejakt',
+    nameEn: 'Roe deer rut calling',
+    targetLabel: 'Rådyr ▸ brunst',
+    conditionsProfile: 'roe-rut',
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 8, max: 16 },
     treeLineBandM: null,
     disturbanceBufferM: 100,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 20, max: 45 },
+    standDistanceBandM: ROE_RUT_STAND_DISTANCE_M,
     weights: {
       'edge-farmland': 1,
       'cover-young': 0.9,
       'edge-myr': 0.5,
-      warmth: 0.5,
       slope: 0.5,
       artfunksjon: 0.5,
       browse: 0.4,
@@ -450,6 +464,30 @@ export const QUARRIES = [
       // through the heat of the day. Less than thicket cover because it is
       // shelter rather than forage, but never absent from the model.
       'cover-mature': 0.4,
+      quiet: 0.3,
+    },
+  },
+  {
+    id: 'radyr-generell',
+    nameNo: 'Rådyr',
+    nameEn: 'Roe deer general',
+    targetLabel: 'Rådyr ▸ generell',
+    conditionsProfile: 'general',
+    harvestKey: 'radyr',
+    treeHeightBandM: { min: 0, peakMin: 2, peakMax: 12, max: 24 },
+    treeLineBandM: null,
+    disturbanceBufferM: 100,
+    strongHarvest: null,
+    slopeBandPercent: { min: -1, peakMin: 0, peakMax: 25, max: 50 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
+    weights: {
+      'edge-farmland': 1,
+      browse: 0.8,
+      'cover-mature': 0.7,
+      'cover-young': 0.6,
+      warmth: 0.5,
+      slope: 0.4,
+      artfunksjon: 0.4,
       quiet: 0.3,
     },
   },
@@ -462,6 +500,7 @@ export const QUARRIES = [
     disturbanceBufferM: 300,
     strongHarvest: 230,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 15, max: 35 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       browse: 1,
       'edge-myr': 0.7,
@@ -482,6 +521,7 @@ export const QUARRIES = [
     disturbanceBufferM: 400,
     strongHarvest: 630,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 40, max: 70 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       'cover-mature': 1,
       'edge-farmland': 0.9,
@@ -501,6 +541,7 @@ export const QUARRIES = [
     disturbanceBufferM: 300,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       'pine-mature': 1,
       artfunksjon: 0.9,
@@ -519,6 +560,7 @@ export const QUARRIES = [
     disturbanceBufferM: 250,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 25, max: 55 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       'edge-myr': 1,
       'cover-young': 0.8,
@@ -536,6 +578,7 @@ export const QUARRIES = [
     disturbanceBufferM: 200,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       treeline: 1,
       'cover-young': 0.7,
@@ -555,6 +598,7 @@ export const QUARRIES = [
     disturbanceBufferM: 200,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 45, max: 80 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: { treeline: 1, 'rocky-ridge': 0.9, slope: 0.4, artfunksjon: 0.4, quiet: 0.3 },
   },
   {
@@ -566,6 +610,7 @@ export const QUARRIES = [
     disturbanceBufferM: 100,
     strongHarvest: null,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
+    standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
       'cover-young': 1,
       'edge-farmland': 0.5,

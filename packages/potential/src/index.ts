@@ -206,6 +206,7 @@ export {
   SPOT_LIMIT,
   SPOT_MIN_RANK,
   SPOT_MIN_SEPARATION_M,
+  HUNT_STAND_MIN_SEPARATION_M,
   thinSpots,
   type SpotPlaceDraft,
 } from './spots.js';

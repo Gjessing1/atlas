@@ -13,6 +13,7 @@ import {
   SPOT_LIMIT,
   SPOT_MIN_RANK,
   SPOT_MIN_SEPARATION_M,
+  HUNT_STAND_MIN_SEPARATION_M,
   bandForRank,
   BAND_LABELS,
   type PotentialSpot,
@@ -264,7 +265,7 @@ export function standCandidates(
   const viewRank = rankInsideView(raw, manifest, bbox);
 
   return localMaxima(viewRank, {
-    minSeparationCells: Math.max(1, SPOT_MIN_SEPARATION_M / sampleSizeM),
+    minSeparationCells: Math.max(1, HUNT_STAND_MIN_SEPARATION_M / sampleSizeM),
     minValue: SPOT_MIN_RANK,
     limit,
   }).flatMap((max): Candidate[] => {
