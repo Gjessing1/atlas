@@ -609,6 +609,32 @@ export function identifyExpandLabel(expanded: boolean): string {
   return expanded ? 'Show less' : 'Show more';
 }
 
+/**
+ * Roughly how many lines a card's identify block wants — the estimate behind
+ * "is there anything to expand?".
+ *
+ * A guess, because the honest answer needs a laid-out box: a heading per
+ * overlay, a line per row, and a second line for a row too long to fit one
+ * (Askeladden's `informasjon` is a paragraph of surveyor's prose). The web card
+ * measures its own `scrollHeight` and does not need this; Android has no cheap
+ * equivalent, and a "Show more" under an answer that is already whole is worse
+ * than no control at all.
+ */
+export function identifyCardLines(groups: readonly IdentifyCardGroup[]): number {
+  const ROW_CHARS = 34;
+  return groups.reduce(
+    (lines, group) =>
+      lines +
+      1 +
+      (group.note ? 1 : 0) +
+      group.rows.reduce(
+        (rows, [, value]) => rows + Math.max(1, Math.ceil(value.length / ROW_CHARS)),
+        0,
+      ),
+    0,
+  );
+}
+
 /** One overlay's answer, cut to what a card has room for. */
 export interface IdentifyCardGroup {
   readonly title: string;

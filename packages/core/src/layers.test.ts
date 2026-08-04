@@ -7,6 +7,7 @@ import {
   iceObservationIdentify,
   iceObservationsUrl,
   identifyCardGroups,
+  identifyCardLines,
   identifyLinkLabel,
   identifyOverlays,
   identifyValueUrl,
@@ -329,6 +330,18 @@ describe('identifyCardGroups', () => {
     // Nothing on the one under the finger: "3 m away" is doubt, not information.
     expect(shown[0]!.distance).toBeUndefined();
     expect(shown[1]!.distance).toBe('42 m away');
+  });
+
+  it('estimates whether there is anything to expand', () => {
+    // A two-row answer is whole; a surveyor's paragraph is not, and a card that
+    // offers "Show more" over an answer already fully visible is worse than
+    // none. Six lines is the 132 px block both cards use.
+    expect(identifyCardLines(identifyCardGroups([group('Depth', 2)]))).toBeLessThanOrEqual(6);
+    const long = {
+      title: 'Cultural heritage',
+      properties: { Description: 'A surveyor’s field description. '.repeat(8) },
+    };
+    expect(identifyCardLines(identifyCardGroups([long]))).toBeGreaterThan(6);
   });
 
   it('recognises the answers that are a link, and only those', () => {

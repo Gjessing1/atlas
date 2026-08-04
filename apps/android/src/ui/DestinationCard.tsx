@@ -2,6 +2,7 @@ import { usePlaceFacts } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
   identifyCardGroups,
+  identifyCardLines,
   identifyExpandLabel,
   identifyLinkLabel,
   identifyValueUrl,
@@ -176,6 +177,9 @@ export function DestinationCard({
   // Capped by the shared helper, so a chatty upstream is cut at the same place
   // on both clients rather than at whatever number each card happened to pick.
   const identify = identifyCardGroups(target.identify ?? []);
+  // The block is 132 px — about six lines. More than that is clipped, and only
+  // then is there anything for "Show more" to do.
+  const identifyClipped = identifyCardLines(identify) > 6;
   const at = { lat: target.lat, lng: target.lng };
   const facts = usePlaceFacts(useServerOrigin(), at);
   const content = usePlaceContent(packs, target.name, at);
@@ -335,15 +339,19 @@ export function DestinationCard({
               </View>
             ))}
           </ScrollView>
-          <Pressable
-            onPress={() => {
-              setIdentifyOpen((open) => !open);
-              if (!identifyOpen) expand();
-            }}
-            hitSlop={8}
-          >
-            <Text style={styles.identifyMore}>{identifyExpandLabel(identifyOpen)}</Text>
-          </Pressable>
+          {identifyClipped || identifyOpen ? (
+            <Pressable
+              onPress={() => {
+                setIdentifyOpen((open) => !open);
+                // Opening the answers over a peeked sheet is a keyhole, the
+                // same reason the nearby list raises it.
+                if (!identifyOpen) expand();
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.identifyMore}>{identifyExpandLabel(identifyOpen)}</Text>
+            </Pressable>
+          ) : null}
         </>
       ) : null}
 
