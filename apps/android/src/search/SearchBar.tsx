@@ -167,7 +167,13 @@ export function SearchBar({
               onPress={() => pick(r)}
             >
               <Text style={styles.resultName}>{r.name}</Text>
-              {r.label ? <Text style={styles.resultLabel}>{r.label}</Text> : null}
+              {r.label ? (
+                // Postcode + county make the label long enough to wrap; one
+                // line per row keeps the list the same shape as the web one.
+                <Text style={styles.resultLabel} numberOfLines={1}>
+                  {r.label}
+                </Text>
+              ) : null}
             </Pressable>
           ))}
         </ScrollView>

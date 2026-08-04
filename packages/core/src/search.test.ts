@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   coordinateSearchResult,
   matchPlacesByName,
+  parseAddressQuery,
   savedPlaceResults,
   parseCoordinateQuery,
   photonFeatureToSearchResult,
+  photonSearchResults,
   type PhotonFeature,
 } from './index.js';
 
@@ -41,6 +43,23 @@ describe('photonFeatureToSearchResult', () => {
     expect(address?.address).toBe('Karl Johans gate 1, Oslo');
   });
 
+  it('shows the postcode and the county, so a near-miss is visible', () => {
+    // The live case: a query for "Alfheim 7 1387 Asker" matches 1384.
+    const address = photonFeatureToSearchResult({
+      geometry: { type: 'Point', coordinates: [10.4364, 59.8339] },
+      properties: {
+        street: 'Alfheim',
+        housenumber: '7',
+        postcode: '1384',
+        city: 'Asker',
+        county: 'Akershus',
+        country: 'Norge',
+      },
+    });
+    expect(address?.label).toBe('1384 Asker, Akershus, Norge');
+    expect(address?.address).toBe('Alfheim 7, 1384 Asker, Akershus, Norge');
+  });
+
   it('rejects features without geometry or name', () => {
     expect(photonFeatureToSearchResult({ properties: { name: 'x' } })).toBeNull();
     expect(
@@ -54,6 +73,100 @@ describe('photonFeatureToSearchResult', () => {
       properties: { name: 'Trondheim', city: 'Trondheim', country: 'Norway' },
     });
     expect(city?.label).toBe('Norway');
+  });
+
+  it('keeps the postcode when the place would only repeat the name', () => {
+    const city = photonFeatureToSearchResult({
+      geometry: { type: 'Point', coordinates: [10.39, 63.43] },
+      properties: { name: 'Trondheim', postcode: '7010', city: 'Trondheim', country: 'Norge' },
+    });
+    expect(city?.label).toBe('7010, Norge');
+  });
+});
+
+describe('parseAddressQuery', () => {
+  it('reads a pasted postal address', () => {
+    expect(parseAddressQuery('Dælimosen 57, 1359 Eiksmarka')).toEqual({
+      query: 'Dælimosen 57, 1359 Eiksmarka',
+      postcode: '1359',
+      houseNumber: '57',
+      // Loosen one constraint at a time: the postcode first, then the number.
+      fallbacks: ['Dælimosen 57, Eiksmarka', 'Dælimosen Eiksmarka'],
+    });
+  });
+
+  it('reads a letter suffix and an address with no postcode', () => {
+    expect(parseAddressQuery('Storgata 10A Oslo')).toMatchObject({
+      houseNumber: '10A',
+      fallbacks: ['Storgata Oslo'],
+    });
+    expect(parseAddressQuery('Storgata 10A Oslo').postcode).toBeUndefined();
+  });
+
+  it('leaves an ordinary place query alone', () => {
+    expect(parseAddressQuery('  Preikestolen ')).toEqual({
+      query: 'Preikestolen',
+      fallbacks: [],
+    });
+  });
+
+  it('never offers an empty or duplicate fallback', () => {
+    // A bare postcode has nothing left once it is dropped.
+    expect(parseAddressQuery('1359').fallbacks).toEqual([]);
+    expect(parseAddressQuery('Storgata 10').fallbacks).toEqual(['Storgata']);
+  });
+});
+
+describe('photonSearchResults', () => {
+  const street = (postcode: string): PhotonFeature => ({
+    geometry: { type: 'Point', coordinates: [10.74, 59.91] },
+    properties: { name: 'Karl Johans gate', postcode, city: 'Oslo', country: 'Norge' },
+  });
+  const house: PhotonFeature = {
+    geometry: { type: 'Point', coordinates: [10.75, 59.91] },
+    properties: {
+      street: 'Karl Johans gate',
+      housenumber: '22',
+      postcode: '0026',
+      city: 'Oslo',
+      country: 'Norge',
+    },
+  };
+
+  it('floats the typed house number above postcode-matching street segments', () => {
+    // Photon's own order: three segments of the street first, the house last.
+    const results = photonSearchResults(
+      [street('0159'), street('0154'), street('0153'), house],
+      parseAddressQuery('Karl Johans gate 22, 0159 Oslo'),
+    );
+    expect(results[0]?.name).toBe('Karl Johans gate 22');
+  });
+
+  it('collapses one street returned as several postal segments', () => {
+    // The postcode is in the label but must not be in the collapse key, or one
+    // street through three postal areas becomes three rows to the same place.
+    const results = photonSearchResults([street('0159'), street('0154'), street('0153')]);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.label).toBe('0159 Oslo, Norge');
+  });
+
+  it('keeps photon order within a tier and drops unusable features', () => {
+    const results = photonSearchResults(
+      [{ properties: { name: 'broken' } }, street('0154'), house],
+      parseAddressQuery('Karl Johans gate Oslo'),
+    );
+    expect(results.map((r) => r.name)).toEqual(['Karl Johans gate', 'Karl Johans gate 22']);
+  });
+
+  it('collapses onto the segment the user actually typed', () => {
+    const results = photonSearchResults(
+      [street('0154'), street('0159')],
+      parseAddressQuery('Karl Johans gate 0159 Oslo'),
+    );
+    // One street, so one row — but it must be the postcode that was asked for,
+    // not whichever segment Photon happened to return first.
+    expect(results).toHaveLength(1);
+    expect(results[0]?.label).toBe('0159 Oslo, Norge');
   });
 });
 

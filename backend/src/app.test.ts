@@ -11,6 +11,8 @@ let app: FastifyInstance;
 let photonStub: FastifyInstance;
 let valhallaStub: FastifyInstance;
 let lastPhotonQuery: Record<string, string | undefined> = {};
+/** Every `q` the search proxy sent upstream — the address ladder is about how many. */
+let photonQueries: string[] = [];
 
 beforeAll(async () => {
   dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-test-'));
@@ -25,6 +27,32 @@ beforeAll(async () => {
     Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };
   }>('/api', (request) => {
     lastPhotonQuery = { ...request.query };
+    const q = request.query.q ?? '';
+    photonQueries.push(q);
+    // The measured Dælimosen case: OSM knows the street and none of its house
+    // numbers, so every form carrying the number comes back empty and only the
+    // loosened query answers at all.
+    if (/dælimosen/i.test(q)) {
+      return {
+        type: 'FeatureCollection',
+        features: /\b57\b/.test(q)
+          ? []
+          : [
+              {
+                geometry: { type: 'Point', coordinates: [10.5854, 59.9571] },
+                properties: {
+                  name: 'Dælimosen',
+                  postcode: '1362',
+                  city: 'Østerås',
+                  county: 'Akershus',
+                  country: 'Norge',
+                  osm_key: 'highway',
+                  osm_value: 'residential',
+                },
+              },
+            ],
+      };
+    }
     return {
       type: 'FeatureCollection',
       features: [
@@ -167,6 +195,36 @@ describe('search proxy', () => {
   it('400s without a query', async () => {
     const res = await app.inject({ url: '/api/search' });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('asks upstream once when the query as typed answers', async () => {
+    photonQueries = [];
+    await app.inject({ url: '/api/search?q=oslo' });
+    expect(photonQueries).toEqual(['oslo']);
+  });
+
+  it('loosens a pasted postal address instead of answering "no results"', async () => {
+    photonQueries = [];
+    const res = await app.inject({
+      url: `/api/search?q=${encodeURIComponent('Dælimosen 57, 1359 Eiksmarka')}`,
+    });
+    expect(res.statusCode).toBe(200);
+    // Postcode dropped first, then the house number OSM has never heard of.
+    expect(photonQueries).toEqual([
+      'Dælimosen 57, 1359 Eiksmarka',
+      'Dælimosen 57, Eiksmarka',
+      'Dælimosen Eiksmarka',
+    ]);
+    // The street is the honest answer, and its own postcode is on the row.
+    expect(res.json().results).toEqual([
+      {
+        name: 'Dælimosen',
+        label: '1362 Østerås, Akershus, Norge',
+        address: '1362 Østerås, Akershus, Norge',
+        position: { lat: 59.9571, lng: 10.5854 },
+        kind: 'highway/residential',
+      },
+    ]);
   });
 
   it('forwards a validated route bounding box and caps the result count', async () => {

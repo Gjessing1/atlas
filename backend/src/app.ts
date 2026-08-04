@@ -5,10 +5,11 @@ import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import {
   APP_NAME,
+  parseAddressQuery,
   photonFeatureToSearchResult,
+  photonSearchResults,
   type LatLng,
   type PhotonFeature,
-  type SearchResult,
   type SystemStatus,
 } from '@atlas/core';
 import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
@@ -52,6 +53,14 @@ import {
   type SyncApiOptions,
 } from './sync-api.js';
 import { createMemoryStores, type Stores } from './stores.js';
+
+/**
+ * Wall-clock ceiling for one /api/search, however many times the address
+ * ladder has to loosen the query. One request keeps its own 5 s timeout, so
+ * the ordinary path is unchanged; only a query that keeps coming back empty
+ * can spend more, and never more than this.
+ */
+const SEARCH_BUDGET_MS = 8000;
 
 export interface AppOptions {
   /** Persistent data directory containing tiles/ and assets/ (ATLAS_DATA_DIR). */
@@ -287,8 +296,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (!q?.trim()) {
       return reply.code(400).send({ error: 'missing query parameter: q' });
     }
+    const address = parseAddressQuery(q);
     const url = new URL('/api', photonUrl);
-    url.searchParams.set('q', q.trim());
+    // `q` is set per attempt below — everything else is the same every time.
     url.searchParams.set('limit', String(Math.min(Number(limit) || 8, 20)));
     // Optional location bias: prefer results near the user's viewport.
     if (lat && lon) {
@@ -316,27 +326,32 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       url.searchParams.set('bbox', values.join(','));
     }
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) {
-        request.log.error({ status: res.status }, 'photon error');
-        status.record('photon', false, `HTTP ${res.status}`);
-        return reply.code(502).send({ error: 'search unavailable' });
+      // A pasted postal address is the most natural thing a user types and the
+      // case that failed hardest: the postcode makes Photon rank a whole street
+      // above the house, and a house number OSM has never heard of empties the
+      // result set entirely. So a query that found *nothing* is asked again,
+      // one constraint looser each time. This costs nothing on the common path
+      // — a query with results never reaches the second attempt — and the whole
+      // ladder shares one budget, so three tries cannot add up to three times
+      // the single-request worst case.
+      const started = Date.now();
+      let features: PhotonFeature[] = [];
+      for (const attempt of [address.query, ...address.fallbacks]) {
+        const remaining = SEARCH_BUDGET_MS - (Date.now() - started);
+        if (remaining < 500) break;
+        url.searchParams.set('q', attempt);
+        const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(5000, remaining)) });
+        if (!res.ok) {
+          request.log.error({ status: res.status }, 'photon error');
+          status.record('photon', false, `HTTP ${res.status}`);
+          return reply.code(502).send({ error: 'search unavailable' });
+        }
+        status.record('photon', true);
+        const geojson = (await res.json()) as { features?: PhotonFeature[] };
+        features = geojson.features ?? [];
+        if (features.length > 0) break;
       }
-      status.record('photon', true);
-      const geojson = (await res.json()) as { features?: PhotonFeature[] };
-      // Photon often returns several OSM objects for one real-world place
-      // (peak + trail + viewpoint all named alike); collapse to one per label.
-      const seen = new Set<string>();
-      const results = (geojson.features ?? [])
-        .map(photonFeatureToSearchResult)
-        .filter((r): r is SearchResult => {
-          if (r === null) return false;
-          const key = `${r.name}|${r.label}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      return { results };
+      return { results: photonSearchResults(features, address) };
     } catch (err) {
       request.log.error({ err }, 'photon unreachable');
       status.record('photon', false, 'unreachable');

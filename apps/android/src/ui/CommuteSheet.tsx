@@ -77,7 +77,9 @@ function EndField({
           <Text style={styles.hitName} numberOfLines={1}>
             {hit.name}
           </Text>
-          <Text style={styles.hitLabel}>{hit.transitStopId ? 'Stop' : hit.label}</Text>
+          <Text style={styles.hitLabel} numberOfLines={1}>
+            {hit.transitStopId ? 'Stop' : hit.label}
+          </Text>
         </Pressable>
       ))}
       {/* Favorites stay a shortcut — they are just no longer the only path.

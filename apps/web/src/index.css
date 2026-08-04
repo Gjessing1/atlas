@@ -138,9 +138,14 @@ button {
   font-size: 14px;
 }
 
+/* The label carries the postcode and county now, so it is routinely long
+   enough to wrap; one line keeps every row the same height to aim at. */
 .searchbox-results .result-label {
   font-size: 12px;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Non-interactive "Recent" header above the recent-picks list. */
@@ -3240,6 +3245,9 @@ button.transit-notice-summary {
 .route-along-search .result-label {
   font-size: 11px;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .route-along-search {
@@ -5483,6 +5491,11 @@ button.transit-notice-summary {
   color: var(--text-muted);
   font-size: 10px;
   white-space: nowrap;
+  /* A postcode-and-county label is long enough to push the name out of a row
+     this narrow; let it shrink and cut instead. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .commute-end-actions {
