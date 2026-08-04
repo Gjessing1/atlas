@@ -190,6 +190,12 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   'old-buildings': { kind: 'tile', lat: 62.5745, lng: 11.3855, z: 14, minBytes: 3000 },
   // Hovedøya and the Oslofjord geosites (7.7 kB).
   geoheritage: { kind: 'tile', lat: 59.91, lng: 10.75, z: 12, minBytes: 2000 },
+  // Briksdalsbreen, an outlet of Jostedalsbreen and the largest block of ice in
+  // mainland Europe — 6.1 kB at z10, against the 0.3 kB empty tile. Probed with
+  // the default chip, so it exercises `Breflate` alone rather than any of the
+  // event layers, which are 51 and 185 points nationally and would make a
+  // healthy layer look dead anywhere but on top of one of them.
+  glaciers: { kind: 'tile', lat: 61.66, lng: 6.95, z: 10, minBytes: 2000 },
   // Kongsberg: the silver, and the densest cluster in the ore register (3.8 kB
   // at z12, against 0.5 kB for a tile with a single occurrence in it and the
   // 0.3 kB empty floor). Asked with the default chip, so the probe exercises

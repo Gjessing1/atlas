@@ -184,7 +184,24 @@ test('what the overlays say lands on the place card, not in a popup of its own',
     }),
   );
   await page.route('**/api/overlay/lake-depth/identify**', (route) =>
-    route.fulfill({ json: { results: [{ navn: 'Semsvannet', maksdyp: '32.5' }] } }),
+    route.fulfill({
+      json: {
+        // Shaped like a real crowded answer: the one under the finger, a
+        // neighbour with a measured distance, a register link, a description
+        // long enough to be clipped, and a count of what is left out.
+        results: [
+          {
+            navn: 'Semsvannet',
+            maksdyp: '32.5',
+            informasjon: 'A surveyor’s field description. '.repeat(12),
+            lenke: 'https://kulturminnesok.no/ra/lokalitet/22228',
+          },
+          { navn: 'Nordvannet', maksdyp: '4.2' },
+        ],
+        distancesM: [3, 42],
+        more: { count: 2, withinM: 30 },
+      },
+    }),
   );
   // Raster tiles for the stub layer are irrelevant here; keep them off the wire.
   await page.route('**/api/overlay/lake-depth/tiles/**', (route) => route.abort());
@@ -201,11 +218,33 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   // The answer opens the card for the clicked point and sits inside it — the
   // separate MapLibre popup that used to show this is gone.
   const card = page.locator('.place-card');
-  await expect(card.getByTestId('place-card-identify')).toContainText('Lake depth');
-  await expect(card.getByTestId('place-card-identify')).toContainText('32.5');
+  const identify = card.getByTestId('place-card-identify');
+  await expect(identify).toContainText('Lake depth');
+  await expect(identify).toContainText('32.5');
   await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
   // And it is one card: the spot's own facts are still there beside the answer.
   await expect(card.locator('.place-card-facts')).toContainText('Light');
+
+  // The one under the finger leads and says nothing about distance; the
+  // neighbour behind it says how far away it is, and the card admits what it
+  // is not showing.
+  await expect(identify.locator('section').first()).toContainText('Semsvannet');
+  await expect(identify.locator('section').first().locator('em')).toHaveCount(0);
+  await expect(identify.locator('section').nth(1)).toContainText('42 m away');
+  await expect(identify).toContainText('2 more within about 30 m');
+
+  // A register's own record is a link, not a line of text nobody can use.
+  const link = identify.getByRole('link', { name: /kulturminnesok\.no/ });
+  await expect(link).toHaveAttribute('href', 'https://kulturminnesok.no/ra/lokalitet/22228');
+
+  // And a description longer than the box can be opened rather than scrolled
+  // blindly (the block keeps a bounded height either way).
+  const more = card.getByRole('button', { name: 'Show more' });
+  await expect(more).toBeVisible();
+  const clipped = (await identify.boundingBox())!.height;
+  await more.click();
+  await expect(card.getByRole('button', { name: 'Show less' })).toBeVisible();
+  expect((await identify.boundingBox())!.height).toBeGreaterThan(clipped);
 });
 
 test('Fish & Hunt shows live ice times and saves a permit as a filled area', async ({ page }) => {

@@ -1,5 +1,6 @@
+import { haversineM, type LatLng } from '@atlas/core';
 import type { OverlayContext } from './context.js';
-import { optionKeeps, optionQueryLayers, resolveOptions } from './options.js';
+import { optionGetMapParams, optionKeeps, optionQueryLayers, resolveOptions } from './options.js';
 import { tileCoords, wmsBaseParams } from './wms.js';
 
 /**
@@ -10,6 +11,24 @@ import { tileCoords, wmsBaseParams } from './wms.js';
  * The parsers below are the part with real edge cases, so they are plain
  * functions over a response body — testable without booting Fastify.
  */
+
+/**
+ * A feature one dialect answered with: its cleaned attributes, and where it is
+ * *when the dialect says* — which most of them don't (see {@link parseGmlInfo}).
+ */
+export interface IdentifyFeature {
+  props: Record<string, string>;
+  /** Degrees, in the upstream's own extent — a point has min === max. */
+  bounds?: FeatureBounds;
+}
+
+/** A feature's extent in degrees. */
+export interface FeatureBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
 
 /**
  * Upstream attribute keys that are noise, not information.
@@ -151,19 +170,38 @@ export function presentFields(
     const decoded = dictionary
       ? translateTokens(value, dictionary)
       : (codes?.[value] ?? codes?.[value.replace(/\.0+$/, '')] ?? value);
-    if (decoded === '') continue;
-    out[labelBy.get(k) ?? key] = applyFormat(decoded, formatBy.get(k));
+    // After the format, not before: a formatter may itself decide a value says
+    // nothing (an area of 0 km², a number that is not one), and a labelled row
+    // with an empty value is worse than no row.
+    const shown = applyFormat(decoded, formatBy.get(k));
+    if (shown === '') continue;
+    out[labelBy.get(k) ?? key] = shown;
   }
   return out;
 }
 
 /** Presentation formats for upstream encodings that are not readable text. */
-export type IdentifyFormat = 'nve-date' | 'esri-datetime';
+export type IdentifyFormat = 'nve-date' | 'esri-datetime' | 'number';
 
 function applyFormat(value: string, format: IdentifyFormat | undefined): string {
   if (format === 'nve-date') return formatNveDate(value);
   if (format === 'esri-datetime') return formatEsriDateTime(value);
+  if (format === 'number') return formatNumber(value);
   return value;
+}
+
+/**
+ * A measurement, cut to two decimals.
+ *
+ * These registers store a computed number and publish all of it: NVE's glacier
+ * outlines answer `543.192344` km², which is six decimals of a figure whose
+ * *first* one is an argument about where the ice ends. Anything that is not a
+ * number is left alone — the same field can hold "Null" or a range.
+ */
+export function formatNumber(value: string): string {
+  const parsed = Number(value.replace(',', '.'));
+  if (!Number.isFinite(parsed) || value.trim() === '') return value;
+  return String(Math.round(parsed * 100) / 100);
 }
 
 /**
@@ -258,14 +296,67 @@ export function keepsIdentify(
   return hit ? keep.values.includes(hit[1]) : true;
 }
 
+/**
+ * Bounds around every coordinate pair in a GeoJSON geometry, whatever its type
+ * — the nesting differs per type and only the leaves matter here.
+ *
+ * ArcGIS is the reason this tolerates a missing geometry rather than assuming
+ * one: its `application/geo+json` identify answers `"geometry": null` on every
+ * feature (measured against NVE's slide register), so a layer served by ArcGIS
+ * has no position to offer no matter which dialect it is asked in.
+ */
+export function geojsonBounds(geometry: unknown): FeatureBounds | undefined {
+  if (!geometry || typeof geometry !== 'object') return undefined;
+  const coords = (geometry as { coordinates?: unknown }).coordinates;
+  const points: [number, number][] = [];
+  const walk = (node: unknown): void => {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === 'number' && typeof node[1] === 'number') {
+      points.push([node[0], node[1]]);
+      return;
+    }
+    for (const child of node) walk(child);
+  };
+  walk(coords);
+  return boundsOf(points.map(([lng, lat]) => ({ lat, lng })));
+}
+
+/** Bounds around a set of points, or `undefined` for none. */
+export function boundsOf(points: readonly LatLng[]): FeatureBounds | undefined {
+  if (points.length === 0) return undefined;
+  const lats = points.map((p) => p.lat);
+  const lngs = points.map((p) => p.lng);
+  return {
+    west: Math.min(...lngs),
+    south: Math.min(...lats),
+    east: Math.max(...lngs),
+    north: Math.max(...lats),
+  };
+}
+
+/** Web-mercator metres back to degrees (the CRS every request here asks for). */
+export function mercatorToLatLng(x: number, y: number): LatLng {
+  return {
+    lng: (x / 20037508.342789244) * 180,
+    lat:
+      (180 / Math.PI) *
+      (2 * Math.atan(Math.exp(((y / 20037508.342789244) * 180 * Math.PI) / 180)) - Math.PI / 2),
+  };
+}
+
 export function parseGeojsonInfo(
   body: string,
   keep: ReadonlySet<string> = new Set(),
-): Record<string, string>[] | null {
+): IdentifyFeature[] | null {
   try {
-    const json = JSON.parse(body) as { features?: { properties?: Record<string, unknown> }[] };
+    const json = JSON.parse(body) as {
+      features?: { properties?: Record<string, unknown>; geometry?: unknown }[];
+    };
     if (!Array.isArray(json.features)) return null;
-    return json.features.map((f) => cleanProps(f.properties ?? {}, keep));
+    return json.features.map((f) => ({
+      props: cleanProps(f.properties ?? {}, keep),
+      bounds: geojsonBounds(f.geometry),
+    }));
   } catch {
     return null;
   }
@@ -283,7 +374,7 @@ export function parseGeojsonInfo(
 export function parseGmlInfo(
   body: string,
   keep: ReadonlySet<string> = new Set(),
-): Record<string, string>[] {
+): IdentifyFeature[] {
   const chunks = body.split(/<(?:\w+:)?(?:featureMember|\w+_feature)\b[^>]*>/).slice(1);
   const sources = chunks.length > 0 ? chunks : [body];
   return sources
@@ -293,9 +384,43 @@ export function parseGmlInfo(
         if (m[1] === 'gml') continue; // gml:name/gml:description are structural
         props[m[2]!] = decodeXmlText(m[3]!);
       }
-      return cleanProps(props, keep);
+      return { props: cleanProps(props, keep), bounds: gmlBounds(chunk) };
     })
-    .filter((p) => Object.keys(p).length > 0);
+    .filter((f) => Object.keys(f.props).length > 0);
+}
+
+/**
+ * Where a GML feature is — the one dialect in the chain that will say.
+ *
+ * MapServer writes a `gml:boundedBy/gml:Box` per feature when the mapfile
+ * publishes geometry, and that is the whole basis for answering "which of these
+ * did you tap?" with a distance instead of a guess: Riksantikvaren's SEFRAK
+ * buildings carry it, and NGU's GRANADA wells do not — same dialect, same
+ * request, different mapfile. So this returns `undefined` for most layers and
+ * everything downstream has to keep working without it.
+ *
+ * Only EPSG:3857 is read, because that is the CRS every request here asks for.
+ * A server answering in some other frame is not translated on a guess: WMS
+ * 1.3.0 flipped the axis order of geographic CRSs, so reading an unknown
+ * `srsName` as x,y is how a building in Horten ends up in the Indian Ocean.
+ */
+export function gmlBounds(chunk: string): FeatureBounds | undefined {
+  const box = /<gml:(Box|Point|Envelope)\b([^>]*)>([\s\S]*?)<\/gml:\1>/.exec(chunk);
+  if (!box) return undefined;
+  // The CRS is usually on the geometry, but GML lets it sit on an ancestor
+  // (`gml:boundedBy`), so fall back to the feature's own declaration.
+  const srs = /srsName="([^"]*)"/.exec(box[2] ?? '')?.[1] ?? /srsName="([^"]*)"/.exec(chunk)?.[1];
+  if (!srs || !/(3857|900913|102100)/.test(srs)) return undefined;
+  // Every coordinate-bearing child at once: `gml:coordinates` (GML 2),
+  // `gml:pos` (GML 3) and an Envelope's two corners all reduce to numbers.
+  // Matched rather than split: splitting leaves an empty token at each end,
+  // and `Number('')` is 0 — a coordinate pair that reads as the Atlantic.
+  const numbers = (box[3]?.replace(/<[^>]*>/g, ' ').match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  const points: LatLng[] = [];
+  for (let i = 0; i + 1 < numbers.length; i += 2) {
+    points.push(mercatorToLatLng(numbers[i]!, numbers[i + 1]!));
+  }
+  return boundsOf(points);
 }
 
 /**
@@ -317,16 +442,16 @@ export function parseGmlInfo(
 export function parseEsriXmlInfo(
   body: string,
   keep: ReadonlySet<string> = new Set(),
-): Record<string, string>[] | null {
+): IdentifyFeature[] | null {
   if (!body.includes('FeatureInfoResponse')) return null;
-  const results: Record<string, string>[] = [];
+  const results: IdentifyFeature[] = [];
   for (const m of body.matchAll(/<(?:\w+:)?FIELDS\b([^>]*?)\s*\/?>/g)) {
     const props: Record<string, unknown> = {};
     for (const attr of m[1]!.matchAll(/([\p{L}\p{N}_.()]+)="([^"]*)"/gu)) {
       props[attr[1]!] = decodeXmlText(attr[2]!);
     }
     const cleaned = cleanProps(props, keep);
-    if (Object.keys(cleaned).length > 0) results.push(cleaned);
+    if (Object.keys(cleaned).length > 0) results.push({ props: cleaned });
   }
   return results;
 }
@@ -344,7 +469,7 @@ export function parseEsriXmlInfo(
 export function parseTextInfo(
   body: string,
   keep: ReadonlySet<string> = new Set(),
-): Record<string, string>[] {
+): IdentifyFeature[] {
   const chunks = body.split(/^\s*Feature\s+\d+:\s*$/m).slice(1);
   return (chunks.length > 0 ? chunks : [body])
     .map((chunk) => {
@@ -352,9 +477,9 @@ export function parseTextInfo(
       for (const m of chunk.matchAll(/^\s+([\p{L}\p{N}_.-]+)\s*=\s*'?([^'\n]*)'?\s*$/gmu)) {
         props[m[1]!] = m[2]!;
       }
-      return cleanProps(props, keep);
+      return { props: cleanProps(props, keep) };
     })
-    .filter((p) => Object.keys(p).length > 0);
+    .filter((f) => Object.keys(f.props).length > 0);
 }
 
 /**
@@ -363,7 +488,7 @@ export function parseTextInfo(
  */
 export const IDENTIFY_FORMATS: {
   format: string;
-  parse: (body: string, keep: ReadonlySet<string>) => Record<string, string>[] | null;
+  parse: (body: string, keep: ReadonlySet<string>) => IdentifyFeature[] | null;
 }[] = [
   { format: 'application/json', parse: parseGeojsonInfo },
   { format: 'application/vnd.ogc.gml', parse: parseGmlInfo },
@@ -398,15 +523,98 @@ export function identifyZoom(
   return Math.max(meta.minzoom ?? 0, capped);
 }
 
+/**
+ * How many pixels around the query point a WMS answers for. A GetFeatureInfo
+ * has no radius parameter, so the only knob is the zoom it is asked at (see
+ * {@link identifyZoom}) — and this is what converts that zoom into metres.
+ *
+ * Four is a *middle*, not a specification: measured 2026-08-04 against the
+ * services this catalog actually asks, Riksantikvaren's SEFRAK answers out to
+ * ~6 px (13.5 m and 13.8 m at z15, where a pixel is 2.33 m) while NGU's GRANADA
+ * stops at ~2 px. Each mapfile sets its own tolerance and none of them
+ * publishes it. The number is therefore only ever used for a rounded "about",
+ * and never for a decision — the narrowing measures the real answer instead of
+ * predicting it.
+ */
+export const IDENTIFY_TOLERANCE_PX = 4;
+
+/** Roughly the ground radius a tap covers at this zoom, in metres. */
+export function identifyRadiusM(zoom: number, lat: number): number {
+  const metresPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+  return IDENTIFY_TOLERANCE_PX * metresPerPixel;
+}
+
+/**
+ * How far a tap is from a feature, in metres — 0 anywhere inside its extent.
+ *
+ * A polygon is not a point and must not be reduced to one: the centre of
+ * Askeladden's largest heritage locality is kilometres from its edge, so a tap
+ * *inside* it would sort behind a point 40 m away if this measured to centroids.
+ */
+export function boundsDistanceM(bounds: FeatureBounds, at: LatLng): number {
+  const lat = Math.min(bounds.north, Math.max(bounds.south, at.lat));
+  const lng = Math.min(bounds.east, Math.max(bounds.west, at.lng));
+  return haversineM(at, { lat, lng });
+}
+
+/**
+ * The zooms a crowded tap is retried at, narrowest last.
+ *
+ * The answer a user wants is the *nearest* feature, and no WMS will sort by
+ * distance (most don't even say where their features are). What they will do is
+ * answer a smaller question: halve the radius and the neighbours drop out.
+ * So a tap that comes back with several features is asked again, closer in, and
+ * the narrowest radius that still answers is the one that answers.
+ *
+ * Four levels is a factor of 16 in radius, which takes GRANADA's ~57 m tap down
+ * to ~3.5 m — past the point where a symbol on screen is even that big. The
+ * 18 ceiling is where a query stops being a tap and becomes a pinprick (~1 m).
+ */
+/**
+ * How many features one layer may answer with. The card has room for three
+ * groups in total (`IDENTIFY_CARD_GROUPS`), so a layer that sent eight — the
+ * old cap — could only ever push another layer's answer off the card. What is
+ * left out is counted in `more` instead.
+ */
+export const IDENTIFY_MAX_RESULTS = 3;
+
+export function narrowZooms(wide: number, steps = 4, ceiling = 18): number[] {
+  const zooms: number[] = [];
+  for (let z = wide + 1; z <= Math.min(wide + steps, ceiling); z++) zooms.push(z);
+  return zooms;
+}
+
 /** Drop results that repeat one already in the list (see `identifyLayers`). */
-export function dedupeResults(results: Record<string, string>[]): Record<string, string>[] {
+export function dedupeResults(results: IdentifyFeature[]): IdentifyFeature[] {
   const seen = new Set<string>();
   return results.filter((result) => {
-    const key = JSON.stringify(Object.entries(result).sort());
+    const key = JSON.stringify(Object.entries(result.props).sort());
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Nearest first, for the dialects that said where their features are. Features
+ * with no position keep their upstream order behind the ones that have it —
+ * an unknown distance is not a large one, but it cannot be ranked either.
+ */
+export function sortByDistance(features: IdentifyFeature[], at: LatLng): IdentifyFeature[] {
+  return features
+    .map((feature, index) => ({
+      feature,
+      index,
+      distance: feature.bounds ? boundsDistanceM(feature.bounds, at) : null,
+    }))
+    .sort((a, b) => {
+      if (a.distance === null || b.distance === null) {
+        if (a.distance !== b.distance) return a.distance === null ? 1 : -1;
+        return a.index - b.index;
+      }
+      return a.distance - b.distance || a.index - b.index;
+    })
+    .map((entry) => entry.feature);
 }
 
 export function registerIdentifyRoute(ctx: OverlayContext): void {
@@ -433,12 +641,8 @@ export function registerIdentifyRoute(ctx: OverlayContext): void {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85) {
       return reply.code(400).send({ error: 'invalid coordinates' });
     }
-    const z = identifyZoom(layer.meta, wms.identifyZoom, zoom);
-    const frac = tileCoords(lat, lng, z);
-    const tx = Math.floor(frac.x);
-    const ty = Math.floor(frac.y);
-    const px = Math.min(255, Math.floor((frac.x - tx) * 256));
-    const py = Math.min(255, Math.floor((frac.y - ty) * 256));
+    const at = { lat, lng };
+    const wide = identifyZoom(layer.meta, wms.identifyZoom, zoom);
 
     const chosen = resolveOptions(layer, request.query);
     const queryLayers = optionQueryLayers(layer, chosen) ?? wms.identifyLayers;
@@ -456,60 +660,143 @@ export function registerIdentifyRoute(ctx: OverlayContext): void {
       : IDENTIFY_FORMATS;
 
     let upstreamDown = false;
-    for (const { format, parse } of attempts) {
-      const url = wmsBaseParams(wms, z, tx, ty);
-      const p = url.searchParams;
-      p.set('REQUEST', 'GetFeatureInfo');
-      // LAYERS is narrowed to the queried set, not left as the drawn set. WMS
-      // requires QUERY_LAYERS ⊆ LAYERS, and a layer whose *drawn* set varies per
-      // option (spawning grounds pick a dataset) would otherwise ask about a
-      // layer it did not name. Every catalog entry queries a subset of what it
-      // draws, so this is the same question asked more cheaply.
-      p.set('LAYERS', queryLayers);
-      p.set('QUERY_LAYERS', queryLayers);
-      p.set('INFO_FORMAT', format);
-      p.set('FEATURE_COUNT', '10');
-      // 1.3.0 renamed the identify pixel params X/Y → I/J.
-      p.set(wms.version === '1.3.0' ? 'I' : 'X', String(px));
-      p.set(wms.version === '1.3.0' ? 'J' : 'Y', String(py));
-      try {
-        const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
-        if (!res.ok) continue;
-        const body = await res.text();
-        if (/ServiceException|ExceptionReport/i.test(body)) continue; // format unsupported
-        const results = parse(body, keep);
-        if (results === null) continue; // unparseable in this format
-        ctx.record(layer.meta.id, true);
-        // Both filters run on the *raw* attributes, before the allow-list
-        // narrows them: the field they match on (the species name, the river
-        // network's class code) may be one a reader wants shown, but it must
-        // not have to be — `ltema` is filtered on and never displayed.
-        const selected = dedupeResults(
-          results
-            .filter((r) => keepsIdentify(wms.identifyKeep, r))
-            .filter((r) => optionKeeps(layer, chosen, r))
-            .map((r) => selectFields(r, wms.identifyFields))
-            .filter((r) => Object.keys(r).length > 0),
-        ).map((r) =>
-          presentFields(
-            r,
-            wms.identifyLabels,
-            wms.identifyValues,
-            wms.identifyFormats,
-            wms.identifyTokens,
-          ),
-        );
-        return { results: selected.slice(0, 8) };
-      } catch (err) {
-        request.log.warn({ err, layer: layer.meta.id, format }, 'identify upstream failed');
-        upstreamDown = true;
+    // The dialect that answered, remembered across the narrowing retries below:
+    // the format chain is a negotiation with the server, not with the point, so
+    // re-running it per zoom would triple every crowded tap's upstream cost.
+    let dialect: (typeof attempts)[number] | undefined;
+
+    /** One GetFeatureInfo at one zoom, through this layer's whole pipeline. */
+    const ask = async (z: number): Promise<IdentifyFeature[] | null> => {
+      const frac = tileCoords(lat, lng, z);
+      const tx = Math.floor(frac.x);
+      const ty = Math.floor(frac.y);
+      const px = Math.min(255, Math.floor((frac.x - tx) * 256));
+      const py = Math.min(255, Math.floor((frac.y - ty) * 256));
+      for (const attempt of dialect ? [dialect] : attempts) {
+        const url = wmsBaseParams(wms, z, tx, ty);
+        const p = url.searchParams;
+        // Before the identify parameters, never after: a chip that swaps the
+        // drawn dataset contributes its own LAYERS, and the queried set has to
+        // win over it (that is what `optionIdentifyLayers` is for).
+        if (wms.optionParamsOnIdentify) {
+          for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
+            p.set(key, value);
+          }
+        }
+        p.set('REQUEST', 'GetFeatureInfo');
+        // LAYERS is narrowed to the queried set, not left as the drawn set. WMS
+        // requires QUERY_LAYERS ⊆ LAYERS, and a layer whose *drawn* set varies per
+        // option (spawning grounds pick a dataset) would otherwise ask about a
+        // layer it did not name. Every catalog entry queries a subset of what it
+        // draws, so this is the same question asked more cheaply.
+        p.set('LAYERS', queryLayers);
+        p.set('QUERY_LAYERS', queryLayers);
+        p.set('INFO_FORMAT', attempt.format);
+        p.set('FEATURE_COUNT', '10');
+        // 1.3.0 renamed the identify pixel params X/Y → I/J.
+        p.set(wms.version === '1.3.0' ? 'I' : 'X', String(px));
+        p.set(wms.version === '1.3.0' ? 'J' : 'Y', String(py));
+        try {
+          const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
+          if (!res.ok) continue;
+          const body = await res.text();
+          if (/ServiceException|ExceptionReport/i.test(body)) continue; // format unsupported
+          const parsed = attempt.parse(body, keep);
+          if (parsed === null) continue; // unparseable in this format
+          dialect = attempt;
+          ctx.record(layer.meta.id, true);
+          // Both filters run on the *raw* attributes, before the allow-list
+          // narrows them: the field they match on (the species name, the river
+          // network's class code) may be one a reader wants shown, but it must
+          // not have to be — `ltema` is filtered on and never displayed.
+          return dedupeResults(
+            parsed
+              .filter((f) => keepsIdentify(wms.identifyKeep, f.props))
+              .filter((f) => optionKeeps(layer, chosen, f.props))
+              .map((f) => ({ ...f, props: selectFields(f.props, wms.identifyFields) }))
+              .filter((f) => Object.keys(f.props).length > 0),
+          );
+        } catch (err) {
+          request.log.warn(
+            { err, layer: layer.meta.id, format: attempt.format },
+            'identify upstream failed',
+          );
+          upstreamDown = true;
+        }
+      }
+      return null;
+    };
+
+    const widest = await ask(wide);
+    if (widest === null) {
+      if (upstreamDown) {
+        ctx.record(layer.meta.id, false, 'identify unreachable');
+        return reply.code(502).send({ error: 'identify unavailable' });
+      }
+      ctx.record(layer.meta.id, true);
+      return { results: [] };
+    }
+
+    // A tap that caught the neighbours as well is asked again, closer in: the
+    // narrowest radius that still answers is the answer (see `narrowZooms`).
+    // Bisection rather than a walk, because each step is an upstream round trip
+    // — five candidate radii cost at most three of them.
+    let nearest = widest;
+    if (nearest.length > 1) {
+      const ladder = narrowZooms(wide);
+      let lo = 0;
+      let hi = ladder.length - 1;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const narrower = await ask(ladder[mid]!);
+        if (narrower && narrower.length > 0) {
+          nearest = narrower;
+          if (narrower.length === 1) break; // nothing to gain from a smaller radius
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
       }
     }
-    if (upstreamDown) {
-      ctx.record(layer.meta.id, false, 'identify unreachable');
-      return reply.code(502).send({ error: 'identify unavailable' });
-    }
-    ctx.record(layer.meta.id, true);
-    return { results: [] };
+
+    /**
+     * How far out the answers this card is *not* showing were found, rounded to
+     * ten metres — the estimate from the query's zoom, or the farthest feature
+     * actually measured under it, whichever is larger.
+     *
+     * Never the estimate alone, because it is a middle of services that
+     * disagree by a factor of three (see `IDENTIFY_TOLERANCE_PX`), and a card
+     * that says "3 more within 10 m" above a row reading "16 m away" is exactly
+     * the kind of small contradiction that makes a reader stop trusting it.
+     */
+    const omittedRadiusM = (found: IdentifyFeature[]): number => {
+      const measured = found.map((f) => (f.bounds ? boundsDistanceM(f.bounds, at) : 0));
+      const metres = Math.max(identifyRadiusM(wide, lat), ...measured);
+      return Math.max(10, Math.round(metres / 10) * 10);
+    };
+
+    const sorted = sortByDistance(nearest, at).slice(0, IDENTIFY_MAX_RESULTS);
+    const results = sorted.map((f) =>
+      presentFields(
+        f.props,
+        wms.identifyLabels,
+        wms.identifyValues,
+        wms.identifyFormats,
+        wms.identifyTokens,
+      ),
+    );
+    const distances = sorted.map((f) =>
+      f.bounds ? Math.round(boundsDistanceM(f.bounds, at)) : null,
+    );
+    // What the wider tap saw and this answer leaves out. Reported as a count and
+    // a radius rather than dropped in silence: the reader is looking at a map
+    // with more symbols on it than the card has rows, and "3 more within 60 m"
+    // is the difference between a card that is wrong and one that is brief.
+    const omitted = Math.max(0, widest.length - sorted.length);
+    return {
+      results,
+      ...(distances.some((d) => d !== null) ? { distancesM: distances } : {}),
+      ...(omitted > 0 ? { more: { count: omitted, withinM: omittedRadiusM(widest) } } : {}),
+    };
   });
 }

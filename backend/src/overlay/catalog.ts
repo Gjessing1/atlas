@@ -115,6 +115,19 @@ export interface WmsUpstream {
    */
   optionFilter?: { field: string; values: Record<string, Record<string, string[]>> };
   /**
+   * Send `optionParams` on GetFeatureInfo too, for the upstreams that apply
+   * their own filter to a tap.
+   *
+   * Opt-in per layer because the two MapServers in this catalog disagree about
+   * it: Riksantikvaren's SEFRAK narrows a tap by the vendor `FILTER` exactly as
+   * it narrows the tile (measured 2026-08-04 — 36 buildings under one tap, 9
+   * with the ruins filter, and every one of the nine a ruin), while
+   * Artsdatabanken's answers with a plant under a filter for animals. Where it
+   * works it is the better half of the pair: the upstream filters *before*
+   * counting, so the narrowing sees the same features the map is drawing.
+   */
+  optionParamsOnIdentify?: boolean;
+  /**
    * `optionFilter`'s always-on sibling: keep only identify results whose `field`
    * holds one of these values, whatever the user has selected.
    *
@@ -302,6 +315,44 @@ const ALIEN_KINGDOMS: Record<string, string> = { plants: 'Plantae', animals: 'An
  * - **An unknown field name is a ServiceException too**, so a rename upstream
  *   surfaces as a dead layer in the probe rather than as an unfiltered map.
  */
+/**
+ * The Askeladden layers a category chip can draw: the two locality layers and
+ * the monument icons, in the order their `STYLES` names are listed.
+ *
+ * `Sikringssoner` and `Enkeltminner` are deliberately absent — neither
+ * publishes a category style, and STYLES is positional, so keeping them would
+ * mean naming a style they do not have (a ServiceException, i.e. a blank
+ * overlay). The cost is the monument outlines above z15 while a chip is on,
+ * which the icons still stand in for.
+ */
+const HERITAGE_CATEGORY_LAYERS = 'Lokaliteter,Lokalitetsikoner,Enkeltminneikoner';
+
+/**
+ * SEFRAK's register status for a building old enough to be reportable — the
+ * literal the service answers with, shared by the filter and the card's own
+ * translation of it so the two can never drift into disagreeing.
+ */
+const SEFRAK_PRE_1850 = 'Meldepliktig iht. Kulturminneloven §25';
+
+/**
+ * One MapServer vendor `FILTER` over the SEFRAK layer: keep the buildings whose
+ * `field` holds one of these values.
+ *
+ * A single value is emitted as a bare comparison and several inside an `<Or>`
+ * — verified against the live service on 2026-08-04, both the one-value and the
+ * two-value form, at a point where the unfiltered tap answered with three
+ * abandoned records and the filter returned exactly those three. SEFRAK is one
+ * layer, so exactly one filter is emitted (the arity rule that bites the alien
+ * species layer above).
+ */
+function sefrakFilter(field: string, values: string[]): string {
+  const eq = (value: string) =>
+    `<PropertyIsEqualTo><PropertyName>${field}</PropertyName>` +
+    `<Literal>${xml(value)}</Literal></PropertyIsEqualTo>`;
+  const inner = values.length === 1 ? eq(values[0]!) : `<Or>${values.map(eq).join('')}</Or>`;
+  return `(<Filter>${inner}</Filter>)`;
+}
+
 export function alienGroupParams(chosen: Record<string, string>): Record<string, string> {
   const kingdom = ALIEN_KINGDOMS[chosen['group'] ?? ''];
   if (!kingdom) return {};
@@ -1214,7 +1265,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // left to see, and `informasjon` is the surveyor's own field description.
       meta: {
         id: 'heritage-sites',
-        rev: 1,
+        rev: 2,
         title: 'Cultural heritage',
         description:
           'Burial mounds, hill forts, ruins, rock art and war remains from the Askeladden ' +
@@ -1233,6 +1284,50 @@ export function norwegianLayers(): OverlayLayer[] {
           'before 1537 is automatically protected — look, never dig. Outlines draw from z15; ' +
           'below that each site is one icon.',
         profiles: ['curiosities'],
+        // Askeladden's own three-way split of the register, as chips.
+        //
+        // Measured over 156 localities sampled from Agder to Trøndelag
+        // (2026-08-04): archaeology 80 %, buildings and infrastructure 18 %,
+        // church sites 2 %. Those shares are exactly why the chips are worth
+        // having and why the default is everything — a church site is one
+        // symbol in a county, findable only by taking the other 98 % away,
+        // while archaeology *is* the register and hiding it by default would
+        // repeat the groundwater mistake of v0.145.0.
+        options: [
+          {
+            key: 'kind',
+            label: 'Show',
+            defaultValue: 'all',
+            choices: [
+              {
+                value: 'all',
+                label: 'Everything',
+                caption: 'Every recorded site — archaeology, buildings and church grounds.',
+              },
+              {
+                value: 'archaeology',
+                label: 'Archaeology',
+                caption:
+                  'Burial mounds, settlement traces, charcoal pits, hunting systems — what is ' +
+                  'in the ground rather than on it.',
+              },
+              {
+                value: 'buildings',
+                label: 'Buildings & works',
+                caption:
+                  'Standing heritage: farm buildings, roads, industry and the rest of the built ' +
+                  'record.',
+              },
+              {
+                value: 'churches',
+                label: 'Church sites',
+                caption:
+                  'Church grounds, including the ones where the church itself is long gone — ' +
+                  'rare enough that only a filter finds them.',
+              },
+            ],
+          },
+        ],
       },
       upstream: {
         kind: 'wms',
@@ -1244,6 +1339,60 @@ export function norwegianLayers(): OverlayLayer[] {
         // what keeps the tap working above z15.
         layers: 'Sikringssoner,Lokaliteter,Enkeltminner,Lokalitetsikoner,Enkeltminneikoner',
         identifyLayers: 'Enkeltminner,Lokaliteter,Lokalitetsikoner',
+        // The chips are `STYLES`, which on this service *selects* rather than
+        // restyles: measured at Borre on 2026-08-04, `Lokalitetsikoner` draws
+        // 8 116 px unstyled, 7 360 as archaeology, 1 187 as buildings and 132
+        // as church sites.
+        //
+        // Two things force the LAYERS rewrite that comes with it. STYLES is
+        // positional — one name per layer in LAYERS — and the five layers do
+        // not share a vocabulary: `Sikringssoner` has no category styles at
+        // all, `Enkeltminner` has none either, and the monument icons call the
+        // built record `bygninger`/`kirker` where the locality layers call it
+        // `bebyggelse_infrastruktur`/`kirkesteder`. Naming a style a layer does
+        // not publish is a ServiceException, i.e. a blank overlay.
+        optionParams: {
+          kind: {
+            all: {},
+            archaeology: {
+              LAYERS: HERITAGE_CATEGORY_LAYERS,
+              STYLES: 'arkeologiske_minner,arkeologiske_minner,arkeologiske_minner',
+            },
+            buildings: {
+              LAYERS: HERITAGE_CATEGORY_LAYERS,
+              STYLES: 'bebyggelse_infrastruktur,bebyggelse_infrastruktur,bygninger',
+            },
+            churches: {
+              LAYERS: HERITAGE_CATEGORY_LAYERS,
+              STYLES: 'kirkesteder,kirkesteder,kirker',
+            },
+          },
+        },
+        // A tap under a chip asks only the two layers that carry the category
+        // field, so the answer can be filtered at all — `Enkeltminner` has no
+        // `lokaliteteskategori`, and `optionKeeps` keeps what it cannot
+        // classify, which under a chip would read as the filter leaking.
+        optionIdentifyLayers: {
+          kind: {
+            archaeology: 'Lokaliteter,Lokalitetsikoner',
+            buildings: 'Lokaliteter,Lokalitetsikoner',
+            churches: 'Lokaliteter,Lokalitetsikoner',
+          },
+        },
+        // STYLES filters the picture, not the question: GetFeatureInfo ignores
+        // it entirely, so without this a tap under "Church sites" answers with
+        // the burial mound underneath.
+        optionFilter: {
+          field: 'lokaliteteskategori',
+          values: {
+            kind: {
+              all: [],
+              archaeology: ['Arkeologisk minne'],
+              buildings: ['Bebyggelse-Infrastruktur'],
+              churches: ['Kirkested'],
+            },
+          },
+        },
         // The union of the two feature types' fields — `lokalitetsart` on a
         // locality, `enkeltminneart` on a single monument — most specific
         // first.
@@ -1377,7 +1526,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // farm), and `sefrakstatustekst` will tell you the thing is a ruin or gone.
       meta: {
         id: 'old-buildings',
-        rev: 1,
+        rev: 2,
         title: 'Old buildings (pre-1900)',
         description:
           'Every building the SEFRAK survey recorded as standing before 1900. Tap for the quarter ' +
@@ -1398,6 +1547,51 @@ export function norwegianLayers(): OverlayLayer[] {
           'protection — for a pre-1850 building it means the county must be told before it is ' +
           'altered.',
         profiles: ['curiosities'],
+        // The register is 700 000 buildings and a town centre draws as a solid
+        // block of them, so the chips are the difference between "old houses
+        // exist here" and finding the one thing worth walking to.
+        //
+        // Every choice is a share of the register measured over 436 buildings
+        // sampled from Agder to Trøndelag (2026-08-04), because a chip for a
+        // class that is 1 % of the data is a chip that always looks broken:
+        // registered without duty 50 %, ruins and vanished 35 %, pre-1850
+        // 15 %; abandoned farms 16 % and abandoned summer pastures 19 % of
+        // `fysiskmiljotekst`.
+        options: [
+          {
+            key: 'kind',
+            label: 'Show',
+            defaultValue: 'all',
+            choices: [
+              {
+                value: 'all',
+                label: 'Everything',
+                caption: 'Every building the survey recorded — dense in any old town centre.',
+              },
+              {
+                value: 'pre1850',
+                label: 'Pre-1850',
+                caption:
+                  'The §25 buildings: old enough that the county must be told before one is ' +
+                  'altered or torn down.',
+              },
+              {
+                value: 'ruins',
+                label: 'Ruins & gone',
+                caption:
+                  'What the survey found standing and later recorded as a ruin or removed — a ' +
+                  'map of what is no longer there.',
+              },
+              {
+                value: 'abandoned',
+                label: 'Abandoned farms & seters',
+                caption:
+                  'Farmsteads and mountain summer pastures the survey recorded as out of use — ' +
+                  'the buildings at the end of the track.',
+              },
+            ],
+          },
+        ],
       },
       upstream: {
         kind: 'wms',
@@ -1405,6 +1599,27 @@ export function norwegianLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'SEFRAKBygninger',
         identifyLayers: 'SEFRAKBygninger',
+        // MapServer's vendor FILTER, one per layer in LAYERS — and this service
+        // applies it to GetFeatureInfo as well as GetMap, which is why the tap
+        // needs no mirror filter of its own (see `optionParamsOnIdentify`).
+        //
+        // The literals are the register's own strings, verbatim; a typo here
+        // filters to nothing rather than failing, so they are copied from a
+        // live reply rather than from the code list.
+        optionParams: {
+          kind: {
+            all: {},
+            pre1850: { FILTER: sefrakFilter('sefrakstatustekst', [SEFRAK_PRE_1850]) },
+            ruins: { FILTER: sefrakFilter('sefrakstatustekst', ['Ruin og fjernet objekt']) },
+            abandoned: {
+              FILTER: sefrakFilter('fysiskmiljotekst', [
+                'Gardsanlegg, nedlagt, ute av bruk',
+                'Seteranlegg, nedlagt, ute av bruk',
+              ]),
+            },
+          },
+        },
+        optionParamsOnIdentify: true,
         // Ordered as the card, and the order is the whole design of this row:
         // what it is called, when it went up, whether it is even still there,
         // what it stood in, who it was for, what it is built of. `IDENTIFY_CARD_ROWS`
@@ -1450,8 +1665,7 @@ export function norwegianLayers(): OverlayLayer[] {
           // The one row that answers "is there anything there?" — SEFRAK's
           // §25 class is also a legal fact about what may be done to it.
           sefrakstatustekst: {
-            'Meldepliktig iht. Kulturminneloven §25':
-              'Pre-1850 — the county must be told before it is altered',
+            [SEFRAK_PRE_1850]: 'Pre-1850 — the county must be told before it is altered',
             'Annet SEFRAK-objekt': 'Recorded, no reporting duty',
             'Ruin og fjernet objekt': 'A ruin, or gone',
           },
@@ -1851,6 +2065,188 @@ export function norwegianLayers(): OverlayLayer[] {
         // and z13 10/12, both with exactly one deposit in the reply. z12 is
         // ~115 m of tolerance, which is what a symbol on open fjell needs.
         identifyZoom: 12,
+      },
+    },
+    {
+      // Norway's glaciers, and the three things they leave behind: the outline
+      // they used to have, the archaeology melting out of them, and the floods
+      // that come out from under them.
+      //
+      // NVE's glacier database is the rare register that carries its own
+      // history — 6 743 glacier units surveyed from Sentinel-2 in 2018–19, and
+      // 17 306 historical outlines going back to an 1895–1907 survey (counts
+      // read off the REST layers 2026-08-04). Drawing the old outline under the
+      // new one is a picture of retreat that needs no chart, which is why the
+      // chips are epochs rather than styles.
+      meta: {
+        id: 'glaciers',
+        rev: 1,
+        title: 'Glaciers & ice',
+        description:
+          'Every mapped glacier with its name, area and height range — plus the outlines they ' +
+          'had a century ago, the ice patches archaeology is melting out of, and the outburst ' +
+          'floods on record.',
+        group: 'Terrain',
+        attribution: '© NVE',
+        metadataUrl: `${KARTKATALOG}breer`,
+        // `Breflate` is drawn from 1:5 120 000 in (≈z7); the archaeology points
+        // from 1:20 480 000, so the floor is the surface layer's.
+        minzoom: 7,
+        maxzoom: 16,
+        defaultOpacity: 0.75,
+        identify: true,
+        coverageNote:
+          'Glacier outlines are a snapshot of the summer they were photographed (2018–19 for the ' +
+          'current set) — ice has moved since. Outburst floods are the ones somebody recorded, ' +
+          'and an ice patch with finds is a protected site: report what you see, take nothing.',
+        profiles: ['curiosities'],
+        options: [
+          {
+            key: 'era',
+            label: 'Show',
+            defaultValue: 'now',
+            choices: [
+              {
+                value: 'now',
+                label: 'Today',
+                caption: 'The current outlines, surveyed from satellite imagery in 2018–19.',
+              },
+              {
+                value: 'then',
+                label: 'Then & now',
+                caption:
+                  'A century of older surveys under today’s ice — where the old outline sticks ' +
+                  'out, that ground is bare now.',
+              },
+              {
+                value: 'finds',
+                label: 'Melting archaeology',
+                caption:
+                  'The 51 ice patches with active archaeological finds — arrows, hunting gear ' +
+                  'and clothing have come out of these as the ice went.',
+              },
+              {
+                value: 'floods',
+                label: 'Outburst floods',
+                caption:
+                  '185 recorded jøkulhlaups: the date, the volume and what happened downstream.',
+              },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/Bre2/MapServer/WMSServer',
+        version: '1.3.0',
+        layers: 'Breflate',
+        identifyLayers: 'Breflate',
+        // Today's ice stays drawn under every chip — an outburst-flood dot in
+        // the middle of nothing tells a reader neither where the glacier is nor
+        // which way the water went.
+        optionParams: {
+          era: {
+            now: { LAYERS: 'Breflate' },
+            then: { LAYERS: 'Breflate_Historisk,Breflate' },
+            finds: { LAYERS: 'Breflate,Arkeologiske_funn' },
+            floods: { LAYERS: 'Breflate,Jokullaup' },
+          },
+        },
+        // Points before polygons, so a tap that hits both answers with the
+        // event rather than with the ice it happened on.
+        optionIdentifyLayers: {
+          era: {
+            now: 'Breflate',
+            then: 'Breflate,Breflate_Historisk',
+            finds: 'Arkeologiske_funn,Breflate',
+            floods: 'Jokullaup,Breflate',
+          },
+        },
+        // The union of four feature types, most specific first — the flood's
+        // own story, then the ice-patch flag, then the glacier itself. Keys are
+        // ArcGIS *aliases* (`hendelseDato`, `aktivFunn`, `maksHoyde`), which is
+        // what the text/xml dialect emits.
+        //
+        // `objektType` leads because it is the row that says *which* of the four
+        // things the tap found; without it a historic outline and today's ice
+        // are two cards with the same fields and no way to tell them apart.
+        identifyFields: [
+          'objektType',
+          'navn',
+          'aar',
+          'volum',
+          'beskrivelse',
+          'konsekvenser',
+          'aktivFunn',
+          'BRENAVN',
+          'HOVEDBRENAVN',
+          'breType',
+          'AREAL_KM2',
+          'lengde_m',
+          'maksHoyde',
+          'minHoyde',
+          'produktID',
+        ],
+        identifyLabels: {
+          objektType: 'What',
+          navn: 'Name',
+          aar: 'Year',
+          volum: 'Volume (mill. m³)',
+          beskrivelse: 'What happened',
+          konsekvenser: 'Consequences',
+          aktivFunn: 'Archaeology',
+          BRENAVN: 'Glacier',
+          HOVEDBRENAVN: 'Part of',
+          breType: 'Type',
+          AREAL_KM2: 'Area (km²)',
+          lengde_m: 'Length (m)',
+          maksHoyde: 'Top (m)',
+          minHoyde: 'Bottom (m)',
+          produktID: 'Surveyed',
+        },
+        // The outline areas are computed, and published to six decimals — the
+        // first of which is already an argument about where the ice ends.
+        identifyFormats: { AREAL_KM2: 'number', volum: 'number' },
+        identifyValues: {
+          // NVE's own object types, and the ice-patch layer's is the surprise:
+          // it answers `Brepunkt`, the generic "glacier point", because the
+          // archaeology flag lives in `aktivFunn` rather than in the type.
+          objektType: {
+            Breflate: 'Glacier, as mapped today',
+            SnøIsbre: 'Glacier, an older survey',
+            Jokulhlaup: 'Glacier outburst flood',
+            Brepunkt: 'Ice patch with archaeological finds',
+          },
+          // The register's coded glacier types, decoded by the WMS itself —
+          // these are the strings it emits, not the integers behind them.
+          breType: {
+            Innlandsis: 'Ice cap',
+            Platåbre: 'Plateau glacier',
+            Dalbre: 'Valley glacier',
+            Botnbre: 'Cirque glacier',
+            Piedmontbre: 'Piedmont glacier',
+            Steinbre: 'Rock glacier',
+            'Usikker eller vanskelig klassifiserbar type': '',
+          },
+          aktivFunn: { '1': 'Finds have come out of this ice' },
+          // A snowfield the register carries at 0 km² is one it could not
+          // measure, not one with no area; the row is noise either way.
+          AREAL_KM2: { '0': '' },
+          // The survey epochs, which is the whole point of the "then & now"
+          // chip. Every value the two layers hold (2026-08-04); anything NVE
+          // adds later passes through as its raw code rather than vanishing.
+          produktID: {
+            '2018_2019': '2018–2019, from satellite',
+            '1999_2006': '1999–2006',
+            '1988_1997': '1988–1997',
+            '1952_1985': '1952–1985',
+            '1947_1985': '1947–1985, the old glacier atlas',
+            '1895_1907': '1895–1907, the first survey',
+          },
+        },
+        // Polygons for the ice, but the two event layers are single points in
+        // high mountains — the same reason every point register here has a cap.
+        identifyZoom: 13,
       },
     },
     {

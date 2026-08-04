@@ -1,6 +1,6 @@
 /** Overlay layer catalog: the client-side layer registry and its map style. */
 
-import { fmtClock, fmtDuration } from './format.js';
+import { fmtClock, fmtDistanceM, fmtDuration } from './format.js';
 import type { LatLng } from './geo.js';
 import type { LngLatBbox } from './geoproject.js';
 
@@ -309,6 +309,22 @@ export function iceObservationsUrl(
  */
 export interface OverlayIdentifyResponse {
   results: Record<string, string>[];
+  /**
+   * Metres from the tap per result, in the same order — `null` where the
+   * upstream dialect never says where its features are (most of them).
+   *
+   * A parallel array rather than a field on each result, deliberately: an
+   * Android bundle that has not taken the OTA yet renders `results` straight
+   * into card rows, so anything added *inside* an entry would show up as a row
+   * of `[object Object]` on every tap until the device restarts.
+   */
+  distancesM?: (number | null)[];
+  /**
+   * Features the wider tap found that this answer leaves out, and the radius
+   * that tap covered. The card says so rather than pretending the answer is
+   * complete (see `IDENTIFY_MAX_RESULTS` and the narrowing in the backend).
+   */
+  more?: { count: number; withinM: number };
 }
 
 /** One overlay's answer to "what is here?", ready for a client to render. */
@@ -317,6 +333,13 @@ export interface OverlayIdentifyGroup {
   title: string;
   /** Cleaned, display-ready attributes (the backend has already dropped the noise). */
   properties: Record<string, string>;
+  /**
+   * Metres from the tapped point, when the upstream said where the feature is.
+   * Absent means unknown, never zero — a card may not invent precision.
+   */
+  distanceM?: number;
+  /** Same-layer features left out of this answer (see `OverlayIdentifyResponse.more`). */
+  more?: { count: number; withinM: number };
 }
 
 /**
@@ -363,7 +386,16 @@ export async function identifyOverlays(
       const res = await fetch(overlayIdentifyUrl(origin, meta, at, zoom, optionsFor?.(meta)));
       if (!res.ok) return [];
       const body = (await res.json()) as OverlayIdentifyResponse;
-      return body.results.map((properties) => ({ title: meta.title, properties }));
+      return body.results.map((properties, index) => ({
+        title: meta.title,
+        properties,
+        ...(typeof body.distancesM?.[index] === 'number'
+          ? { distanceM: body.distancesM[index] }
+          : {}),
+        // On the nearest one only: it is the answer the reader is looking at,
+        // and repeating "2 more nearby" under each of three wells is noise.
+        ...(index === 0 && body.more ? { more: body.more } : {}),
+      }));
     }),
   );
   return settled.flatMap((s) => (s.status === 'fulfilled' ? s.value : []));
@@ -536,11 +568,56 @@ export function trafficFlowIdentify(
 export const IDENTIFY_CARD_GROUPS = 3;
 export const IDENTIFY_CARD_ROWS = 6;
 
+/**
+ * Below this many metres a card says nothing about distance.
+ *
+ * "3 m away" on the feature the reader just tapped is not information, it is
+ * doubt: a finger is wider than that, and so is the symbol under it. The
+ * distance exists to separate the thing you hit from the neighbours that came
+ * back with it, and at arm's length there is nothing to separate.
+ */
+export const IDENTIFY_NEAR_M = 10;
+
+/**
+ * The URL an identify value *is*, when the whole value is one.
+ *
+ * Several of these registers answer with a link and nothing else to say —
+ * NGU's geosite fact sheet, Askeladden's Kulturminnesøk record — and printed as
+ * text it is the one row a reader cannot use: too long to retype, not
+ * selectable inside a card. Both clients ask this and render a link instead.
+ *
+ * Whole-value only, and http(s) only: a description that happens to mention a
+ * URL is still a description, and a `javascript:` value is not a fact sheet.
+ */
+export function identifyValueUrl(value: string): string | undefined {
+  const text = value.trim();
+  return /^https?:\/\/[^\s"'<>]+$/i.test(text) ? text : undefined;
+}
+
+/**
+ * What to show *as* that link: its host, which is the part that says whether
+ * this is worth a tap ("kulturminnesok.no"). The URL itself is 90 characters of
+ * query string that would wrap over three lines of a card.
+ */
+export function identifyLinkLabel(url: string): string {
+  const match = /^https?:\/\/(?:www\.)?([^/?#]+)/i.exec(url);
+  return match?.[1] ?? url;
+}
+
+/** The control that lifts a clipped identify block, worded once for both clients. */
+export function identifyExpandLabel(expanded: boolean): string {
+  return expanded ? 'Show less' : 'Show more';
+}
+
 /** One overlay's answer, cut to what a card has room for. */
 export interface IdentifyCardGroup {
   readonly title: string;
   /** `[label, value]` pairs in the upstream's own order. */
   readonly rows: readonly (readonly [string, string])[];
+  /** "40 m away" — absent for an answer under the tap, and when nothing said. */
+  readonly distance?: string;
+  /** "2 more within 60 m" — what this layer answered that the card left out. */
+  readonly note?: string;
 }
 
 /**
@@ -549,17 +626,66 @@ export interface IdentifyCardGroup {
  * A group with no rows is kept, not dropped: the heading is often the whole
  * answer — an unnamed ATK site is still "Speed camera", and a hunting field
  * with no remarks is still that field.
+ *
+ * The three slots are handed out a round at a time, one per overlay, before any
+ * overlay gets a second: a tap in a suburb catches three groundwater wells, and
+ * taking the first three in order spent the whole card on them while the
+ * heritage site under the same finger never appeared. Everything that does not
+ * fit is counted in the last shown group's note, so a short card still says how
+ * much it is not showing.
  */
 export function identifyCardGroups(
   groups: readonly OverlayIdentifyGroup[],
 ): readonly IdentifyCardGroup[] {
-  return groups.slice(0, IDENTIFY_CARD_GROUPS).map((group) => ({
-    title: group.title,
-    rows: Object.entries(group.properties).slice(0, IDENTIFY_CARD_ROWS) as (readonly [
-      string,
-      string,
-    ])[],
-  }));
+  const byTitle = new Map<string, OverlayIdentifyGroup[]>();
+  for (const group of groups) {
+    const list = byTitle.get(group.title);
+    if (list) list.push(group);
+    else byTitle.set(group.title, [group]);
+  }
+  const quota = new Map<string, number>();
+  let taken = 0;
+  for (let round = 0; taken < IDENTIFY_CARD_GROUPS; round++) {
+    let progressed = false;
+    for (const [title, list] of byTitle) {
+      if (taken >= IDENTIFY_CARD_GROUPS) break;
+      if (list.length <= round) continue;
+      quota.set(title, round + 1);
+      taken++;
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+  const out: IdentifyCardGroup[] = [];
+  for (const [title, list] of byTitle) {
+    const take = quota.get(title) ?? 0;
+    const hidden = list.length - take + (list[0]?.more?.count ?? 0);
+    for (const [index, group] of list.slice(0, take).entries()) {
+      const distance =
+        typeof group.distanceM === 'number' && group.distanceM >= IDENTIFY_NEAR_M
+          ? `${fmtDistanceM(group.distanceM)} away`
+          : undefined;
+      const last = index === take - 1;
+      // "about", because the radius is an estimate of an upstream tolerance
+      // nobody publishes — see IDENTIFY_TOLERANCE_PX on the backend.
+      const note =
+        last && hidden > 0
+          ? `${hidden} more ${
+              list[0]?.more ? `within about ${fmtDistanceM(list[0].more.withinM)}` : 'nearby'
+            }`
+          : undefined;
+      out.push({
+        title,
+        rows: Object.entries(group.properties).slice(0, IDENTIFY_CARD_ROWS) as (readonly [
+          string,
+          string,
+        ])[],
+        ...(distance ? { distance } : {}),
+        ...(note ? { note } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 /**

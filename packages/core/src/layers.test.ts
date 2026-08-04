@@ -7,7 +7,9 @@ import {
   iceObservationIdentify,
   iceObservationsUrl,
   identifyCardGroups,
+  identifyLinkLabel,
   identifyOverlays,
+  identifyValueUrl,
   huntingFieldIdentify,
   speedCameraIdentify,
   trafficFlowIdentify,
@@ -299,6 +301,57 @@ describe('identifyCardGroups', () => {
 
   it('is empty for a tap nothing answered', () => {
     expect(identifyCardGroups([])).toEqual([]);
+  });
+
+  it('gives every overlay a slot before any overlay gets a second', () => {
+    // A tap in a suburb catches three groundwater wells. Taken in order they
+    // fill the card and the heritage site under the same finger never appears.
+    const shown = identifyCardGroups([
+      group('Wells & springs', 1),
+      group('Wells & springs', 1),
+      group('Wells & springs', 1),
+      group('Heritage sites', 1),
+    ]);
+    expect(shown.map((g) => g.title)).toEqual([
+      'Wells & springs',
+      'Wells & springs',
+      'Heritage sites',
+    ]);
+    // And the card says what it is not showing rather than dropping it silently.
+    expect(shown[1]!.note).toBe('1 more nearby');
+  });
+
+  it('says how far away the answers behind the first one are', () => {
+    const shown = identifyCardGroups([
+      { ...group('Old buildings', 1), distanceM: 3 },
+      { ...group('Old buildings', 1), distanceM: 42 },
+    ]);
+    // Nothing on the one under the finger: "3 m away" is doubt, not information.
+    expect(shown[0]!.distance).toBeUndefined();
+    expect(shown[1]!.distance).toBe('42 m away');
+  });
+
+  it('recognises the answers that are a link, and only those', () => {
+    // NGU's geosite fact sheet and Askeladden's Kulturminnesøk record are whole
+    // rows that are nothing but a URL — printed as text they are the one answer
+    // a reader cannot use.
+    expect(identifyValueUrl(' https://kulturminnesok.no/ra/lokalitet/22228 ')).toBe(
+      'https://kulturminnesok.no/ra/lokalitet/22228',
+    );
+    expect(identifyLinkLabel('https://www.kulturminnesok.no/ra/lokalitet/22228')).toBe(
+      'kulturminnesok.no',
+    );
+    // A description that mentions a URL is still a description, and a
+    // javascript: value is not a fact sheet.
+    expect(identifyValueUrl('See https://x.example for the survey')).toBeUndefined();
+    expect(identifyValueUrl('javascript:alert(1)')).toBeUndefined();
+  });
+
+  it('counts the neighbours the backend left out into the last shown group', () => {
+    const shown = identifyCardGroups([
+      { ...group('Wells & springs', 1), more: { count: 2, withinM: 60 } },
+    ]);
+    expect(shown[0]!.note).toBe('2 more within about 60 m');
   });
 });
 

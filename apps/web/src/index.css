@@ -393,6 +393,52 @@ button {
   margin-bottom: 2px;
 }
 
+/* Opened by "Show more": still bounded, so a chatty upstream can never push
+   the card's actions off the screen — just tall enough to read a paragraph. */
+.place-card-identify.expanded {
+  max-height: 380px;
+}
+
+/* The control itself: a link, not a button-looking thing, since it changes
+   nothing but how much of the answer is visible. */
+.place-card-identify-more {
+  align-self: flex-start;
+  margin-top: -2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* A register's own record — NGU's fact sheet, Kulturminnesøk. Shown by host so
+   a 90-character query string cannot wrap over three lines of the card. */
+.place-card-identify-link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+/* How far this answer is from the tap — beside the overlay's name, in the
+   heading's muted colour but none of its shouting (see IDENTIFY_NEAR_M: it
+   only appears when there is a real distance to report). */
+.place-card-identify strong em {
+  margin-left: 6px;
+  font-style: normal;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* What the card is not showing, said out loud rather than left to the map. */
+.place-card-identify-note {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .place-card-identify-row {
   display: flex;
   gap: 8px;

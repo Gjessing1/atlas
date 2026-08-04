@@ -2,6 +2,9 @@ import { usePlaceFacts } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
   identifyCardGroups,
+  identifyExpandLabel,
+  identifyLinkLabel,
+  identifyValueUrl,
   WIKIMEDIA_USER_AGENT,
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
@@ -17,6 +20,7 @@ import { usePlaceContent } from '../place/usePlaceContent';
 import type { LocalPack } from '../regions/packs';
 import { useServerOrigin } from '../serverOrigin';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
+import { copyToClipboard } from './clipboard';
 import { PotentialExplainCard } from './PotentialExplainCard';
 import { StandBlock } from './StandBlock';
 import { StopDepartures } from './StopDepartures';
@@ -180,6 +184,8 @@ export function DestinationCard({
   // decoration. Nothing is downloaded until that action is opened.
   const photos = useNearbyPhotos(at, photosOpen);
   const [nearbyOpen, setNearbyOpen] = useState(false);
+  // Whether the overlay answers are opened out of their clipped box.
+  const [identifyOpen, setIdentifyOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const nearby = useNearbyPlaces(packs, at, nearbyOpen);
   // Every point is a new question — a list left open from the previous card
@@ -188,6 +194,7 @@ export function DestinationCard({
     setNearbyOpen(false);
     setPhotosOpen(false);
     setDeparturesOpen(false);
+    setIdentifyOpen(false);
   }, [target.lat, target.lng]);
   /**
    * Reading is a bigger sheet than tapping "Directions".
@@ -275,23 +282,69 @@ export function DestinationCard({
       {identify.length > 0 ? (
         // "What's here" from the visible overlays. Scrolls inside the card so a
         // chatty upstream can never push the actions off the sheet.
-        <ScrollView style={styles.identify} bounces={false} testID="destination-identify">
-          {identify.map((group, i) => (
-            <View key={`${group.title}-${i}`} style={styles.identifyGroup}>
-              <Text style={styles.identifyTitle}>{group.title}</Text>
-              {group.rows.map(([key, value]) => (
-                <View key={key} style={styles.identifyRow}>
-                  <Text style={styles.identifyKey} numberOfLines={1}>
-                    {key}
-                  </Text>
-                  <Text style={styles.identifyValue} numberOfLines={2}>
-                    {value}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ))}
-        </ScrollView>
+        <>
+          <ScrollView
+            style={identifyOpen ? styles.identifyOpen : styles.identify}
+            bounces={false}
+            testID="destination-identify"
+          >
+            {identify.map((group, i) => (
+              <View key={`${group.title}-${i}`} style={styles.identifyGroup}>
+                <Text style={styles.identifyTitle}>
+                  {group.title}
+                  {/* The first answer of an overlay is the one under the finger;
+                      a distance here says this row is about a neighbour. */}
+                  {group.distance ? (
+                    <Text style={styles.identifyDistance}> {group.distance}</Text>
+                  ) : null}
+                </Text>
+                {group.rows.map(([key, value]) => {
+                  const url = identifyValueUrl(value);
+                  return (
+                    <View key={key} style={styles.identifyRow}>
+                      <Text style={styles.identifyKey} numberOfLines={1}>
+                        {key}
+                      </Text>
+                      {url ? (
+                        // The register's own record: opened on a tap, copied on
+                        // a long press — printed as text it was unusable.
+                        <Text
+                          style={[styles.identifyValue, styles.identifyLink]}
+                          numberOfLines={1}
+                          onPress={() => void Linking.openURL(url)}
+                          onLongPress={() => copyToClipboard(url)}
+                        >
+                          {identifyLinkLabel(url)} ↗
+                        </Text>
+                      ) : (
+                        <Text
+                          style={styles.identifyValue}
+                          // Clipped until the reader asks for it: a surveyor's
+                          // field description is paragraphs long, and the sheet
+                          // opens over the map.
+                          numberOfLines={identifyOpen ? undefined : 2}
+                          selectable
+                        >
+                          {value}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
+                {group.note ? <Text style={styles.identifyNote}>{group.note}</Text> : null}
+              </View>
+            ))}
+          </ScrollView>
+          <Pressable
+            onPress={() => {
+              setIdentifyOpen((open) => !open);
+              if (!identifyOpen) expand();
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.identifyMore}>{identifyExpandLabel(identifyOpen)}</Text>
+          </Pressable>
+        </>
       ) : null}
 
       {content.status === 'loading' ? (
@@ -528,9 +581,16 @@ const styles = StyleSheet.create({
   factLabel: { width: 62, fontSize: 12, color: theme.textMuted },
   factValue: { flex: 1, fontSize: 12, color: theme.text },
   identify: { maxHeight: 132, marginTop: 12 },
+  // Opened by "Show more" — still bounded, so the card's actions stay on the
+  // sheet however much the upstream has to say.
+  identifyOpen: { maxHeight: 320, marginTop: 12 },
+  identifyMore: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  identifyLink: { color: theme.accent, textDecorationLine: 'underline' },
   identifyGroup: { marginBottom: 8 },
   identifyTitle: { fontSize: 12, fontWeight: '800', color: theme.textMuted, marginBottom: 2 },
+  identifyDistance: { fontWeight: '400' },
   identifyRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  identifyNote: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
   identifyKey: { flexShrink: 1, fontSize: 13, color: theme.textMuted },
   identifyValue: { flex: 1, fontSize: 13, color: theme.text, fontWeight: '600' },
   contentLoading: { marginTop: 12, color: theme.textMuted, fontSize: 13 },

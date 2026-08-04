@@ -173,6 +173,9 @@ function testLayers(): OverlayLayer[] {
         },
         optionIdentifyLayers: { kind: { spawning: 'spawning', nursery: 'nursery' } },
         optionParamsFor: (chosen) => (chosen['kind'] === 'nursery' ? { FILTER: '(x)' } : {}),
+        // This upstream applies its own filter to a tap as well as to a tile
+        // (Riksantikvaren's does, Artsdatabanken's does not).
+        optionParamsOnIdentify: true,
         identifyInfoFormats: ['text/plain'],
         identifyZoom: 13,
       },
@@ -390,6 +393,73 @@ describe('layer catalog', () => {
           }
         }
       }
+    }
+  });
+
+  it('filters a chipped tap on the map’s side or ours, but never on neither', () => {
+    // A chip that thins the tile and leaves the tap alone is the worst of both:
+    // the map shows churches and the card answers with the burial mound
+    // underneath. Every layer whose chips filter (rather than swap the dataset)
+    // has to say which mechanism carries the tap — the upstream's own filter
+    // (`optionParamsOnIdentify`) or ours (`optionFilter`).
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms' || !layer.upstream.optionParams) continue;
+      const { optionParams, optionFilter, optionParamsOnIdentify, optionIdentifyLayers } =
+        layer.upstream;
+      if (!layer.meta.identify) continue;
+      for (const [key, byChoice] of Object.entries(optionParams)) {
+        // A chip that only rewrites LAYERS swaps the dataset; the identify-side
+        // twin of that is optionIdentifyLayers, asserted above.
+        const filters = Object.values(byChoice).some((params) =>
+          Object.keys(params).some((name) => name !== 'LAYERS'),
+        );
+        if (!filters) continue;
+        expect(
+          optionParamsOnIdentify || !!optionFilter?.values[key] || !!optionIdentifyLayers?.[key],
+          `${layer.meta.id}: chip ${key} filters the tile but nothing filters the tap`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('gives the SEFRAK chips the register’s own literals, filtered upstream', () => {
+    // The filter is a string this repo builds, and a typo in a Norwegian
+    // literal fails *quietly* — MapServer answers an empty map rather than an
+    // exception — so the values are asserted against the register's spelling.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'old-buildings')!;
+    const upstream = layer.upstream as {
+      optionParams: Record<string, Record<string, Record<string, string>>>;
+      optionParamsOnIdentify?: boolean;
+    };
+    expect(upstream.optionParamsOnIdentify).toBe(true);
+    const filter = (choice: string) => upstream.optionParams['kind']![choice]!['FILTER'] ?? '';
+    expect(filter('all')).toBe('');
+    expect(filter('pre1850')).toContain('Meldepliktig iht. Kulturminneloven §25');
+    expect(filter('ruins')).toContain('<Literal>Ruin og fjernet objekt</Literal>');
+    // Two values ride inside one <Or>; one value must *not*, since a
+    // single-operand Or is ignored by these services.
+    expect(filter('abandoned')).toContain('<Or>');
+    expect(filter('ruins')).not.toContain('<Or>');
+    // One filter per layer in LAYERS, and SEFRAK is one layer.
+    for (const choice of layer.meta.options![0]!.choices) {
+      expect((filter(choice.value).match(/<Filter>/g) ?? []).length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('names a style each heritage layer actually publishes', () => {
+    // STYLES is positional — one name per layer in LAYERS — and naming a style
+    // a layer does not have is a ServiceException, i.e. a blank overlay.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'heritage-sites')!;
+    const upstream = layer.upstream as {
+      optionParams: Record<string, Record<string, Record<string, string>>>;
+    };
+    for (const [choice, params] of Object.entries(upstream.optionParams['kind']!)) {
+      const layers = params['LAYERS'];
+      const styles = params['STYLES'];
+      if (!layers && !styles) continue; // the default chip draws everything
+      expect(styles?.split(',').length, `${choice}: one style per layer`).toBe(
+        layers!.split(',').length,
+      );
     }
   });
 
@@ -812,6 +882,101 @@ describe('identify proxy', () => {
     expect(res.json()).toEqual({
       results: [{ navn: 'Hostvedt skjerp' }, { navn: 'Annet skjerp' }],
     });
+  });
+
+  it('asks again, closer in, when the tap caught the neighbours too', async () => {
+    // The complaint this exists for: a tap on one well answered with three,
+    // because the cap that makes a point layer answerable at all widens the tap
+    // to ~57 m. Anything narrower than the wide query answers with the one
+    // under the finger, and that is the answer.
+    const at = (z: number) =>
+      z <= 13
+        ? "  Feature 1:\n    navn = 'A'\n  Feature 2:\n    navn = 'B'\n  Feature 3:\n    navn = 'C'\n"
+        : z <= 15
+          ? "  Feature 1:\n    navn = 'A'\n  Feature 2:\n    navn = 'B'\n"
+          : "  Feature 1:\n    navn = 'A'\n";
+    const { app, cacheDir, requests } = await build((url) => {
+      const bbox = url.searchParams.get('BBOX')!.split(',').map(Number);
+      const z = Math.round(Math.log2((2 * 20037508.342789244) / (bbox[2]! - bbox[0]!)));
+      return { contentType: 'text/plain', body: at(z) };
+    });
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=17' });
+    // One answer, and an honest count of what the wide tap also saw.
+    expect(res.json()).toEqual({
+      results: [{ navn: 'A' }],
+      more: { count: 2, withinM: expect.any(Number) },
+    });
+    expect((res.json() as { more: { withinM: number } }).more.withinM).toBeGreaterThan(20);
+    // Bisection, not a walk: five candidate radii inside four round trips.
+    expect(requests.length).toBeLessThanOrEqual(4);
+    // And the dialect is negotiated once, not per radius.
+    expect(requests.every((r) => r.searchParams.get('INFO_FORMAT') === 'text/plain')).toBe(true);
+  });
+
+  it('keeps the wide answer when nothing narrower answers at all', async () => {
+    // A tap 40 m off the symbol it aimed at is the normal case on a phone: the
+    // narrow queries all come back empty, and dropping to "nothing here" would
+    // be a regression dressed up as precision.
+    const { app, cacheDir, requests } = await build((url) => {
+      const bbox = url.searchParams.get('BBOX')!.split(',').map(Number);
+      const z = Math.round(Math.log2((2 * 20037508.342789244) / (bbox[2]! - bbox[0]!)));
+      return {
+        contentType: 'text/plain',
+        body:
+          z <= 13 ? "  Feature 1:\n    navn = 'A'\n  Feature 2:\n    navn = 'B'\n" : 'no results',
+      };
+    });
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=16' });
+    expect(res.json()).toEqual({ results: [{ navn: 'A' }, { navn: 'B' }] });
+    expect(requests.length).toBeGreaterThan(1);
+  });
+
+  it('answers nearest first, with the distance to the ones behind it', async () => {
+    // MapServer publishes a per-feature Box when the mapfile says so
+    // (Riksantikvaren's SEFRAK does, NGU's GRANADA does not), and it is the
+    // only thing in the chain that can tell a card which building was tapped.
+    const feature = (name: string, lng: number) => `<SEFRAK_feature>
+      <gml:boundedBy><gml:Box srsName="EPSG:3857">
+        <gml:coordinates>${lng * 111319.49},8271055.4 ${lng * 111319.49},8271055.4</gml:coordinates>
+      </gml:Box></gml:boundedBy>
+      <navn>${name}</navn>
+    </SEFRAK_feature>`;
+    const { app, cacheDir } = await build((url) =>
+      url.searchParams.get('INFO_FORMAT') === 'application/vnd.ogc.gml'
+        ? {
+            contentType: 'application/vnd.ogc.gml',
+            body: `<msGMLOutput>${feature('far', 10.0018)}${feature('near', 10.0)}</msGMLOutput>`,
+          }
+        : { contentType: 'text/xml', body: '<ServiceExceptionReport/>' },
+    );
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/depth/identify?lat=59.41694&lng=10&zoom=13',
+    });
+    const body = res.json() as { results: Record<string, string>[]; distancesM: number[] };
+    expect(body.results.map((r) => r.navn)).toEqual(['near', 'far']);
+    expect(body.distancesM[0]).toBeLessThan(5);
+    expect(body.distancesM[1]).toBeGreaterThan(90);
+  });
+
+  it('hands a chip’s own filter to the upstream when it honours one on a tap', async () => {
+    // Riksantikvaren's SEFRAK narrows a GetFeatureInfo by the same vendor
+    // FILTER it narrows a tile by, which is better than filtering the reply
+    // here: the upstream filters *before* counting, so the narrowing sees the
+    // features the map is actually drawing.
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'text/plain',
+      body: "  Feature 1:\n    navn = 'x'\n",
+    }));
+    track(app, cacheDir);
+    await app.inject({ url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=13&kind=nursery' });
+    const asked = requests[0]!.searchParams;
+    expect(asked.get('FILTER')).toBe('(x)');
+    // …and the queried set still wins over the chip's drawn set.
+    expect(asked.get('LAYERS')).toBe('nursery');
+    expect(asked.get('QUERY_LAYERS')).toBe('nursery');
   });
 
   it('404s for non-identifiable layers and 400s bad coordinates', async () => {

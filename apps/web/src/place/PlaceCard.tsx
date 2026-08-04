@@ -3,6 +3,9 @@ import {
   fmtCoords,
   fmtDistanceM,
   identifyCardGroups,
+  identifyExpandLabel,
+  identifyLinkLabel,
+  identifyValueUrl,
   placeTargetSubtitle,
   shareFormats,
   type LatLng,
@@ -15,7 +18,7 @@ import {
 import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
 import { StandBlock } from './StandBlock.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
@@ -240,24 +243,77 @@ function NearbyFeatures({
  *
  * Scrolls within a fixed height for the same reason Android's does: no upstream
  * gets to push the card's actions out of reach.
+ *
+ * The first answer of each overlay is the one under the finger; the distance
+ * beside a heading is what tells a reader that *this* row is about the well 40 m
+ * up the road rather than the one they aimed at.
  */
 function IdentifyBlock({ groups }: { groups: PlaceTarget['identify'] }) {
   const shown = identifyCardGroups(groups ?? []);
+  // A surveyor's field description runs to paragraphs, and the block is a fixed
+  // scroll box — so a long answer was there but looked cut. The reader opens it.
+  const [expanded, setExpanded] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  const box = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    // 4 px of slack: a sub-pixel line height must not put a permanent "Show
+    // more" under a block that shows everything already.
+    setClipped(!!el && el.scrollHeight > el.clientHeight + 4);
+    // Keyed on the answers themselves, not on the array `identifyCardGroups`
+    // rebuilds every render — a state-setting effect with an unstable dep is
+    // the shape that has cost this app a render loop before.
+  }, [groups, expanded]);
   if (shown.length === 0) return null;
   return (
-    <div className="place-card-identify" data-testid="place-card-identify">
-      {shown.map((group, i) => (
-        <section key={`${group.title}-${i}`}>
-          <strong>{group.title}</strong>
-          {group.rows.map(([key, value]) => (
-            <div className="place-card-identify-row" key={key}>
-              <span>{key}</span>
-              <span>{value}</span>
-            </div>
-          ))}
-        </section>
-      ))}
-    </div>
+    <>
+      <div
+        className={`place-card-identify${expanded ? ' expanded' : ''}`}
+        data-testid="place-card-identify"
+        ref={box}
+      >
+        {shown.map((group, i) => (
+          <section key={`${group.title}-${i}`}>
+            <strong>
+              {group.title}
+              {group.distance ? <em>{group.distance}</em> : null}
+            </strong>
+            {group.rows.map(([key, value]) => {
+              const url = identifyValueUrl(value);
+              return (
+                <div className="place-card-identify-row" key={key}>
+                  <span>{key}</span>
+                  {url ? (
+                    // The register's own record. An anchor rather than text, so
+                    // it can be opened, copied and long-pressed like any link.
+                    <a
+                      className="place-card-identify-link"
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {identifyLinkLabel(url)} ↗
+                    </a>
+                  ) : (
+                    <span>{value}</span>
+                  )}
+                </div>
+              );
+            })}
+            {group.note ? <p className="place-card-identify-note">{group.note}</p> : null}
+          </section>
+        ))}
+      </div>
+      {clipped || expanded ? (
+        <button
+          type="button"
+          className="place-card-identify-more"
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {identifyExpandLabel(expanded)}
+        </button>
+      ) : null}
+    </>
   );
 }
 

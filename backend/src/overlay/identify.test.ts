@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  boundsDistanceM,
   cleanProps,
   decodeXmlText,
   dedupeResults,
   formatEsriDateTime,
+  formatNumber,
   formatNveDate,
+  gmlBounds,
+  identifyRadiusM,
   identifyZoom,
   keepSet,
   keepsIdentify,
@@ -13,9 +17,19 @@ import {
   parseGmlInfo,
   parseTextInfo,
   presentFields,
+  narrowZooms,
   selectFields,
+  sortByDistance,
   translateTokens,
 } from './identify.js';
+
+/**
+ * The parsers answer with `{ props, bounds? }` per feature — the attributes are
+ * what most assertions here are about, so they are read through this rather
+ * than restated in every expectation. The position has tests of its own.
+ */
+const propsOf = (features: { props: Record<string, string> }[] | null) =>
+  features?.map((f) => f.props);
 
 /**
  * The identify parsers are where the real edge cases live (noise keys, the -1
@@ -165,6 +179,29 @@ describe('presentFields', () => {
     expect(presentFields(raw, undefined, undefined)).toBe(raw);
   });
 
+  it('cuts a computed measurement to two decimals, and drops what says nothing', () => {
+    // NVE publishes a glacier's area as `543.192344` km² — six decimals of a
+    // figure whose first one is an argument about where the ice ends.
+    expect(
+      presentFields({ AREAL_KM2: '543.192344' }, { AREAL_KM2: 'Area (km²)' }, undefined, {
+        AREAL_KM2: 'number',
+      }),
+    ).toEqual({ 'Area (km²)': '543.19' });
+    // A row a mapping empties is gone, formatter or not: "Area: " is worse
+    // than no area row at all.
+    expect(
+      presentFields(
+        { AREAL_KM2: '0' },
+        { AREAL_KM2: 'Area (km²)' },
+        { AREAL_KM2: { '0': '' } },
+        { AREAL_KM2: 'number' },
+      ),
+    ).toEqual({});
+    // Not a number: the same field can hold a range or a word.
+    expect(formatNumber('Null')).toBe('Null');
+    expect(formatNumber('11.46')).toBe('11.46');
+  });
+
   it('formats both date orderings present in NVE weakened-ice records', () => {
     expect(formatNveDate('20060217')).toBe('2006-02-17');
     expect(formatNveDate('20211811')).toBe('2021-11-18');
@@ -182,7 +219,7 @@ describe('parseGeojsonInfo', () => {
     const body = JSON.stringify({
       features: [{ properties: { dybde_m: 24, OBJECTID: 7 } }, { properties: { OBJECTID: 8 } }, {}],
     });
-    expect(parseGeojsonInfo(body)).toEqual([{ dybde_m: '24' }, {}, {}]);
+    expect(propsOf(parseGeojsonInfo(body))).toEqual([{ dybde_m: '24' }, {}, {}]);
   });
 
   it('returns null (try the next format) for non-JSON or a non-collection', () => {
@@ -201,7 +238,7 @@ describe('parseGmlInfo', () => {
       </DybdePunkt_feature>
       <DybdePunkt_feature><dybde_m>12</dybde_m></DybdePunkt_feature>
     </DybdePunkt_layer></msGMLOutput>`;
-    expect(parseGmlInfo(gml)).toEqual([{ dybde_m: '31' }, { dybde_m: '12' }]);
+    expect(propsOf(parseGmlInfo(gml))).toEqual([{ dybde_m: '31' }, { dybde_m: '12' }]);
   });
 
   it('reads a featureMember dialect and drops features left empty', () => {
@@ -209,7 +246,126 @@ describe('parseGmlInfo', () => {
       <gml:featureMember><teig><matrikkelnummer>3203-1/2</matrikkelnummer></teig></gml:featureMember>
       <gml:featureMember><teig><OBJECTID>9</OBJECTID></teig></gml:featureMember>
     </wfs:FeatureCollection>`;
-    expect(parseGmlInfo(gml)).toEqual([{ matrikkelnummer: '3203-1/2' }]);
+    expect(propsOf(parseGmlInfo(gml))).toEqual([{ matrikkelnummer: '3203-1/2' }]);
+  });
+
+  it('reads where the feature is, so a tap can rank the neighbours', () => {
+    // Verbatim shape of Riksantikvaren's SEFRAK reply (2026-08-04): a per-
+    // feature Box in the CRS the request asked for. This is the only thing in
+    // the whole format chain that says where anything is.
+    const gml = `<msGMLOutput><SEFRAKBygninger_layer>
+      <SEFRAKBygninger_feature>
+        <gml:boundedBy>
+          <gml:Box srsName="EPSG:3857">
+            <gml:coordinates>1166940.781841,8271055.413643 1166940.781841,8271055.413643</gml:coordinates>
+          </gml:Box>
+        </gml:boundedBy>
+        <objektnavn>TORVET 3, HORTEN</objektnavn>
+      </SEFRAKBygninger_feature>
+    </SEFRAKBygninger_layer></msGMLOutput>`;
+    const bounds = parseGmlInfo(gml)[0]?.bounds;
+    expect(bounds?.west).toBeCloseTo(10.482807, 5);
+    expect(bounds?.south).toBeCloseTo(59.416944, 5);
+    // A building is a point in this register: one corner, twice.
+    expect(bounds?.east).toBeCloseTo(bounds!.west, 6);
+    expect(bounds?.north).toBeCloseTo(bounds!.south, 6);
+  });
+});
+
+describe('gmlBounds', () => {
+  it('reads GML 3 positions and an envelope’s two corners', () => {
+    expect(
+      gmlBounds('<gml:Point srsName="EPSG:3857"><gml:pos>1166940 8271055</gml:pos></gml:Point>'),
+    ).toBeDefined();
+    const envelope = gmlBounds(
+      `<gml:Envelope srsName="urn:ogc:def:crs:EPSG::3857">
+         <gml:lowerCorner>1166000 8271000</gml:lowerCorner>
+         <gml:upperCorner>1167000 8272000</gml:upperCorner>
+       </gml:Envelope>`,
+    );
+    expect(envelope!.east).toBeGreaterThan(envelope!.west);
+    expect(envelope!.north).toBeGreaterThan(envelope!.south);
+  });
+
+  it('refuses a frame it did not ask for rather than guessing the axis order', () => {
+    // WMS 1.3.0 flipped the axis order of geographic CRSs. Read as x,y, a
+    // building in Horten lands in the Indian Ocean — an answer that is wrong
+    // is worse than the "no distance" every other dialect already returns.
+    expect(
+      gmlBounds('<gml:Point srsName="EPSG:4326"><gml:pos>59.41 10.48</gml:pos></gml:Point>'),
+    ).toBeUndefined();
+    expect(
+      gmlBounds('<gml:Box><gml:coordinates>1,2 3,4</gml:coordinates></gml:Box>'),
+    ).toBeUndefined();
+  });
+
+  it('takes the CRS from the feature when the geometry does not carry it', () => {
+    const chunk = `<x_feature><gml:boundedBy srsName="EPSG:3857">
+      <gml:Box><gml:coordinates>1166940.781841,8271055.413643</gml:coordinates></gml:Box>
+    </gml:boundedBy></x_feature>`;
+    expect(gmlBounds(chunk)?.south).toBeCloseTo(59.416944, 5);
+  });
+});
+
+describe('boundsDistanceM', () => {
+  const point = { west: 10.482807, south: 59.416944, east: 10.482807, north: 59.416944 };
+
+  it('measures to the feature, and reads zero on top of it', () => {
+    expect(boundsDistanceM(point, { lat: 59.416944, lng: 10.482807 })).toBeCloseTo(0, 5);
+    expect(boundsDistanceM(point, { lat: 59.416944, lng: 10.484541 })).toBeGreaterThan(90);
+    expect(boundsDistanceM(point, { lat: 59.416944, lng: 10.484541 })).toBeLessThan(110);
+  });
+
+  it('measures to an area’s edge, not its centre', () => {
+    // A tap inside Askeladden's largest locality is *on* it; measured to the
+    // centroid it would sort behind a point 40 m away and the card would name
+    // the wrong thing.
+    const area = { west: 10.4, south: 59.4, east: 10.6, north: 59.5 };
+    expect(boundsDistanceM(area, { lat: 59.45, lng: 10.5 })).toBe(0);
+    expect(boundsDistanceM(area, { lat: 59.45, lng: 10.61 })).toBeLessThan(700);
+  });
+});
+
+describe('sortByDistance', () => {
+  const at = { lat: 59.416944, lng: 10.482807 };
+  const box = (lng: number) => ({ west: lng, south: 59.416944, east: lng, north: 59.416944 });
+
+  it('puts the one under the finger first', () => {
+    const far = { props: { objektnavn: 'far' }, bounds: box(10.4845) };
+    const near = { props: { objektnavn: 'near' }, bounds: box(10.48284) };
+    expect(sortByDistance([far, near], at).map((f) => f.props.objektnavn)).toEqual(['near', 'far']);
+  });
+
+  it('keeps positionless answers in upstream order, behind the placed ones', () => {
+    // GRANADA is this case: same GML dialect as SEFRAK, no geometry in the
+    // mapfile, so nothing can be ranked and inventing an order would be a lie.
+    const a = { props: { nummer: '1' } };
+    const b = { props: { nummer: '2' } };
+    const placed = { props: { nummer: '3' }, bounds: box(10.4845) };
+    expect(sortByDistance([a, b, placed], at).map((f) => f.props.nummer)).toEqual(['3', '1', '2']);
+  });
+});
+
+describe('narrowZooms', () => {
+  it('climbs from just inside the wide tap to a factor of sixteen', () => {
+    expect(narrowZooms(13)).toEqual([14, 15, 16, 17]);
+  });
+
+  it('stops where a query would be a pinprick rather than a tap', () => {
+    expect(narrowZooms(16)).toEqual([17, 18]);
+    expect(narrowZooms(18)).toEqual([]);
+  });
+});
+
+describe('identifyRadiusM', () => {
+  it('is roughly the ground radius the measured caps were chosen for', () => {
+    // The catalog's identifyZoom values are written as metres in their
+    // comments — z13 is tens of metres at Norwegian latitudes, z16 a few.
+    expect(identifyRadiusM(13, 60)).toBeGreaterThan(25);
+    expect(identifyRadiusM(13, 60)).toBeLessThan(45);
+    expect(identifyRadiusM(16, 60)).toBeLessThan(6);
+    // Halving the radius per level is the whole basis of the narrowing.
+    expect(identifyRadiusM(14, 60) / identifyRadiusM(15, 60)).toBeCloseTo(2, 6);
   });
 });
 
@@ -220,7 +376,7 @@ describe('parseEsriXmlInfo', () => {
         <FIELDS OBJECTID="56112" navn="Tyrifjorden" dybde_m="180" Shape.STLength()="14771.8"/>
         <FIELDS navn="Steinsfjorden" dybde_m="22"/>
       </FeatureInfoResponse>`;
-    expect(parseEsriXmlInfo(esri)).toEqual([
+    expect(propsOf(parseEsriXmlInfo(esri))).toEqual([
       { navn: 'Tyrifjorden', dybde_m: '180' },
       { navn: 'Steinsfjorden', dybde_m: '22' },
     ]);
@@ -237,7 +393,7 @@ describe('parseEsriXmlInfo', () => {
           Norsknavn="Elg" Funksjon="beiteområde" Rødlistestatus="Null" Punkt="0"
           Shape="Polygon" SHAPE.STArea="62315,17658"></FIELDS>
       </FeatureInfoResponse>`;
-    expect(parseEsriXmlInfo(esri)).toEqual([
+    expect(propsOf(parseEsriXmlInfo(esri))).toEqual([
       {
         Kommune: 'Overhalla (5047)',
         Verdi: 'Svært viktig',
@@ -261,7 +417,7 @@ describe('parseEsriXmlInfo', () => {
 describe('parseTextInfo', () => {
   it('reads indented key = value lines', () => {
     const body = "GetFeatureInfo results:\nLayer 'DybdePunkt'\n  Feature 9:\n    dybde_m = '12'\n";
-    expect(parseTextInfo(body)).toEqual([{ dybde_m: '12' }]);
+    expect(propsOf(parseTextInfo(body))).toEqual([{ dybde_m: '12' }]);
   });
 
   it('answers empty when nothing survives cleaning', () => {
@@ -286,7 +442,7 @@ Layer 'SE_punkt'
     YearCollected = '2021'
     NorskNavn = 'rynkerose'
 `;
-    expect(parseTextInfo(body)).toEqual([
+    expect(propsOf(parseTextInfo(body))).toEqual([
       { VitNavn: 'Bunias orientalis', YearCollected: '2009', NorskNavn: 'russekål' },
       { VitNavn: 'Rosa rugosa', YearCollected: '2021', NorskNavn: 'rynkerose' },
     ]);
@@ -295,7 +451,9 @@ Layer 'SE_punkt'
   it('reads a Norwegian field name, not the tail of one', () => {
     // Same trap the ESRI parser documents: an ASCII \w pattern starts matching
     // after the first non-ASCII letter, inventing a key nothing can match.
-    expect(parseTextInfo("  Feature 1:\n    Årstid = 'vinter'\n")).toEqual([{ Årstid: 'vinter' }]);
+    expect(propsOf(parseTextInfo("  Feature 1:\n    Årstid = 'vinter'\n"))).toEqual([
+      { Årstid: 'vinter' },
+    ]);
   });
 });
 
@@ -335,9 +493,13 @@ describe('decodeXmlText', () => {
   });
 
   it('is applied by the XML parsers', () => {
-    expect(parseGmlInfo('<x_feature><url>a&amp;b</url></x_feature>')).toEqual([{ url: 'a&b' }]);
+    expect(propsOf(parseGmlInfo('<x_feature><url>a&amp;b</url></x_feature>'))).toEqual([
+      { url: 'a&b' },
+    ]);
     expect(
-      parseEsriXmlInfo('<FeatureInfoResponse><FIELDS navn="Bl&amp;tt"/></FeatureInfoResponse>'),
+      propsOf(
+        parseEsriXmlInfo('<FeatureInfoResponse><FIELDS navn="Bl&amp;tt"/></FeatureInfoResponse>'),
+      ),
     ).toEqual([{ navn: 'Bl&tt' }]);
   });
 });
@@ -422,15 +584,20 @@ describe('dedupeResults', () => {
     // DMF's `Sikringer` is a group whose only child is `Aktsomhetssone`, so
     // naming both spent half the card saying one thing.
     const zone = { Working: 'Hostvedt skjerp', Municipality: 'Flesberg' };
-    expect(dedupeResults([zone, { ...zone }, { Working: 'Annet skjerp' }])).toEqual([
-      zone,
-      { Working: 'Annet skjerp' },
-    ]);
+    expect(
+      propsOf(
+        dedupeResults([
+          { props: zone },
+          { props: { ...zone } },
+          { props: { Working: 'Annet skjerp' } },
+        ]),
+      ),
+    ).toEqual([zone, { Working: 'Annet skjerp' }]);
   });
 
   it('keeps records that differ in any field', () => {
     const a = { Species: 'russekål', 'Position accuracy (m)': '5' };
     const b = { Species: 'russekål', 'Position accuracy (m)': '6' };
-    expect(dedupeResults([a, b])).toEqual([a, b]);
+    expect(propsOf(dedupeResults([{ props: a }, { props: b }]))).toEqual([a, b]);
   });
 });
