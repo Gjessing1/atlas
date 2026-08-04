@@ -188,12 +188,18 @@ function TripRow({ trip }: { trip: TransitTrip }) {
         <strong>{summary.times}</strong>
         <span>{summary.meta}</span>
       </div>
+      {summary.departure && (
+        <span className={`commute-confidence ${summary.departure.confidence}`}>
+          {summary.departure.delay
+            ? `Departs ${summary.departure.expected}, planned ${summary.departure.aimed} · ${summary.departure.confidenceLabel}`
+            : `${summary.departure.confidenceLabel} departure`}
+        </span>
+      )}
       <div className="commute-lines" aria-label={summary.lineCodes.join(', then ')}>
         {summary.lineCodes.map((line, index) => (
           <span key={`${line}-${index}`}>{line}</span>
         ))}
       </div>
-      {summary.delay && <span className="commute-delay">{summary.delay}</span>}
       {summary.severityLabel && <span className="commute-warning">{summary.severityLabel}</span>}
     </li>
   );

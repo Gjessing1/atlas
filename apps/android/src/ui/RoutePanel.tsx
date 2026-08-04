@@ -279,6 +279,7 @@ export function RoutePanel({
   onNavigate,
   onExplore,
   onShowTransitTrip,
+  onStartTransitGuidance,
   getMyLocation,
   locatingOrigin = false,
   bottomInset = 0,
@@ -315,6 +316,8 @@ export function RoutePanel({
   onExplore: () => void;
   /** Collapse the planner and frame this selected journey on the map. */
   onShowTransitTrip: (trip: TransitTrip) => void;
+  /** Start the timetable-driven passenger companion for one selected journey. */
+  onStartTransitGuidance: (trip: TransitTrip) => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
   getMyLocation: () => Promise<LatLng | null>;
   /** Directions opened before its automatic current-position lookup finished. */
@@ -910,6 +913,7 @@ export function RoutePanel({
         {transitMode ? (
           <TransitResults
             transit={transit}
+            onStartGuidance={onStartTransitGuidance}
             onShowMap={(trip, index) => {
               transit.select(index);
               Keyboard.dismiss();

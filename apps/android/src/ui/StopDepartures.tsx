@@ -73,6 +73,7 @@ export function StopDepartures({
               aimedMs: departure.aimedDepartureMs,
               expectedMs: departure.expectedDepartureMs,
               realtime: departure.realtime,
+              predictionInaccurate: departure.predictionInaccurate,
             });
             return (
               <View
@@ -123,6 +124,7 @@ export function StopDepartures({
                     {TRANSIT_MODE_LABEL[departure.mode]}
                     {departure.quay.publicCode ? ` · plat. ${departure.quay.publicCode}` : ''}
                     {departure.line.operator ? ` · ${departure.line.operator}` : ''}
+                    {` · ${time.confidenceLabel}`}
                   </Text>
                   {departure.situations[0] ? (
                     <Text style={styles.notice} numberOfLines={2}>

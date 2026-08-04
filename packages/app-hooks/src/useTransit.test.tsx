@@ -181,6 +181,21 @@ describe('useTransitPlan', () => {
     expect(r.current.transit.trip?.startMs).toBe(9_000);
   });
 
+  it('keeps the selected journey snapshot after the online planner closes', async () => {
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+    await settle();
+
+    const chosen = r.current.transit.trips![0]!;
+    act(() => r.current.transit.startGuidance(chosen));
+    act(() => r.current.route.stop());
+
+    expect(r.current.transit.trips).toBeNull();
+    expect(r.current.transit.guidanceTrip).toBe(chosen);
+    act(() => r.current.transit.stopGuidance());
+    expect(r.current.transit.guidanceTrip).toBeNull();
+  });
+
   it('pages with the planner’s own cursor rather than nudging the clock', async () => {
     const transit = vi
       .fn<TransitFn>()

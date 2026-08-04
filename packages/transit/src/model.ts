@@ -211,6 +211,10 @@ export interface TransitLeg {
   expectedEndMs: number;
   /** True when `expected*` is backed by a live feed rather than just echoing the timetable. */
   realtime: boolean;
+  /** Entur warns that the live departure prediction is too uncertain to trust precisely. */
+  startPredictionInaccurate?: boolean;
+  /** The same warning for the arrival prediction at the end of this leg. */
+  endPredictionInaccurate?: boolean;
   from: TransitPlace;
   to: TransitPlace;
   /** Present on ride legs only. */
@@ -329,6 +333,8 @@ export interface TransitDeparture {
   aimedDepartureMs: number;
   expectedDepartureMs: number;
   realtime: boolean;
+  /** The live feed exists, but Entur considers this prediction inaccurate. */
+  predictionInaccurate?: boolean;
   cancelled: boolean;
   destination: string;
   line: TransitLine;

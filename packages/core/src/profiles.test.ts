@@ -121,8 +121,35 @@ describe('map profiles', () => {
     const note = mapProfile('fishhunt').note ?? '';
     expect(note).toContain('never permission');
     expect(note).toContain('landowner');
-    // Nobody else claims one — a note on every profile would be wallpaper.
-    expect(MAP_PROFILES.filter((p) => p.note).map((p) => p.id)).toEqual(['fishhunt']);
+    // Only the two profiles that draw *registers* of things a person might go
+    // and stand on carry one — a note on every profile would be wallpaper.
+    expect(MAP_PROFILES.filter((p) => p.note).map((p) => p.id)).toEqual([
+      'fishhunt',
+      'curiosities',
+    ]);
+  });
+
+  it('offers Curiosities as a wholly contextual preset that promises nothing', () => {
+    const curiosities = mapProfile('curiosities');
+    // No travel mode, like Ski and Fish & Hunt: it is cartography plus a set of
+    // registers, not a costing.
+    expect(curiosities.routing).toBeNull();
+    expect(curiosities.layerTags).toEqual(['curiosities']);
+    expect(curiosities.defaultLayers).toEqual(['heritage-sites', 'geoheritage']);
+    // The whole catalog is contextual here, which is the point: none of these
+    // rows may leak into a profile someone opened to plan a run.
+    for (const id of ['heritage-sites', 'wrecks', 'old-mines', 'alien-species']) {
+      expect(layerInProfile(meta(id, ['curiosities']), 'curiosities')).toBe(true);
+      for (const other of MAP_PROFILES.filter((p) => p.id !== 'curiosities')) {
+        expect(layerInProfile(meta(id, ['curiosities']), other.id)).toBe(false);
+      }
+    }
+    // A register is not permission, not safety, and not a survey — all three
+    // failure modes of this profile are named where both panels render them.
+    const note = curiosities.note ?? '';
+    expect(note).toContain('registers, not invitations');
+    expect(note).toContain('protected by law');
+    expect(note).toContain('unsurveyed, not empty');
   });
 
   it('only names travel modes the routing package actually knows', () => {
@@ -136,17 +163,43 @@ describe('map profiles', () => {
 });
 
 describe('map profile preferences', () => {
-  it('sanitizes visible profiles and keeps a recovery profile', () => {
+  it('sanitizes hidden profiles and keeps a recovery profile', () => {
     expect(
       sanitizeMapProfilePreferences({
-        visible: ['hike', 'rocket', 'hike'],
+        hidden: ['drive', 'rocket', 'drive'],
         layers: { hike: ['trails-hiking', 'weather', 'weather'], rocket: ['x'] },
       }),
     ).toEqual({
-      visible: ['hike'],
+      visible: ['explore', 'bike', 'hike', 'run', 'ski', 'fishhunt', 'curiosities'],
+      hidden: ['drive'],
       layers: { hike: ['trails-hiking', 'weather'] },
     });
-    expect(sanitizeMapProfilePreferences({ visible: [] }).visible).toEqual(['explore']);
+    // Hiding everything is not a state the switcher can render, so Explore
+    // comes back — and stops being listed as hidden, or it would come back
+    // switched off.
+    const all = MAP_PROFILES.map((p) => p.id);
+    expect(sanitizeMapProfilePreferences({ hidden: all })).toMatchObject({
+      visible: ['explore'],
+      hidden: all.filter((id) => id !== 'explore'),
+    });
+  });
+
+  it('reads a pre-v0.143 value without hiding the profiles it predates', () => {
+    // The stored shape used to be the *positive* list, which cannot say
+    // anything about a profile that did not exist when it was written. A user
+    // who had switched Drive off back then must keep Drive off and still be
+    // shown Curiosities — the whole reason the stored field is now `hidden`.
+    const legacy = sanitizeMapProfilePreferences({
+      visible: ['explore', 'bike', 'hike', 'run', 'ski', 'fishhunt'],
+      layers: {},
+    });
+    expect(legacy.hidden).toEqual(['drive']);
+    expect(legacy.visible).toContain('curiosities');
+    expect(legacy.visible).not.toContain('drive');
+    // A legacy list that names nothing is corrupt, not a demand to hide six
+    // profiles: the old sanitizer replaced it with Explore rather than honour
+    // it, so reading intent out of it now would invent a choice nobody made.
+    expect(sanitizeMapProfilePreferences({ visible: [] })).toEqual(defaultMapProfilePreferences());
   });
 
   it('uses Atlas defaults until a profile has an explicit layer selection', () => {

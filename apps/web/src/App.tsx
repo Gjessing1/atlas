@@ -29,6 +29,8 @@ import {
   useNavAddStop,
   useNavPrefs,
   useBestSpots,
+  useStandBoard,
+  type StandBoardRow,
   useNavResume,
   planFromHash,
   useRoutePlanPersistence,
@@ -40,7 +42,7 @@ import {
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
-import { fetchTransitCommute, type TransitCommuteQuery } from '@atlas/transit';
+import { fetchTransitCommute, type TransitCommuteQuery, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
@@ -64,6 +66,7 @@ import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
 import { PotentialTargetSwitch } from './potential/PotentialTargetSwitch.js';
 import { SpotsButton, SpotsPanel } from './potential/SpotsPanel.js';
+import { StandBoardButton, StandBoardPanel } from './potential/StandBoardPanel.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
@@ -90,6 +93,7 @@ import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useDirections } from './routing/useDirections.js';
 import { useRoute } from './routing/useRoute.js';
 import { useTransitPlan } from './routing/useTransit.js';
+import { prepareWebTransitAlarms, TransitGuidance } from './transit/TransitGuidance.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { PlaceEditDialog } from './place/PlaceEditDialog.js';
 import { SearchBox } from './SearchBox.js';
@@ -211,7 +215,7 @@ export function App() {
   blockPassiveClicksRef.current = route.active || measure.open;
 
   useRouteLayers(map, route, transit.enabled, measuringRef);
-  useTransitLayers(map, transit.enabled ? transit.trip : null);
+  useTransitLayers(map, transit.guidanceTrip ?? (transit.enabled ? transit.trip : null));
   // The plan survives a reload, and rides along in the shareable URL hash.
   useRoutePlanPersistence(route, userData, linkedPlan);
   useShareHash(map, pin, route.plan);
@@ -293,6 +297,19 @@ export function App() {
   useEffect(() => {
     if (!layers.derived) setSpotsOpen(false);
   }, [layers.derived]);
+  // The other half of a hunting season: not "where should I sit" but "which of
+  // the stands I already have is on tonight". Opened by hand for the same reason
+  // the shortlist is — it reads a forecast per stand.
+  const [standBoardOpen, setStandBoardOpen] = useState(false);
+  const standBoard = useStandBoard('', userData.places, {
+    enabled: standBoardOpen,
+    near: mapViewport
+      ? {
+          lat: (mapViewport.bbox[1] + mapViewport.bbox[3]) / 2,
+          lng: (mapViewport.bbox[0] + mapViewport.bbox[2]) / 2,
+        }
+      : null,
+  });
   const planningAreas = usePlanningAreas(userData.tracks, userData.getTrackData);
   const bestSpots = useBestSpots('', layers.derived, mapViewport, {
     enabled: spotsOpen,
@@ -317,6 +334,16 @@ export function App() {
       map?.easeTo({ center: [spot.position.lng, spot.position.lat], duration: 500 });
     },
     [bestSpots.spots, map],
+  );
+  // A board row opens the *saved place*, not a copy of it: the card at those
+  // coordinates is the one carrying the stand block, the rose and the notes.
+  const onPickStand = useCallback(
+    (row: StandBoardRow) => {
+      setPin(null);
+      setTarget({ source: 'poi', position: row.position, name: row.name, category: 'Stand' });
+      map?.easeTo({ center: [row.position.lng, row.position.lat], duration: 500 });
+    },
+    [map],
   );
   useSpotLayer(map, bestSpots.spots, onPickSpot, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
@@ -381,6 +408,14 @@ export function App() {
     stopRoute();
     void nav.explore(profile);
   }, [nav, route.profile, stopRoute]);
+  const startTransitGuidance = useCallback(
+    (trip: TransitTrip) => {
+      void prepareWebTransitAlarms();
+      transit.startGuidance(trip);
+      stopRoute();
+    },
+    [stopRoute, transit.startGuidance],
+  );
   // "Directions" on the place card opens the planner with that point as the
   // destination (Android parity): the planner is the one travel-mode picker, so
   // public transport is offered there whether the trip started from a map pin
@@ -988,6 +1023,19 @@ export function App() {
               onClose={() => setSpotsOpen(false)}
             />
           )}
+          {/* The saved-stand board rides beside the shortlist because it is the
+              same workflow's other half — but it is about places already saved,
+              so it does not wait for a prepared cell. */}
+          {layers.derived?.meta.derived?.vocabulary === 'hunt' && !standBoardOpen && (
+            <StandBoardButton onOpen={() => setStandBoardOpen(true)} />
+          )}
+          {layers.derived?.meta.derived?.vocabulary === 'hunt' && standBoardOpen && (
+            <StandBoardPanel
+              state={standBoard}
+              onPick={onPickStand}
+              onClose={() => setStandBoardOpen(false)}
+            />
+          )}
         </div>
       )}
       {/* One real grid for all bottom-right map controls. It owns activity,
@@ -1069,7 +1117,7 @@ export function App() {
           // Both left-hand panels push the card clear of themselves: picking a
           // spot from the shortlist would otherwise open the card *behind* the
           // list it was picked from.
-          shifted={sidebarOpen || spotsOpen}
+          shifted={sidebarOpen || spotsOpen || standBoardOpen}
           onDirections={() => onDirectionsToTarget(target.position, target.name)}
           onSave={onSaveTarget}
           onEdit={(place) => setEditPlaceId(place.id)}
@@ -1151,10 +1199,14 @@ export function App() {
             fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
             onExplore={onStartExplorer}
+            onStartTransitGuidance={startTransitGuidance}
             onSaveTrack={async (data, name, collectionId) =>
               (await userData.saveTrack(data, name, collectionId)) !== null
             }
           />
+        )}
+        {transit.guidanceTrip && (
+          <TransitGuidance trip={transit.guidanceTrip} onStop={transit.stopGuidance} />
         )}
         {sidebarOpen && (
           <Sidebar

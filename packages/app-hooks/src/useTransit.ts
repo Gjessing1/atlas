@@ -248,6 +248,10 @@ export interface TransitPlan extends TransitPlanner {
   select: (index: number | null) => void;
   /** The selected journey — what the map draws. */
   trip: TransitTrip | null;
+  /** Immutable selected-journey snapshot used by the passenger companion. */
+  guidanceTrip: TransitTrip | null;
+  startGuidance: (trip: TransitTrip) => void;
+  stopGuidance: () => void;
 }
 
 /**
@@ -261,6 +265,9 @@ export interface TransitPlan extends TransitPlanner {
 export function useTransitPlan(route: RoutePlanner, transit: TransitFn): TransitPlan {
   const [enabled, setEnabled] = useState(false);
   const [selected, select] = useState<number | null>(0);
+  const [guidanceTrip, setGuidanceTrip] = useState<TransitTrip | null>(null);
+  const startGuidance = useCallback((trip: TransitTrip) => setGuidanceTrip(trip), []);
+  const stopGuidance = useCallback(() => setGuidanceTrip(null), []);
 
   const first = route.waypoints[0];
   const last =
@@ -301,5 +308,16 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   useEffect(() => select(0), [planner.trips]);
 
   const trip = selected !== null ? (planner.trips?.[selected] ?? null) : null;
-  return { ...planner, offered, enabled, setEnabled, selected, select, trip };
+  return {
+    ...planner,
+    offered,
+    enabled,
+    setEnabled,
+    selected,
+    select,
+    trip,
+    guidanceTrip,
+    startGuidance,
+    stopGuidance,
+  };
 }

@@ -224,7 +224,35 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
     expect(ids).toContain('ice-weak');
+    expect(ids).toContain('heritage-sites');
+    expect(ids).toContain('wrecks');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('keeps every option-driven upstream parameter reachable from a declared choice', () => {
+    // `optionParams` is keyed by option key → *choice value* → params, and a
+    // value that no choice declares is unreachable: nothing ever selects it, so
+    // the layer silently keeps drawing its default variant. The alien-species
+    // row makes this worth a test — its chips override `LAYERS` outright, so a
+    // typo there is the difference between "all records" and one risk category,
+    // with a perfectly healthy-looking tile either way.
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms' || !layer.upstream.optionParams) continue;
+      const declared = new Map(
+        (layer.meta.options ?? []).map((o) => [o.key, new Set(o.choices.map((c) => c.value))]),
+      );
+      for (const [key, byChoice] of Object.entries(layer.upstream.optionParams)) {
+        expect(declared.has(key), `${layer.meta.id}: optionParams key ${key} is not declared`).toBe(
+          true,
+        );
+        for (const value of Object.keys(byChoice)) {
+          expect(
+            declared.get(key)!.has(value),
+            `${layer.meta.id}: option ${key} has no choice "${value}"`,
+          ).toBe(true);
+        }
+      }
+    }
   });
 
   it('only annotates identify keys the layer actually shows', () => {

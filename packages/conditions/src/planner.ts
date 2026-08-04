@@ -37,7 +37,21 @@ export interface PlannerOptions {
   species?: string | null;
   /** Hunting tactic profile; omitted for the established general model. */
   huntProfile?: HuntConditionsProfile;
-  /** Forecast horizon in hours (default 72 — met.no turns 6-hourly beyond ~3 days anyway). */
+  /**
+   * Ground steepness at the point, degrees — enables the hunt model's thermal
+   * factor. A viewport shortlist has no single slope and leaves this unset; a
+   * saved stand is one place and does know it.
+   */
+  slopeDeg?: number | null;
+  /** Downhill azimuth at the point, degrees from north. */
+  aspectDeg?: number | null;
+  /**
+   * Forecast horizon in hours (default 72). met.no turns 6-hourly beyond ~3
+   * days, so anything past that must be read as a day rather than an hour —
+   * `bestWindows` already refuses to join steps more than 90 min apart, and a
+   * caller asking for more is taking on the job of saying which cells are
+   * coarse.
+   */
   maxHours?: number;
   /** "Now" override for tests. */
   now?: Date;
@@ -49,7 +63,7 @@ export interface PlannerOptions {
  * an activity kind is given — attach the transparent assessment.
  */
 export function buildPlanner(forecast: WeatherForecast, opts: PlannerOptions = {}): PlannerHour[] {
-  const { kind, species, huntProfile, maxHours = 72 } = opts;
+  const { kind, species, huntProfile, slopeDeg, aspectDeg, maxHours = 72 } = opts;
   const nowMs = (opts.now ?? new Date()).getTime();
   const rows: PlannerHour[] = [];
   let startMs: number | null = null;
@@ -75,6 +89,8 @@ export function buildPlanner(forecast: WeatherForecast, opts: PlannerOptions = {
               pressureTrendHpa: trendHpa,
               species,
               huntProfile,
+              slopeDeg,
+              aspectDeg,
               latitude: forecast.lat,
             }),
           }

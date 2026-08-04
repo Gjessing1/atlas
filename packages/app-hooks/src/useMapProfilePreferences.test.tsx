@@ -27,6 +27,7 @@ describe('useMapProfilePreferences', () => {
       expect(result.current.visibleProfiles.map((profile) => profile.id)).toEqual([
         'drive',
         'hike',
+        'curiosities',
       ]),
     );
     expect(result.current.preferredLayers('hike')).toEqual(['trails-hiking', 'weather']);
@@ -37,7 +38,7 @@ describe('useMapProfilePreferences', () => {
     const store = settings(null);
     const { result } = renderHook(() => useMapProfilePreferences(store));
 
-    for (const id of ['drive', 'bike', 'hike', 'run', 'ski', 'fishhunt']) {
+    for (const id of ['drive', 'bike', 'hike', 'run', 'ski', 'fishhunt', 'curiosities']) {
       act(() => result.current.setVisible(id, false));
     }
     act(() => result.current.setVisible('explore', false));

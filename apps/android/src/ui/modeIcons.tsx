@@ -395,6 +395,25 @@ export function UnknownModeIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconPr
   );
 }
 
+export function CuriositiesIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  // Mirrors the web glyph exactly (apps/web/src/icons.tsx): a lens with a spark
+  // beside it. No single subject icon would do — the profile carries heritage
+  // sites, wrecks, caves, mines and springs at once.
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={10.5} cy={10.5} r={5.8} stroke={color} strokeWidth={1.6} fill="none" />
+      <Path d="M14.8 14.8l5 5" stroke={color} strokeWidth={1.8} strokeLinecap="round" fill="none" />
+      <Path
+        d="M18.4 3l.85 1.95 1.95.85-1.95.85L18.4 8.6l-.85-1.95-1.95-.85 1.95-.85z"
+        stroke={color}
+        strokeWidth={1.3}
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 type ModeIcon = (props: ModeIconProps) => React.ReactElement;
 
 /** Road profiles, keyed by the ids in `ROUTING_PROFILES`. */
@@ -415,6 +434,7 @@ export const MAP_PROFILE_ICON: Record<string, ModeIcon> = {
   run: RunIcon,
   ski: SkiIcon,
   fishhunt: FishHuntIcon,
+  curiosities: CuriositiesIcon,
 };
 
 /**

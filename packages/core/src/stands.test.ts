@@ -5,6 +5,7 @@ import {
   standApproachNote,
   standCardModel,
   standRose,
+  standScentExposure,
   STAND_LANE_MIN_M,
   type PlaceStand,
 } from './stands.js';
@@ -188,5 +189,97 @@ describe('savedStandFeatures', () => {
 
   it('ignores ordinary places — most pins are not stands', () => {
     expect(savedStandFeatures([{ id: 'p2', lat: 59.85, lng: 10.42 }]).features).toHaveLength(0);
+  });
+});
+
+describe('standScentExposure', () => {
+  // A realistic rose: open to the SE quarter (where the habitat is), screened
+  // hard behind. The eight bearings are the ones the engine always persists.
+  const eight = stand({
+    aim: { label: 'SE', bearing: 135, distanceM: 45, position: { lat: 59.851, lng: 10.421 } },
+    lanes: [
+      { key: 'n', label: 'N', bearing: 0, rangeM: 0 },
+      { key: 'ne', label: 'NE', bearing: 45, rangeM: 40 },
+      { key: 'e', label: 'E', bearing: 90, rangeM: 90 },
+      { key: 'se', label: 'SE', bearing: 135, rangeM: 150 },
+      { key: 's', label: 'S', bearing: 180, rangeM: 120 },
+      { key: 'sw', label: 'SW', bearing: 225, rangeM: 30 },
+      { key: 'w', label: 'W', bearing: 270, rangeM: 0 },
+      { key: 'nw', label: 'NW', bearing: 315, rangeM: 0 },
+    ],
+  });
+
+  it('burns the stand when the wind pushes scent onto the habitat', () => {
+    // Wind from the NW blows scent to the SE — where the aim is.
+    const reading = standScentExposure(eight, 315)!;
+    expect(reading.verdict).toBe('blown');
+    expect(reading.scentToLabel).toBe('SE');
+    expect(reading.detail).toContain('straight into the habitat');
+  });
+
+  it('clears the stand when the wind comes off the habitat', () => {
+    const reading = standScentExposure(eight, 135)!;
+    expect(reading.verdict).toBe('good');
+    expect(reading.exposure).toBeLessThan(0.2);
+  });
+
+  // The rule this replaced tested one bearing against a hard 60° cone, so a
+  // wind square across the aim scored exactly as well as a wind in your face.
+  it('calls a wind square across the aim a crosswind, not a clean sit', () => {
+    const reading = standScentExposure(eight, 225)!;
+    expect(reading.verdict).toBe('crosswind');
+    expect(reading.exposure).toBeGreaterThan(0.15);
+    expect(reading.exposure).toBeLessThan(0.45);
+  });
+
+  // The whole reason for weighting the rose rather than the aim alone.
+  it('costs more to be blown into near cover than across open ground', () => {
+    const base = {
+      aim: { label: 'S', bearing: 180, distanceM: 100, position: { lat: 59.85, lng: 10.42 } },
+      maxRangeM: 150,
+    };
+    const closed = standScentExposure(
+      stand({ ...base, lanes: [{ key: 'n', label: 'N', bearing: 0, rangeM: 5 }] }),
+      180,
+    )!;
+    const open = standScentExposure(
+      stand({ ...base, lanes: [{ key: 'n', label: 'N', bearing: 0, rangeM: 150 }] }),
+      180,
+    )!;
+    expect(closed.exposure).toBeGreaterThan(open.exposure);
+  });
+
+  // The aim's share of the stake rises as the habitat comes closer, so the same
+  // plume onto the same habitat reads worse at 30 m than at the planning limit.
+  it('weighs habitat close in harder than habitat at the planning limit', () => {
+    // Lanes point away from the plume, so only the aim's weight moves the answer.
+    const lanes = [
+      { key: 'n', label: 'N', bearing: 0, rangeM: 150 },
+      { key: 'nw', label: 'NW', bearing: 315, rangeM: 150 },
+      { key: 'ne', label: 'NE', bearing: 45, rangeM: 150 },
+    ];
+    const at = (distanceM: number) =>
+      standScentExposure(
+        stand({
+          lanes,
+          aim: { label: 'S', bearing: 180, distanceM, position: { lat: 0, lng: 0 } },
+        }),
+        0,
+      )!.exposure;
+    expect(at(30)).toBeGreaterThan(at(150));
+  });
+
+  it('has no opinion without a wind direction', () => {
+    expect(standScentExposure(eight, null)).toBeNull();
+    expect(standScentExposure(eight, Number.NaN)).toBeNull();
+  });
+
+  // The shortlist's live plan and a saved one are the same shape on purpose.
+  it('reads a bare geometry, not only a saved stand', () => {
+    const reading = standScentExposure(
+      { aim: { bearing: 90, distanceM: 60 }, lanes: [], maxRangeM: 150 },
+      270,
+    )!;
+    expect(reading.verdict).toBe('blown');
   });
 });

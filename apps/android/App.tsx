@@ -15,9 +15,11 @@ import {
   usePotentialExplain,
   usePotentialTarget,
   usePlanningAreas,
+  useStandBoard,
   useThemeMode,
   type FetchNearbyFn,
   type CommuteFn,
+  type StandBoardRow,
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
@@ -82,6 +84,7 @@ import { useTrafficFlow } from './src/layers/useTrafficFlow';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
 import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
+import { StandBoardButton, StandBoardSheet } from './src/ui/StandBoardSheet';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { useOverlays } from './src/layers/useOverlays';
 import { useMapStyle } from './src/map/useMapStyle';
@@ -114,6 +117,7 @@ import { useSync } from './src/sync/useSync';
 import { useDirections } from './src/routing/useDirections';
 import { useRoute } from './src/routing/useRoute';
 import { useTransitPlan } from './src/routing/useTransit';
+import { cancelTransitAlarms, scheduleTransitAlarms } from './modules/transitguidance';
 import { AppSheets } from './src/ui/AppSheets';
 import { DestinationCard, type DestinationTarget } from './src/ui/DestinationCard';
 import { ExploreSheet } from './src/ui/ExploreSheet';
@@ -130,6 +134,7 @@ import { MapActivityControls } from './src/ui/MapActivityControls';
 import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
+import { TransitGuidance } from './src/ui/TransitGuidance';
 import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
@@ -386,6 +391,19 @@ function AppInner() {
     vocabulary: overlaysCtl.derived?.meta.derived?.vocabulary,
     areas: planningAreas,
   });
+  // The other half of a hunting season: not "where should I sit" but "which of
+  // the stands I already have is on tonight". Opened by hand for the same reason
+  // the shortlist is — it reads a forecast per stand.
+  const [standBoardOpen, setStandBoardOpen] = useState(false);
+  const standBoard = useStandBoard(serverOrigin, data.places, {
+    enabled: standBoardOpen,
+    near: camera.mapViewport
+      ? {
+          lat: (camera.mapViewport.bbox[1] + camera.mapViewport.bbox[3]) / 2,
+          lng: (camera.mapViewport.bbox[0] + camera.mapViewport.bbox[2]) / 2,
+        }
+      : null,
+  });
   // "Keep this area offline" (§N5 → E7). Offered only for a derived surface
   // that is switched on and has a settled viewport, because what it keeps is
   // the area on screen — and it reports "kept" instead once a downloaded pack
@@ -545,6 +563,20 @@ function AppInner() {
         lng: spot.position.lng,
         name: `${spot.stand ? 'Stand' : 'Spot'} ${index + 1}`,
         detail: spot.stand ? spot.reason : spot.bandLabel,
+        canSave: true,
+      });
+    },
+    [pickOnMap],
+  );
+  // A board row opens the *saved place*, not a copy of it: the card at those
+  // coordinates is the one carrying the stand block, the rose and the notes.
+  const onPickStand = useCallback(
+    (row: StandBoardRow) => {
+      pickOnMap({
+        lat: row.position.lat,
+        lng: row.position.lng,
+        name: row.name,
+        detail: 'Stand',
         canSave: true,
       });
     },
@@ -748,6 +780,19 @@ function AppInner() {
     route.stop();
     void nav.explore(profile);
   }, [nav, route]);
+  const startTransitGuidance = useCallback(
+    (trip: TransitTrip) => {
+      transit.startGuidance(trip);
+      showTransitTrip(trip);
+      route.stop();
+      void scheduleTransitAlarms(trip);
+    },
+    [route, showTransitTrip, transit.startGuidance],
+  );
+  const stopTransitGuidance = useCallback(() => {
+    transit.stopGuidance();
+    void cancelTransitAlarms();
+  }, [transit.stopGuidance]);
 
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
@@ -1230,6 +1275,29 @@ function AppInner() {
           ) : null}
           <UpdateNotices storage={data.storage} topInset={topInset} />
 
+          {/* The saved-stand board rides beside the shortlist because it is the
+          same workflow's other half — but it is about places already saved, so
+          it does not wait for a prepared cell. */}
+          {!navActive &&
+          !planning &&
+          overlaysCtl.derived?.meta.derived?.vocabulary === 'hunt' &&
+          !standBoardOpen &&
+          !spotsOpen ? (
+            <StandBoardButton
+              top={topInset + 60 + (potentialPillVisible(potential) ? 40 : 0) + 40}
+              left={side.left + 12}
+              onPress={() => setStandBoardOpen(true)}
+            />
+          ) : null}
+
+          <StandBoardSheet
+            visible={standBoardOpen && !planning && !navActive}
+            state={standBoard}
+            onPick={onPickStand}
+            onClose={() => setStandBoardOpen(false)}
+            bottomInset={bottomInset}
+          />
+
           <SpotsSheet
             visible={spotsOpen && !planning && !navActive}
             state={bestSpots}
@@ -1492,9 +1560,19 @@ function AppInner() {
               onNavigate={startNavigation}
               onExplore={startExplorer}
               onShowTransitTrip={showTransitTrip}
+              onStartTransitGuidance={startTransitGuidance}
               getMyLocation={directions.getMyLocation}
               locatingOrigin={directions.locatingOrigin}
               bottomInset={bottomInset}
+            />
+          ) : null}
+          {transit.guidanceTrip ? (
+            <TransitGuidance
+              trip={transit.guidanceTrip}
+              onStop={stopTransitGuidance}
+              top={topInset + 8}
+              left={side.left + 12}
+              right={side.right + 12}
             />
           ) : null}
         </>

@@ -580,7 +580,7 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   expect(hasRouteSource).toBe(true);
 });
 
-test('transit stop search plans from the exact Entur stops selected', async ({ page }) => {
+test('transit stop search plans exact stops and starts guided transit', async ({ page }) => {
   await mockRouting(page);
   const now = Date.now();
   let transitBody: {
@@ -634,11 +634,37 @@ test('transit stop search plans from the exact Entur stops selected', async ({ p
       json: {
         trips: [
           {
-            startMs: now,
+            startMs: now + 240_000,
             endMs: now + 600_000,
-            durationMs: 600_000,
+            durationMs: 360_000,
             walkDistanceM: 0,
-            legs: [],
+            legs: [
+              {
+                mode: 'rail',
+                distanceM: 5_000,
+                durationMs: 360_000,
+                aimedStartMs: now,
+                expectedStartMs: now + 240_000,
+                aimedEndMs: now + 360_000,
+                expectedEndMs: now + 600_000,
+                realtime: true,
+                startPredictionInaccurate: true,
+                endPredictionInaccurate: false,
+                from: {
+                  name: 'Oslo S',
+                  position: { lat: 59.910357, lng: 10.753051 },
+                  quay: { publicCode: '2' },
+                },
+                to: {
+                  name: 'Nationaltheatret',
+                  position: { lat: 59.9147, lng: 10.7333 },
+                },
+                line: { publicCode: 'R14', headsign: 'Kongsvinger' },
+                intermediateStops: [],
+                points: [],
+                situations: [],
+              },
+            ],
           },
         ],
         problems: [],
@@ -679,6 +705,17 @@ test('transit stop search plans from the exact Entur stops selected', async ({ p
       },
     });
   await expect(page.locator('.transit-results')).toBeVisible();
+  await expect(page.locator('.transit-summary-departure')).toContainText('planned');
+  await expect(page.locator('.transit-summary-departure')).toContainText('Live estimate uncertain');
+
+  await page.context().grantPermissions(['notifications']);
+  await page.getByRole('button', { name: 'Start journey' }).click();
+  await expect(page.locator('.route-panel')).toHaveCount(0);
+  const guidance = page.getByRole('complementary', { name: 'Transit guidance' });
+  await expect(guidance).toContainText('Board line R14');
+  await expect(guidance).toContainText('guidance continues offline');
+  await guidance.getByRole('button', { name: 'End' }).click();
+  await expect(guidance).toHaveCount(0);
 });
 
 test('a planned route saves as a track and reopens as an editable route', async ({ page }) => {

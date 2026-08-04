@@ -47,6 +47,7 @@ export function StopDepartures({ location }: { location: TransitLocation }) {
               aimedMs: departure.aimedDepartureMs,
               expectedMs: departure.expectedDepartureMs,
               realtime: departure.realtime,
+              predictionInaccurate: departure.predictionInaccurate,
             });
             return (
               <li
@@ -75,6 +76,7 @@ export function StopDepartures({ location }: { location: TransitLocation }) {
                     {TRANSIT_MODE_LABEL[departure.mode]}
                     {departure.quay.publicCode ? ` · plat. ${departure.quay.publicCode}` : ''}
                     {departure.line.operator ? ` · ${departure.line.operator}` : ''}
+                    {` · ${time.confidenceLabel}`}
                   </span>
                   {departure.situations[0] && (
                     <span className="stop-departure-notice">{departure.situations[0].summary}</span>

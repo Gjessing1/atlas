@@ -28,6 +28,7 @@ import {
   type RoutePreferences,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
+import type { TransitTrip } from '@atlas/transit';
 import { formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
@@ -248,6 +249,7 @@ export function RoutePanel({
   fetchNearby,
   onNavigate,
   onExplore,
+  onStartTransitGuidance,
   onSaveTrack,
 }: {
   route: RoutePlanner;
@@ -273,6 +275,8 @@ export function RoutePanel({
   onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
   /** Start a destination-free live map in the selected travel mode. */
   onExplore: () => void;
+  /** Start the timetable-driven passenger companion for one selected journey. */
+  onStartTransitGuidance: (trip: TransitTrip) => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -783,7 +787,9 @@ export function RoutePanel({
             Public transport plans between the first and last stop; via points are ignored.
           </p>
         )}
-        {transitMode && <TransitResults transit={transit} />}
+        {transitMode && (
+          <TransitResults transit={transit} onStartGuidance={onStartTransitGuidance} />
+        )}
 
         {!transitMode && route.error && <div className="route-error">{route.error}</div>}
         {!transitMode && path && (

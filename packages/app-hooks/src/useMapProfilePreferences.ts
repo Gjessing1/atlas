@@ -67,10 +67,14 @@ export function useMapProfilePreferences(
     (profileId: string, visible: boolean) => {
       if (!MAP_PROFILES.some((profile) => profile.id === profileId)) return;
       update((current) => {
-        const ids = new Set(current.visible);
-        if (visible) ids.add(profileId);
-        else if (ids.size > 1) ids.delete(profileId);
-        return { ...current, visible: [...ids] };
+        // The stored intent is the *hidden* set (see `MapProfilePreferences`),
+        // so switching a profile on is removing it from that set rather than
+        // adding it to a list — which is what keeps a profile added in a later
+        // release visible for a user who edited this layout in an earlier one.
+        const hidden = new Set(current.hidden);
+        if (visible) hidden.delete(profileId);
+        else if (current.visible.length > 1) hidden.add(profileId);
+        return { ...current, hidden: [...hidden] };
       });
     },
     [update],

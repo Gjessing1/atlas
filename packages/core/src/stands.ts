@@ -168,6 +168,165 @@ export function parsePlaceStand(value: unknown): PlaceStand | null {
   };
 }
 
+/**
+ * The directional part of a stand, as the scent model needs it — a shape both
+ * the live shortlist's `PotentialStandPlan` and a saved `PlaceStand` satisfy, so
+ * one arithmetic answers "is this stand blown?" on every surface.
+ */
+export interface StandGeometry {
+  readonly aim: { readonly bearing: number; readonly distanceM: number };
+  readonly lanes: readonly { readonly bearing: number; readonly rangeM: number }[];
+  readonly maxRangeM: number;
+}
+
+export type StandScentVerdict = 'good' | 'crosswind' | 'blown';
+
+/** What the wind does to a stand, and the sentence that says so. */
+export interface StandScentReading {
+  readonly verdict: StandScentVerdict;
+  /** Share of the watched ground the scent reaches, 0..1. */
+  readonly exposure: number;
+  /** Bearing the scent travels toward (the wind's reciprocal). */
+  readonly scentToDeg: number;
+  /** That bearing as `SE`, for the row. */
+  readonly scentToLabel: string;
+  readonly detail: string;
+}
+
+const COMPASS8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+/** Nearest of the eight bearings the rose itself is traced on. */
+export function standCompass(bearingDeg: number): string {
+  const index = Math.round((((bearingDeg % 360) + 360) % 360) / 45) % 8;
+  return COMPASS8[index]!;
+}
+
+/** Signed shortest angle between two bearings, in degrees. */
+function angleDelta(a: number, b: number): number {
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
+
+/**
+ * How much of a plume travelling toward `windToDeg` lands on `bearing`: 1 dead
+ * downwind, tapering to nothing at `halfWidthDeg` off it. A cosine rather than
+ * the hard 60° cone this replaced, because a forecast bearing does not have an
+ * edge — a stand does not become safe because the wind swung two degrees.
+ */
+function plume(windToDeg: number, bearing: number, halfWidthDeg: number): number {
+  const delta = angleDelta(windToDeg, bearing);
+  if (delta >= halfWidthDeg) return 0;
+  return Math.max(0, Math.cos((delta * (90 / halfWidthDeg) * Math.PI) / 180));
+}
+
+/** A sight line is a ray: past a right angle the plume has left it entirely. */
+const LANE_HALF_WIDTH_DEG = 90;
+
+/**
+ * The aim is not a ray. It stands for a block of paired habitat at a distance —
+ * a thicket, a field edge — which subtends real angular width from the stand,
+ * so a plume that misses its centre by 90° is still partly on it.
+ */
+const AIM_HALF_WIDTH_DEG = 120;
+
+/** Below this the stand is clean enough to sit; above the second, it is burnt. */
+const SCENT_GOOD_MAX = 0.15;
+const SCENT_BLOWN_MIN = 0.45;
+
+/**
+ * The aim carries most of the stake: it is the one direction the surface
+ * actually identified as habitat, and the stand exists to watch it.
+ */
+const AIM_WEIGHT = 3;
+
+/**
+ * Ground behind you still counts. A buck that circles downwind is ordinary roe
+ * behaviour, so no direction is ever worth zero — but the far side of the stand
+ * is worth a quarter of the near side.
+ */
+const BEHIND_FLOOR = 0.25;
+
+/**
+ * Where the wind puts your scent, weighted across the whole rose.
+ *
+ * The rule this replaces compared one bearing — the aim — against a 60° cone,
+ * which answers a different question from the one a hunter asks. Scent does not
+ * go to the aim, it goes downwind across everything; being blown into cover at
+ * 40 m is a burnt sit, and the same wind across open ground at 150 m is not. So
+ * every spoke of the persisted rose is weighted by how much it is worth losing:
+ *
+ * - **The aim dominates**, tempered by distance — scent reaching paired habitat
+ *   at 40 m matters more than the same plume reaching it at the planning limit,
+ *   where it arrives thinned and where you would see the deer first anyway.
+ * - **A lane that closes early is worth more than a long one.** A short sight
+ *   line means the screen is right there, and the deer you never see is the one
+ *   that winds you. Lanes below `STAND_LANE_MIN_M` are *included* here although
+ *   the rose and the card drop them: a direction closed at the stand is not a
+ *   sight line, but it is emphatically somewhere a deer can be standing.
+ * - **Direction is scaled toward the aim**, because the far side of the stand is
+ *   your back cover and losing it costs less than losing the ground you came
+ *   for. `BEHIND_FLOOR` keeps it from costing nothing.
+ *
+ * The result is the *share* of the watched ground the plume covers, which is
+ * why it can be banded the same way whatever the stand's shape.
+ */
+export function standScentExposure(
+  stand: StandGeometry,
+  windFromDeg: number | null | undefined,
+): StandScentReading | null {
+  if (windFromDeg == null || !Number.isFinite(windFromDeg)) return null;
+  const maxRangeM = stand.maxRangeM > 0 ? stand.maxRangeM : STAND_LANE_MIN_M;
+  const windToDeg = (((windFromDeg + 180) % 360) + 360) % 360;
+
+  // Closer paired habitat raises the stake; the taper is gentle because being
+  // blown toward the habitat is bad at any distance inside one shot.
+  const aimStake = 1 - 0.35 * Math.min(1, stand.aim.distanceM / maxRangeM);
+  const aimPlume = plume(windToDeg, stand.aim.bearing, AIM_HALF_WIDTH_DEG);
+  let weighted = AIM_WEIGHT * aimStake * aimPlume;
+  let total = AIM_WEIGHT * aimStake;
+  let worstLoss = 0;
+  let worstBearing: number | null = null;
+
+  for (const lane of stand.lanes) {
+    const screenStake = 1 - 0.6 * Math.min(1, Math.max(0, lane.rangeM) / maxRangeM);
+    const towardAim =
+      (1 + Math.cos((angleDelta(lane.bearing, stand.aim.bearing) * Math.PI) / 180)) / 2;
+    const weight = screenStake * (BEHIND_FLOOR + (1 - BEHIND_FLOOR) * towardAim);
+    const loss = weight * plume(windToDeg, lane.bearing, LANE_HALF_WIDTH_DEG);
+    weighted += loss;
+    total += weight;
+    if (loss > worstLoss) {
+      worstLoss = loss;
+      worstBearing = lane.bearing;
+    }
+  }
+
+  const exposure = total > 0 ? Math.min(1, weighted / total) : 0;
+  const verdict: StandScentVerdict =
+    exposure >= SCENT_BLOWN_MIN ? 'blown' : exposure <= SCENT_GOOD_MAX ? 'good' : 'crosswind';
+  const scentToLabel = standCompass(windToDeg);
+  const aimHit = aimPlume > 0.5;
+  const detail =
+    verdict === 'blown'
+      ? aimHit
+        ? `Scent runs ${scentToLabel}, straight into the habitat this stand watches.`
+        : `Scent runs ${scentToLabel}, across most of the ground this stand watches.`
+      : verdict === 'crosswind'
+        ? `Scent runs ${scentToLabel}, clipping ${
+            worstBearing === null
+              ? 'ground you are watching'
+              : `the ${standCompass(worstBearing)} side`
+          } — sittable, but watch that flank.`
+        : `Scent runs ${scentToLabel}, away from the ground this stand watches.`;
+
+  return {
+    verdict,
+    exposure: Math.round(exposure * 100) / 100,
+    scentToDeg: windToDeg,
+    scentToLabel,
+    detail,
+  };
+}
+
 /** One line of the stand block: a label and its value, in the card's order. */
 export interface StandCardRow {
   readonly key: string;

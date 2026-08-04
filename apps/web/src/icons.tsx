@@ -168,6 +168,25 @@ export function FishHuntIcon(props: IconProps) {
   );
 }
 
+export function CuriositiesIcon(props: IconProps) {
+  // A lens with a spark beside it: the Curiosities profile is about looking at
+  // ground you are already on and finding something in it. Deliberately not a
+  // monument or a rune stone — the profile carries wrecks, caves, mines and
+  // springs too, and any single subject glyph would misname the other nine.
+  return (
+    <IconFrame {...props}>
+      <circle cx="10.5" cy="10.5" r="5.8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M14.8 14.8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M18.4 3l.85 1.95 1.95.85-1.95.85L18.4 8.6l-.85-1.95-1.95-.85 1.95-.85z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function TrainIcon(props: IconProps) {
   return (
     <IconFrame {...props}>
@@ -329,6 +348,7 @@ const MAP_PROFILE_ICON: Record<string, IconComponent> = {
   run: RunIcon,
   ski: SkiIcon,
   fishhunt: FishHuntIcon,
+  curiosities: CuriositiesIcon,
 };
 
 export function mapProfileIcon(id: string): IconComponent {

@@ -33,6 +33,7 @@ const departureCall = {
   aimedDepartureTime: '2026-07-21T07:33:00+02:00',
   expectedDepartureTime: '2026-07-21T07:36:00+02:00',
   realtime: true,
+  predictionInaccurate: true,
   cancellation: false,
   forBoarding: true,
   destinationDisplay: { frontText: 'Kongsvinger' },
@@ -472,6 +473,8 @@ describe('parseEnturResponse — degenerate payloads', () => {
                   expectedStartTime: '2026-07-21T07:36:30+02:00',
                   aimedEndTime: '2026-07-21T07:50:00+02:00',
                   expectedEndTime: '2026-07-21T07:53:00+02:00',
+                  fromEstimatedCall: { predictionInaccurate: true },
+                  toEstimatedCall: { predictionInaccurate: false },
                 },
               ],
             },
@@ -480,6 +483,10 @@ describe('parseEnturResponse — degenerate payloads', () => {
       },
     }).trips;
     expect(legDelayMs(trip!.legs[0]!)).toBe(210_000);
+    expect(trip!.legs[0]).toMatchObject({
+      startPredictionInaccurate: true,
+      endPredictionInaccurate: false,
+    });
   });
 
   it('names an unknown mode rather than dropping the leg', () => {
@@ -572,6 +579,7 @@ describe('departure boards', () => {
       aimedDepartureMs: Date.parse('2026-07-21T07:33:00+02:00'),
       expectedDepartureMs: Date.parse('2026-07-21T07:36:00+02:00'),
       realtime: true,
+      predictionInaccurate: true,
       line: {
         publicCode: 'R14',
         operator: 'Vy',

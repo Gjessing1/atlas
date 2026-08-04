@@ -199,6 +199,18 @@ function TripRow({ trip }: { trip: TransitTrip }) {
         <Text style={styles.tripTime}>{summary.times}</Text>
         <Text style={styles.tripMeta}>{summary.meta}</Text>
       </View>
+      {summary.departure ? (
+        <Text
+          style={[
+            styles.tripConfidence,
+            summary.departure.confidence === 'uncertain' && styles.warning,
+          ]}
+        >
+          {summary.departure.delay
+            ? `Departs ${summary.departure.expected}, planned ${summary.departure.aimed} · ${summary.departure.confidenceLabel}`
+            : `${summary.departure.confidenceLabel} departure`}
+        </Text>
+      ) : null}
       <View style={styles.lines}>
         {summary.lineCodes.map((line, index) => (
           <View style={styles.tripLine} key={`${line}-${index}`}>
@@ -206,7 +218,6 @@ function TripRow({ trip }: { trip: TransitTrip }) {
           </View>
         ))}
       </View>
-      {summary.delay ? <Text style={styles.warning}>{summary.delay}</Text> : null}
       {summary.severityLabel ? <Text style={styles.warning}>{summary.severityLabel}</Text> : null}
     </View>
   );
@@ -518,6 +529,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
   },
   tripLineText: { color: theme.onAccent, fontSize: 11, fontWeight: '800' },
+  tripConfidence: { color: theme.textMuted, fontSize: 11, fontWeight: '600', marginTop: 3 },
   warning: { color: theme.warning, fontSize: 11, fontWeight: '700', marginTop: 5 },
   live: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 12 },
   liveText: { flex: 1, color: theme.textMuted, fontSize: 10, lineHeight: 14 },

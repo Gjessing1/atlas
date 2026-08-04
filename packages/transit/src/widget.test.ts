@@ -91,13 +91,18 @@ describe('tripWidgetRow', () => {
     expect(row.delayMin).toBeNull();
     expect(row.aimed).toBeNull();
     expect(row.whenMs).toBe(at(7 * 60 + 12));
+    expect(row.realtime).toBe(false);
   });
 
   it('shows the delay against the timetable, and keeps the aimed time', () => {
-    const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 10), at(7 * 60 + 16))), NOW);
+    const liveRide = ride('280', at(7 * 60 + 10), at(7 * 60 + 16));
+    liveRide.startPredictionInaccurate = true;
+    const row = tripWidgetRow(trip(liveRide), NOW);
     expect(row.text).toBe('07:16 (+6) · in 16 min · 280');
     expect(row.delayMin).toBe(6);
     expect(row.aimed).toBe('07:10');
+    expect(row.realtime).toBe(true);
+    expect(row.predictionInaccurate).toBe(true);
   });
 
   it('names every vehicle in ride order', () => {
@@ -166,6 +171,8 @@ describe('commuteRefreshAtMs', () => {
     aimed: null,
     countdownMin: 0,
     delayMin: null,
+    realtime: false,
+    predictionInaccurate: false,
     cancelled: false,
     note: null,
   });

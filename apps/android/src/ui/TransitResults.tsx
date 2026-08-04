@@ -155,19 +155,28 @@ function LegTime({
   aimedMs,
   expectedMs,
   realtime,
+  predictionInaccurate,
 }: {
   aimedMs: number;
   expectedMs: number;
   realtime: boolean;
+  predictionInaccurate?: boolean;
 }) {
-  const time = legTimeParts({ aimedMs, expectedMs, realtime });
-  if (!time.delay) return <Text style={styles.time}>{time.expected}</Text>;
+  const time = legTimeParts({ aimedMs, expectedMs, realtime, predictionInaccurate });
+  if (!time.delay) {
+    return (
+      <Text style={styles.time}>
+        {time.expected} <Text style={styles.confidence}>{time.confidenceLabel}</Text>
+      </Text>
+    );
+  }
   return (
     <Text style={styles.time}>
       <Text style={styles.timeAimed}>{time.aimed}</Text>{' '}
       <Text style={time.tone === 'late' ? styles.late : styles.early}>
         {time.expected} ({time.delay})
-      </Text>
+      </Text>{' '}
+      <Text style={styles.confidence}>{time.confidenceLabel}</Text>
     </Text>
   );
 }
@@ -219,6 +228,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
                 aimedMs={leg.aimedStartMs}
                 expectedMs={leg.expectedStartMs}
                 realtime={leg.realtime}
+                predictionInaccurate={leg.startPredictionInaccurate}
               />
               <LineChip line={leg.line} />
               {leg.line.headsign ? (
@@ -257,6 +267,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
                 aimedMs={leg.aimedEndMs}
                 expectedMs={leg.expectedEndMs}
                 realtime={leg.realtime}
+                predictionInaccurate={leg.endPredictionInaccurate}
               />
               <Text style={styles.legDetail}>
                 {leg.to.name}
@@ -281,12 +292,14 @@ function TripCard({
   expanded,
   onToggle,
   onShowMap,
+  onStartGuidance,
   index,
 }: {
   trip: TransitTrip;
   expanded: boolean;
   onToggle: () => void;
   onShowMap: () => void;
+  onStartGuidance: () => void;
   index: number;
 }) {
   // A collapsed card must not look clean when a leg inside it is cancelled —
@@ -298,7 +311,18 @@ function TripCard({
       <Pressable onPress={onToggle} testID={`transit-trip-${index}`}>
         <View style={styles.tripHead}>
           <Text style={styles.tripTimes}>{summary.times}</Text>
-          {summary.delay ? <Text style={styles.late}>{summary.delay}</Text> : null}
+          {summary.departure ? (
+            <Text
+              style={[
+                styles.tripDeparture,
+                summary.departure.confidence === 'uncertain' && styles.confidenceWarning,
+              ]}
+            >
+              {summary.departure.delay
+                ? `Departs ${summary.departure.expected}, planned ${summary.departure.aimed} · ${summary.departure.confidenceLabel}`
+                : `${summary.departure.confidenceLabel} departure`}
+            </Text>
+          ) : null}
           {summary.severity ? (
             <Text
               style={[styles.tripFlag, severityStyle(summary.severity).text]}
@@ -334,13 +358,22 @@ function TripCard({
       </Pressable>
       {expanded ? (
         <View style={styles.legs}>
-          <Pressable
-            style={styles.showMapButton}
-            onPress={onShowMap}
-            testID={`transit-show-map-${index}`}
-          >
-            <Text style={styles.showMapText}>Show on map</Text>
-          </Pressable>
+          <View style={styles.tripActions}>
+            <Pressable
+              style={styles.showMapButton}
+              onPress={onShowMap}
+              testID={`transit-show-map-${index}`}
+            >
+              <Text style={styles.showMapText}>Show on map</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.showMapButton, styles.startButton]}
+              onPress={onStartGuidance}
+              testID={`transit-start-${index}`}
+            >
+              <Text style={styles.startButtonText}>Start journey</Text>
+            </Pressable>
+          </View>
           {trip.legs.map((leg, i) => (
             <LegRow key={i} leg={leg} />
           ))}
@@ -364,9 +397,11 @@ function TripCard({
 export function TransitResults({
   transit,
   onShowMap,
+  onStartGuidance,
 }: {
   transit: TransitPlan;
   onShowMap: (trip: TransitTrip, index: number) => void;
+  onStartGuidance: (trip: TransitTrip) => void;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const board = useTransitBoard(transit);
@@ -480,6 +515,7 @@ export function TransitResults({
               expanded={transit.selected === i}
               onToggle={() => transit.select(transit.selected === i ? null : i)}
               onShowMap={() => onShowMap(trip, i)}
+              onStartGuidance={() => onStartGuidance(trip)}
             />
           ))}
           {board.showLater ? (
@@ -549,8 +585,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   showMapText: { fontSize: 13, fontWeight: '700', color: theme.accent },
+  tripActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  startButton: { backgroundColor: theme.accent },
+  startButtonText: { fontSize: 13, fontWeight: '800', color: theme.onAccent },
   tripHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tripTimes: { fontSize: 15, fontWeight: '700', color: theme.text },
+  tripDeparture: { fontSize: 11, fontWeight: '600', color: theme.textMuted },
   tripLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
   tripMeta: { fontSize: 12, color: theme.textMuted },
   tripMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
@@ -588,6 +628,8 @@ const styles = StyleSheet.create({
   operator: { fontSize: 11, color: theme.textMuted },
   time: { fontSize: 13, fontWeight: '700', color: theme.text },
   timeAimed: { textDecorationLine: 'line-through', color: theme.textMuted, fontWeight: '400' },
+  confidence: { color: theme.textMuted, fontSize: 10, fontWeight: '500' },
+  confidenceWarning: { color: theme.warning },
   late: { color: theme.danger, fontWeight: '700', fontSize: 13 },
   early: { color: '#1e7d32', fontWeight: '700', fontSize: 13 },
   lineChip: {

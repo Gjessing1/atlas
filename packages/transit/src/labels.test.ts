@@ -59,7 +59,14 @@ function trip(over: Partial<TransitTrip> = {}): TransitTrip {
 describe('legTimeParts', () => {
   it('shows only the expected time when nothing is off schedule', () => {
     const parts = legTimeParts({ aimedMs: at(8, 0), expectedMs: at(8, 0), realtime: true });
-    expect(parts).toEqual({ aimed: '08:00', expected: '08:00', delay: null, tone: 'ontime' });
+    expect(parts).toEqual({
+      aimed: '08:00',
+      expected: '08:00',
+      delay: null,
+      tone: 'ontime',
+      confidence: 'realtime',
+      confidenceLabel: 'Live',
+    });
   });
 
   it('ignores sub-minute drift — that is timetable noise, not news', () => {
@@ -74,12 +81,26 @@ describe('legTimeParts', () => {
 
   it('corrects a late departure and keeps the timetabled time', () => {
     const parts = legTimeParts({ aimedMs: at(8, 0), expectedMs: at(8, 4), realtime: true });
-    expect(parts).toEqual({ aimed: '08:00', expected: '08:04', delay: '+4 min', tone: 'late' });
+    expect(parts).toEqual({
+      aimed: '08:00',
+      expected: '08:04',
+      delay: '+4 min',
+      tone: 'late',
+      confidence: 'realtime',
+      confidenceLabel: 'Live',
+    });
   });
 
   it('marks an early departure as early, signed', () => {
     const parts = legTimeParts({ aimedMs: at(8, 5), expectedMs: at(8, 3), realtime: true });
-    expect(parts).toEqual({ aimed: '08:05', expected: '08:03', delay: '-2 min', tone: 'early' });
+    expect(parts).toEqual({
+      aimed: '08:05',
+      expected: '08:03',
+      delay: '-2 min',
+      tone: 'early',
+      confidence: 'realtime',
+      confidenceLabel: 'Live',
+    });
   });
 
   it('never corrects a time no live feed vouched for', () => {
@@ -88,6 +109,19 @@ describe('legTimeParts', () => {
     const parts = legTimeParts({ aimedMs: at(8, 0), expectedMs: at(8, 9), realtime: false });
     expect(parts.delay).toBeNull();
     expect(parts.tone).toBe('ontime');
+    expect(parts.confidenceLabel).toBe('Timetable');
+  });
+
+  it('does not present a prediction Entur distrusts as ordinary live tracking', () => {
+    const parts = legTimeParts({
+      aimedMs: at(8, 0),
+      expectedMs: at(8, 4),
+      realtime: true,
+      predictionInaccurate: true,
+    });
+    expect(parts.confidence).toBe('uncertain');
+    expect(parts.confidenceLabel).toBe('Live estimate uncertain');
+    expect(parts.delay).toBe('+4 min');
   });
 });
 
@@ -208,6 +242,7 @@ describe('tripSummary', () => {
     expect(summary.co2).toBeNull();
     expect(tripSummary(trip({ co2Grams: 742.871 })).co2).toBe('743 g CO₂');
     expect(summary.delay).toBeNull();
+    expect(summary.departure?.confidenceLabel).toBe('Timetable');
     expect(summary.severity).toBeNull();
     expect(summary.needsBooking).toBe(false);
   });
@@ -219,11 +254,20 @@ describe('tripSummary', () => {
       trip({
         legs: [
           leg({ mode: 'foot', aimedStartMs: at(7, 55), expectedStartMs: at(7, 55) }),
-          leg({ expectedStartMs: at(8, 6), realtime: true }),
+          leg({
+            expectedStartMs: at(8, 6),
+            realtime: true,
+            startPredictionInaccurate: true,
+          }),
         ],
       }),
     );
     expect(summary.delay).toBe('+6 min');
+    expect(summary.departure).toMatchObject({
+      aimed: '08:00',
+      expected: '08:06',
+      confidence: 'uncertain',
+    });
   });
 
   it('stays silent about a delay the planner never confirmed', () => {

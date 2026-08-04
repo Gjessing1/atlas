@@ -51,6 +51,10 @@ export interface TransitWidgetRow {
   countdownMin: number;
   /** Minutes late against the timetable (negative = early), or null when on time. */
   delayMin: number | null;
+  /** Whether the displayed expected time is backed by a realtime feed. */
+  realtime: boolean;
+  /** Entur has live data, but warns that this particular prediction is inaccurate. */
+  predictionInaccurate: boolean;
   cancelled: boolean;
   /** A disruption headline, when the operator published one worth a glance. */
   note: string | null;
@@ -152,6 +156,8 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
     aimed: delay === null ? null : norwayClock(aimedMs),
     countdownMin: minutes,
     delayMin: delay,
+    realtime: ride?.realtime === true,
+    predictionInaccurate: ride?.realtime === true && ride.startPredictionInaccurate === true,
     // A planned journey carries no cancellation flag — the planner simply stops
     // offering a cancelled service. Its disruption notice is the honest signal,
     // and it lands in `note`.
@@ -195,6 +201,8 @@ export function departureWidgetRow(departure: TransitDeparture, nowMs: number): 
     aimed: delay === null ? null : norwayClock(departure.aimedDepartureMs),
     countdownMin: minutes,
     delayMin: delay,
+    realtime: departure.realtime,
+    predictionInaccurate: departure.realtime && departure.predictionInaccurate === true,
     cancelled: departure.cancelled,
     note: departure.situations[0]?.summary ?? null,
   };

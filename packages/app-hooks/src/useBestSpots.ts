@@ -35,7 +35,7 @@ import {
   type RoePhenology,
   type WeatherForecast,
 } from '@atlas/conditions';
-import type { LngLatBbox } from '@atlas/core';
+import { standScentExposure, type LngLatBbox, type StandScentVerdict } from '@atlas/core';
 import {
   CELL_ZOOM,
   fishSpecies,
@@ -65,23 +65,21 @@ export interface SpotsWindow {
   readonly windFromDeg: number | null;
 }
 
-export type StandWindRisk = 'good' | 'crosswind' | 'blown' | null;
+export type StandWindRisk = StandScentVerdict | null;
 
 /**
- * Does the forecast carry the caller's scent from the stand toward the paired
- * habitat? A 60° cone is deliberately broad: forecast direction and forest
- * wind are not precise enough to bless a marginal angle.
+ * Does the forecast carry the caller's scent onto the ground this stand
+ * watches? The arithmetic is `standScentExposure` in `@atlas/core`, weighted
+ * across the whole persisted rose rather than the aim alone — shared with the
+ * saved-stand board so the shortlist that proposed a stand and the board that
+ * ranks it later cannot give a hunter two different verdicts about one wind.
  */
 export function standWindRisk(
   spot: Pick<PotentialSpot, 'stand'>,
   window: Pick<SpotsWindow, 'windFromDeg'> | null,
 ): StandWindRisk {
-  if (!spot.stand || window?.windFromDeg === null || window?.windFromDeg === undefined) return null;
-  const windTo = (window.windFromDeg + 180) % 360;
-  const delta = Math.abs(((windTo - spot.stand.aim.bearing + 540) % 360) - 180);
-  if (delta <= 60) return 'blown';
-  if (delta >= 120) return 'good';
-  return 'crosswind';
+  if (!spot.stand) return null;
+  return standScentExposure(spot.stand, window?.windFromDeg)?.verdict ?? null;
 }
 
 export type BestSpotsStatus = 'off' | 'loading' | 'ready' | 'empty' | 'error';

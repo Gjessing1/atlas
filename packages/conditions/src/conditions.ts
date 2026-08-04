@@ -115,6 +115,10 @@ export interface FishingConditionsInput {
   latitude?: number;
   /** Hunting-only terrain elevation for phenology. */
   elevationM?: number | null;
+  /** Hunting-only ground steepness at the stand; enables the thermal factor. */
+  slopeDeg?: number | null;
+  /** Hunting-only downhill azimuth at the stand — the way cold air drains. */
+  aspectDeg?: number | null;
 }
 
 /**
@@ -439,6 +443,12 @@ export type ConditionsKind = 'fishing' | 'hunting';
  * Dispatch one forecast step to the right assessment for a planner kind. The engine never branches
  * on a specific species: the CALLER classifies an activity into one of these two condition models.
  * `pressureTrendHpa` and `species` only feed the fishing model; the hunt model ignores them.
+ *
+ * `slopeDeg`/`aspectDeg` are forwarded rather than dropped, which is what makes the terrain-thermal
+ * factor reachable at all: every production caller reaches the hunt model through here, and until
+ * this passed them on, `assessHuntStand`'s katabatic/anabatic reasoning was tested code that no
+ * user ever saw — precisely at first and last light, where under ~3 m/s the slope flow *is* the
+ * wind and the light factor is calling the hour prime.
  */
 export function assessConditions(
   kind: ConditionsKind,
@@ -451,6 +461,8 @@ export function assessConditions(
         profile: input.huntProfile,
         latitude: input.latitude,
         elevationM: input.elevationM,
+        slopeDeg: input.slopeDeg,
+        aspectDeg: input.aspectDeg,
       })
     : assessFishingBite(input);
 }

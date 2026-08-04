@@ -129,6 +129,32 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       'consent or a valid card, and no national rights layer exists — Statskog’s fields are ' +
       'state land only.',
   },
+  {
+    // Curiosities: the "what is out here that I would never have known to look
+    // for" profile — burial mounds, wrecks, caves, old mine shafts, springs.
+    // Like Ski and Fish & Hunt it expresses no travel mode; it is a cartography
+    // + overlay preset. Its layers are the registers themselves (ROADMAP §4.7),
+    // and it is the one profile whose *whole* catalog is contextual: without the
+    // `curiosities` tag none of these rows would be offered anywhere.
+    id: 'curiosities',
+    label: 'Curiosities',
+    routing: null,
+    layerTags: ['curiosities'],
+    // The two that answer the question everywhere in the country. Wrecks are
+    // offered but off — they are coastal, so on the average inland map they
+    // would be a switched-on layer with nothing in it.
+    defaultLayers: ['heritage-sites', 'geoheritage'],
+    // Three separate ways this profile could mislead, said once rather than
+    // three times on three layers: a record is not permission (kulturminneloven
+    // protects everything pre-1537 automatically, and most sites sit on private
+    // ground), a record is not safety (shafts and cave entrances kill people
+    // who go in), and *no* record is not evidence of absence — these registers
+    // are what somebody got round to surveying.
+    note:
+      'These are registers, not invitations: heritage sites are protected by law and usually on ' +
+      'private land, old shafts and cave entrances are lethal to enter, and blank map means ' +
+      'unsurveyed, not empty.',
+  },
 ];
 
 /** The profile Atlas starts in, and the fallback for an unknown stored id. */
@@ -140,8 +166,24 @@ export const DEFAULT_MAP_PROFILE = 'explore';
  * with the user's other Atlas data.
  */
 export interface MapProfilePreferences {
-  /** Profile ids shown in the one-tap map switcher, in Atlas's curated order. */
+  /**
+   * Profile ids shown in the one-tap map switcher, in Atlas's curated order.
+   * **Derived** from `hidden`, not stored — see `sanitizeMapProfilePreferences`.
+   */
   visible: string[];
+  /**
+   * The profiles the user has explicitly switched *off*, which is the half that
+   * is actually stored and synced.
+   *
+   * Recording the negative is what lets a profile added in a later release show
+   * up for a user who customized this in an earlier one. The stored shape used
+   * to be the positive list, and it silently answered "no" for a profile that
+   * did not exist when it was written: anyone who had ever opened the profile
+   * layout editor would simply never see Curiosities (v0.143.0) appear. A
+   * hidden-list has no opinion about ids it has never heard of, which is the
+   * property that makes it right for every *future* profile too.
+   */
+  hidden: string[];
   /**
    * Preferred overlay ids per profile. A missing profile uses Atlas defaults;
    * an explicit empty array means that profile starts with no overlays.
@@ -149,10 +191,23 @@ export interface MapProfilePreferences {
   layers: Record<string, string[]>;
 }
 
+/**
+ * The profile ids that existed while the preference stored the *positive* list
+ * (up to and including v0.142.0).
+ *
+ * Only these can be inferred as "deliberately hidden" from a legacy value's
+ * omission; anything newer was simply unrepresentable then, so its absence
+ * carries no intent and it stays visible. This list is frozen history — never
+ * add to it, because a new profile appearing here would inherit exactly the bug
+ * the `hidden` field exists to remove.
+ */
+const LEGACY_PROFILE_IDS = ['explore', 'drive', 'bike', 'hike', 'run', 'ski', 'fishhunt'];
+
 /** Atlas defaults before the user has customized their profile layout. */
 export function defaultMapProfilePreferences(): MapProfilePreferences {
   return {
     visible: MAP_PROFILES.map((profile) => profile.id),
+    hidden: [],
     layers: {},
   };
 }
@@ -161,19 +216,42 @@ export function defaultMapProfilePreferences(): MapProfilePreferences {
  * Read profile preferences from storage/sync without trusting hand-edited or
  * newer-version data. Unknown profile ids are ignored; unknown layer ids stay
  * because the overlay catalog is server-provided and may be newer than core.
+ *
+ * Also migrates the pre-v0.143.0 `{visible}` shape in place — a device that
+ * still writes it (an older bundle on another device, syncing) is read the same
+ * way every time, so the two can disagree about a profile's visibility without
+ * either corrupting the other.
  */
 export function sanitizeMapProfilePreferences(input: unknown): MapProfilePreferences {
   const fallback = defaultMapProfilePreferences();
   if (typeof input !== 'object' || input === null) return fallback;
   const raw = input as Record<string, unknown>;
-  const known = new Set(MAP_PROFILES.map((profile) => profile.id));
-  const visibleRaw = Array.isArray(raw['visible']) ? raw['visible'] : fallback.visible;
-  const visibleSet = new Set(
-    visibleRaw.filter((id): id is string => typeof id === 'string' && known.has(id)),
+  const order = MAP_PROFILES.map((profile) => profile.id);
+  const known = new Set(order);
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === 'string' && known.has(id))
+      : [];
+
+  const legacyVisible = Array.isArray(raw['hidden']) ? [] : strings(raw['visible']);
+  const hiddenSet = new Set(
+    Array.isArray(raw['hidden'])
+      ? strings(raw['hidden'])
+      : // Legacy value: everything it *could* have named and did not was
+        // switched off on purpose. Profiles it predates stay visible. A legacy
+        // list that names nothing at all is corrupt rather than emphatic — the
+        // old sanitizer refused to honour it too — so it yields no hides.
+        legacyVisible.length > 0
+        ? LEGACY_PROFILE_IDS.filter((id) => known.has(id) && !legacyVisible.includes(id))
+        : [],
   );
+  const visibleSet = new Set(order.filter((id) => !hiddenSet.has(id)));
   // Never let customization remove the switcher completely. Explore is the
   // neutral recovery choice when a corrupt or hand-edited value hides all.
-  if (visibleSet.size === 0) visibleSet.add(DEFAULT_MAP_PROFILE);
+  if (visibleSet.size === 0) {
+    visibleSet.add(DEFAULT_MAP_PROFILE);
+    hiddenSet.delete(DEFAULT_MAP_PROFILE);
+  }
 
   const layers: Record<string, string[]> = {};
   const rawLayers = raw['layers'];
@@ -186,9 +264,8 @@ export function sanitizeMapProfilePreferences(input: unknown): MapProfilePrefere
     }
   }
   return {
-    visible: MAP_PROFILES.filter((profile) => visibleSet.has(profile.id)).map(
-      (profile) => profile.id,
-    ),
+    visible: order.filter((id) => visibleSet.has(id)),
+    hidden: order.filter((id) => hiddenSet.has(id)),
     layers,
   };
 }

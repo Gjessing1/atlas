@@ -29,3 +29,18 @@ export {
   type PlannerHour,
   type PlannerOptions,
 } from './planner.js';
+export {
+  compareStandCells,
+  standCellSummary,
+  standSitWindow,
+  standWatchDays,
+  STAND_BOARD_DAYS,
+  STAND_SITS,
+  STAND_SLOPE_BEARINGS,
+  STAND_SLOPE_RADIUS_M,
+  type StandCellSummary,
+  type StandDayCell,
+  type StandSit,
+  type StandSitWindow,
+  type StandWatchOptions,
+} from './standwatch.js';

@@ -2033,10 +2033,78 @@ button {
   background: var(--surface-selected);
 }
 
+.transit-start {
+  margin: 0 10px 10px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: white;
+  font-weight: 750;
+}
+
+.transit-guidance {
+  position: fixed;
+  z-index: 80;
+  top: 72px;
+  left: 50%;
+  width: min(420px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 22%);
+}
+
+.transit-guidance.alight {
+  border: 2px solid var(--warning);
+}
+
+.transit-guidance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.transit-guidance > strong {
+  font-size: 18px;
+}
+
+.transit-guidance-countdown {
+  color: var(--accent);
+  font-size: 16px;
+}
+
+.transit-guidance > small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 /* The two numbers a traveller scans for: when to leave, when they arrive. */
 .transit-trip-times {
   font-size: 14px;
   font-weight: 600;
+}
+
+.transit-summary-departure,
+.transit-confidence {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.transit-summary-departure.uncertain,
+.transit-confidence.uncertain {
+  color: var(--warning);
 }
 
 .transit-trip-lines {
@@ -4645,6 +4713,120 @@ button.transit-notice-summary {
   cursor: default;
 }
 
+/* ---- The saved-stand board ("which of my stands is on tonight?"). ---- */
+
+.stand-sits {
+  display: flex;
+  gap: 4px;
+}
+
+.stand-sit {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.stand-sit-on {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.stand-board-list li {
+  align-items: stretch;
+}
+
+.stand-board-row {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The verdict is the loudest thing in the row on purpose: a prime-scoring stand
+   the wind blows out of is not tonight's plan, and the layout has to agree with
+   the ranking rather than bury the disagreement under a bigger number. */
+.stand-verdict {
+  font-weight: 600;
+}
+
+.stand-verdict-wind {
+  font-weight: 400;
+}
+
+.stand-scent-good {
+  color: #2f8f4e;
+}
+
+.stand-scent-crosswind {
+  color: #b37608;
+}
+
+.stand-scent-blown {
+  color: #c83227;
+}
+
+.stand-day-unknown {
+  color: var(--text-muted);
+}
+
+.stand-coarse-note {
+  font-style: italic;
+}
+
+.stand-days {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px 6px;
+}
+
+.stand-day {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 1px;
+  background: var(--surface-sunken, rgb(127 127 127 / 10%));
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.stand-day-selected {
+  border-color: var(--accent);
+}
+
+/* Past ~3 days met.no turns 6-hourly, and a six-hour average cannot resolve a
+   dawn sit. Hatching says the cell is a *day*, not an hour — the alternative is
+   ten identical-looking cells claiming a precision the last seven do not have. */
+.stand-day-coarse {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    rgb(127 127 127 / 22%) 3px 5px
+  );
+}
+
+.stand-day-name {
+  color: var(--text-muted);
+}
+
+.stand-day-wind {
+  font-size: 12px;
+  line-height: 1;
+}
+
 /* The explain block inside the place card. */
 .potential-explain {
   display: flex;
@@ -5558,12 +5740,19 @@ button.transit-notice-summary {
 }
 
 .commute-delay,
-.commute-warning {
+.commute-warning,
+.commute-confidence {
   display: inline-block;
   margin: 6px 6px 0 0;
-  color: var(--warning);
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.commute-delay,
+.commute-warning,
+.commute-confidence.uncertain {
+  color: var(--warning);
 }
 
 .commute-live {

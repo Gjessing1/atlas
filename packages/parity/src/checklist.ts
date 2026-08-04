@@ -119,6 +119,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/map/MapScene.tsx', contains: 'savedStandFeatures' },
   },
   {
+    id: 'map-stand-board',
+    surface: 'map',
+    capability:
+      'Rank every saved stand for a chosen morning or evening, scent verdict first, ten days ahead',
+    hook: 'useStandBoard',
+    web: { file: 'apps/web/src/potential/StandBoardPanel.tsx', contains: 'standCellSummary' },
+    android: { file: 'apps/android/src/ui/StandBoardSheet.tsx', contains: 'standCellSummary' },
+    note: 'The shortlist answers a question asked once per area; this answers the one a season repeats every afternoon. Both clients read the same `standCellSummary` wording, because "Blown out" is exactly the sentence a hunter would compare across two screens on the same day. Days 4–10 are drawn differently on both — CSS hatching on the web, a dashed outline on Android, which has no repeating gradient — because past ~3 days met.no turns 6-hourly and a six-hour average cannot resolve a dawn sit.',
+  },
+  {
     id: 'card-encyclopaedia',
     surface: 'card',
     capability: 'Wikipedia/Wikivoyage extract for a named place',
@@ -642,6 +652,22 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useTransit',
     web: { file: 'apps/web/src/routing/TransitResults.tsx', contains: 'useTransit' },
     android: { file: 'apps/android/src/ui/TransitResults.tsx', contains: 'legTimeParts' },
+  },
+  {
+    id: 'navigation-transit-guidance',
+    surface: 'navigation',
+    capability:
+      'Start a planned journey and follow walk, board, ride, transfer and alight countdowns',
+    hook: 'useTransitPlan',
+    web: {
+      file: 'apps/web/src/transit/TransitGuidance.tsx',
+      contains: 'transitGuidanceAt',
+    },
+    android: {
+      file: 'apps/android/src/ui/TransitGuidance.tsx',
+      contains: 'transitGuidanceAt',
+    },
+    note: 'Both clients continue from the immutable journey snapshot when the network disappears. Android schedules the alight warning with AlarmManager so it survives backgrounding; browsers only guarantee the Notification timer while the Atlas tab remains alive.',
   },
   {
     id: 'planner-commute-board',

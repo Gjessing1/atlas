@@ -30,6 +30,7 @@ export * from './search.js';
 export * from './settings.js';
 export * from './share.js';
 export * from './stands.js';
+export * from './terrain.js';
 export * from './wiki-language.js';
 
 export {

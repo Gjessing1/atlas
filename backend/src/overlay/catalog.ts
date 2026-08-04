@@ -1108,5 +1108,526 @@ export function norwegianLayers(): OverlayLayer[] {
         layers: 'Sykkelrute',
       },
     },
+
+    // -------------------------------------------------------------------
+    // Curiosities (ROADMAP §4.7) — the layers that answer "what is out here
+    // that I would never have known to look for": burial mounds, wrecks,
+    // caves, old mine shafts. Every row is Norway-only and profile-tagged, so
+    // outside Norway the profile degrades to the basemap and the overlays are
+    // simply absent (§2.1), never a "no data" message.
+    //
+    // **Every `minzoom` below is derived from the service's own scale limits,
+    // with the equator formula `scale ≈ 559 082 264 / 2^z`.** These servers
+    // compute the denominator from the EPSG:3857 bbox at face value and never
+    // divide by cos(lat) — measured on Askeladden at Borre (59.4°N), whose
+    // 1:25 000 cut-off leaves z14 (34 124) blank and z15 (17 062) drawn. Using
+    // the ground-distance scale instead predicts z14 and ships a layer that is
+    // switched on and empty, which is indistinguishable from "nothing here".
+    // Where a service splits one dataset across scale bands, all the bands are
+    // listed in `layers` (the contours pattern) so the layer draws all the way
+    // down instead of vanishing at a zoom nobody would think to test.
+    // -------------------------------------------------------------------
+    {
+      // Askeladden — Riksantikvaren's national heritage register, and the
+      // reason this profile exists: gravhaug, bygdeborg, medieval ruins, rock
+      // art, WWII coastal forts, execution sites. ~700 k entries nationally.
+      //
+      // The tap is the whole feature here, not a courtesy: `datering` dates the
+      // thing ("Etterreformatorisk tid"), `synlig` says whether anything is
+      // left to see, and `informasjon` is the surveyor's own field description.
+      meta: {
+        id: 'heritage-sites',
+        rev: 1,
+        title: 'Cultural heritage',
+        description:
+          'Burial mounds, hill forts, ruins, rock art and war remains from the Askeladden ' +
+          'register. Tap for what it is, its dating and whether anything is visible.',
+        group: 'History',
+        attribution: '© Riksantikvaren',
+        metadataUrl: `${KARTKATALOG}kulturminner%20lokaliteter`,
+        // The icon layers stop at 1:450 000 (z11); the outlines at 1:25 000.
+        minzoom: 11,
+        maxzoom: 17,
+        defaultOpacity: 1,
+        identify: true,
+        coverageNote:
+          'A register, not an invitation: most sites are on private land, and everything from ' +
+          'before 1537 is automatically protected — look, never dig. Outlines draw from z15; ' +
+          'below that each site is one icon.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.ra.no/wms/kulturminner2',
+        version: '1.3.0',
+        // Bottom-up: protection zones, then locality and monument outlines
+        // (1:25 000 and closer), then the icons that carry the layer at
+        // planning zoom. The icons are queryable in their own right, which is
+        // what keeps the tap working above z15.
+        layers: 'Sikringssoner,Lokaliteter,Enkeltminner,Lokalitetsikoner,Enkeltminneikoner',
+        identifyLayers: 'Enkeltminner,Lokaliteter,Lokalitetsikoner',
+        // The union of the two feature types' fields — `lokalitetsart` on a
+        // locality, `enkeltminneart` on a single monument — most specific
+        // first. `informasjon` is last of the prose because it is long enough
+        // to push everything else out of a phone card.
+        identifyFields: [
+          'navn',
+          'enkeltminneart',
+          'lokalitetsart',
+          'datering',
+          'opprinneligfunksjon',
+          'vernetype',
+          'vernelov',
+          'synlig',
+          'kommune',
+          'informasjon',
+          'linkkulturminnesok',
+        ],
+        identifyLabels: {
+          navn: 'Name',
+          enkeltminneart: 'Monument',
+          lokalitetsart: 'Site type',
+          datering: 'Dating',
+          opprinneligfunksjon: 'Original function',
+          vernetype: 'Protection',
+          vernelov: 'Protected under',
+          synlig: 'Visible on site',
+          kommune: 'Municipality',
+          informasjon: 'Description',
+          linkkulturminnesok: 'More',
+        },
+        identifyValues: {
+          // The one field a visitor actually plans around: whether there is
+          // anything above ground. Askeladden answers it as a bare boolean.
+          synlig: { true: 'Yes — something to see', false: 'No visible trace' },
+        },
+      },
+    },
+    {
+      // Old mines. The dataset behind Direktoratet for mineralforvaltning's
+      // *Aktsomhetskart for gamle gruver*: secured shafts and the caution zones
+      // around them.
+      //
+      // Geonorge still advertises the old ArcGIS endpoint
+      // (kart.dirmin.no/dirmin/services/GruvesikringsregisterBeta), which now
+      // answers 404 with "Use https://dirmin.no/data" — the live service is the
+      // QGIS server below, found through that page rather than the catalogue.
+      meta: {
+        id: 'old-mines',
+        rev: 1,
+        title: 'Old mines',
+        description:
+          'Secured mine openings and the caution zones around them, from the national ' +
+          'mine-safety register.',
+        group: 'History',
+        attribution: '© Direktoratet for mineralforvaltning',
+        metadataUrl: `${KARTKATALOG}gamle%20gruver`,
+        minzoom: 10,
+        maxzoom: 17,
+        defaultOpacity: 0.85,
+        identify: true,
+        coverageNote:
+          'Registered openings only — Norway has thousands of unrecorded shafts and adits, so ' +
+          'blank ground is not proof of safe ground. An open shaft is a fall hazard whatever ' +
+          'the map says.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://dirmin.no/kart/server/',
+        version: '1.3.0',
+        layers: 'Aktsomhetssone,Sikringer',
+        identifyLayers: 'Sikringer,Aktsomhetssone',
+        identifyFields: ['Sikringsnavn', 'Sikringstype', 'Kommunenavn'],
+        identifyLabels: {
+          Sikringsnavn: 'Mine',
+          Sikringstype: 'Record',
+          Kommunenavn: 'Municipality',
+        },
+      },
+    },
+    {
+      // Wrecks and seabed obstructions from the nautical charts. The layer that
+      // makes a fjord read as a graveyard: `dybde` is how deep it lies, which
+      // is the difference between a diveable wreck and a chart symbol.
+      meta: {
+        id: 'wrecks',
+        rev: 1,
+        title: 'Wrecks & obstructions',
+        description: 'Charted wrecks and seabed obstructions, with the depth each one lies at.',
+        group: 'History',
+        attribution: '© Kartverket',
+        metadataUrl: `${KARTKATALOG}vrak%20og%20hefter`,
+        // `hefte`/`vrak_p` stop at 1:1 M (z10); the wreck areas at 1:100 000.
+        minzoom: 10,
+        maxzoom: 17,
+        defaultOpacity: 1,
+        identify: true,
+        coverageNote:
+          'Charted hazards to navigation, not an archaeological inventory — wrecks that endanger ' +
+          'nothing may never have been charted. Wrecks over 100 years old are protected by law.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.geonorge.no/skwms1/wms.vrak_hefter',
+        version: '1.3.0',
+        layers: 'hefte,vrak_a,vrak_p',
+        identifyLayers: 'vrak_p,vrak_a,hefte',
+        identifyFields: ['objektnavnnorsk', 'objtype', 'vraktype', 'dybde'],
+        identifyLabels: {
+          objektnavnnorsk: 'Name',
+          objtype: 'Type',
+          vraktype: 'Hazard',
+          dybde: 'Depth (m)',
+        },
+        identifyValues: {
+          // Kartverket's SOSI spelling, which reaches the reader as raw
+          // camelCase without this. Most wrecks carry no name at all, so these
+          // two lines are often the entire answer.
+          objtype: { Vrak: 'Wreck', HefteUrenBunn: 'Foul ground', Hefte: 'Obstruction' },
+          vraktype: {
+            farligVrak: 'Dangerous to navigation',
+            ikkeFarligVrak: 'Not dangerous to navigation',
+          },
+        },
+      },
+    },
+    {
+      // NGU's geological heritage register (*geosteder*) — Norway's karst and
+      // cave landscapes, glacial features, classic outcrops. The nearest thing
+      // to a national cave layer: there is **no** standalone karst or cave WMS
+      // in Geonorge (probed 2026-08-03, every NGU Karst*/Grotte* endpoint 404s),
+      // so caves come from here plus OSM `natural=cave_entrance` in the outdoor
+      // overlay, which is also the only half that works outside Norway.
+      meta: {
+        id: 'geoheritage',
+        rev: 1,
+        title: 'Geological heritage',
+        description:
+          'Karst and caves, glacial landforms and classic outcrops from NGU’s geosite register. ' +
+          'Tap for the site’s fact sheet.',
+        group: 'Geology',
+        attribution: '© NGU',
+        metadataUrl: `${KARTKATALOG}geologisk%20arv`,
+        maxzoom: 16,
+        defaultOpacity: 0.85,
+        identify: true,
+        coverageNote:
+          'A curated register of sites judged worth protecting — not a survey of every cave or ' +
+          'landform. A cave entrance is a hazard, not a marked route.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://geo.ngu.no/mapserver/GeologiskarvWMS2',
+        version: '1.3.0',
+        // Three scale bands of one dataset: the overview above 1:262 500 (z11
+        // and out), the areas and points below it. Listing all three is what
+        // keeps the layer from disappearing mid-zoom.
+        layers: 'Geosted_oversikt,Geosted_areal,Geosted_punkt',
+        identifyLayers: 'Geosted_punkt,Geosted_areal,Geosted_oversikt',
+        identifyFields: ['geosted_navn', 'omradenavn', 'geostedtype_tekst', 'faktaark_url'],
+        identifyLabels: {
+          geosted_navn: 'Site',
+          omradenavn: 'Area',
+          geostedtype_tekst: 'Assessment',
+          faktaark_url: 'Fact sheet',
+        },
+      },
+    },
+    {
+      // Mud volcanoes on the seabed — MAREANO's shallow-gas mapping. Tiny and
+      // gloriously obscure, which is the point of the profile.
+      meta: {
+        id: 'mud-volcanoes',
+        rev: 1,
+        title: 'Mud volcanoes',
+        description: 'Seabed mud volcanoes and shallow-gas seeps mapped offshore.',
+        group: 'Geology',
+        attribution: '© NGU / MAREANO',
+        metadataUrl: `${KARTKATALOG}marine%20geofarer`,
+        maxzoom: 13,
+        defaultOpacity: 0.9,
+        identify: true,
+        coverageNote:
+          'Offshore only, and only where MAREANO has surveyed — most of the shelf is unmapped, ' +
+          'and nothing on land will ever appear here.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://geo.ngu.no/mapserver/MarinGeofarerWMS',
+        version: '1.3.0',
+        layers: 'Leirvulkan',
+        identifyLayers: 'Leirvulkan',
+        identifyFields: ['GrunnGassNavn', 'MediumNavn', 'Dato'],
+        identifyLabels: {
+          GrunnGassNavn: 'Feature',
+          MediumNavn: 'Setting',
+          Dato: 'Mapped',
+        },
+      },
+    },
+    {
+      // GRANADA, NGU's national groundwater database: drilled wells and natural
+      // springs. A spring is drinking water on a ridge with no stream; a well
+      // is evidence of a farm that may no longer be there.
+      meta: {
+        id: 'groundwater-wells',
+        rev: 1,
+        title: 'Wells & springs',
+        description: 'Drilled wells and natural springs from the national groundwater database.',
+        group: 'Water & depth',
+        attribution: '© NGU',
+        metadataUrl: `${KARTKATALOG}granada`,
+        // Point layers cut off at 1:525 000. The coarser national/regional
+        // density bands above that are deliberately left out — at that scale
+        // they cover half the country in symbols and answer nothing.
+        minzoom: 11,
+        maxzoom: 17,
+        defaultOpacity: 0.9,
+        identify: true,
+        coverageNote:
+          'Reported wells and springs — reporting is patchy and a mapped spring is not tested ' +
+          'drinking water.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://geo.ngu.no/mapserver/GranadaWMS5',
+        version: '1.3.0',
+        layers: 'Grunnvannsborehull,Grunnvannsoppkomme',
+        identifyLayers: 'Grunnvannsborehull,Grunnvannsoppkomme',
+        identifyFields: ['broenn_nr', 'bronn_type', 'brukstype'],
+        identifyLabels: {
+          broenn_nr: 'Well no.',
+          bronn_type: 'Type',
+          brukstype: 'Use',
+        },
+      },
+    },
+    {
+      // NVE's registry of *observed* landslides and avalanches — where one has
+      // actually come down, with the date. Offered in Ski as well as
+      // Curiosities: "has this slope run before?" is a tour-planning question,
+      // and this is the only layer in the catalog that answers it.
+      meta: {
+        id: 'landslide-events',
+        rev: 1,
+        title: 'Landslide & avalanche history',
+        description:
+          'Recorded slide events — snow, rock, debris and quick clay — with release and runout ' +
+          'areas and the date each one happened.',
+        group: 'Hazards',
+        attribution: '© NVE',
+        metadataUrl: `${KARTKATALOG}skredhendelser`,
+        maxzoom: 16,
+        defaultOpacity: 0.8,
+        identify: true,
+        coverageNote:
+          'Events somebody reported, not every slide that has happened. Blank ground means ' +
+          'nothing was recorded — never that a slope is safe. Release and runout outlines draw ' +
+          'from z13; the typed points draw at every zoom.',
+        profiles: ['curiosities', 'ski'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/Skredhendelser1/MapServer/WMSServer',
+        version: '1.3.0',
+        // Outlines under, typed points over. `Skredtype` is the same event set
+        // symbolized by slide type with no scale floor, so it carries the layer
+        // above z13 where the two area layers stop drawing.
+        layers: 'Skredhendelse_UtlopsOmrade,Skredhendelse_UtlosningsOmrade,Skredtype',
+        identifyLayers: 'Skredtype,Skredhendelse_UtlosningsOmrade,Skredhendelse_UtlopsOmrade',
+        identifyFields: [
+          'skredType',
+          'skredTidspunkt',
+          'skredNavn',
+          'utlosningArsak',
+          'objektType',
+        ],
+        identifyLabels: {
+          skredType: 'Slide type',
+          skredTidspunkt: 'Happened',
+          skredNavn: 'Name',
+          utlosningArsak: 'Trigger',
+          objektType: 'Part',
+        },
+        identifyValues: {
+          // NVE's Norwegian type names. The distinctions are real and the
+          // English words are not interchangeable — a sørpeskred behaves
+          // nothing like a snøskred — so each is translated, not grouped.
+          skredType: {
+            Snøskred: 'Snow avalanche',
+            Sørpeskred: 'Slushflow',
+            Steinsprang: 'Rockfall',
+            Steinskred: 'Rockslide',
+            Fjellskred: 'Rock avalanche',
+            Jordskred: 'Soil slide',
+            Flomskred: 'Debris flow',
+            Kvikkleireskred: 'Quick-clay slide',
+            Isnedfall: 'Ice fall',
+          },
+          objektType: { Utlop: 'Runout area', Utlosning: 'Release area' },
+        },
+      },
+    },
+    {
+      // The modelled twin of the layer above: where rockfall *could* reach,
+      // from NVE's national terrain-model run. Distinct from the event registry
+      // in the way that matters — this one has no gaps because nobody happened
+      // to report a fall.
+      meta: {
+        id: 'rockfall-hazard',
+        rev: 1,
+        title: 'Rockfall zones',
+        description:
+          'Modelled rockfall release and runout zones from NVE’s national terrain analysis.',
+        group: 'Hazards',
+        attribution: '© NVE',
+        metadataUrl: `${KARTKATALOG}steinsprang%20aktsomhet`,
+        maxzoom: 17,
+        // Wall-to-wall polygons under every cliff in the country: at full
+        // strength they erase the terrain the zones are drawn *for*.
+        defaultOpacity: 0.45,
+        identify: true,
+        coverageNote:
+          'A model over the terrain model, at national resolution — advisory for planning, never ' +
+          'a substitute for looking up at the slope you are under.',
+        profiles: ['curiosities', 'ski'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.nve.no/enterprise/services/SkredSteinAktR/MapServer/WMSServer',
+        version: '1.3.0',
+        // Two scale bands, and they do not overlap: the generalized group layer
+        // owns 1:37 799 and out (z13 and coarser), the detailed pair owns
+        // everything closer. Either one alone is an overlay that empties itself
+        // at some zoom the user will reach.
+        layers: 'Steinsprang-AktsomhetOmrader,Utlopsomrade,Utlosningsomrade',
+        identifyLayers: 'Utlosningsomrade,Utlopsomrade',
+        identifyFields: ['skredtype', 'objType', 'temaKval'],
+        identifyLabels: {
+          skredtype: 'Hazard',
+          objType: 'Zone',
+          temaKval: 'Data quality',
+        },
+        identifyValues: {
+          objType: { UtlopOmr: 'Runout zone', UtlosningOmr: 'Release zone' },
+        },
+      },
+    },
+    {
+      // Artskart's alien-species observations, split by the Norwegian risk
+      // assessment (SE severe → NK no known risk). An ecological invasion map.
+      //
+      // `identify: false` on purpose: the upstream's own GetFeatureInfo is
+      // broken — every QUERY_LAYERS value faults with "Layer named 'DD_punkt'
+      // does not exist", a category that no longer exists in their config
+      // (probed 2026-08-03). The raster draws fine; only the tap is dead, so
+      // the layer ships without one rather than not at all.
+      meta: {
+        id: 'alien-species',
+        rev: 1,
+        title: 'Alien species',
+        description:
+          'Recorded sightings of invasive and non-native species, coloured by their assessed ' +
+          'ecological risk.',
+        group: 'Nature',
+        attribution: '© Artsdatabanken',
+        metadataUrl: `${KARTKATALOG}fremmede%20arter`,
+        maxzoom: 15,
+        defaultOpacity: 0.75,
+        identify: false,
+        coverageNote:
+          'Volunteer and survey observations: dense near towns and roads because that is where ' +
+          'people look, not because that is where the species are.',
+        profiles: ['curiosities'],
+        // Drawn whole, the layer is a wall of dots — a single z12 tile over
+        // Oslo comes back 109 kB and 78 % covered. The risk chips are the
+        // difference between "everything anyone ever recorded" and "the species
+        // that actually displace native ones".
+        options: [
+          {
+            key: 'risk',
+            label: 'Risk',
+            defaultValue: 'severe',
+            choices: [
+              {
+                value: 'severe',
+                label: 'Severe',
+                caption: 'SE — species assessed as a severe ecological threat.',
+              },
+              {
+                value: 'high',
+                label: 'Severe + high',
+                caption: 'SE and HI, the two categories that drive control work.',
+              },
+              {
+                value: 'all',
+                label: 'All records',
+                caption: 'Every risk category, down to species with no known impact.',
+              },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.artsdatabanken.no/WMS/artskartfa.aspx',
+        version: '1.3.0',
+        layers: 'SE',
+        // The risk categories are separate WMS layers, so the chip simply
+        // rewrites LAYERS — `optionGetMapParams` is applied after the base
+        // request is built, which makes overriding it a data-only change.
+        optionParams: {
+          risk: {
+            severe: { LAYERS: 'SE' },
+            high: { LAYERS: 'HI,SE' },
+            all: { LAYERS: 'NK,LO,PH,HI,SE' },
+          },
+        },
+      },
+    },
+    {
+      // Coastal spawning grounds from Fiskeridirektoratet's *kystnære
+      // fiskeridata*, mapped with local fishermen. Tagged `fishing` as well:
+      // the species list on a tap is exactly what a shore angler wants, and it
+      // is the only layer in the catalog that carries one.
+      meta: {
+        id: 'spawning-areas',
+        rev: 1,
+        title: 'Spawning grounds',
+        description: 'Coastal spawning and nursery areas, with the species recorded for each one.',
+        group: 'Nature',
+        attribution: '© Fiskeridirektoratet',
+        metadataUrl: `${KARTKATALOG}gyteomr%C3%A5der`,
+        maxzoom: 15,
+        defaultOpacity: 0.6,
+        identify: true,
+        coverageNote:
+          'Local knowledge collected area by area — coverage follows where fishermen were asked, ' +
+          'and says nothing about closures or quotas.',
+        profiles: ['curiosities', 'fishing'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://gis.fiskeridir.no/server/services/fiskeridirWMS_fiskeri/MapServer/WMSServer',
+        version: '1.3.0',
+        layers: 'gyteomraader',
+        identifyLayers: 'gyteomraader',
+        // `arter` arrives as one space-separated string of Norwegian names in
+        // caps ("HYSE RØDSPETTE SEI SILD TORSK"), which is left exactly as the
+        // upstream wrote it — inventing a translation of a free-text field is
+        // how a species list starts lying.
+        identifyFields: ['stedsnavn', 'arter', 'kommunenavn'],
+        identifyLabels: {
+          stedsnavn: 'Place',
+          arter: 'Species (Norwegian)',
+          kommunenavn: 'Municipality',
+        },
+      },
+    },
   ];
 }

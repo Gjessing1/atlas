@@ -440,8 +440,16 @@ const SURFACE_AWARE_PROFILES = ['run', 'hike', 'fishhunt', 'bike'];
  */
 const BARRIER_PROFILES = ['fishhunt', 'hike', 'bike'];
 
-/** Profiles where the outdoor POIs are the point of the map, not background. */
-const OUTDOOR_POI_PROFILES = ['fishhunt', 'hike'];
+/**
+ * Profiles where the outdoor POIs are the point of the map, not background.
+ *
+ * Curiosities is here for one class in particular: `cave_entrance`, which the
+ * basemap does not carry and no Norwegian WMS answers for either (there is no
+ * national karst or cave service — see the `geoheritage` catalog row). The
+ * outdoor archive is the only layer that can put a cave on the map, and the one
+ * half of "find caves" that also works outside Norway.
+ */
+const OUTDOOR_POI_PROFILES = ['fishhunt', 'hike', 'curiosities'];
 
 /** Named, because the user's POI-size setting has to reach this layer too. */
 const OUTDOOR_POI_LAYER_ID = 'atlas-outdoor-poi';
@@ -517,6 +525,7 @@ const OUTDOOR_POI_CLASSES = [
   'drinking_water',
   'slipway',
   'boatyard',
+  'cave_entrance',
 ];
 
 /**
@@ -558,6 +567,11 @@ const OUTDOOR_ICON_IMAGE = [
   'drinking_water',
   ['slipway', 'boatyard'],
   'harbor',
+  // `entrance` (a doorway) is the sheet's closest thing to a cave mouth, and
+  // deliberately not `attraction` — that is the viewpoint icon, and a cave you
+  // cannot tell apart from a viewpoint is not on the map in any useful sense.
+  'cave_entrance',
+  'entrance',
   // Unreachable — the layer filter admits only the classes above — but MapLibre
   // requires a default, and a real sprite name keeps it from ever warning.
   'attraction',
@@ -794,9 +808,16 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   // Profiles with bespoke cartography. An unknown stored id falls back to
   // `neutral` — the untouched restrained base, which is what a general preset
   // wants (roads and terrain fully visible).
-  const profile = ['drive', 'bike', 'hike', 'ski', 'run', 'explore', 'fishhunt'].includes(
-    appearance.profile,
-  )
+  const profile = [
+    'drive',
+    'bike',
+    'hike',
+    'ski',
+    'run',
+    'explore',
+    'fishhunt',
+    'curiosities',
+  ].includes(appearance.profile)
     ? appearance.profile
     : 'neutral';
   const wantsBarriers = BARRIER_PROFILES.includes(profile);
@@ -943,6 +964,19 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       if (/^poi_/.test(layer.id)) {
         paint(layer, 'text-opacity', 0.55);
         paint(layer, 'icon-opacity', 0.5);
+      }
+    } else if (profile === 'curiosities') {
+      // The overlays *are* the map here: a wall of heritage icons, wreck
+      // symbols and mine zones on top of the basemap. So the basemap gets out
+      // of their way — through-roads recede and the ordinary POI soup (shops,
+      // restaurants, fuel) drops further back than in any other profile, since
+      // an amenity icon and a burial-mound icon are the same size on screen and
+      // only one of them is what this profile was opened for. Nothing is
+      // hidden: everything stays legible at full zoom.
+      if (isCarRoad(layer)) paint(layer, 'line-opacity', 0.72);
+      if (/^poi_/.test(layer.id)) {
+        paint(layer, 'text-opacity', 0.45);
+        paint(layer, 'icon-opacity', 0.4);
       }
     } else if (profile === 'ski') {
       tuneWinterLayer(layer, dark);

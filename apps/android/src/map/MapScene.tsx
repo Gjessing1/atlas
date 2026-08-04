@@ -329,7 +329,7 @@ export function MapScene({
   // drawn on top of it start inside the landscape navigation bar (0 in portrait).
   const side = useSideInsets();
   // In transit mode the road line stands down so the map shows one answer.
-  const transitTrip = transit.enabled ? transit.trip : null;
+  const transitTrip = transit.guidanceTrip ?? (transit.enabled ? transit.trip : null);
   // The routed line to draw while planning (selected path, primary or alt).
   const planPath = route.paths?.[route.selectedPath] ?? null;
 
@@ -987,7 +987,7 @@ export function MapScene({
         {/* The selected public transport journey: rides in the line's own
           colour, walks dashed, boarding points ringed. Drawn instead of the
           planned road line, never alongside it. */}
-        {planning && transitTrip ? (
+        {transitTrip ? (
           <>
             <GeoJSONSource id="atlas-transit" data={transitLegsGeoJSON(transitTrip)}>
               <Layer

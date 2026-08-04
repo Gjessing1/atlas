@@ -20,7 +20,6 @@ import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
 
 import {
   isRideMode,
-  legDelayMs,
   transferCount,
   tripLineCodes,
   tripNeedsBooking,
@@ -64,6 +63,9 @@ export function delayLabel(deltaMs: number): string {
 /** How a time reads against its timetable: as printed, or corrected late/early. */
 export type TransitTimeTone = 'ontime' | 'late' | 'early';
 
+/** What backs an expected time — schedule, a live feed, or a live feed Entur distrusts. */
+export type TransitTimeConfidence = 'timetable' | 'realtime' | 'uncertain';
+
 /** A departure or arrival time, split into the parts a board paints separately. */
 export interface LegTimeParts {
   /** The timetabled time — shown struck through, and only when it is being corrected. */
@@ -73,6 +75,9 @@ export interface LegTimeParts {
   /** "+4 min" / "-2 min", or null when there is nothing worth correcting. */
   delay: string | null;
   tone: TransitTimeTone;
+  confidence: TransitTimeConfidence;
+  /** Short enough for a collapsed journey card and explicit enough not to imply live tracking. */
+  confidenceLabel: 'Timetable' | 'Live' | 'Live estimate uncertain';
 }
 
 /**
@@ -85,14 +90,34 @@ export function legTimeParts(time: {
   aimedMs: number;
   expectedMs: number;
   realtime: boolean;
+  predictionInaccurate?: boolean;
 }): LegTimeParts {
   const delta = time.expectedMs - time.aimedMs;
   const aimed = fmtClock(time.aimedMs);
   const expected = fmtClock(time.expectedMs);
+  const confidence =
+    time.realtime && time.predictionInaccurate
+      ? 'uncertain'
+      : time.realtime
+        ? 'realtime'
+        : 'timetable';
+  const confidenceLabel =
+    confidence === 'uncertain'
+      ? 'Live estimate uncertain'
+      : confidence === 'realtime'
+        ? 'Live'
+        : 'Timetable';
   if (!time.realtime || Math.abs(delta) < DELAY_THRESHOLD_MS) {
-    return { aimed, expected, delay: null, tone: 'ontime' };
+    return { aimed, expected, delay: null, tone: 'ontime', confidence, confidenceLabel };
   }
-  return { aimed, expected, delay: delayLabel(delta), tone: delta > 0 ? 'late' : 'early' };
+  return {
+    aimed,
+    expected,
+    delay: delayLabel(delta),
+    tone: delta > 0 ? 'late' : 'early',
+    confidence,
+    confidenceLabel,
+  };
 }
 
 /** The platform/track/stand as the sign says it — "plat. 3" — or null when the stop has none. */
@@ -196,6 +221,8 @@ export interface TripSummary {
    * make it — or null when nothing is running late enough to say so.
    */
   delay: string | null;
+  /** First vehicle departure, with timetable and live-confidence kept separate. */
+  departure: LegTimeParts | null;
   /** The worst disruption anywhere inside, so a collapsed card never looks clean when it is not. */
   severity: TransitSeverity | null;
   /** "Disruption" / "Notice", paired with `severity`. */
@@ -224,11 +251,18 @@ export function tripSummary(trip: TransitTrip): TripSummary {
   const severity = tripSeverity(trip);
   // The delay that decides whether you make it: the first vehicle you board.
   const firstRide = trip.legs.find((leg) => isRideMode(leg.mode));
-  const delta = firstRide ? legDelayMs(firstRide) : 0;
-  const late = firstRide?.realtime === true && delta >= DELAY_THRESHOLD_MS;
+  const departure = firstRide
+    ? legTimeParts({
+        aimedMs: firstRide.aimedStartMs,
+        expectedMs: firstRide.expectedStartMs,
+        realtime: firstRide.realtime,
+        predictionInaccurate: firstRide.startPredictionInaccurate,
+      })
+    : null;
   return {
     times: `${fmtClock(trip.startMs)} – ${fmtClock(trip.endMs)}`,
-    delay: late ? delayLabel(delta) : null,
+    delay: departure?.delay ?? null,
+    departure,
     severity,
     severityLabel: severity ? severityFlagLabel(severity) : null,
     needsBooking: tripNeedsBooking(trip),

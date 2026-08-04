@@ -628,6 +628,25 @@ export function quarry(id: string): Quarry | undefined {
   return QUARRIES.find((q) => q.id === id);
 }
 
+/** The name a catalog choice — and therefore a saved stand — carries for a quarry. */
+export function quarryLabel(q: Quarry): string {
+  return 'targetLabel' in q && q.targetLabel ? q.targetLabel : q.nameNo;
+}
+
+/**
+ * The quarry a saved stand was planned for, from the label the payload kept.
+ *
+ * A `PlaceStand` records the *display* name rather than the catalog id, because
+ * that is what a hunter reads on the card and what an export has to carry. That
+ * makes this lookup the seam where a later surface can rank a stand under the
+ * tactic it was actually planned for — and it returns undefined rather than a
+ * default for a stand from before the roe split (whose label was just
+ * "hunting"), so a caller falls back to the general model knowingly.
+ */
+export function quarryByLabel(label: string): Quarry | undefined {
+  return QUARRIES.find((q) => quarryLabel(q) === label);
+}
+
 /**
  * Everything the app says about hunting seasons: a link and the date we last
  * checked it. No dates are restated — see the file header for why a national

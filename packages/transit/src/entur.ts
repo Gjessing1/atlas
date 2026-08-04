@@ -51,7 +51,8 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[
     pointsOnLink{points}
     line{ id publicCode name presentation{colour textColour} }
     authority{name}
-    fromEstimatedCall{ destinationDisplay{frontText} }
+    fromEstimatedCall{ predictionInaccurate destinationDisplay{frontText} }
+    toEstimatedCall{ predictionInaccurate }
     fromPlace{ name latitude longitude quay{id publicCode name} }
     toPlace{ name latitude longitude quay{id publicCode name} }
     intermediateEstimatedCalls{ aimedDepartureTime expectedDepartureTime quay{id publicCode name latitude longitude} }
@@ -61,7 +62,7 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[
 
 const DEPARTURE_FIELDS = `id name latitude longitude
  estimatedCalls(startTime:$start,timeRange:$range,numberOfDepartures:$limit,arrivalDeparture:departures,includeCancelledTrips:true,whiteListed:$lines){
-  aimedDepartureTime expectedDepartureTime realtime cancellation forBoarding
+  aimedDepartureTime expectedDepartureTime realtime predictionInaccurate cancellation forBoarding
   destinationDisplay{frontText}
   quay{id publicCode name}
   serviceJourney{id publicCode transportMode directionType line{id publicCode name presentation{colour textColour} operator{name}}}
@@ -503,9 +504,9 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
   const aimedStartMs = toMs(wire.aimedStartTime);
   const aimedEndMs = toMs(wire.aimedEndTime);
   const line = toLine(wire.line, wire.authority);
-  const headsign = (
-    wire.fromEstimatedCall as { destinationDisplay?: { frontText?: unknown } | null } | null
-  )?.destinationDisplay?.frontText;
+  const fromCall = wire.fromEstimatedCall as Record<string, unknown> | null;
+  const toCall = wire.toEstimatedCall as Record<string, unknown> | null;
+  const headsign = (fromCall?.destinationDisplay as { frontText?: unknown } | null)?.frontText;
   if (line && typeof headsign === 'string' && headsign.trim()) line.headsign = headsign;
 
   const calls = Array.isArray(wire.intermediateEstimatedCalls)
@@ -523,6 +524,8 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
     aimedEndMs,
     expectedEndMs: toMs(wire.expectedEndTime, aimedEndMs),
     realtime: wire.realtime === true,
+    startPredictionInaccurate: fromCall?.predictionInaccurate === true,
+    endPredictionInaccurate: toCall?.predictionInaccurate === true,
     from: toPlace(wire.fromPlace as WirePlace),
     to: toPlace(wire.toPlace as WirePlace),
     ...(line ? { line } : {}),
@@ -626,6 +629,7 @@ export function parseEnturDeparturesResponse(body: unknown): TransitDeparturesRe
         aimedDepartureMs,
         expectedDepartureMs: toMs(call.expectedDepartureTime, aimedDepartureMs),
         realtime: call.realtime === true,
+        predictionInaccurate: call.predictionInaccurate === true,
         cancelled: call.cancellation === true,
         destination:
           typeof destination === 'string' && destination.trim()

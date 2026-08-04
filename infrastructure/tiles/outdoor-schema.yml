@@ -185,6 +185,29 @@ layers:
             value: camp_site
           - key: name
 
+      # --- Caves -----------------------------------------------------------
+      # `natural=cave_entrance` is absent from OpenMapTiles entirely, and there
+      # is no Norwegian cave or karst service to fall back on either: every NGU
+      # Karst*/Grotte* endpoint 404s (probed 2026-08-03), and NGU's geological-
+      # heritage register only carries the caves somebody proposed for
+      # protection. So this is the only layer that can put a cave entrance on
+      # the map — and unlike the WMS half of the Curiosities profile, it works
+      # anywhere OSM does.
+      #
+      # Revealed at the same zoom as the cabins rather than the viewpoints: a
+      # cave is a destination you plan a day around, not something you notice on
+      # arrival. `name` rides along because Norwegian caves are named
+      # (Grønligrotta, Setergrotta) and the name is how you look one up.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          natural: [cave_entrance]
+        attributes:
+          - key: class
+            value: cave_entrance
+          - key: name
+
       # --- Viewpoints ------------------------------------------------------
       # A zoom later than the cabins: plentiful, and not what a trip is planned
       # around.

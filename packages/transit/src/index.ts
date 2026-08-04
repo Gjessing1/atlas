@@ -64,6 +64,7 @@ export {
   tripSummary,
   walkLegLabel,
   type LegTimeParts,
+  type TransitTimeConfidence,
   type TransitTimeTone,
   type TripSummary,
 } from './labels.js';
@@ -131,3 +132,12 @@ export {
   type TransitWidgetDirection,
   type TransitWidgetRow,
 } from './widget.js';
+export {
+  TRANSIT_ALIGHT_LEAD_MS,
+  transitAlightAlarms,
+  transitCountdown,
+  transitGuidanceAt,
+  type TransitAlightAlarm,
+  type TransitGuidancePhase,
+  type TransitGuidanceSnapshot,
+} from './guidance.js';

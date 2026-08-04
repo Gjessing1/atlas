@@ -45,17 +45,27 @@ function LegTime({
   aimedMs,
   expectedMs,
   realtime,
+  predictionInaccurate,
 }: {
   aimedMs: number;
   expectedMs: number;
   realtime: boolean;
+  predictionInaccurate?: boolean;
 }) {
-  const time = legTimeParts({ aimedMs, expectedMs, realtime });
-  if (!time.delay) return <span className="transit-time">{time.expected}</span>;
+  const time = legTimeParts({ aimedMs, expectedMs, realtime, predictionInaccurate });
+  if (!time.delay) {
+    return (
+      <span className="transit-time">
+        {time.expected}
+        <span className={`transit-confidence ${time.confidence}`}>{time.confidenceLabel}</span>
+      </span>
+    );
+  }
   return (
     <span className={`transit-time ${time.tone}`}>
       <s>{time.aimed}</s> {time.expected}
       <span className="transit-delay">{time.delay}</span>
+      <span className={`transit-confidence ${time.confidence}`}>{time.confidenceLabel}</span>
     </span>
   );
 }
@@ -169,6 +179,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
                 aimedMs={leg.aimedStartMs}
                 expectedMs={leg.expectedStartMs}
                 realtime={leg.realtime}
+                predictionInaccurate={leg.startPredictionInaccurate}
               />
               <LineChip line={leg.line} />
               {leg.line.headsign && <span className="transit-headsign">→ {leg.line.headsign}</span>}
@@ -199,6 +210,7 @@ function LegRow({ leg }: { leg: TransitLeg }) {
                 aimedMs={leg.aimedEndMs}
                 expectedMs={leg.expectedEndMs}
                 realtime={leg.realtime}
+                predictionInaccurate={leg.endPredictionInaccurate}
               />
               <span className="transit-leg-detail">
                 {leg.to.name}
@@ -222,10 +234,12 @@ function TripCard({
   trip,
   expanded,
   onToggle,
+  onStartGuidance,
 }: {
   trip: TransitTrip;
   expanded: boolean;
   onToggle: () => void;
+  onStartGuidance: () => void;
 }) {
   // A collapsed card must not look clean when a leg inside it is cancelled —
   // the whole point of the summary row is deciding without expanding.
@@ -241,7 +255,13 @@ function TripCard({
       >
         <span className="transit-trip-times">
           {summary.times}
-          {summary.delay && <span className="transit-delay">{summary.delay}</span>}
+          {summary.departure && (
+            <span className={`transit-summary-departure ${summary.departure.confidence}`}>
+              {summary.departure.delay
+                ? `Departs ${summary.departure.expected}, planned ${summary.departure.aimed} · ${summary.departure.confidenceLabel}`
+                : `${summary.departure.confidenceLabel} departure`}
+            </span>
+          )}
           {summary.severity && (
             <span className={`transit-trip-flag ${summary.severity}`}>
               ! {summary.severityLabel}
@@ -271,6 +291,11 @@ function TripCard({
         {summary.lineCodes.length > 0 ? `Lines ${summary.lineCodes.join(', ')}` : 'Walking only'}
       </span>
       {expanded && (
+        <button type="button" className="transit-start" onClick={onStartGuidance}>
+          Start journey
+        </button>
+      )}
+      {expanded && (
         <ol className="transit-legs">
           {trip.legs.map((leg, i) => (
             <LegRow key={i} leg={leg} />
@@ -298,7 +323,13 @@ function toLocalInput(ms: number): string {
  * falls back, how an empty answer is worded) live in `useTransitBoard`, shared
  * with Android; what is left here is markup.
  */
-export function TransitResults({ transit }: { transit: TransitPlan }) {
+export function TransitResults({
+  transit,
+  onStartGuidance,
+}: {
+  transit: TransitPlan;
+  onStartGuidance: (trip: TransitTrip) => void;
+}) {
   const [showFilters, setShowFilters] = useState(false);
   const board = useTransitBoard(transit);
   const trips = transit.trips;
@@ -406,6 +437,7 @@ export function TransitResults({ transit }: { transit: TransitPlan }) {
                 trip={trip}
                 expanded={transit.selected === i}
                 onToggle={() => transit.select(transit.selected === i ? null : i)}
+                onStartGuidance={() => onStartGuidance(trip)}
               />
             ))}
           </ol>

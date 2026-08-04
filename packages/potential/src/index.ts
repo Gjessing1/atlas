@@ -130,6 +130,8 @@ export {
   LAKE_SIGNALS,
   QUARRIES,
   quarry,
+  quarryByLabel,
+  quarryLabel,
   RIVER_SIGNALS,
   seasonAt,
   signalMeta,

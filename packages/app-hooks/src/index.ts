@@ -221,4 +221,12 @@ export {
   type SpotsWindow,
   type StandWindRisk,
 } from './useBestSpots.js';
+export {
+  useStandBoard,
+  STAND_BOARD_LIMIT,
+  type StandBoardPlace,
+  type StandBoardRow,
+  type StandBoardState,
+  type StandBoardStatus,
+} from './useStandBoard.js';
 export { planningArea, usePlanningAreas, type PlanningArea } from './usePlanningAreas.js';
