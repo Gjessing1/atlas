@@ -22,6 +22,20 @@ export interface MapAppearance {
    * infrastructure/tiles/outdoor-schema.yml.
    */
   outdoorTiles?: string;
+  /**
+   * Draw the vector basemap at all. Absent or `true` is the map as it has always
+   * been; `false` replaces the whole thing with one flat, inert background and
+   * leaves the overlays to carry the map (see `blankBasemapStyle`).
+   *
+   * Not a cartographic preference but a *reading* one, and the case that asked
+   * for it is the historic-maps overlay: an amtskart sheet from 1826 has hard
+   * edges and holes, and with today's coloured land under it the eye reads the
+   * modern green as part of the old survey. The same is true of any raster with
+   * gaps — satellite cloud, a bathymetry survey's edge. Nothing else in the
+   * style pass can express it, because "no basemap" is not a tuning of the
+   * basemap's layers: it is their absence.
+   */
+  basemap?: boolean;
 }
 
 /** The deliberately small, portable style-editor surface shared by both maps. */
@@ -790,6 +804,42 @@ function tuneSurface(
 }
 
 /**
+ * The colour a map with no basemap is drawn on: near-paper in light, near-ink in
+ * dark. Deliberately *not* the style's own background (a pale land green) and
+ * not a mid grey either — a raster overlay drawn at 80 % opacity takes its cast
+ * from whatever is underneath, and the point of switching the basemap off is to
+ * see the overlay's own colours and its own edges.
+ */
+const BLANK_BACKGROUND = { light: '#f5f4f2', dark: '#15171a' };
+
+/**
+ * The style for "overlays only": everything the renderer needs and not one
+ * drawn layer of the basemap.
+ *
+ * Sources go with the layers rather than being left declared-but-unused, so no
+ * basemap tile is fetched at all — this is also the setting somebody switches on
+ * to stop paying for them. `glyphs` and `sprite` stay: the *overlays* draw text
+ * (bathymetry depths, route labels) through the same font stack, and dropping
+ * them would break those instead.
+ */
+function blankBasemapStyle(style: MapStyleDocument, dark: boolean): string {
+  return JSON.stringify({
+    version: style['version'] ?? 8,
+    ...(style.name === undefined ? {} : { name: style.name }),
+    ...(style['glyphs'] === undefined ? {} : { glyphs: style['glyphs'] }),
+    ...(style['sprite'] === undefined ? {} : { sprite: style['sprite'] }),
+    sources: {},
+    layers: [
+      {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': dark ? BLANK_BACKGROUND.dark : BLANK_BACKGROUND.light },
+      },
+    ],
+  });
+}
+
+/**
  * Apply Atlas's restrained cartography, dark palette and activity emphasis to
  * the same source style on web and Android. The source URLs and asset paths are
  * untouched, so online templates and downloaded packs remain interchangeable.
@@ -805,6 +855,10 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   }
   const style = parsed as MapStyleDocument;
   const dark = appearance.colorScheme === 'dark';
+  // Basemap off: there is nothing left for the passes below to tune. Answered
+  // here rather than by filtering at the end, so no profile emphasis, outdoor
+  // POI layer or barrier clone is computed for a map that will not draw one.
+  if (appearance.basemap === false) return blankBasemapStyle(style, dark);
   // Profiles with bespoke cartography. An unknown stored id falls back to
   // `neutral` — the untouched restrained base, which is what a general preset
   // wants (roads and terrain fully visible).

@@ -2486,6 +2486,7 @@ button.transit-notice-summary {
   display: grid;
   grid-template-areas:
     'quarry quarry'
+    'filters filters'
     'profiles layers'
     '. measure'
     'zoom locate';
@@ -2676,6 +2677,120 @@ button.transit-notice-summary {
   border-top: 1px solid var(--border);
   border-radius: 0 0 6px 6px;
   color: var(--text-muted);
+}
+
+/* What the switched-on layers are filtered to: directly above the switcher that
+   turns them on, and absent when nothing on the map has a variant to pick. */
+.layer-filters {
+  position: relative;
+  grid-area: filters;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.layer-filters-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(240px, calc(100vw - 24px));
+  min-height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.layer-filters-toggle:hover,
+.layer-filters-toggle-open {
+  background: var(--surface);
+}
+
+/* The trigger reads out the chosen values ("Everything · Severe · Gold"), so
+   the control says what the map is filtered to without being opened. Several
+   filters make that long — one line, ellipsised, never a second row. */
+.layer-filters-toggle-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-filters-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 24px));
+  max-height: min(56vh, 460px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.layer-filters-group + .layer-filters-group {
+  margin-top: 2px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.layer-filters-layer {
+  padding: 2px 2px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.layer-filters-option + .layer-filters-option {
+  margin-top: 6px;
+}
+
+.layer-filters-label {
+  padding: 0 2px 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.layer-filters-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* What the current choice actually changes. The one place a filtered register
+   can teach what it is showing, so it is not optional decoration. */
+.layer-filters-caption {
+  padding: 4px 2px 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+/* The basemap row, at the foot of the switcher: not an overlay but the map they
+   are drawn on. Sticky, because Curiosities' catalog is nineteen rows deep and a
+   switch nobody can see without scrolling to the end is a switch nobody finds. */
+.layer-switch-base {
+  position: sticky;
+  bottom: -4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  padding-bottom: 4px;
+  /* Opaque, not `--surface-overlay`: that is 95 % white, and the rows scrolling
+     under a sticky footer read straight through it. */
+  background: var(--surface);
 }
 
 .map-zoom-controls {

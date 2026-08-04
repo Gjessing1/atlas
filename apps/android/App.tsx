@@ -14,6 +14,7 @@ import {
   useRoutePlanPersistence,
   usePotentialExplain,
   usePotentialTarget,
+  useLayerFilters,
   usePlanningAreas,
   useStandBoard,
   useThemeMode,
@@ -193,19 +194,23 @@ function AppInner() {
   // switcher layout syncs and is shared by Settings and the one-tap controls.
   const profiles = useMapProfile(data);
   const profilePreferences = useMapProfilePreferences(data);
-  const mapAppearance = useMemo<MapAppearance>(
-    () => ({
-      colorScheme: appearance.colorScheme,
-      profile: profiles.profile.id,
-      custom: mapStyleEditor.value,
-    }),
-    [appearance.colorScheme, profiles.profile.id, mapStyleEditor.value],
-  );
   const overlaysCtl = useOverlays(
     data,
     profiles.profile.id,
     profilePreferences.preferredLayers(profiles.profile.id),
     profilePreferences.customizedLayers(profiles.profile.id),
+  );
+  // After `useOverlays`, because whether the basemap draws at all is part of the
+  // same per-profile overlay state — the style is rebuilt when it changes, which
+  // is the whole mechanism (there is no basemap layer left to hide).
+  const mapAppearance = useMemo<MapAppearance>(
+    () => ({
+      colorScheme: appearance.colorScheme,
+      profile: profiles.profile.id,
+      custom: mapStyleEditor.value,
+      basemap: overlaysCtl.basemapOn,
+    }),
+    [appearance.colorScheme, profiles.profile.id, mapStyleEditor.value, overlaysCtl.basemapOn],
   );
   const serverOrigin = useServerOrigin();
   const regionJobs = useRegionPackJobs(data, serverOrigin);
@@ -378,6 +383,10 @@ function AppInner() {
   // which the spots sheet and a saved spot both label themselves with.
   const potentialTargets = usePotentialTarget(overlaysCtl);
   const potentialTargetLabel = potentialTargets.active?.label;
+  // The other half of that idea, for every layer the quarry switch does not own:
+  // the chips of whatever is currently drawn, reachable from the map. What makes
+  // Curiosities readable — every register in it is a filtered register.
+  const layerFilters = useLayerFilters(overlaysCtl);
   // The shortlist a derived surface turns into a plan (§N5 → E6). Opened by
   // hand: it is a real request against the derive service and the router, not a
   // legend that could just appear.
@@ -1156,6 +1165,7 @@ function AppInner() {
               visibleProfiles={profilePreferences.visibleProfiles}
               overlays={overlaysCtl}
               targets={potentialTargets}
+              filters={layerFilters}
               mapZoom={mapZoom}
               // Bottom-edge row, immediately left of the locate button. Menus
               // expand upward, so profile switching no longer floats mid-map.

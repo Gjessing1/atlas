@@ -1,11 +1,15 @@
-import type { MapProfileController, PotentialTargetSwitch } from '@atlas/app-hooks';
+import type {
+  LayerFilterSwitch,
+  MapProfileController,
+  PotentialTargetSwitch,
+} from '@atlas/app-hooks';
 import { groupLayerCatalog, type LayerMeta, type MapProfile } from '@atlas/core';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import { useSideInsets } from './insets';
-import { FishHuntIcon, LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
+import { FilterIcon, FishHuntIcon, LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
 
 /** The chosen variant of a layer that has one ("Springs", "Severe") — web's twin. */
@@ -20,20 +24,23 @@ function variantLabel(overlays: OverlaysController, meta: LayerMeta): string | n
 
 /**
  * Bottom-right, one-tap map setup: activity profiles, the Fish & Hunt
- * sub-profile, and the current profile's overlay catalog. All three operate on
- * the same persisted state as the route planner and full Layers sheet, so
- * switching never creates a second source of truth.
+ * sub-profile, what the drawn layers are filtered to, and the current profile's
+ * overlay catalog. All of them operate on the same persisted state as the route
+ * planner and full Layers sheet, so switching never creates a second source of
+ * truth.
  *
  * The overlay menu is grouped and ordered by `groupLayerCatalog`, exactly as
  * the Layers sheet and the web switcher are: a profile's own registers come
  * first, and a menu that reaches eleven rows in Curiosities needs headings to
- * stay scannable on a phone.
+ * stay scannable on a phone. The basemap sits at its foot, below a rule — not an
+ * overlay, but the map they are drawn on.
  */
 export function MapActivityControls({
   profile,
   visibleProfiles,
   overlays,
   targets,
+  filters,
   mapZoom,
   bottom,
   onPickProfile,
@@ -47,6 +54,12 @@ export function MapActivityControls({
    * data, not by a profile id spelled out a second time here.
    */
   targets: PotentialTargetSwitch;
+  /**
+   * The chips of the layers that are currently drawing (`useLayerFilters`).
+   * Absent when none of them has a variant to pick, which is again a fact about
+   * the catalog rather than about the profile.
+   */
+  filters: LayerFilterSwitch;
   mapZoom: number;
   /** Already includes the system navigation-bar inset. */
   bottom: number;
@@ -55,6 +68,7 @@ export function MapActivityControls({
   const [layersOpen, setLayersOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
   const [targetsOpen, setTargetsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const win = useWindowDimensions();
   // In landscape the system navigation bar sits on a side of the screen: the
   // triggers and the menus they open both start inside it. `right` is the
@@ -70,20 +84,25 @@ export function MapActivityControls({
   // on a 360 dp phone runs straight into the menu/search/route cluster on the
   // other side. A row to itself also puts it where the web app puts it.
   const quarryRow = targets.groups.length > 0;
+  // Same reasoning as the quarry pill, one row further up: a labelled pill
+  // cannot share a row with two 44 dp circles on a 360 dp phone, and this one
+  // reads out the chosen values, so it needs the width.
+  const filterRow = filters.groups.length > 0;
   const layerGroups = useMemo(
     () => groupLayerCatalog(overlays.catalog, overlays.profileId),
     [overlays.catalog, overlays.profileId],
   );
-  const menuBottom = bottom + (quarryRow ? 104 : 52);
+  const menuBottom = bottom + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
   const closeMenus = () => {
     setLayersOpen(false);
     setProfilesOpen(false);
     setTargetsOpen(false);
+    setFiltersOpen(false);
   };
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {layersOpen || profilesOpen || targetsOpen ? (
+      {layersOpen || profilesOpen || targetsOpen || filtersOpen ? (
         <Pressable
           style={styles.backdrop}
           onPress={closeMenus}
@@ -186,6 +205,64 @@ export function MapActivityControls({
         </View>
       ) : null}
 
+      {/* What the drawn layers are filtered to. Chip rows rather than a radio
+          list: a layer can carry two independent questions (alien species asks
+          risk *and* organism), and the chips are the same control the Layers
+          sheet shows — this is just the copy of it that is on the map. */}
+      {filtersOpen ? (
+        <View
+          style={[
+            styles.quarryMenu,
+            {
+              bottom: menuBottom,
+              right,
+              maxHeight: Math.max(88, Math.min(win.height * 0.52, 440, win.height - bottom - 64)),
+            },
+          ]}
+          accessibilityLabel="Layer filters"
+        >
+          <ScrollView bounces={false} contentContainerStyle={styles.filterMenuContent}>
+            {filters.groups.map((group) => (
+              <View key={group.layer} style={styles.filterGroup}>
+                <Text style={styles.quarryGroupTitle}>{group.title}</Text>
+                {group.filters.map((filter) => (
+                  <View key={filter.key} style={styles.filterOption}>
+                    <Text style={styles.filterLabel}>{filter.label}</Text>
+                    <View style={styles.filterChips}>
+                      {filter.choices.map((choice) => (
+                        <Pressable
+                          key={choice.value}
+                          style={[styles.filterChip, choice.active && styles.filterChipOn]}
+                          onPress={() => filters.select(choice.layer, choice.key, choice.value)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: choice.active }}
+                          accessibilityLabel={choice.label}
+                          testID={`layer-filter-${choice.layer}-${choice.key}-${choice.value}`}
+                        >
+                          <Text
+                            style={[
+                              styles.filterChipText,
+                              choice.active && styles.filterChipTextOn,
+                            ]}
+                          >
+                            {choice.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    {/* The caption is the point, not decoration: a filtered
+                        register means nothing until you know what was cut. */}
+                    {filter.activeCaption ? (
+                      <Text style={styles.filterCaption}>{filter.activeCaption}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {layersOpen ? (
         <View
           style={[
@@ -236,6 +313,27 @@ export function MapActivityControls({
                 })}
               </View>
             ))}
+            {/* The map the overlays are drawn on, at the foot and below a rule.
+                Off is how a scanned 1826 sheet — or any raster with holes — is
+                read honestly; today's coloured land fills the holes. */}
+            <Pressable
+              style={[styles.layerItem, styles.basemapItem]}
+              onPress={() => overlays.setBasemapOn(!overlays.basemapOn)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: overlays.basemapOn }}
+              accessibilityLabel="Base map"
+              testID="layer-quick-basemap"
+            >
+              <View style={[styles.check, overlays.basemapOn && styles.checkOn]}>
+                {overlays.basemapOn ? <Text style={styles.checkText}>✓</Text> : null}
+              </View>
+              <Text
+                style={[styles.layerLabel, overlays.basemapOn && styles.layerLabelOn]}
+                numberOfLines={1}
+              >
+                Base map
+              </Text>
+            </Pressable>
           </ScrollView>
         </View>
       ) : null}
@@ -243,12 +341,13 @@ export function MapActivityControls({
       {/* A pill rather than a third identical circle: the animal's name is the
           whole point of the control, and an icon cannot say "Elg". */}
       {quarryRow ? (
-        <View style={[styles.controlRow, { bottom: bottom + 52, right }]}>
+        <View style={[styles.controlRow, { bottom: bottom + 52 + (filterRow ? 52 : 0), right }]}>
           <Pressable
             style={[styles.quarryTrigger, targetsOpen && styles.controlSelected]}
             onPress={() => {
               setLayersOpen(false);
               setProfilesOpen(false);
+              setFiltersOpen(false);
               setTargetsOpen((open) => !open);
             }}
             accessibilityRole="button"
@@ -271,12 +370,41 @@ export function MapActivityControls({
         </View>
       ) : null}
 
+      {/* Directly above the switcher that turns those layers on, and labelled
+          with what they are set to ("Everything · Severe · Gold") — the control
+          says what the map is filtered to without being opened. */}
+      {filterRow ? (
+        <View style={[styles.controlRow, { bottom: bottom + 52, right }]}>
+          <Pressable
+            style={[styles.quarryTrigger, filtersOpen && styles.controlSelected]}
+            onPress={() => {
+              setLayersOpen(false);
+              setProfilesOpen(false);
+              setTargetsOpen(false);
+              setFiltersOpen((open) => !open);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={
+              filters.summary ? `Layer filters: ${filters.summary}` : 'Filter the layers on the map'
+            }
+            accessibilityState={{ expanded: filtersOpen }}
+            testID="layer-filters-toggle"
+          >
+            <FilterIcon color={theme.icon} size={19} />
+            <Text style={styles.quarryTriggerLabel} numberOfLines={1}>
+              {filters.summary ?? 'Filters'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={[styles.controlRow, { bottom, right }]}>
         <Pressable
           style={[styles.profileTrigger, profilesOpen && styles.controlSelected]}
           onPress={() => {
             setLayersOpen(false);
             setTargetsOpen(false);
+            setFiltersOpen(false);
             setProfilesOpen((open) => !open);
           }}
           accessibilityRole="button"
@@ -293,6 +421,7 @@ export function MapActivityControls({
             onPress={() => {
               setProfilesOpen(false);
               setTargetsOpen(false);
+              setFiltersOpen(false);
               setLayersOpen((open) => !open);
             }}
             accessibilityRole="button"
@@ -378,6 +507,32 @@ const styles = StyleSheet.create({
   },
   quarryClear: { marginTop: 4, borderTopWidth: 1, borderTopColor: theme.border },
   quarryClearLabel: { flex: 1, color: theme.textMuted, fontSize: 13 },
+  filterMenuContent: { paddingVertical: 2, paddingHorizontal: 5 },
+  filterGroup: { paddingBottom: 4 },
+  filterOption: { paddingTop: 4 },
+  filterLabel: { paddingHorizontal: 4, paddingBottom: 4, fontSize: 12, color: theme.textMuted },
+  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  // Pill chips, the same shape the Layers sheet uses for options and opacity —
+  // this control is that control, moved to where the map is.
+  filterChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceMuted,
+  },
+  filterChipOn: { backgroundColor: theme.accent },
+  filterChipText: { fontSize: 12, fontWeight: '600', color: theme.text },
+  filterChipTextOn: { color: theme.onAccent },
+  filterCaption: {
+    paddingHorizontal: 4,
+    paddingTop: 5,
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.textMuted,
+  },
+  // The basemap row, at the foot of the layer menu: not an overlay, but the map
+  // the overlays are drawn on.
+  basemapItem: { marginTop: 4, borderTopWidth: 1, borderTopColor: theme.border },
   layerButton: {
     width: 44,
     height: 44,

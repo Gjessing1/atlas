@@ -600,3 +600,28 @@ export type OverlayStateMap = Record<
   string,
   { on?: boolean; opacity?: number; options?: Record<string, string> }
 >;
+
+/**
+ * The reserved `OverlayStateMap` id under which a device records that it has
+ * switched the **basemap** off in a profile (see `MapAppearance.basemap`).
+ *
+ * The basemap is not a catalog row — it is the map the rows are drawn on — but
+ * it is switched from the same two surfaces, defaults per profile, and is a
+ * device-local choice, which is the whole shape `OverlayStateMap` already has.
+ * Reusing it means no second setting, no second migration and no second place
+ * for the switcher and the panel to disagree. A catalog layer may never claim
+ * this id; `api.test.ts` asserts that it does not.
+ */
+export const BASEMAP_STATE_ID = 'basemap';
+
+/**
+ * Whether the vector basemap draws in this profile — **on** unless the device
+ * has said otherwise, which is why this is a function rather than a lookup: an
+ * absent entry means "not asked", and the answer to that is yes.
+ *
+ * Shared so the two clients cannot disagree about the default; the key shape is
+ * the same `<profile>:<id>` their controllers already use for visibility.
+ */
+export function basemapVisible(state: OverlayStateMap, profileId: string): boolean {
+  return state[`${profileId}:${BASEMAP_STATE_ID}`]?.on ?? true;
+}

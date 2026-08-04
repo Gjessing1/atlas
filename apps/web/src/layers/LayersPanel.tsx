@@ -86,6 +86,24 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
     <section className="layers-section" aria-label="Map layers">
       <div className="layers-title">Map layers</div>
       {note && <p className="layers-profile-note">{note}</p>}
+      {/* The map the overlays are drawn on, above the overlays themselves.
+          Switching it off is the honest way to read a raster with holes in it —
+          a 1826 amtskart sheet, a bathymetry survey's edge — because today's
+          coloured land fills those holes and reads as part of the old map. */}
+      <div className="layer-row">
+        <label className="layer-toggle">
+          <input
+            type="checkbox"
+            checked={layers.basemapOn}
+            onChange={() => layers.setBasemapOn(!layers.basemapOn)}
+          />
+          <span className="layer-name">Base map</span>
+        </label>
+        <div className="layer-desc">
+          Roads, land and place names under the overlays. Turn it off to read a historic map or any
+          overlay with gaps on its own — this profile only.
+        </div>
+      </div>
       {groups.map((group) => (
         <div key={group.name}>
           <div className="layers-group">{group.name}</div>

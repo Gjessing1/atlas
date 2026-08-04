@@ -37,6 +37,7 @@ import {
   usePotential,
   usePotentialExplain,
   usePotentialTarget,
+  useLayerFilters,
   usePlanningAreas,
   useThemeMode,
   type FetchNearbyFn,
@@ -62,6 +63,7 @@ import {
   TrainIcon,
 } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
+import { LayerFilterSwitch } from './layers/LayerFilterSwitch.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
 import { PotentialTargetSwitch } from './potential/PotentialTargetSwitch.js';
@@ -290,6 +292,10 @@ export function App() {
   // which the spots panel and a saved spot both label themselves with.
   const potentialTargets = usePotentialTarget(layers);
   const potentialTargetLabel = potentialTargets.active?.label;
+  // The other half of that idea, for every layer the quarry switch does not own:
+  // the chips of whatever is currently drawn, reachable from the map. What makes
+  // Curiosities readable — every register in it is a filtered register.
+  const layerFilters = useLayerFilters(layers);
   // The shortlist a derived surface turns into a plan (§N5 → E6): opened by
   // hand, because it is a real request against the derive service and the
   // router rather than a legend that could just appear.
@@ -829,6 +835,7 @@ export function App() {
         colorScheme={appearance.colorScheme}
         profile={profiles.profile.id}
         customStyle={mapStyleEditor.value}
+        basemap={layers.basemapOn}
         locateRequest={locateRequest}
       />
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
@@ -1047,6 +1054,9 @@ export function App() {
               Renders nothing in the other profiles — their catalogs carry no
               derived surface. */}
           <PotentialTargetSwitch targets={potentialTargets} />
+          {/* What the layers that *are* on are filtered to. Renders nothing
+              when none of them has a variant to pick. */}
+          <LayerFilterSwitch filters={layerFilters} />
           <MapProfileSwitch
             active={profiles.profile.id}
             profiles={profilePreferences.visibleProfiles}

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { layerInProfile, MAP_PROFILES } from '@atlas/core';
+import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
 import { norwegianLayers, registerOverlayApi, type OverlayLayer } from './index.js';
 
@@ -273,6 +273,11 @@ describe('layer catalog', () => {
     expect(ids).toContain('heritage-sites');
     expect(ids).toContain('wrecks');
     expect(new Set(ids).size).toBe(ids.length);
+    // `basemap` is the reserved id a device stores its "draw the basemap at all"
+    // choice under (`BASEMAP_STATE_ID`), keyed in the same per-profile state map
+    // as layer visibility. A catalog row claiming it would share that entry and
+    // the two would switch each other off.
+    expect(ids).not.toContain(BASEMAP_STATE_ID);
   });
 
   it('keeps every option-driven upstream parameter reachable from a declared choice', () => {
@@ -358,6 +363,69 @@ describe('layer catalog', () => {
           ).toBeGreaterThan(0);
         }
       }
+    }
+  });
+
+  it('asks about the dataset a chip draws, never a wider one', () => {
+    // WMS requires QUERY_LAYERS ⊆ LAYERS, and the identify route sends the
+    // queried set as both — so a chip that swaps the dataset and a tap that
+    // names something outside it is a request the upstream answers with a
+    // ServiceException, which the proxy renders as an empty answer. The pair
+    // that made this worth asserting is `metal-deposits`, whose default chip
+    // has to name *two* scale bands: one of them is blank at any given zoom.
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms') continue;
+      const { optionParams, optionIdentifyLayers } = layer.upstream;
+      if (!optionParams || !optionIdentifyLayers) continue;
+      for (const [key, byChoice] of Object.entries(optionIdentifyLayers)) {
+        for (const [value, queried] of Object.entries(byChoice)) {
+          const drawn = optionParams[key]?.[value]?.['LAYERS'];
+          if (drawn === undefined) continue; // the chip filters rather than swapping
+          const drawnSet = new Set(drawn.split(','));
+          for (const name of queried.split(',')) {
+            expect(
+              drawnSet.has(name),
+              `${layer.meta.id}: ${key}=${value} queries ${name}, which it does not draw`,
+            ).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('draws the whole groundwater register by default, with each kind on its own chip', () => {
+    // The v0.145.0 default was springs alone, which took the human half of
+    // GRANADA off the map entirely — a dug well is exactly the kind of trace
+    // this profile exists for. Everything draws; the chips take it apart.
+    const layer = norwegianLayers().find((l) => l.meta.id === 'groundwater-wells')!;
+    const option = layer.meta.options!.find((o) => o.key === 'kind')!;
+    expect(option.defaultValue).toBe('all');
+    const drawn = (value: string) =>
+      (
+        layer.upstream as { optionParams: Record<string, Record<string, Record<string, string>>> }
+      ).optionParams['kind']![value]!['LAYERS']!.split(',');
+    expect(drawn('all')).toContain('Grunnvannsoppkomme');
+    expect(drawn('all').length, 'the default chip must draw boreholes as well as springs').toBe(2);
+    expect(drawn('springs')).toEqual(['Grunnvannsoppkomme']);
+    // Every choice has to name its own GRANADA layers, or a chip is a no-op
+    // that quietly leaves the previous variant drawn.
+    for (const choice of option.choices) expect(drawn(choice.value).length).toBeGreaterThan(0);
+  });
+
+  it('keeps both ore-register scale bands in the default metals chip', () => {
+    // Measured at Trondheim: `Punkt_Metaller` is the 334 B empty tile from z8
+    // out, `Forekomster_zoom` from z9 in. Either name alone is a layer that
+    // switches on and shows nothing over half its zoom range, which is
+    // indistinguishable from "no metal here".
+    const layer = norwegianLayers().find((l) => l.meta.id === 'metal-deposits')!;
+    const upstream = layer.upstream as {
+      layers: string;
+      optionParams: Record<string, Record<string, Record<string, string>>>;
+    };
+    const bands = ['Forekomster_zoom', 'Punkt_Metaller'];
+    for (const band of bands) {
+      expect(upstream.layers.split(',')).toContain(band);
+      expect(upstream.optionParams['metal']!['all']!['LAYERS']!.split(',')).toContain(band);
     }
   });
 

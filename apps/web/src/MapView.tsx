@@ -35,6 +35,7 @@ async function loadStyle(
   colorScheme: ColorScheme,
   profile: string,
   custom: MapStyleOverrides,
+  basemap: boolean,
 ): Promise<string | StyleSpecification> {
   try {
     templatePromise ??= fetch(STYLE_TEMPLATE_URL).then(async (res) => {
@@ -49,6 +50,7 @@ async function loadStyle(
         colorScheme,
         profile,
         custom,
+        basemap,
         // Unconditional: only the outdoor profiles bind it, and a server with
         // no archive answers empty rather than wrong (see outdoorTilesUrl).
         outdoorTiles: outdoorTilesUrl(origin),
@@ -110,6 +112,12 @@ interface MapViewProps {
   profile: string;
   /** User-edited colours and label/POI scale. */
   customStyle: MapStyleOverrides;
+  /**
+   * Draw the vector basemap under the overlays. Off leaves one flat background
+   * and the overlays alone on it — how a historic sheet or any raster with holes
+   * in it is read honestly (see `MapAppearance.basemap`).
+   */
+  basemap: boolean;
   /** Incremented by the shared control grid to trigger MapLibre geolocation. */
   locateRequest: number;
 }
@@ -126,6 +134,7 @@ export function MapView({
   colorScheme,
   profile,
   customStyle,
+  basemap,
   locateRequest,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -274,13 +283,13 @@ export function MapView({
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    void loadStyle(colorScheme, profile, customStyle).then((style) => {
+    void loadStyle(colorScheme, profile, customStyle, basemap).then((style) => {
       if (!cancelled) map.setStyle(style);
     });
     return () => {
       cancelled = true;
     };
-  }, [map, colorScheme, profile, customStyle]);
+  }, [map, colorScheme, profile, customStyle, basemap]);
 
   // Render the (single) dropped pin as a draggable marker. Clicking it reopens
   // the place card; the card itself is App-level React, not a MapLibre popup.

@@ -29,7 +29,13 @@ function variantLabel(layers: LayerCatalog, meta: LayerMeta): string | null {
  * order), because a flat list stops being scannable at the length Curiosities
  * reaches: eleven rows with no headings, opening on the general-purpose layers.
  * A layer that has variants shows the one it is set to rather than a chip row —
- * the switcher says what is on, the panel changes it.
+ * the switcher says what is on, the panel changes it, and the filter control
+ * above changes it without leaving the map.
+ *
+ * The basemap sits at the foot of the list, below a rule: it is not one of the
+ * overlays, it is the map they are drawn on, and switching it off is what makes
+ * a scanned 1826 sheet or any raster with holes readable — today's coloured land
+ * fills those holes and the eye takes it for part of the old survey.
  */
 export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
   const [open, setOpen] = useState(false);
@@ -98,6 +104,20 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
               })}
             </div>
           ))}
+          <div className="layer-switch-group layer-switch-base">
+            <button
+              type="button"
+              className={`layer-switch-item${layers.basemapOn ? ' layer-switch-item-on' : ''}`}
+              aria-pressed={layers.basemapOn}
+              onClick={() => layers.setBasemapOn(!layers.basemapOn)}
+              title="Draw the ordinary map under the overlays"
+            >
+              <span className="layer-switch-check" aria-hidden="true">
+                {layers.basemapOn ? '✓' : ''}
+              </span>
+              <span className="layer-switch-label">Base map</span>
+            </button>
+          </div>
         </div>
       )}
       <button

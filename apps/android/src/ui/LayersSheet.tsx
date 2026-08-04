@@ -133,6 +133,27 @@ export function LayersContent({
   return (
     <View>
       {note ? <Text style={styles.profileNote}>{note}</Text> : null}
+      {/* The map the overlays are drawn on, above the overlays themselves. Off
+          is how a raster with holes in it — a 1826 amtskart sheet, the edge of a
+          bathymetry survey — is read honestly: today's coloured land fills those
+          holes and the eye takes it for part of the old map. Web twin in
+          LayersPanel. */}
+      <View style={styles.row}>
+        <Pressable
+          style={styles.toggleRow}
+          onPress={() => overlays.setBasemapOn(!overlays.basemapOn)}
+          testID="layer-toggle-basemap"
+        >
+          <View style={[styles.checkbox, overlays.basemapOn ? styles.checkboxOn : null]}>
+            {overlays.basemapOn ? <Text style={styles.checkmark}>✓</Text> : null}
+          </View>
+          <Text style={styles.layerTitle}>Base map</Text>
+        </Pressable>
+        <Text style={styles.muted}>
+          Roads, land and place names under the overlays. Turn it off to read a historic map or any
+          overlay with gaps on its own — this profile only.
+        </Text>
+      </View>
       {groups.map((group) => (
         <View key={group.name}>
           <Text style={styles.groupHeading}>{group.name}</Text>

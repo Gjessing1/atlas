@@ -182,18 +182,33 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // tile is small (1.3 kB / 0.3 inland) — the check is that symbols are drawn
   // at all, which is what a scale-band change would take away.
   wrecks: { kind: 'tile', lat: 60.39, lng: 5.2, z: 12, minBytes: 700 },
+  // Røros — the wooden mining town, where SEFRAK is dense and the buildings
+  // are the reason anyone goes. z14 rather than the layer's z13 floor: the
+  // floor is what a scale-band change would move, and z13 already halves the
+  // ink (5.6 kB against 12.0), so probing at the edge would make a healthy
+  // layer's next redraw look like a failure. 0.3 kB over open sea.
+  'old-buildings': { kind: 'tile', lat: 62.5745, lng: 11.3855, z: 14, minBytes: 3000 },
   // Hovedøya and the Oslofjord geosites (7.7 kB).
   geoheritage: { kind: 'tile', lat: 59.91, lng: 10.75, z: 12, minBytes: 2000 },
+  // Kongsberg: the silver, and the densest cluster in the ore register (3.8 kB
+  // at z12, against 0.5 kB for a tile with a single occurrence in it and the
+  // 0.3 kB empty floor). Asked with the default chip, so the probe exercises
+  // the two-band LAYERS string the row is built on — `Punkt_Metaller` alone is
+  // *empty* from z8 out and `Forekomster_zoom` alone from z9 in, so a band that
+  // moves is the failure this catches.
+  'metal-deposits': { kind: 'tile', lat: 59.6686, lng: 9.6497, z: 12, minBytes: 1500 },
   // The Vøring plateau. This point used to be probed at z7 for a 0.64 kB tile,
   // the thinnest margin in the table, because the layer drew mud volcanoes and
   // nothing else — 23 lit pixels nationally. Drawing the whole shallow-gas
   // group instead put a real measurement here: 20.1 kB at z8 (0.3 empty).
   'seabed-gas': { kind: 'tile', lat: 67.6, lng: 6.8, z: 8, minBytes: 4000 },
-  // Nannestad on Romerike, and the point matters more than it looks: the
-  // layer's default chip is *springs*, which are two orders of magnitude
-  // sparser than boreholes, so the old probe point (60.0/11.0, chosen when the
-  // layer drew every energy well) reports 0.3 kB — a healthy layer read as
-  // dead. 4.1 kB here, where GRANADA has mapped springs.
+  // Nannestad on Romerike, where GRANADA has mapped springs as well as
+  // boreholes. The probe goes through `optionGetMapParams` with the layer's
+  // default chip, which is the whole register again from v0.146.0 — but the
+  // point is kept as it was, on ground that has *springs*: it was chosen when
+  // the default was springs-only and a suburban point reported the healthy
+  // layer as dead, and a point that only works for the widest chip could not
+  // catch that returning. 4.1 kB with springs alone, 0.3 kB empty.
   'groundwater-wells': { kind: 'tile', lat: 60.2, lng: 10.28, z: 13, minBytes: 1500 },
   // Loen in Stryn — the Lodalen rock avalanches, the most thoroughly recorded
   // slide ground in Norway. z13 is the first zoom where the release/runout

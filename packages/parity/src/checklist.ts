@@ -68,6 +68,29 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/MapActivityControls.tsx', contains: 'quarry-toggle' },
     note: 'Sits directly above the layer switch on both clients: the animal is what the derived surface is tuned for, so it belongs beside the layers rather than three steps into the panel that lists them.',
   },
+  {
+    id: 'map-layer-filters',
+    surface: 'map',
+    capability: 'Change what the drawn layers are filtered to without leaving the map',
+    hook: 'useLayerFilters',
+    web: { file: 'apps/web/src/layers/LayerFilterSwitch.tsx', contains: 'layer-filters-menu' },
+    android: {
+      file: 'apps/android/src/ui/MapActivityControls.tsx',
+      contains: 'layer-filters-toggle',
+    },
+    note: 'The quarry switch generalized to every other option-bearing layer, and what makes Curiosities readable: alien species is a wall of dots until the risk chip cuts it down, the ore register cannot answer "where is the gold" without the metal chip. Only switched-on layers appear, and a derived surface’s `target` stays with the quarry switch, which owns the one-surface-at-a-time rule. Both triggers read out the chosen values, so the control says what the map is filtered to without being opened.',
+  },
+  {
+    id: 'map-basemap-off',
+    surface: 'map',
+    capability: 'Turn the basemap off and read the overlays on their own, per profile',
+    web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'layer-switch-base' },
+    android: {
+      file: 'apps/android/src/ui/MapActivityControls.tsx',
+      contains: 'layer-quick-basemap',
+    },
+    note: 'Both clients offer it in two places, the map-corner switcher and the full layer list, and both store it per profile in the same overlay state as visibility (`BASEMAP_STATE_ID`). `applyMapAppearance` does the work for both: `basemap: false` returns one flat background and no basemap layer at all — the case is the 1826 amtskart overlay, whose holes today’s coloured land fills in until it reads as part of the old survey.',
+  },
 
   // ---------------------------------------------------------------- card ---
   {

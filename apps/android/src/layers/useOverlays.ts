@@ -1,4 +1,6 @@
 import {
+  BASEMAP_STATE_ID,
+  basemapVisible,
   layerDefaultsOn,
   layerOptionSignature,
   layersForProfile,
@@ -63,6 +65,14 @@ export interface OverlaysController {
   overlays: ActiveOverlay[];
   /** Resolve an explicit choice against the active profile's default. */
   isOn: (id: string) => boolean;
+  /**
+   * Whether the vector basemap draws under the overlays in this profile — on
+   * until the user says otherwise, and per profile for the same reason
+   * visibility is: reading an 1826 amtskart with nothing under it is a
+   * Curiosities decision, not a global one. Web twin in useLayerCatalog.
+   */
+  basemapOn: boolean;
+  setBasemapOn: (on: boolean) => void;
   opacityFor: (id: string) => number;
   /** The layer's resolved variant (see `LayerMeta.options`), defaults filled in. */
   optionsFor: (meta: LayerMeta) => Record<string, string>;
@@ -176,6 +186,23 @@ export function useOverlays(
 
   const toggle = useCallback((id: string) => setOn(id, !isOn(id)), [setOn, isOn]);
 
+  // The basemap is not a catalog row, so it borrows `setOn`'s key shape but not
+  // `isOn`: that resolves a missing entry against the profile's `defaultLayers`
+  // and would answer *off*, while the basemap's default is on. `basemapVisible`
+  // owns that rule for both clients.
+  const basemapOn = basemapVisible(state, profileId);
+  const setBasemapOn = useCallback(
+    (on: boolean) =>
+      update((cur) => ({
+        ...cur,
+        [stateKey(profileId, BASEMAP_STATE_ID)]: {
+          ...cur[stateKey(profileId, BASEMAP_STATE_ID)],
+          on,
+        },
+      })),
+    [update, stateKey, profileId],
+  );
+
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
       update((cur) => ({
@@ -269,6 +296,8 @@ export function useOverlays(
     state,
     overlays,
     isOn,
+    basemapOn,
+    setBasemapOn,
     opacityFor,
     optionsFor,
     setOption,

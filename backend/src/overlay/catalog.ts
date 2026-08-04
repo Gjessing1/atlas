@@ -1362,6 +1362,167 @@ export function norwegianLayers(): OverlayLayer[] {
       },
     },
     {
+      // SEFRAK — the national survey of buildings standing before 1900 (1945 in
+      // Finnmark and Nord-Troms), carried out by hand between the 1970s and the
+      // 1990s. Askeladden's opposite number: not the archaeology under the
+      // ground but the *building* that is still on it, which is why Curiosities
+      // gets both. It is also the register that finally has the dating
+      // Askeladden's WMS turned out not to publish — `tidsangivelsetekst` is a
+      // quarter-century band ("1825-1849") on essentially every record.
+      //
+      // What makes it a curiosity rather than a building layer is the field
+      // survey behind it: `opprinneligsosialtmiljotekst` says who the house was
+      // built for ("Husmann, strandsitter" — a cottar), `fysiskmiljotekst` says
+      // what it stood in ("Gardsanlegg, nedlagt, ute av bruk" — an abandoned
+      // farm), and `sefrakstatustekst` will tell you the thing is a ruin or gone.
+      meta: {
+        id: 'old-buildings',
+        rev: 1,
+        title: 'Old buildings (pre-1900)',
+        description:
+          'Every building the SEFRAK survey recorded as standing before 1900. Tap for the quarter ' +
+          'century it went up, who it was built for, and what it is built of.',
+        group: 'History',
+        attribution: '© Riksantikvaren',
+        metadataUrl: `${KARTKATALOG}sefrak`,
+        // The single `SEFRAKBygninger` layer is cut off at 1:100 000, i.e. z13
+        // by the equator formula these servers actually use — measured at
+        // Horten, where z12 is the 334 B empty tile and z13 draws 32.5 kB.
+        minzoom: 13,
+        maxzoom: 17,
+        defaultOpacity: 0.9,
+        identify: true,
+        coverageNote:
+          'A field survey from the 1970s–90s: some of these buildings have burned or been torn ' +
+          'down since (the register says so when it knows), and being listed here is not ' +
+          'protection — for a pre-1850 building it means the county must be told before it is ' +
+          'altered.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.ra.no/wms/sefrak',
+        version: '1.3.0',
+        layers: 'SEFRAKBygninger',
+        identifyLayers: 'SEFRAKBygninger',
+        // Ordered as the card, and the order is the whole design of this row:
+        // what it is called, when it went up, whether it is even still there,
+        // what it stood in, who it was for, what it is built of. `IDENTIFY_CARD_ROWS`
+        // is six, so everything below `ytterveggtekst` only surfaces when one of
+        // those is blank.
+        //
+        // The fields *not* here are as measured as the ones that are: probed
+        // over 35 buildings from Horten to Tromsø on 2026-08-04, `fredning`,
+        // `vernevedtak`, `kulturminneverneverdi`, `kulturminnehovedgruppe`,
+        // `sefrakfunksjontekst`, `taktekkingtekst`, `endingsgrad`,
+        // `bygningsendring` and `askeladdenid` are empty on **every** record
+        // this WMS returns — an allow-list entry for a column the export never
+        // populates is indistinguishable from a field that is merely rare.
+        identifyFields: [
+          'objektnavn',
+          'tidsangivelsetekst',
+          'sefrakstatustekst',
+          'fysiskmiljotekst',
+          'opprinneligsosialtmiljotekst',
+          'ytterveggtekst',
+          'bygningstypetekst',
+          'takformtekst',
+          'underbyggingskonstrtekst',
+        ],
+        identifyLabels: {
+          objektnavn: 'Building',
+          tidsangivelsetekst: 'Built',
+          sefrakstatustekst: 'Register status',
+          fysiskmiljotekst: 'Setting',
+          opprinneligsosialtmiljotekst: 'Built for',
+          ytterveggtekst: 'Walls',
+          bygningstypetekst: 'Type',
+          takformtekst: 'Roof',
+          underbyggingskonstrtekst: 'Foundation',
+        },
+        // SEFRAK's own coded texts, sampled from the live service across 35
+        // buildings in towns and farm country (2026-08-04) so the lists cover
+        // what a tap actually returns. The vocabularies are long — Matrikkel's
+        // building types alone run to a couple of hundred — so anything
+        // unlisted reaches the reader in Norwegian, which is the right failure
+        // for a register written by surveyors rather than a code list.
+        identifyValues: {
+          // The one row that answers "is there anything there?" — SEFRAK's
+          // §25 class is also a legal fact about what may be done to it.
+          sefrakstatustekst: {
+            'Meldepliktig iht. Kulturminneloven §25':
+              'Pre-1850 — the county must be told before it is altered',
+            'Annet SEFRAK-objekt': 'Recorded, no reporting duty',
+            'Ruin og fjernet objekt': 'A ruin, or gone',
+          },
+          fysiskmiljotekst: {
+            'Gardsanlegg med vanlig landbruksfunksjon': 'A working farm',
+            'Gardsanlegg, nedlagt, ute av bruk': 'A farm, abandoned',
+            'Naust, rorbu, utmarksløe, koie, bu o.l.':
+              'Boathouse, fishing cabin, outlying barn or hut',
+            'Sentralt bystrøk': 'Central town district',
+            'Tettbebyggelse, boligstrøk': 'Built-up residential area',
+          },
+          // Who the house was for. The class list is the 1970s survey's own
+          // reading of the social landscape, which is exactly why it is worth
+          // showing rather than paraphrasing.
+          opprinneligsosialtmiljotekst: {
+            Bonde: 'A farmer',
+            'Husmann, strandsitter': 'A cottar or shore-dweller',
+            Arbeider: 'A labourer',
+            'Håndverker, småindustridrivende': 'A craftsman or small industrialist',
+            Næringsdrivende: 'A trader',
+            'Næringsdrivende i handel og tjenesteyrker': 'A shop or service trade',
+          },
+          ytterveggtekst: {
+            Lafteverk: 'Notched logs (laft)',
+            Bindingsverk: 'Timber frame',
+            Reisverk: 'Vertical post-and-plank (reisverk)',
+            Sleppekonstruksjon: 'Planks slotted into posts (sleppverk)',
+            'Mur av teglstein': 'Brick',
+            'Annen ytterveggskonstruksjon i tre, se merknad': 'Other timber construction',
+            'Annen type massiv steinmur, se merknad': 'Other solid stone wall',
+          },
+          takformtekst: {
+            'Vanlig saltak': 'Plain gable',
+            Halvvalmtak: 'Half-hipped',
+            'Valmtak m.v.': 'Hipped',
+            Pulttak: 'Mono-pitch',
+            Mansardtak: 'Mansard',
+            'Flatt tak': 'Flat',
+          },
+          bygningstypetekst: {
+            Enebolig: 'Detached house',
+            'Tomannsbolig, horisontaldelt': 'Two-flat house',
+            'Garasje, uthus, anneks til bolig': 'Garage, outhouse or annex',
+            'Garasje, uthus, anneks til fritidbolig': 'Outhouse or annex to a holiday cabin',
+            'Annen landbruksbygning': 'Other farm building',
+            Butikkbygning: 'Shop',
+            'Restaurantbygning, kafébygning': 'Restaurant or café',
+            'Kontor- og administrasjonsbygning, rådhus': 'Office building or town hall',
+            'Andre småhus med 3 boliger eller flere': 'Small block, three dwellings or more',
+            'Store sammenbygde boligbygg på 3 og 4 etg': 'Terraced housing, three to four storeys',
+          },
+          underbyggingskonstrtekst: {
+            'Grunnmur. Naturstein uten bindemiddel (tørrmur)': 'Dry-stone footing',
+            'Grunnmur. Naturstein med bindemiddel, fuget': 'Mortared stone footing',
+            'Grunnmur. Naturstein med bindemiddel, pusset, kalket e.l.':
+              'Rendered or limewashed stone footing',
+            'Grunnmur. Teglstein, fuget': 'Brick footing',
+            'Grunnmur. Betong': 'Concrete footing',
+            'Punktvis bæring. Stående trepeler (stabber e.l.)':
+              'Standing on timber piers (stabbur)',
+          },
+        },
+        // Buildings sit metres apart in a town, so this is the one register in
+        // the profile whose tap must stay *narrow*: measured over 35 buildings,
+        // a query at z16 answers 8/8 with 1.4 buildings in the reply, while z14
+        // answers with five — three cards spent on the neighbours. z16 is a ~7 m
+        // radius, and the footprints are drawn from z13 anyway.
+        identifyZoom: 16,
+      },
+    },
+    {
       // Old mines. The dataset behind Direktoratet for mineralforvaltning's
       // *Aktsomhetskart for gamle gruver*: secured shafts and the caution zones
       // around them.
@@ -1528,6 +1689,171 @@ export function norwegianLayers(): OverlayLayer[] {
       },
     },
     {
+      // NGU's national ore register: every place metal has been found in
+      // Norwegian bedrock, from a noted showing in a road cut to Kongsberg's
+      // silver and Løkken's copper. The question it answers is the oldest one
+      // there is about a hill — *what is in it, and did anyone dig for it* — and
+      // no other row in the catalog says a word about it: `old-mines` maps the
+      // safety zones DMF has secured, which is the aftermath, not the ore.
+      //
+      // The register writes its own English, which is why this row carries no
+      // metal dictionary: `websub_etext` is already "Silver", "Zinc", "Gold".
+      meta: {
+        id: 'metal-deposits',
+        rev: 1,
+        title: 'Metals in the ground',
+        description:
+          'Where gold, silver, copper and iron have been found in the bedrock, from NGU’s national ' +
+          'ore register. Tap for the metal, the deposit’s name and whether anyone ever worked it.',
+        group: 'Geology',
+        attribution: '© NGU',
+        metadataUrl: `${KARTKATALOG}metaller`,
+        // No floor: the chip's own layers draw at every scale, and the default
+        // pair covers the whole range between them (see `layers`).
+        maxzoom: 15,
+        defaultOpacity: 0.9,
+        identify: true,
+        coverageNote:
+          'Overwhelmingly *showings*, not mines: 24 of the 26 points sampled are a registered ' +
+          'occurrence somebody noted, and the register grades importance as “not assessed” on most ' +
+          'of them. Finding metal here is not permission to dig for it — the metals are the ' +
+          'state’s to license and the ground is the landowner’s.',
+        profiles: ['curiosities'],
+        // The chip is the point of the row: "all metals" over southern Norway is
+        // 26 476 lit pixels of copper against gold's 2 156, so the question
+        // "where is the gold" is unanswerable on the combined layer. Each choice
+        // is a separate NGU layer rather than a filter, so a chip is a different
+        // map and not a thinner one.
+        options: [
+          {
+            key: 'metal',
+            label: 'Metal',
+            defaultValue: 'all',
+            choices: [
+              {
+                value: 'all',
+                label: 'All metals',
+                caption: 'Every registered occurrence, whatever the metal.',
+              },
+              {
+                value: 'gold',
+                label: 'Gold',
+                caption: 'Gold showings and deposits — Bidjovagge, Bømlo, the Eidsvoll field.',
+              },
+              {
+                value: 'silver',
+                label: 'Silver',
+                caption: 'Silver, the metal Kongsberg was built on.',
+              },
+              {
+                value: 'base',
+                label: 'Copper & zinc',
+                caption:
+                  'The base metals — copper, zinc, lead, tin — which is most of what Norway ' +
+                  'actually mined.',
+              },
+              {
+                value: 'iron',
+                label: 'Iron',
+                caption: 'Iron and iron-titanium ore, from bog iron country to Sydvaranger.',
+              },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://geo.ngu.no/mapserver/MetallerWMS2',
+        version: '1.3.0',
+        // Two scale bands of one dataset, the contours pattern: `Punkt_Metaller`
+        // is cut off *above* 1:1.5 M and `Forekomster_zoom` only draws above it,
+        // so naming one alone leaves the layer empty at half the zooms —
+        // measured at Trondheim, the points are the 334 B empty tile at z8 and
+        // the overview is empty from z9 in.
+        layers: 'Forekomster_zoom,Punkt_Metaller',
+        identifyLayers: 'Punkt_Metaller,Forekomster_zoom',
+        // The per-metal layers have no scale band at all, so one name covers
+        // every zoom. `Basemetaller_samlet` and its siblings are the *leaf*
+        // that holds the whole group: MapServer publishes a group named
+        // `Basemetaller` containing a child of the same name, and asking for
+        // the group draws each metal's symbols on top of the combined set
+        // (13 489 lit pixels against 10 426) and answers one tap three times.
+        optionParams: {
+          metal: {
+            all: { LAYERS: 'Forekomster_zoom,Punkt_Metaller' },
+            gold: { LAYERS: 'Gull' },
+            silver: { LAYERS: 'Solv' },
+            base: { LAYERS: 'Basemetaller_samlet' },
+            iron: { LAYERS: 'Jernmetaller_samlet' },
+          },
+        },
+        optionIdentifyLayers: {
+          metal: {
+            all: 'Punkt_Metaller,Forekomster_zoom',
+            gold: 'Gull',
+            silver: 'Solv',
+            base: 'Basemetaller_samlet',
+            iron: 'Jernmetaller_samlet',
+          },
+        },
+        // The union of two schemas, because the sub-layers do not agree on how
+        // they say the same thing: the point layers carry
+        // `mineralregistreringtype` (registrering / forekomst / prospekt) while
+        // the per-metal ones carry `objtype` (MalmRegistrering / MalmForekomst),
+        // and a card that listed only one would go blank on half the chips.
+        //
+        // `objtype` is on the generic noise list and is rescued by being named
+        // here (see NOISE_KEYS) — the same trap the wrecks row hit.
+        identifyFields: [
+          'name',
+          'websub_etext',
+          'mineralregistreringtype',
+          'objtype',
+          'raastoffbetydning',
+          'webcom_etext',
+        ],
+        identifyLabels: {
+          name: 'Deposit',
+          websub_etext: 'Metal',
+          mineralregistreringtype: 'Register class',
+          objtype: 'Register class',
+          raastoffbetydning: 'Importance',
+          webcom_etext: 'Metal group',
+        },
+        identifyValues: {
+          // NGU's three-step register class, in both its spellings. The
+          // distinction is the difference between "somebody noticed ore here"
+          // and "this was a mine", which is the first thing a reader wants.
+          mineralregistreringtype: {
+            registrering: 'A noted showing',
+            prospekt: 'A prospect — investigated, not worked',
+            forekomst: 'A deposit — mapped, drilled or mined',
+          },
+          objtype: {
+            MalmRegistrering: 'A noted showing',
+            MalmProspekt: 'A prospect — investigated, not worked',
+            MalmForekomst: 'A deposit — mapped, drilled or mined',
+          },
+          // NGU's own grading of what the occurrence is worth. "Not assessed"
+          // is the answer on three quarters of the register and is kept rather
+          // than blanked: it means nobody has judged it, not that it is worth
+          // nothing.
+          raastoffbetydning: {
+            ikkeVurdert: 'Not assessed',
+            litenLokalBetydning: 'Minor, local',
+            regionalBetydning: 'Regional',
+            nasjonalBetydning: 'National',
+            internasjonalBetydning: 'International',
+          },
+        },
+        // Single point symbols in a national register, and they cluster: from
+        // sample points up to ~35 m off the true position, z12 answered 12/12
+        // and z13 10/12, both with exactly one deposit in the reply. z12 is
+        // ~115 m of tolerance, which is what a symbol on open fjell needs.
+        identifyZoom: 12,
+      },
+    },
+    {
       // The seabed where gas escapes it: pockmark fields, seeps, blowout
       // craters, mud volcanoes and mud diapirs, from MAREANO's shallow-gas
       // mapping. Gloriously obscure, which is the point of the profile.
@@ -1616,32 +1942,52 @@ export function norwegianLayers(): OverlayLayer[] {
           'Reported wells and springs — reporting is patchy and a mapped spring is not tested ' +
           'drinking water.',
         profiles: ['curiosities'],
-        // Springs first, and by default. A spring is the find — drinking water
-        // on a ridge with no stream — while GRANADA's boreholes are dominated
-        // by suburban ground-source heat wells, which outnumber springs by
-        // orders of magnitude and bury them: a national sweep of the two layers
-        // over Romerike drew 270 235 borehole pixels against 1 507 spring ones.
+        // Everything by default, and each kind reachable on its own.
+        //
+        // v0.145.0 defaulted this to springs alone, for a real reason: GRANADA's
+        // boreholes are dominated by suburban ground-source heat wells, and a
+        // national sweep over Romerike drew 270 235 borehole pixels against
+        // 1 507 spring ones, so springs are genuinely buried in the full layer.
+        // But that default *removed* the register's other half from the map
+        // altogether — a dug well is evidence of a farm that may no longer be
+        // there, which is precisely what this profile is for — and the way to
+        // find something in a crowded layer is a filter, not a smaller layer.
+        // So the whole register draws, and the chips take it apart: the four
+        // choices are separate GRANADA layers rather than nested supersets, so
+        // "Energy wells" is a different map and not just a thinner one.
         options: [
           {
             key: 'kind',
             label: 'Show',
-            defaultValue: 'springs',
+            defaultValue: 'all',
             choices: [
               {
-                value: 'springs',
-                label: 'Springs',
-                caption: 'Natural springs only — water coming out of the ground on its own.',
+                value: 'all',
+                label: 'Everything',
+                caption:
+                  'Every reported spring and borehole, energy wells included — dense in any ' +
+                  'built-up area.',
               },
               {
                 value: 'water',
-                label: 'Springs + water wells',
-                caption: 'Adds the wells drilled for water supply, skipping the heat-pump wells.',
+                label: 'Water sources',
+                caption:
+                  'Springs and the wells drilled for water supply — what you could drink from, ' +
+                  'without the heat-pump wells.',
               },
               {
-                value: 'all',
-                label: 'Everything drilled',
+                value: 'springs',
+                label: 'Springs only',
                 caption:
-                  'Every reported borehole, energy wells included — dense in every built-up area.',
+                  'Natural springs — water coming out of the ground on its own, often on a ridge ' +
+                  'with no stream.',
+              },
+              {
+                value: 'energy',
+                label: 'Energy wells',
+                caption:
+                  'Ground-source heat boreholes only — the suburban half of the register, and a ' +
+                  'map of where the register is dense at all.',
               },
             ],
           },
@@ -1656,18 +2002,26 @@ export function norwegianLayers(): OverlayLayer[] {
         // GRANADA publishes the well types as separate layers, so the chip is a
         // LAYERS rewrite — and QUERY_LAYERS has to move with it, or a tap in a
         // suburb answers "energy well" over a map showing only springs.
+        //
+        // `Grunnvannsborehull` is the whole borehole set, not a group layer with
+        // children (GetCapabilities is flat here): measured over Romerike it
+        // draws 22 465 px against Energibrønn's 16 207 and Brønn-vannforsyning's
+        // 8 358, so it is their union and naming it alongside them would answer
+        // one tap three times.
         optionParams: {
           kind: {
-            springs: { LAYERS: 'Grunnvannsoppkomme' },
-            water: { LAYERS: 'Bronn_vannforsyning,Grunnvannsoppkomme' },
             all: { LAYERS: 'Grunnvannsborehull,Grunnvannsoppkomme' },
+            water: { LAYERS: 'Bronn_vannforsyning,Grunnvannsoppkomme' },
+            springs: { LAYERS: 'Grunnvannsoppkomme' },
+            energy: { LAYERS: 'Energibronn' },
           },
         },
         optionIdentifyLayers: {
           kind: {
-            springs: 'Grunnvannsoppkomme',
-            water: 'Bronn_vannforsyning,Grunnvannsoppkomme',
             all: 'Grunnvannsborehull,Grunnvannsoppkomme',
+            water: 'Bronn_vannforsyning,Grunnvannsoppkomme',
+            springs: 'Grunnvannsoppkomme',
+            energy: 'Energibronn',
           },
         },
         // The union of the two schemas, and the whole reason this row was
@@ -1699,11 +2053,17 @@ export function norwegianLayers(): OverlayLayer[] {
             Overvåking: 'Monitoring',
           },
           geolmedium: { Løsmasse: 'Sediment', Fjell: 'Bedrock' },
+          // `Undersøkelse` was measured only once the default chip started
+          // drawing the whole register (v0.146.0): 18 of 40 sampled boreholes
+          // answer with it, second only to `Energi`, and it had been reaching
+          // the reader as a bare Norwegian word all along — the springs-only
+          // default meant no tap ever returned it.
           brukstype: {
             Energi: 'Ground-source heat',
             Vannforsyning: 'Water supply',
-            Ukjent: 'Not recorded',
+            Undersøkelse: 'Investigation bore',
             Grunnundersøkelse: 'Ground survey',
+            Ukjent: 'Not recorded',
             Overvåking: 'Monitoring',
           },
           bronn_type: {

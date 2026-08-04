@@ -274,6 +274,25 @@ export function LayersIcon(props: IconProps) {
   );
 }
 
+/**
+ * Funnel glyph for the layer-filter control: what the layers on the map are
+ * narrowed to. A funnel rather than sliders — every one of these filters picks
+ * *which* records are drawn, and none of them is a continuous value.
+ */
+export function FilterIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M4 5.5h16l-6.2 7.3v5.4l-3.6 1.8v-7.2z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 /** Ruler glyph for the measure tool (distance ruler + radius circles). */
 export function RulerIcon(props: IconProps) {
   return (

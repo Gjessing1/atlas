@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  BASEMAP_STATE_ID,
+  basemapVisible,
   IDENTIFY_CARD_ROWS,
   formatIceObservationTime,
   iceObservationIdentify,
@@ -144,6 +146,23 @@ describe('normalizeLayerOptions', () => {
 
   it('is empty for a layer without options, so nothing is appended anywhere', () => {
     expect(normalizeLayerOptions(undefined, { species: 'ptarmigan' })).toEqual({});
+  });
+});
+
+describe('basemapVisible', () => {
+  it('is on until the device says otherwise, and only for the profile it was said in', () => {
+    expect(basemapVisible({}, 'curiosities')).toBe(true);
+    const off = { [`curiosities:${BASEMAP_STATE_ID}`]: { on: false } };
+    expect(basemapVisible(off, 'curiosities')).toBe(false);
+    // Reading a historic map with no land under it is a Curiosities decision;
+    // it must not blank the map in Drive.
+    expect(basemapVisible(off, 'drive')).toBe(true);
+  });
+
+  it('ignores an entry stored under the bare id, the way visibility does', () => {
+    // Only `<profile>:<id>` carries an on/off choice for the basemap. A bare
+    // entry (the pre-profile shape, or a hand-edited setting) is not one.
+    expect(basemapVisible({ [BASEMAP_STATE_ID]: { on: false } }, 'curiosities')).toBe(true);
   });
 });
 

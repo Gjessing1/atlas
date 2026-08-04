@@ -205,6 +205,14 @@ export {
   type PotentialTargetSwitch,
 } from './usePotentialTarget.js';
 export {
+  useLayerFilters,
+  type LayerFilter,
+  type LayerFilterAccess,
+  type LayerFilterChoice,
+  type LayerFilterGroup,
+  type LayerFilterSwitch,
+} from './useLayerFilters.js';
+export {
   useElevation,
   usePlaceFacts,
   type ElevationState,

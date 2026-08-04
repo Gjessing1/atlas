@@ -190,6 +190,26 @@ export function LayersIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) 
   );
 }
 
+/**
+ * Funnel: what the layers on the map are narrowed to (web's FilterIcon twin).
+ * A funnel rather than sliders — every one of these filters picks *which*
+ * records are drawn, and none of them is a continuous value.
+ */
+export function FilterIcon({ color = DEFAULT_COLOR, size = 20 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M4 5.5h16l-6.2 7.3v5.4l-3.6 1.8v-7.2z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Directions sign: a turn arrow inside the diamond used by map apps. */
 export function DirectionsIcon({ color = DEFAULT_COLOR, size = 23 }: ModeIconProps) {
   return (

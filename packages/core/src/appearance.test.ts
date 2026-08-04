@@ -621,6 +621,67 @@ describe('map appearance', () => {
   });
 });
 
+describe('basemap off', () => {
+  const blank = (colorScheme: 'light' | 'dark') =>
+    JSON.parse(
+      applyMapAppearance(
+        JSON.stringify({
+          ...(JSON.parse(style) as Record<string, unknown>),
+          glyphs: 'https://atlas.example/fonts/{fontstack}/{range}.pbf',
+          sprite: 'https://atlas.example/sprites/ofm',
+          sources: {
+            openmaptiles: { type: 'vector', tiles: ['https://atlas.example/{z}/{x}/{y}'] },
+          },
+        }),
+        { colorScheme, profile: 'curiosities', basemap: false },
+      ),
+    ) as {
+      layers: TestLayer[];
+      sources: Record<string, unknown>;
+      glyphs?: string;
+      sprite?: string;
+    };
+
+  it('leaves one flat background and no basemap layer at all', () => {
+    const style = blank('light');
+    expect(style.layers).toHaveLength(1);
+    expect(style.layers[0]!.id).toBe('background');
+    expect(style.layers[0]!.paint['background-color']).toBe('#f5f4f2');
+    expect(blank('dark').layers[0]!.paint['background-color']).toBe('#15171a');
+  });
+
+  it('drops the tile sources but keeps the fonts and sprites the overlays draw with', () => {
+    // A source left declared with no layer using it is a request MapLibre may
+    // still make, and switching the basemap off is partly about not paying for
+    // those. Glyphs are the opposite case: bathymetry depth labels and route
+    // labels are Atlas's own symbol layers on the same font stack.
+    const style = blank('dark');
+    expect(style.sources).toEqual({});
+    expect(style.glyphs).toBe('https://atlas.example/fonts/{fontstack}/{range}.pbf');
+    expect(style.sprite).toBe('https://atlas.example/sprites/ofm');
+  });
+
+  it('is unaffected by the profile and the style editor, and stays opt-in', () => {
+    // The blank map is the *absence* of the basemap, so nothing that tunes the
+    // basemap may reach it — a custom land colour here would be a land colour
+    // for land that is not drawn.
+    const custom = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'fishhunt',
+        basemap: false,
+        custom: { landColor: '#112233', labelScale: 1.25, poiScale: 1.5 },
+      }),
+    ) as { layers: TestLayer[] };
+    expect(custom.layers).toHaveLength(1);
+    expect(custom.layers[0]!.paint['background-color']).toBe('#f5f4f2');
+    // Absent means on: every existing caller passes no `basemap` at all.
+    expect(
+      layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'curiosities' })).length,
+    ).toBeGreaterThan(1);
+  });
+});
+
 describe('theme mode', () => {
   it('accepts only the three persisted values', () => {
     expect(isThemeMode('system')).toBe(true);
