@@ -15,7 +15,6 @@ export function MainMenuSheet({
   visible,
   onClose,
   onOpenFavorites,
-  onOpenTracks,
   onOpenLayers,
   onOpenExplore,
   onOpenMeasure,
@@ -26,7 +25,6 @@ export function MainMenuSheet({
   visible: boolean;
   onClose: () => void;
   onOpenFavorites: () => void;
-  onOpenTracks: () => void;
   onOpenLayers: () => void;
   onOpenExplore: () => void;
   onOpenMeasure: () => void;
@@ -43,15 +41,13 @@ export function MainMenuSheet({
     },
     {
       label: 'Collections',
-      detail: 'Saved places, tracks and folders',
+      // What the user is looking for, not how the surface is built: everything
+      // they have saved or brought in, in one place. There used to be a second
+      // entry here ("Tracks — Import and profiles") over the same records, and
+      // the pair of them was a question rather than a destination.
+      detail: 'Everything you have saved or imported',
       testID: 'open-favorites',
       onPress: onOpenFavorites,
-    },
-    {
-      label: 'Tracks',
-      detail: 'Import and profiles',
-      testID: 'open-tracks',
-      onPress: onOpenTracks,
     },
     {
       label: 'Layers',

@@ -41,6 +41,61 @@ export const PARITY_SURFACE_LABELS: Record<ParitySurface, string> = {
 };
 
 /**
+ * The user-facing surface a client component *is* — by the name a user would
+ * give it (the menu entry that opens it, the heading it wears), never by its
+ * file name.
+ *
+ * This exists because of the checklist's second real miss (ROADMAP §6.1): four
+ * `collections` rows resolved web's `Sidebar.tsx` against Android's separate
+ * `TracksSheet.tsx` and stayed green for months, while the two clients
+ * disagreed about how many saved-data surfaces there even were. A row asks
+ * *whether* a client can do a thing and never *where*, so a capability that has
+ * drifted onto a differently-named surface is invisible to it — which is drift
+ * of exactly the kind §7 exists to catch.
+ *
+ * Only surface *roots* are listed. Everything else (hooks, rows, cards, shared
+ * helpers) has no home of its own and is skipped: it lives wherever the surface
+ * that renders it lives.
+ */
+export const PARITY_SURFACE_HOMES: Readonly<Record<string, string>> = {
+  'apps/web/src/Sidebar.tsx': 'Collections',
+  'apps/android/src/ui/FavoritesSheet.tsx': 'Collections',
+  'apps/web/src/explore/ExplorePanel.tsx': 'Explore',
+  'apps/android/src/ui/ExploreSheet.tsx': 'Explore',
+  'apps/web/src/transit/CommutePanel.tsx': 'Commute',
+  'apps/android/src/ui/CommuteSheet.tsx': 'Commute',
+  'apps/web/src/settings/SettingsPanel.tsx': 'Settings',
+  // Rendered *inside* the Settings panel's Account & data tab, which is the
+  // surface the user is on — Android answers the same rows from its own
+  // Settings sheet, and that is not a difference.
+  'apps/web/src/sync/AccountPanel.tsx': 'Settings',
+  'apps/android/src/ui/SettingsSheet.tsx': 'Settings',
+  'apps/web/src/routing/RoutePanel.tsx': 'Route planner',
+  'apps/android/src/ui/RoutePanel.tsx': 'Route planner',
+  'apps/web/src/potential/StandBoardPanel.tsx': 'Stand board',
+  'apps/android/src/ui/StandBoardSheet.tsx': 'Stand board',
+  'apps/android/src/ui/TrackProfileSheet.tsx': 'Track profile',
+  'apps/android/src/ui/ShareSheet.tsx': 'Share',
+  'apps/android/src/nav/AddStopSheet.tsx': 'Add a stop',
+};
+
+/**
+ * Whether a file is a surface root, and therefore has to declare its home
+ * above. Structural on purpose — both apps name these components for what they
+ * are (`…Sheet` on Android, `…Panel` on web, plus web's one older `Sidebar`) —
+ * so a new surface used as evidence reddens the build until someone says which
+ * surface it is, instead of quietly widening the blind spot this closes.
+ */
+export function isSurfaceComponent(file: string): boolean {
+  return /\/(?:\w+(?:Sheet|Panel)|Sidebar)\.tsx$/.test(file);
+}
+
+/** The surface a file belongs to, or null when it is not a surface root. */
+export function surfaceHome(file: string): string | null {
+  return PARITY_SURFACE_HOMES[file] ?? null;
+}
+
+/**
  * Where a capability can be seen in one client's source.
  *
  * `contains` is a literal substring, not a pattern: a marker that needs a regex
@@ -91,6 +146,13 @@ export interface ParityCapability {
    * Recorded so a reviewer does not "fix" it back into drift.
    */
   readonly note?: string;
+  /**
+   * Required when the two clients answer this capability from surfaces the
+   * user knows by different names (see {@link PARITY_SURFACE_HOMES}): why that
+   * stands. Usually it should not — the same capability on two differently
+   * named surfaces is how a user ends up not knowing where their data is.
+   */
+  readonly crossSurface?: string;
   /**
    * A backend route this capability cannot work without.
    *

@@ -1,7 +1,10 @@
 export {
   PARITY_SURFACES,
+  PARITY_SURFACE_HOMES,
   PARITY_SURFACE_LABELS,
+  isSurfaceComponent,
   paritySides,
+  surfaceHome,
   type ParityCapability,
   type ParityEvidence,
   type ParitySurface,

@@ -35,7 +35,7 @@ import {
   type NearbyPlaceArticle,
   type VisibilityFolder,
 } from '@atlas/core';
-import { buildGpx, trackBounds } from '@atlas/gpx';
+import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
@@ -141,6 +141,7 @@ import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { TransitGuidance } from './src/ui/TransitGuidance';
 import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
+import { TrackProfileSheet } from './src/ui/TrackProfileSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
 import { useTrackGeometry } from './src/useTrackGeometry';
@@ -232,7 +233,12 @@ function AppInner() {
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
-  const [tracksOpen, setTracksOpen] = useState(false);
+  // The track whose elevation profile is open, with the geometry the row tap
+  // already loaded to frame it (§6.1 — one gesture, map *and* profile).
+  const [trackProfile, setTrackProfile] = useState<{
+    track: TrackRecord;
+    data: TrackData | null;
+  } | null>(null);
   const commuteFetch = useMemo<CommuteFn>(
     () => (query, signal) => fetchTransitCommute(query, { baseUrl: serverOrigin, signal }),
     [serverOrigin],
@@ -871,12 +877,18 @@ function AppInner() {
     [data],
   );
 
-  // Frame a track on the map, from a row in either sheet — its whole shape,
-  // which is the only view that says which track this actually is. A track with
-  // no parseable geometry simply doesn't move the camera.
+  // Frame a track on the map from its Collections row — its whole shape, which
+  // is the only view that says which track this actually is — and read out its
+  // climb underneath, which is the other half of the same question and the half
+  // web has always answered. A track with no parseable geometry opens the
+  // profile saying so, and simply doesn't move the camera.
   const showTrack = useCallback(
     (track: TrackRecord) => {
+      setTrackProfile({ track, data: null });
       void data.getTrackData(track.id).then((trackData) => {
+        setTrackProfile((current) =>
+          current?.track.id === track.id ? { track, data: trackData } : current,
+        );
         if (!trackData) return;
         const bounds = trackBounds(trackData);
         if (!bounds) return;
@@ -893,6 +905,18 @@ function AppInner() {
     },
     [data, topInset, bottomInset, side],
   );
+
+  // Follow the record while the profile is up: a rename shows through, and a
+  // delete — here or from a synced device — closes it rather than leaving a
+  // chart of a track that no longer exists.
+  useEffect(() => {
+    setTrackProfile((current) => {
+      if (!current) return current;
+      const track = data.tracks.find((candidate) => candidate.id === current.track.id);
+      if (!track) return null;
+      return track === current.track ? current : { ...current, track };
+    });
+  }, [data.tracks]);
 
   const planTrack = useCallback(
     (track: TrackRecord) => {
@@ -1325,11 +1349,20 @@ function AppInner() {
             bottomInset={bottomInset}
           />
 
+          {/* A track row's other half: the climb, under the shape the camera
+          has just framed. Stands down while planning or navigating, like every
+          other map sheet. */}
+          <TrackProfileSheet
+            track={planning || navActive ? null : (trackProfile?.track ?? null)}
+            data={trackProfile?.data ?? null}
+            onClose={() => setTrackProfile(null)}
+            bottomInset={bottomInset}
+          />
+
           <MainMenuSheet
             visible={menuOpen && !planning && !navActive}
             onClose={() => setMenuOpen(false)}
             onOpenFavorites={() => setFavoritesOpen(true)}
-            onOpenTracks={() => setTracksOpen(true)}
             onOpenLayers={() => setLayersOpen(true)}
             onOpenExplore={() => setExploreOpen(true)}
             onOpenMeasure={() => measure.setOpen(true)}
@@ -1486,8 +1519,6 @@ function AppInner() {
             onCloseFavorites={() => setFavoritesOpen(false)}
             editPlaceId={editPlaceId}
             onCloseEditPlace={() => setEditPlaceId(null)}
-            tracksOpen={tracksOpen}
-            onCloseTracks={() => setTracksOpen(false)}
             layersOpen={layersOpen}
             onCloseLayers={() => setLayersOpen(false)}
             keepOffline={keepOfflineControls}

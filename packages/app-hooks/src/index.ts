@@ -156,6 +156,18 @@ export {
   type TreeItem,
 } from './useCollectionTree.js';
 export {
+  filterCollectionRecords,
+  parseCollectionQuery,
+  recordMatchesQuery,
+  tagQuery,
+  type CollectionFilterInput,
+  type CollectionFilterResult,
+  type CollectionQuery,
+  type FilterableFolder,
+  type FilterableItem,
+  type FilterableRecord,
+} from './collectionFilter.js';
+export {
   collectionDropZone,
   resolveCollectionDrop,
   type CollectionDragItem,

@@ -236,6 +236,31 @@ describe('savedPlaceResults', () => {
     ]);
   });
 
+  it('answers "show me my stands" from the tags the app itself writes', () => {
+    const stands = [
+      { name: 'Elgpost nord', lat: 61.1, lng: 9.2, tags: ['hunt', 'spot', 'stand'] },
+      { name: 'Elgpost sør', lat: 61.0, lng: 9.3, tags: ['hunt', 'spot', 'stand'] },
+      ...places,
+    ];
+    expect(savedPlaceResults(stands, 'stand').map((r) => r.name)).toEqual([
+      'Elgpost nord',
+      'Elgpost sør',
+    ]);
+  });
+
+  it('ranks a tag match above the free-text fields, and a name above both', () => {
+    const mixed = [
+      { name: 'Notes hit', lat: 59, lng: 10, notes: 'left the boat by the stand' },
+      { name: 'Tagged', lat: 59, lng: 10, tags: ['stand'] },
+      { name: 'Standplass', lat: 59, lng: 10, notes: '' },
+    ];
+    expect(savedPlaceResults(mixed, 'stand').map((r) => r.name)).toEqual([
+      'Standplass',
+      'Tagged',
+      'Notes hit',
+    ]);
+  });
+
   it('ranks name matches above notes matches', () => {
     const withNotesHit = [{ name: 'Ferry', lat: 59, lng: 10, notes: 'near the cabin' }, ...places];
     expect(savedPlaceResults(withNotesHit, 'cabin').map((r) => r.name)).toEqual(['Cabin', 'Ferry']);

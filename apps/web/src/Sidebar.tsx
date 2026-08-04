@@ -1,7 +1,13 @@
-import { ancestorFolderIds, promoteParentId, useCollectionTree } from '@atlas/app-hooks';
+import {
+  ancestorFolderIds,
+  filterCollectionRecords,
+  promoteParentId,
+  tagQuery,
+  useCollectionTree,
+} from '@atlas/app-hooks';
 import { trackSummary } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon } from './icons.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
@@ -94,6 +100,36 @@ function FolderNameInput({
   );
 }
 
+/**
+ * A row's tags, as buttons that filter the tree to them.
+ *
+ * They were already written on every saved stand (`spotPlaceDraft` tags them
+ * `hunt`/`spot`/`stand`) and rendered as inert text: a vocabulary the app kept
+ * and the user could not use. Tapping one writes `#tag` into the filter box —
+ * visibly, so it can be edited or cleared like anything else typed there.
+ */
+function TagChips({ tags, onPick }: { tags: readonly string[]; onPick: (query: string) => void }) {
+  if (tags.length === 0) return null;
+  return (
+    <div className="item-tags">
+      {tags.map((tag) => (
+        <button
+          key={tag}
+          type="button"
+          className="tag-chip"
+          // The word alone is the label a screen reader would otherwise read,
+          // and "stand" says nothing about what pressing it does.
+          aria-label={`Filter by ${tag}`}
+          title={`Filter by ${tag}`}
+          onClick={() => onPick(tagQuery(tag))}
+        >
+          {tag}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Sidebar({
   data,
   selectedTrackId,
@@ -133,13 +169,25 @@ export function Sidebar({
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   // Pending destructive action, awaiting the confirmation dialog.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  // What the tree is narrowed to (§6.2) — name, tag, notes or address, with a
+  // leading `#` meaning tags alone. Session-only, like the expansion state: a
+  // filter is a way of looking at the list, not a property of it.
+  const [filter, setFilter] = useState('');
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
+  const filtered = useMemo(
+    () =>
+      filterCollectionRecords(
+        { collections: data.collections, places: data.places, tracks: data.tracks },
+        filter,
+      ),
+    [data.collections, data.places, data.tracks, filter],
+  );
   // The shared tree derivation: one orphan policy for both apps (a folder whose
   // parent is gone shows at the root instead of vanishing with its subtree).
   const tree = useCollectionTree({
-    collections: data.collections,
-    places: data.places,
-    tracks: data.tracks,
+    collections: filtered.collections,
+    places: filtered.places,
+    tracks: filtered.tracks,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const revealRowRef = useRef<HTMLLIElement>(null);
@@ -162,6 +210,9 @@ export function Sidebar({
       onRevealed?.();
       return;
     }
+    // A filter left over from a moment ago can hide the very row we were asked
+    // to show, so revealing clears it — the request is more specific than it is.
+    setFilter('');
     const ancestors = ancestorFolderIds(tree, place.collectionId);
     setExpandedFolders((current) => {
       if (ancestors.every((id) => current.has(id))) return current;
@@ -326,7 +377,7 @@ export function Sidebar({
             <EyeIcon off={!place.visible} size={18} />
           </button>
         </div>
-        {place.tags.length > 0 && <div className="item-tags">{place.tags.join(' · ')}</div>}
+        <TagChips tags={place.tags} onPick={setFilter} />
         {expanded === key && (
           <ItemEditor
             name={place.name}
@@ -385,6 +436,7 @@ export function Sidebar({
           </button>
         </div>
         <div className="item-tags">{trackSummary(track.stats)}</div>
+        <TagChips tags={track.tags} onPick={setFilter} />
         {expanded === key && (
           <ItemEditor
             name={track.name}
@@ -431,7 +483,13 @@ export function Sidebar({
       folders.length + places.length + tracks.length === 0 &&
       !creatingHere
     ) {
-      return (
+      // A filter that matched nothing is not an empty collection: saying "drop
+      // a pin" to someone whose pins are all still there reads as data loss.
+      return filtered.active ? (
+        <p className="sidebar-empty">
+          Nothing here matches <strong>{filter.trim()}</strong>.
+        </p>
+      ) : (
         <p className="sidebar-empty">
           Nothing saved yet. Drop a pin and save it, import a GPX/KML/KMZ file, or restore an Atlas
           backup.
@@ -460,7 +518,10 @@ export function Sidebar({
           </li>
         )}
         {folders.map(({ folder }) => {
-          const open = expandedFolders.has(folder.id);
+          // While a filter is up every folder left standing is part of the
+          // answer, so it opens: the whole point is to see the matches, not to
+          // be told which folders they are in.
+          const open = expandedFolders.has(folder.id) || filtered.active;
           return (
             <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
               <div
@@ -635,6 +696,31 @@ export function Sidebar({
           hidden
           onChange={(e) => void onImportFiles(e.target.files)}
         />
+        <div className="sidebar-filter">
+          <input
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setFilter('');
+              }
+            }}
+            placeholder="Filter by name, #tag or notes"
+            aria-label="Filter collections"
+          />
+          {filtered.active && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Clear filter"
+              onClick={() => setFilter('')}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
       {importOpen && (
         <div className="sidebar-import">

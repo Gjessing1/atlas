@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PARITY_CHECKLIST } from './checklist.js';
 import { capabilitiesFor, parityGaps, paritySummary } from './index.js';
-import { PARITY_SURFACES, paritySides } from './types.js';
+import { isSurfaceComponent, PARITY_SURFACES, paritySides, surfaceHome } from './types.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -106,6 +106,41 @@ describe('parity checklist', () => {
         ).toBeGreaterThan(20);
       }
     }
+  });
+
+  /**
+   * The blind spot ROADMAP §6.1 found: a row asks *whether* a client can do a
+   * thing and never *where*, so four `collections` rows resolved web's
+   * Collections panel against Android's separate Tracks sheet and stayed green
+   * while the clients disagreed about how many saved-data surfaces existed.
+   */
+  it('never pairs one capability with two differently-named surfaces', () => {
+    const problems: string[] = [];
+    for (const cap of PARITY_CHECKLIST) {
+      for (const evidence of [cap.web, cap.android]) {
+        if (evidence && isSurfaceComponent(evidence.file) && !surfaceHome(evidence.file)) {
+          problems.push(
+            `${cap.id}: ${evidence.file} looks like a surface root but has no entry in ` +
+              `PARITY_SURFACE_HOMES — say which surface a user would call it`,
+          );
+        }
+      }
+      if (!cap.web || !cap.android) continue;
+      const web = surfaceHome(cap.web.file);
+      const android = surfaceHome(cap.android.file);
+      const split = web !== null && android !== null && web !== android;
+      if (split && !cap.crossSurface) {
+        problems.push(
+          `${cap.id}: web answers this from “${web}” and Android from “${android}” — ` +
+            `move it, or say in \`crossSurface\` why one capability lives on two ` +
+            `differently-named surfaces`,
+        );
+      }
+      if (!split && cap.crossSurface) {
+        problems.push(`${cap.id}: both clients answer from “${web}”, so \`crossSurface\` is stale`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 
   it('points each side of a row at that side’s own app', () => {

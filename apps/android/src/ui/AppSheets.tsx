@@ -20,7 +20,6 @@ import type { DestinationTarget } from './DestinationCard';
 import { FavoritesSheet, PlaceEditSheet } from './FavoritesSheet';
 import { LayersSheet, type KeepOfflineControls } from './LayersSheet';
 import { SettingsSheet } from './SettingsSheet';
-import { TracksSheet } from './TracksSheet';
 
 interface AppSheetsProps {
   data: UserData;
@@ -34,8 +33,6 @@ interface AppSheetsProps {
   /** Place whose focused editor should open (map pin → Edit). */
   editPlaceId: string | null;
   onCloseEditPlace: () => void;
-  tracksOpen: boolean;
-  onCloseTracks: () => void;
   layersOpen: boolean;
   onCloseLayers: () => void;
   /** "Keep this area offline" for the switched-on derived surface (§N5 → E7). */
@@ -60,7 +57,7 @@ interface AppSheetsProps {
 
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
-  /** Frame a track on the map (a track row's name, in either sheet). */
+  /** Frame a track on the map and open its profile (a track row's name). */
   onShowTrack: (track: TrackRecord) => void;
   /** Convert a stored/imported track to an editable snapped route. */
   onPlanTrack: (track: TrackRecord) => void;
@@ -70,9 +67,9 @@ interface AppSheetsProps {
 }
 
 /**
- * All modal surfaces above the map: the three ☰ sheets (places & folders,
- * tracks, settings) and the focused place editor. Pure wiring between the
- * shared user-data/sync hooks and the sheet components — no logic of its own.
+ * All modal surfaces above the map: the ☰ sheets (Collections, Layers,
+ * Settings) and the focused place editor. Pure wiring between the shared
+ * user-data/sync hooks and the sheet components — no logic of its own.
  */
 export function AppSheets({
   data,
@@ -84,8 +81,6 @@ export function AppSheets({
   onCloseFavorites,
   editPlaceId,
   onCloseEditPlace,
-  tracksOpen,
-  onCloseTracks,
   layersOpen,
   onCloseLayers,
   keepOffline,
@@ -152,6 +147,8 @@ export function AppSheets({
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
         onExportAll={() => void data.exportAll()}
+        onImport={onImportTracks}
+        onImportInatur={onImportInatur}
         onDrop={(drag, target, zone) => void data.arrangeCollectionItem(drag, target, zone)}
         bottomInset={bottomInset}
       />
@@ -162,24 +159,6 @@ export function AppSheets({
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
         onClose={onCloseEditPlace}
-        bottomInset={bottomInset}
-      />
-      <TracksSheet
-        visible={tracksOpen}
-        onClose={onCloseTracks}
-        tracks={data.tracks}
-        onSetVisible={(id, v) => void data.updateTrack(id, { visible: v })}
-        onRename={(id, name) => void data.updateTrack(id, { name })}
-        onExport={(id, format) => void data.exportTrack(id, format)}
-        onPlan={(track) => {
-          onCloseTracks();
-          onPlanTrack(track);
-        }}
-        onDelete={(id) => void data.deleteTrack(id)}
-        collections={data.collections}
-        onImport={onImportTracks}
-        onImportInatur={onImportInatur}
-        onLoadTrackData={(id) => data.getTrackData(id)}
         bottomInset={bottomInset}
       />
       <LayersSheet

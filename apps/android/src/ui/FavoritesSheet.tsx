@@ -1,7 +1,9 @@
 import {
   collectionDropZone,
-  flattenCollectionTree,
+  filterCollectionRecords,
+  importedCount,
   promoteParentId,
+  tagQuery,
   useCollectionTree,
   type CollectionDragItem,
   type CollectionDropZone,
@@ -15,8 +17,17 @@ import type {
   TrackRecord,
 } from '@atlas/storage';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
+import type { ImportOptions, ImportResult } from '../useUserData';
 import { BottomSheet } from './BottomSheet';
 import { flattenFolders } from './folders';
 import { confirmDelete, ItemEditor } from './ItemEditor';
@@ -127,6 +138,221 @@ const eyeStyles = StyleSheet.create({
 });
 
 /**
+ * A row's tags, as chips that filter the list to them.
+ *
+ * They were already written on every saved stand (`spotPlaceDraft` tags them
+ * `hunt`/`spot`/`stand`) and shown nowhere on this client: a vocabulary the app
+ * kept and the user could not use. Tapping one writes `#tag` into the filter
+ * box — visibly, so it can be edited or cleared like anything else typed there.
+ */
+function TagChips({ tags, onPick }: { tags: readonly string[]; onPick: (query: string) => void }) {
+  if (tags.length === 0) return null;
+  return (
+    <View style={styles.tagRow}>
+      {tags.map((tag) => (
+        <Pressable
+          key={tag}
+          style={styles.tagChip}
+          onPress={() => onPick(tagQuery(tag))}
+          accessibilityLabel={`Filter by ${tag}`}
+          testID={`tag-chip-${tag}`}
+        >
+          <Text style={styles.tagChipText}>{tag}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Where saved data comes *in*: GPX/KML/KMZ files, whole Atlas backups, and the
+ * iNatur permit boundary — which is the same act with a link instead of a file,
+ * and shares the destination folder for exactly that reason.
+ *
+ * This lived in a second sheet of its own until §6.1. Import is not another
+ * kind of saved data, it is how saved data arrives, so it belongs in the header
+ * of the list it fills — which is where web has always kept it.
+ */
+function ImportControls({
+  folders,
+  onImport,
+  onImportInatur,
+}: {
+  folders: { folder: CollectionRecord; depth: number }[];
+  onImport: (options?: ImportOptions) => Promise<ImportResult | null>;
+  onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
+}) {
+  const [importing, setImporting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  // Import destination: a folder id, 'root' for no folder, or 'new' (named below).
+  const [target, setTarget] = useState('root');
+  const [newFolder, setNewFolder] = useState('');
+  const [inaturInput, setInaturInput] = useState('');
+  const [inaturBusy, setInaturBusy] = useState(false);
+
+  const importDisabled = importing || (target === 'new' && !newFolder.trim());
+  // The new-folder guard also blocks the iNatur add, which shares the folder row.
+  const inaturDisabled =
+    inaturBusy || !inaturInput.trim() || (target === 'new' && !newFolder.trim());
+
+  const importOptions = (): ImportOptions =>
+    target === 'new'
+      ? { newCollection: { name: newFolder.trim() } }
+      : { collectionId: target === 'root' ? null : target };
+
+  // After a folder-creating import the folder is now a normal chip — drop back
+  // to the default so a second import doesn't make a duplicate of the same name.
+  const resetTargetAfterImport = () => {
+    setNewFolder('');
+    if (target === 'new') setTarget('root');
+  };
+
+  // Turn an import summary into the one-line status shown under the controls.
+  const summarize = (result: ImportResult): string => {
+    const bits: string[] = [];
+    if (result.tracks.length) bits.push(`${result.tracks.length} track(s)`);
+    if (result.places.length) bits.push(`${result.places.length} place(s)`);
+    // A restored backup merges by id, so it adds nothing to tracks/places —
+    // without this a successful restore would report "nothing importable".
+    const restored = result.restored;
+    if (restored) {
+      const n = importedCount(restored);
+      bits.push(n > 0 ? `${n} record(s) from backup` : 'a backup (already up to date)');
+    }
+    let text = bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing importable found.';
+    if (result.errors.length) text = `${text} ${result.errors[0]}`.trim();
+    return text;
+  };
+
+  const runImport = async () => {
+    setImporting(true);
+    setMessage(null);
+    try {
+      const result = await onImport(importOptions());
+      if (result) {
+        resetTargetAfterImport();
+        setMessage(summarize(result));
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const runInatur = async () => {
+    setInaturBusy(true);
+    setMessage(null);
+    try {
+      const result = await onImportInatur(inaturInput.trim(), importOptions());
+      if (result) {
+        setInaturInput('');
+        resetTargetAfterImport();
+        setMessage(summarize(result));
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInaturBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.importBlock}>
+      {/* Destination for GPX/KML/KMZ imports; backups keep their own folders. */}
+      <Text style={styles.fieldLabel}>Import into</Text>
+      <View style={styles.choiceRow}>
+        <Pressable
+          style={[styles.folderChip, target === 'root' && styles.folderChipSelected]}
+          onPress={() => setTarget('root')}
+          testID="import-folder-none"
+        >
+          <Text style={styles.folderChipText}>No folder</Text>
+        </Pressable>
+        {folders.map(({ folder, depth }) => (
+          <Pressable
+            key={folder.id}
+            style={[styles.folderChip, target === folder.id && styles.folderChipSelected]}
+            onPress={() => setTarget(folder.id)}
+            testID={`import-folder-${folder.id}`}
+          >
+            <Text style={styles.folderChipText}>
+              {depth > 0 ? '└ ' : ''}📁 {folder.name}
+            </Text>
+          </Pressable>
+        ))}
+        <Pressable
+          style={[styles.folderChip, target === 'new' && styles.folderChipSelected]}
+          onPress={() => setTarget('new')}
+          testID="import-folder-new"
+        >
+          <Text style={styles.folderChipText}>＋ New folder</Text>
+        </Pressable>
+      </View>
+      {target === 'new' ? (
+        <TextInput
+          style={styles.textField}
+          value={newFolder}
+          onChangeText={setNewFolder}
+          placeholder="New folder name"
+          returnKeyType="done"
+          accessibilityLabel="New import folder name"
+          testID="import-folder-name"
+        />
+      ) : null}
+      <Pressable
+        style={[styles.button, styles.importButton, importDisabled ? styles.buttonDisabled : null]}
+        disabled={importDisabled}
+        onPress={() => void runImport()}
+        testID="tracks-import"
+      >
+        {importing ? (
+          <ActivityIndicator color={theme.onAccent} />
+        ) : (
+          <Text style={styles.buttonText}>Choose files</Text>
+        )}
+      </Pressable>
+      <Text style={styles.muted}>
+        GPX, KML and KMZ tracks or waypoints use this folder. Atlas backups keep their original
+        folders.
+      </Text>
+      {/* iNatur permit → boundary: paste an offer link/id and save its exact
+          area into the folder chosen above, as a track. */}
+      <Text style={styles.fieldLabel}>iNatur permit</Text>
+      <View style={styles.inaturRow}>
+        <TextInput
+          style={[styles.textField, styles.inaturInput]}
+          value={inaturInput}
+          onChangeText={setInaturInput}
+          placeholder="Offer link or id"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="go"
+          onSubmitEditing={() => {
+            if (!inaturDisabled) void runInatur();
+          }}
+          accessibilityLabel="iNatur offer link or id"
+          testID="inatur-input"
+        />
+        <Pressable
+          style={[styles.button, inaturDisabled ? styles.buttonDisabled : null]}
+          disabled={inaturDisabled}
+          onPress={() => void runInatur()}
+          testID="inatur-add"
+        >
+          {inaturBusy ? (
+            <ActivityIndicator color={theme.onAccent} />
+          ) : (
+            <Text style={styles.buttonText}>Add area</Text>
+          )}
+        </Pressable>
+      </View>
+      {message ? <Text style={styles.muted}>{message}</Text> : null}
+    </View>
+  );
+}
+
+/**
  * Saved (places, tracks & folders) — the mobile counterpart of the web Sidebar:
  * browse everything saved (synced records from other devices appear here too),
  * organise it into folders, and control what's drawn on the map. Fly to,
@@ -136,6 +362,11 @@ const eyeStyles = StyleSheet.create({
  * anything filed in a folder is visible *in* that folder. Folders can be
  * created, renamed, hidden (hiding their contents too) and deleted; a header
  * toggle shows or hides everything at once.
+ *
+ * Since §6.1 this is the *only* saved-data surface: import (files and whole
+ * backups) and the iNatur permit tool moved in from the Tracks sheet, which is
+ * gone. Two lists of the same tracks, reached from two menu entries, was the
+ * "I am not sure where to find things" complaint in its purest form.
  */
 export function FavoritesSheet({
   visible,
@@ -159,6 +390,8 @@ export function FavoritesSheet({
   onDeleteFolder,
   onSetAllVisible,
   onExportAll,
+  onImport,
+  onImportInatur,
   onDrop,
   bottomInset = 0,
 }: {
@@ -189,6 +422,10 @@ export function FavoritesSheet({
   onSetAllVisible: (visible: boolean) => void;
   /** Export everything as a file — also in Settings → Account & data. */
   onExportAll: () => void;
+  /** Pick files and import them; returns a per-run summary (null if cancelled). */
+  onImport: (options?: ImportOptions) => Promise<ImportResult | null>;
+  /** Resolve an iNatur permit link/id and import its boundary as a track. */
+  onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
   /** Apply the shared place/folder drop spec after the native gesture is measured. */
   onDrop: (drag: CollectionDragItem, target: CollectionDragItem, zone: CollectionDropZone) => void;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
@@ -198,6 +435,12 @@ export function FavoritesSheet({
   // toggles it). Keyed `place:<id>` / `track:<id>`, as on web — two record
   // kinds now share the list, and only one editor is ever open.
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // The import block, folded away by default: it is four controls deep and the
+  // list underneath is what the sheet is for.
+  const [importOpen, setImportOpen] = useState(false);
+  // What the list is narrowed to. Session-only, like the expansion state: a
+  // filter is a way of looking at the list, not a property of it.
+  const [filter, setFilter] = useState('');
   const [newFolder, setNewFolder] = useState('');
   // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
@@ -234,20 +477,38 @@ export function FavoritesSheet({
     }
   };
 
-  // What a folder row's number means: everything filed directly in it. Counting
-  // only places would report "0" for a folder holding nothing but tracks.
+  // What the list is narrowed to (§6.2) — name, tag, notes or address, with a
+  // leading `#` meaning tags alone, which is what a tapped tag chip writes.
+  const filtered = useMemo(
+    () => filterCollectionRecords({ collections, places, tracks }, filter),
+    [collections, places, tracks, filter],
+  );
+
+  // What a folder row's number means: everything filed directly in it that the
+  // list is currently showing, so the number always matches the rows beneath.
+  // Counting only places would report "0" for a folder holding nothing but tracks.
   const counts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const item of [...places, ...tracks]) {
+    for (const item of [...filtered.places, ...filtered.tracks]) {
       if (item.collectionId) map.set(item.collectionId, (map.get(item.collectionId) ?? 0) + 1);
     }
     return map;
-  }, [places, tracks]);
+  }, [filtered]);
 
   // Folder tree — derived by the shared model, so web and Android agree on
   // nesting, ordering and what happens to a folder whose parent is missing.
-  const tree = useCollectionTree({ collections, places, tracks });
-  const flatFolders = useMemo(() => flattenCollectionTree(tree), [tree]);
+  const tree = useCollectionTree({
+    collections: filtered.collections,
+    places: filtered.places,
+    tracks: filtered.tracks,
+  });
+  // Pickers (move-to-folder, import destination) offer *every* folder: a filter
+  // narrows what you are looking at, never where you are allowed to put things.
+  const flatFolders = useMemo(() => flattenFolders(collections), [collections]);
+
+  // While a filter is up every folder left standing is part of the answer, so
+  // it opens: the point is to see the matches, not which folders they are in.
+  const isOpen = (id: string) => expanded.has(id) || filtered.active;
 
   const allShown =
     places.every((p) => p.visible) &&
@@ -328,6 +589,7 @@ export function FavoritesSheet({
             <Text style={styles.muted}>
               {place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`}
             </Text>
+            <TagChips tags={place.tags} onPick={setFilter} />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
@@ -402,6 +664,7 @@ export function FavoritesSheet({
               {track.name}
             </Text>
             <Text style={styles.muted}>{trackSummary(track.stats)}</Text>
+            <TagChips tags={track.tags} onPick={setFilter} />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
@@ -525,17 +788,17 @@ export function FavoritesSheet({
                 <Pressable
                   style={styles.chevronButton}
                   onPress={() => toggleExpanded(folder.id)}
-                  accessibilityLabel={`${expanded.has(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
+                  accessibilityLabel={`${isOpen(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
                   testID={`folder-collapse-${folder.id}`}
                 >
-                  <Text style={styles.chevronText}>{expanded.has(folder.id) ? '▾' : '▸'}</Text>
+                  <Text style={styles.chevronText}>{isOpen(folder.id) ? '▾' : '▸'}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => toggleExpanded(folder.id)}
-                  accessibilityLabel={`${expanded.has(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
+                  accessibilityLabel={`${isOpen(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
                   testID={`folder-icon-${folder.id}`}
                 >
-                  <Text style={styles.folderIcon}>{expanded.has(folder.id) ? '📂' : '📁'}</Text>
+                  <Text style={styles.folderIcon}>{isOpen(folder.id) ? '📂' : '📁'}</Text>
                 </Pressable>
                 <TextInput
                   style={styles.folderName}
@@ -587,7 +850,7 @@ export function FavoritesSheet({
                   <Text style={styles.buttonQuietText}>Delete</Text>
                 </Pressable>
               </View>
-              {expanded.has(folder.id) ? (
+              {isOpen(folder.id) ? (
                 <>
                   {renderPlaces(folder.id, true)}
                   {renderTracks(folder.id, true)}
@@ -612,6 +875,14 @@ export function FavoritesSheet({
       <View style={styles.headerRow}>
         <Text style={styles.heading}>Collections</Text>
         <View style={styles.headerActions}>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet, importOpen ? styles.buttonOn : null]}
+            onPress={() => setImportOpen((open) => !open)}
+            accessibilityLabel="Import files, backups and permits"
+            testID="favorites-import"
+          >
+            <Text style={styles.buttonQuietText}>Import</Text>
+          </Pressable>
           {/* Also in Settings → Account & data. Two homes on purpose: web puts
               it on this header, and a user who learned it there should find it
               here (rule 5 is about the data, not about one route to it). */}
@@ -633,8 +904,41 @@ export function FavoritesSheet({
           ) : null}
         </View>
       </View>
+      {importOpen ? (
+        <ImportControls folders={flatFolders} onImport={onImport} onImportInatur={onImportInatur} />
+      ) : null}
+
+      <View style={styles.filterRow}>
+        <TextInput
+          style={[styles.textField, styles.filterInput]}
+          value={filter}
+          onChangeText={setFilter}
+          placeholder="Filter by name, #tag or notes"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Filter collections"
+          testID="collections-filter"
+        />
+        {filtered.active ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() => setFilter('')}
+            accessibilityLabel="Clear filter"
+            testID="collections-filter-clear"
+          >
+            <Text style={styles.buttonQuietText}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <ScrollView style={styles.scroll} scrollEnabled={!dragActive}>
+        {/* A filter that matched nothing is not an empty collection: saying
+            "nothing saved yet" to someone whose pins are all still there reads
+            as data loss. */}
+        {filtered.active && filtered.empty ? (
+          <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
+        ) : null}
         {/* Folders (nested — a folder row's ＋ targets the new-folder input at it) */}
         <Text style={styles.sectionLabel}>Folders</Text>
         {renderFolderLevel(null, 0)}
@@ -703,10 +1007,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
     marginBottom: 6,
   },
   heading: { fontSize: 15, fontWeight: '700', color: theme.text },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  importBlock: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+    marginBottom: 4,
+  },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted, marginTop: 8 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  folderChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  folderChipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceMuted },
+  folderChipText: { fontSize: 12, color: theme.text },
+  textField: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    color: theme.text,
+    marginTop: 6,
+  },
+  importButton: { marginTop: 8, alignItems: 'center' },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  filterInput: { flex: 1, marginTop: 0 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 3 },
+  tagChip: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  tagChipText: { fontSize: 11, color: theme.textMuted },
+  inaturRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  inaturInput: { flex: 1 },
   close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
   sectionLabel: {
     fontSize: 12,
@@ -762,5 +1111,7 @@ const styles = StyleSheet.create({
   buttonText: { color: theme.onAccent, fontWeight: '600' },
   buttonQuiet: { backgroundColor: theme.surfaceMuted },
   buttonQuietText: { color: theme.text, fontWeight: '600' },
+  // A quiet button that is currently *doing* something — the open disclosure.
+  buttonOn: { borderWidth: 1, borderColor: theme.accent },
   closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });

@@ -147,3 +147,71 @@ test('a saved place goes straight from its row to the planner, and Export all ha
   await page.getByRole('button', { name: 'Export all data' }).click();
   expect((await download).suggestedFilename()).toMatch(/^atlas-export-\d{4}-\d{2}-\d{2}\./);
 });
+
+test('the tree can be filtered by name and by a tapped tag', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+
+  // A saved pin to tag, and two folders to filter between.
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2, {
+    button: 'right',
+  });
+  await page.locator('.place-card').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.place-edit-dialog')).toBeVisible();
+  await page.locator('.place-edit-dialog').getByLabel('Name').fill('Elgpost nord');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByPlaceholder('New folder name').fill('Stands');
+  await page.getByPlaceholder('New folder name').press('Enter');
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByPlaceholder('New folder name').fill('Fishing');
+  await page.getByPlaceholder('New folder name').press('Enter');
+
+  // Tag the place, so the chip has something to say.
+  await page.getByRole('button', { name: 'Edit Elgpost nord' }).click();
+  await page.getByLabel('Tags').fill('hunt, stand');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Filter by stand' })).toBeVisible();
+
+  const filter = page.getByLabel('Filter collections');
+  await filter.fill('stan');
+  // The folder matched by name stays; the other one goes.
+  await expect(page.locator('.folder-name')).toHaveText(['Stands']);
+
+  await filter.fill('fjell');
+  await expect(page.locator('.sidebar-body')).toContainText('Nothing here matches');
+
+  // A tag chip is the same filter, written as #tag so it can be edited or cleared.
+  await page.getByRole('button', { name: 'Clear filter' }).click();
+  await page.getByRole('button', { name: 'Filter by stand' }).click();
+  await expect(filter).toHaveValue('#stand');
+  await expect(page.locator('.item-name')).toHaveText(['Elgpost nord']);
+  await expect(page.locator('.folder-name')).toHaveCount(0);
+});
+
+test('only one panel is open at a time', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+
+  // Settings used to leave Collections up (and Collections used to leave
+  // Settings up): both panels are anchored to the same corners, so at phone
+  // width the two overlapped.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.locator('.settings-panel')).toBeVisible();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await expect(page.locator('.settings-panel')).toHaveCount(0);
+
+  // And the same button closes what it opened.
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+});

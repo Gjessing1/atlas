@@ -281,6 +281,14 @@ export interface SearchablePlace {
   address?: string;
   /** Free text the user attached. */
   notes?: string;
+  /**
+   * The labels the user (or the app) put on it. Searched because the app writes
+   * them itself — `spotPlaceDraft()` tags every saved stand `hunt`/`spot`/
+   * `stand` — and a vocabulary the app authors but cannot answer on is worse
+   * than none: "show me my stands" was unanswerable in a product that had
+   * already labelled them.
+   */
+  tags?: readonly string[];
 }
 
 /** Label a saved place carries in a result list, so its origin is obvious. */
@@ -294,7 +302,9 @@ export const SAVED_PLACE_LABEL = 'Saved place';
  * only ever went to Photon could never find it. Matching locally also means
  * favourites keep resolving with no network at all.
  *
- * Address and notes are searched after names; a name match always ranks first.
+ * Tags, address and notes are searched after names, in that order; a name match
+ * always ranks first. Tags come before the two free-text fields because they
+ * are a deliberate label rather than prose the query happened to land in.
  */
 export function savedPlaceResults<T extends SearchablePlace>(
   places: T[],
@@ -305,26 +315,32 @@ export function savedPlaceResults<T extends SearchablePlace>(
   if (q.length === 0) return [];
   const byName = matchPlacesByName(places, q, limit);
   const seen = new Set<T>(byName);
-  const byAddress: T[] = [];
-  const byNotes: T[] = [];
-  if (byName.length < limit) {
+  /** The next tier of matches, up to whatever the earlier tiers left of `limit`. */
+  const tier = (matches: (place: T) => boolean, taken: number): T[] => {
+    const found: T[] = [];
+    if (taken >= limit) return found;
     for (const place of places) {
       if (seen.has(place)) continue;
-      if (place.address?.toLowerCase().includes(q)) {
-        byAddress.push(place);
-        seen.add(place);
-      }
-      if (byName.length + byAddress.length === limit) break;
+      if (!matches(place)) continue;
+      found.push(place);
+      seen.add(place);
+      if (taken + found.length === limit) break;
     }
-  }
-  if (byName.length + byAddress.length < limit) {
-    for (const place of places) {
-      if (seen.has(place)) continue;
-      if (place.notes?.toLowerCase().includes(q)) byNotes.push(place);
-      if (byName.length + byAddress.length + byNotes.length === limit) break;
-    }
-  }
-  return [...byName, ...byAddress, ...byNotes].map((p) => ({
+    return found;
+  };
+  const byTag = tier(
+    (p) => (p.tags ?? []).some((tag) => tag.toLowerCase().includes(q)),
+    byName.length,
+  );
+  const byAddress = tier(
+    (p) => (p.address ?? '').toLowerCase().includes(q),
+    byName.length + byTag.length,
+  );
+  const byNotes = tier(
+    (p) => (p.notes ?? '').toLowerCase().includes(q),
+    byName.length + byTag.length + byAddress.length,
+  );
+  return [...byName, ...byTag, ...byAddress, ...byNotes].map((p) => ({
     name: p.name,
     label: p.address || SAVED_PLACE_LABEL,
     ...(p.address ? { address: p.address } : {}),

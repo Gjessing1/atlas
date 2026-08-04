@@ -146,6 +146,17 @@ const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
 // here too so one URL opens the same board in a browser and on a phone.
 const linkedPanel = decodePanelLink(window.location.hash);
 
+/**
+ * The four toolbar drawers. They are all `min(340px, 100vw - 24px)` wide and
+ * anchored to one of the two top corners, so at phone width any two of them
+ * cover each other — which makes "at most one is open" a property of the
+ * layout, not a preference. One value carries it; five independent booleans
+ * meant every toolbar button hand-closed a different subset of the others
+ * (Settings closed Explore and Commute but left Collections up, Collections
+ * closed Explore and Commute but left Settings up).
+ */
+type PanelId = 'collections' | 'explore' | 'commute' | 'settings';
+
 function useSystemColorScheme(): ColorScheme {
   const query = '(prefers-color-scheme: dark)';
   const [scheme, setScheme] = useState<ColorScheme>(() =>
@@ -172,15 +183,25 @@ export function App() {
   const [userAt, setUserAt] = useState<LatLng | null>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [locateRequest, setLocateRequest] = useState(0);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   // The saved place whose editor is open, and the one the Collections tree
   // should reveal — both by id, so a rename or a delete elsewhere is followed
   // rather than leaving a stale copy of the record on screen.
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   const [revealPlaceId, setRevealPlaceId] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [commuteOpen, setCommuteOpen] = useState(linkedPanel === 'commute');
-  const [exploreOpen, setExploreOpen] = useState(false);
+  // Which drawer is open — see {@link PanelId}. The named booleans below are
+  // read-only views of it, so the render tree still says which panel it means.
+  const [panel, setPanel] = useState<PanelId | null>(linkedPanel === 'commute' ? 'commute' : null);
+  const togglePanel = useCallback(
+    (id: PanelId) => setPanel((current) => (current === id ? null : id)),
+    [],
+  );
+  const closePanels = useCallback(() => setPanel(null), []);
+  const sidebarOpen = panel === 'collections';
+  const settingsOpen = panel === 'settings';
+  const commuteOpen = panel === 'commute';
+  const exploreOpen = panel === 'explore';
+  // The two drawers anchored top-left, where the potential bar also lives.
+  const leftPanelOpen = sidebarOpen || exploreOpen;
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
     data: TrackData;
@@ -439,10 +460,10 @@ export function App() {
   // hand-off the Android favourites sheet makes.
   const goToPlace = useCallback(
     (place: PlaceRecord) => {
-      setSidebarOpen(false);
+      closePanels();
       onDirectionsToTarget({ lat: place.lat, lng: place.lng }, place.name);
     },
-    [onDirectionsToTarget],
+    [closePanels, onDirectionsToTarget],
   );
   // The route elevation profile can be dismissed; it comes back per route session.
   const [routeProfileHidden, setRouteProfileHidden] = useState(false);
@@ -502,7 +523,7 @@ export function App() {
   // A picked search result becomes a pin plus the same card a POI tap opens.
   const onSearchSelect = useCallback(
     (result: SearchResult) => {
-      setExploreOpen(false);
+      closePanels();
       setPin(result.position);
       setTarget({
         source: 'search',
@@ -518,7 +539,7 @@ export function App() {
         map.flyTo({ center: result.position, zoom: Math.max(map.getZoom(), 13) });
       }
     },
-    [followPin],
+    [closePanels, followPin],
   );
 
   // A described place picked from the card's nearby list becomes the card's
@@ -662,7 +683,7 @@ export function App() {
         if (!data) return;
         const points = trackToRoutePoints(data);
         if (points.length < 2) return;
-        setSidebarOpen(false);
+        closePanels();
         setSelectedTrack(null);
         route.restore({
           profile: route.profile,
@@ -677,7 +698,7 @@ export function App() {
         });
       });
     },
-    [getTrackData, route],
+    [closePanels, getTrackData, route],
   );
 
   const onImported = useCallback(
@@ -881,12 +902,7 @@ export function App() {
           aria-label="Commute"
           title="Commute"
           aria-expanded={commuteOpen}
-          onClick={() => {
-            setExploreOpen(false);
-            setSettingsOpen(false);
-            setSidebarOpen(false);
-            setCommuteOpen((open) => !open);
-          }}
+          onClick={() => togglePanel('commute')}
         >
           <TrainIcon size={18} />
         </button>
@@ -897,11 +913,10 @@ export function App() {
           title="Explore"
           aria-expanded={exploreOpen}
           onClick={() => {
-            setExploreOpen((open) => !open);
+            togglePanel('explore');
+            // The list is the subject while it is up; a card left open from
+            // before would sit on top of the results it has nothing to do with.
             setTarget(null);
-            setSidebarOpen(false);
-            setSettingsOpen(false);
-            setCommuteOpen(false);
           }}
         >
           <CompassIcon size={18} />
@@ -912,11 +927,7 @@ export function App() {
           aria-label="Collections"
           title="Collections"
           aria-expanded={sidebarOpen}
-          onClick={() => {
-            setExploreOpen(false);
-            setCommuteOpen(false);
-            setSidebarOpen((open) => !open);
-          }}
+          onClick={() => togglePanel('collections')}
         >
           <StarIcon size={18} />
         </button>
@@ -927,12 +938,14 @@ export function App() {
           title="Route"
           aria-pressed={route.active}
           onClick={() => {
-            setExploreOpen(false);
             // Starting from a dropped pin routes "from here".
             if (route.active) {
               route.stop();
               return;
             }
+            // The planner's own panel takes the same corner the drawers do, so
+            // opening it stands them down — stopping it leaves them alone.
+            closePanels();
             const seeded = route.start(pin ?? undefined);
             // Label that first stop like any other hand-placed one, so the plan
             // doesn't open with a row of decimals.
@@ -953,7 +966,9 @@ export function App() {
           title="Weather"
           aria-pressed={weatherTarget !== null}
           onClick={() => {
-            setExploreOpen(false);
+            // Same corner again: the forecast opens over the drawers, so it
+            // closes them — dismissing it does not.
+            if (weatherTarget === null) closePanels();
             weatherAt.toggle();
           }}
         >
@@ -965,11 +980,7 @@ export function App() {
           aria-label="Settings"
           title="Settings"
           aria-expanded={settingsOpen}
-          onClick={() => {
-            setExploreOpen(false);
-            setCommuteOpen(false);
-            setSettingsOpen((open) => !open);
-          }}
+          onClick={() => togglePanel('settings')}
         >
           <SettingsIcon size={18} />
         </button>
@@ -1007,8 +1018,15 @@ export function App() {
           shortlist it can turn into. Both sit under the search box because that
           is where "what is this map doing" belongs; the pill is absent entirely
           once the surface is ready, and the column keeps the panel below
-          whatever the pill is saying rather than on top of it. */}
-      {nav.phase === 'idle' && layers.derived && (
+          whatever the pill is saying rather than on top of it.
+
+          It stands aside for the left-hand drawers, which take the same column
+          and start 2 px below it: the bar's higher z-index meant the shortlist
+          drew *through* an open Collections tree. `spotsOpen` is untouched
+          while it is away and `useBestSpots` stays enabled, so closing the
+          drawer brings the same shortlist back rather than re-asking the derive
+          service for it. */}
+      {nav.phase === 'idle' && layers.derived && !leftPanelOpen && (
         <div className="potential-bar">
           <PotentialPill prep={potential} />
           {layers.derived &&
@@ -1127,7 +1145,7 @@ export function App() {
           // Both left-hand panels push the card clear of themselves: picking a
           // spot from the shortlist would otherwise open the card *behind* the
           // list it was picked from.
-          shifted={sidebarOpen || spotsOpen || standBoardOpen}
+          shifted={leftPanelOpen || spotsOpen || standBoardOpen}
           onDirections={() => onDirectionsToTarget(target.position, target.name)}
           onSave={onSaveTarget}
           onEdit={(place) => setEditPlaceId(place.id)}
@@ -1143,11 +1161,8 @@ export function App() {
       {exploreOpen && nav.phase === 'idle' && (
         <ExplorePanel
           getArea={getExploreArea}
-          onPick={(result) => {
-            setExploreOpen(false);
-            onSearchSelect(result);
-          }}
-          onClose={() => setExploreOpen(false)}
+          onPick={(result) => onSearchSelect(result)}
+          onClose={closePanels}
         />
       )}
       {/* Opened from the card's Edit action, and straight after saving a pin
@@ -1162,7 +1177,7 @@ export function App() {
           onShowInCollections={() => {
             setEditPlaceId(null);
             setRevealPlaceId(editPlace.id);
-            setSidebarOpen(true);
+            setPanel('collections');
           }}
           onClose={() => setEditPlaceId(null)}
         />
@@ -1230,7 +1245,7 @@ export function App() {
             onGoToPlace={goToPlace}
             onImported={onImported}
             onSavePermit={savePermit}
-            onClose={() => setSidebarOpen(false)}
+            onClose={closePanels}
           />
         )}
         {settingsOpen && (
@@ -1244,7 +1259,7 @@ export function App() {
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}
             onExportAll={() => void userData.exportAll()}
-            onClose={() => setSettingsOpen(false)}
+            onClose={closePanels}
           />
         )}
         {commuteOpen && (
@@ -1252,7 +1267,7 @@ export function App() {
             commute={commute}
             places={userData.places}
             getBias={getBias}
-            onClose={() => setCommuteOpen(false)}
+            onClose={closePanels}
           />
         )}
         {/* Route detail samples terrain heights; outside coverage, skip the

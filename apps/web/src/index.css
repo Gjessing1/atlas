@@ -1256,9 +1256,47 @@ button {
 }
 
 .item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   padding-left: 26px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* A tag is a filter you can press, not decoration — but it sits inside a row
+   that is already busy, so it stays quiet until hovered. */
+.tag-chip {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.sidebar-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sidebar-filter input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
 }
 
 .icon-button {

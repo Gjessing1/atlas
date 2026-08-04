@@ -304,7 +304,6 @@ test('Fish & Hunt shows live ice times and saves a permit as a filled area', asy
   await page.goto('/#map=10/60/10');
   await waitForMap(page);
   await page.getByRole('radio', { name: 'Fish & Hunt' }).click();
-  await expect(page.getByRole('button', { name: 'My permit area' })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(
@@ -342,10 +341,13 @@ test('Fish & Hunt shows live ice times and saves a permit as a filled area', asy
   await expect(identify).toContainText('Kari');
   await page.locator('.place-card').getByRole('button', { name: 'Close' }).click();
 
-  await page.getByRole('button', { name: 'My permit area' }).click();
+  // The permit tool lives where saved data comes in — the Collections header —
+  // and not on the map: the map-level copy could not choose a folder and was
+  // removed in v0.129.0.
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'iNatur permit' }).click();
   await page.getByLabel('iNatur offer link or id').fill('0123456789abcdef01234567');
-  await page.getByRole('button', { name: 'Show area' }).click();
-  await expect(page.locator('section[aria-label="My permit area"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add permit area' }).click();
 
   const savedArea = () =>
     page.evaluate(() => {
