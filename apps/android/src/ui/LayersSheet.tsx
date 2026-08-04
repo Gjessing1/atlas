@@ -1,4 +1,4 @@
-import { mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
+import { groupLayerCatalog, mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -118,12 +118,7 @@ export function LayersContent({
   /** Omitted by Settings → Map, which has no viewport to keep. */
   keepOffline?: KeepOfflineControls;
 }) {
-  const groups: [string, LayerMeta[]][] = [];
-  for (const meta of overlays.catalog) {
-    const group = groups.find(([name]) => name === meta.group);
-    if (group) group[1].push(meta);
-    else groups.push([meta.group, [meta]]);
-  }
+  const groups = groupLayerCatalog(overlays.catalog, overlays.profileId);
 
   if (overlays.catalog.length === 0) {
     return (
@@ -138,10 +133,10 @@ export function LayersContent({
   return (
     <View>
       {note ? <Text style={styles.profileNote}>{note}</Text> : null}
-      {groups.map(([group, metas]) => (
-        <View key={group}>
-          <Text style={styles.groupHeading}>{group}</Text>
-          {metas.map((meta) => {
+      {groups.map((group) => (
+        <View key={group.name}>
+          <Text style={styles.groupHeading}>{group.name}</Text>
+          {group.layers.map((meta) => {
             const on = overlays.isOn(meta.id);
             const opacity = overlays.opacityFor(meta.id);
             return (

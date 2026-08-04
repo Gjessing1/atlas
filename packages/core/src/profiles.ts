@@ -306,6 +306,58 @@ export function layersForProfile(catalog: readonly LayerMeta[], profileId: strin
   return catalog.filter((meta) => layerInProfile(meta, profileId));
 }
 
+/** One themed section of the layer list, as both clients render it. */
+export interface LayerGroup {
+  /** The `LayerMeta.group` heading ("Terrain", "History", …). */
+  name: string;
+  layers: LayerMeta[];
+  /**
+   * Whether this group holds a layer tagged for the active profile — i.e. it
+   * is *why* you switched profile, rather than a general-purpose section that
+   * is offered everywhere.
+   */
+  contextual: boolean;
+}
+
+/**
+ * The catalog for a profile, grouped by theme, with the profile's own groups
+ * first.
+ *
+ * Both clients built this list themselves, identically and twice, and both took
+ * the server's flat order — which is the catalog's *authoring* order and puts
+ * the general-purpose rows first. In Curiosities that meant a switcher opening
+ * on Hillshade, Satellite, Lake depth and Property, with the eight registers
+ * the profile exists for pushed below them; picking a profile should put its
+ * own map at the top of the list.
+ *
+ * A group ranks contextual if *any* of its layers is tagged for the profile:
+ * Curiosities' wells and springs share "Water & depth" with the general lake
+ * and sea depth rows, and splitting one heading in two would be a worse answer
+ * than letting the tagged row lift its section. Inside such a mixed group the
+ * tagged rows come first for the same reason — otherwise the first thing the
+ * Curiosities switcher shows under its first heading is lake depth. Everything
+ * else keeps the order the server sent.
+ */
+export function groupLayerCatalog(catalog: readonly LayerMeta[], profileId: string): LayerGroup[] {
+  const tags = mapProfile(profileId).layerTags;
+  const isContextual = (meta: LayerMeta) => (meta.profiles ?? []).some((tag) => tags.includes(tag));
+  const groups: LayerGroup[] = [];
+  for (const meta of catalog) {
+    const group = groups.find((entry) => entry.name === meta.group);
+    if (group) {
+      group.layers.push(meta);
+      group.contextual ||= isContextual(meta);
+    } else {
+      groups.push({ name: meta.group, layers: [meta], contextual: isContextual(meta) });
+    }
+  }
+  const ordered = [...groups.filter((g) => g.contextual), ...groups.filter((g) => !g.contextual)];
+  return ordered.map((group) => ({
+    ...group,
+    layers: [...group.layers.filter(isContextual), ...group.layers.filter((m) => !isContextual(m))],
+  }));
+}
+
 /**
  * Whether a layer is on by default in this profile (see `defaultLayers`). Used
  * as the fallback when the device has no stored on/off choice for the layer, so

@@ -3,6 +3,7 @@ import {
   DEFAULT_MAP_PROFILE,
   defaultMapProfilePreferences,
   isMapProfile,
+  groupLayerCatalog,
   layerDefaultsOn,
   layerInProfile,
   layersForProfile,
@@ -57,6 +58,41 @@ describe('map profiles', () => {
       'hillshade',
       'sea-depth',
       'trails-hiking',
+    ]);
+  });
+
+  it('groups the catalog by theme, with the profile’s own groups first', () => {
+    // The server sends the catalog in authoring order, which puts the
+    // general-purpose rows first: in Curiosities that opened the switcher on
+    // Hillshade and Satellite with the eight registers the profile exists for
+    // below them.
+    const group = (id: string, name: string, profiles?: string[]) =>
+      ({ ...meta(id, profiles), group: name }) as LayerMeta;
+    const catalog = [
+      group('hillshade', 'Terrain'),
+      group('satellite', 'Imagery'),
+      group('lake-depth', 'Water & depth'),
+      group('groundwater-wells', 'Water & depth', ['curiosities']),
+      group('heritage-sites', 'History', ['curiosities']),
+      group('old-mines', 'History', ['curiosities']),
+    ];
+    const grouped = groupLayerCatalog(catalog, 'curiosities');
+    expect(grouped.map((g) => g.name)).toEqual(['Water & depth', 'History', 'Terrain', 'Imagery']);
+    // One tagged row lifts its whole section rather than splitting the
+    // heading — and leads it, so the first row under the first heading is not
+    // a general-purpose layer.
+    expect(grouped[0]!.contextual).toBe(true);
+    expect(grouped[0]!.layers.map((m) => m.id)).toEqual(['groundwater-wells', 'lake-depth']);
+    expect(grouped[1]!.layers.map((m) => m.id)).toEqual(['heritage-sites', 'old-mines']);
+    expect(grouped.at(-1)!.contextual).toBe(false);
+  });
+
+  it('leaves the server order alone for a profile with no tags of its own', () => {
+    const group = (id: string, name: string) => ({ ...meta(id), group: name }) as LayerMeta;
+    const catalog = [group('hillshade', 'Terrain'), group('satellite', 'Imagery')];
+    expect(groupLayerCatalog(catalog, 'explore').map((g) => g.name)).toEqual([
+      'Terrain',
+      'Imagery',
     ]);
   });
 

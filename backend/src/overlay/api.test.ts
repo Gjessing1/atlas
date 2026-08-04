@@ -140,6 +140,45 @@ function testLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'swapped',
+        rev: 1,
+        title: 'Swapped',
+        description: 'WMS layer whose chip swaps the dataset outright',
+        group: 'Misc',
+        attribution: '© Test',
+        minzoom: 11,
+        maxzoom: 17,
+        defaultOpacity: 1,
+        identify: true,
+        options: [
+          {
+            key: 'kind',
+            label: 'Areas',
+            defaultValue: 'spawning',
+            choices: [
+              { value: 'spawning', label: 'Spawning' },
+              { value: 'nursery', label: 'Nursery' },
+            ],
+          },
+        ],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://upstream.example/wms',
+        version: '1.3.0',
+        layers: 'spawning',
+        identifyLayers: 'spawning',
+        optionParams: {
+          kind: { spawning: { LAYERS: 'spawning' }, nursery: { LAYERS: 'nursery' } },
+        },
+        optionIdentifyLayers: { kind: { spawning: 'spawning', nursery: 'nursery' } },
+        optionParamsFor: (chosen) => (chosen['kind'] === 'nursery' ? { FILTER: '(x)' } : {}),
+        identifyInfoFormats: ['text/plain'],
+        identifyZoom: 13,
+      },
+    },
+    {
+      meta: {
         id: 'ortho',
         rev: 1,
         title: 'Ortho',
@@ -201,7 +240,14 @@ describe('layer catalog', () => {
     const res = await app.inject({ url: '/api/layers' });
     expect(res.statusCode).toBe(200);
     const { layers } = res.json() as { layers: Record<string, unknown>[] };
-    expect(layers.map((l) => l.id)).toEqual(['depth', 'hidpi', 'legacy', 'coded', 'filtered']);
+    expect(layers.map((l) => l.id)).toEqual([
+      'depth',
+      'hidpi',
+      'legacy',
+      'coded',
+      'filtered',
+      'swapped',
+    ]);
     expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
 
@@ -262,18 +308,74 @@ describe('layer catalog', () => {
     // user and nothing anywhere says why.
     for (const layer of norwegianLayers()) {
       if (layer.upstream.kind !== 'wms') continue;
-      const { identifyFields, identifyLabels, identifyValues } = layer.upstream;
+      const { identifyFields, identifyLabels, identifyValues, identifyFormats, identifyTokens } =
+        layer.upstream;
       const shown = new Set((identifyFields ?? []).map((f) => f.toLowerCase()));
       if (shown.size === 0) continue; // no allow-list: everything passes through
       for (const key of [
         ...Object.keys(identifyLabels ?? {}),
         ...Object.keys(identifyValues ?? {}),
+        ...Object.keys(identifyFormats ?? {}),
+        ...Object.keys(identifyTokens ?? {}),
       ]) {
         expect(
           shown.has(key.toLowerCase()),
           `${layer.meta.id}: ${key} is not in identifyFields`,
         ).toBe(true);
       }
+    }
+  });
+
+  it('keeps every option-driven QUERY_LAYERS reachable, on a layer that identifies', () => {
+    // `optionIdentifyLayers` is what keeps a tap pointed at the dataset the
+    // chip is drawing. An undeclared choice there is worse than a dead entry:
+    // the option resolves, the map swaps dataset, and the tap silently keeps
+    // answering from the old one.
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms' || !layer.upstream.optionIdentifyLayers) continue;
+      expect(layer.meta.identify, `${layer.meta.id}: optionIdentifyLayers without identify`).toBe(
+        true,
+      );
+      const declared = new Map(
+        (layer.meta.options ?? []).map((o) => [o.key, new Set(o.choices.map((c) => c.value))]),
+      );
+      // Only one option may decide the queried set — two would be a race
+      // between whichever the request happened to list first.
+      expect(
+        Object.keys(layer.upstream.optionIdentifyLayers).length,
+        `${layer.meta.id}: two options claim QUERY_LAYERS`,
+      ).toBe(1);
+      for (const [key, byChoice] of Object.entries(layer.upstream.optionIdentifyLayers)) {
+        expect(declared.has(key), `${layer.meta.id}: no option named ${key}`).toBe(true);
+        for (const [value, layers] of Object.entries(byChoice)) {
+          expect(
+            declared.get(key)!.has(value),
+            `${layer.meta.id}: option ${key} has no choice "${value}"`,
+          ).toBe(true);
+          expect(
+            layers.length,
+            `${layer.meta.id}: empty QUERY_LAYERS for ${key}=${value}`,
+          ).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('keeps every identify zoom cap inside the layer’s own scale band', () => {
+    // A cap below `minzoom` is silently ignored (the floor wins) and one above
+    // `maxzoom` never applies — either way the tap keeps the pixel-precision
+    // behaviour the cap was added to fix, and nothing says so.
+    for (const layer of norwegianLayers()) {
+      if (layer.upstream.kind !== 'wms') continue;
+      const cap = layer.upstream.identifyZoom;
+      if (cap === undefined) continue;
+      expect(layer.meta.identify, `${layer.meta.id}: identifyZoom without identify`).toBe(true);
+      expect(cap, `${layer.meta.id}: identifyZoom below minzoom`).toBeGreaterThanOrEqual(
+        layer.meta.minzoom ?? 0,
+      );
+      expect(cap, `${layer.meta.id}: identifyZoom above maxzoom`).toBeLessThanOrEqual(
+        layer.meta.maxzoom,
+      );
     }
   });
 
@@ -593,6 +695,55 @@ describe('identify proxy', () => {
     track(app, cacheDir);
     const res = await app.inject({ url: '/api/overlay/depth/identify?lat=60.1&lng=10.2&zoom=13' });
     expect(res.json()).toEqual({ results: [{ dybde_m: '12' }] });
+  });
+
+  it('asks about the dataset the chip is drawing, not the one it replaced', async () => {
+    // The chip swaps LAYERS outright, so an unchanged QUERY_LAYERS would answer
+    // from a dataset the map is not showing — a confident card about nothing on
+    // screen.
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'text/plain',
+      body: "GetFeatureInfo results:\n  Feature 1:\n    navn = 'Samnangerfjorden'\n",
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({
+      url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=15&kind=nursery',
+    });
+    expect(res.json()).toEqual({ results: [{ navn: 'Samnangerfjorden' }] });
+    const asked = requests.at(-1)!.searchParams;
+    expect(asked.get('QUERY_LAYERS')).toBe('nursery');
+    expect(asked.get('LAYERS')).toBe('nursery');
+    // Pinned dialect: only the format the upstream actually answers in is tried.
+    expect(requests).toHaveLength(1);
+    expect(asked.get('INFO_FORMAT')).toBe('text/plain');
+  });
+
+  it('caps the identify zoom so a tap has ground radius', async () => {
+    const { app, cacheDir, requests } = await build(() => ({
+      contentType: 'text/plain',
+      body: "  Feature 1:\n    navn = 'x'\n",
+    }));
+    track(app, cacheDir);
+    await app.inject({ url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=17' });
+    const first = requests[0]!.searchParams.get('BBOX')!.split(',').map(Number);
+    // z13 tile edge in mercator metres — the cap, not the requested z17.
+    expect(first[2]! - first[0]!).toBeCloseTo((2 * 20037508.342789244) / 2 ** 13, 3);
+  });
+
+  it('drops a duplicate answer instead of spending the card on it', async () => {
+    // A WMS group layer and its only child answer the same feature twice.
+    const { app, cacheDir } = await build(() => ({
+      contentType: 'text/plain',
+      body:
+        "  Feature 1:\n    navn = 'Hostvedt skjerp'\n" +
+        "  Feature 2:\n    navn = 'Hostvedt skjerp'\n" +
+        "  Feature 3:\n    navn = 'Annet skjerp'\n",
+    }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/swapped/identify?lat=60&lng=10&zoom=13' });
+    expect(res.json()).toEqual({
+      results: [{ navn: 'Hostvedt skjerp' }, { navn: 'Annet skjerp' }],
+    });
   });
 
   it('404s for non-identifiable layers and 400s bad coordinates', async () => {

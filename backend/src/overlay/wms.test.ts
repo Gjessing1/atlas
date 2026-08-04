@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeLayerOptions } from '@atlas/core';
-import { artfunksjonSld, elvenettSld, norwegianLayers, type WmsUpstream } from './catalog.js';
+import {
+  alienGroupParams,
+  artfunksjonSld,
+  elvenettSld,
+  norwegianLayers,
+  type WmsUpstream,
+} from './catalog.js';
 import { optionGetMapParams } from './options.js';
 import { substituteEnv, tileBbox3857, tileCoords, wmsBaseParams } from './wms.js';
 
@@ -199,6 +205,72 @@ describe('elvenettSld', () => {
     // SLD still draws — anything else and a tap answers for an invisible brook.
     expect(upstream.optionFilter!.values.streams!.all).toEqual([]);
     expect(upstream.optionFilter!.values.streams!.main).toEqual(['3', '4', '5', '6', '7', '8']);
+  });
+});
+
+describe('alienGroupParams', () => {
+  const layer = norwegianLayers().find((l) => l.meta.id === 'alien-species')!;
+  const riskChoices = layer.meta
+    .options!.find((o) => o.key === 'risk')!
+    .choices.map((c) => c.value);
+  const groupChoices = layer.meta
+    .options!.find((o) => o.key === 'group')!
+    .choices.map((c) => c.value);
+
+  it('emits one filter per drawn layer, for every chip combination', () => {
+    // Measured on the live service: `(f)` against LAYERS=HI,SE is a
+    // ServiceException, which the tile proxy turns into a *transparent tile* —
+    // so a count mismatch reads as "no alien species here" rather than as an
+    // error. This is the invariant that keeps that from shipping.
+    for (const risk of riskChoices) {
+      const drawn = (
+        layer.upstream as { optionParams: Record<string, Record<string, Record<string, string>>> }
+      ).optionParams['risk']![risk]!['LAYERS']!.split(',').length;
+      for (const group of groupChoices) {
+        const params = alienGroupParams({ risk, group });
+        const filters = (params['FILTER']?.match(/<Filter>/g) ?? []).length;
+        if (group === 'all') {
+          expect(params['FILTER'], `${risk}/${group} should not filter`).toBeUndefined();
+        } else {
+          expect(filters, `${risk}/${group}`).toBe(drawn);
+        }
+      }
+    }
+  });
+
+  it('keeps every request inside the upstream’s ~2 kB query cap', () => {
+    // The same server 404s a 3 548-char query string while answering a 1 050
+    // one — an SLD document was what blew it, and this filter is the compact
+    // replacement, so the budget is worth guarding.
+    for (const risk of riskChoices) {
+      for (const group of groupChoices) {
+        const params = new URLSearchParams(alienGroupParams({ risk, group }));
+        expect(params.toString().length, `${risk}/${group}`).toBeLessThan(1500);
+      }
+    }
+  });
+
+  it('reaches a real GetMap request through optionGetMapParams', () => {
+    // The whole-selection escape hatch has to *win* over the per-option table,
+    // and the alien row is the only user: both chips write GetMap parameters,
+    // and only one of them can know the other's layer count.
+    const chosen = normalizeLayerOptions(layer.meta.options, { risk: 'high', group: 'animals' });
+    const params = optionGetMapParams(layer, chosen);
+    expect(params['LAYERS']).toBe('HI,SE');
+    expect((params['FILTER']!.match(/<Filter>/g) ?? []).length).toBe(2);
+    const url = wmsBaseParams(layer.upstream as WmsUpstream, 12, 2185, 1121);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    expect(url.toString().length).toBeLessThan(2000);
+  });
+
+  it('filters on the field the tap-side filter reads', () => {
+    // The upstream applies FILTER to GetMap only, so `optionFilter` repeats the
+    // decision on identify results. Two spellings of the same field name is how
+    // the map and the card start disagreeing.
+    const field = (layer.upstream as { optionFilter: { field: string } }).optionFilter.field;
+    expect(alienGroupParams({ risk: 'severe', group: 'plants' })['FILTER']).toContain(
+      `<PropertyName>${field}</PropertyName>`,
+    );
   });
 });
 

@@ -1,4 +1,4 @@
-import { mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
+import { groupLayerCatalog, mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
 import type { LayerCatalog } from './useLayerCatalog.js';
 
 /**
@@ -79,23 +79,17 @@ interface LayersPanelProps {
 export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
   if (layers.catalog.length === 0) return null;
 
-  const groups: [string, LayerMeta[]][] = [];
-  for (const meta of layers.catalog) {
-    const group = groups.find(([name]) => name === meta.group);
-    if (group) group[1].push(meta);
-    else groups.push([meta.group, [meta]]);
-  }
-
+  const groups = groupLayerCatalog(layers.catalog, layers.profileId);
   const note = mapProfile(layers.profileId).note;
 
   return (
     <section className="layers-section" aria-label="Map layers">
       <div className="layers-title">Map layers</div>
       {note && <p className="layers-profile-note">{note}</p>}
-      {groups.map(([group, metas]) => (
-        <div key={group}>
-          <div className="layers-group">{group}</div>
-          {metas.map((meta) => {
+      {groups.map((group) => (
+        <div key={group.name}>
+          <div className="layers-group">{group.name}</div>
+          {group.layers.map((meta) => {
             const on = layers.isOn(meta.id);
             const opacity = layers.opacityFor(meta.id);
             return (

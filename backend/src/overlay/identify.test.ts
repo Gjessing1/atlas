@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanProps,
+  decodeXmlText,
+  dedupeResults,
+  formatEsriDateTime,
   formatNveDate,
+  identifyZoom,
+  keepSet,
   keepsIdentify,
   parseEsriXmlInfo,
   parseGeojsonInfo,
@@ -9,6 +14,7 @@ import {
   parseTextInfo,
   presentFields,
   selectFields,
+  translateTokens,
 } from './identify.js';
 
 /**
@@ -261,5 +267,170 @@ describe('parseTextInfo', () => {
   it('answers empty when nothing survives cleaning', () => {
     expect(parseTextInfo("  OBJECTID = '4'\n")).toEqual([]);
     expect(parseTextInfo('no results')).toEqual([]);
+  });
+
+  it('keeps each feature apart, so a card never mixes two finds', () => {
+    // Verbatim shape of Artsdatabanken's reply, the one upstream that answers
+    // in this dialect alone. Read as one flat key/value list — which is what
+    // this parser used to do — a tap in a town returns a single record whose
+    // species, year and place come from three different observations.
+    const body = `GetFeatureInfo results:
+
+Layer 'SE_punkt'
+  Feature 28270:
+    VitNavn = 'Bunias orientalis'
+    YearCollected = '2009'
+    NorskNavn = 'russekål'
+  Feature 371245:
+    VitNavn = 'Rosa rugosa'
+    YearCollected = '2021'
+    NorskNavn = 'rynkerose'
+`;
+    expect(parseTextInfo(body)).toEqual([
+      { VitNavn: 'Bunias orientalis', YearCollected: '2009', NorskNavn: 'russekål' },
+      { VitNavn: 'Rosa rugosa', YearCollected: '2021', NorskNavn: 'rynkerose' },
+    ]);
+  });
+
+  it('reads a Norwegian field name, not the tail of one', () => {
+    // Same trap the ESRI parser documents: an ASCII \w pattern starts matching
+    // after the first non-ASCII letter, inventing a key nothing can match.
+    expect(parseTextInfo("  Feature 1:\n    Årstid = 'vinter'\n")).toEqual([{ Årstid: 'vinter' }]);
+  });
+});
+
+describe('keepSet + cleanProps', () => {
+  it('lets a layer rescue a field from the generic noise list', () => {
+    // Kartverket's wrecks carry the whole classification in `objtype`, which is
+    // on NOISE_KEYS because every SOSI dataset has one. Before the allow-list
+    // could override it, a tap on a nameless wreck answered "Depth: 47" and had
+    // no word for what was down there.
+    const wreck = { objtype: 'Vrak', dybde: '47', OBJECTID: '3' };
+    expect(cleanProps(wreck)).toEqual({ dybde: '47' });
+    expect(cleanProps(wreck, keepSet(['objektnavnnorsk', 'objtype', 'dybde']))).toEqual({
+      objtype: 'Vrak',
+      dybde: '47',
+    });
+  });
+
+  it('does not rescue what no layer asked for', () => {
+    expect(cleanProps({ objtype: 'Vrak' }, keepSet(['dybde']))).toEqual({});
+  });
+});
+
+describe('decodeXmlText', () => {
+  it('decodes the entities that make a link unusable', () => {
+    // Verbatim from NGU's geosite fact sheet: with the `&amp;` left in, the
+    // link opens the wrong page.
+    expect(decodeXmlText('https://geo.ngu.no/x.php?lang=nor&amp;p_objid=14129')).toBe(
+      'https://geo.ngu.no/x.php?lang=nor&p_objid=14129',
+    );
+    expect(decodeXmlText('&lt;b&gt; &quot;a&quot; &apos;b&apos; &#39;c&#39; &#x41;')).toBe(
+      "<b> \"a\" 'b' 'c' A",
+    );
+  });
+
+  it('leaves an unknown or malformed entity alone', () => {
+    expect(decodeXmlText('100 &euro; &amp')).toBe('100 &euro; &amp');
+  });
+
+  it('is applied by the XML parsers', () => {
+    expect(parseGmlInfo('<x_feature><url>a&amp;b</url></x_feature>')).toEqual([{ url: 'a&b' }]);
+    expect(
+      parseEsriXmlInfo('<FeatureInfoResponse><FIELDS navn="Bl&amp;tt"/></FeatureInfoResponse>'),
+    ).toEqual([{ navn: 'Bl&tt' }]);
+  });
+});
+
+describe('translateTokens', () => {
+  const species = { TORSK: 'cod', HYSE: 'haddock', SEI: 'saithe', OG: '', '0': '' };
+
+  it('translates a list held in one attribute and sentence-cases it', () => {
+    // Fiskeridirektoratet writes the species of a spawning area as one
+    // space-separated string of shouted Norwegian names.
+    expect(translateTokens('HYSE SEI TORSK', species)).toBe('Haddock, saithe, cod');
+  });
+
+  it('drops the junk in a hand-maintained list', () => {
+    expect(translateTokens('SEI OG TORSK 0', species)).toBe('Saithe, cod');
+    expect(translateTokens('OG 0', species)).toBe('');
+  });
+
+  it('keeps an unknown species instead of hiding it', () => {
+    expect(translateTokens('TORSK GAPEFLYNDRE', species)).toBe('Cod, Gapeflyndre');
+  });
+
+  it('collapses a name repeated by the upstream', () => {
+    expect(translateTokens('TORSK torsk TORSK', species)).toBe('Cod');
+  });
+
+  it('reaches the card through presentFields', () => {
+    expect(
+      presentFields({ arter: 'HYSE TORSK' }, { arter: 'Species' }, undefined, undefined, {
+        arter: species,
+      }),
+    ).toEqual({ Species: 'Haddock, cod' });
+  });
+});
+
+describe('formatEsriDateTime', () => {
+  it('reorders ESRI’s US 12-hour datetime', () => {
+    // Verbatim from NVE's slide register: read as written, a Norwegian reader
+    // dates this event to 3 October.
+    expect(formatEsriDateTime('3/10/2015 7:57:00 AM')).toBe('2015-03-10 07:57');
+    expect(formatEsriDateTime('12/24/1999 11:05:00 PM')).toBe('1999-12-24 23:05');
+    expect(formatEsriDateTime('12/24/1999 12:30:00 AM')).toBe('1999-12-24 00:30');
+    expect(formatEsriDateTime('4/15/2015')).toBe('2015-04-15');
+  });
+
+  it('keeps anything it does not recognise verbatim', () => {
+    expect(formatEsriDateTime('Null')).toBe('Null');
+    expect(formatEsriDateTime('2015-03-10')).toBe('2015-03-10');
+  });
+});
+
+describe('identifyZoom', () => {
+  const meta = { minzoom: 11, maxzoom: 17 };
+
+  it('caps the query zoom so a tap has ground radius, not pixels', () => {
+    // A tap at z17 on a point layer has to land within a couple of metres of
+    // the feature; measured against Askeladden and GRANADA, nothing answered.
+    expect(identifyZoom(meta, 13, 17)).toBe(13);
+    expect(identifyZoom(meta, 13, 16)).toBe(13);
+  });
+
+  it('never raises the zoom a coarser view asked for', () => {
+    expect(identifyZoom(meta, 13, 12)).toBe(12);
+  });
+
+  it('never goes below the layer’s own floor', () => {
+    // These upstreams refuse to draw — and to answer — outside their scale
+    // band, so a coarser query would turn "nothing here" into "never answers".
+    expect(identifyZoom(meta, 8, 17)).toBe(11);
+    expect(identifyZoom(meta, undefined, 3)).toBe(11);
+  });
+
+  it('behaves exactly as before for a layer with no cap', () => {
+    expect(identifyZoom({ maxzoom: 15 }, undefined, 17)).toBe(15);
+    expect(identifyZoom({ maxzoom: 15 }, undefined, 12)).toBe(12);
+    expect(identifyZoom({ maxzoom: 15 }, undefined, Number.NaN)).toBe(15);
+  });
+});
+
+describe('dedupeResults', () => {
+  it('collapses a feature the upstream answered for twice', () => {
+    // DMF's `Sikringer` is a group whose only child is `Aktsomhetssone`, so
+    // naming both spent half the card saying one thing.
+    const zone = { Working: 'Hostvedt skjerp', Municipality: 'Flesberg' };
+    expect(dedupeResults([zone, { ...zone }, { Working: 'Annet skjerp' }])).toEqual([
+      zone,
+      { Working: 'Annet skjerp' },
+    ]);
+  });
+
+  it('keeps records that differ in any field', () => {
+    const a = { Species: 'russekål', 'Position accuracy (m)': '5' };
+    const b = { Species: 'russekål', 'Position accuracy (m)': '6' };
+    expect(dedupeResults([a, b])).toEqual([a, b]);
   });
 });

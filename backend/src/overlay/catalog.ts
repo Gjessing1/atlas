@@ -1,4 +1,5 @@
 import type { LayerMeta } from '@atlas/core';
+import type { IdentifyFormat } from './identify.js';
 
 /**
  * The overlay registry: data, not code. A new overlay = a new `OverlayLayer`
@@ -45,9 +46,39 @@ export interface WmsUpstream {
   /**
    * Per-field presentation formats for upstream encodings that are not already
    * readable text. NVE's historic `dato_dig` values use both YYYYMMDD and
-   * YYYYDDMM, so formatting it generically can swap day and month.
+   * YYYYDDMM, so formatting it generically can swap day and month;
+   * `esri-datetime` is ArcGIS's US-order 12-hour clock (`3/10/2015 7:57:00 AM`).
    */
-  identifyFormats?: Record<string, 'nve-date'>;
+  identifyFormats?: Record<string, IdentifyFormat>;
+  /**
+   * `identifyValues`' list-valued sibling: the field holds *several* codes in
+   * one string, so it is split on whitespace/commas and each token translated
+   * (see `translateTokens`).
+   *
+   * Fiskeridirektoratet's `arter` is the case — "HYSE RØDSPETTE SEI SILD TORSK"
+   * is not free text but a controlled vocabulary of 35 tokens across 1 644
+   * areas (measured 2026-08-04), which is exactly what a dictionary may be
+   * written for. A token mapped to the empty string is dropped, which is how
+   * the junk in a hand-maintained list ("OG", a literal "0") stays out.
+   */
+  identifyTokens?: Record<string, Record<string, string>>;
+  /**
+   * Restrict (and order) the INFO_FORMATs tried for this layer. Unset = the
+   * standard chain. Only for upstreams that answer *wrongly* in a format the
+   * chain would reach first — see the note in the identify route.
+   */
+  identifyInfoFormats?: string[];
+  /**
+   * Cap the zoom a tap is asked at, widening the query's ground radius (see
+   * `identifyZoom`). For layers whose features are point symbols: without it a
+   * tap has to land within a couple of metres of the point at high zoom.
+   */
+  identifyZoom?: number;
+  /**
+   * QUERY_LAYERS per option choice, for options that swap the *dataset* rather
+   * than filter one (see `optionQueryLayers`).
+   */
+  optionIdentifyLayers?: Record<string, Record<string, string>>;
   /**
    * Optional ArcGIS REST source for map labels — a number the raster tile can
    * never show because it lives in the upstream's *attributes*, not its
@@ -65,6 +96,17 @@ export interface WmsUpstream {
    * testable without a server.
    */
   optionParams?: Record<string, Record<string, Record<string, string>>>;
+  /**
+   * GetMap parameters computed from *all* the selected options at once, merged
+   * over `optionParams`.
+   *
+   * The escape hatch for a parameter two chips have to agree on, which the
+   * per-option table cannot express. Alien species is the case: MapServer's
+   * vendor `FILTER` takes exactly one filter per layer in LAYERS and faults if
+   * the counts differ, so the organism filter has to know how many risk
+   * categories the *other* chip selected.
+   */
+  optionParamsFor?: (chosen: Record<string, string>) => Record<string, string>;
   /**
    * The identify-side twin of `optionParams`, for upstreams that cannot apply
    * the same filter to GetFeatureInfo — ArcGIS accepts `SLD_BODY` on GetMap and
@@ -234,6 +276,41 @@ const artfunksjonOptionParams = () => {
   }
   return { species: byChoice };
 };
+
+/**
+ * Alien species: which WMS layers each risk chip draws, and what an organism
+ * chip filters them to. One table, read by the tile params, the identify
+ * params and the filter arity below, so the three cannot drift apart.
+ */
+const ALIEN_RISK_LAYERS: Record<string, string> = {
+  severe: 'SE',
+  high: 'HI,SE',
+  all: 'NK,LO,PH,HI,SE',
+};
+
+const ALIEN_KINGDOMS: Record<string, string> = { plants: 'Plantae', animals: 'Animalia' };
+
+/**
+ * The organism filter, as MapServer's vendor `FILTER` parameter.
+ *
+ * Measured on the live service 2026-08-04, and both halves fail loudly rather
+ * than silently, which is why this is safe to build by string:
+ *
+ * - **One filter per layer in LAYERS, or a ServiceException.** `(f)` against
+ *   `HI,SE` is a fault, `(f)(f)` draws — so the repeat count is read from the
+ *   *risk* chip's layer list, not assumed.
+ * - **An unknown field name is a ServiceException too**, so a rename upstream
+ *   surfaces as a dead layer in the probe rather than as an unfiltered map.
+ */
+export function alienGroupParams(chosen: Record<string, string>): Record<string, string> {
+  const kingdom = ALIEN_KINGDOMS[chosen['group'] ?? ''];
+  if (!kingdom) return {};
+  const layers = ALIEN_RISK_LAYERS[chosen['risk'] ?? ''] ?? ALIEN_RISK_LAYERS['severe']!;
+  const filter =
+    `(<Filter><PropertyIsEqualTo><PropertyName>Kingdom</PropertyName>` +
+    `<Literal>${xml(kingdom)}</Literal></PropertyIsEqualTo></Filter>)`;
+  return { FILTER: filter.repeat(layers.split(',').length) };
+}
 
 /**
  * `ltema` is the clean classifier that `objekttype` is not (measured against the
@@ -1141,7 +1218,8 @@ export function norwegianLayers(): OverlayLayer[] {
         title: 'Cultural heritage',
         description:
           'Burial mounds, hill forts, ruins, rock art and war remains from the Askeladden ' +
-          'register. Tap for what it is, its dating and whether anything is visible.',
+          'register. Tap for what it is, whether anything is still visible, and the surveyor’s ' +
+          'own description.',
         group: 'History',
         attribution: '© Riksantikvaren',
         metadataUrl: `${KARTKATALOG}kulturminner%20lokaliteter`,
@@ -1168,29 +1246,41 @@ export function norwegianLayers(): OverlayLayer[] {
         identifyLayers: 'Enkeltminner,Lokaliteter,Lokalitetsikoner',
         // The union of the two feature types' fields — `lokalitetsart` on a
         // locality, `enkeltminneart` on a single monument — most specific
-        // first. `informasjon` is last of the prose because it is long enough
-        // to push everything else out of a phone card.
+        // first.
+        //
+        // The order is the card, not a preference: a place card shows the first
+        // six rows (`IDENTIFY_CARD_ROWS`), and the six this list used to lead
+        // with were name, type, protection, statute, visibility, municipality —
+        // so the two rows a visitor is actually standing there for, the
+        // surveyor's own description and the link to the public record, were
+        // cut off the bottom of every card. `vernelov` reads "Kulturminneloven
+        // av 1978" on essentially every automatically protected site and
+        // `kommune` repeats what the map already says, so both give up their
+        // place.
+        //
+        // `datering` is gone, and with it this row's original promise of a
+        // dating: probed field by field on 2026-08-04, **the WMS has no such
+        // attribute** — not on `Lokaliteter`, not on `Enkeltminner`. Askeladden
+        // holds the dating, the export behind this service does not, and an
+        // allow-list entry for a field that cannot arrive is indistinguishable
+        // from one that is simply never populated.
         identifyFields: [
           'navn',
           'enkeltminneart',
           'lokalitetsart',
-          'datering',
-          'opprinneligfunksjon',
-          'vernetype',
-          'vernelov',
           'synlig',
-          'kommune',
+          'vernetype',
           'informasjon',
           'linkkulturminnesok',
+          'opprinneligfunksjon',
+          'kommune',
         ],
         identifyLabels: {
           navn: 'Name',
           enkeltminneart: 'Monument',
           lokalitetsart: 'Site type',
-          datering: 'Dating',
           opprinneligfunksjon: 'Original function',
           vernetype: 'Protection',
-          vernelov: 'Protected under',
           synlig: 'Visible on site',
           kommune: 'Municipality',
           informasjon: 'Description',
@@ -1200,7 +1290,75 @@ export function norwegianLayers(): OverlayLayer[] {
           // The one field a visitor actually plans around: whether there is
           // anything above ground. Askeladden answers it as a bare boolean.
           synlig: { true: 'Yes — something to see', false: 'No visible trace' },
+          // Riksantikvaren's site types, sampled from the live register across
+          // 40 places (2026-08-04) so the list covers what a tap actually
+          // returns rather than what the code list contains — the register runs
+          // from Stone Age settlement to listed bank buildings, and "Site type:
+          // Kullfremstillingsanlegg" is the most common answer in the forest.
+          // Anything unlisted reaches the reader in Norwegian, which is the
+          // right failure for a vocabulary this long.
+          lokalitetsart: {
+            'Bosetning-aktivitetsområde': 'Settlement / activity area',
+            Kullfremstillingsanlegg: 'Charcoal production site',
+            Dyrkingsspor: 'Traces of cultivation',
+            Gravminne: 'Burial monument',
+            Gravfelt: 'Burial ground',
+            Rydningsrøyslokalitet: 'Clearance cairns',
+            Kokegroplokalitet: 'Cooking pits',
+            Funnsted: 'Find spot',
+            Veganlegg: 'Road works',
+            Vandrerute: 'Historic route',
+            Kirkested: 'Church site',
+            Kirkegårdslokalitet: 'Graveyard',
+            Forsvarsanlegg: 'Defence works',
+            Krigsminnelokalitet: 'War remains',
+            Minnesmerke: 'Memorial',
+            Tradisjonslokalitet: 'Place of tradition',
+            Skipsfunn: 'Ship find',
+            Bygdeborg: 'Hill fort',
+            Bergkunst: 'Rock art',
+            Jernvinneanlegg: 'Iron-smelting site',
+            Fangstlokalitet: 'Hunting or trapping site',
+            Steinbrudd: 'Quarry',
+            Industrianlegg: 'Industrial works',
+            Kraftverk: 'Power station',
+            Tekstilproduksjon: 'Textile works',
+            Jernbaneanlegg: 'Railway structure',
+            Havneområde: 'Harbour area',
+            Handelsanlegg: 'Trading premises',
+            Boligeiendom: 'Listed dwelling',
+            Bygårdsanlegg: 'Listed town building',
+            'Annen bygningslokalitet': 'Other listed building',
+            Undervisningsanlegg: 'School building',
+            Finansinstitusjon: 'Bank building',
+            'Offentlig institusjon': 'Public institution',
+            'Kulturinstitusjoner - forsamlingshus': 'Assembly hall',
+            'Embetsgård-embetsbolig': 'Official residence',
+            'Idretts-rekreasjonsanlegg': 'Sports or recreation grounds',
+            Grøntområder: 'Historic green space',
+          },
+          // Riksantikvaren's own protection classes, translated. "Uavklart" is
+          // load-bearing: it means the case has never been decided, not that
+          // the site is unprotected.
+          vernetype: {
+            'Automatisk fredet': 'Automatically protected (pre-1537)',
+            Vedtaksfredet: 'Protected by decision',
+            Forskriftsfredet: 'Protected by regulation',
+            'Midlertidig fredet': 'Temporarily protected',
+            'Ikke fredet': 'Not protected',
+            Uavklart: 'Protection undecided',
+          },
         },
+        // Askeladden's sites are icons, and a tap has to land on the *point*
+        // under one. Measured at Horten 2026-08-04: a query at z15's resolution
+        // (~2 m/px) answered nothing from the middle of a drawn icon, z14
+        // (~4.5 m/px, so ~14 m of tolerance) answered. The trade is deliberate
+        // and one-directional — at z14 the outline layers are outside their
+        // 1:25 000 band, so a tap answers from `Lokalitetsikoner`, which carries
+        // the *locality* record (name, type, the surveyor's description, the
+        // Kulturminnesøk link) rather than the single monument. The parent
+        // record is a far better answer than the empty card it replaces.
+        identifyZoom: 14,
       },
     },
     {
@@ -1214,11 +1372,11 @@ export function norwegianLayers(): OverlayLayer[] {
       // QGIS server below, found through that page rather than the catalogue.
       meta: {
         id: 'old-mines',
-        rev: 1,
+        rev: 2,
         title: 'Old mines',
         description:
-          'Secured mine openings and the caution zones around them, from the national ' +
-          'mine-safety register.',
+          'Caution zones around old mine workings and trial pits, from the national mine-safety ' +
+          'register. Tap for the working’s name.',
         group: 'History',
         attribution: '© Direktoratet for mineralforvaltning',
         metadataUrl: `${KARTKATALOG}gamle%20gruver`,
@@ -1227,7 +1385,7 @@ export function norwegianLayers(): OverlayLayer[] {
         defaultOpacity: 0.85,
         identify: true,
         coverageNote:
-          'Registered openings only — Norway has thousands of unrecorded shafts and adits, so ' +
+          'Registered workings only — Norway has thousands of unrecorded shafts and adits, so ' +
           'blank ground is not proof of safe ground. An open shaft is a fall hazard whatever ' +
           'the map says.',
         profiles: ['curiosities'],
@@ -1236,14 +1394,23 @@ export function norwegianLayers(): OverlayLayer[] {
         kind: 'wms',
         url: 'https://dirmin.no/kart/server/',
         version: '1.3.0',
-        layers: 'Aktsomhetssone,Sikringer',
-        identifyLayers: 'Sikringer,Aktsomhetssone',
-        identifyFields: ['Sikringsnavn', 'Sikringstype', 'Kommunenavn'],
+        // `Sikringer` is a *group* whose only child is `Aktsomhetssone`
+        // (GetCapabilities, 2026-08-04), so naming both drew the same polygons
+        // twice and answered a tap with two identical rows — half a card spent
+        // saying one thing.
+        layers: 'Sikringer',
+        identifyLayers: 'Sikringer',
+        // `Sikringstype` is deliberately gone: it reads "Aktsomhetssone" on
+        // every feature in the register, which is the layer's own name repeated
+        // back at the reader. The name is the answer here — "Hostvedt skjerp"
+        // is a searchable, findable thing.
+        identifyFields: ['Sikringsnavn', 'Kommunenavn'],
         identifyLabels: {
-          Sikringsnavn: 'Mine',
-          Sikringstype: 'Record',
+          Sikringsnavn: 'Working',
           Kommunenavn: 'Municipality',
         },
+        // Small polygons around points: a tap needs ground radius, not pixels.
+        identifyZoom: 14,
       },
     },
     {
@@ -1252,7 +1419,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // is the difference between a diveable wreck and a chart symbol.
       meta: {
         id: 'wrecks',
-        rev: 1,
+        rev: 2,
         title: 'Wrecks & obstructions',
         description: 'Charted wrecks and seabed obstructions, with the depth each one lies at.',
         group: 'History',
@@ -1274,6 +1441,11 @@ export function norwegianLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'hefte,vrak_a,vrak_p',
         identifyLayers: 'vrak_p,vrak_a,hefte',
+        // `objtype` is on the generic noise list (every SOSI dataset carries
+        // one), and being *named here* is what rescues it — see NOISE_KEYS.
+        // Until v0.145.0 it was silently dropped before the card was built, so
+        // a tap on the average unnamed wreck answered with a bare "Depth: 47"
+        // and no word for what was down there.
         identifyFields: ['objektnavnnorsk', 'objtype', 'vraktype', 'dybde'],
         identifyLabels: {
           objektnavnnorsk: 'Name',
@@ -1291,6 +1463,10 @@ export function norwegianLayers(): OverlayLayer[] {
             ikkeFarligVrak: 'Not dangerous to navigation',
           },
         },
+        // Chart symbols on open water: a metre-accurate tap is not a thing
+        // anyone does from a boat, and there is nothing else out there to
+        // confuse the answer with.
+        identifyZoom: 13,
       },
     },
     {
@@ -1331,19 +1507,45 @@ export function norwegianLayers(): OverlayLayer[] {
         identifyLabels: {
           geosted_navn: 'Site',
           omradenavn: 'Area',
-          geostedtype_tekst: 'Assessment',
+          geostedtype_tekst: 'Register status',
           faktaark_url: 'Fact sheet',
         },
+        // NGU's three register tracks, in their own words. Each `Geosted_*`
+        // layer has a `_historiske_verneforslag` and an `_uten_verdivurdering`
+        // sibling and the group answers for all of them, so a tap really does
+        // return these three strings — untranslated, "Historiske verneforslag"
+        // is the whole answer for a site on Hovedøya.
+        identifyValues: {
+          geostedtype_tekst: {
+            Geosteder: 'Assessed geosite',
+            'Historiske verneforslag': 'Historic conservation proposal',
+            'Uten verdivurdering': 'Registered, not yet assessed',
+          },
+        },
+        // Point and small-area sites in a curated national register: nothing
+        // near enough to confuse, and the fact sheet is worth reaching.
+        identifyZoom: 13,
       },
     },
     {
-      // Mud volcanoes on the seabed — MAREANO's shallow-gas mapping. Tiny and
-      // gloriously obscure, which is the point of the profile.
+      // The seabed where gas escapes it: pockmark fields, seeps, blowout
+      // craters, mud volcanoes and mud diapirs, from MAREANO's shallow-gas
+      // mapping. Gloriously obscure, which is the point of the profile.
+      //
+      // Drawn as the two *group* layers rather than `Leirvulkan` alone, which
+      // is what shipped in v0.143.0: measured 2026-08-04, mud volcanoes are 23
+      // lit pixels in a national sweep — one site on the Vøring plateau — so
+      // the layer was a switched-on overlay with nothing in it anywhere a user
+      // would look. `GrunnGass` is Leirvulkan's own parent (GetCapabilities) and
+      // brings the pockmarks with it: 7 140 px in the same sweep, all sharing
+      // one attribute schema, so the tap is unchanged.
       meta: {
-        id: 'mud-volcanoes',
+        id: 'seabed-gas',
         rev: 1,
-        title: 'Mud volcanoes',
-        description: 'Seabed mud volcanoes and shallow-gas seeps mapped offshore.',
+        title: 'Seabed gas & pockmarks',
+        description:
+          'Where gas escapes the seabed: pockmark fields, seeps, blowout craters, mud volcanoes ' +
+          'and mud diapirs.',
         group: 'Geology',
         attribution: '© NGU / MAREANO',
         metadataUrl: `${KARTKATALOG}marine%20geofarer`,
@@ -1359,14 +1561,34 @@ export function norwegianLayers(): OverlayLayer[] {
         kind: 'wms',
         url: 'https://geo.ngu.no/mapserver/MarinGeofarerWMS',
         version: '1.3.0',
-        layers: 'Leirvulkan',
-        identifyLayers: 'Leirvulkan',
+        layers: 'GrunnGass,Diapirer',
+        identifyLayers: 'GrunnGass,Diapirer',
         identifyFields: ['GrunnGassNavn', 'MediumNavn', 'Dato'],
         identifyLabels: {
           GrunnGassNavn: 'Feature',
           MediumNavn: 'Setting',
           Dato: 'Mapped',
         },
+        // NGU's own class names for what the tap found. The list is the classes
+        // measured on the live service; anything they add later falls through
+        // in Norwegian rather than disappearing.
+        identifyValues: {
+          GrunnGassNavn: {
+            Leirvulkan: 'Mud volcano',
+            'Gass/væske utslipp': 'Gas or fluid seep',
+            'Område med pockmarks': 'Pockmark field',
+            'Utblåsningskrater (under sjøbunnen)': 'Buried blowout crater',
+            'Grunn gass i berggrunn': 'Shallow gas in bedrock',
+            'Grunn gass i sedimenter': 'Shallow gas in sediments',
+          },
+          MediumNavn: {
+            'På sjøbunnen': 'On the seabed',
+            'Under sjøbunnen': 'Below the seabed',
+          },
+        },
+        // Small polygons in deep water, and the map is never zoomed in far out
+        // here anyway (maxzoom 13).
+        identifyZoom: 12,
       },
     },
     {
@@ -1375,9 +1597,11 @@ export function norwegianLayers(): OverlayLayer[] {
       // is evidence of a farm that may no longer be there.
       meta: {
         id: 'groundwater-wells',
-        rev: 1,
+        rev: 2,
         title: 'Wells & springs',
-        description: 'Drilled wells and natural springs from the national groundwater database.',
+        description:
+          'Natural springs and drilled wells from the national groundwater database. Tap for ' +
+          'what a well is used for and what it is drilled into.',
         group: 'Water & depth',
         attribution: '© NGU',
         metadataUrl: `${KARTKATALOG}granada`,
@@ -1392,19 +1616,107 @@ export function norwegianLayers(): OverlayLayer[] {
           'Reported wells and springs — reporting is patchy and a mapped spring is not tested ' +
           'drinking water.',
         profiles: ['curiosities'],
+        // Springs first, and by default. A spring is the find — drinking water
+        // on a ridge with no stream — while GRANADA's boreholes are dominated
+        // by suburban ground-source heat wells, which outnumber springs by
+        // orders of magnitude and bury them: a national sweep of the two layers
+        // over Romerike drew 270 235 borehole pixels against 1 507 spring ones.
+        options: [
+          {
+            key: 'kind',
+            label: 'Show',
+            defaultValue: 'springs',
+            choices: [
+              {
+                value: 'springs',
+                label: 'Springs',
+                caption: 'Natural springs only — water coming out of the ground on its own.',
+              },
+              {
+                value: 'water',
+                label: 'Springs + water wells',
+                caption: 'Adds the wells drilled for water supply, skipping the heat-pump wells.',
+              },
+              {
+                value: 'all',
+                label: 'Everything drilled',
+                caption:
+                  'Every reported borehole, energy wells included — dense in every built-up area.',
+              },
+            ],
+          },
+        ],
       },
       upstream: {
         kind: 'wms',
         url: 'https://geo.ngu.no/mapserver/GranadaWMS5',
         version: '1.3.0',
-        layers: 'Grunnvannsborehull,Grunnvannsoppkomme',
-        identifyLayers: 'Grunnvannsborehull,Grunnvannsoppkomme',
-        identifyFields: ['broenn_nr', 'bronn_type', 'brukstype'],
-        identifyLabels: {
-          broenn_nr: 'Well no.',
-          bronn_type: 'Type',
-          brukstype: 'Use',
+        layers: 'Grunnvannsoppkomme',
+        identifyLayers: 'Grunnvannsoppkomme',
+        // GRANADA publishes the well types as separate layers, so the chip is a
+        // LAYERS rewrite — and QUERY_LAYERS has to move with it, or a tap in a
+        // suburb answers "energy well" over a map showing only springs.
+        optionParams: {
+          kind: {
+            springs: { LAYERS: 'Grunnvannsoppkomme' },
+            water: { LAYERS: 'Bronn_vannforsyning,Grunnvannsoppkomme' },
+            all: { LAYERS: 'Grunnvannsborehull,Grunnvannsoppkomme' },
+          },
         },
+        optionIdentifyLayers: {
+          kind: {
+            springs: 'Grunnvannsoppkomme',
+            water: 'Bronn_vannforsyning,Grunnvannsoppkomme',
+            all: 'Grunnvannsborehull,Grunnvannsoppkomme',
+          },
+        },
+        // The union of the two schemas, and the whole reason this row was
+        // rewritten: a spring answers `nummer`/`bruk`/`geolmedium` while a
+        // borehole answers `broenn_nr`/`brukstype`/`bronn_type`, so the
+        // borehole-only allow-list this shipped with dropped every field a
+        // spring has — the tap on a star returned a card with nothing on it.
+        // Substance before bookkeeping: what the water comes out of, then what
+        // it is used for, then the register number — which is also the row that
+        // says *which* of the two things you tapped, since a spring is numbered
+        // `nummer` and a borehole `broenn_nr`.
+        identifyFields: ['geolmedium', 'bronn_type', 'brukstype', 'bruk', 'nummer', 'broenn_nr'],
+        identifyLabels: {
+          bruk: 'Use',
+          geolmedium: 'Water from',
+          brukstype: 'Use',
+          bronn_type: 'Type',
+          nummer: 'Spring no.',
+          broenn_nr: 'Well no.',
+        },
+        // NGU's own vocabulary. "Ukjent" is kept rather than blanked: on a
+        // spring it is usually the *only* thing the record says, and an empty
+        // card is what this layer is being fixed for.
+        identifyValues: {
+          bruk: {
+            Ukjent: 'Not recorded',
+            Vannforsyning: 'Water supply',
+            Drikkevann: 'Drinking water',
+            Overvåking: 'Monitoring',
+          },
+          geolmedium: { Løsmasse: 'Sediment', Fjell: 'Bedrock' },
+          brukstype: {
+            Energi: 'Ground-source heat',
+            Vannforsyning: 'Water supply',
+            Ukjent: 'Not recorded',
+            Grunnundersøkelse: 'Ground survey',
+            Overvåking: 'Monitoring',
+          },
+          bronn_type: {
+            Fjellbrønn: 'Drilled into bedrock',
+            Løsmassebrønn: 'Drilled into sediment',
+            Sonderboring: 'Test bore',
+          },
+        },
+        // Point symbols, and the measurement that started this: from the middle
+        // of a drawn spring star, GRANADA answered nothing until the query was
+        // ~50 m wide. z13 is ~30 m at these latitudes and still names one
+        // spring rather than the hillside.
+        identifyZoom: 13,
       },
     },
     {
@@ -1440,37 +1752,73 @@ export function norwegianLayers(): OverlayLayer[] {
         // above z13 where the two area layers stop drawing.
         layers: 'Skredhendelse_UtlopsOmrade,Skredhendelse_UtlosningsOmrade,Skredtype',
         identifyLayers: 'Skredtype,Skredhendelse_UtlosningsOmrade,Skredhendelse_UtlopsOmrade',
+        // Measured against a real event (Våga, Samnanger, 2015): `beskrivelse`
+        // is the observer's account of what came down and how far, which is the
+        // whole reason to tap a historic slide, and `stedsnavn` names the
+        // slope. Both were missing. `utlosningArsak` is gone the other way —
+        // the layer has no such field, so it was an allow-list entry that could
+        // never match anything.
         identifyFields: [
           'skredType',
           'skredTidspunkt',
           'skredNavn',
-          'utlosningArsak',
+          'stedsnavn',
+          'totAntPersOmkommet',
+          'beskrivelse',
           'objektType',
         ],
         identifyLabels: {
           skredType: 'Slide type',
           skredTidspunkt: 'Happened',
           skredNavn: 'Name',
-          utlosningArsak: 'Trigger',
-          objektType: 'Part',
+          stedsnavn: 'Place',
+          totAntPersOmkommet: 'Lives lost',
+          beskrivelse: 'Account',
+          objektType: 'Record',
         },
         identifyValues: {
           // NVE's Norwegian type names. The distinctions are real and the
           // English words are not interchangeable — a sørpeskred behaves
           // nothing like a snøskred — so each is translated, not grouped.
+          //
+          // The register also uses ", uspesifisert" subtypes ("Steinskred,
+          // uspesifisert"), which is what a real tap returns, so those spellings
+          // are listed too — an exact-match table that only knew the bare word
+          // silently showed the Norwegian.
           skredType: {
             Snøskred: 'Snow avalanche',
+            'Snøskred, uspesifisert': 'Snow avalanche',
             Sørpeskred: 'Slushflow',
             Steinsprang: 'Rockfall',
             Steinskred: 'Rockslide',
+            'Steinskred, uspesifisert': 'Rockslide',
             Fjellskred: 'Rock avalanche',
             Jordskred: 'Soil slide',
+            'Jord- og flomskred, uspesifisert': 'Soil or debris slide',
             Flomskred: 'Debris flow',
             Kvikkleireskred: 'Quick-clay slide',
             Isnedfall: 'Ice fall',
+            'Skred, uspesifisert': 'Slide, type not recorded',
           },
-          objektType: { Utlop: 'Runout area', Utlosning: 'Release area' },
+          // Two layers answer through this one field: the polygons say which
+          // half of the slide you tapped, the typed points say what kind of
+          // record it is. Untranslated, the point half reads
+          // "SkredObsHistorisk" at the reader.
+          objektType: {
+            Utlop: 'Runout area',
+            Utlosning: 'Release area',
+            SkredObsHistorisk: 'Historic record',
+            SkredObs: 'Field observation',
+            SkredHendelse: 'Reported event',
+          },
         },
+        // ArcGIS answers `3/10/2015 7:57:00 AM`, which a Norwegian reader will
+        // read as 3 October at best.
+        identifyFormats: { skredTidspunkt: 'esri-datetime' },
+        // The typed points are single symbols; the outlines stop drawing (and
+        // answering) below 1:75 596, i.e. above z13, so this is also where both
+        // halves of the layer can answer at once.
+        identifyZoom: 13,
       },
     },
     {
@@ -1522,24 +1870,30 @@ export function norwegianLayers(): OverlayLayer[] {
       // Artskart's alien-species observations, split by the Norwegian risk
       // assessment (SE severe → NK no known risk). An ecological invasion map.
       //
-      // `identify: false` on purpose: the upstream's own GetFeatureInfo is
-      // broken — every QUERY_LAYERS value faults with "Layer named 'DD_punkt'
-      // does not exist", a category that no longer exists in their config
-      // (probed 2026-08-03). The raster draws fine; only the tap is dead, so
-      // the layer ships without one rather than not at all.
+      // The tap works, and finding out why it did not is the story of this row.
+      // v0.143.0 shipped it `identify: false` after every QUERY_LAYERS value
+      // faulted; re-probed 2026-08-04, the service answers *only* in
+      // text/plain. Its GML reply is a well-formed empty document, which the
+      // format chain reads as "this format works, nothing here" and stops on —
+      // so the dialect that had the answer was three formats further down and
+      // never reached. `identifyInfoFormats` pins it.
       meta: {
         id: 'alien-species',
-        rev: 1,
+        rev: 2,
         title: 'Alien species',
         description:
           'Recorded sightings of invasive and non-native species, coloured by their assessed ' +
-          'ecological risk.',
+          'ecological risk. Tap a dot for the species, when it was found and how precisely.',
         group: 'Nature',
         attribution: '© Artsdatabanken',
         metadataUrl: `${KARTKATALOG}fremmede%20arter`,
+        // Artsdatabanken caps the point layers at 1:150 000, so z11 comes back
+        // as an empty tile (measured: 334 B at z11, 51.8 kB at z12 over Oslo) —
+        // without this the layer reads as switched on and broken.
+        minzoom: 12,
         maxzoom: 15,
         defaultOpacity: 0.75,
-        identify: false,
+        identify: true,
         coverageNote:
           'Volunteer and survey observations: dense near towns and roads because that is where ' +
           'people look, not because that is where the species are.',
@@ -1571,6 +1925,30 @@ export function norwegianLayers(): OverlayLayer[] {
               },
             ],
           },
+          {
+            // The second dimension of the same wall of dots, and the one a
+            // reader actually asks for: a lupin field and an escaped mink are
+            // different questions. Measured over Oslo, the same tile is 38 kB
+            // unfiltered, 16 kB for plants and 4.8 kB for animals — the
+            // register is overwhelmingly garden escapes, so "animals" is a
+            // different map rather than a thinner one.
+            key: 'group',
+            label: 'Organism',
+            defaultValue: 'all',
+            choices: [
+              { value: 'all', label: 'All', caption: 'Every organism group in the register.' },
+              {
+                value: 'plants',
+                label: 'Plants',
+                caption: 'Garden escapes and invasive plants — most of what is recorded.',
+              },
+              {
+                value: 'animals',
+                label: 'Animals',
+                caption: 'Introduced animals: mink, Iberian slug, king crab, pink salmon.',
+              },
+            ],
+          },
         ],
       },
       upstream: {
@@ -1581,27 +1959,75 @@ export function norwegianLayers(): OverlayLayer[] {
         // The risk categories are separate WMS layers, so the chip simply
         // rewrites LAYERS — `optionGetMapParams` is applied after the base
         // request is built, which makes overriding it a data-only change.
+        //
+        // The organism chip is MapServer's vendor `FILTER` instead of an SLD,
+        // and deliberately so: an SLD *replaces* the style, which would flatten
+        // the risk colours the other chip exists to show, and the URL-encoded
+        // document blew past this server's ~2 kB query limit at five named
+        // layers (measured: 3 548 chars → a bare 404). One filter per layer in
+        // LAYERS, in the same order, at ~170 chars.
         optionParams: {
-          risk: {
-            severe: { LAYERS: 'SE' },
-            high: { LAYERS: 'HI,SE' },
-            all: { LAYERS: 'NK,LO,PH,HI,SE' },
-          },
+          risk: Object.fromEntries(
+            Object.entries(ALIEN_RISK_LAYERS).map(([choice, layers]) => [
+              choice,
+              { LAYERS: layers },
+            ]),
+          ),
         },
+        optionParamsFor: alienGroupParams,
+        // FILTER applies to GetMap only — the same request on GetFeatureInfo
+        // answered with a plant while filtered to animals — so the tap is
+        // filtered here, exactly like the wildlife layer's species chip.
+        optionFilter: {
+          field: 'Kingdom',
+          values: { group: { all: [], plants: ['Plantae'], animals: ['Animalia'] } },
+        },
+        identifyLayers: 'SE',
+        optionIdentifyLayers: { risk: ALIEN_RISK_LAYERS },
+        identifyInfoFormats: ['text/plain'],
+        // Darwin Core, of which the reader wants six fields: what it is, in
+        // both languages, when it was found, where the finder said they were,
+        // and how much to trust the dot's position.
+        identifyFields: [
+          'NorskNavn',
+          'VitNavn',
+          'YearCollected',
+          'Locality',
+          'CoordinatePrecision',
+          'Kingdom',
+        ],
+        identifyLabels: {
+          NorskNavn: 'Species',
+          VitNavn: 'Scientific name',
+          YearCollected: 'Found',
+          Locality: 'Reported location',
+          CoordinatePrecision: 'Position accuracy (m)',
+          Kingdom: 'Group',
+        },
+        identifyValues: {
+          // A zero year is "not recorded" in this database, and an empty
+          // decoding drops the row rather than claiming the year 0.
+          YearCollected: { '0': '' },
+          Kingdom: { Plantae: 'Plant', Animalia: 'Animal', Fungi: 'Fungus', Chromista: 'Algae' },
+        },
+        // Single observation dots, and the dots are what a user aims at.
+        identifyZoom: 14,
       },
     },
     {
-      // Coastal spawning grounds from Fiskeridirektoratet's *kystnære
-      // fiskeridata*, mapped with local fishermen. Tagged `fishing` as well:
-      // the species list on a tap is exactly what a shore angler wants, and it
-      // is the only layer in the catalog that carries one.
+      // Coastal spawning and nursery grounds from Fiskeridirektoratet's
+      // *kystnære fiskeridata*, mapped with local fishermen. Tagged `fishing`
+      // as well: the species list on a tap is exactly what a shore angler
+      // wants, and it is the only layer in the catalog that carries one.
       meta: {
         id: 'spawning-areas',
-        rev: 1,
-        title: 'Spawning grounds',
-        description: 'Coastal spawning and nursery areas, with the species recorded for each one.',
+        rev: 2,
+        title: 'Spawning & nursery grounds',
+        description:
+          'Where fish spawn and grow up along the coast, and which species were recorded for each ' +
+          'area. Pick spawning, nursery or the surveyed cod fields.',
         group: 'Nature',
-        attribution: '© Fiskeridirektoratet',
+        attribution: '© Fiskeridirektoratet / Havforskningsinstituttet',
         metadataUrl: `${KARTKATALOG}gyteomr%C3%A5der`,
         maxzoom: 15,
         defaultOpacity: 0.6,
@@ -1610,6 +2036,38 @@ export function norwegianLayers(): OverlayLayer[] {
           'Local knowledge collected area by area — coverage follows where fishermen were asked, ' +
           'and says nothing about closures or quotas.',
         profiles: ['curiosities', 'fishing'],
+        // "Spawning grounds" alone never said *whose* spawning, and the answer
+        // was buried in a tap: the one layer mixes 1 644 areas across 35
+        // species. Fiskeridirektoratet publishes the distinction as three
+        // datasets, so the chip is the honest place to make it — and it brings
+        // the surveyed cod fields, which carry a graded importance the
+        // fishermen's areas do not.
+        options: [
+          {
+            key: 'kind',
+            label: 'Areas',
+            defaultValue: 'spawning',
+            choices: [
+              {
+                value: 'spawning',
+                label: 'Spawning',
+                caption: 'Where fish spawn — 1 644 areas, cod in seven of ten.',
+              },
+              {
+                value: 'nursery',
+                label: 'Nursery & feeding',
+                caption: 'Where the young grow up and the shoals feed (446 areas).',
+              },
+              {
+                value: 'cod',
+                label: 'Cod fields (surveyed)',
+                caption:
+                  'Coastal cod spawning fields mapped by egg survey and sonar, graded local to ' +
+                  'national. Spawning runs January–May.',
+              },
+            ],
+          },
+        ],
       },
       upstream: {
         kind: 'wms',
@@ -1617,16 +2075,139 @@ export function norwegianLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'gyteomraader',
         identifyLayers: 'gyteomraader',
-        // `arter` arrives as one space-separated string of Norwegian names in
-        // caps ("HYSE RØDSPETTE SEI SILD TORSK"), which is left exactly as the
-        // upstream wrote it — inventing a translation of a free-text field is
-        // how a species list starts lying.
-        identifyFields: ['stedsnavn', 'arter', 'kommunenavn'],
+        optionParams: {
+          kind: {
+            spawning: { LAYERS: 'gyteomraader' },
+            nursery: { LAYERS: 'oppvekst_beiteomraade' },
+            cod: { LAYERS: 'gytefelt_torsk_mb' },
+          },
+        },
+        // The chip swaps the *dataset*, so the tap has to swap with it.
+        optionIdentifyLayers: {
+          kind: {
+            spawning: 'gyteomraader',
+            nursery: 'oppvekst_beiteomraade',
+            cod: 'gytefelt_torsk_mb',
+          },
+        },
+        // The union of two schemas: the fishermen's areas answer
+        // `stedsnavn`/`arter`/`merknad`, the surveyed cod fields answer
+        // `species_no`/`info`/`områdebeskrivelse`. `selectFields` keeps
+        // whichever exist, so one list serves all three choices — the order is
+        // what a card shows first.
+        identifyFields: [
+          'stedsnavn',
+          'arter',
+          'species_no',
+          'info',
+          'områdebeskrivelse',
+          'merknad',
+          'stock_no',
+          'kommunenavn',
+        ],
         identifyLabels: {
           stedsnavn: 'Place',
-          arter: 'Species (Norwegian)',
+          arter: 'Species',
+          species_no: 'Species',
+          info: 'Importance',
+          områdebeskrivelse: 'Survey',
+          merknad: 'Local note (Norwegian)',
+          stock_no: 'Stock',
           kommunenavn: 'Municipality',
         },
+        identifyValues: {
+          species_no: { Kysttorsk: 'Coastal cod', Skrei: 'Northeast Arctic cod (skrei)' },
+          info: {
+            'Lokalt viktig Gytefelt': 'Locally important spawning field',
+            'Regionalt viktig Gytefelt': 'Regionally important spawning field',
+            'Nasjonalt viktig Gytefelt': 'Nationally important spawning field',
+          },
+        },
+        // `arter` is a *list* in one attribute — "HYSE RØDSPETTE SEI SILD
+        // TORSK" — and it is not free text: 35 tokens cover all 1 644 areas
+        // (measured 2026-08-04), so this is the upstream's own vocabulary,
+        // translated the same way every other coded field in this file is.
+        // "OG" (Norwegian "and") and a stray "0" are mapped to nothing, which
+        // drops them.
+        identifyTokens: {
+          arter: {
+            TORSK: 'cod',
+            HYSE: 'haddock',
+            SEI: 'saithe',
+            SILD: 'herring',
+            RØDSPETTE: 'plaice',
+            MAKRELL: 'mackerel',
+            ROGNKJEKS: 'lumpfish',
+            LYR: 'pollack',
+            UER: 'redfish',
+            KVEITE: 'halibut',
+            LYSING: 'hake',
+            LANGE: 'ling',
+            BLÅLANGE: 'blue ling',
+            BROSME: 'tusk',
+            LODDE: 'capelin',
+            BRISLING: 'sprat',
+            TOBIS: 'sandeel',
+            SIL: 'sandeel',
+            REKE: 'prawn',
+            KRABBE: 'crab',
+            '(TASKE)': 'edible crab',
+            HUMMER: 'lobster',
+            SJØKREPS: 'Norway lobster',
+            PIGGHÅ: 'spurdog',
+            HVITTING: 'whiting',
+            PIGGVAR: 'turbot',
+            KOLMULE: 'blue whiting',
+            BREIFLABB: 'monkfish',
+            GAPEFLYNDRE: 'long rough dab',
+            HESTMAKRELL: 'horse mackerel',
+            GRÅSTEINBIT: 'wolffish',
+            ANNEN: 'other species',
+            '(ANNEN)': 'other species',
+            OG: '',
+            '0': '',
+          },
+        },
+      },
+    },
+    {
+      // Kartverket's amtskart: the county map series surveyed between 1826 and
+      // 1917, georeferenced and served seamlessly. The layer that turns the
+      // profile's question around — not "what is out here" but "what *was*".
+      // Farms that are now forest, the old road before the road, sæter names
+      // nobody writes down any more, and Christiania where Oslo is.
+      //
+      // Opaque by nature (it is a scanned map, not an overlay of symbols), so
+      // it ships at 0.8 and the panel slider fades the present back in.
+      meta: {
+        id: 'historic-maps',
+        rev: 1,
+        title: 'Historic maps (1826–1917)',
+        description:
+          'Kartverket’s hand-drawn county maps (amtskart), georeferenced over today’s terrain.',
+        group: 'History',
+        attribution: '© Kartverket',
+        metadataUrl: `${KARTKATALOG}historiske%20kart`,
+        // The sheets are ~1:100 000–1:200 000 surveys: past z14 the request
+        // only buys a bigger blur, so the client overzooms from there.
+        maxzoom: 14,
+        defaultOpacity: 0.8,
+        identify: false,
+        coverageNote:
+          'Sheet by sheet, surveyed across ninety years — neighbouring valleys can be decades ' +
+          'apart, and a few sheets are missing entirely. Surveyed at about 1:100 000, so it goes ' +
+          'soft past village zoom: there is no more detail in the paper. Nothing here is a survey ' +
+          'of today.',
+        profiles: ['curiosities'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.geonorge.no/skwms1/wms.historiskekart',
+        version: '1.3.0',
+        // `georefererte`, the service's other layer, is not an overlay: it
+        // returns *one* named sheet by id, so it has nothing to draw without
+        // one. `amt1` is the whole series, mosaicked.
+        layers: 'amt1',
       },
     },
   ];

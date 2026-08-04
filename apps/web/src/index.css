@@ -2922,6 +2922,30 @@ button.transit-notice-summary {
   white-space: nowrap;
 }
 
+/* Theme heading inside the switcher — the same groups as the Layers panel, so
+   a long profile catalog stays scannable. */
+.layer-switch-heading {
+  padding: 8px 8px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.layer-switch-group:first-child .layer-switch-heading {
+  padding-top: 4px;
+}
+
+/* Which variant an on layer is set to ("Springs", "Severe"). Never bold — it
+   is context for the row, not a second control. */
+.layer-switch-variant {
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .layer-switch-hint {
   flex: none;
   font-size: 10px;

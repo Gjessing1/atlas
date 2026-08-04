@@ -184,15 +184,17 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   wrecks: { kind: 'tile', lat: 60.39, lng: 5.2, z: 12, minBytes: 700 },
   // Hovedøya and the Oslofjord geosites (7.7 kB).
   geoheritage: { kind: 'tile', lat: 59.91, lng: 10.75, z: 12, minBytes: 2000 },
-  // The Vøring plateau, found by grid-sweeping the Norwegian and Barents Seas —
-  // MAREANO's mud volcanoes are sparse enough that the z9 tile around this very
-  // point is empty while the z7 one inks (0.64 kB). The margin over MapServer's
-  // 334 B floor is the smallest in this table, which is inherent: the features
-  // are a handful of small polygons and there is nothing denser to aim at.
-  'mud-volcanoes': { kind: 'tile', lat: 68, lng: 6, z: 7, minBytes: 450 },
-  // Romerike: farm wells and energy wells, dense enough anywhere inland once
-  // past GRANADA's 1:525 000 point-layer floor (6.5 kB at z13).
-  'groundwater-wells': { kind: 'tile', lat: 60.0, lng: 11.0, z: 13, minBytes: 2000 },
+  // The Vøring plateau. This point used to be probed at z7 for a 0.64 kB tile,
+  // the thinnest margin in the table, because the layer drew mud volcanoes and
+  // nothing else — 23 lit pixels nationally. Drawing the whole shallow-gas
+  // group instead put a real measurement here: 20.1 kB at z8 (0.3 empty).
+  'seabed-gas': { kind: 'tile', lat: 67.6, lng: 6.8, z: 8, minBytes: 4000 },
+  // Nannestad on Romerike, and the point matters more than it looks: the
+  // layer's default chip is *springs*, which are two orders of magnitude
+  // sparser than boreholes, so the old probe point (60.0/11.0, chosen when the
+  // layer drew every energy well) reports 0.3 kB — a healthy layer read as
+  // dead. 4.1 kB here, where GRANADA has mapped springs.
+  'groundwater-wells': { kind: 'tile', lat: 60.2, lng: 10.28, z: 13, minBytes: 1500 },
   // Loen in Stryn — the Lodalen rock avalanches, the most thoroughly recorded
   // slide ground in Norway. z13 is the first zoom where the release/runout
   // outlines draw beside the typed points (2.2 kB / 0.9).
@@ -201,13 +203,21 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // z13, the last zoom of the generalized band: the detailed pair takes over
   // below it, so this point checks the band the panel opens at (2.4 kB / 0.9).
   'rockfall-hazard': { kind: 'tile', lat: 61.86, lng: 6.85, z: 13, minBytes: 1400 },
-  // Oslo, with the layer's *default* risk chip (severe only) — the probe goes
-  // through `optionGetMapParams` like a real request, so it exercises the LAYERS
-  // override the chips are built on (51.8 kB / 0.3).
+  // Oslo, with the layer's *default* chips (severe risk, all organisms) — the
+  // probe goes through `optionGetMapParams` like a real request, so it
+  // exercises the LAYERS override the chips are built on (51.8 kB / 0.3). z12
+  // is also the layer's floor: Artsdatabanken caps the point layers at
+  // 1:150 000 and z11 comes back empty, so a probe one zoom coarser would
+  // report the healthy layer as dead.
   'alien-species': { kind: 'tile', lat: 59.91, lng: 10.75, z: 12, minBytes: 2000 },
   // Vestfjorden off Lofoten — the cod spawning grounds, and the reason the
   // dataset exists at all (5.1 kB / 0.9 inland).
   'spawning-areas': { kind: 'tile', lat: 68.2, lng: 14.0, z: 10, minBytes: 2000 },
+  // Christiania, i.e. Oslo before 1925. The amtskart series is a scanned map,
+  // so *any* covered tile is huge (169 kB) and an uncovered one is the 334 B
+  // floor — the two are never close, and the risk this guards is a sheet index
+  // that stops resolving rather than a thin drawing.
+  'historic-maps': { kind: 'tile', lat: 59.91, lng: 10.75, z: 11, minBytes: 20000 },
 };
 
 /** ArcGIS answers errors with HTTP 200 and an `error` object — unwrap both. */

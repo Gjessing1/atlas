@@ -1,6 +1,6 @@
 import type { MapProfileController, PotentialTargetSwitch } from '@atlas/app-hooks';
-import type { MapProfile } from '@atlas/core';
-import { useState } from 'react';
+import { groupLayerCatalog, type LayerMeta, type MapProfile } from '@atlas/core';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -8,11 +8,26 @@ import { useSideInsets } from './insets';
 import { FishHuntIcon, LayersIcon, MAP_PROFILE_ICON } from './modeIcons';
 import { theme } from './theme';
 
+/** The chosen variant of a layer that has one ("Springs", "Severe") — web's twin. */
+function variantLabel(overlays: OverlaysController, meta: LayerMeta): string | null {
+  if (!meta.options?.length) return null;
+  const chosen = overlays.optionsFor(meta);
+  const labels = meta.options
+    .map((option) => option.choices.find((choice) => choice.value === chosen[option.key])?.label)
+    .filter((label): label is string => Boolean(label));
+  return labels.length > 0 ? labels.join(' · ') : null;
+}
+
 /**
  * Bottom-right, one-tap map setup: activity profiles, the Fish & Hunt
  * sub-profile, and the current profile's overlay catalog. All three operate on
  * the same persisted state as the route planner and full Layers sheet, so
  * switching never creates a second source of truth.
+ *
+ * The overlay menu is grouped and ordered by `groupLayerCatalog`, exactly as
+ * the Layers sheet and the web switcher are: a profile's own registers come
+ * first, and a menu that reaches eleven rows in Curiosities needs headings to
+ * stay scannable on a phone.
  */
 export function MapActivityControls({
   profile,
@@ -55,6 +70,10 @@ export function MapActivityControls({
   // on a 360 dp phone runs straight into the menu/search/route cluster on the
   // other side. A row to itself also puts it where the web app puts it.
   const quarryRow = targets.groups.length > 0;
+  const layerGroups = useMemo(
+    () => groupLayerCatalog(overlays.catalog, overlays.profileId),
+    [overlays.catalog, overlays.profileId],
+  );
   const menuBottom = bottom + (quarryRow ? 104 : 52);
   const closeMenus = () => {
     setLayersOpen(false);
@@ -182,29 +201,41 @@ export function MapActivityControls({
           accessibilityLabel="Map layers"
         >
           <ScrollView bounces={false} contentContainerStyle={styles.layerMenuContent}>
-            {overlays.catalog.map((meta) => {
-              const on = overlays.isOn(meta.id);
-              const tooLowZoom = meta.minzoom !== undefined && mapZoom < meta.minzoom;
-              return (
-                <Pressable
-                  key={meta.id}
-                  style={[styles.layerItem, on && styles.layerItemOn]}
-                  onPress={() => overlays.toggle(meta.id)}
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: on }}
-                  accessibilityLabel={meta.title}
-                  testID={`layer-quick-${meta.id}`}
-                >
-                  <View style={[styles.check, on && styles.checkOn]}>
-                    {on ? <Text style={styles.checkText}>✓</Text> : null}
-                  </View>
-                  <Text style={[styles.layerLabel, on && styles.layerLabelOn]} numberOfLines={1}>
-                    {meta.title}
-                  </Text>
-                  {on && tooLowZoom ? <Text style={styles.zoomHint}>z{meta.minzoom}+</Text> : null}
-                </Pressable>
-              );
-            })}
+            {layerGroups.map((group) => (
+              <View key={group.name}>
+                <Text style={styles.layerGroupHeading}>{group.name}</Text>
+                {group.layers.map((meta) => {
+                  const on = overlays.isOn(meta.id);
+                  const tooLowZoom = meta.minzoom !== undefined && mapZoom < meta.minzoom;
+                  const variant = on ? variantLabel(overlays, meta) : null;
+                  return (
+                    <Pressable
+                      key={meta.id}
+                      style={[styles.layerItem, on && styles.layerItemOn]}
+                      onPress={() => overlays.toggle(meta.id)}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: on }}
+                      accessibilityLabel={variant ? `${meta.title}, ${variant}` : meta.title}
+                      testID={`layer-quick-${meta.id}`}
+                    >
+                      <View style={[styles.check, on && styles.checkOn]}>
+                        {on ? <Text style={styles.checkText}>✓</Text> : null}
+                      </View>
+                      <Text
+                        style={[styles.layerLabel, on && styles.layerLabelOn]}
+                        numberOfLines={1}
+                      >
+                        {meta.title}
+                        {variant ? <Text style={styles.layerVariant}>{`  ${variant}`}</Text> : null}
+                      </Text>
+                      {on && tooLowZoom ? (
+                        <Text style={styles.zoomHint}>z{meta.minzoom}+</Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
           </ScrollView>
         </View>
       ) : null}
@@ -422,6 +453,19 @@ const styles = StyleSheet.create({
   checkText: { color: theme.onAccent, fontWeight: '800', fontSize: 12, lineHeight: 14 },
   layerLabel: { flex: 1, color: theme.text, fontSize: 14 },
   layerLabelOn: { color: theme.accent, fontWeight: '700' },
+  layerGroupHeading: {
+    paddingHorizontal: 9,
+    paddingTop: 8,
+    paddingBottom: 2,
+    color: theme.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  // Which variant an on layer is set to. Never bold: context for the row, not
+  // a second control — the chips that change it live in the Layers sheet.
+  layerVariant: { color: theme.textMuted, fontSize: 11, fontWeight: '400' },
   zoomHint: {
     color: theme.warning,
     backgroundColor: '#f6ecd7',

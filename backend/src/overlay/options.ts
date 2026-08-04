@@ -32,13 +32,43 @@ export function optionGetMapParams(
   layer: OverlayLayer,
   chosen: Record<string, string>,
 ): Record<string, string> {
-  const table = layer.upstream.kind === 'wms' ? layer.upstream.optionParams : undefined;
-  if (!table) return {};
+  const wms = layer.upstream.kind === 'wms' ? layer.upstream : undefined;
+  if (!wms?.optionParams && !wms?.optionParamsFor) return {};
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(chosen)) {
-    Object.assign(out, table[key]?.[value] ?? {});
+    Object.assign(out, wms.optionParams?.[key]?.[value] ?? {});
   }
+  // Last, so a parameter that depends on the whole selection wins over any
+  // per-option guess at it (see `optionParamsFor`).
+  Object.assign(out, wms.optionParamsFor?.(chosen) ?? {});
   return out;
+}
+
+/**
+ * The QUERY_LAYERS a selected option asks about (see `optionIdentifyLayers`),
+ * or `undefined` when the layer's identify does not vary.
+ *
+ * The tap must ask about the dataset the map is drawing. Where the option
+ * *swaps the dataset* rather than filtering one — spawning grounds choosing
+ * between spawning areas, nursery areas and the surveyed cod fields — an
+ * unchanged QUERY_LAYERS would answer from a layer the user is not looking at,
+ * which is worse than not answering at all.
+ *
+ * At most one option may decide the queried set; two would be a race between
+ * whichever the caller listed first, so `api.test.ts` asserts the single key
+ * rather than leaving it to whoever writes the third such row.
+ */
+export function optionQueryLayers(
+  layer: OverlayLayer,
+  chosen: Record<string, string>,
+): string | undefined {
+  const table = layer.upstream.kind === 'wms' ? layer.upstream.optionIdentifyLayers : undefined;
+  if (!table) return undefined;
+  for (const [key, value] of Object.entries(chosen)) {
+    const layers = table[key]?.[value];
+    if (layers) return layers;
+  }
+  return undefined;
 }
 
 /**
