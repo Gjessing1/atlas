@@ -1033,6 +1033,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
     ) => {
       if (startInFlight.current) return;
       startInFlight.current = true;
+      // A route preview supersedes destination-free Explorer (or any previous
+      // live trip) immediately. Leaving its watch alive until Go meant Android
+      // had to hand the same foreground location task from the old activity to
+      // guidance at the most timing-sensitive moment, and old fixes could keep
+      // driving the outgoing session behind the preview meanwhile.
+      stopWatch();
+      sessionRef.current = null;
+      tripSeq.current++;
       const seq = ++previewSeq.current;
       setError(null);
       setActivity('guidance');
@@ -1074,7 +1082,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (seq === previewSeq.current) startInFlight.current = false;
       }
     },
-    [platformRef, fetchChoices, fail],
+    [platformRef, stopWatch, fetchChoices, fail],
   );
 
   /**

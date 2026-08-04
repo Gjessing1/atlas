@@ -302,6 +302,20 @@ describe('useNavigationController — Explorer mode', () => {
     expect(result.current.error).toBe('Location permission is required');
     expect(h.route).not.toHaveBeenCalled();
   });
+
+  it('releases Explorer before previewing and starts a fresh guidance watch', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.explore('car'));
+
+    await act(() => result.current.start(destination));
+    expect(result.current.phase).toBe('preview');
+    expect(h.watchStopped()).toBe(1);
+
+    await act(() => result.current.go());
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+    expect(h.watchActivities).toEqual(['explorer', 'guidance']);
+  });
 });
 
 /** Three consecutive fixes well off the line — the session's off-route grace. */

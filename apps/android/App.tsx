@@ -84,6 +84,10 @@ import { useTraffic } from './src/layers/useTraffic';
 import { useTrafficFlow } from './src/layers/useTrafficFlow';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
+import {
+  useNavigationDiagnostics,
+  useNavigationDiagnosticState,
+} from './src/nav/useNavigationDiagnostics';
 import { SpotsButton, SpotsSheet } from './src/ui/SpotsSheet';
 import { StandBoardButton, StandBoardSheet } from './src/ui/StandBoardSheet';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
@@ -184,7 +188,9 @@ function AppInner() {
     return data.places.filter((p) => placeIsVisible(p, folders));
   }, [data.places, data.collections]);
   const sync = useSync(data.storage, data.refreshAll, data.places);
+  const navDiagnostics = useNavigationDiagnostics(data, sync.email, sync.status);
   const nav = useNavigation();
+  useNavigationDiagnosticState(nav);
   const route = useRoute();
   const transit = useTransitPlan(route);
   const directions = useDirections(route);
@@ -1493,6 +1499,7 @@ function AppInner() {
             appearance={appearance}
             mapStyleEditor={mapStyleEditor}
             navPrefs={navPrefs}
+            navDiagnostics={navDiagnostics}
             pip={pip}
             regionJobs={regionJobs}
             downloads={downloads}

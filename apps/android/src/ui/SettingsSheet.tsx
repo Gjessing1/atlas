@@ -43,6 +43,7 @@ import { packJobAction, packJobLabel } from '../regions/downloads';
 import type { LocalPack } from '../regions/packs';
 import { deletePack, fetchAvailableRegions } from '../regions/packs';
 import type { NavPipController } from '../nav/useNavigationPip';
+import type { NavigationDiagnosticsController } from '../nav/useNavigationDiagnostics';
 import type { OfflinePrefsController } from '../regions/useOfflinePrefs';
 import type { PackDownloadsController } from '../regions/usePackDownloads';
 import { closeEngine } from '../routing/offlineRouting';
@@ -1079,6 +1080,76 @@ function ProfileSection({
   );
 }
 
+function diagnosticSize(bytes: number): string {
+  if (bytes < 1024) return bytes === 0 ? 'No log recorded yet' : `${bytes} B recorded`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB recorded`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB recorded`;
+}
+
+function NavigationDiagnosticsSection({
+  diagnostics,
+}: {
+  diagnostics: NavigationDiagnosticsController;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+
+  return (
+    <View>
+      <View style={styles.switchRow}>
+        <Text style={styles.rowText}>Record navigation diagnostics</Text>
+        <Switch
+          value={diagnostics.enabled}
+          onValueChange={(on) => {
+            setMessage(null);
+            diagnostics.setEnabled(on);
+          }}
+          testID="nav-diagnostics"
+        />
+      </View>
+      <Text style={styles.muted}>
+        Saves raw GPS fixes, accuracy, speed and heading; the calculated route and maneuvers; route
+        matching, dead reckoning, service handoffs and reroutes. The switch syncs with your account.
+        Logs stay on this phone until you share or clear them.
+      </Text>
+      <Text style={styles.muted}>{diagnosticSize(diagnostics.sizeBytes)}.</Text>
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[
+            styles.button,
+            styles.buttonQuiet,
+            diagnostics.sizeBytes === 0 && styles.buttonDisabled,
+          ]}
+          disabled={diagnostics.sizeBytes === 0}
+          onPress={() => {
+            setMessage(null);
+            void diagnostics.share().then((shared) => {
+              if (!shared) setMessage('No diagnostic log is available to share.');
+            });
+          }}
+          testID="nav-diagnostics-share"
+        >
+          <Text style={styles.buttonQuietText}>Share log</Text>
+        </Pressable>
+        <Pressable
+          style={[
+            styles.button,
+            styles.buttonQuiet,
+            diagnostics.sizeBytes === 0 && styles.buttonDisabled,
+          ]}
+          disabled={diagnostics.sizeBytes === 0}
+          onPress={() => {
+            void diagnostics.clear().then(() => setMessage('Diagnostic log cleared.'));
+          }}
+          testID="nav-diagnostics-clear"
+        >
+          <Text style={styles.buttonQuietText}>Clear log</Text>
+        </Pressable>
+      </View>
+      {message ? <Text style={styles.muted}>{message}</Text> : null}
+    </View>
+  );
+}
+
 /**
  * The rows, from the shared section list in `@atlas/core` — the same sections,
  * names and order the web tab strip shows (ROADMAP §7.5). Android keeps two
@@ -1101,6 +1172,7 @@ export function SettingsSheet({
   overlays,
   profilePreferences,
   navPrefs,
+  navDiagnostics,
   pip,
   regionJobs,
   downloads,
@@ -1125,6 +1197,7 @@ export function SettingsSheet({
   overlays: OverlaysController;
   profilePreferences: MapProfilePreferencesController;
   navPrefs: NavPrefsController;
+  navDiagnostics: NavigationDiagnosticsController;
   /** Whether guidance continues in a floating mini window when Atlas is left. */
   pip: NavPipController;
   regionJobs: RegionPackJobsController;
@@ -1256,6 +1329,8 @@ export function SettingsSheet({
                   ? 'This device does not support picture-in-picture.'
                   : 'Pressing Home mid-trip shrinks Atlas into a floating window showing the next turn. Tap it to come back.'}
             </Text>
+            <Text style={styles.heading}>Diagnostics</Text>
+            <NavigationDiagnosticsSection diagnostics={navDiagnostics} />
           </>
         ) : null}
         {section === 'offline' ? (

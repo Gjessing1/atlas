@@ -16,7 +16,9 @@ import { AudioFocus } from '../../modules/audiofocus';
 import { makeNvdbCameraTransport, makeNvdbLimitTransport } from '../routing/offlineNvdb';
 import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
+import { logNavigationDiagnostic } from './diagnostics';
 import { NAV_LOCATION_TASK, setLocationHandler, toPosition } from './locationTask';
+import { LocationWatchCoordinator } from './locationWatch';
 
 /** How stale a last-known position may be when a live fix never arrives. */
 const LAST_KNOWN_MAX_AGE_MS = 120_000;
@@ -26,6 +28,13 @@ const LAST_KNOWN_MAX_AGE_MS = 120_000;
  * one duck spans a whole burst of prompts rather than flapping between them.
  */
 let utterances = 0;
+
+const locationWatch = new LocationWatchCoordinator(
+  NAV_LOCATION_TASK,
+  Location,
+  setLocationHandler,
+  (transition) => void logNavigationDiagnostic({ event: 'gps-service', ...transition }),
+);
 
 function focus(on: boolean): void {
   try {
@@ -74,6 +83,12 @@ async function currentFix(timeoutMs: number): Promise<NavOriginFix> {
   ]);
   const pos = cur ?? (await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }));
   if (!pos) throw new Error('Could not get a GPS fix — is location on?');
+  void logNavigationDiagnostic({
+    event: 'gps-origin-fix',
+    measuredAtMs: pos.timestamp,
+    source: cur ? 'current' : 'last-known',
+    coords: pos.coords,
+  });
   return { fix: toPosition(pos), atMs: pos.timestamp };
 }
 
@@ -86,31 +101,21 @@ async function watchFixes(
   onFix: (fix: Position) => void,
   activity: 'guidance' | 'explorer' = 'guidance',
 ): Promise<() => void> {
-  setLocationHandler(onFix);
-  const already = await Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK);
-  if (!already) {
-    await Location.startLocationUpdatesAsync(NAV_LOCATION_TASK, {
-      accuracy: Location.Accuracy.BestForNavigation,
-      // Time-based, not distance-based: with a distance filter no fixes arrive
-      // at a standstill, freezing the ETA at every red light.
-      timeInterval: 1000,
-      distanceInterval: 0,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: activity === 'explorer' ? 'Atlas Explorer' : 'Atlas navigation',
-        notificationBody:
-          activity === 'explorer'
-            ? 'Following your position without a destination'
-            : 'Guiding you to your destination',
-      },
-    });
-  }
-  return () => {
-    setLocationHandler(null);
-    void Location.hasStartedLocationUpdatesAsync(NAV_LOCATION_TASK).then((started) => {
-      if (started) void Location.stopLocationUpdatesAsync(NAV_LOCATION_TASK);
-    });
-  };
+  return locationWatch.start(onFix, {
+    accuracy: Location.Accuracy.BestForNavigation,
+    // Time-based, not distance-based: with a distance filter no fixes arrive
+    // at a standstill, freezing the ETA at every red light.
+    timeInterval: 1000,
+    distanceInterval: 0,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: activity === 'explorer' ? 'Atlas Explorer' : 'Atlas navigation',
+      notificationBody:
+        activity === 'explorer'
+          ? 'Following your position without a destination'
+          : 'Guiding you to your destination',
+    },
+  });
 }
 
 /**
@@ -197,9 +202,26 @@ function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void
  */
 export function useNavigation(): NavController {
   const serverOrigin = useServerOrigin();
-  const platform = useMemo<NavPlatform>(
-    () => ({
-      provider: makeRouteProvider(serverOrigin),
+  const platform = useMemo<NavPlatform>(() => {
+    const provider = makeRouteProvider(serverOrigin);
+    return {
+      provider: {
+        route: async (query, signal) => {
+          void logNavigationDiagnostic({ event: 'route-request', query });
+          try {
+            const result = await provider.route(query, signal);
+            void logNavigationDiagnostic({ event: 'route-calculated', query, result });
+            return result;
+          } catch (error) {
+            void logNavigationDiagnostic({
+              event: 'route-failed',
+              query,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          }
+        },
+      },
       trafficClosures: httpTrafficClosures(serverOrigin),
       // The same corridor measurements the provider prices a new route with,
       // asked again mid-drive so the trip being followed is re-priced too.
@@ -224,9 +246,8 @@ export function useNavigation(): NavController {
       },
       watchHeadingRate,
       watchFacing,
-    }),
-    [serverOrigin],
-  );
+    };
+  }, [serverOrigin]);
 
   return useNavigationController(platform);
 }

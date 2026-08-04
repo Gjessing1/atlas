@@ -11,6 +11,7 @@ import type { TrackRecord } from '@atlas/storage';
 import type { OverlaysController } from '../layers/useOverlays';
 import type { TileSource } from '../map/useTileSource';
 import type { NavPipController } from '../nav/useNavigationPip';
+import type { NavigationDiagnosticsController } from '../nav/useNavigationDiagnostics';
 import type { LocalPack } from '../regions/packs';
 import type { OfflinePrefsController } from '../regions/useOfflinePrefs';
 import type { PackDownloadsController } from '../regions/usePackDownloads';
@@ -49,6 +50,7 @@ interface AppSheetsProps {
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   navPrefs: NavPrefsController;
+  navDiagnostics: NavigationDiagnosticsController;
   pip: NavPipController;
   regionJobs: RegionPackJobsController;
   /** Background pack downloads (progress, resume, cancel) and their preferences. */
@@ -95,6 +97,7 @@ export function AppSheets({
   appearance,
   mapStyleEditor,
   navPrefs,
+  navDiagnostics,
   pip,
   regionJobs,
   downloads,
@@ -201,6 +204,7 @@ export function AppSheets({
         overlays={overlays}
         profilePreferences={profilePreferences}
         navPrefs={navPrefs}
+        navDiagnostics={navDiagnostics}
         pip={pip}
         regionJobs={regionJobs}
         downloads={downloads}

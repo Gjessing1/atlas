@@ -2,6 +2,8 @@ import type { Position } from '@atlas/navigation';
 import type * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
+import { logNavigationDiagnostic } from './diagnostics';
+
 /**
  * Background location plumbing. `startLocationUpdatesAsync` runs this task in a
  * (possibly headless) JS context tied to an Android foreground service, so
@@ -37,9 +39,33 @@ export function setLocationHandler(h: ((fix: Position) => void) | null): void {
 }
 
 TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
-  if (error || !handler) return;
+  if (error) {
+    void logNavigationDiagnostic({ event: 'gps-task-error', error: String(error) });
+    return;
+  }
   const locations = (data as { locations?: Location.LocationObject[] } | null)?.locations ?? [];
   const last = locations[locations.length - 1];
   if (!last) return;
-  handler(toPosition(last));
+  if (handler) handler(toPosition(last));
+  await logNavigationDiagnostic({
+    event: 'gps-fix-batch',
+    measuredAtMs: last.timestamp,
+    batchSize: locations.length,
+    // Background delivery may batch samples. Navigation intentionally consumes
+    // the newest one, but diagnostics retains every measured sample so a gap
+    // in JS delivery cannot be mistaken for a gap in Android's provider.
+    samples: locations.map((sample) => ({
+      measuredAtMs: sample.timestamp,
+      mocked: sample.mocked,
+      coords: {
+        lat: sample.coords.latitude,
+        lng: sample.coords.longitude,
+        accuracyM: sample.coords.accuracy,
+        speedMps: sample.coords.speed,
+        headingDeg: sample.coords.heading,
+        altitudeM: sample.coords.altitude,
+      },
+    })),
+    deliveredToNavigation: handler !== null,
+  });
 });
