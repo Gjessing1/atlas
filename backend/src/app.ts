@@ -16,6 +16,7 @@ import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerAppLinks } from './applinks.js';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
+import { registerDiagnosticsApi } from './diagnostics-api.js';
 import { registerExploreApi } from './explore-api.js';
 import {
   registerOverlayApi,
@@ -219,6 +220,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // at all) instead of offering a button the server will always refuse.
     registration: stores === null ? 'closed' : resolveRegistrationMode(syncApiOptions),
   }));
+  registerDiagnosticsApi(app, opts.dataDir);
 
   // Basemap freshness is read from the PMTiles archives on disk, not probed.
   status.register('basemap', 'Basemap tiles', 'Map data');

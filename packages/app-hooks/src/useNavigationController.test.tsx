@@ -42,7 +42,7 @@ interface Harness {
   platform: NavPlatform;
   spoken: string[];
   /** Feed a fix to whatever the controller is currently watching. */
-  emit: (fix: Position) => void;
+  emit: (fix: Position, measuredAtMs?: number) => void;
   route: ReturnType<typeof vi.fn>;
   currentFix: ReturnType<typeof vi.fn>;
   watchStopped: () => number;
@@ -54,7 +54,7 @@ function harness(
   overrides: Partial<NavPlatform> = {},
 ): Harness {
   const spoken: string[] = [];
-  let sink: ((fix: Position) => void) | null = null;
+  let sink: ((fix: Position, measuredAtMs?: number) => void) | null = null;
   let stopped = 0;
   const watchActivities: Array<'guidance' | 'explorer' | undefined> = [];
   const route = vi.fn(
@@ -81,7 +81,7 @@ function harness(
   return {
     platform,
     spoken,
-    emit: (fix) => sink?.(fix),
+    emit: (fix, measuredAtMs) => sink?.(fix, measuredAtMs),
     route,
     currentFix,
     watchStopped: () => stopped,
@@ -179,6 +179,48 @@ describe('useNavigationController — guidance', () => {
     expect(h.spoken.length).toBeGreaterThan(0);
     // Seeded from the origin fix rather than waiting for the watch's first one.
     expect(result.current.state).not.toBeNull();
+  });
+
+  it('shows signal loss at the measured origin when a started watch emits no fixes', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const origin = onLine(0, { speedMps: 9.51 });
+    h.currentFix.mockImplementation(() => Promise.resolve({ fix: origin, atMs: Date.now() }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+    try {
+      await act(() => hook.result.current.start(destination));
+      await act(() => hook.result.current.go());
+      expect(hook.result.current.phase).toBe('navigating');
+      expect(hook.result.current.state?.fix).toBe('live');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(11_000);
+      });
+
+      expect(hook.result.current.state?.fix).toBe('lost');
+      expect(hook.result.current.state?.raw).toEqual({ lat: origin.lat, lng: origin.lng });
+      expect(hook.result.current.state?.snapped).toEqual({ lat: origin.lat, lng: origin.lng });
+      expect(hook.result.current.state?.traveledM).toBeCloseTo(0, 0);
+      expect(hook.result.current.position).toEqual(origin);
+    } finally {
+      hook.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a delayed background batch rewind a newer measured fix', async () => {
+    const h = harness();
+    const hook = await drive(h);
+    const newer = onLine(5, { speedMps: 10 });
+    const delayed = onLine(2, { speedMps: 10 });
+    const base = Date.now() + 1_000;
+
+    act(() => h.emit(newer, base + 1_000));
+    act(() => h.emit(delayed, base));
+
+    expect(hook.result.current.position).toEqual(newer);
+    expect(hook.result.current.state?.raw).toEqual({ lat: newer.lat, lng: newer.lng });
   });
 
   it('re-reads the position at Start, so a wait in the preview does not misplace the trip', async () => {

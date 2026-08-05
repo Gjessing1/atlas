@@ -110,7 +110,7 @@ export interface NavPlatform {
    * real error rather than a silent no-fix trip.
    */
   watchFixes(
-    onFix: (fix: Position) => void,
+    onFix: (fix: Position, measuredAtMs?: number) => void,
     activity?: Exclude<NavActivity, null>,
   ): Promise<() => void>;
   /** Speak a prompt. Muting is handled here, so this is called only when audible. */
@@ -359,6 +359,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const lastStateRef = useRef<NavState | null>(null);
   /** Latest raw fix — the origin an accepted reroute offer recalculates from. */
   const lastFixRef = useRef<Position | null>(null);
+  /** Measurement time of that fix; rejects delayed batches and Start-time races. */
+  const lastFixMeasuredAtRef = useRef<number | null>(null);
   /** One spoken "off route" per episode in offer mode, not one per fix. */
   const offRouteSpokenRef = useRef(false);
   /** The faster-route offer's payload; the state above only carries the saving. */
@@ -973,7 +975,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
   }, [clearFasterOffer]);
 
   const onFix = useCallback(
-    (fix: Position) => {
+    (fix: Position, measuredAtMs?: number) => {
+      const explicitlyMeasured = typeof measuredAtMs === 'number' && Number.isFinite(measuredAtMs);
+      let fixAtMs = explicitlyMeasured ? measuredAtMs : Date.now();
+      const previousAtMs = lastFixMeasuredAtRef.current;
+      if (previousAtMs !== null && fixAtMs <= previousAtMs) {
+        // Real platform timestamps are authoritative: a delayed TaskManager
+        // batch or the older Start origin must not rewind a newer direct fix.
+        if (explicitlyMeasured) return;
+        // Test/custom seams without timestamps still represent ordered callback
+        // delivery, even when several arrive inside one wall-clock millisecond.
+        fixAtMs = previousAtMs + 1;
+      }
+      lastFixMeasuredAtRef.current = fixAtMs;
       const session = sessionRef.current;
       lastFixRef.current = fix;
       // A faster-route offer describes a branch from where the car *was*; once
@@ -992,7 +1006,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // Runs on every GPS fix (incl. Android's headless background task); an
       // uncaught throw here would take the whole app down in a release build.
       try {
-        const { state: next, prompts } = session.update(fix, Date.now());
+        const { state: next, prompts } = session.update(fix, fixAtMs);
         setState(next);
         lastStateRef.current = next;
         for (const prompt of prompts) speak(prompt.text);
@@ -1118,10 +1132,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setSpeedMps(null);
       setAltitudeM(null);
       setPosition(null);
+      lastFixMeasuredAtRef.current = null;
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
         if (seq !== previewSeq.current) return;
-        onFix(origin.fix);
+        onFix(origin.fix, origin.atMs);
         const stopFixes = await platformRef.current.watchFixes(onFix, 'explorer');
         if (seq !== previewSeq.current) {
           stopFixes();
@@ -1196,6 +1211,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setActivePath(path);
       clearPreview();
 
+      // A fresh trip owns a fresh ordering window. Set this before starting
+      // the streams: if watchPositionAsync immediately emits a newer sample,
+      // the origin applied below is correctly rejected rather than rewinding
+      // the session.
+      lastFixMeasuredAtRef.current = null;
+
       stopWatch();
       const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
       // End (or another trip) while the watch was starting: don't leave one live.
@@ -1212,7 +1233,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // Show a state at once rather than waiting for the watch's first fix,
       // but only if the origin fix is still recent — someone who studied the
       // choices for a minute has moved, and a stale fix misplaces the puck.
-      if (origin && Date.now() - origin.atMs < ORIGIN_FRESH_MS) onFix(origin.fix);
+      if (origin && Date.now() - origin.atMs < ORIGIN_FRESH_MS) onFix(origin.fix, origin.atMs);
     },
     [platformRef, enrich, clearPreview, stopWatch, onFix, speak],
   );

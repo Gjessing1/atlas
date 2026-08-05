@@ -1,4 +1,5 @@
 import type { Position } from '@atlas/navigation';
+import * as FileSystem from 'expo-file-system/legacy';
 import type * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
@@ -15,6 +16,12 @@ import { logNavigationDiagnostic } from './diagnostics';
  * imported for its side effect from the app entry.
  */
 export const NAV_LOCATION_TASK = 'atlas-nav-location';
+const NAV_LOCATION_INBOX = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}navigation-location-inbox.json`;
+
+export interface MeasuredLocationFix {
+  fix: Position;
+  measuredAtMs: number;
+}
 
 /**
  * An expo-location fix as the navigation session reads it. Android reports -1
@@ -31,11 +38,38 @@ export function toPosition(pos: Location.LocationObject): Position {
   return fix;
 }
 
-let handler: ((fix: Position) => void) | null = null;
+let handler: ((sample: MeasuredLocationFix) => void) | null = null;
 
 /** Install (or clear, with null) the sink the background task forwards fixes to. */
-export function setLocationHandler(h: ((fix: Position) => void) | null): void {
+export function setLocationHandler(h: ((sample: MeasuredLocationFix) => void) | null): void {
   handler = h;
+}
+
+/**
+ * Recover the newest TaskManager sample across JS runtimes. Android may launch
+ * the task in a headless runtime, where the module-global handler above is a
+ * different variable from the foreground application's. Keeping one latest
+ * sample on disk makes that delivery observable without growing an unbounded
+ * location journal; the coordinator's timestamp gate makes repeated reads
+ * harmless.
+ */
+export async function readPersistedLocationFix(): Promise<MeasuredLocationFix | null> {
+  try {
+    const raw = await FileSystem.readAsStringAsync(NAV_LOCATION_INBOX);
+    const value = JSON.parse(raw) as Partial<MeasuredLocationFix>;
+    if (
+      typeof value.measuredAtMs !== 'number' ||
+      !Number.isFinite(value.measuredAtMs) ||
+      !value.fix ||
+      typeof value.fix.lat !== 'number' ||
+      typeof value.fix.lng !== 'number'
+    ) {
+      return null;
+    }
+    return value as MeasuredLocationFix;
+  } catch {
+    return null;
+  }
 }
 
 TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
@@ -46,7 +80,15 @@ TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
   const locations = (data as { locations?: Location.LocationObject[] } | null)?.locations ?? [];
   const last = locations[locations.length - 1];
   if (!last) return;
-  if (handler) handler(toPosition(last));
+  const sample = { fix: toPosition(last), measuredAtMs: last.timestamp };
+  if (handler) handler(sample);
+  // This write is the cross-runtime bridge. A headless task cannot assume the
+  // React runtime's module-global callback exists; the live coordinator polls
+  // this latest-value inbox and deduplicates it against direct foreground and
+  // same-runtime task delivery.
+  await FileSystem.writeAsStringAsync(NAV_LOCATION_INBOX, JSON.stringify(sample)).catch(
+    () => undefined,
+  );
   await logNavigationDiagnostic({
     event: 'gps-fix-batch',
     measuredAtMs: last.timestamp,
@@ -67,5 +109,6 @@ TaskManager.defineTask(NAV_LOCATION_TASK, async ({ data, error }) => {
       },
     })),
     deliveredToNavigation: handler !== null,
+    persistedForNavigation: true,
   });
 });

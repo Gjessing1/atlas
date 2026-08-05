@@ -1092,6 +1092,7 @@ function NavigationDiagnosticsSection({
   diagnostics: NavigationDiagnosticsController;
 }) {
   const [message, setMessage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   return (
     <View>
@@ -1109,9 +1110,34 @@ function NavigationDiagnosticsSection({
       <Text style={styles.muted}>
         Saves raw GPS fixes, accuracy, speed and heading; the calculated route and maneuvers; route
         matching, dead reckoning, service handoffs and reroutes. The switch syncs with your account.
-        Logs stay on this phone until you share or clear them.
+        Logs stay on this phone until you explicitly upload, share or clear them.
       </Text>
       <Text style={styles.muted}>{diagnosticSize(diagnostics.sizeBytes)}.</Text>
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[
+            styles.button,
+            (diagnostics.sizeBytes === 0 || uploading) && styles.buttonDisabled,
+          ]}
+          disabled={diagnostics.sizeBytes === 0 || uploading}
+          onPress={() => {
+            setMessage(null);
+            setUploading(true);
+            void diagnostics
+              .upload()
+              .then((reference) =>
+                setMessage(`Uploaded. Send this reference to support: ${reference}`),
+              )
+              .catch((error) =>
+                setMessage(error instanceof Error ? error.message : 'Diagnostic upload failed.'),
+              )
+              .finally(() => setUploading(false));
+          }}
+          testID="nav-diagnostics-upload"
+        >
+          <Text style={styles.buttonText}>{uploading ? 'Uploading…' : 'Upload to Atlas'}</Text>
+        </Pressable>
+      </View>
       <View style={styles.buttonRow}>
         <Pressable
           style={[

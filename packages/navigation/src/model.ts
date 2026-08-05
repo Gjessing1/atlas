@@ -331,7 +331,7 @@ export interface NavigationOptions {
   signalLostMs?: number;
   /** Minimum last-known speed (m/s) required to dead-reckon through a gap. */
   deadReckonMinSpeedMps?: number;
-  /** Longest gap (ms) dead reckoning may bridge before reporting `lost`. */
+  /** Longest unmapped gap (ms) dead reckoning may bridge before reporting `lost`. */
   deadReckonMaxMs?: number;
   /**
    * Farthest distance (m) dead reckoning may extrapolate before `lost` — the
@@ -339,6 +339,11 @@ export interface NavigationOptions {
    * away. Inside a known tunnel the far portal bounds it instead.
    */
   deadReckonMaxM?: number;
+  /**
+   * Time backstop for a mapped tunnel. Its portal is the primary bound, but a
+   * malformed or implausibly long segment must not enable endless projection.
+   */
+  tunnelDeadReckonMaxMs?: number;
   /**
    * How far past a known tunnel's exit portal (m) dead reckoning may still
    * run. GPS does not re-lock the instant daylight returns, so a little slack
@@ -417,11 +422,15 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   fixGapMs: 3000,
   signalLostMs: 5000,
   deadReckonMinSpeedMps: 3, // below ~11 km/h a stop is likelier than a tunnel
-  // The distance cap does the real bounding: 25 km covers Lærdal (24.5 km,
-  // the world's longest road tunnel). The time cap is a backstop so a dead
-  // GPS at crawling speed can't fake progress for hours.
-  deadReckonMaxMs: 1_200_000,
-  deadReckonMaxM: 25_000,
+  // Without tunnel evidence, projection is only a brief bridge over an
+  // underpass/provider handoff. It must never turn a dead receiver into many
+  // minutes of invented travel.
+  deadReckonMaxMs: 10_000,
+  deadReckonMaxM: 150,
+  // Mapped tunnels earn a much longer time allowance, while their mapped far
+  // portal remains the tighter and route-specific distance bound. Twenty
+  // minutes covers Lærdal at ordinary traffic speeds.
+  tunnelDeadReckonMaxMs: 1_200_000,
   tunnelExitMarginM: 200,
   tunnelArmM: 150,
   deadReckonBlendTauMs: 45_000,

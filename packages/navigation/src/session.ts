@@ -147,6 +147,10 @@ export class NavigationSession {
   private alongAtFixM: number | null = null;
   private lastSpeedMps: number | null = null;
   private lastState: NavState | null = null;
+  /** Last state backed by an accepted measured fix, never by projection. */
+  private lastMeasuredState: NavState | null = null;
+  /** Whether the last measured fix was honestly inside the display corridor. */
+  private deadReckonArmed = false;
   /** Sensor-measured heading change (deg) accumulated over the current GPS gap. */
   private yawActualDeg = 0;
   /** Route-tangent heading change (deg) over the same reckoned stretch. */
@@ -223,13 +227,13 @@ export class NavigationSession {
     // in place and hand it back, so the limit appears when it is known rather
     // than at the next fix — which, stopped at a light or in a tunnel, may be
     // a long way off.
-    if (this.lastState) {
-      this.lastState = {
-        ...this.lastState,
-        speedLimitKph: speedLimitKphAt(enrichment, this.lastState.traveledM),
-        tunnel: this.tunnelState(this.lastState.traveledM),
-      };
-    }
+    const enrichState = (state: NavState): NavState => ({
+      ...state,
+      speedLimitKph: speedLimitKphAt(enrichment, state.traveledM),
+      tunnel: this.tunnelState(state.traveledM),
+    });
+    if (this.lastMeasuredState) this.lastMeasuredState = enrichState(this.lastMeasuredState);
+    if (this.lastState) this.lastState = enrichState(this.lastState);
     return this.lastState;
   }
 
@@ -755,6 +759,8 @@ export class NavigationSession {
       fix: 'live',
       wrongBranch: false,
     };
+    this.deadReckonArmed = !this.arrived && !offRoute && displayOnRoute;
+    this.lastMeasuredState = state;
     this.lastState = state;
     return { state, prompts };
   }
@@ -782,10 +788,9 @@ export class NavigationSession {
     // Where the signal died inside (or right before) a mapped tunnel, the far
     // portal is the honest bound on extrapolation: past it the car is back in
     // daylight and a still-absent fix means something other than a tunnel, so
-    // reckoning should stop rather than run on to the generic 25 km cap. Where
-    // the data says nothing — an unmapped tunnel, a dead receiver, a parking
-    // garage — the generic cap remains the bound, which is why the v0.24.3
-    // coarse-fix heuristic stays in place as the fallback it now is.
+    // reckoning should stop. Where the data says nothing — an underpass,
+    // provider handoff, or dead receiver — only a short generic bridge is
+    // allowed. Crucially, an off-line fix never arms projection at all.
     const tunnel =
       this.alongAtFixM === null
         ? null
@@ -794,13 +799,15 @@ export class NavigationSession {
       tunnel === null
         ? this.opts.deadReckonMaxM
         : Math.max(0, tunnel.endM + this.opts.tunnelExitMarginM - this.alongAtFixM!);
+    const maxGapMs = tunnel === null ? this.opts.deadReckonMaxMs : this.opts.tunnelDeadReckonMaxMs;
 
     let reckonedM: number | null = null;
     if (
       this.alongAtFixM !== null &&
+      this.deadReckonArmed &&
       speed !== null &&
       speed >= this.opts.deadReckonMinSpeedMps &&
-      gapMs <= this.opts.deadReckonMaxMs
+      gapMs <= maxGapMs
     ) {
       const tSec = gapMs / 1000;
       const tauSec = this.opts.deadReckonBlendTauMs / 1000;
@@ -814,7 +821,24 @@ export class NavigationSession {
     }
     if (reckonedM === null) {
       if (gapMs < this.opts.signalLostMs) return null;
-      const state: NavState = { ...last, fix: 'lost', etaEpochMs: nowMs + last.timeRemainingMs };
+      // Signal loss returns to the last *measured* position. Leaving the puck
+      // at the final extrapolated point would preserve the very fiction the
+      // lost state is meant to disclose, and copying an estimated state would
+      // also erase a real off-route distance/status.
+      const measured = this.lastMeasuredState ?? last;
+      this.lastAlongM = this.alongAtFixM;
+      const state: NavState = {
+        ...measured,
+        // Even a live state's displayed point may carry the normal one-second
+        // render-latency projection. Once signal is lost, show the measured
+        // coordinate itself rather than preserving any point manufactured on
+        // the route.
+        snapped: measured.raw,
+        displayRouteProgress: measured.routeProgress,
+        fix: 'lost',
+        etaEpochMs: nowMs + measured.timeRemainingMs,
+        wrongBranch: false,
+      };
       this.lastState = state;
       return { state, prompts: [] };
     }
@@ -867,8 +891,11 @@ export class NavigationSession {
     const state: NavState = {
       status: 'navigating',
       snapped: point,
-      raw: point,
-      offRouteM: 0,
+      // Projection may move the displayed puck through a known tunnel, but it
+      // cannot manufacture a raw GPS position or erase measured cross-track
+      // evidence. Diagnostics and recovery retain the last honest sample.
+      raw: this.lastMeasuredState?.raw ?? last.raw,
+      offRouteM: this.lastMeasuredState?.offRouteM ?? last.offRouteM,
       traveledM: alongM,
       routeProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
       displayRouteProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,

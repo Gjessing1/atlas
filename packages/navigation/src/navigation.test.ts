@@ -922,6 +922,7 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
 
   it('eases the extrapolation speed toward the leg expected pace', () => {
     const s = new NavigationSession(route());
+    s.setEnrichment({ segments: [{ startM: 0, endM: routeTotal, tunnel: true }] });
     const legMps = routeCum[10]! / 60; // ≈9.3 m/s expected on leg 1
     s.update({ ...pointAtAlong(200), speedMps: 20 }, 0);
     // 20 s in, the reckoned distance sits between pure last-speed (which would
@@ -933,6 +934,7 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
 
   it('keeps firing voice prompts from extrapolated positions', () => {
     const s = new NavigationSession(route());
+    s.setEnrichment({ segments: [{ startM: 0, endM: routeTotal, tunnel: true }] });
     const maneuverAlong = routeCum[10]!;
     expect(s.update({ ...pointAtAlong(maneuverAlong - 513), speedMps: 8 }, 0).prompts).toEqual([]);
     // 15 s later the estimated position is inside the 400 m alert band.
@@ -959,8 +961,9 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     expect(lost!.state.traveledM).toBeCloseTo(100, 0);
   });
 
-  it('keeps reckoning through coarse stationary fixes from a tunnel fallback', () => {
+  it('keeps reckoning through coarse stationary fixes inside a mapped tunnel', () => {
     const s = new NavigationSession(route());
+    s.setEnrichment({ segments: [{ startM: 0, endM: routeTotal, tunnel: true }] });
     const legMps = routeCum[10]! / 60;
     s.update({ ...pointAtAlong(200), speedMps: legMps, accuracyM: 5 }, 0);
     // Into the tunnel: the fused provider keeps emitting "parked here, ±60 m"
@@ -1001,8 +1004,9 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
     expect(s.tick(1_250_000)!.state.fix).toBe('lost');
   });
 
-  it('bridges a long tunnel but gives up past the distance cap', () => {
-    // A ~33 km straight route (Lærdal-scale) driven at its expected speed.
+  it('does not treat an unmapped receiver failure as a Lærdal-length tunnel', () => {
+    // A ~33 km straight route (Lærdal-scale) driven at its expected speed, but
+    // with no tunnel evidence attached to it.
     const points: LatLng[] = Array.from({ length: 21 }, (_, i) => ({
       lat: 60,
       lng: 10 + i * 0.03,
@@ -1016,22 +1020,41 @@ describe('NavigationSession tick: dead reckoning and signal loss', () => {
       descentM: 0,
     });
     s.update({ ...points[0]!, speedMps: 30 }, 0);
-    // 10 min without GPS: 18 km in and still guiding (the old 3 min cap
-    // froze the puck a fraction into tunnels like this).
-    const inTunnel = s.tick(600_000)!;
-    expect(inTunnel.state.fix).toBe('estimated');
-    expect(inTunnel.state.traveledM).toBeCloseTo(18_000, -2);
-    // 15 min would put it 27 km in — past the 25 km cap the extrapolation
-    // is fiction, not a tunnel.
-    expect(s.tick(900_000)!.state.fix).toBe('lost');
+    expect(s.tick(5_000)!.state.fix).toBe('estimated');
+    const lost = s.tick(11_000)!;
+    expect(lost.state.fix).toBe('lost');
+    expect(lost.state.traveledM).toBeCloseTo(0, 0);
+    expect(lost.state.raw).toEqual(points[0]);
+  });
+
+  it('never projects from an off-route fix and preserves its evidence when signal is lost', () => {
+    const s = new NavigationSession(route(), { offRouteGraceUpdates: 1 });
+    const raw = { ...pointAtAlong(200), lat: pointAtAlong(200).lat + 0.002, speedMps: 20 };
+    const off = s.update(raw, 0).state;
+    expect(off.status).toBe('off-route');
+    expect(off.offRouteM).toBeGreaterThan(100);
+
+    const lost = s.tick(6_000)!.state;
+    expect(lost.fix).toBe('lost');
+    expect(lost.status).toBe('off-route');
+    expect(lost.raw).toEqual({ lat: raw.lat, lng: raw.lng });
+    expect(lost.snapped).toEqual({ lat: raw.lat, lng: raw.lng });
+    expect(lost.offRouteM).toBe(off.offRouteM);
+    expect(lost.traveledM).toBe(off.traveledM);
   });
 });
 
 describe('NavigationSession wrong-branch detection (gyro)', () => {
   const legMps = routeCum[10]! / 60;
 
+  function tunnelSession(): NavigationSession {
+    const session = new NavigationSession(route());
+    session.setEnrichment({ segments: [{ startM: 0, endM: routeTotal, tunnel: true }] });
+    return session;
+  }
+
   it('raises wrongBranch with one alert when the vehicle turns off a straight reckoned route', () => {
-    const s = new NavigationSession(route());
+    const s = tunnelSession();
     s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
     expect(s.tick(5000)!.state.wrongBranch).toBe(false);
     // The gyro reports a 90° turn while the assumed route runs dead straight.
@@ -1049,14 +1072,14 @@ describe('NavigationSession wrong-branch detection (gyro)', () => {
   });
 
   it('ignores heading reports while live fixes are flowing', () => {
-    const s = new NavigationSession(route());
+    const s = tunnelSession();
     s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
     for (let i = 0; i < 10; i++) s.reportHeadingDelta(9); // dropped: fix is live
     expect(s.tick(5000)!.state.wrongBranch).toBe(false);
   });
 
   it('clears the flag and starts over on the next live fix', () => {
-    const s = new NavigationSession(route());
+    const s = tunnelSession();
     s.update({ ...pointAtAlong(200), speedMps: legMps }, 0);
     s.tick(5000);
     for (let i = 0; i < 10; i++) s.reportHeadingDelta(9);
@@ -1679,13 +1702,15 @@ describe('NavigationSession tunnel awareness from route data', () => {
     expect(session.tick(250_000)!.state.fix).toBe('lost');
   });
 
-  it('falls back to the generic cap where the tiles map no tunnel', () => {
-    // The v0.24.3 heuristic is still the mechanism for unmapped gaps: without
-    // enrichment the same drive reckons on to the 25 km cap as before.
+  it('uses only the short generic bridge where the tiles map no tunnel', () => {
     const { path } = longRoute();
     const session = new NavigationSession(path);
     session.update({ ...path.points[0]!, speedMps: 30 }, 0);
-    expect(session.tick(250_000)!.state.fix).toBe('estimated');
+    expect(session.tick(5_000)!.state.fix).toBe('estimated');
+    const lost = session.tick(11_000)!.state;
+    expect(lost.fix).toBe('lost');
+    expect(lost.raw).toEqual(path.points[0]);
+    expect(lost.traveledM).toBeCloseTo(0, 0);
   });
 
   it('arms at a portal the last fix stopped just short of', () => {

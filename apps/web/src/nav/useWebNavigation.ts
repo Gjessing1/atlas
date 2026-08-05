@@ -118,7 +118,7 @@ export function useWebNavigation(): NavController {
       },
       watchFixes: (onFix) => {
         const id = navigator.geolocation.watchPosition(
-          (geo) => onFix(toPosition(geo)),
+          (geo) => onFix(toPosition(geo), geo.timestamp),
           () => {
             // A transient watch error is not fatal; the next fix resumes.
           },

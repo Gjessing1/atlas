@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 import appJson from '../../app.json';
+import { getServerOrigin } from '../serverOrigin';
 
 /** Synced preference; the location-bearing log itself never leaves this phone automatically. */
 export const NAV_DIAGNOSTICS_SETTING = 'navigation.diagnostics.enabled';
@@ -91,6 +92,32 @@ export async function shareNavigationDiagnostics(): Promise<boolean> {
     dialogTitle: 'Share Atlas navigation diagnostics',
   });
   return true;
+}
+
+/** Upload only after an explicit button press; this file contains exact locations. */
+export async function uploadNavigationDiagnostics(): Promise<string> {
+  await writeQueue.catch(() => undefined);
+  const info = await FileSystem.getInfoAsync(LOG_URI).catch(() => null);
+  if (!info?.exists) throw new Error('No diagnostic log is available to upload.');
+  const body = await FileSystem.readAsStringAsync(LOG_URI);
+  if (!body.trim()) throw new Error('No diagnostic log is available to upload.');
+  const response = await fetch(`${getServerOrigin()}/api/diagnostics/navigation`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'x-atlas-version': APP_VERSION,
+      'x-atlas-runtime': RUNTIME_VERSION,
+    },
+    body,
+  });
+  const result = (await response.json().catch(() => null)) as {
+    reference?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !result?.reference) {
+    throw new Error(result?.error ?? `Upload failed (${response.status}).`);
+  }
+  return result.reference;
 }
 
 export async function clearNavigationDiagnostics(): Promise<void> {

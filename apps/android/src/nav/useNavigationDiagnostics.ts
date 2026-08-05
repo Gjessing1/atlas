@@ -9,6 +9,7 @@ import {
   NAV_DIAGNOSTICS_SETTING,
   navigationDiagnosticSize,
   shareNavigationDiagnostics,
+  uploadNavigationDiagnostics,
 } from './diagnostics';
 
 export interface NavigationDiagnosticsSettings {
@@ -22,6 +23,7 @@ export interface NavigationDiagnosticsController {
   setEnabled(enabled: boolean): void;
   sizeBytes: number;
   share(): Promise<boolean>;
+  upload(): Promise<string>;
   clear(): Promise<void>;
 }
 
@@ -83,12 +85,18 @@ export function useNavigationDiagnostics(
     return shared;
   }, []);
 
+  const upload = useCallback(async () => {
+    const reference = await uploadNavigationDiagnostics();
+    setSizeBytes(await navigationDiagnosticSize());
+    return reference;
+  }, []);
+
   const clear = useCallback(async () => {
     await clearNavigationDiagnostics();
     setSizeBytes(0);
   }, []);
 
-  return { enabled, setEnabled, sizeBytes, share, clear };
+  return { enabled, setEnabled, sizeBytes, share, upload, clear };
 }
 
 /** Capture the controller's interpretation of raw fixes and its chosen route. */

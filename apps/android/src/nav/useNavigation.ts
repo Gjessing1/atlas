@@ -17,7 +17,12 @@ import { makeNvdbCameraTransport, makeNvdbLimitTransport } from '../routing/offl
 import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { logNavigationDiagnostic } from './diagnostics';
-import { NAV_LOCATION_TASK, setLocationHandler, toPosition } from './locationTask';
+import {
+  NAV_LOCATION_TASK,
+  readPersistedLocationFix,
+  setLocationHandler,
+  toPosition,
+} from './locationTask';
 import { LocationWatchCoordinator } from './locationWatch';
 
 /** How stale a last-known position may be when a live fix never arrives. */
@@ -33,7 +38,8 @@ const locationWatch = new LocationWatchCoordinator(
   NAV_LOCATION_TASK,
   Location,
   setLocationHandler,
-  (transition) => void logNavigationDiagnostic({ event: 'gps-service', ...transition }),
+  readPersistedLocationFix,
+  (transition) => void logNavigationDiagnostic({ event: 'gps-stream', ...transition }),
 );
 
 function focus(on: boolean): void {
@@ -98,10 +104,10 @@ async function currentFix(timeoutMs: number): Promise<NavOriginFix> {
  * module-level handler in `locationTask`.
  */
 async function watchFixes(
-  onFix: (fix: Position) => void,
+  onFix: (fix: Position, measuredAtMs?: number) => void,
   activity: 'guidance' | 'explorer' = 'guidance',
 ): Promise<() => void> {
-  return locationWatch.start(onFix, {
+  return locationWatch.start((fix, measuredAtMs) => onFix(fix, measuredAtMs), {
     accuracy: Location.Accuracy.BestForNavigation,
     // Time-based, not distance-based: with a distance filter no fixes arrive
     // at a standstill, freezing the ETA at every red light.
@@ -189,7 +195,7 @@ function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void
 
 /**
  * Turn-by-turn navigation on Android: the device half of the shared navigation
- * controller. Fixes come from a foreground-service location task, prompts from
+ * controller. Fixes come from redundant foreground and background streams, prompts from
  * expo-speech (with audio ducking), and routes from the offline-first provider
  * — the embedded Valhalla engine when a downloaded pack covers the trip,
  * otherwise the server. The trip logic itself is `useNavigationController`,
