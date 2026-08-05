@@ -681,7 +681,8 @@ export class NavigationSession {
       : this.totalM > 0
         ? Math.min(1, alongM / this.totalM)
         : 0;
-    if (snap.crossTrackM <= snapDisplayM && accurate) {
+    const displayOnRoute = snap.crossTrackM <= snapDisplayM && accurate;
+    if (this.opts.snapDisplayPosition && displayOnRoute) {
       let displayAlongM = alongM;
       if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
         const aheadM = Math.min(60, speedMps * (this.opts.predictAheadMs / 1000));
@@ -707,9 +708,23 @@ export class NavigationSession {
       shownCourse = this.courseAt(alongM, speedMps);
     } else {
       shown = { lat: position.lat, lng: position.lng };
-      // Off the line the route tangent is a lie; the GPS course (when moving)
-      // is the only honest bearing, else leave the camera/chevron alone.
-      shownCourse = headingDeg;
+      // The guidance matcher is continuity- and heading-biased on purpose: at
+      // junctions and doubled-back routes it may choose a nearby branch that
+      // is not the raw point's closest piece of line. That is useful for route
+      // progress, but it must not put the grey travelled boundary ahead of a
+      // puck we chose to draw raw. Anchor the rendered boundary to the raw
+      // point's plain geometric projection instead.
+      const shownSnap = snapToRoute(shown, this.points, this.cum);
+      displayRouteProgress = this.arrived
+        ? 1
+        : this.totalM > 0
+          ? Math.min(1, shownSnap.alongM / this.totalM)
+          : 0;
+      // A pedestrian profile may deliberately draw the precise fix even while
+      // it is on-route. Keep the stable route course there for the walking
+      // compass blend; only a genuinely off-line puck should use the raw GPS
+      // course, because there the route tangent is a lie.
+      shownCourse = displayOnRoute ? this.courseAt(alongM, speedMps) : headingDeg;
     }
 
     const remainMs = this.remainingTimeMs(alongM, distanceRemainingM);

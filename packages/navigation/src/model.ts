@@ -93,11 +93,12 @@ export interface SustainGuidance {
 export interface NavState {
   status: NavStatus;
   /**
-   * The position a nav UI should render. Glued to the route only while the
-   * raw fix is genuinely near it (`snapDisplayMaxM`, tighter before
-   * departure) — otherwise the raw fix itself, so a car 30 m from the road
-   * is not drawn on it. While moving on-route it is projected slightly ahead
-   * along the line (`predictAheadMs`) to cancel GPS + render latency.
+   * The position a nav UI should render. Profiles with
+   * `snapDisplayPosition: false` always expose the raw fix. Otherwise it is
+   * glued to the route only while the fix is genuinely near it
+   * (`snapDisplayMaxM`, tighter before departure), so a car 30 m from the
+   * road is not drawn on it. While moving on-route it is projected slightly
+   * ahead along the line (`predictAheadMs`) to cancel GPS + render latency.
    */
   snapped: LatLng;
   /** The raw GPS fix that produced this state (for off-route display fallback). */
@@ -112,8 +113,10 @@ export interface NavState {
    * Fraction of the route at which the rendered travelled/untravelled colour
    * boundary should sit. Normally this is `routeProgress`; while the on-route
    * puck is projected ahead to cancel GPS/render latency, it follows that
-   * displayed puck instead. Guidance and trip progress remain truthful in
-   * `traveledM` / `routeProgress`.
+   * displayed puck instead. When the puck is raw, this uses its nearest
+   * geometric projection rather than the continuity-biased guidance match.
+   * Guidance and trip progress remain truthful in `traveledM` /
+   * `routeProgress`.
    */
   displayRouteProgress: number;
   /** Distance (m) still to travel to the destination. */
@@ -367,6 +370,8 @@ export interface NavigationOptions {
   snapDisplayMaxM?: number;
   /** Tighter `snapDisplayMaxM` used before departure (pre-drive honesty). */
   startSnapDisplayMaxM?: number;
+  /** Whether the displayed position may be snapped to the planned route. */
+  snapDisplayPosition?: boolean;
   /** Ground speed (m/s) at which the trip counts as departed. */
   departMinSpeedMps?: number;
   /** Along-route progress (m) that also counts as departed (no-speed devices). */
@@ -424,6 +429,7 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   chainManeuverM: 300,
   snapDisplayMaxM: 25,
   startSnapDisplayMaxM: 10,
+  snapDisplayPosition: true,
   departMinSpeedMps: 3, // ~11 km/h: rolling out of a parking spot counts
   departProgressM: 30,
   startDeparted: false,

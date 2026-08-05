@@ -496,6 +496,37 @@ describe('NavigationSession snapped state', () => {
     expect(state.status).toBe('navigating');
   });
 
+  it('pins the travelled-line boundary to a raw puck rather than the biased match', () => {
+    // The route returns west 11 m north of its eastbound leg. After matching
+    // the return, continuity keeps guidance there even when the raw fix is
+    // geometrically closer to the outbound leg.
+    const points: LatLng[] = [
+      { lat: 60, lng: 10 },
+      { lat: 60, lng: 10.01 },
+      { lat: 60.0001, lng: 10.01 },
+      { lat: 60.0001, lng: 10 },
+    ];
+    const path: RoutePath = {
+      points,
+      distanceM: 0,
+      timeMs: 60_000,
+      ascentM: 0,
+      descentM: 0,
+      instructions: [],
+    };
+    const cum = cumulativeDistances(points);
+    const s = new NavigationSession(path, { startDeparted: true });
+    s.update({ lat: 60.0001, lng: 10.002, speedMps: 2, headingDeg: 270 }, 0);
+    const raw = { lat: 60.00004, lng: 10.002, accuracyM: 50 };
+    const state = s.update(raw, 1000).state;
+    const nearest = snapToPolyline(raw, points, cum);
+
+    expect(state.snapped).toEqual({ lat: raw.lat, lng: raw.lng });
+    expect(state.routeProgress).toBeGreaterThan(0.5);
+    expect(state.displayRouteProgress).toBeCloseTo(nearest.alongM / cum.at(-1)!, 8);
+    expect(state.displayRouteProgress).toBeLessThan(0.5);
+  });
+
   it('projects the shown position ahead at speed, leaving guidance math honest', () => {
     const s = new NavigationSession(route(), { startDeparted: true });
     const state = s.update({ ...pointAtAlong(200), speedMps: 20 }, 0).state;
@@ -1688,6 +1719,30 @@ describe('navOptionsForProfile', () => {
     const opts = navOptionsForProfile('foot', { startDeparted: true });
     expect(opts.startDeparted).toBe(true);
     expect(opts.predictAheadMs).toBe(0); // the rest of the row survives
+  });
+
+  it('draws pedestrian profiles at the precise GPS position', () => {
+    for (const profile of ['foot', 'hike', 'run'] as const) {
+      const s = new NavigationSession(
+        route(),
+        navOptionsForProfile(profile, { startDeparted: true }),
+      );
+      const fix = { lat: 60.000045, lng: 10.005, accuracyM: 5 };
+      const state = s.update(fix, 0).state;
+      expect(state.snapped, profile).toEqual({ lat: fix.lat, lng: fix.lng });
+      expect(state.routeProgress, profile).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps road snapping for vehicle profiles', () => {
+    for (const profile of ['car', 'bike'] as const) {
+      const s = new NavigationSession(
+        route(),
+        navOptionsForProfile(profile, { startDeparted: true }),
+      );
+      const state = s.update({ lat: 60.000045, lng: 10.005, accuracyM: 5 }, 0).state;
+      expect(state.snapped.lat, profile).toBeCloseTo(60, 5);
+    }
   });
 
   it('never reports wrong-way on foot — walking a path backwards is legal', () => {

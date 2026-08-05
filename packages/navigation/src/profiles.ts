@@ -92,6 +92,9 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     sustainMinLegM: Infinity,
     postTransitionPrompts: false,
     chainManeuverM: 60,
+    // A pedestrian can legitimately leave the mapped line. Keep matching for
+    // progress and guidance, but draw where the GPS says the person is.
+    snapDisplayPosition: false,
     snapDisplayMaxM: 20,
     startSnapDisplayMaxM: 15,
     departMinSpeedMps: 0.7, // ~2.5 km/h — a stroll is a departure
@@ -137,6 +140,7 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     sustainMinLegM: Infinity,
     postTransitionPrompts: false,
     chainManeuverM: 60,
+    snapDisplayPosition: false,
     snapDisplayMaxM: 30,
     startSnapDisplayMaxM: 20,
     departMinSpeedMps: 0.7,
@@ -166,6 +170,7 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     deadReckonMinSpeedMps: 2,
     deadReckonMaxMs: 20_000,
     deadReckonMaxM: 150,
+    snapDisplayPosition: false,
     predictAheadMs: 500,
   },
 };

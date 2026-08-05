@@ -885,6 +885,7 @@ describe('useNavigationController — walking modes', () => {
 
     // Above the blend-out speed the course owns the heading again.
     act(() => h.emit(onLine(2, { speedMps: 3 })));
+    await waitFor(() => expect(result.current.state?.courseDeg).not.toBeNull());
     await waitFor(() => expect(result.current.facingDeg).toBeNull());
 
     // End tears the compass watch down with the trip.
