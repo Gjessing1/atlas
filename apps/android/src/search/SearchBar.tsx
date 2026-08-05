@@ -1,11 +1,6 @@
-import { useRecentSearches } from '@atlas/app-hooks';
-import {
-  RECENT_SEARCHES_SETTING,
-  savedPlaceResults,
-  type SearchablePlace,
-  type SearchResult,
-} from '@atlas/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
+import { RECENT_SEARCHES_SETTING, type SearchablePlace, type SearchResult } from '@atlas/core';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
@@ -44,13 +39,11 @@ export function SearchBar({
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => void;
 }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [offline, setOffline] = useState(false);
-  const generation = useRef(0);
-  // Read when a search runs rather than depended on — a fresh array each render.
-  const placesRef = useRef(places);
-  placesRef.current = places;
+  const fetchSearch = useCallback<SearchFn>(
+    async ({ text, signal }) => geoSearch(packs, text, getBias, { signal }),
+    [packs, getBias],
+  );
+  const search = useSearch({ search: fetchSearch, places, debounceMs: 300 });
 
   const {
     recent,
@@ -66,37 +59,11 @@ export function SearchBar({
     ),
   );
 
-  const search = useCallback(
-    async (text: string) => {
-      const gen = ++generation.current;
-      if (text.trim().length < 2) {
-        setResults([]);
-        return;
-      }
-      // The user's own places answer instantly and offline; a geocoder can never
-      // find "Bogdan og Ada", so a query that only went upstream missed them.
-      const saved = savedPlaceResults(placesRef.current, text);
-      if (saved.length > 0 && gen === generation.current) setResults(saved);
-      const { results: found, offline: usedOffline } = await geoSearch(packs, text, getBias);
-      if (gen === generation.current) {
-        setResults([...saved, ...found]);
-        setOffline(usedOffline);
-      }
-    },
-    [packs, getBias],
-  );
-
-  useEffect(() => {
-    const t = setTimeout(() => void search(query), 300);
-    return () => clearTimeout(t);
-  }, [query, search]);
-
   const close = useCallback(() => {
     Keyboard.dismiss();
-    setQuery('');
-    setResults([]);
+    search.reset();
     onClose();
-  }, [onClose]);
+  }, [search, onClose]);
 
   const pick = useCallback(
     (result: SearchResult) => {
@@ -114,8 +81,8 @@ export function SearchBar({
   }, []);
 
   // An empty input shows the recent picks so frequent trips are two taps.
-  const showingRecent = results.length === 0 && query.trim().length < 2;
-  const shown = showingRecent ? recent : results;
+  const showingRecent = search.query.trim().length < 2;
+  const shown = showingRecent ? recent : search.results;
 
   return (
     <BottomSheet
@@ -131,8 +98,8 @@ export function SearchBar({
         <TextInput
           style={styles.input}
           placeholder="Search places or coordinates"
-          value={query}
-          onChangeText={setQuery}
+          value={search.query}
+          onChangeText={search.setQuery}
           autoCorrect={false}
           // Android otherwise opens its fullscreen "extract" editor in
           // landscape, making this look like two separate search fields.
@@ -144,7 +111,7 @@ export function SearchBar({
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
       </View>
-      {shown.length > 0 ? (
+      {shown.length > 0 || (!showingRecent && search.statusText) ? (
         <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
           {showingRecent ? (
             // Web has offered this since its recents shipped; Android never
@@ -156,8 +123,8 @@ export function SearchBar({
                 <Text style={styles.clearRecent}>Clear</Text>
               </Pressable>
             </View>
-          ) : offline ? (
-            <Text style={styles.listTag}>offline results</Text>
+          ) : search.statusText ? (
+            <Text style={styles.listTag}>{search.statusText}</Text>
           ) : null}
           {shown.map((r, i) => (
             <Pressable

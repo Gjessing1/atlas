@@ -75,7 +75,7 @@ function StopSearch({
   /** Present when this box is re-pointing an existing stop — leaves it as is. */
   onCancel?: () => void;
 }) {
-  const { query, setQuery, hits, reset } = useStopSearch({
+  const { query, setQuery, hits, reset, statusText } = useStopSearch({
     geocode,
     places,
     initialQuery,
@@ -103,8 +103,9 @@ function StopSearch({
           </button>
         )}
       </div>
-      {hits.length > 0 && (
+      {(hits.length > 0 || statusText) && (
         <ul>
+          {statusText && <li className="route-stop-status">{statusText}</li>}
           {hits.map((hit, i) => (
             <li key={`${hit.position.lat}/${hit.position.lng}/${i}`}>
               <button

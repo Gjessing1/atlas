@@ -27,20 +27,26 @@ export function useGeocode(getBias: () => LatLng | null): StopGeocodeFn {
       }
       const general = async (): Promise<SearchResult[]> => {
         const res = await fetch(`/api/search?${params}`, { signal });
-        if (!res.ok) return [];
+        if (!res.ok) throw new Error(`search: HTTP ${res.status}`);
         return ((await res.json()) as { results: SearchResult[] }).results;
       };
-      if (!transit) return general();
+      if (!transit) return { results: await general(), offline: false };
 
       const [stops, addresses] = await Promise.allSettled([
         fetchTransitStops(text, { signal, bias, limit }),
         general(),
       ]);
-      return mergeTransitSearchResults(
-        stops.status === 'fulfilled' ? stops.value : [],
-        addresses.status === 'fulfilled' ? addresses.value : [],
-        limit ?? 8,
-      );
+      if (stops.status === 'rejected' && addresses.status === 'rejected') {
+        throw new Error('online search unavailable');
+      }
+      return {
+        results: mergeTransitSearchResults(
+          stops.status === 'fulfilled' ? stops.value : [],
+          addresses.status === 'fulfilled' ? addresses.value : [],
+          limit ?? 8,
+        ),
+        offline: false,
+      };
     },
     [getBias],
   );

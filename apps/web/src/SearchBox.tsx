@@ -1,13 +1,6 @@
-import { useRecentSearches } from '@atlas/app-hooks';
-import {
-  coordinateSearchResult,
-  parseCoordinateQuery,
-  savedPlaceResults,
-  type LatLng,
-  type SearchablePlace,
-  type SearchResult,
-} from '@atlas/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
+import { type LatLng, type SearchablePlace, type SearchResult } from '@atlas/core';
+import { useCallback, useMemo, useState } from 'react';
 
 interface SearchBoxProps {
   /** Called when the user picks a result. */
@@ -27,8 +20,24 @@ interface SearchBoxProps {
 const RECENT_KEY = 'atlas.search.recent';
 
 export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const fetchSearch = useCallback<SearchFn>(
+    async ({ text, signal }) => {
+      const params = new URLSearchParams({ q: text });
+      const bias = getBias();
+      if (bias) {
+        params.set('lat', String(bias.lat));
+        params.set('lon', String(bias.lng));
+      }
+      const response = await fetch(`/api/search?${params}`, { signal });
+      if (!response.ok) throw new Error(`search: HTTP ${response.status}`);
+      return {
+        results: ((await response.json()) as { results: SearchResult[] }).results,
+        offline: false,
+      };
+    },
+    [getBias],
+  );
+  const search = useSearch({ search: fetchSearch, places });
   const {
     recent,
     remember,
@@ -44,75 +53,14 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   );
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
-  const abortRef = useRef<AbortController | null>(null);
-  // Picking a result writes its name into the input; that change must not
-  // re-trigger a search (which would pop the dropdown right back open).
-  const pickedRef = useRef<string | null>(null);
-  // Read when a search runs, not depended on: `places` is a fresh array every
-  // render, and depending on it would restart the debounce forever.
-  const placesRef = useRef(places);
-  placesRef.current = places;
 
   // An empty (or too-short) query shows the recent picks instead of results.
-  const showingRecent = query.trim().length < 2;
-  const shown = showingRecent ? recent : results;
-
-  useEffect(() => {
-    abortRef.current?.abort();
-    const q = query.trim();
-    if (q === pickedRef.current) return;
-    pickedRef.current = null;
-    if (q.length < 2) {
-      setResults([]);
-      setHighlighted(0);
-      return;
-    }
-    // A typed-in coordinate pair is its own result — no geocoder round-trip.
-    const coord = parseCoordinateQuery(q);
-    if (coord) {
-      setResults([coordinateSearchResult(coord)]);
-      setHighlighted(0);
-      setOpen(true);
-      return;
-    }
-    // The user's own places answer instantly and without a network round-trip:
-    // show them before the debounce, and keep them on top once Photon replies.
-    const saved = savedPlaceResults(placesRef.current, q);
-    if (saved.length > 0) {
-      setResults(saved);
-      setHighlighted(0);
-      setOpen(true);
-    }
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const timer = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams({ q });
-        const bias = getBias();
-        if (bias) {
-          params.set('lat', String(bias.lat));
-          params.set('lon', String(bias.lng));
-        }
-        const res = await fetch(`/api/search?${params}`, { signal: controller.signal });
-        if (!res.ok) return;
-        const data = (await res.json()) as { results: SearchResult[] };
-        setResults([...saved, ...data.results]);
-        setHighlighted(0);
-        setOpen(true);
-      } catch {
-        // Aborted or offline; the saved matches shown above still stand.
-      }
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query, getBias]);
+  const showingRecent = search.query.trim().length < 2;
+  const shown = showingRecent ? recent : search.results;
 
   const pick = (result: SearchResult) => {
     remember(result);
-    pickedRef.current = result.name;
-    setQuery(result.name);
+    search.settle(result.name);
     setOpen(false);
     onSelect(result);
   };
@@ -145,14 +93,18 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
       <input
         type="search"
         placeholder="Search places or coordinates…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        value={search.query}
+        onChange={(e) => {
+          search.setQuery(e.target.value);
+          setHighlighted(0);
+          setOpen(true);
+        }}
         onKeyDown={onKeyDown}
-        onFocus={() => shown.length > 0 && setOpen(true)}
+        onFocus={() => (shown.length > 0 || search.statusText !== null) && setOpen(true)}
         onBlur={() => setOpen(false)}
         aria-label="Search places"
       />
-      {open && shown.length > 0 && (
+      {open && (shown.length > 0 || search.statusText !== null) && (
         <ul className="searchbox-results" role="listbox">
           {showingRecent && (
             <li className="searchbox-tag">
@@ -166,6 +118,11 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
               >
                 Clear
               </button>
+            </li>
+          )}
+          {!showingRecent && search.statusText && (
+            <li className="searchbox-tag searchbox-status" role="presentation">
+              {search.statusText}
             </li>
           )}
           {shown.map((result, i) => (

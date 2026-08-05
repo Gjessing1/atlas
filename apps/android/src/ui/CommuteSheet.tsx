@@ -68,6 +68,9 @@ function EndField({
         onChangeText={editor.search.setQuery}
         testID={`commute-search-${field}`}
       />
+      {editor.search.statusText ? (
+        <Text style={styles.searchStatus}>{editor.search.statusText}</Text>
+      ) : null}
       {editor.search.hits.map((hit) => (
         <Pressable
           key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}
@@ -443,6 +446,7 @@ const styles = StyleSheet.create({
   },
   hitName: { color: theme.text, fontSize: 13, flexShrink: 1 },
   hitLabel: { color: theme.textMuted, fontSize: 10 },
+  searchStatus: { color: theme.textMuted, fontSize: 11, paddingHorizontal: 4, paddingTop: 6 },
   rowGap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' },
   smallButton: {
     backgroundColor: theme.surfaceMuted,

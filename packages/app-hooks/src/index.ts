@@ -109,6 +109,22 @@ export {
   type StopLinesFn,
 } from './useCommuteEditor.js';
 export {
+  mergeSearchResults,
+  searchStatusText,
+  useSearch,
+  SEARCH_EMPTY,
+  SEARCH_ERROR,
+  SEARCH_LOADING,
+  SEARCH_LOCAL_ERROR,
+  SEARCH_OFFLINE,
+  SEARCH_OFFLINE_EMPTY,
+  type SearchFn,
+  type SearchHits,
+  type SearchQuery,
+  type SearchState,
+  type SearchStatus,
+} from './useSearch.js';
+export {
   useStopSearch,
   type StopGeocodeFn,
   type StopGeocodeQuery,

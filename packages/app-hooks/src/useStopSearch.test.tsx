@@ -16,6 +16,8 @@ function hit(name: string, lat: number, lng: number, transitStopId?: string): Se
   };
 }
 
+const online = (results: SearchResult[]) => ({ results, offline: false });
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
@@ -32,7 +34,7 @@ async function settle(ms = 300): Promise<void> {
 
 describe('useStopSearch', () => {
   it('asks nothing until the query is worth geocoding', async () => {
-    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue([]);
+    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue(online([]));
     const { result } = renderHook(() => useStopSearch({ geocode, places: [] }));
 
     act(() => result.current.setQuery('o'));
@@ -42,7 +44,9 @@ describe('useStopSearch', () => {
   });
 
   it('lists saved places before geocoder results', async () => {
-    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue([hit('Oslo Airport', 60.19, 11.1)]);
+    const geocode = vi
+      .fn<StopGeocodeFn>()
+      .mockResolvedValue(online([hit('Oslo Airport', 60.19, 11.1)]));
     const { result } = renderHook(() =>
       useStopSearch({ geocode, places: [OSLO_S, HOME], debounceMs: 250 }),
     );
@@ -65,10 +69,24 @@ describe('useStopSearch', () => {
     await settle();
 
     await waitFor(() => expect(result.current.hits.map((h) => h.name)).toEqual(['Oslo S']));
+    expect(result.current.statusText).toBe('Saved results · online search unavailable');
+  });
+
+  it('preserves the downloaded-data source state from Android', async () => {
+    const geocode = vi
+      .fn<StopGeocodeFn>()
+      .mockResolvedValue({ results: [hit('Offline stop', 59.9, 10.7)], offline: true });
+    const { result } = renderHook(() => useStopSearch({ geocode, places: [] }));
+
+    act(() => result.current.setQuery('stop'));
+    await settle();
+
+    await waitFor(() => expect(result.current.status).toBe('offline'));
+    expect(result.current.statusText).toBe('Offline results');
   });
 
   it('debounces a query being typed into a single request', async () => {
-    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue([]);
+    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue(online([]));
     const { result } = renderHook(() => useStopSearch({ geocode, places: [] }));
 
     act(() => result.current.setQuery('Os'));
@@ -83,7 +101,7 @@ describe('useStopSearch', () => {
   it('switches to stop-aware search and preserves the selected NSR identity', async () => {
     const geocode = vi
       .fn<StopGeocodeFn>()
-      .mockResolvedValue([hit('Oslo S', 59.910357, 10.753051, 'NSR:StopPlace:59872')]);
+      .mockResolvedValue(online([hit('Oslo S', 59.910357, 10.753051, 'NSR:StopPlace:59872')]));
     const { result, rerender } = renderHook(
       ({ transit }: { transit: boolean }) => useStopSearch({ geocode, places: [], transit }),
       { initialProps: { transit: false } },
@@ -103,7 +121,7 @@ describe('useStopSearch', () => {
     const seen: AbortSignal[] = [];
     const geocode = vi.fn<StopGeocodeFn>(async ({ signal }) => {
       seen.push(signal);
-      return [];
+      return online([]);
     });
     const { result } = renderHook(() => useStopSearch({ geocode, places: [] }));
 
@@ -126,7 +144,7 @@ describe('useStopSearch', () => {
     const geocode = vi
       .fn<StopGeocodeFn>()
       .mockResolvedValue(
-        Array.from({ length: 8 }, (_, i) => hit(`Remote ${i}`, 60 + i / 1000, 11)),
+        online(Array.from({ length: 8 }, (_, i) => hit(`Remote ${i}`, 60 + i / 1000, 11))),
       );
     const { result } = renderHook(() => useStopSearch({ geocode, places, limit: 6 }));
 
@@ -139,7 +157,7 @@ describe('useStopSearch', () => {
   });
 
   it('clears query and results on reset', async () => {
-    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue([]);
+    const geocode = vi.fn<StopGeocodeFn>().mockResolvedValue(online([]));
     const { result } = renderHook(() => useStopSearch({ geocode, places: [OSLO_S] }));
 
     act(() => result.current.setQuery('Oslo'));

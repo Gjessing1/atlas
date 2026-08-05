@@ -82,7 +82,7 @@ function StopSearch({
   /** Present when this box is editing an existing stop — leaves it unchanged. */
   onCancel?: () => void;
 }) {
-  const { query, setQuery, hits, reset } = useStopSearch({
+  const { query, setQuery, hits, reset, statusText } = useStopSearch({
     geocode,
     places,
     initialQuery,
@@ -117,8 +117,9 @@ function StopSearch({
           </Pressable>
         ) : null}
       </View>
-      {hits.length > 0 ? (
+      {hits.length > 0 || statusText ? (
         <View style={styles.stopResults}>
+          {statusText ? <Text style={styles.stopStatus}>{statusText}</Text> : null}
           {hits.map((hit, i) => (
             <Pressable
               key={`${hit.position.lat}/${hit.position.lng}/${i}`}
@@ -1156,6 +1157,7 @@ const styles = StyleSheet.create({
   stopResult: { paddingHorizontal: 10, paddingVertical: 6 },
   stopResultName: { fontSize: 14, color: theme.text, fontWeight: '600' },
   stopResultLabel: { fontSize: 11, color: theme.textMuted },
+  stopStatus: { fontSize: 11, color: theme.textMuted, paddingHorizontal: 10, paddingVertical: 6 },
   alongSearch: { alignItems: 'stretch', gap: 4 },
   alongCategories: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   alongCategory: {

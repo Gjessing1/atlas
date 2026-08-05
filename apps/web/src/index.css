@@ -170,6 +170,11 @@ button {
   cursor: pointer;
 }
 
+.searchbox-results li.searchbox-status {
+  justify-content: flex-start;
+  padding-bottom: 6px;
+}
+
 /* --- Place card: one card for pins, saved places, POIs and search hits ---
    Bottom-left so it never covers the search box or the right-hand map
    controls, and above the scale bar. It shifts clear of the Saved sidebar
@@ -3473,6 +3478,12 @@ button.transit-notice-summary {
   white-space: nowrap;
 }
 
+.route-stop-search li.route-stop-status {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .route-along-search {
   display: flex;
   flex-direction: column;
@@ -5726,6 +5737,12 @@ button.transit-notice-summary {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.commute-hits .commute-search-status {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .commute-end-actions {

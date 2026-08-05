@@ -554,6 +554,37 @@ test('search result flies the camera and drops the pin', async ({ page }) => {
     .toBeCloseTo(58.9864, 1);
 });
 
+test('search replaces stale rows with honest loading, empty and error states', async ({ page }) => {
+  await page.route('**/api/search**', async (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q');
+    if (query === 'slow') {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return route.fulfill({
+        json: {
+          results: [{ name: 'Slow place', label: 'Oslo', position: { lat: 59.91, lng: 10.75 } }],
+        },
+      });
+    }
+    if (query === 'empty') return route.fulfill({ json: { results: [] } });
+    return route.fulfill({ status: 503, json: { message: 'unavailable' } });
+  });
+  await page.goto('/');
+  await waitForMap(page);
+  const input = page.getByPlaceholder('Search places');
+
+  await input.fill('slow');
+  await expect(page.getByText('Searching…')).toBeVisible();
+  await expect(page.getByText('Slow place')).toBeVisible();
+
+  await input.fill('empty');
+  await expect(page.getByText('Searching…')).toBeVisible();
+  await expect(page.getByText('Slow place')).toHaveCount(0);
+  await expect(page.getByText('No matches found.')).toBeVisible();
+
+  await input.fill('failure');
+  await expect(page.getByText('Search is unavailable.')).toBeVisible();
+});
+
 test('Explore browses the map view by category and opens place guide content', async ({ page }) => {
   await page.route('**/api/explore**', (route) =>
     route.fulfill({

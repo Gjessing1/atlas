@@ -52,6 +52,9 @@ function EndField({
             onChange={(event) => editor.search.setQuery(event.target.value)}
           />
           <ul className="commute-hits">
+            {editor.search.statusText && (
+              <li className="commute-search-status">{editor.search.statusText}</li>
+            )}
             {editor.search.hits.map((hit) => (
               <li key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}>
                 <button type="button" onClick={() => editor.pickHit(field, hit)}>

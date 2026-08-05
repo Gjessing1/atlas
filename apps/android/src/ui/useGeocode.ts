@@ -17,13 +17,12 @@ import { geoSearch, type SearchBias } from '../search/geoSearch';
 export function useGeocode(packs: LocalPack[], getBias: SearchBias): StopGeocodeFn {
   return useCallback(
     async ({ text, bbox, limit, signal, transit }) => {
-      const { results } = await geoSearch(packs, text, bbox ? undefined : getBias, {
+      return geoSearch(packs, text, bbox ? undefined : getBias, {
         bbox,
         limit,
         signal,
         transit,
       });
-      return results;
     },
     [packs, getBias],
   );

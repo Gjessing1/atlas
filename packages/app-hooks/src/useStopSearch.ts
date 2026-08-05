@@ -9,11 +9,19 @@
  * has no idea what a route is.
  */
 
-import { matchPlacesByName, type SearchResult, type StopHit } from '@atlas/core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  coordinateSearchResult,
+  matchPlacesByName,
+  parseCoordinateQuery,
+  type SearchResult,
+  type StopHit,
+} from '@atlas/core';
+import { useRef } from 'react';
+
+import { useLocalFirstSearch, type SearchHits } from './useSearch.js';
 
 /** Geocode a stop query — the platform seam (web proxy / packs-with-fallback). */
-export type StopGeocodeFn = (query: StopGeocodeQuery) => Promise<SearchResult[]>;
+export type StopGeocodeFn = (query: StopGeocodeQuery) => Promise<SearchHits>;
 
 export interface StopGeocodeQuery {
   /** Trimmed query text, always at least two characters. */
@@ -47,9 +55,6 @@ function useLatest<T>(value: T): { current: T } {
   return ref;
 }
 
-/** Empty out state without churning its identity — see {@link useLatest}. */
-const emptied = <T>(previous: T[]): T[] => (previous.length === 0 ? previous : []);
-
 const savedHits = (places: StopSearchPlace[], query: string, limit: number): StopHit[] =>
   matchPlacesByName(places, query, limit).map((p) => ({
     name: p.name,
@@ -71,6 +76,12 @@ export interface StopSearch {
   query: string;
   setQuery: (text: string) => void;
   hits: StopHit[];
+  status: 'idle' | 'loading' | 'ready' | 'empty' | 'offline' | 'error';
+  loading: boolean;
+  offline: boolean;
+  error: boolean;
+  showEmpty: boolean;
+  statusText: string | null;
   /** Clear query and results — after picking a hit, or on cancel. */
   reset: () => void;
 }
@@ -100,42 +111,25 @@ export function useStopSearch({
   /** Use Entur stop-aware autocomplete ahead of general address results. */
   transit?: boolean;
 }): StopSearch {
-  const [query, setQuery] = useState(initialQuery);
-  const [hits, setHits] = useState<StopHit[]>([]);
   const placesRef = useLatest(places);
   const geocodeRef = useLatest(geocode);
+  const state = useLocalFirstSearch<StopHit>({
+    initialQuery,
+    debounceMs,
+    requestKey: transit,
+    local: (text) => {
+      const coordinate = parseCoordinateQuery(text);
+      if (coordinate) {
+        return { results: remoteHits([coordinateSearchResult(coordinate)]), complete: true };
+      }
+      return { results: savedHits(placesRef.current, text, savedLimit) };
+    },
+    remote: async ({ text, signal }) => {
+      const found = await geocodeRef.current({ text, signal, transit });
+      return { results: remoteHits(found.results), offline: found.offline };
+    },
+    merge: (local, remote) => [...local, ...remote].slice(0, limit),
+  });
 
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setHits(emptied);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void (async () => {
-        const saved = savedHits(placesRef.current, q, savedLimit);
-        let remote: StopHit[] = [];
-        try {
-          remote = remoteHits(
-            await geocodeRef.current({ text: q, signal: controller.signal, transit }),
-          );
-        } catch {
-          // Aborted or offline — saved places still match.
-        }
-        if (!controller.signal.aborted) setHits([...saved, ...remote].slice(0, limit));
-      })();
-    }, debounceMs);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query, placesRef, geocodeRef, debounceMs, limit, savedLimit, transit]);
-
-  const reset = useCallback(() => {
-    setQuery('');
-    setHits(emptied);
-  }, []);
-
-  return { query, setQuery, hits, reset };
+  return { ...state, hits: state.results };
 }
