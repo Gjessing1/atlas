@@ -1,12 +1,14 @@
 import type { NavController } from '@atlas/app-hooks';
 import {
   bboxOutlinesFeatureCollection,
+  exploreResultsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
   savedStandFeatures,
   waypointLabel,
   type BBox,
   type LatLng,
+  type SearchResult,
 } from '@atlas/core';
 import {
   Camera,
@@ -112,6 +114,9 @@ export const ICE_OBSERVATION_LAYER_IDS = [
  */
 export const SPOT_LAYER_ID = 'atlas-spots-disc';
 
+/** Numbered nearby-result discs; App hit-tests these with a finger-sized radius. */
+export const EXPLORE_RESULT_LAYER_ID = 'atlas-explore-results-disc';
+
 /** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
 export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
 
@@ -207,6 +212,8 @@ interface MapSceneProps {
   trafficFlow: VectorOverlayData | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
+  /** Numbered category-browse results, retained while the picked card is open. */
+  exploreResults: readonly SearchResult[];
   /** The measure tool's ruler/rings while it is open, else null. */
   measure: GeoJSON.FeatureCollection | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
@@ -280,6 +287,7 @@ export function MapScene({
   traffic,
   trafficFlow,
   spots,
+  exploreResults,
   measure,
   trackGeo,
   offlineRegionCorner,
@@ -803,6 +811,44 @@ export function MapScene({
                 'text-field': ['get', 'label'],
                 'text-font': ['Noto Sans Bold'],
                 'text-size': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {exploreResults.length > 0 ? (
+          <GeoJSONSource
+            id="atlas-explore-results"
+            data={exploreResultsFeatureCollection(exploreResults)}
+          >
+            <Layer
+              type="circle"
+              id="atlas-explore-results-halo"
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 13, 14, 18],
+                'circle-color': '#ffffff',
+                'circle-opacity': 0.92,
+              }}
+            />
+            <Layer
+              type="circle"
+              id={EXPLORE_RESULT_LAYER_ID}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 10.5, 14, 15],
+                'circle-color': '#0e7490',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 1.5,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-explore-results-number"
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 8, 11, 14, 14],
                 'text-allow-overlap': true,
                 'text-ignore-placement': true,
               }}

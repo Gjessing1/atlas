@@ -1,10 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import { isExploreCategory, rankExploreResults } from './explore.js';
+import {
+  exploreCategoriesForProfile,
+  exploreResultsFeatureCollection,
+  isExploreCategory,
+  rankExploreResults,
+} from './explore.js';
 
 describe('explore categories', () => {
   it('narrows ids', () => {
     expect(isExploreCategory('coffee')).toBe(true);
+    expect(isExploreCategory('boat-access')).toBe(true);
     expect(isExploreCategory('anything')).toBe(false);
+  });
+
+  it('offers activity-specific questions and a safe fallback', () => {
+    expect(exploreCategoriesForProfile('drive').map((category) => category.id)).toEqual([
+      'food',
+      'coffee',
+      'fuel',
+      'charging',
+      'supermarket',
+      'rest-area',
+    ]);
+    expect(exploreCategoriesForProfile('fishhunt').map((category) => category.id)).toEqual([
+      'parking',
+      'boat-access',
+      'cabins',
+      'viewpoints',
+      'gates',
+    ]);
+    expect(exploreCategoriesForProfile('future-profile')).toEqual(
+      exploreCategoriesForProfile('explore'),
+    );
+  });
+
+  it('numbers map markers in the same order as the result list', () => {
+    const collection = exploreResultsFeatureCollection([
+      { name: 'First', label: '', position: { lat: 59.9, lng: 10.7 } },
+      { name: 'Second', label: '', position: { lat: 60.1, lng: 11.2 } },
+    ]);
+    expect(collection.features.map((feature) => feature.properties)).toEqual([
+      { index: 0, label: '1', name: 'First' },
+      { index: 1, label: '2', name: 'Second' },
+    ]);
+    expect(collection.features[1]!.geometry.coordinates).toEqual([11.2, 60.1]);
   });
 
   it('keeps only nearby unique results and orders by distance', () => {

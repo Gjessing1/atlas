@@ -9,6 +9,7 @@ import {
   EXPLORE_LOADING,
   EXPLORE_SUBTITLE,
   EXPLORE_SUBTITLE_OFFLINE,
+  EXPLORE_STALE,
   type ExploreArea,
   type ExploreHits,
   type ExploreQuery,
@@ -60,6 +61,24 @@ describe('useExplore', () => {
     act(() => result.current.refresh());
     await waitFor(() => expect(fetchNearby).toHaveBeenCalledTimes(2));
     expect(fetchNearby.mock.calls[1]![0].center).toEqual({ lat: 60.39, lng: 5.32 });
+  });
+
+  it('marks settled results stale after the map moves without fetching again', async () => {
+    const fetchNearby = vi.fn(async () => online([hit('Somewhere')]));
+    const { result, rerender } = renderHook(
+      ({ currentArea }: { currentArea: ExploreArea }) =>
+        useExplore({ getArea: () => area, currentArea, fetchNearby }),
+      { initialProps: { currentArea: area } },
+    );
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+
+    rerender({ currentArea: { center: { lat: 60.39, lng: 5.32 }, radiusM: 4_000 } });
+    expect(result.current.stale).toBe(true);
+    expect(result.current.status).toBe(EXPLORE_STALE);
+    expect(fetchNearby).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.refresh());
+    await waitFor(() => expect(fetchNearby).toHaveBeenCalledTimes(2));
   });
 
   it('does not re-browse when the caller merely re-renders', async () => {

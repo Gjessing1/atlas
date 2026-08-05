@@ -41,7 +41,22 @@ db.exec(`
 `);
 
 // Which OSM tags make a feature worth finding by name (roughly Photon's set).
-const KEYS = ['place', 'natural', 'tourism', 'amenity', 'leisure', 'shop', 'historic', 'peak'];
+const KEYS = [
+  'place',
+  'natural',
+  // A trailhead is more specific than its generic tourism=information tag and
+  // must retain that identity for profile-aware Explore categories.
+  'information',
+  'tourism',
+  'amenity',
+  'leisure',
+  'shop',
+  'historic',
+  'barrier',
+  'waterway',
+  'highway',
+  'peak',
+];
 
 function centroid(geometry) {
   switch (geometry?.type) {

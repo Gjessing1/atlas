@@ -6,7 +6,8 @@ import {
   type ExploreArea,
   type ExploreQuery,
 } from '@atlas/app-hooks';
-import { EXPLORE_CATEGORIES, fmtDistanceM, type SearchResult } from '@atlas/core';
+import { exploreCategoriesForProfile, fmtDistanceM, type SearchResult } from '@atlas/core';
+import { useEffect, useMemo } from 'react';
 
 export type { ExploreArea };
 
@@ -30,14 +31,27 @@ async function fetchExplore({ category, center, radiusM, signal }: ExploreQuery)
 /** Category-first POI browse for the current map view. */
 export function ExplorePanel({
   getArea,
+  currentArea,
+  profileId,
   onPick,
+  onResultsChange,
   onClose,
 }: {
   getArea: () => ExploreArea;
+  currentArea: ExploreArea | null;
+  profileId: string;
   onPick: (result: SearchResult) => void;
+  onResultsChange: (results: SearchResult[]) => void;
   onClose: () => void;
 }) {
-  const explore = useExplore({ getArea, fetchNearby: fetchExplore });
+  const categories = useMemo(() => exploreCategoriesForProfile(profileId), [profileId]);
+  const explore = useExplore({
+    getArea,
+    currentArea,
+    fetchNearby: fetchExplore,
+    initialCategory: categories[0]!.id,
+  });
+  useEffect(() => onResultsChange(explore.results), [explore.results, onResultsChange]);
 
   return (
     <aside className="explore-panel" aria-label="Explore nearby places">
@@ -51,7 +65,7 @@ export function ExplorePanel({
         </button>
       </div>
       <div className="explore-categories" role="tablist" aria-label="Place category">
-        {EXPLORE_CATEGORIES.map((item) => (
+        {categories.map((item) => (
           <button
             type="button"
             role="tab"
@@ -64,7 +78,7 @@ export function ExplorePanel({
           </button>
         ))}
       </div>
-      <div className="explore-status">
+      <div className={`explore-status${explore.stale ? ' stale' : ''}`}>
         {explore.status}
         <button type="button" className="link-button" onClick={explore.refresh}>
           {EXPLORE_REFRESH}
@@ -72,10 +86,13 @@ export function ExplorePanel({
       </div>
       {explore.showEmpty ? <p className="explore-empty">{EXPLORE_EMPTY}</p> : null}
       <ul className="explore-results">
-        {explore.results.map((result) => (
+        {explore.results.map((result, index) => (
           <li key={`${result.name}/${result.position.lat}/${result.position.lng}`}>
             <button type="button" onClick={() => onPick(result)}>
-              <span>
+              <span className="explore-result-index" aria-hidden="true">
+                {index + 1}
+              </span>
+              <span className="explore-result-text">
                 <strong>{result.name}</strong>
                 {result.label ? <small>{result.label}</small> : null}
               </span>

@@ -8,12 +8,12 @@ import {
 } from '@atlas/app-hooks';
 import {
   clampExploreRadiusM,
-  EXPLORE_CATEGORIES,
+  exploreCategoriesForProfile,
   fmtDistanceM,
   type LatLng,
   type SearchResult,
 } from '@atlas/core';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
@@ -33,16 +33,22 @@ export function ExploreSheet({
   visible,
   packs,
   getCenter,
+  currentArea,
   zoom,
+  profileId,
   onPick,
+  onResultsChange,
   onClose,
   bottomInset,
 }: {
   visible: boolean;
   packs: LocalPack[];
   getCenter: () => Promise<LatLng | null>;
+  currentArea: ExploreArea | null;
   zoom: number;
+  profileId: string;
   onPick: (result: SearchResult) => void;
+  onResultsChange: (results: SearchResult[]) => void;
   onClose: () => void;
   bottomInset: number;
 }) {
@@ -58,7 +64,15 @@ export function ExploreSheet({
     [packs],
   );
 
-  const explore = useExplore({ getArea, fetchNearby, active: visible });
+  const categories = useMemo(() => exploreCategoriesForProfile(profileId), [profileId]);
+  const explore = useExplore({
+    getArea,
+    currentArea,
+    fetchNearby,
+    active: visible,
+    initialCategory: categories[0]!.id,
+  });
+  useEffect(() => onResultsChange(explore.results), [explore.results, onResultsChange]);
 
   return (
     <BottomSheet
@@ -79,7 +93,7 @@ export function ExploreSheet({
         </Pressable>
       </View>
       <View style={styles.categories}>
-        {EXPLORE_CATEGORIES.map((item) => (
+        {categories.map((item) => (
           <Pressable
             key={item.id}
             style={[styles.category, explore.category === item.id && styles.categorySelected]}
@@ -93,7 +107,7 @@ export function ExploreSheet({
         ))}
       </View>
       <View style={styles.status}>
-        <Text style={styles.muted}>{explore.status}</Text>
+        <Text style={[styles.muted, explore.stale && styles.stale]}>{explore.status}</Text>
         <Pressable onPress={explore.refresh}>
           <Text style={styles.refresh}>{EXPLORE_REFRESH}</Text>
         </Pressable>
@@ -107,6 +121,9 @@ export function ExploreSheet({
             onPress={() => onPick(result)}
             testID={`explore-result-${index}`}
           >
+            <View style={styles.resultIndex}>
+              <Text style={styles.resultIndexText}>{index + 1}</Text>
+            </View>
             <View style={styles.resultText}>
               <Text style={styles.resultName} numberOfLines={1}>
                 {result.name}
@@ -150,6 +167,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   refresh: { color: theme.accent, fontWeight: '700', fontSize: 12 },
+  stale: { color: '#b45309', fontWeight: '700' },
   empty: { color: theme.textMuted, fontSize: 13, marginTop: 18 },
   results: { marginTop: 6 },
   result: {
@@ -161,6 +179,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   resultText: { flex: 1, paddingRight: 10 },
+  resultIndex: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0e7490',
+    marginRight: 10,
+  },
+  resultIndexText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
   resultName: { color: theme.text, fontWeight: '700', fontSize: 15 },
   resultLabel: { color: theme.textMuted, fontSize: 12, marginTop: 2 },
   distance: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },

@@ -566,6 +566,13 @@ test('Explore browses the map view by category and opens place guide content', a
             kind: 'amenity/cafe',
             distanceM: 420,
           },
+          {
+            name: 'Tim Wendelboe',
+            label: 'Cafe, Oslo',
+            position: { lat: 59.9277, lng: 10.7492 },
+            kind: 'amenity/cafe',
+            distanceM: 1_900,
+          },
         ],
       },
     }),
@@ -592,14 +599,38 @@ test('Explore browses the map view by category and opens place guide content', a
   const explore = page.getByRole('complementary', { name: 'Explore nearby places' });
   await explore.getByRole('tab', { name: 'Coffee' }).click();
   await expect(explore).toContainText('Fuglen');
+  await expect(explore.locator('.explore-result-index')).toHaveText(['1', '2']);
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-explore-results'))))
+    .toBe(true);
+
+  // Panning does not silently re-fetch (that once ran on every camera frame),
+  // but the list says plainly that it describes the previous view.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const map = window.__atlasMap!;
+        map.once('moveend', () => resolve());
+        map.panBy([120, 0], { duration: 0 });
+      }),
+  );
+  await expect(explore).toContainText('Results are for the previous map view.');
   await explore.getByRole('button', { name: /Fuglen/ }).click();
 
   const card = page.locator('.place-card');
+  // Opening one result keeps the rest of the numbered spatial answer visible.
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-explore-results'))))
+    .toBe(true);
   await expect(card).toContainText('A coffee bar and design shop in central Oslo.');
   await expect(card.getByRole('link', { name: 'Read article' })).toHaveAttribute(
     'href',
     'https://en.wikipedia.org/wiki/Fuglen',
   );
+  await card.getByRole('button', { name: 'Close' }).click();
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-explore-results'))))
+    .toBe(false);
 });
 
 test('route planning: two map clicks produce a route with stats', async ({ page }) => {

@@ -13,7 +13,7 @@
  * {@link useRouteStops}; this one only ever asks about the current map view.
  */
 
-import type { ExploreCategoryId, LatLng, SearchResult } from '@atlas/core';
+import { haversineM, type ExploreCategoryId, type LatLng, type SearchResult } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** The map view a browse asks about. */
@@ -48,6 +48,15 @@ export const EXPLORE_LOADING = 'Looking nearby…';
 export const EXPLORE_ERROR = 'Explore is unavailable.';
 export const EXPLORE_EMPTY = 'No places in this category are indexed here.';
 export const EXPLORE_REFRESH = 'Refresh map view';
+export const EXPLORE_STALE = 'Results are for the previous map view.';
+
+/** Ignore sub-pixel camera settling, but call any deliberate pan or zoom stale. */
+export function exploreAreaIsStale(browsed: ExploreArea, current: ExploreArea): boolean {
+  const centerMovedM = haversineM(browsed.center, current.center);
+  const meaningfulPanM = Math.max(25, Math.min(browsed.radiusM, current.radiusM) * 0.02);
+  const radiusRatio = current.radiusM / Math.max(1, browsed.radiusM);
+  return centerMovedM > meaningfulPanM || radiusRatio < 0.98 || radiusRatio > 1.02;
+}
 
 export interface ExploreState {
   category: ExploreCategoryId;
@@ -56,6 +65,8 @@ export interface ExploreState {
   loading: boolean;
   error: boolean;
   offline: boolean;
+  /** Results still describe the last browse, but the map has since moved. */
+  stale: boolean;
   /** Sub-heading: names the source, so offline answers are never mistaken. */
   subtitle: string;
   /** The one status line: looking / unavailable / how many. */
@@ -71,6 +82,7 @@ export function useExplore({
   fetchNearby,
   active = true,
   initialCategory = 'food',
+  currentArea = null,
 }: {
   /** The current map view; null while the map has not reported one yet. */
   getArea: () => ExploreArea | null | Promise<ExploreArea | null>;
@@ -78,12 +90,15 @@ export function useExplore({
   /** False while the panel is mounted but closed (Android keeps its sheet). */
   active?: boolean;
   initialCategory?: ExploreCategoryId;
+  /** Settled live viewport, observed without automatically fetching it. */
+  currentArea?: ExploreArea | null;
 }): ExploreState {
   const [category, setCategory] = useState<ExploreCategoryId>(initialCategory);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [browsedArea, setBrowsedArea] = useState<ExploreArea | null>(null);
   const [generation, setGeneration] = useState(0);
   // Read when a browse runs, not depended on: both are rebuilt every render by
   // callers that close over the live map, and depending on them would refetch
@@ -99,6 +114,8 @@ export function useExplore({
     const controller = new AbortController();
     setLoading(true);
     setError(false);
+    setResults([]);
+    setBrowsedArea(null);
     void (async () => {
       try {
         const area = await getAreaRef.current();
@@ -115,6 +132,7 @@ export function useExplore({
         if (controller.signal.aborted) return;
         setResults(hits.results);
         setOffline(hits.offline);
+        setBrowsedArea(area);
         setLoading(false);
       } catch {
         if (controller.signal.aborted) return;
@@ -127,6 +145,12 @@ export function useExplore({
   }, [active, category, generation]);
 
   const refresh = useCallback(() => setGeneration((value) => value + 1), []);
+  const stale =
+    !loading &&
+    !error &&
+    browsedArea !== null &&
+    currentArea !== null &&
+    exploreAreaIsStale(browsedArea, currentArea);
 
   return {
     category,
@@ -135,9 +159,16 @@ export function useExplore({
     loading,
     error,
     offline,
+    stale,
     subtitle: offline ? EXPLORE_SUBTITLE_OFFLINE : EXPLORE_SUBTITLE,
-    status: loading ? EXPLORE_LOADING : error ? EXPLORE_ERROR : `${results.length} places`,
-    showEmpty: !loading && !error && results.length === 0,
+    status: loading
+      ? EXPLORE_LOADING
+      : error
+        ? EXPLORE_ERROR
+        : stale
+          ? EXPLORE_STALE
+          : `${results.length} places`,
+    showEmpty: !loading && !error && !stale && results.length === 0,
     refresh,
   };
 }

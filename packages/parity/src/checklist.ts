@@ -418,10 +418,34 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'explore-categories',
     surface: 'explore',
-    capability: 'Browse nearby places by category, from one shared vocabulary',
+    capability: 'Browse nearby places by categories curated for the active map profile',
     hook: 'useExplore',
-    web: { file: 'apps/web/src/explore/ExplorePanel.tsx', contains: 'EXPLORE_CATEGORIES' },
-    android: { file: 'apps/android/src/ui/ExploreSheet.tsx', contains: 'EXPLORE_CATEGORIES' },
+    web: { file: 'apps/web/src/explore/ExplorePanel.tsx', contains: 'exploreCategoriesForProfile' },
+    android: {
+      file: 'apps/android/src/ui/ExploreSheet.tsx',
+      contains: 'exploreCategoriesForProfile',
+    },
+  },
+  {
+    id: 'explore-map-results',
+    surface: 'explore',
+    capability: 'Keep the numbered nearby result set visible and pickable on the map',
+    web: {
+      file: 'apps/web/src/map/useExploreLayer.ts',
+      contains: 'exploreResultsFeatureCollection',
+    },
+    android: {
+      file: 'apps/android/src/map/MapScene.tsx',
+      contains: 'exploreResultsFeatureCollection',
+    },
+  },
+  {
+    id: 'explore-stale-view',
+    surface: 'explore',
+    capability: 'Say when the result list describes the previous map view',
+    hook: 'useExplore',
+    web: { file: 'apps/web/src/explore/ExplorePanel.tsx', contains: 'explore.stale' },
+    android: { file: 'apps/android/src/ui/ExploreSheet.tsx', contains: 'explore.stale' },
   },
   {
     id: 'explore-states',

@@ -19,12 +19,15 @@ import {
   useStandBoard,
   useThemeMode,
   type FetchNearbyFn,
+  type ExploreArea,
   type CommuteFn,
   type StandBoardRow,
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
   atlasRouteUrl,
+  clampExploreRadiusM,
+  haversineM,
   mapProfile,
   placeIsVisible,
   resolveInaturOffer,
@@ -33,6 +36,7 @@ import {
   type LatLng,
   type MapAppearance,
   type NearbyPlaceArticle,
+  type SearchResult,
   type VisibilityFolder,
 } from '@atlas/core';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
@@ -227,6 +231,8 @@ function AppInner() {
   // The expanded search overlay (the 🔍 button in the bottom-left cluster opens it).
   const [searchOpen, setSearchOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
+  const [exploreResults, setExploreResults] = useState<SearchResult[]>([]);
+  const [exploreSelection, setExploreSelection] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commuteOpen, setCommuteOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -342,6 +348,22 @@ function AppInner() {
   }, []);
   const camera = useBootCamera(data, cameraRef, onLinkPin, onLinkPanel);
   const { initialView, viewRef, mapZoom, getBias } = camera;
+  const currentExploreArea = useMemo<ExploreArea | null>(() => {
+    if (!camera.mapViewport) return null;
+    const center = {
+      lat: (camera.mapViewport.bbox[1] + camera.mapViewport.bbox[3]) / 2,
+      lng: (camera.mapViewport.bbox[0] + camera.mapViewport.bbox[2]) / 2,
+    };
+    return {
+      center,
+      radiusM: clampExploreRadiusM(
+        haversineM(center, {
+          lat: camera.mapViewport.bbox[3],
+          lng: camera.mapViewport.bbox[2],
+        }),
+      ),
+    };
+  }, [camera.mapViewport]);
   // Stop search for the commute board's ends, biased to where the map is looking.
   const stopGeocode = useGeocode(packs, getBias);
   // The half-built plan survives the app being killed in the background, and a
@@ -612,6 +634,25 @@ function AppInner() {
     },
     [bestSpots.spots, onPickSpot],
   );
+  const onPickExplore = useCallback(
+    (result: SearchResult) => {
+      setExploreSelection(
+        `${result.name}/${result.position.lat.toFixed(6)}/${result.position.lng.toFixed(6)}`,
+      );
+      setExploreOpen(false);
+      dest.pickResult(result);
+    },
+    [dest],
+  );
+  useEffect(() => {
+    if (!exploreSelection) return;
+    const destinationKey = dest.destination?.name
+      ? `${dest.destination.name}/${dest.destination.lat.toFixed(6)}/${dest.destination.lng.toFixed(6)}`
+      : null;
+    if (destinationKey === exploreSelection) return;
+    setExploreSelection(null);
+    setExploreResults([]);
+  }, [dest.destination, exploreSelection]);
   // A spot saved from the shortlist keeps its reasoning in the notes: the pin
   // syncs and comes along offline, where the surface that produced it will not.
   const onSaveSpot = useCallback(
@@ -633,6 +674,8 @@ function AppInner() {
     showIdentify: dest.showIdentify,
     spots: spotsOpen ? bestSpots.spots : undefined,
     pickSpot: onPickSpotById,
+    exploreResults,
+    pickExplore: onPickExplore,
   });
   const selectOfflineRegionPoint = useCallback((point: LatLng) => {
     setOfflineRegion((current) => {
@@ -1058,6 +1101,7 @@ function AppInner() {
         traffic={traffic}
         trafficFlow={trafficFlow}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
+        exploreResults={exploreResults}
         measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}
@@ -1365,7 +1409,10 @@ function AppInner() {
             onClose={() => setMenuOpen(false)}
             onOpenFavorites={() => setFavoritesOpen(true)}
             onOpenLayers={() => setLayersOpen(true)}
-            onOpenExplore={() => setExploreOpen(true)}
+            onOpenExplore={() => {
+              setExploreSelection(null);
+              setExploreOpen(true);
+            }}
             onOpenMeasure={() => measure.setOpen(true)}
             onOpenCommute={() => setCommuteOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1489,15 +1536,20 @@ function AppInner() {
           />
 
           <ExploreSheet
+            key={profiles.profile.id}
             visible={exploreOpen && !planning && !navActive}
             packs={packs}
             getCenter={getBias}
+            currentArea={currentExploreArea}
             zoom={mapZoom}
-            onPick={(result) => {
+            profileId={profiles.profile.id}
+            onPick={onPickExplore}
+            onResultsChange={setExploreResults}
+            onClose={() => {
               setExploreOpen(false);
-              dest.pickResult(result);
+              setExploreSelection(null);
+              setExploreResults([]);
             }}
-            onClose={() => setExploreOpen(false)}
             bottomInset={bottomInset}
           />
 

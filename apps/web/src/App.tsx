@@ -76,6 +76,7 @@ import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
+import { useExploreLayer } from './map/useExploreLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
@@ -200,6 +201,8 @@ export function App() {
   const settingsOpen = panel === 'settings';
   const commuteOpen = panel === 'commute';
   const exploreOpen = panel === 'explore';
+  const [exploreResults, setExploreResults] = useState<SearchResult[]>([]);
+  const [exploreSelection, setExploreSelection] = useState<string | null>(null);
   // The two drawers anchored top-left, where the potential bar also lives.
   const leftPanelOpen = sidebarOpen || exploreOpen;
   const [selectedTrack, setSelectedTrack] = useState<{
@@ -512,6 +515,19 @@ export function App() {
       ),
     };
   }, []);
+  const currentExploreArea = useMemo<ExploreArea | null>(() => {
+    if (!mapViewport) return null;
+    const center = {
+      lat: (mapViewport.bbox[1] + mapViewport.bbox[3]) / 2,
+      lng: (mapViewport.bbox[0] + mapViewport.bbox[2]) / 2,
+    };
+    return {
+      center,
+      radiusM: clampExploreRadiusM(
+        haversineM(center, { lat: mapViewport.bbox[3], lng: mapViewport.bbox[2] }),
+      ),
+    };
+  }, [mapViewport]);
 
   // ---- weather & conditions ----
 
@@ -542,6 +558,32 @@ export function App() {
     },
     [closePanels, followPin],
   );
+  const onPickExplore = useCallback(
+    (result: SearchResult) => {
+      setExploreSelection(
+        `${result.name}/${result.position.lat.toFixed(6)}/${result.position.lng.toFixed(6)}`,
+      );
+      onSearchSelect(result);
+    },
+    [onSearchSelect],
+  );
+  useExploreLayer(map, exploreResults, onPickExplore, blockPassiveClicksRef);
+  // A picked result keeps the rest of its numbered set on the map while its
+  // card is open. Once the card changes subject or closes, the browse is over.
+  useEffect(() => {
+    if (!exploreSelection) return;
+    const targetKey = target?.name
+      ? `${target.name}/${target.position.lat.toFixed(6)}/${target.position.lng.toFixed(6)}`
+      : null;
+    if (targetKey === exploreSelection) return;
+    setExploreSelection(null);
+    setExploreResults([]);
+  }, [exploreSelection, target]);
+  useEffect(() => {
+    if (panel !== 'explore' && exploreSelection === null) {
+      setExploreResults((current) => (current.length ? [] : current));
+    }
+  }, [panel, exploreSelection]);
 
   // A described place picked from the card's nearby list becomes the card's
   // new subject: same treatment as a search hit (pin, card, camera), so the
@@ -914,6 +956,8 @@ export function App() {
           title="Explore"
           aria-expanded={exploreOpen}
           onClick={() => {
+            if (exploreOpen) setExploreResults([]);
+            setExploreSelection(null);
             togglePanel('explore');
             // The list is the subject while it is up; a card left open from
             // before would sit on top of the results it has nothing to do with.
@@ -1161,9 +1205,17 @@ export function App() {
       )}
       {exploreOpen && nav.phase === 'idle' && (
         <ExplorePanel
+          key={profiles.profile.id}
           getArea={getExploreArea}
-          onPick={(result) => onSearchSelect(result)}
-          onClose={closePanels}
+          currentArea={currentExploreArea}
+          profileId={profiles.profile.id}
+          onPick={onPickExplore}
+          onResultsChange={setExploreResults}
+          onClose={() => {
+            setExploreResults([]);
+            setExploreSelection(null);
+            closePanels();
+          }}
         />
       )}
       {/* Opened from the card's Edit action, and straight after saving a pin

@@ -11,7 +11,12 @@ export type ExploreCategoryId =
   | 'fuel'
   | 'charging'
   | 'supermarket'
-  | 'rest-area';
+  | 'rest-area'
+  | 'parking'
+  | 'cabins'
+  | 'boat-access'
+  | 'viewpoints'
+  | 'gates';
 
 export interface ExploreCategory {
   id: ExploreCategoryId;
@@ -59,7 +64,52 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
     label: 'Rest areas',
     osmTags: ['highway/rest_area', 'highway/services', 'tourism/picnic_site'],
   },
+  {
+    id: 'parking',
+    label: 'Parking & trailheads',
+    osmTags: ['amenity/parking', 'information/trailhead'],
+  },
+  {
+    id: 'cabins',
+    label: 'Cabins & shelters',
+    osmTags: ['tourism/wilderness_hut', 'tourism/alpine_hut', 'tourism/chalet', 'amenity/shelter'],
+  },
+  {
+    id: 'boat-access',
+    label: 'Boat access',
+    osmTags: ['leisure/slipway', 'waterway/boatyard'],
+  },
+  {
+    id: 'viewpoints',
+    label: 'Viewpoints',
+    osmTags: ['tourism/viewpoint', 'natural/peak'],
+  },
+  {
+    id: 'gates',
+    label: 'Road gates',
+    osmTags: ['barrier/gate', 'barrier/lift_gate', 'barrier/swing_gate'],
+  },
 ];
+
+const CATEGORIES_BY_ID = new Map(EXPLORE_CATEGORIES.map((category) => [category.id, category]));
+
+const PROFILE_CATEGORY_IDS: Readonly<Record<string, readonly ExploreCategoryId[]>> = {
+  explore: ['food', 'coffee', 'sights', 'nature', 'shops', 'essentials'],
+  drive: ['food', 'coffee', 'fuel', 'charging', 'supermarket', 'rest-area'],
+  bike: ['coffee', 'food', 'parking', 'viewpoints', 'essentials'],
+  hike: ['parking', 'cabins', 'viewpoints', 'nature'],
+  run: ['parking', 'viewpoints', 'nature', 'coffee'],
+  ski: ['parking', 'cabins', 'viewpoints'],
+  fishhunt: ['parking', 'boat-access', 'cabins', 'viewpoints', 'gates'],
+  curiosities: ['sights', 'nature', 'viewpoints', 'parking'],
+};
+
+/** The nearby questions that make sense for the activity currently on the map. */
+export function exploreCategoriesForProfile(profileId: string): readonly ExploreCategory[] {
+  return (PROFILE_CATEGORY_IDS[profileId] ?? PROFILE_CATEGORY_IDS['explore']!).map((id) =>
+    CATEGORIES_BY_ID.get(id)!,
+  );
+}
 
 /**
  * The browse radius both clients ask for, in metres. Web measures the map's own
@@ -81,7 +131,22 @@ export function isExploreCategory(value: unknown): value is ExploreCategoryId {
 }
 
 export function exploreCategory(id: ExploreCategoryId): ExploreCategory {
-  return EXPLORE_CATEGORIES.find((category) => category.id === id)!;
+  return CATEGORIES_BY_ID.get(id)!;
+}
+
+/** Numbered map markers in the exact order used by the Explore result list. */
+export function exploreResultsFeatureCollection(results: readonly SearchResult[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: results.map((result, index) => ({
+      type: 'Feature' as const,
+      properties: { index, label: String(index + 1), name: result.name },
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [result.position.lng, result.position.lat],
+      },
+    })),
+  };
 }
 
 /** Rank and deduplicate nearby POIs, enforcing the visible-area radius. */

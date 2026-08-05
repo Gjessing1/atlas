@@ -10,6 +10,7 @@ import {
   trafficIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
+  type SearchResult,
 } from '@atlas/core';
 import { viaInsertIndex } from '@atlas/routing';
 import { tappedFlowProperties } from '@atlas/traffic';
@@ -72,6 +73,9 @@ export interface MapPressOptions {
    */
   spots?: readonly { readonly id: string; readonly position: LatLng }[];
   pickSpot?: (id: string) => void;
+  /** Numbered Explore markers use the same reliable distance hit-test as spots. */
+  exploreResults?: readonly SearchResult[];
+  pickExplore?: (result: SearchResult) => void;
 }
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
@@ -109,6 +113,8 @@ export function useMapPress({
   showIdentify,
   spots,
   pickSpot,
+  exploreResults,
+  pickExplore,
 }: MapPressOptions): MapPressHandlers {
   // Identify is a network round trip, so a second tap can land before the first
   // answers. Only the newest tap's answer may reach the card — otherwise the
@@ -290,6 +296,21 @@ export function useMapPress({
             return;
           }
         }
+        if (exploreResults?.length && pickExplore) {
+          let bestResult: SearchResult | undefined;
+          let bestResultM = Infinity;
+          for (const result of exploreResults) {
+            const d = haversineM({ lat, lng }, result.position);
+            if (d < bestResultM) {
+              bestResultM = d;
+              bestResult = result;
+            }
+          }
+          if (bestResult && bestResultM <= toleranceM) {
+            pickExplore(bestResult);
+            return;
+          }
+        }
         const best = tappedPlace(toleranceM);
         if (best) {
           pickDestination({
@@ -320,6 +341,8 @@ export function useMapPress({
       showIdentify,
       spots,
       pickSpot,
+      exploreResults,
+      pickExplore,
     ],
   );
 

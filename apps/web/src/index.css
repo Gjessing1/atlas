@@ -6251,6 +6251,11 @@ button.transit-notice-summary {
   justify-content: space-between;
 }
 
+.explore-status.stale {
+  color: #b45309;
+  font-weight: 700;
+}
+
 .explore-results {
   list-style: none;
   margin: 0;
@@ -6275,10 +6280,24 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
-.explore-results li > button > span:first-child {
+.explore-result-text {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.explore-result-index {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #0e7490;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .explore-results small,
