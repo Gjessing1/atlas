@@ -59,8 +59,9 @@ export function useNavLayers(
 ): NavFollowControls {
   const [followPaused, setFollowPaused] = useState(false);
   const [overview, setOverview] = useState(false);
-  const active = nav.phase === 'navigating' || nav.phase === 'rerouting';
-  const following = active || nav.phase === 'exploring';
+  const active = nav.phase === 'navigating' || nav.phase === 'rerouting' || nav.phase === 'paused';
+  const following =
+    nav.phase === 'navigating' || nav.phase === 'rerouting' || nav.phase === 'exploring';
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
   // This must stay exact: rounding by a percentage of the whole route made
@@ -361,7 +362,7 @@ export function useNavLayers(
     // Arrival keeps the fix watch running until Done, so the puck stays too:
     // the last stretch to the door is exactly where it is being watched.
     const snapped =
-      following || nav.phase === 'arrived' ? (nav.state?.snapped ?? nav.position) : undefined;
+      active || nav.phase === 'arrived' ? (nav.state?.snapped ?? nav.position) : undefined;
     if (snapped) {
       if (!puckRef.current) {
         const el = document.createElement('div');

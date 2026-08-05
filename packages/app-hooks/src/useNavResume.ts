@@ -20,6 +20,8 @@ import type { LatLng } from '@atlas/core';
 import type { RoutePreferences, RoutingProfile } from '@atlas/routing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { NavTripProgress } from './useNavigationController.js';
+
 /** Device-local, like every navigation preference: `local.` keys never sync. */
 const TRIP_SETTING = 'local.nav.trip';
 
@@ -51,6 +53,8 @@ export interface ResumableTrip {
   preferences: Partial<RoutePreferences> | null;
   /** Distance left when the record was last written — the offer's "12 km to go". */
   remainingM: number | null;
+  /** Totals already earned, so a process restart cannot reset the final summary. */
+  progress: NavTripProgress | null;
   /** When guidance last confirmed it was alive (epoch ms). */
   atMs: number;
 }
@@ -72,12 +76,15 @@ export interface NavResumeTarget {
   profile: RoutingProfile;
   preferences: Partial<RoutePreferences> | null;
   remainingM: number | null;
+  /** Original estimate plus active time/distance already accumulated. */
+  tripProgress: NavTripProgress | null;
   /** Pick the trip back up: route from here and start guiding, no preview. */
   resume: (
     destination: LatLng,
     profile: RoutingProfile,
     preferences: Partial<RoutePreferences> | undefined,
     vias: LatLng[],
+    progress?: NavTripProgress,
   ) => Promise<void>;
 }
 
@@ -90,8 +97,9 @@ export interface NavResumeController {
   dismiss: () => void;
 }
 
-/** Whether guidance is running (either phase writes the same record). */
-const isGuiding = (phase: string): boolean => phase === 'navigating' || phase === 'rerouting';
+/** Whether a route is still a live trip, including a deliberate pause. */
+const isGuiding = (phase: string): boolean =>
+  phase === 'navigating' || phase === 'rerouting' || phase === 'paused';
 
 const isLatLng = (value: unknown): value is LatLng =>
   typeof value === 'object' &&
@@ -127,12 +135,25 @@ export function parseResumableTrip(raw: string | null, now: number): ResumableTr
         ? (value['preferences'] as Partial<RoutePreferences>)
         : null;
     const remainingM = value['remainingM'];
+    const rawProgress = value['progress'];
+    const progress =
+      typeof rawProgress === 'object' &&
+      rawProgress !== null &&
+      typeof (rawProgress as Record<string, unknown>)['distanceM'] === 'number' &&
+      Number.isFinite((rawProgress as Record<string, unknown>)['distanceM']) &&
+      typeof (rawProgress as Record<string, unknown>)['elapsedMs'] === 'number' &&
+      Number.isFinite((rawProgress as Record<string, unknown>)['elapsedMs']) &&
+      typeof (rawProgress as Record<string, unknown>)['originalEstimateMs'] === 'number' &&
+      Number.isFinite((rawProgress as Record<string, unknown>)['originalEstimateMs'])
+        ? (rawProgress as unknown as NavTripProgress)
+        : null;
     return {
       destination,
       vias,
       profile,
       preferences,
       remainingM: typeof remainingM === 'number' && Number.isFinite(remainingM) ? remainingM : null,
+      progress,
       atMs,
     };
   } catch {
@@ -194,6 +215,7 @@ export function useNavResume(
       // Rounded: a metre-by-metre remaining distance would rewrite the record
       // on every beat for a number the offer shows as "12 km".
       remainingM: current.remainingM === null ? null : Math.round(current.remainingM / 100) * 100,
+      progress: current.tripProgress,
       atMs: Date.now(),
     };
     const text = JSON.stringify(snapshot);
@@ -222,14 +244,20 @@ export function useNavResume(
       if (isGuiding(trip.current.phase)) return;
       clear();
     };
-  }, [guiding, record, clear]);
+  }, [guiding, nav.phase, record, clear]);
 
   const resume = useCallback(() => {
     const offer = resumable;
     if (!offer) return;
     setResumable(null);
     void trip.current
-      .resume(offer.destination, offer.profile, offer.preferences ?? undefined, offer.vias)
+      .resume(
+        offer.destination,
+        offer.profile,
+        offer.preferences ?? undefined,
+        offer.vias,
+        offer.progress ?? undefined,
+      )
       .catch(() => {
         // The controller's own error phase carries the reason; the offer is
         // spent either way — a failed resume must not re-offer on every render.

@@ -515,6 +515,7 @@ function AppInner() {
     profile: nav.profile,
     preferences: nav.preferences,
     remainingM: nav.state?.distanceRemainingM ?? null,
+    tripProgress: nav.tripProgress,
     resume: nav.resume,
   });
   // The follow camera uses the same responsive viewport as the visible puck:

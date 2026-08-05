@@ -256,6 +256,64 @@ describe('useNavigationController — guidance', () => {
     expect(h.platform.stopSpeaking).toHaveBeenCalled();
   });
 
+  it('pauses fixes, guidance and elapsed time, then resumes the same route', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const h = harness();
+    const hook = renderHook(() => useNavigationController(h.platform));
+    try {
+      await act(() => hook.result.current.start(destination));
+      await act(() => hook.result.current.go());
+      expect(hook.result.current.phase).toBe('navigating');
+      act(() => h.emit(onLine(5, { speedMps: 8 }), Date.now()));
+      const beforePauseM = hook.result.current.tripProgress!.distanceM;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      act(() => hook.result.current.pause());
+
+      expect(hook.result.current.phase).toBe('paused');
+      expect(h.watchStopped()).toBe(1);
+      expect(h.platform.stopSpeaking).toHaveBeenCalled();
+      expect(hook.result.current.routeCoords).toHaveLength(21);
+      expect(hook.result.current.tripProgress?.elapsedMs).toBe(60_000);
+
+      // The old native watch cannot move the trip after Pause, even if a
+      // final sample was already queued at its boundary.
+      act(() => h.emit(onLine(10, { speedMps: 8 }), Date.now()));
+      expect(hook.result.current.tripProgress?.distanceM).toBeCloseTo(beforePauseM, 0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+      });
+      h.currentFix.mockResolvedValueOnce({ fix: onLine(10, { speedMps: 0 }), atMs: Date.now() });
+      await act(() => hook.result.current.continueTrip());
+
+      expect(hook.result.current.phase).toBe('navigating');
+      expect(h.watchActivities).toEqual(['guidance', 'guidance']);
+      // Moving while paused re-anchors the puck, but is not trip distance.
+      expect(hook.result.current.state?.traveledM).toBeGreaterThan(beforePauseM);
+      expect(hook.result.current.tripProgress?.distanceM).toBeCloseTo(beforePauseM, 0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+      });
+      act(() => h.emit(onLine(12, { speedMps: 8 }), Date.now()));
+      act(() => hook.result.current.arriveNow());
+
+      expect(hook.result.current.tripSummary).toMatchObject({
+        durationMs: 3 * 60_000,
+        originalEstimateMs: 600_000,
+      });
+      expect(hook.result.current.tripSummary!.distanceM).toBeGreaterThan(beforePauseM);
+    } finally {
+      hook.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('ends as arrived with a distance/time summary, keeping the watch until Done', async () => {
     const h = harness();
     const { result } = await drive(h);
@@ -265,6 +323,7 @@ describe('useNavigationController — guidance', () => {
     await waitFor(() => expect(result.current.phase).toBe('arrived'));
     expect(result.current.tripSummary).not.toBeNull();
     expect(result.current.tripSummary!.distanceM).toBeGreaterThan(0);
+    expect(result.current.tripSummary!.originalEstimateMs).toBe(600_000);
     expect(result.current.destination).toEqual(destination);
     // The last stretch to the door is walked with the arrival card up, so the
     // fixes keep coming — and keep moving the position — until Done.

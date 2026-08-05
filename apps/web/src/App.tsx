@@ -412,6 +412,7 @@ export function App() {
     profile: nav.profile,
     preferences: nav.preferences,
     remainingM: nav.state?.distanceRemainingM ?? null,
+    tripProgress: nav.tripProgress,
     resume: nav.resume,
   });
   const follow = useNavLayers(map, nav, navPrefs.followMode);

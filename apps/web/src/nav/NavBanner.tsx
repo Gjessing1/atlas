@@ -214,13 +214,24 @@ export function NavBanner({
               </span>
               <span className="nav-error">{nav.error ?? 'Navigation error'}</span>
             </div>
+          ) : nav.phase === 'paused' ? (
+            <div className="nav-state-block">
+              <span className="nav-state-eyebrow">Navigation paused</span>
+              <span className="nav-maneuver">Your trip is waiting</span>
+              <span className="nav-arrival-summary">
+                {state ? `${fmtKm(state.distanceRemainingM)} remaining · ` : ''}
+                Position, progress and voice guidance are stopped
+              </span>
+              {nav.error ? <span className="nav-error">{nav.error}</span> : null}
+            </div>
           ) : nav.phase === 'arrived' ? (
             <div className="nav-state-block">
               <span className="nav-state-eyebrow">Trip complete</span>
               <span className="nav-maneuver">You have arrived</span>
               {nav.tripSummary ? (
                 <span className="nav-arrival-summary">
-                  {fmtKm(nav.tripSummary.distanceM)} · {fmtDuration(nav.tripSummary.durationMs)}
+                  Estimated {fmtDuration(nav.tripSummary.originalEstimateMs)} · Actual{' '}
+                  {fmtDuration(nav.tripSummary.durationMs)} · {fmtKm(nav.tripSummary.distanceM)}
                 </span>
               ) : null}
             </div>
@@ -306,7 +317,7 @@ export function NavBanner({
               </button>
             </div>
           ) : null}
-          {state && nav.phase !== 'arrived' ? (
+          {state && guiding ? (
             <>
               {/* Time left leads (Android parity): mid-drive "12 min" is the
                   number the driver decides on, and needs no "left" label in a
@@ -421,6 +432,15 @@ export function NavBanner({
                 title={nav.muted ? 'Unmute guidance' : 'Mute guidance'}
               >
                 <NavActionIcon kind={nav.muted ? 'mute' : 'sound'} />
+              </button>
+            ) : null}
+            {guiding ? (
+              <button type="button" className="nav-pause" onClick={nav.pause}>
+                Pause
+              </button>
+            ) : nav.phase === 'paused' ? (
+              <button type="button" className="nav-arrived" onClick={nav.continueTrip}>
+                Resume
               </button>
             ) : null}
             {canDeclareArrival ? (

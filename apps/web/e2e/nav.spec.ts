@@ -88,9 +88,24 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   // So does the speed-camera warning, from its own NVDB dataset fetch.
   await expect(page.locator('.nav-camera-chip')).toHaveText(/Speed camera · \d+ m/);
 
+  // Pause is a real trip state, not End under another name: the line and puck
+  // stay visible while live guidance/ETA disappear, and Resume returns to the
+  // same route without a new preview.
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await expect(page.getByText('Navigation paused')).toBeVisible();
+  await expect(page.getByText(/Position, progress and voice guidance are stopped/)).toBeVisible();
+  await expect(page.locator('.nav-eta')).toHaveCount(0);
+  await expect(page.locator('.nav-puck')).toBeVisible();
+  expect(await page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-nav')))).toBe(true);
+  await page.getByRole('button', { name: 'Resume' }).click();
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect(page.locator('.nav-eta')).toBeVisible();
+
   // A fix near the destination arrives → the session declares arrival.
   await context.setGeolocation({ latitude: 59.9199, longitude: 10.7599 });
   await expect(page.locator('.nav-maneuver')).toContainText('You have arrived');
+  await expect(page.locator('.nav-arrival-summary')).toContainText('Estimated');
+  await expect(page.locator('.nav-arrival-summary')).toContainText('Actual');
 
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.nav-banner')).toHaveCount(0);

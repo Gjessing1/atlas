@@ -57,7 +57,7 @@ export function useNavPuck(
   // so it keeps the trip's own marker too. Handing the last hundred metres —
   // across the car park, round the courtyard — back to the native puck's fuzzy
   // accuracy blob would drop precision exactly where it is wanted most.
-  const live = following || nav.phase === 'arrived';
+  const live = following || nav.phase === 'paused' || nav.phase === 'arrived';
   const courseUp = followMode === 'course';
   // Walking modes keep a flat, centred camera even course-up (useNavCamera);
   // only the pitched driving frame bottom-anchors the puck.

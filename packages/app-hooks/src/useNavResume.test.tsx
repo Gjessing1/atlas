@@ -31,6 +31,7 @@ function target(overrides: Partial<NavResumeTarget> = {}): NavResumeTarget {
     profile: 'car',
     preferences: null,
     remainingM: null,
+    tripProgress: null,
     resume: vi.fn(() => Promise.resolve()),
     ...overrides,
   };
@@ -44,6 +45,7 @@ const stored = (ageMs = 0, extra: Record<string, unknown> = {}) =>
     profile: 'car',
     preferences: { avoidTolls: true },
     remainingM: 12_300,
+    progress: { distanceM: 8_500, elapsedMs: 1_800_000, originalEstimateMs: 2_400_000 },
     atMs: Date.now() - ageMs,
     ...extra,
   });
@@ -57,6 +59,11 @@ describe('parseResumableTrip', () => {
     expect(trip?.vias).toEqual([OSLO]);
     expect(trip?.preferences).toEqual({ avoidTolls: true });
     expect(trip?.remainingM).toBe(12_300);
+    expect(trip?.progress).toEqual({
+      distanceM: 8_500,
+      elapsedMs: 1_800_000,
+      originalEstimateMs: 2_400_000,
+    });
   });
 
   it('drops a trip too old to still be under way', () => {
@@ -130,6 +137,7 @@ describe('useNavResume', () => {
       viaPoints: [OSLO, { lat: 60, lng: 6 }],
       viasPassed: 1,
       remainingM: 12_345,
+      tripProgress: { distanceM: 4_000, elapsedMs: 600_000, originalEstimateMs: 900_000 },
       preferences: { avoidTolls: true },
     });
     renderHook(() => useNavResume(store, nav));
@@ -142,6 +150,11 @@ describe('useNavResume', () => {
     expect(written['vias']).toEqual([{ lat: 60, lng: 6 }]);
     expect(written['preferences']).toEqual({ avoidTolls: true });
     expect(written['remainingM']).toBe(12_300);
+    expect(written['progress']).toEqual({
+      distanceM: 4_000,
+      elapsedMs: 600_000,
+      originalEstimateMs: 900_000,
+    });
   });
 
   it('re-dates the record while the trip runs, without churning on every beat', async () => {
@@ -182,6 +195,18 @@ describe('useNavResume', () => {
     expect(store.setSetting).toHaveBeenLastCalledWith(TRIP, '');
   });
 
+  it('keeps a deliberately paused trip resumable instead of clearing it', async () => {
+    const store = settings();
+    const nav = target({ phase: 'navigating', destination: BERGEN });
+    const { rerender } = renderHook(() => useNavResume(store, nav));
+    await waitFor(() => expect(store.setSetting).toHaveBeenCalledTimes(1));
+
+    nav.phase = 'paused';
+    rerender();
+
+    expect(store.setSetting).not.toHaveBeenCalledWith(TRIP, '');
+  });
+
   it('keeps the record when the app goes away mid-trip', async () => {
     const store = settings();
     const nav = target({ phase: 'navigating', destination: BERGEN });
@@ -199,7 +224,11 @@ describe('useNavResume', () => {
     await waitFor(() => expect(result.current.resumable).not.toBeNull());
 
     act(() => result.current.resume());
-    expect(nav.resume).toHaveBeenCalledWith(BERGEN, 'car', { avoidTolls: true }, [OSLO]);
+    expect(nav.resume).toHaveBeenCalledWith(BERGEN, 'car', { avoidTolls: true }, [OSLO], {
+      distanceM: 8_500,
+      elapsedMs: 1_800_000,
+      originalEstimateMs: 2_400_000,
+    });
     expect(result.current.resumable).toBeNull();
   });
 

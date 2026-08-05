@@ -254,14 +254,25 @@ export function NavBanner({
             </Text>
             <Text style={styles.error}>{nav.error ?? 'Navigation error'}</Text>
           </View>
+        ) : nav.phase === 'paused' ? (
+          <View style={styles.stateBlock}>
+            <Text style={styles.eyebrow}>Navigation paused</Text>
+            <Text style={styles.maneuver}>Your trip is waiting</Text>
+            <Text style={styles.arrivalSummary}>
+              {state ? `${formatDistance(state.distanceRemainingM)} remaining · ` : ''}
+              Position, progress and voice guidance are stopped
+            </Text>
+            {nav.error ? <Text style={styles.error}>{nav.error}</Text> : null}
+          </View>
         ) : nav.phase === 'arrived' ? (
           <View style={styles.stateBlock}>
             <Text style={styles.eyebrow}>Trip complete</Text>
             <Text style={styles.maneuver}>You have arrived</Text>
             {nav.tripSummary ? (
               <Text style={styles.arrivalSummary}>
-                {formatDistance(nav.tripSummary.distanceM)} ·{' '}
-                {formatDuration(nav.tripSummary.durationMs)}
+                Estimated {formatDuration(nav.tripSummary.originalEstimateMs)} · Actual{' '}
+                {formatDuration(nav.tripSummary.durationMs)} ·{' '}
+                {formatDistance(nav.tripSummary.distanceM)}
               </Text>
             ) : null}
           </View>
@@ -372,7 +383,7 @@ export function NavBanner({
           <Text style={styles.reroute}>Check route — you may have taken a different turn</Text>
         ) : null}
 
-        {state && nav.phase !== 'arrived' ? (
+        {state && guiding ? (
           <>
             {/* Time left leads: mid-drive "12 min" is the number the driver is
                 actually deciding on — unlabelled, because a duration in a
@@ -534,6 +545,27 @@ export function NavBanner({
               accessibilityState={{ selected: nav.muted }}
             >
               <AudioIcon muted={nav.muted} />
+            </Pressable>
+          ) : null}
+          {guiding ? (
+            <Pressable
+              style={styles.pause}
+              onPress={nav.pause}
+              testID="pause-nav"
+              accessibilityRole="button"
+              accessibilityLabel="Pause navigation"
+            >
+              <Text style={styles.pauseText}>Pause</Text>
+            </Pressable>
+          ) : nav.phase === 'paused' ? (
+            <Pressable
+              style={styles.resume}
+              onPress={() => void nav.continueTrip()}
+              testID="resume-nav"
+              accessibilityRole="button"
+              accessibilityLabel="Resume navigation"
+            >
+              <Text style={styles.stopText}>Resume</Text>
             </Pressable>
           ) : null}
           {canDeclareArrival ? (
@@ -819,6 +851,25 @@ const styles = StyleSheet.create({
     backgroundColor: theme.danger,
     borderRadius: 22,
     paddingHorizontal: 18,
+    elevation: 5,
+  },
+  pause: {
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: theme.surfaceOverlay,
+    borderColor: theme.warning,
+    borderWidth: 1,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    elevation: 5,
+  },
+  pauseText: { color: theme.text, fontWeight: '700', fontSize: 15 },
+  resume: {
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: '#1e8e3e',
+    borderRadius: 22,
+    paddingHorizontal: 16,
     elevation: 5,
   },
   // Completing the trip, not abandoning it — green against the red End beside it.

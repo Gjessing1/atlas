@@ -853,6 +853,22 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/App.tsx', contains: 'useNavResume' },
   },
   {
+    id: 'nav-pause',
+    surface: 'navigation',
+    capability: 'Pause a trip without ending it, then resume the same route',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'nav.continueTrip' },
+    android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'nav.continueTrip' },
+  },
+  {
+    id: 'nav-trip-summary',
+    surface: 'navigation',
+    capability: 'Compare the original estimate with actual time and distance on arrival',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'originalEstimateMs' },
+    android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'originalEstimateMs' },
+  },
+  {
     id: 'nav-recentre',
     surface: 'navigation',
     capability: 'Pan away to look ahead, then get the follow camera back',

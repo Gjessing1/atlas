@@ -4394,6 +4394,13 @@ button.transit-notice-summary {
   background: #982018;
 }
 
+.nav-buttons .nav-pause {
+  background: var(--surface-overlay);
+  color: var(--text);
+  border-color: var(--warning);
+  padding-inline: 15px;
+}
+
 /* Completing the trip, not abandoning it — green reads as "done", against the
    red End beside it. */
 .nav-buttons .nav-arrived {

@@ -42,7 +42,15 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type NavPhase =
-  'idle' | 'starting' | 'preview' | 'exploring' | 'navigating' | 'rerouting' | 'arrived' | 'error';
+  | 'idle'
+  | 'starting'
+  | 'preview'
+  | 'exploring'
+  | 'navigating'
+  | 'rerouting'
+  | 'paused'
+  | 'arrived'
+  | 'error';
 
 /** Whether the location watch is following a route or simply following the traveller. */
 export type NavActivity = 'guidance' | 'explorer' | null;
@@ -51,6 +59,15 @@ export type NavActivity = 'guidance' | 'explorer' | null;
 export interface NavTripSummary {
   distanceM: number;
   durationMs: number;
+  /** The route engine's estimate when Start was pressed, before any reroutes. */
+  originalEstimateMs: number;
+}
+
+/** Session totals persisted with an interrupted trip so its final summary remains whole. */
+export interface NavTripProgress {
+  distanceM: number;
+  elapsedMs: number;
+  originalEstimateMs: number;
 }
 
 /** A one-off fix, with the wall-clock time it was *measured* (not received). */
@@ -218,6 +235,8 @@ export interface NavController {
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
   tripSummary: NavTripSummary | null;
+  /** Running totals used by process restoration; null outside an active trip. */
+  tripProgress: NavTripProgress | null;
   /** True while off-route but the reroute keeps failing (routing unreachable). */
   rerouteFailed: boolean;
   error: string | null;
@@ -254,7 +273,12 @@ export interface NavController {
     profile: RoutingProfile,
     preferences?: Partial<RoutePreferences>,
     vias?: LatLng[],
+    progress?: NavTripProgress,
   ) => Promise<void>;
+  /** Freeze this trip in place: no fixes, prompts, reroutes, PiP or wake lock. */
+  pause: () => void;
+  /** Continue the same in-memory route and session from a fresh position fix. */
+  continueTrip: () => Promise<void>;
   toggleMute: () => void;
   /** Set mute directly (the persisted preference applies through this). */
   setMuted: (muted: boolean) => void;
@@ -351,8 +375,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const rerouteFailCount = useRef(0);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
   const mutedRef = useRef(false);
-  /** When guidance began, for the arrival card's elapsed time. */
-  const tripStartRef = useRef<number | null>(null);
+  /** Original engine estimate, deliberately unchanged by reroutes or live traffic. */
+  const originalEstimateMsRef = useRef(0);
+  /** Active (not paused) elapsed time banked before the current running segment. */
+  const activeElapsedMsRef = useRef(0);
+  /** Start of the current active segment; null while paused/outside guidance. */
+  const activeStartedAtRef = useRef<number | null>(null);
   /** Distance driven across reroutes (each reroute starts a fresh session). */
   const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
@@ -382,6 +410,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const enrichAbort = useRef<AbortController | null>(null);
   /** Teardown for the active fix watch, if any. */
   const watchStopRef = useRef<(() => void) | null>(null);
+  /** Synchronous guard for a final queued fix after a pause tears its watch down. */
+  const pausedRef = useRef(false);
+  /** Prevent two quick Resume taps from starting competing location watches. */
+  const continueInFlightRef = useRef(false);
+  /** Along-route progress at Pause; the first resumed fix must not count the gap as travel. */
+  const resumeFromTraveledRef = useRef<number | null>(null);
+  /** The re-anchor fix updates state but does not replay a cue crossed during the pause. */
+  const suppressPromptsOnceRef = useRef(false);
   /**
    * True from the moment the trip is declared arrived until it is released.
    * Fixes keep arriving through the arrival card (see `stop`), and every one
@@ -420,6 +456,13 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const stopWatch = useCallback(() => {
     watchStopRef.current?.();
     watchStopRef.current = null;
+  }, []);
+
+  /** Bank the current active segment exactly once (Pause, arrival or End). */
+  const bankActiveTime = useCallback((now = Date.now()) => {
+    if (activeStartedAtRef.current === null) return;
+    activeElapsedMsRef.current += Math.max(0, now - activeStartedAtRef.current);
+    activeStartedAtRef.current = null;
   }, []);
 
   const fetchPath = useCallback(
@@ -561,6 +604,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const stop = useCallback(
     (arrived = false) => {
       tripSeq.current++;
+      bankActiveTime();
       // Arrival is not the end of needing a position. The last hundred metres
       // are on foot — across a car park, round a courtyard, looking for the
       // door — and that is exactly where an accurate, live puck earns its
@@ -600,17 +644,23 @@ export function useNavigationController(platform: NavPlatform): NavController {
       facingBlender.current.reset();
       lastFixRef.current = null;
       offRouteSpokenRef.current = false;
+      pausedRef.current = false;
+      continueInFlightRef.current = false;
+      resumeFromTraveledRef.current = null;
+      suppressPromptsOnceRef.current = false;
       if (!arrived) {
         setState(null);
         setDestination(null);
         setTripSummary(null);
         setActivity(null);
       }
-      tripStartRef.current = null;
+      originalEstimateMsRef.current = 0;
+      activeElapsedMsRef.current = 0;
+      activeStartedAtRef.current = null;
       traveledBaseRef.current = 0;
       setPhase(arrived ? 'arrived' : 'idle');
     },
-    [stopWatch, clearPreview, clearFasterOffer],
+    [stopWatch, clearPreview, clearFasterOffer, bankActiveTime],
   );
 
   /** Abandon a trip that could not be set up, keeping the reason on screen. */
@@ -645,14 +695,16 @@ export function useNavigationController(platform: NavPlatform): NavController {
     (session: NavigationSession, traveledM: number) => {
       if (arrivedRef.current) return;
       arrivedRef.current = true;
+      bankActiveTime();
       speak(session.arrivalText());
       setTripSummary({
         distanceM: traveledBaseRef.current + traveledM,
-        durationMs: tripStartRef.current !== null ? Date.now() - tripStartRef.current : 0,
+        durationMs: activeElapsedMsRef.current,
+        originalEstimateMs: originalEstimateMsRef.current,
       });
       stop(true);
     },
-    [speak, stop],
+    [speak, stop, bankActiveTime],
   );
 
   /**
@@ -671,6 +723,29 @@ export function useNavigationController(platform: NavPlatform): NavController {
     }
     finishArrived(session, next?.traveledM ?? 0);
   }, [finishArrived]);
+
+  /**
+   * Deliberately stop the trip clock and every active delivery surface while
+   * retaining the route/session in memory. `pausedRef` is set before native
+   * watch teardown so a queued final fix cannot sneak progress into the pause.
+   */
+  const pause = useCallback(() => {
+    if (!sessionRef.current || (phase !== 'navigating' && phase !== 'rerouting')) return;
+    pausedRef.current = true;
+    resumeFromTraveledRef.current = lastStateRef.current?.traveledM ?? null;
+    tripSeq.current++;
+    bankActiveTime();
+    stopWatch();
+    platformRef.current.stopSpeaking();
+    rerouteInFlight.current = false;
+    rerouteBackoffUntil.current = 0;
+    setRerouteFailed(false);
+    clearFasterOffer();
+    fasterCheckInFlight.current = false;
+    setSpeedMps(null);
+    setError(null);
+    setPhase('paused');
+  }, [phase, bankActiveTime, stopWatch, platformRef, clearFasterOffer]);
 
   const reroute = useCallback(
     async (from: Position, viasOverride?: LatLng[]) => {
@@ -976,6 +1051,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   const onFix = useCallback(
     (fix: Position, measuredAtMs?: number) => {
+      // Stopping an Android foreground watch is asynchronous at the native
+      // boundary. A final queued sample belongs to the paused interval and
+      // must not move progress, fire a prompt or start a reroute.
+      if (pausedRef.current) return;
       const explicitlyMeasured = typeof measuredAtMs === 'number' && Number.isFinite(measuredAtMs);
       let fixAtMs = explicitlyMeasured ? measuredAtMs : Date.now();
       const previousAtMs = lastFixMeasuredAtRef.current;
@@ -1007,9 +1086,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // uncaught throw here would take the whole app down in a release build.
       try {
         const { state: next, prompts } = session.update(fix, fixAtMs);
+        const pausedAtM = resumeFromTraveledRef.current;
+        if (pausedAtM !== null) {
+          // Re-anchor the visible route at the traveller's current position,
+          // but exclude any forward movement made while Atlas was paused from
+          // the completed-trip distance. From here onward new progress counts.
+          traveledBaseRef.current -= Math.max(0, next.traveledM - pausedAtM);
+          resumeFromTraveledRef.current = null;
+        }
+        const suppressPrompts = suppressPromptsOnceRef.current;
+        suppressPromptsOnceRef.current = false;
         setState(next);
         lastStateRef.current = next;
-        for (const prompt of prompts) speak(prompt.text);
+        if (!suppressPrompts) for (const prompt of prompts) speak(prompt.text);
         if (next.status === 'arrived') {
           finishArrived(session, next.traveledM);
         } else if (next.status === 'off-route') {
@@ -1037,6 +1126,47 @@ export function useNavigationController(platform: NavPlatform): NavController {
     },
     [reroute, speak, finishArrived, clearFasterOffer],
   );
+
+  /** Resume a deliberately paused in-memory session without replacing its route. */
+  const continueTrip = useCallback(async (): Promise<void> => {
+    const session = sessionRef.current;
+    if (!session || !pausedRef.current || continueInFlightRef.current) return;
+    continueInFlightRef.current = true;
+    const trip = tripSeq.current;
+    setError(null);
+    try {
+      // Obtain a measured anchor before accepting streaming fixes. It puts the
+      // puck where the traveller is now without treating the paused interval
+      // as dead reckoning or replaying guidance that belonged inside it.
+      const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
+      if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) return;
+      const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
+      if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) {
+        stopFixes();
+        return;
+      }
+      watchStopRef.current = stopFixes;
+      lastFixMeasuredAtRef.current = null;
+      activeStartedAtRef.current = Date.now();
+      pausedRef.current = false;
+      setPhase('navigating');
+      suppressPromptsOnceRef.current = true;
+      onFix(origin.fix, origin.atMs);
+      if (!arrivedRef.current) speak('Navigation resumed');
+    } catch (err) {
+      // A failed restart leaves the route safely paused and retryable. It does
+      // not become the terminal error phase, which would discard the only
+      // useful route state the traveller still has.
+      if (trip === tripSeq.current && sessionRef.current === session) {
+        pausedRef.current = true;
+        activeStartedAtRef.current = null;
+        setError(message(err));
+        setPhase('paused');
+      }
+    } finally {
+      continueInFlightRef.current = false;
+    }
+  }, [platformRef, onFix, speak]);
 
   const start = useCallback(
     async (
@@ -1194,16 +1324,20 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * departure prompt that answers "which way now?".
    */
   const beginGuidance = useCallback(
-    async (path: RoutePath, origin: NavOriginFix | null) => {
+    async (path: RoutePath, origin: NavOriginFix | null, restoredProgress?: NavTripProgress) => {
       tripSeq.current++;
       setActivity('guidance');
       const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
       sessionRef.current = session;
       offRouteSpokenRef.current = false;
       arrivedRef.current = false;
+      pausedRef.current = false;
+      resumeFromTraveledRef.current = null;
       enrich(session, path);
-      tripStartRef.current = Date.now();
-      traveledBaseRef.current = 0;
+      originalEstimateMsRef.current = restoredProgress?.originalEstimateMs ?? path.timeMs;
+      activeElapsedMsRef.current = restoredProgress?.elapsedMs ?? 0;
+      activeStartedAtRef.current = Date.now();
+      traveledBaseRef.current = restoredProgress?.distanceM ?? 0;
       lastStateRef.current = null;
       setTripSummary(null);
       setState(null);
@@ -1298,6 +1432,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       prof: RoutingProfile,
       preferencesOverride?: Partial<RoutePreferences>,
       vias: LatLng[] = [],
+      progress?: NavTripProgress,
     ) => {
       if (startInFlight.current) return;
       startInFlight.current = true;
@@ -1327,7 +1462,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // finally runs this resume no longer looks like the current one and
         // would leave the double-tap guard latched on for good.
         startInFlight.current = false;
-        await beginGuidance(path, origin);
+        await beginGuidance(path, origin, progress);
       } catch (err) {
         if (seq !== previewSeq.current) return;
         fail(err);
@@ -1340,6 +1475,18 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   const guiding = phase === 'navigating' || phase === 'rerouting';
   const liveFollowing = guiding || phase === 'exploring';
+  const activeTrip = guiding || phase === 'paused';
+  const tripProgress: NavTripProgress | null = activeTrip
+    ? {
+        distanceM: Math.max(0, traveledBaseRef.current + (state?.traveledM ?? 0)),
+        elapsedMs:
+          activeElapsedMsRef.current +
+          (activeStartedAtRef.current === null
+            ? 0
+            : Math.max(0, Date.now() - activeStartedAtRef.current)),
+        originalEstimateMs: originalEstimateMsRef.current,
+      }
+    : null;
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.
@@ -1480,6 +1627,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     dismissFasterRoute,
     addStop,
     tripSummary,
+    tripProgress,
     rerouteFailed,
     error,
     start,
@@ -1488,6 +1636,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
     setProfile,
     go,
     resume,
+    pause,
+    continueTrip,
     toggleMute,
     setMuted,
     arriveNow,

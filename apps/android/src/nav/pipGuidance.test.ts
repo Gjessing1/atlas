@@ -67,7 +67,10 @@ describe('pipGuidance', () => {
 
   it('says a trip is over rather than freezing the last maneuver', () => {
     const arrived = pipGuidance(
-      nav({ phase: 'arrived', tripSummary: { distanceM: 24_000, durationMs: 1_800_000 } }),
+      nav({
+        phase: 'arrived',
+        tripSummary: { distanceM: 24_000, durationMs: 1_800_000, originalEstimateMs: 1_500_000 },
+      }),
     );
     expect(arrived).toMatchObject({ headline: 'Arrived', detail: '24 km', ended: true });
 
