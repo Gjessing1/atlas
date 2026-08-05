@@ -22,7 +22,7 @@ import {
 } from '@maplibre/maplibre-react-native';
 import { maneuverArrowsGeoJSON, navLineProgress } from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
-import { useCallback, useMemo, useState, type RefObject } from 'react';
+import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { HuntingFields } from '../layers/useHuntingFields';
@@ -246,6 +246,8 @@ interface MapSceneProps {
    * app one tap away still carries it.
    */
   inPip: boolean;
+  /** Full-screen map rectangle used as Android's PiP transition source. */
+  onMapRect?: (rect: { x: number; y: number; width: number; height: number }) => void;
   /** Every map tap (menu dismissal, plan stops, pin/POI hit-tests live in the app). */
   onMapPress: (point: LatLng, pixel: { x: number; y: number }) => void;
   /** Long-press outside route planning: pick the point as a destination. */
@@ -293,12 +295,21 @@ export function MapScene({
   initialView,
   showIdleChrome,
   inPip,
+  onMapRect,
   onMapPress,
   onPickPoint,
   onViewChange,
   onUserGesture,
   onDestinationMoved,
 }: MapSceneProps) {
+  const mapViewportRef = useRef<View>(null);
+  const measureMapViewport = useCallback(() => {
+    requestAnimationFrame(() => {
+      mapViewportRef.current?.measureInWindow((x, y, width, height) => {
+        if (width > 0 && height > 0) onMapRect?.({ x, y, width, height });
+      });
+    });
+  }, [onMapRect]);
   // The follow camera itself lives in useNavCamera (App drives it through
   // cameraRef) — the scene only renders the puck and reports gestures.
   const following =
@@ -380,7 +391,7 @@ export function MapScene({
   );
 
   return (
-    <View style={styles.map}>
+    <View ref={mapViewportRef} style={styles.map} onLayout={measureMapViewport}>
       <MapLibreMap
         ref={mapRef}
         style={styles.map}

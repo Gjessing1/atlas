@@ -13,7 +13,8 @@ import { PixelRatio } from 'react-native';
 interface PipNativeModule {
   isSupported(): boolean;
   isAllowed(): boolean;
-  setActive(on: boolean): void;
+  setActive(on: boolean): boolean;
+  isArmed(): boolean;
   setSourceRect(x: number, y: number, width: number, height: number): void;
   inPictureInPicture(): boolean;
   addListener(
@@ -25,10 +26,10 @@ interface PipNativeModule {
 /** Null in builds that predate the native module (and in unit tests). */
 const Native = requireOptionalNativeModule<PipNativeModule>('AtlasPip');
 
-/** Whether a mini navigation window is possible: module present, device capable, app allowed. */
+/** Whether the build and device support a mini navigation window. */
 export function pipSupported(): boolean {
   try {
-    return Native?.isSupported() === true && Native.isAllowed();
+    return Native?.isSupported() === true;
   } catch {
     return false;
   }
@@ -43,16 +44,26 @@ export function pipBlockedByUser(): boolean {
   }
 }
 
-export function setPipActive(on: boolean): void {
+/** Request PiP arming and return whether native state is currently applied. */
+export function setPipActive(on: boolean): boolean {
   try {
-    Native?.setActive(on);
+    return Native?.setActive(on) === true;
   } catch {
     // A finishing activity — nothing to arm.
+    return false;
+  }
+}
+
+export function pipArmed(): boolean {
+  try {
+    return Native?.isArmed() === true;
+  } catch {
+    return false;
   }
 }
 
 /**
- * Where the guidance banner sits (dp, window coordinates) — the patch of screen
+ * Where the map viewport sits (dp, window coordinates) — the patch of screen
  * the mini window is about to become.
  *
  * Android crops the shrinking activity to this rectangle, so it decides what

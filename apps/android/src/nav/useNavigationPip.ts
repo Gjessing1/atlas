@@ -1,10 +1,11 @@
 import type { NavController } from '@atlas/app-hooks';
 import { useCallback, useEffect, useState } from 'react';
-import { useWindowDimensions } from 'react-native';
+import { AppState, useWindowDimensions } from 'react-native';
 
 import {
   addPipListener,
   inPictureInPicture,
+  pipArmed,
   pipBlockedByUser,
   pipSupported,
   setPipActive,
@@ -23,18 +24,17 @@ export interface NavPipSettings {
 export interface NavPipController {
   /** True while Atlas is showing as a floating mini window. */
   inPictureInPicture: boolean;
-  /** Whether a mini window is possible at all on this device and build. */
+  /** Whether a mini window is possible and currently permitted. */
   available: boolean;
   /** PiP exists but is switched off for Atlas in system settings. */
   blockedByUser: boolean;
   enabled: boolean;
   setEnabled: (value: boolean) => void;
   /**
-   * Tell the system where the guidance banner is (dp, window coordinates), so
-   * the shrink animation folds up *that* rather than the whole screen. Wired to
-   * the banner's own layout.
+   * Tell the system where the map viewport is (dp, window coordinates), so the
+   * shrink animation follows the content the mini window continues to show.
    */
-  setBannerRect: (rect: { x: number; y: number; width: number; height: number }) => void;
+  setMapRect: (rect: { x: number; y: number; width: number; height: number }) => void;
 }
 
 /**
@@ -52,11 +52,17 @@ export interface NavPipController {
  */
 export function useNavigationPip(nav: NavController, settings: NavPipSettings): NavPipController {
   const { status, getSetting, setSetting } = settings;
-  const [available] = useState(pipSupported);
-  const [blockedByUser] = useState(pipBlockedByUser);
+  const [supported, setSupported] = useState(pipSupported);
+  const [blockedByUser, setBlockedByUser] = useState(pipBlockedByUser);
   const [enabled, setEnabledState] = useState(true);
   const [inPip, setInPip] = useState(inPictureInPicture);
   const win = useWindowDimensions();
+
+  const refreshNativeState = useCallback(() => {
+    setSupported(pipSupported());
+    setBlockedByUser(pipBlockedByUser());
+    setInPip(inPictureInPicture());
+  }, []);
 
   useEffect(() => {
     if (status !== 'ready') return;
@@ -82,34 +88,58 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
     return () => subscription?.remove();
   }, []);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshNativeState();
+    });
+    return () => subscription.remove();
+  }, [refreshNativeState]);
+
+  const available = supported && !blockedByUser;
   const armed = available && enabled && (nav.phase === 'navigating' || nav.phase === 'rerouting');
 
+  // Arming and geometry are intentionally separate. In particular, a PiP
+  // resize must never run an effect cleanup that disarms the native module.
   useEffect(() => {
-    if (!available) return;
-    // Re-arming also refreshes the window rectangle the shrink animation flies
-    // out of, which is why the window size is a dependency — but never while
-    // already in PiP, where that rectangle would be the mini window itself.
-    if (inPip) return;
     setPipActive(armed);
-    return () => setPipActive(false);
-  }, [available, armed, inPip, win.width, win.height]);
+  }, [armed]);
 
-  const setBannerRect = useCallback(
+  // The native module also re-applies on activity resume. This check makes the
+  // JS side self-healing on builds where the activity returned before the
+  // AppState event was delivered.
+  useEffect(() => {
+    if (armed && !pipArmed()) setPipActive(true);
+  }, [armed, win.width, win.height]);
+
+  useEffect(
+    () => () => {
+      setPipActive(false);
+    },
+    [],
+  );
+
+  // Window dimensions update with the native resize, before the PiP event has
+  // necessarily crossed the native→JS bridge. Reading native state here lets
+  // the compact layout land with that resize rather than several frames later.
+  const effectiveInPip = inPip || (armed && inPictureInPicture());
+
+  const setMapRect = useCallback(
     (rect: { x: number; y: number; width: number; height: number }) => {
-      // In the mini window the banner is not rendered at all, and its last
-      // full-screen rectangle is the one worth keeping for the next entry.
-      if (!available || inPip) return;
+      // A resize in PiP measures the floating window itself. Keep the last
+      // full-screen viewport for the next entry instead of replacing it with
+      // that tiny rectangle.
+      if (!available || effectiveInPip) return;
       setPipSourceRect(rect);
     },
-    [available, inPip],
+    [available, effectiveInPip],
   );
 
   return {
-    inPictureInPicture: inPip,
+    inPictureInPicture: effectiveInPip,
     available,
     blockedByUser,
     enabled,
     setEnabled,
-    setBannerRect,
+    setMapRect,
   };
 }

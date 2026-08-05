@@ -1076,6 +1076,7 @@ function AppInner() {
         initialView={viewRef.current ?? initialView}
         showIdleChrome={showIdleChrome}
         inPip={inPip}
+        onMapRect={pip.setMapRect}
         onMapPress={onMapPress}
         onPickPoint={onPickPoint}
         onViewChange={camera.onViewChange}
@@ -1131,7 +1132,6 @@ function AppInner() {
             widgets={navPrefs.widgets}
             onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
             onHeight={setNavHeight}
-            onRect={pip.setBannerRect}
           />
 
           {/* Position chevron, orientation/overview buttons, road chip, re-centre. */}

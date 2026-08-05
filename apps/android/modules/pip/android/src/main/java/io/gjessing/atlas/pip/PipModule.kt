@@ -31,13 +31,13 @@ import java.lang.ref.WeakReference
 class PipModule : Module() {
   /** True while guidance wants the mini window (and the user has it enabled). */
   private var active = false
+  /** The activity whose PiP parameters most recently accepted `active`. */
+  private var appliedTo = WeakReference<ComponentActivity>(null)
   private var listeningTo = WeakReference<ComponentActivity>(null)
   /**
    * Where on screen the content that continues in the mini window is drawn —
-   * the maneuver banner, reported by React as it lays out. The system crops the
-   * shrinking activity to this, so with the whole screen as the hint the
-   * transition folded the entire UI into the window and the driver watched the
-   * map, sheets and buttons squeeze past the one thing they were keeping.
+   * the map viewport, measured by React as it lays out. The system follows this
+   * rectangle into the floating window, matching the content that remains.
    */
   private var sourceRect: Rect? = null
 
@@ -70,21 +70,15 @@ class PipModule : Module() {
      */
     Function("setActive") { on: Boolean ->
       active = on
-      val current = activity as? ComponentActivity ?: return@Function
-      listen(current)
-      current.runOnUiThread {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          try {
-            current.setPictureInPictureParams(params(current, autoEnter = on))
-          } catch (err: IllegalStateException) {
-            // The activity is finishing or PiP is unavailable — nothing to arm.
-          }
-        }
-      }
+      applyToCurrentActivity()
+      active && appliedTo.get() != null
     }
 
+    /** The applied state, not merely the last state requested by JavaScript. */
+    Function("isArmed") { active && appliedTo.get() === activity }
+
     /**
-     * Point the shrink animation at the guidance banner (device pixels, window
+     * Point the shrink animation at the map viewport (device pixels, window
      * coordinates). A width of 0 clears it, falling back to the whole content
      * view. Params are re-applied straight away so the hint is already current
      * when the system enters PiP by itself on Android 12+.
@@ -94,10 +88,12 @@ class PipModule : Module() {
       if (next == sourceRect) return@Function
       sourceRect = next
       val current = activity as? ComponentActivity ?: return@Function
-      if (!active || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function
+      if (!active) return@Function
       current.runOnUiThread {
         try {
-          current.setPictureInPictureParams(params(current, autoEnter = true))
+          current.setPictureInPictureParams(
+            params(current, autoEnter = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
+          )
         } catch (err: IllegalStateException) {
           // Finishing activity — the next setActive will carry the rect.
         }
@@ -109,21 +105,40 @@ class PipModule : Module() {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity?.isInPictureInPictureMode == true
     }
 
+    // Auto-enter is the smooth path on Android 12+, but it is not a guarantee:
+    // an activity attach/resume can race the parameters being applied. Keep the
+    // guarded manual path on every supported version so the first Home press
+    // still works when that race loses.
     OnUserLeavesActivity {
-      if (!active || Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return@OnUserLeavesActivity
+      if (!active) return@OnUserLeavesActivity
       val current = activity ?: return@OnUserLeavesActivity
       if (current.isInPictureInPictureMode) return@OnUserLeavesActivity
-      try {
-        @Suppress("DEPRECATION") current.enterPictureInPictureMode(params(current, autoEnter = false))
-      } catch (err: IllegalStateException) {
-        // PiP refused (disabled for the app, or the activity is finishing):
-        // guidance carries on in the notification and by voice, as before.
+      val enterIfStillNeeded = {
+        if (active && !current.isFinishing && !current.isInPictureInPictureMode) {
+          try {
+            @Suppress("DEPRECATION")
+            current.enterPictureInPictureMode(params(current, autoEnter = false))
+          } catch (err: IllegalStateException) {
+            // PiP refused (disabled for the app, or the activity is finishing):
+            // guidance carries on in the notification and by voice, as before.
+          }
+        }
       }
+      // Give Android 12+'s smooth auto-enter path one frame to win. Older
+      // versions have no auto-enter and use the manual path immediately.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        current.window.decorView.postDelayed(enterIfStillNeeded, 200)
+      } else current.runOnUiThread(enterIfStillNeeded)
     }
 
+    // `active` is desired trip state and deliberately survives activity
+    // recreation. Re-apply it whenever Expo attaches/resumes the replacement
+    // activity; a transiently-null currentActivity therefore heals itself.
+    OnActivityEntersForeground { applyToCurrentActivity() }
+
     OnActivityDestroys {
-      active = false
       sourceRect = null
+      appliedTo.clear()
       listeningTo.clear()
     }
   }
@@ -142,19 +157,36 @@ class PipModule : Module() {
     }
   }
 
+  private fun applyToCurrentActivity() {
+    val current = activity as? ComponentActivity ?: run {
+      appliedTo.clear()
+      return
+    }
+    listen(current)
+    current.runOnUiThread {
+      try {
+        current.setPictureInPictureParams(
+          params(current, autoEnter = active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
+        )
+        if (active) appliedTo = WeakReference(current) else appliedTo.clear()
+      } catch (err: IllegalStateException) {
+        appliedTo.clear()
+      }
+    }
+  }
+
   /**
-   * A 16:9 window that flies out of the guidance banner — the content it is
-   * about to hold — falling back to the whole view before React has reported
-   * where that banner is. Seamless resize is off: the window holds a maneuver
-   * card, not a video, and stretching type while it re-lays out looks broken;
-   * the system crossfades instead and the card lays out at the new size.
+   * A 16:9 window that flies out of the map viewport it continues to show,
+   * falling back to the whole content view before React has measured it. The
+   * live map resizes cleanly, so seamless resize avoids a stale cropped
+   * snapshot while React commits the compact guidance strip.
    */
   private fun params(current: Activity, autoEnter: Boolean): PictureInPictureParams {
     val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
     (sourceRect ?: contentRect(current))?.let { builder.setSourceRectHint(it) }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       builder.setAutoEnterEnabled(autoEnter)
-      builder.setSeamlessResizeEnabled(false)
+      builder.setSeamlessResizeEnabled(true)
     }
     return builder.build()
   }
