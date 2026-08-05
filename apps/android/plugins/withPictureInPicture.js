@@ -10,7 +10,28 @@ const PIP_MAP_LIFECYCLE = `
     newConfig: Configuration,
   ) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-    visitMapViews(findViewById(android.R.id.content), isInPictureInPictureMode)
+    if (isInPictureInPictureMode) {
+      visitMapViews(findViewById(android.R.id.content), true)
+    }
+  }
+
+  // A stashed PiP can become genuinely invisible without leaving PiP mode.
+  // Pause MapLibre then; onStart resumes it if the user unstashes the window.
+  // Expanding to full-screen is intentionally left to React's normal host
+  // resume — explicitly pausing on the PiP-exit callback can arrive after that
+  // resume and freeze the full-size map instead.
+  override fun onStop() {
+    if (isInPictureInPictureMode) {
+      visitMapViews(findViewById(android.R.id.content), false)
+    }
+    super.onStop()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    if (isInPictureInPictureMode) {
+      visitMapViews(findViewById(android.R.id.content), true)
+    }
   }
 
   private fun visitMapViews(view: View?, resume: Boolean) {

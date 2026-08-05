@@ -122,8 +122,13 @@ describe('pipCardMetrics', () => {
     }
   });
 
-  it('drops the arrival clock in a window too narrow to hold it', () => {
-    expect(pipCardMetrics(160, 90).showFooter).toBe(false);
-    expect(pipCardMetrics(240, 135).showFooter).toBe(true);
+  it('drops maneuver detail before the arrival clock at narrow sizes', () => {
+    expect(pipCardMetrics(160, 90).showDetail).toBe(false);
+    expect(pipCardMetrics(320, 180).showDetail).toBe(true);
+  });
+
+  it('caps large text at 1.3x and still leaves most of the window to the map', () => {
+    expect(pipCardMetrics(320, 180, 2).height).toBe(pipCardMetrics(320, 180, 1.3).height);
+    expect(pipCardMetrics(160, 90, 1.3).height).toBeLessThan(90 / 2);
   });
 });

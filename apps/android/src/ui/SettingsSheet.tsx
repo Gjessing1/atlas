@@ -1350,11 +1350,20 @@ export function SettingsSheet({
             </View>
             <Text style={styles.muted}>
               {pip.blockedByUser
-                ? 'Turned off for Atlas in Android settings — Apps → Atlas → Picture-in-picture.'
+                ? 'Turned off for Atlas in Android settings.'
                 : !pip.available
                   ? 'This device does not support picture-in-picture.'
                   : 'Pressing Home mid-trip shrinks Atlas into a floating window showing the next turn. Tap it to come back.'}
             </Text>
+            {pip.blockedByUser ? (
+              <Pressable
+                onPress={pip.openSettings}
+                accessibilityRole="button"
+                testID="open-pip-settings"
+              >
+                <Text style={styles.linkAction}>Open picture-in-picture settings</Text>
+              </Pressable>
+            ) : null}
             <Text style={styles.heading}>Diagnostics</Text>
             <NavigationDiagnosticsSection diagnostics={navDiagnostics} />
           </>

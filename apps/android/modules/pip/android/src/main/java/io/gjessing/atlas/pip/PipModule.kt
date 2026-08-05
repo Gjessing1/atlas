@@ -2,11 +2,19 @@ package io.gjessing.atlas.pip
 
 import android.app.Activity
 import android.app.AppOpsManager
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Rational
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -40,13 +48,35 @@ class PipModule : Module() {
    * rectangle into the floating window, matching the content that remains.
    */
   private var sourceRect: Rect? = null
+  /** The action label/icon follows the same mute state as the full banner. */
+  private var muted = false
+  private var receiverRegistered = false
+
+  private val actionReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        when (intent?.action) {
+          ACTION_TOGGLE_MUTE -> sendEvent(ACTION_EVENT, mapOf("action" to "toggleMute"))
+          ACTION_END_TRIP -> sendEvent(ACTION_EVENT, mapOf("action" to "endTrip"))
+        }
+      }
+    }
 
   private val activity: Activity?
     get() = appContext.activityProvider?.currentActivity
 
   override fun definition() = ModuleDefinition {
     Name("AtlasPip")
-    Events(CHANGE_EVENT)
+    Events(CHANGE_EVENT, ACTION_EVENT)
+
+    OnCreate { registerActionReceiver() }
+
+    OnDestroy {
+      if (receiverRegistered) {
+        runCatching { appContext.reactContext?.unregisterReceiver(actionReceiver) }
+        receiverRegistered = false
+      }
+    }
 
     /** Whether this device has picture-in-picture at all. */
     Function("isSupported") {
@@ -72,6 +102,12 @@ class PipModule : Module() {
       active = on
       applyToCurrentActivity()
       active && appliedTo.get() != null
+    }
+
+    /** Keep the system action in sync with the banner's persisted voice state. */
+    Function("setMuted") { on: Boolean ->
+      muted = on
+      if (active) applyToCurrentActivity()
     }
 
     /** The applied state, not merely the last state requested by JavaScript. */
@@ -103,6 +139,26 @@ class PipModule : Module() {
     /** Whether the activity is in PiP right now (for the first render). */
     Function("inPictureInPicture") {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity?.isInPictureInPictureMode == true
+    }
+
+    /** Open the one Android settings screen that can unblock this feature. */
+    Function("openSettings") {
+      val context = appContext.reactContext ?: return@Function false
+      val packageUri = Uri.parse("package:${context.packageName}")
+      val intent =
+        Intent(ACTION_PIP_SETTINGS, packageUri).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      try {
+        context.startActivity(intent)
+      } catch (_: Exception) {
+        context.startActivity(
+          Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          },
+        )
+      }
+      true
     }
 
     // Auto-enter is the smooth path on Android 12+, but it is not a guarantee:
@@ -152,12 +208,24 @@ class PipModule : Module() {
     listeningTo = WeakReference(current)
     current.runOnUiThread {
       current.addOnPictureInPictureModeChangedListener { info ->
+        // Some launchers take their first action snapshot while auto-enter is
+        // still resizing the task. Re-apply once the task is pinned so the
+        // menu always receives the current mute/end controls as well as the
+        // geometry used for the transition.
+        if (info.isInPictureInPictureMode && active) {
+          try {
+            current.setPictureInPictureParams(params(current, autoEnter = false))
+          } catch (_: IllegalStateException) {
+            // Activity is already being dismissed.
+          }
+        }
         sendEvent(CHANGE_EVENT, mapOf("inPictureInPicture" to info.isInPictureInPictureMode))
       }
     }
   }
 
   private fun applyToCurrentActivity() {
+    registerActionReceiver()
     val current = activity as? ComponentActivity ?: run {
       appliedTo.clear()
       return
@@ -175,6 +243,64 @@ class PipModule : Module() {
     }
   }
 
+  private fun registerActionReceiver() {
+    if (receiverRegistered) return
+    val context = appContext.reactContext ?: return
+    val filter = IntentFilter().apply {
+      addAction(ACTION_TOGGLE_MUTE)
+      addAction(ACTION_END_TRIP)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      context.registerReceiver(actionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    } else {
+      @Suppress("DEPRECATION") context.registerReceiver(actionReceiver, filter)
+    }
+    receiverRegistered = true
+  }
+
+  private fun action(
+    current: Activity,
+    intentAction: String,
+    requestCode: Int,
+    iconRes: Int,
+    title: String,
+  ): RemoteAction {
+    val intent = Intent(intentAction).setPackage(current.packageName)
+    val pending =
+      PendingIntent.getBroadcast(
+        current,
+        requestCode,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    // These IDs belong to framework-res.apk, not Atlas. Passing the activity
+    // context stamps the Icon with Atlas's package name, leaving SystemUI
+    // unable to resolve it and causing the whole custom action to disappear.
+    return RemoteAction(Icon.createWithResource("android", iconRes), title, title, pending)
+  }
+
+  private fun muteAction(current: Activity): RemoteAction =
+    action(
+      current,
+      ACTION_TOGGLE_MUTE,
+      REQUEST_TOGGLE_MUTE,
+      if (muted) {
+        android.R.drawable.ic_lock_silent_mode_off
+      } else {
+        android.R.drawable.ic_lock_silent_mode
+      },
+      if (muted) "Unmute guidance" else "Mute guidance",
+    )
+
+  private fun endAction(current: Activity): RemoteAction =
+    action(
+      current,
+      ACTION_END_TRIP,
+      REQUEST_END_TRIP,
+      android.R.drawable.ic_menu_close_clear_cancel,
+      "End trip",
+    )
+
   /**
    * A 16:9 window that flies out of the map viewport it continues to show,
    * falling back to the whole content view before React has measured it. The
@@ -184,6 +310,14 @@ class PipModule : Module() {
   private fun params(current: Activity, autoEnter: Boolean): PictureInPictureParams {
     val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
     (sourceRect ?: contentRect(current))?.let { builder.setSourceRectHint(it) }
+    if (active) {
+      val end = endAction(current)
+      builder.setActions(listOf(muteAction(current), end))
+      // Android 13 is the first release that lets an app define what the X
+      // means. It now invokes the same End trip path as the explicit action,
+      // so the window cannot tear down a trip behind React's back.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) builder.setCloseAction(end)
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       builder.setAutoEnterEnabled(autoEnter)
       builder.setSeamlessResizeEnabled(true)
@@ -223,5 +357,11 @@ class PipModule : Module() {
 
   companion object {
     private const val CHANGE_EVENT = "onPictureInPictureChange"
+    private const val ACTION_EVENT = "onPictureInPictureAction"
+    private const val ACTION_TOGGLE_MUTE = "io.gjessing.atlas.pip.TOGGLE_MUTE"
+    private const val ACTION_END_TRIP = "io.gjessing.atlas.pip.END_TRIP"
+    private const val ACTION_PIP_SETTINGS = "android.settings.PICTURE_IN_PICTURE_SETTINGS"
+    private const val REQUEST_TOGGLE_MUTE = 4101
+    private const val REQUEST_END_TRIP = 4102
   }
 }

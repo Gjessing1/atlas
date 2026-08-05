@@ -3,12 +3,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppState, useWindowDimensions } from 'react-native';
 
 import {
+  addPipActionListener,
   addPipListener,
   inPictureInPicture,
+  openPipSettings,
   pipArmed,
   pipBlockedByUser,
   pipSupported,
   setPipActive,
+  setPipMuted,
   setPipSourceRect,
 } from '../../modules/pip';
 
@@ -30,6 +33,8 @@ export interface NavPipController {
   blockedByUser: boolean;
   enabled: boolean;
   setEnabled: (value: boolean) => void;
+  /** Open Atlas's per-app PiP permission screen. */
+  openSettings: () => void;
   /**
    * Tell the system where the map viewport is (dp, window coordinates), so the
    * shrink animation follows the content the mini window continues to show.
@@ -40,8 +45,8 @@ export interface NavPipController {
 /**
  * Keeps guidance visible when the user leaves Atlas mid-trip.
  *
- * The native module is armed for exactly as long as guidance is actively
- * navigating (or rerouting) and the setting is on; the system does the entering,
+ * The native module is armed from route startup through active guidance (or
+ * rerouting) while the setting is on; the system does the entering,
  * so pressing Home or opening Recents shrinks the running trip into a floating
  * window instead of hiding it. Disarming on any other phase is what guarantees
  * an ended trip leaves no idle Atlas window behind.
@@ -56,6 +61,7 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
   const [blockedByUser, setBlockedByUser] = useState(pipBlockedByUser);
   const [enabled, setEnabledState] = useState(true);
   const [inPip, setInPip] = useState(inPictureInPicture);
+  const [resumeEpoch, setResumeEpoch] = useState(0);
   const win = useWindowDimensions();
 
   const refreshNativeState = useCallback(() => {
@@ -89,14 +95,28 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
   }, []);
 
   useEffect(() => {
+    const subscription = addPipActionListener((action) => {
+      if (action === 'toggleMute') nav.toggleMute();
+      else nav.stop();
+    });
+    return () => subscription?.remove();
+  }, [nav.toggleMute, nav.stop]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refreshNativeState();
+      if (state === 'active') {
+        refreshNativeState();
+        setResumeEpoch((value) => value + 1);
+      }
     });
     return () => subscription.remove();
   }, [refreshNativeState]);
 
   const available = supported && !blockedByUser;
-  const armed = available && enabled && (nav.phase === 'navigating' || nav.phase === 'rerouting');
+  const armed =
+    available &&
+    enabled &&
+    (nav.phase === 'starting' || nav.phase === 'navigating' || nav.phase === 'rerouting');
 
   // Arming and geometry are intentionally separate. In particular, a PiP
   // resize must never run an effect cleanup that disarms the native module.
@@ -104,12 +124,16 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
     setPipActive(armed);
   }, [armed]);
 
+  useEffect(() => {
+    setPipMuted(nav.muted);
+  }, [nav.muted]);
+
   // The native module also re-applies on activity resume. This check makes the
   // JS side self-healing on builds where the activity returned before the
   // AppState event was delivered.
   useEffect(() => {
     if (armed && !pipArmed()) setPipActive(true);
-  }, [armed, win.width, win.height]);
+  }, [armed, resumeEpoch, win.width, win.height]);
 
   useEffect(
     () => () => {
@@ -140,6 +164,7 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
     blockedByUser,
     enabled,
     setEnabled,
+    openSettings: openPipSettings,
     setMapRect,
   };
 }

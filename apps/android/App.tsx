@@ -1113,7 +1113,10 @@ function AppInner() {
         visiblePlaces={visiblePlaces}
         showPuck={showPuck}
         suppressPuck={navPuck.suppressNative}
-        navDot={navPuck.dot}
+        // NavChrome owns the screen-fixed chevron full-screen, but that whole
+        // chrome is absent in PiP. Anchor a smaller dot to the live map there
+        // so the compact cartography still has an unmistakably moving puck.
+        navDot={inPip ? (nav.state?.snapped ?? nav.position) : navPuck.dot}
         // Switching light/dark remounts the scene (keyed on colorScheme) to
         // reload the restyled map; boot that fresh scene at wherever the camera
         // already is, not back at the persisted launch view — otherwise a theme

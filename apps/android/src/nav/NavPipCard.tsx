@@ -29,7 +29,7 @@ import { TurnIcon } from './TurnIcon';
 export function NavPipCard({ nav }: { nav: NavController }) {
   const guidance = pipGuidance(nav);
   const win = useWindowDimensions();
-  const size = pipCardMetrics(win.width, win.height);
+  const size = pipCardMetrics(win.width, win.height, win.fontScale);
   return (
     <View
       style={[
@@ -42,16 +42,28 @@ export function NavPipCard({ nav }: { nav: NavController }) {
       {guidance.instruction ? (
         <TurnIcon instruction={guidance.instruction} size={size.icon} color={theme.accent} />
       ) : null}
-      <Text style={[styles.headline, { fontSize: size.headline }]} numberOfLines={1}>
+      <Text
+        style={[styles.headline, { fontSize: size.headline }]}
+        numberOfLines={1}
+        maxFontSizeMultiplier={1.3}
+      >
         {guidance.headline}
       </Text>
-      {guidance.detail ? (
-        <Text style={[styles.detail, { fontSize: size.detail }]} numberOfLines={1}>
+      {guidance.detail && size.showDetail ? (
+        <Text
+          style={[styles.detail, { fontSize: size.detail }]}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.3}
+        >
           {guidance.detail}
         </Text>
       ) : null}
-      {guidance.footer && size.showFooter ? (
-        <Text style={[styles.footer, { fontSize: size.footer }]} numberOfLines={1}>
+      {guidance.footer ? (
+        <Text
+          style={[styles.footer, { fontSize: size.footer }]}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.3}
+        >
           {guidance.footer}
         </Text>
       ) : null}
@@ -74,5 +86,5 @@ const styles = StyleSheet.create({
   headline: { color: theme.text, fontWeight: '800' },
   // The maneuver takes whatever room the fixed-width distance and clock leave.
   detail: { color: theme.textMuted, fontWeight: '600', flex: 1 },
-  footer: { color: theme.text, fontWeight: '700' },
+  footer: { color: theme.text, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });

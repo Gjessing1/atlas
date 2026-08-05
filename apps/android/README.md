@@ -48,3 +48,32 @@ infrastructure/packs/publish-apk.sh <apk> <versionCode> <versionName>
 This copies the APK into `<dataDir>/app/` and writes `version.json`; the backend announces it at
 `/api/app/version`. The app shows its update button when the published `versionCode` is higher
 than the installed one.
+
+## Picture-in-picture verification
+
+PiP must be checked with changing locations: a parked emulator cannot distinguish a live MapLibre
+render loop from the stale frame this test exists to catch.
+
+1. Start `atlas_test`, install a native build, and seed the emulator near the route origin (`adb
+emu geo fix <lng> <lat>`; longitude comes first).
+2. In Atlas, calculate a driving route, choose one of the route alternatives, and start guidance.
+   Press Home once with `adb shell input keyevent KEYCODE_HOME`.
+3. Record the transition with `adb shell screenrecord /sdcard/atlas-pip.mp4`. While recording,
+   send several fixes a few seconds and at least 30 metres apart along the selected route. The puck
+   and road beneath it must advance inside the mini window; a changing distance label alone is not
+   sufficient.
+4. Tap the window to check **Mute guidance** / **End trip**, expand it again, then repeat entry. The
+   second Home press must work without restarting the trip, and the expand transition must not
+   freeze the full-screen map.
+5. End the trip from the PiP action and confirm a later Home press does not recreate an idle
+   window. Disable PiP under the system's Atlas app settings, return to Atlas Settings →
+   Navigation, and verify the permission state and direct settings button refresh without
+   restarting Atlas.
+
+Useful evidence while the window is up:
+
+```bash
+adb shell dumpsys activity activities | rg 'pictureInPicture|mPictureInPicture'
+adb shell dumpsys window | rg 'PinnedTask|io.gjessing.atlas'
+adb pull /sdcard/atlas-pip.mp4
+```

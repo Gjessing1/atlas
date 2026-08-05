@@ -31,8 +31,8 @@ export interface PipCardMetrics {
   gap: number;
   /** Height (dp) the strip occupies along the bottom of the window. */
   height: number;
-  /** False in the narrowest windows, where the clock costs the street name. */
-  showFooter: boolean;
+  /** Street/maneuver detail yields first; ETA is retained at every width. */
+  showDetail: boolean;
 }
 
 /**
@@ -44,10 +44,12 @@ export interface PipCardMetrics {
  * follows, and height is what decides how much of it guidance may take before
  * the map underneath stops being a map.
  */
-export function pipCardMetrics(width: number, height: number): PipCardMetrics {
+export function pipCardMetrics(width: number, height: number, fontScale = 1): PipCardMetrics {
   // 0 at a ~90 dp-tall window, 1 at ~220 dp — the range Android's PiP allows.
   const room = Math.max(0, Math.min(1, (Math.min(height, width * 0.75) - 90) / 130));
   const at = (small: number, large: number) => Math.round(small + (large - small) * room);
+  const safeFontScale = Math.max(1, Math.min(1.3, fontScale));
+  const baseHeight = at(40, 66);
   return {
     icon: at(22, 34),
     headline: at(15, 24),
@@ -55,10 +57,16 @@ export function pipCardMetrics(width: number, height: number): PipCardMetrics {
     footer: at(10, 13),
     padding: at(8, 12),
     gap: at(8, 12),
-    height: at(40, 66),
-    // The clock is the first thing to go: it is the one line the driver can
-    // reconstruct, and a cramped row that truncates the street name is worse.
-    showFooter: width >= 240,
+    // Respect large text without letting guidance consume the map. The Text
+    // nodes use the same 1.3 cap, so this height and their actual glyphs agree.
+    height: Math.max(
+      36,
+      Math.min(Math.round(baseHeight * safeFontScale), Math.floor(height * 0.48)),
+    ),
+    // The mini window answers two questions: "what is next?" and "when will I
+    // arrive?" The road/maneuver wording is useful context, but it yields in
+    // the smallest window so the arrival clock never does.
+    showDetail: width >= 250,
   };
 }
 

@@ -14,14 +14,18 @@ interface PipNativeModule {
   isSupported(): boolean;
   isAllowed(): boolean;
   setActive(on: boolean): boolean;
+  setMuted(on: boolean): void;
   isArmed(): boolean;
   setSourceRect(x: number, y: number, width: number, height: number): void;
   inPictureInPicture(): boolean;
+  openSettings(): boolean;
   addListener(
-    event: 'onPictureInPictureChange',
-    listener: (payload: { inPictureInPicture: boolean }) => void,
+    event: 'onPictureInPictureChange' | 'onPictureInPictureAction',
+    listener: (payload: { inPictureInPicture?: boolean; action?: PipAction }) => void,
   ): EventSubscription;
 }
+
+export type PipAction = 'toggleMute' | 'endTrip';
 
 /** Null in builds that predate the native module (and in unit tests). */
 const Native = requireOptionalNativeModule<PipNativeModule>('AtlasPip');
@@ -57,6 +61,24 @@ export function setPipActive(on: boolean): boolean {
 export function pipArmed(): boolean {
   try {
     return Native?.isArmed() === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Keep the native PiP action label in sync with navigation voice state. */
+export function setPipMuted(muted: boolean): void {
+  try {
+    Native?.setMuted(muted);
+  } catch {
+    // An older binary has no PiP actions; guidance itself is unaffected.
+  }
+}
+
+/** Take the user directly to Atlas's per-app PiP permission. */
+export function openPipSettings(): boolean {
+  try {
+    return Native?.openSettings() === true;
   } catch {
     return false;
   }
@@ -102,7 +124,18 @@ export function addPipListener(
 ): EventSubscription | null {
   return (
     Native?.addListener('onPictureInPictureChange', (payload) =>
-      listener(payload.inPictureInPicture),
+      listener(payload.inPictureInPicture === true),
     ) ?? null
+  );
+}
+
+/** Mute/End buttons supplied by Android's own PiP controls. */
+export function addPipActionListener(
+  listener: (action: PipAction) => void,
+): EventSubscription | null {
+  return (
+    Native?.addListener('onPictureInPictureAction', (payload) => {
+      if (payload.action === 'toggleMute' || payload.action === 'endTrip') listener(payload.action);
+    }) ?? null
   );
 }

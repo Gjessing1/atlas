@@ -454,73 +454,77 @@ export function MapScene({
           catalog caps requests — the map overzooms beyond it instead of
           hammering limited-depth upstreams. Vector overlays (the jaktfelt
           polygons) draw as their own GeoJSON source below, not as rasters. */}
-        {overlays
-          .filter((overlay) => !overlay.meta.vector)
-          .map((overlay) => (
-            <RasterSource
-              // Keyed on the *variant* id, not the layer id: switching species
-              // has to remount the source, or the native source keeps serving
-              // the tiles it already loaded under the old filter.
-              key={overlay.sourceId}
-              id={overlay.sourceId}
-              tiles={[overlay.tileUrlTemplate]}
-              tileSize={256}
-              maxzoom={overlay.meta.maxzoom}
-              minzoom={overlay.meta.minzoom ?? 0}
-              attribution={overlay.meta.attribution}
-            >
-              <Layer
-                type="raster"
-                id={`${overlay.sourceId}-layer`}
-                paint={{ 'raster-opacity': overlay.opacity }}
-              />
-            </RasterSource>
-          ))}
+        {!inPip
+          ? overlays
+              .filter((overlay) => !overlay.meta.vector)
+              .map((overlay) => (
+                <RasterSource
+                  // Keyed on the *variant* id, not the layer id: switching species
+                  // has to remount the source, or the native source keeps serving
+                  // the tiles it already loaded under the old filter.
+                  key={overlay.sourceId}
+                  id={overlay.sourceId}
+                  tiles={[overlay.tileUrlTemplate]}
+                  tileSize={256}
+                  maxzoom={overlay.meta.maxzoom}
+                  minzoom={overlay.meta.minzoom ?? 0}
+                  attribution={overlay.meta.attribution}
+                >
+                  <Layer
+                    type="raster"
+                    id={`${overlay.sourceId}-layer`}
+                    paint={{ 'raster-opacity': overlay.opacity }}
+                  />
+                </RasterSource>
+              ))
+          : null}
         {/* Attribute labels drawn over the raster — the number a tile can't
           carry (a surveyed lake's max depth). Mounted after the rasters so
           they read on top, and only while the overlay itself is on. */}
-        {overlays.map((overlay) => {
-          const labels = overlay.meta.labels;
-          const data = labels ? overlayLabels[overlay.meta.id] : undefined;
-          if (!labels || !data || data.features.length === 0) return null;
-          return (
-            <GeoJSONSource
-              key={`labels-${overlay.meta.id}`}
-              id={`atlas-overlay-labels-${overlay.meta.id}`}
-              data={data}
-            >
-              <Layer
-                type="symbol"
-                id={`atlas-overlay-labels-${overlay.meta.id}-layer`}
-                minzoom={labels.minzoom}
-                layout={{
-                  'text-field': ['get', 'label'],
-                  'text-font': ['Noto Sans Bold'],
-                  'text-size': 13,
-                  // Sits below the anchor so it reads under the basemap's own
-                  // lake name rather than through it — both are centred on the
-                  // same water, and overlap-forcing alone stacked them.
-                  'text-offset': [0, 1.4],
-                  // Always drawn: added after the basemap's symbol layers, so
-                  // with collision on it would lose placement and flicker.
-                  'text-allow-overlap': true,
-                  'text-ignore-placement': true,
-                }}
-                paint={{
-                  'text-color': '#0b3d63',
-                  'text-halo-color': '#ffffff',
-                  'text-halo-width': 1.6,
-                }}
-              />
-            </GeoJSONSource>
-          );
-        })}
+        {!inPip
+          ? overlays.map((overlay) => {
+              const labels = overlay.meta.labels;
+              const data = labels ? overlayLabels[overlay.meta.id] : undefined;
+              if (!labels || !data || data.features.length === 0) return null;
+              return (
+                <GeoJSONSource
+                  key={`labels-${overlay.meta.id}`}
+                  id={`atlas-overlay-labels-${overlay.meta.id}`}
+                  data={data}
+                >
+                  <Layer
+                    type="symbol"
+                    id={`atlas-overlay-labels-${overlay.meta.id}-layer`}
+                    minzoom={labels.minzoom}
+                    layout={{
+                      'text-field': ['get', 'label'],
+                      'text-font': ['Noto Sans Bold'],
+                      'text-size': 13,
+                      // Sits below the anchor so it reads under the basemap's own
+                      // lake name rather than through it — both are centred on the
+                      // same water, and overlap-forcing alone stacked them.
+                      'text-offset': [0, 1.4],
+                      // Always drawn: added after the basemap's symbol layers, so
+                      // with collision on it would lose placement and flicker.
+                      'text-allow-overlap': true,
+                      'text-ignore-placement': true,
+                    }}
+                    paint={{
+                      'text-color': '#0b3d63',
+                      'text-halo-color': '#ffffff',
+                      'text-halo-width': 1.6,
+                    }}
+                  />
+                </GeoJSONSource>
+              );
+            })
+          : null}
         {/* Statskog storviltjaktfelt: state-forest big-game hunting fields as a
           faint rust fill with a firmer outline and the field name at closer
           zooms, the Fish & Hunt signature overlay. Drawn above the rasters but
           under the tracks/routes; a tap on the fill opens the field's identify
           card (see useMapPress → HUNT_FIELDS_FILL_LAYER_ID). */}
-        {huntingFields ? (
+        {!inPip && huntingFields ? (
           <GeoJSONSource id="atlas-jaktfelt" data={huntingFields.data}>
             <Layer
               type="fill"
@@ -560,7 +564,7 @@ export function MapScene({
         {/* Regobs ice observations: symbol = report kind, colour = age. Kept
           separate from the static weakened-ice raster so the map never makes
           an old hydropower hazard polygon look like a current field report. */}
-        {iceObservations ? (
+        {!inPip && iceObservations ? (
           <GeoJSONSource id="atlas-ice-observations" data={iceObservations.data}>
             <Layer
               type="circle"
@@ -602,7 +606,7 @@ export function MapScene({
           spoken/visual warnings while navigating come from the pack's own
           camera tables (offlineNvdb) and work with no network. A tap on either
           opens the identify card (see useMapPress → SPEED_CAMERA_LAYER_IDS). */}
-        {speedCameras ? (
+        {!inPip && speedCameras ? (
           <GeoJSONSource id="atlas-cameras" data={speedCameras.data}>
             <Layer
               type="line"
@@ -684,7 +688,7 @@ export function MapScene({
           markers so those stay on top, and offset right of the direction of
           travel: every corridor has a reverse twin over the same road (median
           13 m apart), so without the offset one direction hides the other. */}
-        {trafficFlow ? (
+        {!inPip && trafficFlow ? (
           <GeoJSONSource id="atlas-traffic-flow" data={trafficFlow.data}>
             <Layer
               type="line"
@@ -723,7 +727,7 @@ export function MapScene({
         ) : null}
         {/* Live DATEX II closures, works and incidents. NPRA message text is
           shown verbatim by the tap card; marker colour/type is shared with web. */}
-        {traffic ? (
+        {!inPip && traffic ? (
           <GeoJSONSource id="atlas-traffic" data={traffic.data}>
             <Layer
               type="circle"
@@ -757,7 +761,7 @@ export function MapScene({
         from the shared `spotsFeatureCollection`, not from this file: a marker and
         its row in the sheet are the same recommendation, and numbering them
         per-client would break the only link between the two halves of it. */}
-        {spots.length > 0 ? (
+        {!inPip && spots.length > 0 ? (
           <GeoJSONSource id="atlas-spots" data={spotsFeatureCollection(spots)}>
             <Layer
               type="line"
@@ -818,7 +822,7 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
-        {exploreResults.length > 0 ? (
+        {!inPip && exploreResults.length > 0 ? (
           <GeoJSONSource
             id="atlas-explore-results"
             data={exploreResultsFeatureCollection(exploreResults)}
@@ -857,7 +861,7 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Coverage of downloaded offline packs, so blank areas are explicable. */}
-        {packs.length > 0 ? (
+        {!inPip && packs.length > 0 ? (
           <GeoJSONSource id="atlas-pack-outlines" data={packOutlinesGeoJSON(packs)}>
             <Layer
               type="line"
@@ -871,7 +875,7 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
-        {offlineRegionBbox ? (
+        {!inPip && offlineRegionBbox ? (
           <GeoJSONSource
             id="atlas-offline-region-selection"
             data={selectedRegionGeoJSON(offlineRegionBbox)}
@@ -889,7 +893,7 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Saved/imported tracks (visible ones), drawn under the routes. */}
-        {trackGeo.features.length > 0 ? (
+        {!inPip && trackGeo.features.length > 0 ? (
           <GeoJSONSource id="atlas-tracks" data={trackGeo}>
             <Layer
               type="fill"
@@ -918,7 +922,7 @@ export function MapScene({
               id="atlas-route-casing"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
-                'line-width': 11,
+                'line-width': inPip ? 7 : 11,
                 'line-gradient': ['step', ['line-progress'], '#7d8590', routeProgress, '#1557b0'],
               }}
             />
@@ -927,7 +931,7 @@ export function MapScene({
               id="atlas-route-line"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
-                'line-width': 7,
+                'line-width': inPip ? 4 : 7,
                 'line-gradient': ['step', ['line-progress'], '#aab2bd', routeProgress, '#4285f4'],
               }}
             />
@@ -936,7 +940,7 @@ export function MapScene({
         {/* Turn arrows over the route (web-style white-on-blue): every remaining
           maneuver gets a short arrow across the turn plus an oriented head, so
           the turn is visible on the map itself, not only in the banner. */}
-        {navArrows && navArrows.features.length > 0 ? (
+        {!inPip && navArrows && navArrows.features.length > 0 ? (
           <GeoJSONSource id="atlas-nav-arrows" data={navArrows}>
             <Layer
               type="line"
@@ -990,7 +994,7 @@ export function MapScene({
         {/* Route choices before guidance starts: muted alternatives under the
           selected line; a tap on a grey line switches to it (App hit-tests
           NAV_PREVIEW_LAYER_IDS and calls nav.selectPreview). */}
-        {nav.phase === 'preview' && nav.previewPaths ? (
+        {!inPip && nav.phase === 'preview' && nav.previewPaths ? (
           <GeoJSONSource
             id="atlas-nav-preview"
             data={previewRoutesGeoJSON(nav.previewPaths, nav.previewIndex)}
@@ -1010,7 +1014,7 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Planned route (route-planning panel): distinct colour from navigation. */}
-        {planning && planPath && !transitTrip ? (
+        {!inPip && planning && planPath && !transitTrip ? (
           <GeoJSONSource
             id="atlas-plan"
             data={lineStringFeature(planPath.points.map((p) => [p.lng, p.lat]))}
@@ -1044,7 +1048,7 @@ export function MapScene({
         {/* The selected public transport journey: rides in the line's own
           colour, walks dashed, boarding points ringed. Drawn instead of the
           planned road line, never alongside it. */}
-        {transitTrip ? (
+        {!inPip && transitTrip ? (
           <>
             <GeoJSONSource id="atlas-transit" data={transitLegsGeoJSON(transitTrip)}>
               <Layer
@@ -1088,7 +1092,7 @@ export function MapScene({
           a measurement is always readable over whatever it is measuring, and
           filtered on the same `kind` properties the web tool uses — both scenes
           draw one `measureFeatures()` collection. */}
-        {measure ? (
+        {!inPip && measure ? (
           <GeoJSONSource id="atlas-measure" data={measure}>
             <Layer
               type="fill"
@@ -1152,7 +1156,7 @@ export function MapScene({
         {/* Waypoints are draggable (long-press, then drag — MapLibre Native's
           annotation drag gesture); releasing re-routes through the new point.
           ViewAnnotation, not Marker: only annotations support native dragging. */}
-        {planning
+        {!inPip && planning
           ? route.waypoints.map((w, i) => (
               <ViewAnnotation
                 key={w.id}
@@ -1189,45 +1193,47 @@ export function MapScene({
             be rotated twice and point at a road we aren't on. */}
         {navDot ? (
           <Marker lngLat={[navDot.lng, navDot.lat]} anchor="center">
-            <View style={styles.navDot} />
+            <View style={[styles.navDot, inPip && styles.navDotPip]} />
           </Marker>
         ) : null}
-        {offlineRegionCorner && !offlineRegionBbox ? (
+        {!inPip && offlineRegionCorner && !offlineRegionBbox ? (
           <Marker lngLat={[offlineRegionCorner.lng, offlineRegionCorner.lat]} anchor="center">
             <View style={styles.regionCorner} />
           </Marker>
         ) : null}
         {/* Via stops still ahead on a multi-stop trip: dots on the line,
             quieter than the destination flag; each disappears once passed. */}
-        {nav.destination
+        {!inPip && nav.destination
           ? nav.viaPoints.slice(nav.state?.viasPassed ?? 0).map((via, i) => (
               <Marker key={`nav-via-${i}`} lngLat={[via.lng, via.lat]} anchor="center">
                 <View style={styles.navVia} />
               </Marker>
             ))
           : null}
-        {nav.destination ? (
-          <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
-            <View style={pinScaleStyle}>
-              <PlacePin color="#16324f" icon="🏁" />
-            </View>
-          </Marker>
-        ) : destination ? (
-          // Draggable (long-press + drag) so a picked point can be fine-tuned;
-          // full-size on purpose: the annotation renders to a bitmap, so the
-          // zoom-proportional transform the Markers use wouldn't refresh it.
-          <ViewAnnotation
-            id="destination-pin"
-            lngLat={[destination.lng, destination.lat]}
-            anchor="bottom"
-            draggable
-            onDragEnd={(e) => {
-              const [lng, lat] = e.nativeEvent.lngLat;
-              onDestinationMoved({ lat, lng });
-            }}
-          >
-            <PlacePin color="#d33939" />
-          </ViewAnnotation>
+        {!inPip ? (
+          nav.destination ? (
+            <Marker lngLat={[nav.destination.lng, nav.destination.lat]} anchor="bottom">
+              <View style={pinScaleStyle}>
+                <PlacePin color="#16324f" icon="🏁" />
+              </View>
+            </Marker>
+          ) : destination ? (
+            // Draggable (long-press + drag) so a picked point can be fine-tuned;
+            // full-size on purpose: the annotation renders to a bitmap, so the
+            // zoom-proportional transform the Markers use wouldn't refresh it.
+            <ViewAnnotation
+              id="destination-pin"
+              lngLat={[destination.lng, destination.lat]}
+              anchor="bottom"
+              draggable
+              onDragEnd={(e) => {
+                const [lng, lat] = e.nativeEvent.lngLat;
+                onDestinationMoved({ lat, lng });
+              }}
+            >
+              <PlacePin color="#d33939" />
+            </ViewAnnotation>
+          ) : null
         ) : null}
         {/* A saved stand's own rose, so which way it faces is visible on the map
           that planned it (§E12). Deliberately dimmer and thinner than the live
@@ -1235,7 +1241,7 @@ export function MapScene({
           season's stands visible, and a proposal being considered must not read
           as a decision already made. Geometry comes from the shared
           `savedStandFeatures` — the same builder the web map and the card use. */}
-        {savedStands.features.length > 0 ? (
+        {!inPip && savedStands.features.length > 0 ? (
           <GeoJSONSource id="atlas-saved-stands" data={savedStands}>
             <Layer
               type="line"
@@ -1260,13 +1266,15 @@ export function MapScene({
           The marker view itself never handles touches (they aren't delivered
           reliably) — taps fall through to the map, and App.onMapPress hit-tests
           the pins to open the destination card (Navigate / Edit). */}
-        {visiblePlaces.map((place) => (
-          <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
-            <View pointerEvents="none" testID={`place-pin-${place.id}`} style={pinScaleStyle}>
-              <PlacePin color={place.color} icon={place.icon} />
-            </View>
-          </Marker>
-        ))}
+        {!inPip
+          ? visiblePlaces.map((place) => (
+              <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
+                <View pointerEvents="none" testID={`place-pin-${place.id}`} style={pinScaleStyle}>
+                  <PlacePin color={place.color} icon={place.icon} />
+                </View>
+              </Marker>
+            ))
+          : null}
       </MapLibreMap>
 
       {/* Sits where the native bar used to: middle of the bottom edge, between
@@ -1317,6 +1325,12 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#fff',
     elevation: 4,
+  },
+  navDotPip: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
   },
   navVia: {
     width: 14,
