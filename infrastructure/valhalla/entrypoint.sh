@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# First start: build the Valhalla tileset (admins + timezones + routing tiles
-# + a single-file tile extract) from the OSM extracts in $VALHALLA_PBF_URLS,
+# First start: build the Valhalla tileset (timezones + routing tiles + a
+# single-file tile extract) from the OSM extracts in $VALHALLA_PBF_URLS,
 # downloading any that are missing. Subsequent starts skip straight to serving.
 # To refresh OSM data (or after changing the extract list), delete the .pbf
 # files to refresh / add the new ones, delete /data/tiles.tar and restart
@@ -29,7 +29,7 @@ valhalla_build_config \
   --mjolnir-tile-dir "$DATA_DIR/tiles" \
   --mjolnir-tile-extract "$DATA_DIR/tiles.tar" \
   --mjolnir-timezone "$DATA_DIR/timezones.sqlite" \
-  --mjolnir-admin "$DATA_DIR/admins.sqlite" \
+  --mjolnir-data-processing-use-admin-db false \
   --mjolnir-concurrency "$CONCURRENCY" \
   > "$CONFIG"
 
@@ -52,9 +52,14 @@ if [ ! -f "$DATA_DIR/tiles.tar" ]; then
   done
   echo ">> No tile extract at $DATA_DIR/tiles.tar - building tiles from: ${PBFS[*]}"
   valhalla_build_timezones > "$DATA_DIR/timezones.sqlite"
-  # Admin areas drive country-specific routing rules (driving side, roundabout
-  # phrasing, border crossings); built from the same extracts as the tiles.
-  valhalla_build_admins -c "$CONFIG" "${PBFS[@]}"
+  # A regional Geofabrik extract clips the country-boundary relation. Building
+  # admins from it produced county rows with no country parents, so Valhalla
+  # assigned the dummy left-driving admin to every Norwegian and Swedish road.
+  # Both covered countries drive on the right: leave the incomplete admin DB
+  # disabled and retain Valhalla's per-way right-driving default. This matters
+  # to roundabout exit counting, which inspects only the driving-side branch.
+  # If coverage gains a left-driving country, supply a complete country-level
+  # admin dataset before enabling the admin DB again.
   valhalla_build_tiles -c "$CONFIG" "${PBFS[@]}"
   # Single-file tar of all tiles: faster startup (one mmap) and the marker
   # that the build finished — a crashed build leaves no tiles.tar and reruns.

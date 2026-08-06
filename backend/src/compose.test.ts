@@ -56,3 +56,25 @@ describe('repository-root compose example', () => {
     expect(yaml).toMatch(/VALHALLA_URL:\s*http:\/\/atlas-valhalla:8002/);
   });
 });
+
+describe('regional Valhalla builds', () => {
+  it('keep Norway and Sweden on Valhalla’s right-driving fallback', () => {
+    const entrypoint = readFileSync(
+      path.join(repoRoot, 'infrastructure/valhalla/entrypoint.sh'),
+      'utf8',
+    );
+    const packBuilder = readFileSync(
+      path.join(repoRoot, 'infrastructure/packs/build-pack.sh'),
+      'utf8',
+    );
+
+    // Geofabrik's regional extracts do not contain complete country-boundary
+    // relations. An admin DB built from them silently assigned the dummy
+    // left-driving admin, making Valhalla count the wrong side of roundabouts.
+    for (const script of [entrypoint, packBuilder]) {
+      expect(script).toContain('--mjolnir-data-processing-use-admin-db false');
+      expect(script).not.toContain('--mjolnir-admin');
+    }
+    expect(entrypoint).not.toContain('valhalla_build_admins');
+  });
+});

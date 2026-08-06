@@ -94,10 +94,10 @@ node "$SCRIPT_DIR/build-pack-nvdb.mjs" "$OUT/nvdb.sqlite" "$BBOX" "$DATA_DIR/nvd
 rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
 
 echo "==> [$ID] building Valhalla routing tiles"
-# Reuse the server's admins/timezones (built by infrastructure/valhalla on
-# first start) — same data source, and skips a shapefile download per pack.
+# Reuse the server's timezones (built by infrastructure/valhalla on first
+# start), which skips a shapefile download per pack.
 VALHALLA_MASTER="$DATA_DIR/valhalla"
-for f in admins.sqlite timezones.sqlite; do
+for f in timezones.sqlite; do
   [[ -f "$VALHALLA_MASTER/$f" ]] || {
     echo "missing $VALHALLA_MASTER/$f — start infrastructure/valhalla once first." >&2
     exit 1
@@ -115,7 +115,7 @@ docker run --rm "${LIMITS[@]}" \
         --mjolnir-tile-dir /work/valhalla-tiles \
         --mjolnir-tile-extract /work/valhalla.tar \
         --mjolnir-timezone /master/timezones.sqlite \
-        --mjolnir-admin /master/admins.sqlite \
+        --mjolnir-data-processing-use-admin-db false \
         --mjolnir-concurrency 2 > /work/valhalla.json
       valhalla_build_tiles -c /work/valhalla.json /work/$ID.osm.pbf
       valhalla_build_extract -c /work/valhalla.json -v --overwrite"
