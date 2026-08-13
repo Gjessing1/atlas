@@ -185,6 +185,7 @@ export function NavBanner({
   // Deliberately distinct from End: this completes the trip rather than
   // abandoning it, so it banks the summary.
   const canDeclareArrival = guiding && state != null && state.distanceRemainingM <= 150;
+  const canContinuePastStop = guiding && nav.nextIntermediateStop !== null;
   const profileLabel = ROUTING_PROFILES.find((candidate) => candidate.id === nav.profile)?.label;
   const shownWidgets: NavWidgetId[] = exploring ? ['speed', 'altitude'] : widgets;
 
@@ -276,6 +277,11 @@ export function NavBanner({
           )}
 
           {nav.phase === 'rerouting' ? <span className="nav-reroute">Rerouting…</span> : null}
+          {guiding && nav.headingCalibrationNeeded ? (
+            <span className="nav-reroute">
+              Compass needs calibration — move your phone in a figure 8
+            </span>
+          ) : null}
           {nav.rerouteOffered ? (
             <div className="nav-offroute-row">
               <span className="nav-offroute-text">
@@ -441,6 +447,16 @@ export function NavBanner({
             ) : nav.phase === 'paused' ? (
               <button type="button" className="nav-arrived" onClick={nav.continueTrip}>
                 Resume
+              </button>
+            ) : null}
+            {canContinuePastStop ? (
+              <button
+                type="button"
+                className="nav-arrived"
+                onClick={nav.continuePastIntermediateStop}
+                title="Mark the current intermediate stop visited and continue"
+              >
+                Stop visited
               </button>
             ) : null}
             {canDeclareArrival ? (

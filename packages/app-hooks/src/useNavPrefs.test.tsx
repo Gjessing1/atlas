@@ -15,6 +15,8 @@ const target = (profile: RoutingProfile = 'car', muted = false) => ({
   muted,
   setMuted: vi.fn(),
   profile,
+  headingSource: 'auto' as const,
+  setHeadingSource: vi.fn(),
 });
 
 describe('useNavPrefs', () => {
@@ -42,13 +44,14 @@ describe('useNavPrefs', () => {
     const store = settings({ 'local.nav.follow': 'sideways' });
     const { result } = renderHook(() => useNavPrefs(store, target()));
 
-    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(5));
     expect(result.current.followMode).toBe('course');
   });
 
   it('persists orientation changes', async () => {
     const store = settings();
     const { result } = renderHook(() => useNavPrefs(store, target()));
+    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(5));
 
     act(() => result.current.toggleFollowMode());
     expect(result.current.followMode).toBe('north');
@@ -84,7 +87,14 @@ describe('useNavPrefs', () => {
   it('mirrors mute changes made through the controller, but not the initial value', async () => {
     const store = settings();
     const { rerender } = renderHook(
-      ({ muted }) => useNavPrefs(store, { muted, setMuted: vi.fn(), profile: 'car' }),
+      ({ muted }) =>
+        useNavPrefs(store, {
+          muted,
+          setMuted: vi.fn(),
+          profile: 'car',
+          headingSource: 'auto',
+          setHeadingSource: vi.fn(),
+        }),
       { initialProps: { muted: false } },
     );
     await waitFor(() => expect(store.getSetting).toHaveBeenCalled());
@@ -92,6 +102,17 @@ describe('useNavPrefs', () => {
 
     rerender({ muted: true });
     expect(store.setSetting).toHaveBeenCalledWith('local.nav.muted', 'true');
+  });
+
+  it('restores and persists the direction-arrow source', async () => {
+    const store = settings({ 'local.nav.heading-source': 'compass' });
+    const nav = target('foot');
+    const { result } = renderHook(() => useNavPrefs(store, nav));
+
+    await waitFor(() => expect(nav.setHeadingSource).toHaveBeenCalledWith('compass'));
+    act(() => result.current.setHeadingSource('gps'));
+    expect(nav.setHeadingSource).toHaveBeenLastCalledWith('gps');
+    expect(store.setSetting).toHaveBeenLastCalledWith('local.nav.heading-source', 'gps');
   });
 
   it('restores and persists a capped widget selection', async () => {
@@ -138,12 +159,18 @@ describe('useNavPrefs', () => {
   it('does not re-read when the controller hands out a new setMuted each render', async () => {
     const store = settings({ 'local.nav.muted': 'true' });
     const { rerender } = renderHook(() =>
-      useNavPrefs(store, { muted: false, setMuted: () => undefined, profile: 'car' }),
+      useNavPrefs(store, {
+        muted: false,
+        setMuted: () => undefined,
+        profile: 'car',
+        headingSource: 'auto',
+        setHeadingSource: () => undefined,
+      }),
     );
-    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(store.getSetting).toHaveBeenCalledTimes(5));
 
     rerender();
     rerender();
-    expect(store.getSetting).toHaveBeenCalledTimes(4);
+    expect(store.getSetting).toHaveBeenCalledTimes(5);
   });
 });

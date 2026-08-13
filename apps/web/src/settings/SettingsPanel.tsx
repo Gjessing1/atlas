@@ -341,6 +341,34 @@ export function SettingsPanel({
 
         {tab === 'navigation' && (
           <div className="settings-section">
+            <h3>Direction arrow</h3>
+            <div className="theme-options" role="radiogroup" aria-label="Direction arrow source">
+              {(
+                [
+                  ['auto', 'Auto'],
+                  ['compass', 'Compass'],
+                  ['gps', 'GPS course'],
+                ] as const
+              ).map(([source, label]) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={navPrefs.headingSource === source}
+                  className={
+                    navPrefs.headingSource === source
+                      ? 'theme-option theme-option-on'
+                      : 'theme-option'
+                  }
+                  onClick={() => navPrefs.setHeadingSource(source)}
+                  key={source}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="settings-note">
+              Auto uses the compass while still and the steadier travel course once moving.
+            </p>
             <h3>Navigation widgets</h3>
             <div
               className="theme-options nav-widget-options"

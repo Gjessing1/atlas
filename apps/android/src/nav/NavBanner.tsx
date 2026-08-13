@@ -201,6 +201,7 @@ export function NavBanner({
   // Deliberately distinct from End: this completes the trip rather than
   // abandoning it, so it banks the summary.
   const canDeclareArrival = guiding && state != null && state.distanceRemainingM <= 150;
+  const canContinuePastStop = guiding && nav.nextIntermediateStop !== null;
   // "then …" hint when the maneuver after the current one follows hot on its
   // heels — or the distant maneuver demoted below a long-road sustain cue.
   const thenManeuver =
@@ -326,6 +327,11 @@ export function NavBanner({
         )}
 
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
+        {guiding && nav.headingCalibrationNeeded ? (
+          <Text style={styles.reroute} accessibilityLiveRegion="polite">
+            Compass needs calibration — move your phone in a figure 8
+          </Text>
+        ) : null}
         {nav.rerouteOffered ? (
           <View style={styles.offRouteRow}>
             <Text style={styles.offRouteText} numberOfLines={2}>
@@ -566,6 +572,17 @@ export function NavBanner({
               accessibilityLabel="Resume navigation"
             >
               <Text style={styles.stopText}>Resume</Text>
+            </Pressable>
+          ) : null}
+          {canContinuePastStop ? (
+            <Pressable
+              style={styles.arrived}
+              onPress={nav.continuePastIntermediateStop}
+              testID="continue-past-stop"
+              accessibilityRole="button"
+              accessibilityLabel="Mark intermediate stop visited and continue"
+            >
+              <Text style={styles.stopText}>Stop visited</Text>
             </Pressable>
           ) : null}
           {canDeclareArrival ? (

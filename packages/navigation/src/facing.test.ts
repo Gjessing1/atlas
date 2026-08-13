@@ -53,6 +53,28 @@ describe('FacingBlender', () => {
     expect(b.current(0, null, 1400)!.deg).toBeGreaterThan(80);
   });
 
+  it('rejects a lone near-opposite spike but accepts a confirmed fast turn', () => {
+    const b = new FacingBlender();
+    b.updateCompass(10, 15, 1000);
+    b.updateCompass(188, 15, 1100);
+    expect(b.current(0, null, 1100)!.deg).toBe(10);
+
+    // A second nearby reading proves that this is a real turn rather than the
+    // common one-sample magnetometer flip.
+    b.updateCompass(190, 15, 1200);
+    expect(b.current(0, null, 1200)!.deg).toBeGreaterThan(150);
+  });
+
+  it('uses accuracy hysteresis so a marginal sample cannot flicker the arrow', () => {
+    const b = new FacingBlender();
+    b.updateCompass(20, 70, 1000);
+    expect(b.current(0, null, 1000)).toBeNull();
+    b.updateCompass(22, 55, 1100);
+    expect(b.current(0, null, 1100)).toBeNull();
+    b.updateCompass(24, 40, 1200);
+    expect(b.current(0, null, 1200)).not.toBeNull();
+  });
+
   it('treats unknown accuracy (web) as usable', () => {
     const b = new FacingBlender();
     b.updateCompass(120, null, 1000);

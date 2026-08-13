@@ -1313,6 +1313,40 @@ export function SettingsSheet({
         ) : null}
         {section === 'navigation' ? (
           <>
+            <Text style={styles.heading}>Direction arrow</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(
+                [
+                  ['auto', 'Auto'],
+                  ['compass', 'Compass'],
+                  ['gps', 'GPS course'],
+                ] as const
+              ).map(([source, label]) => (
+                <Pressable
+                  key={source}
+                  style={[
+                    styles.themeOption,
+                    navPrefs.headingSource === source && styles.themeOptionOn,
+                  ]}
+                  onPress={() => navPrefs.setHeadingSource(source)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: navPrefs.headingSource === source }}
+                  testID={`heading-source-${source}`}
+                >
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      navPrefs.headingSource === source && styles.themeOptionTextOn,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.muted}>
+              Auto uses the compass while still and the steadier travel course once moving.
+            </Text>
             <Text style={styles.heading}>Navigation widgets</Text>
             <View style={styles.widgetOptions}>
               {NAV_WIDGETS.map((widget) => {

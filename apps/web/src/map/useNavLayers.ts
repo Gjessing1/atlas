@@ -367,9 +367,12 @@ export function useNavLayers(
       if (!puckRef.current) {
         const el = document.createElement('div');
         el.className = 'nav-puck-wrap';
+        const heading = document.createElement('div');
+        heading.className = 'nav-puck-heading';
         const dot = document.createElement('div');
         dot.className = 'nav-puck';
-        el.append(dot);
+        heading.append(dot);
+        el.append(heading);
         puckRef.current = new maplibregl.Marker({ element: el });
       }
       puckRef.current.setLngLat(snapped).addTo(map);
@@ -377,6 +380,14 @@ export function useNavLayers(
       // Grey when the GPS signal is lost, so a frozen puck reads as
       // "no signal", not "we're still here".
       el.classList.toggle('nav-puck-lost', nav.state?.fix === 'lost');
+      const headingEl = el.firstElementChild as HTMLDivElement | null;
+      const directional = followMode === 'course' || nav.headingArrowVisible;
+      headingEl?.classList.toggle('nav-puck-directional', directional);
+      const heading =
+        followMode === 'course'
+          ? 0
+          : (nav.facingDeg ?? nav.state?.courseDeg ?? nav.position?.headingDeg ?? 0);
+      if (headingEl) headingEl.style.transform = directional ? `rotate(${heading}deg)` : '';
     } else {
       puckRef.current?.remove();
       puckRef.current = null;
@@ -404,7 +415,12 @@ export function useNavLayers(
     nav.phase,
     nav.state?.snapped,
     nav.state?.fix,
+    nav.state?.courseDeg,
     nav.position,
+    nav.position?.headingDeg,
+    nav.facingDeg,
+    nav.headingArrowVisible,
+    followMode,
     nav.destination,
   ]);
   // Via stops still ahead on a multi-stop trip, as small dots along the line:

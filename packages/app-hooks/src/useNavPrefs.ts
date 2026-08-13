@@ -5,6 +5,7 @@ import {
   type NavWidgetId,
 } from '@atlas/core';
 import type { RoutingProfile } from '@atlas/routing';
+import type { HeadingSource } from '@atlas/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -23,6 +24,7 @@ const FOLLOW_SETTING = 'local.nav.follow';
  */
 const FOLLOW_WALK_SETTING = 'local.nav.follow.walk';
 const WIDGETS_SETTING = 'local.nav.widgets';
+const HEADING_SOURCE_SETTING = 'local.nav.heading-source';
 
 export type NavFollowMode = 'course' | 'north';
 
@@ -42,6 +44,8 @@ export interface NavPrefsTarget {
   setMuted: (muted: boolean) => void;
   /** Travel mode of the current trip — picks the orientation/widget defaults. */
   profile: RoutingProfile;
+  headingSource: HeadingSource;
+  setHeadingSource: (source: HeadingSource) => void;
 }
 
 export interface NavPrefsController {
@@ -49,6 +53,9 @@ export interface NavPrefsController {
   followMode: NavFollowMode;
   setFollowMode: (mode: NavFollowMode) => void;
   toggleFollowMode: () => void;
+  /** Direction-arrow input for walking, running and cycling guidance. */
+  headingSource: HeadingSource;
+  setHeadingSource: (source: HeadingSource) => void;
   /** Curated readouts shown during guidance, in display order. */
   widgets: NavWidgetId[];
   toggleWidget: (widget: NavWidgetId) => void;
@@ -56,6 +63,9 @@ export interface NavPrefsController {
 
 const parseFollow = (raw: string | null): NavFollowMode | null =>
   raw === 'north' || raw === 'course' ? raw : null;
+
+const parseHeadingSource = (raw: string | null): HeadingSource | null =>
+  raw === 'auto' || raw === 'compass' || raw === 'gps' ? raw : null;
 
 /** Parse a stored widget strip; null when nothing (valid) was ever saved. */
 function parseStoredWidgets(raw: string | null): NavWidgetId[] | null {
@@ -102,6 +112,8 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
   // render would otherwise re-run the load effect and clobber a live toggle.
   const setMutedRef = useRef(nav.setMuted);
   setMutedRef.current = nav.setMuted;
+  const setHeadingSourceRef = useRef(nav.setHeadingSource);
+  setHeadingSourceRef.current = nav.setHeadingSource;
 
   useEffect(() => {
     if (status !== 'ready') return;
@@ -119,6 +131,10 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     });
     void getSetting(WIDGETS_SETTING).then((raw) => {
       if (!cancelled) setCustomWidgets(parseStoredWidgets(raw));
+    });
+    void getSetting(HEADING_SOURCE_SETTING).then((raw) => {
+      const source = parseHeadingSource(raw);
+      if (!cancelled && source) setHeadingSourceRef.current(source);
     });
     return () => {
       cancelled = true;
@@ -152,6 +168,14 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     else apply(setDriveFollow, FOLLOW_SETTING);
   }, [setSetting]);
 
+  const setHeadingSource = useCallback(
+    (source: HeadingSource) => {
+      setHeadingSourceRef.current(source);
+      setSetting(HEADING_SOURCE_SETTING, source);
+    },
+    [setSetting],
+  );
+
   // The first toggle materialises the mode's defaults as a saved strip; from
   // then on the one curated strip applies to every mode.
   const widgetsRef = useRef(widgets);
@@ -180,5 +204,13 @@ export function useNavPrefs(settings: NavPrefsSettings, nav: NavPrefsTarget): Na
     if (status === 'ready') setSetting(MUTED_SETTING, String(nav.muted));
   }, [nav.muted, status, setSetting]);
 
-  return { followMode, setFollowMode, toggleFollowMode, widgets, toggleWidget };
+  return {
+    followMode,
+    setFollowMode,
+    toggleFollowMode,
+    headingSource: nav.headingSource,
+    setHeadingSource,
+    widgets,
+    toggleWidget,
+  };
 }

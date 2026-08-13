@@ -12,6 +12,25 @@ test('cold load shows the map at the default Oslo view', async ({ page }) => {
   expect(cam.lng).toBeCloseTo(10.75, 1);
 });
 
+test('direction-arrow source is selectable and persists on this device', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Navigation' }).click();
+  await expect(page.getByRole('radio', { name: 'Auto' })).toBeChecked();
+  await page.getByRole('radio', { name: 'GPS course' }).click();
+  await expect(page.getByRole('radio', { name: 'GPS course' })).toBeChecked();
+  // Settings writes are asynchronous through the OPFS worker; give the click's
+  // transaction a turn before deliberately tearing the page down.
+  await page.waitForTimeout(250);
+
+  await page.reload();
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Navigation' }).click();
+  await expect(page.getByRole('radio', { name: 'GPS course' })).toBeChecked();
+});
+
 test('dark mode themes the UI and basemap, persists, and profiles change map emphasis', async ({
   page,
 }) => {

@@ -685,6 +685,25 @@ describe('useNavigationController — via stops', () => {
     expect(rerouteQuery.points[1]).toEqual(via);
     expect(hook.result.current.viaPoints).toEqual([via]);
   });
+
+  it('lets the traveller mark only the next intermediate stop visited', async () => {
+    const vias = [points[7]!, points[13]!];
+    const h = harness(() => Promise.resolve({ paths: [viaPath(600_000)] }));
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'car', undefined, vias));
+    await act(() => hook.result.current.go());
+    await waitFor(() => expect(hook.result.current.phase).toBe('navigating'));
+
+    expect(hook.result.current.nextIntermediateStop).toEqual(vias[0]);
+    const callsBefore = h.route.mock.calls.length;
+    act(() => hook.result.current.continuePastIntermediateStop());
+
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(callsBefore + 1));
+    const [query] = h.route.mock.calls.at(-1)!;
+    expect(query.points).toEqual([expect.objectContaining(points[0]!), vias[1], destination]);
+    await waitFor(() => expect(hook.result.current.viaPoints).toEqual([vias[1]]));
+    expect(hook.result.current.nextIntermediateStop).toEqual(vias[1]);
+  });
 });
 
 describe('useNavigationController — add stop mid-trip', () => {
@@ -992,6 +1011,46 @@ describe('useNavigationController — walking modes', () => {
     // End tears the compass watch down with the trip.
     act(() => result.current.stop());
     expect(facingSink).toBeNull();
+  });
+
+  it('reports calibration trouble and honours forced compass and GPS sources', async () => {
+    let facingSink: ((deg: number, accuracyDeg: number | null) => void) | null = null;
+    const h = harness(undefined, {
+      watchFacing: (onFacing) => {
+        facingSink = onFacing;
+        return () => {
+          facingSink = null;
+        };
+      },
+    });
+    const { result } = await walk(h);
+    await waitFor(() => expect(facingSink).not.toBeNull());
+
+    act(() => facingSink?.(170, 90));
+    await waitFor(() => expect(result.current.headingCalibrationNeeded).toBe(true));
+    expect(result.current.headingArrowVisible).toBe(false);
+
+    act(() => result.current.setHeadingSource('compass'));
+    await waitFor(() => expect(facingSink).not.toBeNull());
+    act(() => facingSink?.(80, 15));
+    await waitFor(() => expect(result.current.facingDeg).toBe(80));
+    act(() => h.emit(onLine(2, { speedMps: 3, headingDeg: 95 })));
+    expect(result.current.facingDeg).toBe(80);
+
+    act(() => result.current.setHeadingSource('gps'));
+    await waitFor(() => expect(facingSink).toBeNull());
+    act(() => h.emit(onLine(3, { speedMps: 2, headingDeg: 96 })));
+    await waitFor(() => expect(result.current.facingDeg).toBe(96));
+    expect(result.current.headingArrowVisible).toBe(true);
+  });
+
+  it('prepares a gated compass from the Start gesture', async () => {
+    const prepareFacing = vi.fn(() => Promise.resolve());
+    const h = harness(undefined, { prepareFacing });
+    const hook = renderHook(() => useNavigationController(h.platform));
+    await act(() => hook.result.current.start(destination, 'foot'));
+    await act(() => hook.result.current.go());
+    expect(prepareFacing).toHaveBeenCalledTimes(1);
   });
 
   it('never subscribes to the compass for a driving trip', async () => {

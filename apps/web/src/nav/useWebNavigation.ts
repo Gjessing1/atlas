@@ -77,20 +77,54 @@ function keepAwake(): () => void {
  * permission prompt); a desktop browser has no compass and simply never fires,
  * which is the honest outcome — the puck keeps its route-tangent fallback
  * rather than pretending. iOS Safari gates orientation behind a per-site
- * permission that needs a user gesture; until that flow exists it lands in
- * the same fallback. The event has no accuracy field, so null is reported and
- * the blender applies its default cone.
+ * permission that needs a user gesture and publishes `webkitCompassHeading`
+ * on the ordinary `deviceorientation` event. Other browsers use the absolute
+ * event and expose no accuracy field.
  */
 function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void {
-  const handler = (event: DeviceOrientationEvent) => {
+  const absoluteHandler = (event: DeviceOrientationEvent) => {
     if (!event.absolute || event.alpha == null) return;
     // alpha is the device's rotation from north (counter-clockwise); the
     // compass heading is its inverse, corrected for a rotated screen.
     const screenDeg = screen.orientation?.angle ?? 0;
     onFacing((360 - event.alpha + screenDeg) % 360, null);
   };
-  window.addEventListener('deviceorientationabsolute', handler as EventListener);
-  return () => window.removeEventListener('deviceorientationabsolute', handler as EventListener);
+  const safariHandler = (event: DeviceOrientationEvent) => {
+    const safari = event as DeviceOrientationEvent & {
+      webkitCompassHeading?: number;
+      webkitCompassAccuracy?: number;
+    };
+    if (typeof safari.webkitCompassHeading !== 'number') return;
+    const accuracy = safari.webkitCompassAccuracy;
+    onFacing(
+      safari.webkitCompassHeading,
+      typeof accuracy === 'number' && Number.isFinite(accuracy)
+        ? accuracy >= 0
+          ? accuracy
+          : 90
+        : null,
+    );
+  };
+  window.addEventListener('deviceorientationabsolute', absoluteHandler as EventListener);
+  window.addEventListener('deviceorientation', safariHandler as EventListener);
+  return () => {
+    window.removeEventListener('deviceorientationabsolute', absoluteHandler as EventListener);
+    window.removeEventListener('deviceorientation', safariHandler as EventListener);
+  };
+}
+
+/**
+ * iOS Safari exposes orientation only after this is called directly from a
+ * tap. Merely installing the listener is silent, so Start/Resume invokes this
+ * seam before doing any asynchronous route work. Other browsers need nothing.
+ */
+function prepareFacing(): Promise<void> {
+  if (!('DeviceOrientationEvent' in window)) return Promise.resolve();
+  const ctor = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+    requestPermission?: () => Promise<'granted' | 'denied'>;
+  };
+  if (typeof ctor.requestPermission !== 'function') return Promise.resolve();
+  return ctor.requestPermission.call(ctor).then(() => undefined);
 }
 
 /**
@@ -139,6 +173,7 @@ export function useWebNavigation(): NavController {
       },
       keepAwake,
       watchFacing,
+      prepareFacing,
     };
   }, []);
 

@@ -15,9 +15,11 @@
 
 import type { LatLng } from '@atlas/core';
 import {
+  DEFAULT_FACING_BLEND,
   FacingBlender,
   navOptionsForProfile,
   NavigationSession,
+  type HeadingSource,
   type NavState,
   type Position,
 } from '@atlas/navigation';
@@ -154,6 +156,12 @@ export interface NavPlatform {
    * then keeps the route-tangent fallback rather than pretending.
    */
   watchFacing?(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void;
+  /**
+   * Ask for access to device orientation from a user gesture when the platform
+   * requires it (iOS Safari). A denial is an honest no-compass fallback, not a
+   * navigation failure.
+   */
+  prepareFacing?(): Promise<void>;
 }
 
 export interface NavController {
@@ -184,6 +192,8 @@ export interface NavController {
    * `viaPoints.slice(state?.viasPassed ?? 0)`. Empty for ordinary trips.
    */
   viaPoints: LatLng[];
+  /** The next intermediate stop still owed by this route, or null. */
+  nextIntermediateStop: LatLng | null;
   /** Route choices while in the preview phase (fastest first); null otherwise. */
   previewPaths: RoutePath[] | null;
   /** Index into previewPaths of the choice guidance will follow. */
@@ -207,6 +217,13 @@ export interface NavController {
   facingDeg: number | null;
   /** Sensor-declared ± accuracy of `facingDeg` (deg), or null when unknown. */
   facingAccuracyDeg: number | null;
+  /** Direction-arrow source selected in Settings. */
+  headingSource: HeadingSource;
+  setHeadingSource: (source: HeadingSource) => void;
+  /** False when the selected source has no trustworthy direction to draw. */
+  headingArrowVisible: boolean;
+  /** The sensor explicitly reports that a figure-8 calibration is needed. */
+  headingCalibrationNeeded: boolean;
   /**
    * True while the session is off-route but this mode leaves rerouting to the
    * traveller (walking modes): the UI shows "Off route — reroute?" instead of
@@ -231,6 +248,11 @@ export interface NavController {
    * guidance recalculates from the last fix; the final destination stays.
    */
   addStop: (stop: LatLng) => void;
+  /**
+   * Mark the next intermediate stop visited and route onward from the current
+   * fix. The final destination and every later stop stay in place.
+   */
+  continuePastIntermediateStop: () => void;
   /** Whether voice prompts are muted. */
   muted: boolean;
   /** Distance/time of the finished trip (arrived phase only), else null. */
@@ -321,6 +343,9 @@ function useLatest<T>(value: T): { current: T } {
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** Profiles where facing the device and direction of travel can diverge. */
+const usesFacingHeading = (profile: RoutingProfile): boolean => profile !== 'car';
+
 export function useNavigationController(platform: NavPlatform): NavController {
   const platformRef = useLatest(platform);
 
@@ -341,6 +366,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [altitudeM, setAltitudeM] = useState<number | null>(null);
   const [facing, setFacing] = useState<{ deg: number; accuracyDeg: number | null } | null>(null);
+  const [headingSource, setHeadingSourceState] = useState<HeadingSource>('auto');
+  const [headingCalibrationNeeded, setHeadingCalibrationNeeded] = useState(false);
   const [muted, setMutedState] = useState(false);
   const [fasterRoute, setFasterRoute] = useState<NavFasterRoute | null>(null);
   const [tripSummary, setTripSummary] = useState<NavTripSummary | null>(null);
@@ -406,6 +433,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const activePathRef = useLatest(activePath);
   /** Compass-vs-course blending for the walking puck (speed hysteresis). */
   const facingBlender = useRef(new FacingBlender());
+  const headingSourceRef = useRef<HeadingSource>('auto');
   /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
   const enrichAbort = useRef<AbortController | null>(null);
   /** Teardown for the active fix watch, if any. */
@@ -641,6 +669,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       setSpeedMps(null);
       setAltitudeM(null);
       setFacing(null);
+      setHeadingCalibrationNeeded(false);
       facingBlender.current.reset();
       lastFixRef.current = null;
       offRouteSpokenRef.current = false;
@@ -837,6 +866,24 @@ export function useNavigationController(platform: NavPlatform): NavController {
     },
     [fetchPath, speak, enrich, clearFasterOffer],
   );
+
+  /**
+   * The stop marker and the road a traveller can actually reach are not
+   * always the same point (petrol forecourt versus POI, station entrance
+   * versus platform). Let the traveller settle that ambiguity explicitly:
+   * remove only the next unvisited via and calculate the continuation from
+   * the measured position. The old route remains authoritative if that
+   * calculation fails, just like every other reroute.
+   */
+  const continuePastIntermediateStop = useCallback(() => {
+    if (phase !== 'navigating' && phase !== 'rerouting') return;
+    const fix = lastFixRef.current;
+    if (!fix) return;
+    const passed = lastStateRef.current?.viasPassed ?? 0;
+    if (passed >= viasRef.current.length) return;
+    const remaining = viasRef.current.slice(passed + 1);
+    void reroute(fix, remaining);
+  }, [phase, reroute]);
 
   /** Accept an offered reroute: recalculate from the last known fix. */
   const rerouteNow = useCallback(() => {
@@ -1078,6 +1125,15 @@ export function useNavigationController(platform: NavPlatform): NavController {
         typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
       );
       setPosition(fix);
+      if (usesFacingHeading(profileRef.current) && headingSourceRef.current === 'gps') {
+        const speed = typeof fix.speedMps === 'number' ? fix.speedMps : 0;
+        const deg = typeof fix.headingDeg === 'number' ? fix.headingDeg : null;
+        setFacing(
+          deg !== null && Number.isFinite(deg) && speed >= 0.5
+            ? { deg: ((deg % 360) + 360) % 360, accuracyDeg: null }
+            : null,
+        );
+      }
       // Explorer mode is deliberately only a live fix and follow camera. It
       // has no synthetic route state, so no arrival/off-route/reroute logic can
       // accidentally leak into a destination-free trip.
@@ -1132,6 +1188,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
     const session = sessionRef.current;
     if (!session || !pausedRef.current || continueInFlightRef.current) return;
     continueInFlightRef.current = true;
+    const facingReady =
+      usesFacingHeading(profileRef.current) && headingSourceRef.current !== 'gps'
+        ? platformRef.current.prepareFacing?.()
+        : undefined;
     const trip = tripSeq.current;
     setError(null);
     try {
@@ -1139,6 +1199,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // puck where the traveller is now without treating the paused interval
       // as dead reckoning or replaying guidance that belonged inside it.
       const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
+      await facingReady?.catch(() => undefined);
       if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) return;
       const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
       if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) {
@@ -1239,6 +1300,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
     async (prof: RoutingProfile = 'car') => {
       if (startInFlight.current) return;
       startInFlight.current = true;
+      const facingReady =
+        usesFacingHeading(prof) && headingSourceRef.current !== 'gps'
+          ? platformRef.current.prepareFacing?.()
+          : undefined;
       stopWatch();
       sessionRef.current = null;
       clearPreview();
@@ -1265,6 +1330,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       lastFixMeasuredAtRef.current = null;
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
+        await facingReady?.catch(() => undefined);
         if (seq !== previewSeq.current) return;
         onFix(origin.fix, origin.atMs);
         const stopFixes = await platformRef.current.watchFixes(onFix, 'explorer');
@@ -1373,6 +1439,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   const go = useCallback(async () => {
+    // Invoke this before the first await: iOS Safari accepts its orientation
+    // prompt only while the Start button's user gesture is still on the stack.
+    const facingReady =
+      usesFacingHeading(profileRef.current) && headingSourceRef.current !== 'gps'
+        ? platformRef.current.prepareFacing?.()
+        : undefined;
     const index = previewIndexRef.current;
     const previewPath = previewPathsRef.current?.[index];
     if (!previewPath) return;
@@ -1407,6 +1479,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
       // Cancel or profile switch while the refresh was in flight invalidates it.
       if (seq !== previewSeq.current || !destRef.current) return;
+      await facingReady?.catch(() => undefined);
       await beginGuidance(path, origin);
     } catch (err) {
       fail(err);
@@ -1436,6 +1509,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
     ) => {
       if (startInFlight.current) return;
       startInFlight.current = true;
+      const facingReady =
+        usesFacingHeading(prof) && headingSourceRef.current !== 'gps'
+          ? platformRef.current.prepareFacing?.()
+          : undefined;
       const seq = ++previewSeq.current;
       setError(null);
       setPhase('starting');
@@ -1457,6 +1534,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
         const path = await fetchPath(origin.fix, dest, prof, preferencesOverride, undefined, vias);
         if (seq !== previewSeq.current) return;
+        await facingReady?.catch(() => undefined);
         // Cleared here rather than in `finally`: `beginGuidance` bumps the
         // preview sequence itself (it clears any preview), so by the time the
         // finally runs this resume no longer looks like the current one and
@@ -1539,10 +1617,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
   // hysteresis (compass while walking, GPS course when moving fast enough for
   // it to be trustworthy) and drops readings the sensor itself flags as bad —
   // Google's degrade-to-a-dot behaviour, minus the figure-8 nag.
-  const walkingProfile = profile === 'foot' || profile === 'hike' || profile === 'run';
+  const facingProfile = usesFacingHeading(profile);
   const speedRef = useLatest(speedMps);
   useEffect(() => {
-    if (!liveFollowing || !walkingProfile) return;
+    if (!liveFollowing || !facingProfile || headingSource === 'gps') return;
     const watch = platformRef.current.watchFacing;
     if (!watch) return;
     const blender = facingBlender.current;
@@ -1551,12 +1629,18 @@ export function useNavigationController(platform: NavPlatform): NavController {
     let lastSetDeg: number | null = null;
     const unsubscribe = watch((deg, accuracyDeg) => {
       const now = Date.now();
+      if (accuracyDeg !== null) {
+        setHeadingCalibrationNeeded((needed) =>
+          needed
+            ? accuracyDeg > DEFAULT_FACING_BLEND.accuracyRecoveryDeg
+            : accuracyDeg > DEFAULT_FACING_BLEND.maxAccuracyDeg,
+        );
+      }
       blender.updateCompass(deg, accuracyDeg, now);
-      const sample = blender.current(
-        speedRef.current,
-        lastStateRef.current?.courseDeg ?? null,
-        now,
-      );
+      const sample =
+        headingSource === 'compass'
+          ? blender.current(null, null, now)
+          : blender.current(speedRef.current, lastStateRef.current?.courseDeg ?? null, now);
       if (!sample) {
         if (lastSetDeg !== null) {
           lastSetDeg = null;
@@ -1576,18 +1660,57 @@ export function useNavigationController(platform: NavPlatform): NavController {
     return () => {
       unsubscribe();
       setFacing(null);
+      setHeadingCalibrationNeeded(false);
     };
-  }, [liveFollowing, walkingProfile, platformRef, speedRef]);
+  }, [liveFollowing, facingProfile, headingSource, platformRef, speedRef]);
 
   // Speeding up leans the puck onto the course even between compass events (a
   // cyclist pushing off from a walk would otherwise keep a stale facing); a
   // compass that has since gone quiet drops it entirely.
   useEffect(() => {
+    if (headingSource !== 'auto') return;
     const course = lastStateRef.current?.courseDeg ?? null;
     if (facing && facingBlender.current.current(speedMps, course, Date.now()) === null) {
       setFacing(null);
     }
-  }, [speedMps, facing]);
+  }, [speedMps, facing, headingSource]);
+
+  const setHeadingSource = useCallback(
+    (source: HeadingSource) => {
+      headingSourceRef.current = source;
+      setHeadingSourceState(source);
+      facingBlender.current.reset();
+      setHeadingCalibrationNeeded(false);
+      if (source === 'gps') {
+        const fix = lastFixRef.current;
+        const speed = typeof fix?.speedMps === 'number' ? fix.speedMps : 0;
+        const deg = typeof fix?.headingDeg === 'number' ? fix.headingDeg : null;
+        setFacing(
+          deg !== null && Number.isFinite(deg) && speed >= 0.5
+            ? { deg: ((deg % 360) + 360) % 360, accuracyDeg: null }
+            : null,
+        );
+      } else {
+        setFacing(null);
+        // Changing this setting is itself a user gesture. If Safari was
+        // started in GPS-only mode, this is the only valid moment to ask for
+        // orientation access without forcing the traveller to restart.
+        if (
+          usesFacingHeading(profileRef.current) &&
+          (phase === 'navigating' || phase === 'rerouting' || phase === 'exploring')
+        ) {
+          void platformRef.current.prepareFacing?.().catch(() => undefined);
+        }
+      }
+    },
+    [phase, platformRef],
+  );
+
+  const headingArrowVisible = !facingProfile
+    ? true
+    : headingSource === 'auto'
+      ? !headingCalibrationNeeded && (facing !== null || state?.courseDeg != null)
+      : facing !== null;
 
   // A navigating device is a dashboard: keep the screen on for the whole trip.
   useEffect(() => {
@@ -1609,6 +1732,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     preferences,
     destination,
     viaPoints,
+    nextIntermediateStop: viaPoints[state?.viasPassed ?? 0] ?? null,
     previewPaths,
     previewIndex,
     previewLoading,
@@ -1617,6 +1741,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
     altitudeM,
     facingDeg: facing?.deg ?? null,
     facingAccuracyDeg: facing?.accuracyDeg ?? null,
+    headingSource,
+    setHeadingSource,
+    headingArrowVisible,
+    headingCalibrationNeeded,
     rerouteOffered:
       phase === 'navigating' &&
       state?.status === 'off-route' &&
@@ -1626,6 +1754,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     acceptFasterRoute,
     dismissFasterRoute,
     addStop,
+    continuePastIntermediateStop,
     tripSummary,
     tripProgress,
     rerouteFailed,

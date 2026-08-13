@@ -4493,6 +4493,35 @@ button.transit-notice-summary {
   justify-content: center;
 }
 
+.nav-puck-heading {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* A trustworthy heading adds a small forward pointer. When calibration or a
+   forced source has no direction, the class is absent and the marker is the
+   same honest position-only dot as before. */
+.nav-puck-directional::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 11px solid var(--accent);
+}
+
+.nav-puck-lost .nav-puck-directional::before {
+  border-bottom-color: #9aa0a6;
+}
+
 /* Tunnel dimming: fades in slowly once dead reckoning has persisted (eyes
    adjusting to the dark), snaps back out at the bright portal. */
 .tunnel-dim {

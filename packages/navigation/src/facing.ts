@@ -25,6 +25,9 @@ export interface FacingSample {
   accuracyDeg: number | null;
 }
 
+/** User-selected source for the pedestrian/cyclist direction arrow. */
+export type HeadingSource = 'auto' | 'compass' | 'gps';
+
 export interface FacingBlendOptions {
   /** At or below this ground speed (m/s) the puck is pure compass. */
   compassOnlySpeedMps: number;
@@ -45,6 +48,14 @@ export interface FacingBlendOptions {
    * still tracked promptly while small jitter is heavily damped.
    */
   smoothingAlpha: number;
+  /** Largest credible one-sample rotation before confirmation is required. */
+  maxTurnRateDegPerSec: number;
+  /** Always permit small changes even when samples arrive almost together. */
+  spikeFloorDeg: number;
+  /** A second reading this close to a rejected one confirms a genuine turn. */
+  spikeConfirmDeg: number;
+  /** Accuracy required before an arrow hidden as uncalibrated comes back. */
+  accuracyRecoveryDeg: number;
 }
 
 export const DEFAULT_FACING_BLEND: FacingBlendOptions = {
@@ -57,6 +68,10 @@ export const DEFAULT_FACING_BLEND: FacingBlendOptions = {
   maxAccuracyDeg: 60,
   maxSampleAgeMs: 5000,
   smoothingAlpha: 0.3,
+  maxTurnRateDegPerSec: 240,
+  spikeFloorDeg: 35,
+  spikeConfirmDeg: 25,
+  accuracyRecoveryDeg: 45,
 };
 
 /** Shortest signed difference b−a, in (−180, 180]. */
@@ -81,6 +96,8 @@ export class FacingBlender {
   private readonly opts: FacingBlendOptions;
   private sample: FacingSample | null = null;
   private sampleAtMs = 0;
+  private pendingSpike: { deg: number; atMs: number } | null = null;
+  private accuracyUsable = true;
 
   constructor(options: Partial<FacingBlendOptions> = {}) {
     this.opts = { ...DEFAULT_FACING_BLEND, ...options };
@@ -90,6 +107,8 @@ export class FacingBlender {
   reset(): void {
     this.sample = null;
     this.sampleAtMs = 0;
+    this.pendingSpike = null;
+    this.accuracyUsable = true;
   }
 
   /** Feed one compass reading (already true-north referenced). */
@@ -98,16 +117,47 @@ export class FacingBlender {
     const wrapped = ((deg % 360) + 360) % 360;
     const prev = this.sample;
     const stale = prev === null || nowMs - this.sampleAtMs > this.opts.maxSampleAgeMs;
+    if (accuracyDeg !== null) {
+      if (accuracyDeg > this.opts.maxAccuracyDeg) this.accuracyUsable = false;
+      else if (accuracyDeg <= this.opts.accuracyRecoveryDeg) this.accuracyUsable = true;
+    }
     let smoothed: number;
     if (stale) {
       // No trustworthy history to filter against — take the reading as-is.
       smoothed = wrapped;
     } else {
+      const dtSec = Math.max(0.016, (nowMs - this.sampleAtMs) / 1000);
+      const rawDelta = angleDeltaDeg(prev.deg, wrapped);
+      const credibleDelta = Math.max(
+        this.opts.spikeFloorDeg,
+        this.opts.maxTurnRateDegPerSec * dtSec,
+      );
+      if (Math.abs(rawDelta) > credibleDelta) {
+        const pending = this.pendingSpike;
+        if (
+          !pending ||
+          nowMs - pending.atMs > 1000 ||
+          Math.abs(angleDeltaDeg(pending.deg, wrapped)) > this.opts.spikeConfirmDeg
+        ) {
+          // A one-sample near-opposite reading is magnetic interference. A
+          // genuine fast turn produces a second nearby sample and is accepted.
+          this.pendingSpike = { deg: wrapped, atMs: nowMs };
+          return;
+        }
+      }
+      this.pendingSpike = null;
       // Low-pass the heading: small jitter is damped by `smoothingAlpha`, while
-      // a large swing (a real turn) raises the weight toward 1 so the puck
-      // still tracks it within a couple of samples rather than crawling.
+      // a sustained turn raises the weight so the puck still tracks promptly.
+      // Poor-but-usable accuracy lowers the base weight rather than making a
+      // noisy compass look more authoritative than a healthy one.
       const delta = angleDeltaDeg(prev.deg, wrapped);
-      const alpha = Math.min(1, this.opts.smoothingAlpha + Math.abs(delta) / 180);
+      const confidence =
+        accuracyDeg === null
+          ? 1
+          : Math.max(0, Math.min(1, 1 - accuracyDeg / this.opts.maxAccuracyDeg));
+      const baseAlpha = this.opts.smoothingAlpha * (0.5 + confidence * 0.5);
+      const turnAlpha = Math.min(0.6, (Math.abs(delta) / 90) * 0.6);
+      const alpha = Math.min(0.85, baseAlpha + turnAlpha);
       smoothed = blendAngleDeg(prev.deg, wrapped, alpha);
     }
     this.sample = { deg: smoothed, accuracyDeg };
@@ -127,7 +177,7 @@ export class FacingBlender {
     const sample = this.sample;
     if (!sample) return null;
     if (nowMs - this.sampleAtMs > this.opts.maxSampleAgeMs) return null;
-    if (sample.accuracyDeg !== null && sample.accuracyDeg > this.opts.maxAccuracyDeg) return null;
+    if (!this.accuracyUsable) return null;
     if (courseDeg === null) return sample;
     const w = this.courseWeight(speedMps);
     if (w <= 0) return sample;

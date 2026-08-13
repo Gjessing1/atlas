@@ -34,6 +34,7 @@ export {
   DEFAULT_FACING_BLEND,
   type FacingBlendOptions,
   type FacingSample,
+  type HeadingSource,
 } from './facing.js';
 export { backToTrack, cardinalFromDeg, type BackToTrack } from './offtrack.js';
 export { remainingAscentM, type ElevationPoint } from './elevation.js';

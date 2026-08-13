@@ -19,6 +19,8 @@ export interface NavPuck {
   x: number;
   y: number;
   rotation: number;
+  /** Draw a direction arrow; false deliberately degrades to a position dot. */
+  directional: boolean;
 }
 
 /**
@@ -83,6 +85,7 @@ export function useNavPuck(
     rotation: courseUp
       ? 0
       : Math.round(nav.facingDeg ?? nav.state?.courseDeg ?? nav.position?.headingDeg ?? 0),
+    directional: courseUp || nav.headingArrowVisible,
   };
 }
 
@@ -130,11 +133,15 @@ export function NavChrome({ nav, navCam, puck, bottomInset, viewport }: NavChrom
           pointerEvents="none"
           style={[styles.navPuckWrap, { top: puck.y - 21, left: puck.x - 21 }]}
         >
-          <View style={{ transform: [{ rotate: `${puck.rotation}deg` }] }}>
-            {/* Grey when the GPS signal is lost, so a frozen puck reads as
-                "no signal", not "we're still here". */}
-            <NavArrowIcon color={nav.state?.fix === 'lost' ? theme.icon : theme.accent} />
-          </View>
+          {puck.directional ? (
+            <View style={{ transform: [{ rotate: `${puck.rotation}deg` }] }}>
+              {/* Grey when the GPS signal is lost, so a frozen puck reads as
+                  "no signal", not "we're still here". */}
+              <NavArrowIcon color={nav.state?.fix === 'lost' ? theme.icon : theme.accent} />
+            </View>
+          ) : (
+            <View style={[styles.navPuckDot, nav.state?.fix === 'lost' && styles.navPuckDotLost]} />
+          )}
         </View>
       ) : null}
 
@@ -203,6 +210,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 5,
   },
+  navPuckDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: theme.accent,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  navPuckDotLost: { backgroundColor: theme.icon },
   recentrePill: {
     flexDirection: 'row',
     alignItems: 'center',

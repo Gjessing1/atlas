@@ -870,6 +870,30 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/AddStopSheet.tsx', contains: 'export function' },
   },
   {
+    id: 'nav-continue-past-stop',
+    surface: 'navigation',
+    capability: 'Mark an intermediate stop visited and continue to the next one',
+    hook: 'useNavigationController',
+    web: {
+      file: 'apps/web/src/nav/NavBanner.tsx',
+      contains: 'continuePastIntermediateStop',
+    },
+    android: {
+      file: 'apps/android/src/nav/NavBanner.tsx',
+      contains: 'continuePastIntermediateStop',
+    },
+  },
+  {
+    id: 'nav-heading-source',
+    surface: 'navigation',
+    capability:
+      'Choose auto, compass or GPS course for the direction arrow and explain bad calibration',
+    hook: 'useNavPrefs',
+    web: { file: 'apps/web/src/settings/SettingsPanel.tsx', contains: 'Direction arrow' },
+    android: { file: 'apps/android/src/ui/SettingsSheet.tsx', contains: 'Direction arrow' },
+    note: 'The shared FacingBlender rejects isolated spikes and applies confidence-aware smoothing. Each banner asks for a figure-8 when its sensor reports an uncalibrated compass; Safari requests orientation from the Start gesture and reads webkitCompassHeading.',
+  },
+  {
     id: 'nav-resume',
     surface: 'navigation',
     capability: 'Offer to resume the trip that was interrupted',
