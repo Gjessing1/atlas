@@ -4237,6 +4237,38 @@ button.transit-notice-summary {
   background: var(--accent);
 }
 
+.nav-elevation-ahead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nav-elevation-ahead svg {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 48px;
+  margin-top: 2px;
+  overflow: visible;
+}
+
+.nav-elevation-area {
+  fill: rgba(26, 115, 232, 0.12);
+}
+
+.nav-elevation-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
 .nav-summary {
   min-width: 0;
   color: var(--text-muted);

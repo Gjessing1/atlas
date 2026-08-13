@@ -5,7 +5,9 @@ import {
   laneGlyphs,
   laneLabel,
   remainingAscentM,
+  remainingElevationProfile,
   shortManeuverText,
+  type ElevationPoint,
   tunnelChipLabel,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
@@ -68,6 +70,48 @@ function LaneRow({ lanes }: { lanes: RouteLane[] }) {
           </svg>
         </span>
       ))}
+    </div>
+  );
+}
+
+/** The planner's elevation story, narrowed to only the ground still ahead. */
+function RemainingElevationChart({
+  points,
+  traveledM,
+}: {
+  points: ElevationPoint[];
+  traveledM: number;
+}) {
+  const profile = remainingElevationProfile(points, traveledM, 72);
+  if (profile.length < 2) return null;
+  const width = 440;
+  const height = 48;
+  const min = Math.min(...profile.map((point) => point.elevationM));
+  const max = Math.max(...profile.map((point) => point.elevationM));
+  const padding = Math.max(5, (max - min) * 0.08);
+  const floor = min - padding;
+  const ceiling = max + padding;
+  const distanceM = profile.at(-1)!.distanceM;
+  const x = (value: number) => (distanceM > 0 ? (value / distanceM) * width : 0);
+  const y = (value: number) => height - ((value - floor) / (ceiling - floor)) * height;
+  const line = profile
+    .map(
+      (point, index) =>
+        `${index === 0 ? 'M' : 'L'}${x(point.distanceM).toFixed(1)},${y(point.elevationM).toFixed(1)}`,
+    )
+    .join('');
+
+  return (
+    <div
+      className="nav-elevation-ahead"
+      aria-label={`Elevation ahead for ${fmtDistanceM(distanceM)}, from ${Math.round(profile[0]!.elevationM)} to ${Math.round(profile.at(-1)!.elevationM)} metres`}
+    >
+      <span>Elevation ahead</span>
+      <span>{fmtDistanceM(distanceM)}</span>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-hidden="true">
+        <path d={`${line}L${width},${height}L0,${height}Z`} className="nav-elevation-area" />
+        <path d={line} className="nav-elevation-line" />
+      </svg>
     </div>
   );
 }
@@ -353,6 +397,12 @@ export function NavBanner({
                   }}
                 />
               </div>
+              {nav.profile === 'hike' && nav.activePath ? (
+                <RemainingElevationChart
+                  points={nav.activePath.points}
+                  traveledM={state.traveledM}
+                />
+              ) : null}
             </>
           ) : null}
         </div>

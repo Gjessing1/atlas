@@ -5,6 +5,7 @@ import {
   type NavPlatform,
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
+import { enrichPlannedResult, httpElevationProfile } from '@atlas/routing';
 import { httpTrafficClosures, httpTrafficDelay } from '@atlas/traffic';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
@@ -210,12 +211,17 @@ export function useNavigation(): NavController {
   const serverOrigin = useServerOrigin();
   const platform = useMemo<NavPlatform>(() => {
     const provider = makeRouteProvider(serverOrigin);
+    const trace = makeTraceTransport(serverOrigin);
+    const elevation = httpElevationProfile({ baseUrl: serverOrigin });
     return {
       provider: {
         route: async (query, signal) => {
           void logNavigationDiagnostic({ event: 'route-request', query });
           try {
-            const result = await provider.route(query, signal);
+            const routed = await provider.route(query, signal);
+            const result = query.details
+              ? await enrichPlannedResult(routed, query, trace, elevation, signal)
+              : routed;
             void logNavigationDiagnostic({ event: 'route-calculated', query, result });
             return result;
           } catch (error) {
@@ -232,7 +238,7 @@ export function useNavigation(): NavController {
       // The same corridor measurements the provider prices a new route with,
       // asked again mid-drive so the trip being followed is re-priced too.
       trafficDelay: httpTrafficDelay(serverOrigin),
-      trace: makeTraceTransport(serverOrigin),
+      trace,
       // NVDB speed limits + ATK/OSM cameras, offline-first (ROADMAP §2.1): a
       // downloaded pack that ships nvdb.sqlite answers from its own copy of the
       // dataset with the same conflation the server runs; otherwise these fall

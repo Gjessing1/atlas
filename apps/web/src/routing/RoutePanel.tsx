@@ -229,7 +229,7 @@ const CUSTOM_OPTIONS: readonly {
   {
     key: 'avoidFerries',
     label: 'Avoid ferries',
-    profiles: ['car', 'bike', 'foot', 'hike', 'run'],
+    profiles: ['car'],
   },
   { key: 'avoidHighways', label: 'Avoid highways / main roads', profiles: ['car', 'bike'] },
   { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },

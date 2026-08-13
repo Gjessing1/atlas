@@ -6,6 +6,7 @@ import {
   fmtDistanceM,
   haversineM,
   mapProfile,
+  mapProfileForRouting,
   placeIsVisible,
   placeTargetTitle,
   resolveInaturOffer,
@@ -386,6 +387,15 @@ export function App() {
   // ---- turn-by-turn navigation ----
 
   const nav = useWebNavigation();
+  // The route mode owns cartography for the duration of guidance. In
+  // particular, starting a drive from a Hike map must restore road-first Drive
+  // styling and its contextual layers. Walk has no dedicated map profile and
+  // deliberately leaves the chosen cartography alone.
+  useEffect(() => {
+    if (nav.activity !== 'guidance') return;
+    const next = mapProfileForRouting(nav.profile);
+    if (next && next.id !== profiles.profile.id) profiles.setProfile(next.id);
+  }, [nav.activity, nav.profile, profiles.profile.id, profiles.setProfile]);
   const tunnelDim = useTunnelDim(nav.state?.fix, nav.state?.tunnel != null);
   // Category candidates from the explore endpoint, shared by the mid-drive
   // "add a stop" panel (what is still ahead) and the planner's "stops along

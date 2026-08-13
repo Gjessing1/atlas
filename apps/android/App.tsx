@@ -29,6 +29,7 @@ import {
   clampExploreRadiusM,
   haversineM,
   mapProfile,
+  mapProfileForRouting,
   placeIsVisible,
   resolveInaturOffer,
   savedPlaceAt,
@@ -204,6 +205,14 @@ function AppInner() {
   // The active profile and quick overlay state are device-local; the preferred
   // switcher layout syncs and is shared by Settings and the one-tap controls.
   const profiles = useMapProfile(data);
+  // Navigation's route mode owns the matching map cartography. A Drive trip
+  // cannot retain Hike styling just because that was the previous activity;
+  // plain Walk has no dedicated profile and leaves the chosen map alone.
+  useEffect(() => {
+    if (nav.activity !== 'guidance') return;
+    const next = mapProfileForRouting(nav.profile);
+    if (next && next.id !== profiles.profile.id) profiles.setProfile(next.id);
+  }, [nav.activity, nav.profile, profiles.profile.id, profiles.setProfile]);
   const profilePreferences = useMapProfilePreferences(data);
   const overlaysCtl = useOverlays(
     data,

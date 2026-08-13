@@ -144,7 +144,7 @@ describe('buildValhallaRequest', () => {
       })['costing_options'],
     ).toEqual({
       bicycle: {
-        use_ferry: 0.5,
+        use_ferry: 0,
         use_hills: 0,
         bicycle_type: 'mountain',
         use_roads: 0.1,
@@ -178,6 +178,15 @@ describe('buildValhallaRequest', () => {
     expect(
       buildValhallaRequest({ profile: 'bike', points: [oslo, sognsvann] })['costing_options'],
     ).toEqual({ bicycle: { use_ferry: 0 } });
+    // A stale/custom preference cannot turn a walk or ride into an ordinary
+    // ferry shortcut. `use_ferry: 0` remains a strong preference, not a ban.
+    expect(
+      buildValhallaRequest({
+        profile: 'run',
+        points: [oslo, sognsvann],
+        preferences: { avoidFerries: false },
+      })['costing_options'],
+    ).toEqual({ pedestrian: { use_ferry: 0, walking_speed: 10 } });
     // Norwegian ferries are part of the road network; driving keeps them.
     expect(
       buildValhallaRequest({ profile: 'car', points: [oslo, sognsvann] })['costing_options'],

@@ -876,6 +876,7 @@ test('running and custom trail preferences reach the routing engine', async ({ p
   await page.getByRole('button', { name: 'Route' }).click();
   await page.getByRole('button', { name: 'Run' }).click();
   await page.getByText('Customize Run').click();
+  await expect(page.getByRole('checkbox', { name: 'Avoid ferries' })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Prefer trails' }).check();
 
   const customizedRequest = page.waitForRequest((request) => {

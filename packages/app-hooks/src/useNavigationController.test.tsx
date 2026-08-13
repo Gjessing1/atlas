@@ -113,6 +113,19 @@ afterEach(() => {
 });
 
 describe('useNavigationController — preview', () => {
+  it('requests route detail for hike elevation guidance only', async () => {
+    const hike = harness();
+    const hikeHook = renderHook(() => useNavigationController(hike.platform));
+    await act(() => hikeHook.result.current.start(destination, 'hike'));
+    expect(hike.route).toHaveBeenCalledWith(expect.objectContaining({ details: true }));
+    hikeHook.unmount();
+
+    const drive = harness();
+    const driveHook = renderHook(() => useNavigationController(drive.platform));
+    await act(() => driveHook.result.current.start(destination, 'car'));
+    expect(drive.route).toHaveBeenCalledWith(expect.objectContaining({ details: false }));
+  });
+
   it('offers the choices fastest first and enters the preview phase', async () => {
     const h = harness(() => Promise.resolve({ paths: [path(900_000), path(600_000, 0.0001)] }));
     const { result } = renderHook(() => useNavigationController(h.platform));

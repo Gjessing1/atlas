@@ -111,6 +111,51 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-banner')).toHaveCount(0);
 });
 
+test('hike guidance shows only the elevation still ahead', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Directions' }).click();
+  await page.getByRole('button', { name: 'Hike' }).click();
+  await page.getByRole('button', { name: 'Start navigation' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+
+  const profile = page.locator('.nav-elevation-ahead');
+  await expect(profile).toBeVisible();
+  await expect(profile).toContainText('Elevation ahead');
+  await expect(profile.locator('.nav-elevation-line')).toHaveCount(1);
+});
+
+test('driving guidance replaces a previously selected Hike map profile', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  const profileSwitch = page.locator('.profile-switch');
+  await profileSwitch.getByRole('radio', { name: 'Hike' }).click();
+  await expect(profileSwitch.getByRole('radio', { name: 'Hike' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Directions' }).click();
+  await page
+    .getByRole('group', { name: 'Routing profile' })
+    .getByRole('button', { name: 'Drive' })
+    .click();
+  await page.getByRole('button', { name: 'Start navigation' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await page.getByRole('button', { name: 'End' }).click();
+
+  await expect(profileSwitch.getByRole('radio', { name: 'Drive' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+});
+
 test('Start refreshes a preview route from the latest position', async ({ page, context }) => {
   const routeOrigins: Array<{ lat: number; lon: number }> = [];
   await mockRouting(page);

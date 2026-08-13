@@ -804,6 +804,22 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'speedLimit' },
   },
   {
+    id: 'nav-hike-elevation',
+    surface: 'navigation',
+    capability: 'Show the elevation profile still ahead while guiding a hike',
+    web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'RemainingElevationChart' },
+    android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'RemainingElevationChart' },
+    note: 'Both clients render `remainingElevationProfile` from the routed path already in memory. The series starts at an interpolated current elevation, shrinks as progress advances, and stays absent where the route has no elevation data.',
+  },
+  {
+    id: 'nav-map-profile',
+    surface: 'navigation',
+    capability: 'Switch the map cartography to the route mode when guidance starts',
+    web: { file: 'apps/web/src/App.tsx', contains: 'mapProfileForRouting(nav.profile)' },
+    android: { file: 'apps/android/App.tsx', contains: 'mapProfileForRouting(nav.profile)' },
+    note: 'Drive, Cycle, Hike and Run select their matching map profile for preview, resumed trips and active guidance. Plain Walk has no dedicated map profile, so it deliberately preserves the current cartography.',
+  },
+  {
     id: 'nav-speed-cameras',
     surface: 'navigation',
     capability: 'Warn about a speed camera ahead, and about an average-speed section',

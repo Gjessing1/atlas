@@ -37,7 +37,12 @@ export {
   type HeadingSource,
 } from './facing.js';
 export { backToTrack, cardinalFromDeg, type BackToTrack } from './offtrack.js';
-export { remainingAscentM, type ElevationPoint } from './elevation.js';
+export {
+  remainingAscentM,
+  remainingElevationProfile,
+  type ElevationPoint,
+  type RemainingElevationPoint,
+} from './elevation.js';
 export {
   followZoom,
   navCameraStyle,

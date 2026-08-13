@@ -300,13 +300,13 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
   const preferences: RoutePreferences = { ...defaults, ...query.preferences };
   const costingOptions: Record<string, Record<string, unknown>> = {};
   const costing = costingFor(query.profile);
-  if (preferences.avoidFerries) {
+  // For a pedestrian or cyclist, a ferry is a discontinuity in the journey,
+  // not an ordinary route preference: keep the strong avoidance even if an
+  // older saved preference says otherwise. Valhalla may still use one where
+  // it is the necessary connection (islands / no reasonable land crossing),
+  // and the parsed path then warns the traveller explicitly.
+  if (query.profile !== 'car' || preferences.avoidFerries) {
     costingOptions[costing] = { use_ferry: 0 };
-  } else if (query.profile !== 'car' && query.preferences?.avoidFerries === false) {
-    // Non-car Atlas defaults avoid ferries; an explicit custom-profile choice
-    // restores Valhalla's ordinary willingness instead of merely removing a key
-    // that the defaulting layer would add again.
-    costingOptions[costing] = { use_ferry: 0.5 };
   }
   if (query.profile === 'car') {
     if (preferences.avoidHighways || preferences.avoidTolls) {

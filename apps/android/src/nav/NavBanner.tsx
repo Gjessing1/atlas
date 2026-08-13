@@ -6,7 +6,9 @@ import {
   laneGlyphs,
   laneLabel,
   remainingAscentM,
+  remainingElevationProfile,
   shortManeuverText,
+  type ElevationPoint,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
 import { formatTrafficDelay } from '@atlas/traffic';
@@ -110,6 +112,44 @@ function LaneRow({ lanes, compact }: { lanes: RouteLane[]; compact: boolean }) {
         );
       })}
     </ScrollView>
+  );
+}
+
+/** Compact hike profile, continuously rebased to the route still ahead. */
+function RemainingElevationChart({
+  points,
+  traveledM,
+}: {
+  points: ElevationPoint[];
+  traveledM: number;
+}) {
+  const profile = remainingElevationProfile(points, traveledM, 72);
+  if (profile.length < 2) return null;
+  const min = Math.min(...profile.map((point) => point.elevationM));
+  const max = Math.max(...profile.map((point) => point.elevationM));
+  const range = Math.max(10, max - min);
+  const distanceM = profile.at(-1)!.distanceM;
+
+  return (
+    <View
+      style={styles.elevationAhead}
+      accessible
+      accessibilityLabel={`Elevation ahead for ${fmtDistanceM(distanceM)}, from ${Math.round(profile[0]!.elevationM)} to ${Math.round(profile.at(-1)!.elevationM)} metres`}
+      testID="nav-elevation-ahead"
+    >
+      <View style={styles.elevationLabels}>
+        <Text style={styles.elevationLabel}>Elevation ahead</Text>
+        <Text style={styles.elevationLabel}>{fmtDistanceM(distanceM)}</Text>
+      </View>
+      <View style={styles.elevationChart} pointerEvents="none">
+        {profile.map((point, index) => (
+          <View
+            key={index}
+            style={[styles.elevationBar, { height: 4 + ((point.elevationM - min) / range) * 40 }]}
+          />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -430,6 +470,9 @@ export function NavBanner({
                 ]}
               />
             </View>
+            {nav.profile === 'hike' && nav.activePath ? (
+              <RemainingElevationChart points={nav.activePath.points} traveledM={state.traveledM} />
+            ) : null}
           </>
         ) : null}
       </View>
@@ -735,6 +778,23 @@ const styles = StyleSheet.create({
   },
   progressTrackCompact: { marginTop: 6 },
   progressFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
+  elevationAhead: { marginTop: 8 },
+  elevationLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  elevationLabel: { color: theme.textMuted, fontSize: 11, fontWeight: '700' },
+  elevationChart: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(26, 115, 232, 0.18)',
+  },
+  elevationBar: { flex: 1, backgroundColor: theme.accent, opacity: 0.78 },
   reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
   // Walking modes: off-route is an offer ("Reroute?"), never a silent
   // recalculation — with the bearing back to the track alongside, which is

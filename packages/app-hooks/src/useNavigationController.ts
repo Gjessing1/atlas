@@ -506,6 +506,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
         profile: prof,
         points: [origin, ...vias, dest],
         instructions: true,
+        // Hike guidance draws the remaining elevation profile and ascent from
+        // this active path. Other modes avoid the extra elevation/trace work.
+        details: prof === 'hike',
         ...(preferences ? { preferences } : {}),
         ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
       });
@@ -532,6 +535,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         points: [origin, ...vias, dest],
         instructions: true,
         alternatives: true,
+        details: prof === 'hike',
         ...(preferences ? { preferences } : {}),
       });
       if (result.paths.length === 0) throw new Error('no route found');

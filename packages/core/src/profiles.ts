@@ -289,6 +289,15 @@ export function mapProfile(id: string): MapProfile {
 }
 
 /**
+ * Map activity that corresponds to a routing mode, or null where no dedicated
+ * cartography exists (plain Walk currently uses whichever map the user chose).
+ * Navigation uses this to keep a Drive route from wearing Hike cartography.
+ */
+export function mapProfileForRouting(routing: string): MapProfile | null {
+  return MAP_PROFILES.find((profile) => profile.routing === routing) ?? null;
+}
+
+/**
  * Whether an overlay belongs in the panel for a profile.
  *
  * Untagged layers are general purpose and always offered. A tagged layer is

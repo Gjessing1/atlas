@@ -9,6 +9,7 @@ import {
   layersForProfile,
   MAP_PROFILES,
   mapProfile,
+  mapProfileForRouting,
   preferredLayersForProfile,
   sanitizeMapProfilePreferences,
   type LayerMeta,
@@ -23,6 +24,14 @@ describe('map profiles', () => {
     expect(isMapProfile('rocket')).toBe(false);
     expect(isMapProfile(null)).toBe(false);
     expect(mapProfile('rocket').id).toBe(DEFAULT_MAP_PROFILE);
+  });
+
+  it('maps navigation modes back to their matching cartography', () => {
+    expect(mapProfileForRouting('car')?.id).toBe('drive');
+    expect(mapProfileForRouting('bike')?.id).toBe('bike');
+    expect(mapProfileForRouting('hike')?.id).toBe('hike');
+    expect(mapProfileForRouting('run')?.id).toBe('run');
+    expect(mapProfileForRouting('foot')).toBeNull();
   });
 
   it('always offers untagged general-purpose layers', () => {
