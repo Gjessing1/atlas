@@ -31,7 +31,8 @@ sudo apt-get install libpulse0
 On a host where sudo is unavailable, `./e2e/install-emulator-libs.sh` extracts `libpulse0` and its
 runtime dependencies into `$HOME/.local/opt/atlas-emulator-libpulse` without changing system
 directories. `./e2e/start-emulator.sh` uses the system library when installed and otherwise adds
-that user-local tree to the emulator's library path. The Atlas host currently uses this fallback.
+that user-local tree to the emulator's library path. The Atlas host has `libpulse0` installed
+system-wide, so it does not need this fallback.
 
 ```bash
 ./e2e/install-emulator-libs.sh
