@@ -9,7 +9,7 @@
 # over the shared network (set DATABASE_URL and JWT_SECRET in the deploy
 # compose .env at /home/gjessing/docker/atlas). 127.0.0.1:5433 is published
 # for local dev (npm run dev) and debugging only. The backend creates its own
-# schema on startup. Data persists in /mnt/data/atlas/postgres.
+# schema on startup. Data persists on the system NVMe.
 services:
   postgres:
     image: postgis/postgis:17-3.5-alpine
@@ -22,7 +22,7 @@ services:
     ports:
       - '127.0.0.1:5433:5432'
     volumes:
-      - /mnt/data/atlas/postgres:/var/lib/postgresql/data
+      - /home/gjessing/data/atlas/postgres:/var/lib/postgresql/data
     networks:
       - atlas
 

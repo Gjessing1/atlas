@@ -33,6 +33,7 @@ backend/data
 apps/android/android/
 apps/android/.gradle-home/
 apps/android/.expo/
+apps/android/e2e/artifacts/
 # Native build intermediates of local expo modules (CMake/ninja).
 .cxx/
 

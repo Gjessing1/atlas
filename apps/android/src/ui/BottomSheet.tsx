@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   Animated,
+  BackHandler,
   Keyboard,
   Modal,
   PanResponder,
@@ -122,6 +123,19 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const onCloseRef = useRef(onClose);
   snapsRef.current = snaps;
   onCloseRef.current = onClose;
+
+  // Map-mode sheets are intentionally not React Native Modals, so Android
+  // does not send them through Modal.onRequestClose. Consume Back here before
+  // the activity is backgrounded; every bottom surface then has the same
+  // close behavior without each owner growing its own BackHandler effect.
+  useEffect(() => {
+    if (!visible || mode !== 'map') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      onCloseRef.current();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [mode, visible]);
 
   const animateTo = (snap: SheetSnap) => {
     const target = snapsRef.current[snap];

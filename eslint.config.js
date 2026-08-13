@@ -24,7 +24,7 @@ export default tseslint.config(
   },
   {
     // Plain-node scripts (build tooling in scripts/, infrastructure/packs/*.mjs).
-    files: ['scripts/**/*.mjs', 'infrastructure/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'infrastructure/**/*.mjs', 'apps/android/e2e/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

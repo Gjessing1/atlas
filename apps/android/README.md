@@ -19,6 +19,42 @@ EXPO_PUBLIC_ATLAS_SERVER=http://10.0.2.2:3100 npx expo run:android
 `10.0.2.2` is the host loopback as seen from the Android emulator; `3100` is the backend dev
 port. (A real device on the LAN would use the machine's LAN IP instead.)
 
+## Emulator host prerequisite
+
+The Linux emulator runtime links against `libpulse.so.0` even when started with `-no-audio`.
+Install Ubuntu's PulseAudio client library before starting an AVD:
+
+```bash
+sudo apt-get install libpulse0
+```
+
+On a host where sudo is unavailable, `./e2e/install-emulator-libs.sh` extracts `libpulse0` and its
+runtime dependencies into `$HOME/.local/opt/atlas-emulator-libpulse` without changing system
+directories. `./e2e/start-emulator.sh` uses the system library when installed and otherwise adds
+that user-local tree to the emulator's library path. The Atlas host currently uses this fallback.
+
+```bash
+./e2e/install-emulator-libs.sh
+./e2e/start-emulator.sh
+```
+
+The launcher defaults to the `atlas_test` AVD and a headless, audio-free SwiftShader renderer.
+Pass extra emulator arguments after the script name when an interactive or clean boot is needed.
+
+## Full-app smoke test
+
+With `atlas_test` booted and an Atlas APK installed, run the deterministic first regression slice:
+
+```bash
+node e2e/smoke.mjs
+```
+
+It verifies app boot, the primary map controls, menu-sheet Back behavior, portrait and landscape
+search, and the route sheet. The runner refuses to clear or exercise a device that is not the
+`atlas_test` AVD. `--reset-app` clears Atlas data before launch; omit it to exercise a pre-seeded
+fixture or an installed OTA. On failure, the current screenshot and accessibility tree are written
+to `e2e/artifacts/`.
+
 ## Release APK
 
 ```bash
