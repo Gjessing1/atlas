@@ -10,7 +10,14 @@ import {
   type RoutePath,
 } from '@atlas/routing';
 
-import { bearingDeg, cumulativeDistances, pointAtDistance, snapToRoute } from './geometry.js';
+import {
+  bearingDeg,
+  cumulativeDistances,
+  cumulativeLineMetrics,
+  pointAtDistance,
+  renderedLineProgress,
+  snapToRoute,
+} from './geometry.js';
 import {
   DEFAULT_NAV_OPTIONS,
   type NavigationOptions,
@@ -96,6 +103,8 @@ function voiceDistance(distanceM: number): string {
 export class NavigationSession {
   private readonly points: LatLng[];
   private readonly cum: number[];
+  /** Cumulative spherical-Mercator length, matching MapLibre line-progress. */
+  private readonly lineMetricCum: number[];
   private readonly totalM: number;
   /** Not readonly: {@link setSchedule} re-prices the trip without restarting it. */
   private totalTimeMs: number;
@@ -186,6 +195,7 @@ export class NavigationSession {
     if (route.points.length === 0) throw new Error('cannot navigate an empty route');
     this.points = route.points.map((p) => ({ lat: p.lat, lng: p.lng }));
     this.cum = cumulativeDistances(this.points);
+    this.lineMetricCum = cumulativeLineMetrics(this.points);
     this.totalM = this.cum[this.cum.length - 1] ?? 0;
     this.totalTimeMs = route.timeMs;
     this.opts = { ...DEFAULT_NAV_OPTIONS, ...options };
@@ -680,11 +690,7 @@ export class NavigationSession {
     const snapDisplayM = this.departed ? this.opts.snapDisplayMaxM : this.opts.startSnapDisplayMaxM;
     let shown: LatLng;
     let shownCourse: number | null;
-    let displayRouteProgress = this.arrived
-      ? 1
-      : this.totalM > 0
-        ? Math.min(1, alongM / this.totalM)
-        : 0;
+    let displayRouteProgress = this.arrived ? 1 : this.renderedProgress(alongM);
     const displayOnRoute = snap.crossTrackM <= snapDisplayM && accurate;
     if (this.opts.snapDisplayPosition && displayOnRoute) {
       let displayAlongM = alongM;
@@ -700,11 +706,7 @@ export class NavigationSession {
         displayAlongM = Math.min(this.totalM, turnM, alongM + aheadM);
       }
       shown = pointAtDistance(this.points, this.cum, displayAlongM);
-      displayRouteProgress = this.arrived
-        ? 1
-        : this.totalM > 0
-          ? Math.min(1, displayAlongM / this.totalM)
-          : 0;
+      displayRouteProgress = this.arrived ? 1 : this.renderedProgress(displayAlongM);
       // Bearing from where the vehicle actually is, not from the projected
       // display point: the projection exists to cancel render latency in the
       // *position*, and letting it drive the bearing too made the course-up
@@ -719,11 +721,7 @@ export class NavigationSession {
       // puck we chose to draw raw. Anchor the rendered boundary to the raw
       // point's plain geometric projection instead.
       const shownSnap = snapToRoute(shown, this.points, this.cum);
-      displayRouteProgress = this.arrived
-        ? 1
-        : this.totalM > 0
-          ? Math.min(1, shownSnap.alongM / this.totalM)
-          : 0;
+      displayRouteProgress = this.arrived ? 1 : this.renderedProgress(shownSnap.alongM);
       // A pedestrian profile may deliberately draw the precise fix even while
       // it is on-route. Keep the stable route course there for the walking
       // compass blend; only a genuinely off-line puck should use the raw GPS
@@ -834,7 +832,9 @@ export class NavigationSession {
         // coordinate itself rather than preserving any point manufactured on
         // the route.
         snapped: measured.raw,
-        displayRouteProgress: measured.routeProgress,
+        displayRouteProgress: this.renderedProgress(
+          snapToRoute(measured.raw, this.points, this.cum).alongM,
+        ),
         fix: 'lost',
         etaEpochMs: nowMs + measured.timeRemainingMs,
         wrongBranch: false,
@@ -898,7 +898,7 @@ export class NavigationSession {
       offRouteM: this.lastMeasuredState?.offRouteM ?? last.offRouteM,
       traveledM: alongM,
       routeProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
-      displayRouteProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
+      displayRouteProgress: this.renderedProgress(alongM),
       distanceRemainingM,
       timeRemainingMs: remainMs,
       etaEpochMs: nowMs + remainMs,
@@ -998,6 +998,11 @@ export class NavigationSession {
       fix: 'lost',
       wrongBranch: false,
     };
+  }
+
+  /** MapLibre's rendered fraction for one honest metre position on this route. */
+  private renderedProgress(alongM: number): number {
+    return renderedLineProgress(this.points, this.cum, this.lineMetricCum, alongM);
   }
 
   /** Index of the first maneuver strictly ahead of `alongM`, or -1 past the last. */

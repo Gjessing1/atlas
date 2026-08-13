@@ -64,10 +64,10 @@ export function useNavLayers(
     nav.phase === 'navigating' || nav.phase === 'rerouting' || nav.phase === 'exploring';
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
-  // This must stay exact: rounding by a percentage of the whole route made
-  // the colour boundary jump tens or hundreds of metres ahead on long trips.
-  // The core's display progress also follows its latency-compensated puck, so
-  // the grey trail ends directly underneath the marker.
+  // This must stay exact and in MapLibre's spherical-Mercator line metric:
+  // rounding or using the guidance layer's real-metre fraction can move the
+  // colour boundary far ahead on long/northbound trips. The core's display
+  // progress follows its latency-compensated puck, so grey ends at the marker.
   const routeProgress = navLineProgress(nav.state);
   const routeProgressRef = useRef(routeProgress);
   routeProgressRef.current = routeProgress;

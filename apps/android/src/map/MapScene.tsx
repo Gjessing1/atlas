@@ -337,9 +337,9 @@ export function MapScene({
     [nav.activePath],
   );
   // Arrow filters can move in coarse metre steps. The route colour boundary
-  // cannot: rounding by a percentage of the whole route made it jump tens or
-  // hundreds of metres ahead on long trips. The core's display progress also
-  // follows its latency-compensated puck, so the grey trail ends underneath it.
+  // cannot: rounding or using the guidance layer's real-metre fraction can
+  // move it far ahead on long/northbound trips. The core instead supplies the
+  // exact MapLibre line metric at its puck, so grey ends underneath it.
   const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
   const routeProgress = navLineProgress(nav.state);
 

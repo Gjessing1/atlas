@@ -110,13 +110,13 @@ export interface NavState {
   /** Fraction of the route completed, 0..1 (`traveledM / total`; 1 on arrival). */
   routeProgress: number;
   /**
-   * Fraction of the route at which the rendered travelled/untravelled colour
-   * boundary should sit. Normally this is `routeProgress`; while the on-route
-   * puck is projected ahead to cancel GPS/render latency, it follows that
-   * displayed puck instead. When the puck is raw, this uses its nearest
-   * geometric projection rather than the continuity-biased guidance match.
-   * Guidance and trip progress remain truthful in `traveledM` /
-   * `routeProgress`.
+   * MapLibre `line-progress` fraction at which the rendered
+   * travelled/untravelled colour boundary should sit. This deliberately uses
+   * MapLibre's spherical-Mercator line metric rather than `routeProgress`'s
+   * real-world metres: the two fractions diverge on north/south routes. It
+   * follows the latency-compensated puck while that puck is on-route, or the
+   * nearest geometric projection when it is raw. Guidance and trip progress
+   * remain truthful in `traveledM` / `routeProgress`.
    */
   displayRouteProgress: number;
   /** Distance (m) still to travel to the destination. */
@@ -211,9 +211,10 @@ export interface NavState {
 /**
  * Exact progress value for the map's travelled-route colour boundary.
  *
- * Keep this shared so neither client reintroduces percentage rounding: 0.5%
- * of a motorway trip can put the grey trail hundreds of metres ahead of the
- * puck. Clamping is defensive only; session-produced values are already 0..1.
+ * Keep this shared so neither client reintroduces percentage rounding or
+ * substitutes metre-based `routeProgress`: either can put the grey trail
+ * hundreds of metres ahead of the puck. Clamping is defensive only;
+ * session-produced values are already 0..1.
  */
 export function navLineProgress(
   state: Pick<NavState, 'displayRouteProgress'> | null | undefined,

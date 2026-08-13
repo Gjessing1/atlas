@@ -6,7 +6,9 @@ import { followZoom, remainingRouteBounds, zoomForSpeed } from './camera.js';
 import {
   bearingDeg,
   cumulativeDistances,
+  cumulativeLineMetrics,
   pointAtDistance,
+  renderedLineProgress,
   snapToPolyline,
   snapToRoute,
   subPolyline,
@@ -437,6 +439,54 @@ describe('navLineProgress', () => {
   });
 });
 
+describe('renderedLineProgress', () => {
+  it('uses MapLibre mercator length so grey ends at the puck on a northbound route', () => {
+    const points: LatLng[] = [
+      { lat: 0, lng: 10 },
+      { lat: 60, lng: 10 },
+      { lat: 80, lng: 10 },
+    ];
+    const distanceCum = cumulativeDistances(points);
+    const lineMetricCum = cumulativeLineMetrics(points);
+    const halfwayM = distanceCum.at(-1)! / 2;
+
+    // Real metres put the puck halfway through the trip. Mercator stretches
+    // the northern remainder, so that same coordinate is earlier on the line
+    // MapLibre actually renders. Feeding MapLibre 0.5 would grey ahead of it.
+    expect(halfwayM / distanceCum.at(-1)!).toBe(0.5);
+    expect(renderedLineProgress(points, distanceCum, lineMetricCum, halfwayM)).toBeLessThan(0.4);
+
+    const path: RoutePath = {
+      points,
+      distanceM: distanceCum.at(-1)!,
+      timeMs: 60_000,
+      ascentM: 0,
+      descentM: 0,
+      instructions: [],
+    };
+    const state = new NavigationSession(path, { startDeparted: true }).update(
+      pointAtDistance(points, distanceCum, halfwayM),
+      0,
+    ).state;
+    expect(state.routeProgress).toBeCloseTo(0.5, 8);
+    expect(state.displayRouteProgress).toBeCloseTo(
+      renderedLineProgress(points, distanceCum, lineMetricCum, halfwayM),
+      8,
+    );
+  });
+
+  it('keeps the endpoints exact and rejects unusable geometry', () => {
+    const points: LatLng[] = [
+      { lat: 0, lng: 0 },
+      { lat: 0, lng: 1 },
+    ];
+    expect(renderedLineProgress(points, [0, 10], [0, 20], -1)).toBe(0);
+    expect(renderedLineProgress(points, [0, 10], [0, 20], 11)).toBe(1);
+    expect(renderedLineProgress(points.slice(0, 1), [0], [0], 0)).toBe(0);
+    expect(renderedLineProgress(points, [0, 10], [0], 5)).toBe(0);
+  });
+});
+
 describe('NavigationSession snapped state', () => {
   it('hugs the road for a near fix, keeping the raw fix as-is', () => {
     const s = new NavigationSession(route());
@@ -523,7 +573,10 @@ describe('NavigationSession snapped state', () => {
 
     expect(state.snapped).toEqual({ lat: raw.lat, lng: raw.lng });
     expect(state.routeProgress).toBeGreaterThan(0.5);
-    expect(state.displayRouteProgress).toBeCloseTo(nearest.alongM / cum.at(-1)!, 8);
+    expect(state.displayRouteProgress).toBeCloseTo(
+      renderedLineProgress(points, cum, cumulativeLineMetrics(points), nearest.alongM),
+      8,
+    );
     expect(state.displayRouteProgress).toBeLessThan(0.5);
   });
 

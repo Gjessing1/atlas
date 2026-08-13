@@ -20,6 +20,87 @@ export function cumulativeDistances(points: LatLng[]): number[] {
   return cum;
 }
 
+/**
+ * Cumulative distance in the spherical-Mercator coordinate space MapLibre's
+ * GeoJSON tiler uses for `line-progress`.
+ *
+ * This is deliberately not a real-world distance. Mercator stretches the map
+ * toward the poles, so `cumulativeDistances(points) / total` does not identify
+ * the same rendered point on a route that travels north or south. Keeping the
+ * renderer's metric beside the honest metre metric lets the route colour
+ * boundary land at the puck without contaminating guidance calculations.
+ */
+export function cumulativeLineMetrics(points: LatLng[]): number[] {
+  if (points.length === 0) return [];
+  const cum = new Array<number>(points.length);
+  cum[0] = 0;
+  let previous = mercatorPoint(points[0]!);
+  for (let i = 1; i < points.length; i++) {
+    const current = mercatorPoint(points[i]!);
+    cum[i] = cum[i - 1]! + Math.hypot(current.x - previous.x, current.y - previous.y);
+    previous = current;
+  }
+  return cum;
+}
+
+function mercatorPoint(point: LatLng): { x: number; y: number } {
+  // Match @maplibre/geojson-vt's projectX/projectY exactly: lineMetrics are
+  // accumulated from these projected input vertices before tile clipping.
+  const x = point.lng / 360 + 0.5;
+  const sin = Math.sin((point.lat * Math.PI) / 180);
+  const projectedY = 0.5 - (0.25 * Math.log((1 + sin) / (1 - sin))) / Math.PI;
+  return { x, y: Math.min(1, Math.max(0, projectedY)) };
+}
+
+/**
+ * Convert an honest along-route distance to the fraction MapLibre calls
+ * `line-progress`. Both cumulative arrays must describe the same points:
+ * `distanceCum` in metres and `lineMetricCum` from
+ * `cumulativeLineMetrics`.
+ */
+export function renderedLineProgress(
+  points: LatLng[],
+  distanceCum: number[],
+  lineMetricCum: number[],
+  alongM: number,
+): number {
+  if (
+    distanceCum.length < 2 ||
+    points.length !== distanceCum.length ||
+    distanceCum.length !== lineMetricCum.length
+  ) {
+    return 0;
+  }
+  const distanceTotal = distanceCum[distanceCum.length - 1]!;
+  const lineTotal = lineMetricCum[lineMetricCum.length - 1]!;
+  if (!(distanceTotal > 0) || !(lineTotal > 0)) return 0;
+  const clamped = Math.min(distanceTotal, Math.max(0, alongM));
+
+  for (let i = 0; i < distanceCum.length - 1; i++) {
+    if (clamped <= distanceCum[i + 1]!) {
+      const distanceSegment = distanceCum[i + 1]! - distanceCum[i]!;
+      const t = distanceSegment > 0 ? (clamped - distanceCum[i]!) / distanceSegment : 0;
+      // pointAtDistance and the route snapper interpolate the geographic
+      // coordinate. Project that same coordinate, then locate it on the
+      // rendered Mercator segment; using the metre-space `t` directly would
+      // retain a smaller mismatch inside long, sparse north/south segments.
+      const a = mercatorPoint(points[i]!);
+      const b = mercatorPoint(points[i + 1]!);
+      const shown = mercatorPoint(lerp(points[i]!, points[i + 1]!, t));
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const segmentSquared = dx * dx + dy * dy;
+      const renderedT =
+        segmentSquared > 0
+          ? Math.min(1, Math.max(0, ((shown.x - a.x) * dx + (shown.y - a.y) * dy) / segmentSquared))
+          : 0;
+      const lineAlong = lineMetricCum[i]! + (lineMetricCum[i + 1]! - lineMetricCum[i]!) * renderedT;
+      return Math.min(1, Math.max(0, lineAlong / lineTotal));
+    }
+  }
+  return 1;
+}
+
 export interface Snap {
   /** The query point projected onto the polyline. */
   point: LatLng;
