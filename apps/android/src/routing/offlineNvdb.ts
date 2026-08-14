@@ -2,13 +2,17 @@ import { bboxContains, type LatLng } from '@atlas/core';
 import {
   conflateCameras,
   httpNvdbCameras,
+  httpNvdbLanes,
   httpNvdbLimits,
+  nvdbLaneOverrides,
   nvdbSpeedOverrides,
   type NvdbCameraPoint,
   type NvdbCameraSection,
   type NvdbLimitTransport,
+  type NvdbLaneTransport,
   type NvdbCameraTransport,
   type NvdbSpeedSegment,
+  type NvdbLaneSegment,
 } from '@atlas/routing';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
@@ -16,14 +20,14 @@ import { listLocalPacks, type LocalPack } from '../regions/packs';
 
 /**
  * Offline NVDB road data (ROADMAP §2.1), the on-device mirror of the backend's
- * NvdbStore: speed-limit overrides and speed-camera warnings read out of a
+ * NvdbStore: speed-limit overrides, turn-lane guidance and speed-camera warnings read out of a
  * downloaded pack's `nvdb.sqlite` — NVDB in Norway plus OSM `speed_camera`
  * points elsewhere — so a drive covered by a pack gets both with no network.
  *
  * The dataset and the conflation are deliberately identical to the server's:
  * the same SQLite schema (built by infrastructure/packs/build-pack-nvdb.mjs),
  * queried the same way, then handed to the very same platform-neutral
- * `nvdbSpeedOverrides` / `conflateCameras`. Only the read path differs — this
+ * `nvdbSpeedOverrides` / `nvdbLaneOverrides` / `conflateCameras`. Only the read path differs — this
  * file opens the pack file through expo-sqlite where the backend opens it
  * through node:sqlite.
  *
@@ -118,6 +122,33 @@ async function querySpeedSegments(
   return out;
 }
 
+async function queryLaneSegments(
+  db: SQLiteDatabase,
+  sw: LatLng,
+  ne: LatLng,
+): Promise<NvdbLaneSegment[]> {
+  const rows = await db.getAllAsync<{ fieldCodes: string; geom: string }>(
+    `SELECT s.field_codes AS fieldCodes, s.geom AS geom
+       FROM lane_rtree r JOIN lane_segment s ON s.id = r.id
+      WHERE r.min_lng <= ? AND r.max_lng >= ? AND r.min_lat <= ? AND r.max_lat >= ?`,
+    ne.lng + RTREE_PAD_DEG,
+    sw.lng - RTREE_PAD_DEG,
+    ne.lat + RTREE_PAD_DEG,
+    sw.lat - RTREE_PAD_DEG,
+  );
+  return rows.flatMap((row): NvdbLaneSegment[] => {
+    const points = parseGeom(row.geom);
+    const fieldCodes =
+      typeof row.fieldCodes === 'string'
+        ? row.fieldCodes
+            .split('#')
+            .map((code) => code.trim())
+            .filter(Boolean)
+        : [];
+    return points && fieldCodes.length >= 2 ? [{ points, fieldCodes }] : [];
+  });
+}
+
 async function queryCameraPoints(
   db: SQLiteDatabase,
   sw: LatLng,
@@ -194,6 +225,26 @@ export function makeNvdbLimitTransport(serverOrigin: string): NvdbLimitTransport
       console.warn('offline NVDB limits failed, falling back to server:', error);
     }
     return online(points, signal);
+  };
+}
+
+/** Dedicated turn lanes, using a covering pack before the server. */
+export function makeNvdbLaneTransport(serverOrigin: string): NvdbLaneTransport {
+  const online = httpNvdbLanes({ baseUrl: serverOrigin });
+  return async (route, signal) => {
+    try {
+      const pack = packWithNvdb(await listLocalPacks(), route.points);
+      if (pack) {
+        const db = await packNvdbDb(pack);
+        const { sw, ne } = routeBounds(route.points);
+        return nvdbLaneOverrides(route, await queryLaneSegments(db, sw, ne));
+      }
+    } catch (error) {
+      // Older installed packs have the pre-lane schema. Falling through keeps
+      // them useful online and leaves lanes simply absent while fully offline.
+      console.warn('offline NVDB lanes failed, falling back to server:', error);
+    }
+    return online(route, signal);
   };
 }
 

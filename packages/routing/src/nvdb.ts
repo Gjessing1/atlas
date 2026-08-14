@@ -162,11 +162,16 @@ class SpeedGrid {
    * Scans the vertex's own cell plus its eight neighbours — the tolerance is
    * far smaller than a cell, so a nearer stretch can only sit one cell away.
    */
-  limitNear(p: LatLng, toleranceM: number): number | undefined {
+  matchNear(
+    p: LatLng,
+    toleranceM: number,
+    preferredIndex?: number,
+  ): { index: number; limitKph: number } | undefined {
     const gx = this.cell(p.lng);
     const gy = this.cell(p.lat);
     let best = toleranceM;
-    let limit: number | undefined;
+    let bestIndex: number | undefined;
+    let preferredDistance = Infinity;
     const seen = new Set<number>();
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
@@ -176,14 +181,27 @@ class SpeedGrid {
           if (seen.has(idx)) continue;
           seen.add(idx);
           const d = pointPolylineDistM(p, this.segments[idx]!.points);
+          if (idx === preferredIndex) preferredDistance = d;
           if (d < best) {
             best = d;
-            limit = this.segments[idx]!.limitKph;
+            bestIndex = idx;
           }
         }
       }
     }
-    return limit;
+    // Parallel carriageways and dense junction geometry can put conflicting
+    // stretches inside the same 15 m corridor. Keep the previous match until
+    // another centreline is materially closer; sub-metre survey noise must not
+    // make the displayed limit alternate while the car stays on one road.
+    const chosen =
+      preferredIndex !== undefined &&
+      preferredDistance <= toleranceM &&
+      (bestIndex === undefined || preferredDistance <= best + 4)
+        ? preferredIndex
+        : bestIndex;
+    return chosen === undefined
+      ? undefined
+      : { index: chosen, limitKph: this.segments[chosen]!.limitKph };
   }
 }
 
@@ -206,7 +224,12 @@ export function nvdbSpeedOverrides(
   const tolerance = opts.toleranceM ?? DEFAULT_TOLERANCE_M;
   const grid = new SpeedGrid(segments);
   const cum = cumulative(routePoints);
-  const perVertex = routePoints.map((p) => grid.limitNear(p, tolerance));
+  let previousIndex: number | undefined;
+  const perVertex = routePoints.map((point) => {
+    const match = grid.matchNear(point, tolerance, previousIndex);
+    previousIndex = match?.index;
+    return match?.limitKph;
+  });
 
   const out: SpeedLimitOverride[] = [];
   let runLimit: number | undefined;

@@ -804,6 +804,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'speedLimit' },
   },
   {
+    id: 'nav-lane-guidance',
+    surface: 'navigation',
+    capability: 'Show which lane carries the approaching driving maneuver',
+    web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'LaneRow' },
+    android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'LaneRow' },
+    route: { file: 'backend/src/app.ts', contains: "'/api/route/nvdb-lanes'" },
+    note: 'Valhalla/OSM turn:lanes is the international fallback. In Norway, the same banner also receives authoritative dedicated V/H turn lanes from static NVDB data; Android reads them from its region pack before falling back to this backend route.',
+  },
+  {
     id: 'nav-hike-elevation',
     surface: 'navigation',
     capability: 'Show the elevation profile still ahead while guiding a hike',

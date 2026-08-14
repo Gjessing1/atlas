@@ -12,7 +12,8 @@ import {
   type PhotonFeature,
   type SystemStatus,
 } from '@atlas/core';
-import { conflateCameras, nvdbSpeedOverrides } from '@atlas/routing';
+import { conflateCameras, nvdbLaneOverrides, nvdbSpeedOverrides } from '@atlas/routing';
+import type { RouteInstruction } from '@atlas/routing';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { registerAppLinks } from './applinks.js';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
@@ -507,6 +508,51 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const segments = nvdb.querySpeedSegments(sw, ne);
     return reply.send({ overrides: nvdbSpeedOverrides(points, segments) });
   });
+
+  // NVDB 616 dedicated turn lanes. Only maneuver geometry/sign fields cross
+  // the wire; the shared matcher returns ordinary RouteLane rows keyed by
+  // instruction index, so web and offline Android render the exact same data.
+  app.post<{ Body: { points?: unknown; instructions?: unknown } }>(
+    '/api/route/nvdb-lanes',
+    (request, reply) => {
+      const points = routeShape(request.body?.points);
+      const raw = Array.isArray(request.body?.instructions) ? request.body.instructions : [];
+      const parsed = raw.map((value): RouteInstruction | null => {
+        if (typeof value !== 'object' || value === null) return null;
+        const item = value as { sign?: unknown; interval?: unknown; exitAngleDeg?: unknown };
+        if (
+          typeof item.sign !== 'number' ||
+          !Array.isArray(item.interval) ||
+          item.interval.length !== 2 ||
+          typeof item.interval[0] !== 'number' ||
+          typeof item.interval[1] !== 'number'
+        ) {
+          return null;
+        }
+        return {
+          text: '',
+          distanceM: 0,
+          timeMs: 0,
+          sign: item.sign,
+          interval: [item.interval[0], item.interval[1]],
+          ...(typeof item.exitAngleDeg === 'number' ? { exitAngleDeg: item.exitAngleDeg } : {}),
+        };
+      });
+      if (
+        !nvdb?.hasLaneData ||
+        points.length < 2 ||
+        parsed.length === 0 ||
+        parsed.some((instruction) => instruction === null)
+      ) {
+        return reply.send({ overrides: [] });
+      }
+      const instructions = parsed as RouteInstruction[];
+      const { sw, ne } = shapeBounds(points);
+      return reply.send({
+        overrides: nvdbLaneOverrides({ points, instructions }, nvdb.queryLaneSegments(sw, ne)),
+      });
+    },
+  );
 
   // ATK speed cameras from the same dataset (ROADMAP §2.1): given a route
   // shape, return the point cameras it passes (direction-filtered) and the

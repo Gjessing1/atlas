@@ -82,8 +82,8 @@ docker run --rm "${LIMITS[@]}" -v "$WORK:/work" iboates/osmium:latest \
 node "$SCRIPT_DIR/build-search-db.mjs" "$OUT/search.sqlite" "$NAME" < "$WORK/$ID.geojsonseq"
 node "$SCRIPT_DIR/enrich-place-content.mjs" "$OUT/search.sqlite"
 
-echo "==> [$ID] building nvdb.sqlite (speed limits + cameras)"
-# Offline road data (ROADMAP §2.1): NVDB speed limits + ATK cameras clipped from
+echo "==> [$ID] building nvdb.sqlite (speed limits + turn lanes + cameras)"
+# Offline road data (ROADMAP §2.1): NVDB speed limits + turn lanes + ATK cameras clipped from
 # the national master, plus OSM speed cameras read from the same region extract
 # for coverage outside Norway. Reuses the search stream, so it must run before
 # the geojsonseq is removed. The script deletes its output when the region has

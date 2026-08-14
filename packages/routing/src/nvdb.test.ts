@@ -80,6 +80,27 @@ describe('nvdbSpeedOverrides', () => {
     expect(overrides).toHaveLength(1);
     expect(overrides[0]!.limitKph).toBe(50);
   });
+
+  it('does not alternate when parallel-centreline noise swaps the nearest row', () => {
+    const points = route(8);
+    const west: NvdbSpeedSegment = {
+      limitKph: 60,
+      points: points.map((point, index) => ({
+        ...point,
+        lng: point.lng + (index === 3 ? 0.000081 : 0.000072),
+      })),
+    };
+    const east: NvdbSpeedSegment = {
+      limitKph: 80,
+      points: points.map((point, index) => ({
+        ...point,
+        lng: point.lng + (index === 3 ? 0.000072 : 0.000081),
+      })),
+    };
+    const overrides = nvdbSpeedOverrides(points, [west, east]);
+    expect(overrides).toHaveLength(1);
+    expect(overrides[0]!.limitKph).toBe(60);
+  });
 });
 
 describe('applyNvdbSpeedLimits', () => {

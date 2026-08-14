@@ -57,6 +57,13 @@ function createCameraTables(db: DatabaseSync): void {
   `);
 }
 
+function createLaneTables(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE lane_segment (id INTEGER PRIMARY KEY, field_codes TEXT NOT NULL, geom TEXT NOT NULL);
+    CREATE VIRTUAL TABLE lane_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
+  `);
+}
+
 async function bootApp(dataDir: string): Promise<FastifyInstance> {
   const app = await buildApp({ dataDir });
   apps.push(app);
@@ -65,6 +72,61 @@ async function bootApp(dataDir: string): Promise<FastifyInstance> {
 
 const routeBody = (n: number) => ({
   points: Array.from({ length: n }, (_, i) => ({ lat: latAt(i), lng: 10 })),
+});
+
+describe('/api/route/nvdb-lanes', () => {
+  it('matches a dedicated lane to the maneuver approaching it', async () => {
+    const dataDir = await tempDataDir();
+    await mkdir(path.join(dataDir, 'nvdb'), { recursive: true });
+    const db = new DatabaseSync(path.join(dataDir, 'nvdb', 'nvdb.sqlite'));
+    createSpeedTables(db);
+    createLaneTables(db);
+    db.prepare('INSERT INTO lane_segment VALUES (1, ?, ?)').run('1#1H1#2', lineGeom(4, 7));
+    db.prepare('INSERT INTO lane_rtree VALUES (1, 10, 10, ?, ?)').run(latAt(4), latAt(7));
+    db.close();
+
+    const app = await bootApp(dataDir);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/route/nvdb-lanes',
+      payload: {
+        ...routeBody(10),
+        instructions: [
+          { sign: 0, interval: [0, 0] },
+          { sign: 2, interval: [7, 8] },
+          { sign: 4, interval: [9, 9] },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      overrides: [
+        {
+          instructionIndex: 1,
+          lanes: [
+            { directions: ['straight'], state: 'invalid' },
+            { directions: ['right'], state: 'active', recommendedDirection: 'right' },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('answers empty for an older dataset and malformed maneuver payloads', async () => {
+    const dataDir = await tempDataDir();
+    await mkdir(path.join(dataDir, 'nvdb'), { recursive: true });
+    const db = new DatabaseSync(path.join(dataDir, 'nvdb', 'nvdb.sqlite'));
+    createSpeedTables(db);
+    db.close();
+    const app = await bootApp(dataDir);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/route/nvdb-lanes',
+      payload: { ...routeBody(10), instructions: ['bad'] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ overrides: [] });
+  });
 });
 
 describe('/api/route/nvdb-cameras', () => {

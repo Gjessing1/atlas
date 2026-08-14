@@ -32,10 +32,12 @@ export {
   httpTraceTransport,
   httpElevationProfile,
   httpNvdbLimits,
+  httpNvdbLanes,
   httpNvdbCameras,
   RoutingError,
   type FetchRouteOptions,
   type NvdbLimitTransport,
+  type NvdbLaneTransport,
   type NvdbCameraTransport,
 } from './client.js';
 export {
@@ -73,6 +75,13 @@ export {
   type NvdbSpeedOptions,
   type SpeedLimitOverride,
 } from './nvdb.js';
+export {
+  applyNvdbLanes,
+  nvdbLaneOverrides,
+  type LaneOverride,
+  type NvdbLaneOptions,
+  type NvdbLaneSegment,
+} from './nvdbLanes.js';
 export {
   httpRouteProvider,
   valhallaRouteProvider,

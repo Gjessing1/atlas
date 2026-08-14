@@ -14,7 +14,11 @@ import * as Speech from 'expo-speech';
 import { useMemo } from 'react';
 
 import { AudioFocus } from '../../modules/audiofocus';
-import { makeNvdbCameraTransport, makeNvdbLimitTransport } from '../routing/offlineNvdb';
+import {
+  makeNvdbCameraTransport,
+  makeNvdbLaneTransport,
+  makeNvdbLimitTransport,
+} from '../routing/offlineNvdb';
 import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
 import { logNavigationDiagnostic } from './diagnostics';
@@ -245,6 +249,7 @@ export function useNavigation(): NavController {
       // back to the server, and an offline drive with no such pack simply keeps
       // the tile limits and gets no camera guidance.
       nvdbLimits: makeNvdbLimitTransport(serverOrigin),
+      nvdbLanes: makeNvdbLaneTransport(serverOrigin),
       nvdbCameras: makeNvdbCameraTransport(serverOrigin),
       currentFix,
       watchFixes,

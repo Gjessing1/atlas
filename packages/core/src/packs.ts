@@ -77,7 +77,7 @@ export interface RegionPackManifest {
     assets?: RegionPackFile;
     /**
      * Offline road-data side dataset (ROADMAP §2.1): a SQLite mirroring the
-     * server's nvdb.sqlite — NVDB speed limits + ATK cameras clipped to the
+     * server's nvdb.sqlite — NVDB speed limits, dedicated turn lanes and ATK cameras clipped to the
      * region, plus OSM `highway=speed_camera` point cameras for coverage
      * outside Norway. Read in place (no unzip), same schema the backend's
      * NvdbStore uses, so speed-limit overrides and camera warnings work with no

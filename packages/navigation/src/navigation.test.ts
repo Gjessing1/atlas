@@ -1527,6 +1527,26 @@ describe('NavState course and then-maneuver', () => {
     expect(s.update(pointAtAlong(routeCum[10]! + 5), 2000).state.laneGuidance).toBeNull();
   });
 
+  it('attaches a late NVDB lane row to the state already on screen', () => {
+    const s = new NavigationSession(route());
+    const before = s.update(pointAtAlong(routeCum[10]! - 200), 1000).state;
+    expect(before.laneGuidance).toBeNull();
+    const refreshed = s.setLanes([
+      {
+        instructionIndex: 1,
+        lanes: [
+          { directions: ['straight'], state: 'invalid' },
+          { directions: ['right'], state: 'active', recommendedDirection: 'right' },
+        ],
+      },
+    ]);
+    expect(refreshed?.laneGuidance).toEqual([
+      { directions: ['straight'], state: 'invalid' },
+      { directions: ['right'], state: 'active', recommendedDirection: 'right' },
+    ]);
+    expect(refreshed?.upcoming?.instruction.lanes).toEqual(refreshed?.laneGuidance);
+  });
+
   it('sustains a named long road until the time-based far approach band', () => {
     const s = new NavigationSession(longRoute);
     const early = s.update({ ...longRoutePoints[0]!, speedMps: 30 }, 0).state;

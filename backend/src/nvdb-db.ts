@@ -3,13 +3,18 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import type { LatLng } from '@atlas/core';
-import type { NvdbCameraPoint, NvdbCameraSection, NvdbSpeedSegment } from '@atlas/routing';
+import type {
+  NvdbCameraPoint,
+  NvdbCameraSection,
+  NvdbLaneSegment,
+  NvdbSpeedSegment,
+} from '@atlas/routing';
 
 /**
  * Read side of the NVDB dataset: the SQLite the import pipeline
  * (infrastructure/nvdb/build-nvdb.mjs) writes to `<dataDir>/nvdb/nvdb.sqlite` —
- * speed limits (type 105) plus the ATK speed cameras (162 points, 823
- * average-speed sections).
+ * speed limits (type 105), dedicated turn lanes (616) and the ATK speed
+ * cameras (162 points, 823 average-speed sections).
  *
  * Static, read-only, and entirely optional — without the file the backend
  * simply reports no dataset and every route keeps its OSM/tile limits, exactly
@@ -19,6 +24,7 @@ import type { NvdbCameraPoint, NvdbCameraSection, NvdbSpeedSegment } from '@atla
  * Schema (mirror of build-nvdb.mjs):
  *   speed_segment(id, limit_kph, geom)   -- geom = JSON "[[lat,lng],…]"
  *   speed_rtree(id, min_lng, max_lng, min_lat, max_lat)  -- bbox index
+ *   lane_segment(id, field_codes, geom)  + lane_rtree
  *   camera_point(id, name, bearing_deg, lat, lng)        + camera_point_rtree
  *   camera_section(id, name, geom)                       + camera_section_rtree
  *
@@ -30,6 +36,7 @@ export class NvdbStore {
   private constructor(
     private readonly db: DatabaseSync,
     private readonly hasCameras: boolean,
+    private readonly hasLanes: boolean,
   ) {}
 
   /** Open the dataset under `dataDir`, or null when it isn't present. */
@@ -55,12 +62,24 @@ export class NvdbStore {
     } catch {
       hasCameras = false;
     }
-    return new NvdbStore(db, hasCameras);
+    let hasLanes = true;
+    try {
+      db.prepare('SELECT id, field_codes, geom FROM lane_segment LIMIT 0').all();
+      db.prepare('SELECT id FROM lane_rtree LIMIT 0').all();
+    } catch {
+      hasLanes = false;
+    }
+    return new NvdbStore(db, hasCameras, hasLanes);
   }
 
   /** Whether this dataset build carries the ATK camera tables at all. */
   get hasCameraData(): boolean {
     return this.hasCameras;
+  }
+
+  /** Whether this dataset build carries NVDB 616 dedicated-lane rows. */
+  get hasLaneData(): boolean {
+    return this.hasLanes;
   }
 
   /**
@@ -100,6 +119,44 @@ export class NvdbStore {
       if (points.length >= 2 && typeof row.limitKph === 'number' && row.limitKph > 0) {
         out.push({ limitKph: row.limitKph, points });
       }
+    }
+    return out;
+  }
+
+  /** Dedicated turn-lane stretches intersecting the route corridor. */
+  queryLaneSegments(sw: LatLng, ne: LatLng, padDeg = 0.001): NvdbLaneSegment[] {
+    if (!this.hasLanes) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT s.field_codes AS fieldCodes, s.geom AS geom
+           FROM lane_rtree r JOIN lane_segment s ON s.id = r.id
+          WHERE r.min_lng <= ? AND r.max_lng >= ? AND r.min_lat <= ? AND r.max_lat >= ?`,
+      )
+      .all(ne.lng + padDeg, sw.lng - padDeg, ne.lat + padDeg, sw.lat - padDeg) as {
+      fieldCodes: string;
+      geom: string;
+    }[];
+    const out: NvdbLaneSegment[] = [];
+    for (const row of rows) {
+      let coords: unknown;
+      try {
+        coords = JSON.parse(row.geom);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(coords) || coords.length < 2 || typeof row.fieldCodes !== 'string') {
+        continue;
+      }
+      const points = coords.flatMap((coord): LatLng[] =>
+        Array.isArray(coord) && typeof coord[0] === 'number' && typeof coord[1] === 'number'
+          ? [{ lat: coord[0], lng: coord[1] }]
+          : [],
+      );
+      const fieldCodes = row.fieldCodes
+        .split('#')
+        .map((code) => code.trim())
+        .filter(Boolean);
+      if (points.length >= 2 && fieldCodes.length >= 2) out.push({ fieldCodes, points });
     }
     return out;
   }

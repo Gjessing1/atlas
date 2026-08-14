@@ -5,6 +5,7 @@ import {
   tunnelNear,
   type RouteCameras,
   type RouteEnrichment,
+  type LaneOverride,
   type RouteInstruction,
   type RouteLane,
   type RoutePath,
@@ -244,6 +245,34 @@ export class NavigationSession {
     });
     if (this.lastMeasuredState) this.lastMeasuredState = enrichState(this.lastMeasuredState);
     if (this.lastState) this.lastState = enrichState(this.lastState);
+    return this.lastState;
+  }
+
+  /**
+   * Attach authoritative NVDB lane rows after the route has already started.
+   * Like enrichment and cameras, absence is normal and delivery must not hold
+   * up guidance. Only named maneuver indexes are replaced; Valhalla/OSM rows
+   * remain the fallback everywhere NVDB has no dedicated-lane evidence.
+   */
+  setLanes(overrides: readonly LaneOverride[]): NavState | null {
+    for (const override of overrides) {
+      const maneuver = this.maneuvers[override.instructionIndex];
+      if (maneuver && override.lanes.length >= 2) {
+        maneuver.instruction = { ...maneuver.instruction, lanes: override.lanes };
+      }
+    }
+    const refresh = (state: NavState): NavState => {
+      if (state.status === 'arrived') return { ...state, laneGuidance: null };
+      const [upcoming, then] = this.displayUpcoming(state.traveledM);
+      return {
+        ...state,
+        upcoming,
+        then,
+        laneGuidance: this.laneGuidanceAt(upcoming, this.lastSpeedMps),
+      };
+    };
+    if (this.lastMeasuredState) this.lastMeasuredState = refresh(this.lastMeasuredState);
+    if (this.lastState) this.lastState = refresh(this.lastState);
     return this.lastState;
   }
 

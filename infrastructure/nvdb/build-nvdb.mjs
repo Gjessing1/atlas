@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// Build the offline NVDB dataset (ROADMAP §2.1): speed limits + ATK cameras.
+// Build the offline NVDB dataset (ROADMAP §2.1): speed limits, dedicated turn
+// lanes and ATK cameras.
 //
 //   node build-nvdb.mjs [out.sqlite] [minLng,minLat,maxLng,maxLat]
 //   node build-nvdb.mjs /mnt/data/atlas/nvdb/nvdb.sqlite            # all Norway
 //   node build-nvdb.mjs ./nvdb-oslo.sqlite 10.4,59.7,11.0,60.1     # one bbox
 //
 // Imports Vegvesen NVDB object types 105 (Fartsgrense — the authoritative
-// Norwegian posted speed limits), 162 (Punkt-ATK speed cameras) and 823
-// (Streknings-ATK average-speed sections) into a SQLite the backend and
-// Android packs read via NvdbStore / @atlas/routing. This is the offline
+// Norwegian posted speed limits), 616 (Feltstrekning — dedicated V/H turn
+// lanes), 162 (Punkt-ATK speed cameras) and 823 (Streknings-ATK average-speed
+// sections) into a SQLite the backend and Android packs read via NvdbStore /
+// @atlas/routing. This is the offline
 // artefact the §2.1 rule demands: NVDB is an online service, but limits and
 // camera sites are static (sites move on the order of years), so they are
 // baked into a shipped file rather than fetched live.
@@ -31,6 +33,8 @@
 // Output schema (mirror of backend/src/nvdb-db.ts):
 //   speed_segment(id INTEGER PK, limit_kph INTEGER, geom TEXT)  geom="[[lat,lng],…]"
 //   speed_rtree(id, min_lng, max_lng, min_lat, max_lat)         bbox index
+//   lane_segment(id INTEGER PK, field_codes TEXT, geom TEXT)     field_codes="1#1V1#2"
+//   lane_rtree(id, min_lng, max_lng, min_lat, max_lat)          bbox index
 //   camera_point(id, name, bearing_deg, lat, lng)               + camera_point_rtree
 //   camera_section(id, name, geom)  geom in travel order        + camera_section_rtree
 
@@ -44,6 +48,12 @@ const PAGE = 1000; // API max page size.
 // egenskap 2021 = the posted limit; 5127 = valid-from date (unused, but the
 // object always carries the limit under 2021).
 const EGENSKAP_FARTSGRENSE = 2021;
+// Feltstrekning (616): the field overview aligned with veglenke geometry, not
+// metering direction. V/H suffixes are the standard's explicit left/right
+// turn-lane designations. `Antall svingefelt` lets the API avoid returning the
+// overwhelmingly larger set of ordinary cross-sections we cannot enrich.
+const EGENSKAP_FELTOVERSIKT_VEGLENKE = 5528;
+const EGENSKAP_ANTALL_SVINGEFELT = 12632;
 // Punkt-ATK (162): 9522 = name, 9527 = Kontrollretning (NVDB spells the
 // display name "Kontollretning"; match by id, not name).
 const EGENSKAP_ATK_NAVN = 9522;
@@ -230,7 +240,12 @@ function openDb(file, { camerasOnly = false } = {}) {
   mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(`
-    ${camerasOnly ? '' : 'DROP TABLE IF EXISTS speed_segment; DROP TABLE IF EXISTS speed_rtree;'}
+    ${
+      camerasOnly
+        ? ''
+        : `DROP TABLE IF EXISTS speed_segment; DROP TABLE IF EXISTS speed_rtree;
+    DROP TABLE IF EXISTS lane_segment; DROP TABLE IF EXISTS lane_rtree;`
+    }
     DROP TABLE IF EXISTS camera_point;
     DROP TABLE IF EXISTS camera_point_rtree;
     DROP TABLE IF EXISTS camera_section;
@@ -239,7 +254,9 @@ function openDb(file, { camerasOnly = false } = {}) {
       camerasOnly
         ? ''
         : `CREATE TABLE speed_segment (id INTEGER PRIMARY KEY, limit_kph INTEGER NOT NULL, geom TEXT NOT NULL);
-    CREATE VIRTUAL TABLE speed_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);`
+    CREATE VIRTUAL TABLE speed_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
+    CREATE TABLE lane_segment (id INTEGER PRIMARY KEY, field_codes TEXT NOT NULL, geom TEXT NOT NULL);
+    CREATE VIRTUAL TABLE lane_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);`
     }
     CREATE TABLE camera_point (id INTEGER PRIMARY KEY, name TEXT, bearing_deg REAL, lat REAL NOT NULL, lng REAL NOT NULL);
     CREATE VIRTUAL TABLE camera_point_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
@@ -298,6 +315,54 @@ async function importSpeedLimits(db) {
     }
   } while (start);
   console.log(`    done: ${id} speed segments (${skipped} without limit/geometry skipped)`);
+}
+
+async function importLaneSegments(db) {
+  console.log('==> Feltstrekning with dedicated turn lanes (616)');
+  const insSeg = db.prepare('INSERT INTO lane_segment (id, field_codes, geom) VALUES (?, ?, ?)');
+  const insBox = db.prepare(
+    'INSERT INTO lane_rtree (id, min_lng, max_lng, min_lat, max_lat) VALUES (?, ?, ?, ?, ?)',
+  );
+  let id = 0;
+  let seen = 0;
+  let skipped = 0;
+  let start = null;
+  let page = 0;
+  do {
+    const { objects, next } = await fetchPage(616, start, {
+      segmentering: 'true',
+      egenskap: `egenskap(${EGENSKAP_ANTALL_SVINGEFELT})>0`,
+    });
+    db.exec('BEGIN');
+    for (const obj of objects) {
+      seen++;
+      const fieldCodes = egenskap(obj, EGENSKAP_FELTOVERSIKT_VEGLENKE);
+      const points =
+        parseLineString(obj.lokasjon?.geometri?.wkt) ??
+        parseMultiLineString(obj.lokasjon?.geometri?.wkt);
+      // The field overview is a standards-coded string such as 1#1V1#2.
+      // Recheck V/H instead of trusting only the derived count field: a future
+      // catalog inconsistency costs one row, never an invented arrow.
+      if (
+        typeof fieldCodes !== 'string' ||
+        !/(?:^|#)\d+[VH]\d+(?:#|$)/i.test(fieldCodes) ||
+        !points
+      ) {
+        skipped++;
+        continue;
+      }
+      const b = boundsOf(points);
+      id++;
+      insSeg.run(id, fieldCodes, JSON.stringify(points));
+      insBox.run(id, b.minLng, b.maxLng, b.minLat, b.maxLat);
+    }
+    db.exec('COMMIT');
+    start = next;
+    if (++page % 20 === 0 || !start) {
+      console.log(`    page ${page}: ${seen} objects seen, ${id} stored, ${skipped} skipped`);
+    }
+  } while (start);
+  console.log(`    done: ${id} dedicated-lane segments (${skipped} incomplete rows skipped)`);
 }
 
 async function importPointCameras(db) {
@@ -384,7 +449,10 @@ async function main() {
   console.log(`==> NVDB → ${outPath}${camerasOnly ? ' (cameras only)' : ''}`);
   console.log(`    extent: ${bbox}`);
   const db = openDb(outPath, { camerasOnly });
-  if (!camerasOnly) await importSpeedLimits(db);
+  if (!camerasOnly) {
+    await importSpeedLimits(db);
+    await importLaneSegments(db);
+  }
   await importPointCameras(db);
   await importSectionCameras(db);
   db.exec('PRAGMA optimize; VACUUM;');

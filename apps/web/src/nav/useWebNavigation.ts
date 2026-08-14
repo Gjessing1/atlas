@@ -9,6 +9,7 @@ import {
   enrichPlannedResult,
   httpElevationProfile,
   httpNvdbCameras,
+  httpNvdbLanes,
   httpNvdbLimits,
   httpRouteProvider,
   httpTraceTransport,
@@ -157,6 +158,7 @@ export function useWebNavigation(): NavController {
       trafficDelay,
       trace,
       nvdbLimits: httpNvdbLimits(),
+      nvdbLanes: httpNvdbLanes(),
       nvdbCameras: httpNvdbCameras(),
       currentFix: async (timeoutMs): Promise<NavOriginFix> => {
         const geo = await currentPosition(timeoutMs);

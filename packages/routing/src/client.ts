@@ -1,8 +1,9 @@
 import type { ElevationProfileResponse, LatLng } from '@atlas/core';
 
 import type { RouteCameras } from './cameras.js';
-import type { RouteQuery, RouteResult } from './model.js';
+import type { RoutePath, RouteQuery, RouteResult } from './model.js';
 import type { SpeedLimitOverride } from './nvdb.js';
+import type { LaneOverride } from './nvdbLanes.js';
 import type { ValhallaTransport } from './provider.js';
 import type { RouteElevationTransport } from './planning.js';
 import { buildValhallaRequest, parseValhallaResponse } from './valhalla.js';
@@ -31,6 +32,35 @@ export function httpNvdbLimits(opts: FetchRouteOptions = {}): NvdbLimitTransport
     });
     if (!res.ok) throw new RoutingError(`nvdb limits failed (HTTP ${res.status})`);
     const json = (await res.json()) as { overrides?: SpeedLimitOverride[] };
+    return json.overrides ?? [];
+  };
+}
+
+/** Dedicated Norwegian turn-lane rows matched to a route's maneuver indexes. */
+export type NvdbLaneTransport = (
+  route: Pick<RoutePath, 'points' | 'instructions'>,
+  signal?: AbortSignal,
+) => Promise<LaneOverride[]>;
+
+/** {@link NvdbLaneTransport} backed by `/api/route/nvdb-lanes`. */
+export function httpNvdbLanes(opts: FetchRouteOptions = {}): NvdbLaneTransport {
+  return async (route, signal) => {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const instructions = (route.instructions ?? []).map((instruction) => ({
+      sign: instruction.sign,
+      interval: instruction.interval,
+      ...(typeof instruction.exitAngleDeg === 'number'
+        ? { exitAngleDeg: instruction.exitAngleDeg }
+        : {}),
+    }));
+    const res = await doFetch(`${opts.baseUrl ?? ''}/api/route/nvdb-lanes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: route.points, instructions }),
+      signal: signal ?? opts.signal,
+    });
+    if (!res.ok) throw new RoutingError(`nvdb lanes failed (HTTP ${res.status})`);
+    const json = (await res.json()) as { overrides?: LaneOverride[] };
     return json.overrides ?? [];
   };
 }

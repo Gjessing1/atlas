@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Build a region pack's offline road-data dataset (ROADMAP §2.1): the same
-// nvdb.sqlite schema the backend's NvdbStore reads, so speed-limit overrides
-// and speed-camera warnings work on-device with no network.
+// nvdb.sqlite schema the backend's NvdbStore reads, so speed-limit overrides,
+// turn-lane guidance and speed-camera warnings work on-device with no network.
 //
 //   node build-pack-nvdb.mjs <out.sqlite> <minLng,minLat,maxLng,maxLat> [master-nvdb.sqlite] \
 //        < region.geojsonseq
 //
 // Two sources, combined:
-//   1. NVDB (Norway, authoritative) — speed limits + ATK cameras clipped from
+//   1. NVDB (Norway, authoritative) — speed limits + turn lanes + ATK cameras clipped from
 //      the national master dataset (built by infrastructure/nvdb/build-nvdb.mjs)
 //      to the region bounding box. Absent/empty for a region outside Norway.
 //   2. OSM `highway=speed_camera` point cameras read from the region's own OSM
@@ -78,6 +78,8 @@ function openOut(file) {
   db.exec(`
     CREATE TABLE speed_segment (id INTEGER PRIMARY KEY, limit_kph INTEGER NOT NULL, geom TEXT NOT NULL);
     CREATE VIRTUAL TABLE speed_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
+    CREATE TABLE lane_segment (id INTEGER PRIMARY KEY, field_codes TEXT NOT NULL, geom TEXT NOT NULL);
+    CREATE VIRTUAL TABLE lane_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
     CREATE TABLE camera_point (id INTEGER PRIMARY KEY, name TEXT, bearing_deg REAL, lat REAL NOT NULL, lng REAL NOT NULL);
     CREATE VIRTUAL TABLE camera_point_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
     CREATE TABLE camera_section (id INTEGER PRIMARY KEY, name TEXT, geom TEXT NOT NULL);
@@ -97,15 +99,21 @@ function clipTable(master, table, rtree, cols) {
     .all(maxLng, minLng, maxLat, minLat);
 }
 
-/** Copy the NVDB speed limits + cameras covering the region out of the master DB. */
+const hasTable = (db, name) =>
+  Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?").get(name),
+  );
+
+/** Copy the NVDB speed limits + lanes + cameras covering the region out of the master DB. */
 function importNvdbClip(db, masterFile) {
   const nvdbCameras = []; // NVDB camera positions, for OSM dedup
   if (!masterFile || !existsSync(masterFile)) {
     console.log('    no master nvdb.sqlite — OSM cameras only');
-    return { speed: 0, points: 0, sections: 0, nvdbCameras };
+    return { speed: 0, lanes: 0, points: 0, sections: 0, nvdbCameras };
   }
   const master = new DatabaseSync(masterFile, { readOnly: true });
   let speed = 0;
+  let lanes = 0;
   let points = 0;
   let sections = 0;
   try {
@@ -126,6 +134,28 @@ function importNvdbClip(db, masterFile) {
       insSeg.run(row.id, row.limit_kph, row.geom);
       insSegBox.run(row.id, b.bMinLng, b.bMaxLng, b.bMinLat, b.bMaxLat);
       speed++;
+    }
+
+    if (hasTable(master, 'lane_segment') && hasTable(master, 'lane_rtree')) {
+      const insLane = db.prepare(
+        'INSERT INTO lane_segment (id, field_codes, geom) VALUES (?, ?, ?)',
+      );
+      const insLaneBox = db.prepare(
+        'INSERT INTO lane_rtree (id, min_lng, max_lng, min_lat, max_lat) VALUES (?, ?, ?, ?, ?)',
+      );
+      for (const row of clipTable(master, 'lane_segment', 'lane_rtree', ['field_codes', 'geom'])) {
+        let coords;
+        try {
+          coords = JSON.parse(row.geom);
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(coords) || coords.length < 2) continue;
+        const b = boundsOf(coords);
+        insLane.run(row.id, row.field_codes, row.geom);
+        insLaneBox.run(row.id, b.bMinLng, b.bMaxLng, b.bMinLat, b.bMaxLat);
+        lanes++;
+      }
     }
 
     const insPt = db.prepare(
@@ -168,8 +198,8 @@ function importNvdbClip(db, masterFile) {
     }
     db.exec('COMMIT');
   } catch (err) {
-    // A master without the camera tables (an older build) is not fatal — take
-    // the speed limits it does have and move on.
+    // A master without newer optional tables is not fatal — take what it does
+    // have and move on.
     try {
       db.exec('COMMIT');
     } catch {
@@ -179,8 +209,10 @@ function importNvdbClip(db, masterFile) {
   } finally {
     master.close();
   }
-  console.log(`    NVDB clip: ${speed} speed, ${points} point cameras, ${sections} sections`);
-  return { speed, points, sections, nvdbCameras };
+  console.log(
+    `    NVDB clip: ${speed} speed, ${lanes} lanes, ${points} point cameras, ${sections} sections`,
+  );
+  return { speed, lanes, points, sections, nvdbCameras };
 }
 
 /** The next free camera_point id, above every id the NVDB clip used. */
@@ -245,7 +277,12 @@ async function main() {
   const nvdb = importNvdbClip(db, masterPath);
   const osm = await importOsmCameras(db, nvdb.nvdbCameras);
   db.exec('PRAGMA optimize; VACUUM;');
-  const empty = nvdb.speed === 0 && nvdb.points === 0 && nvdb.sections === 0 && osm.added === 0;
+  const empty =
+    nvdb.speed === 0 &&
+    nvdb.lanes === 0 &&
+    nvdb.points === 0 &&
+    nvdb.sections === 0 &&
+    osm.added === 0;
   db.close();
   if (empty) {
     rmSync(outPath);

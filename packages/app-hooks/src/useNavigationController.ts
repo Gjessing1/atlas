@@ -30,6 +30,7 @@ import {
   viaInsertIndex,
   type NvdbCameraTransport,
   type NvdbLimitTransport,
+  type NvdbLaneTransport,
   type RoutePreferences,
   type RoutePath,
   type RouteProvider,
@@ -100,6 +101,8 @@ export interface NavPlatform {
    * tile limits standing, so it can never cost a roundel that `trace` produced.
    */
   nvdbLimits?: NvdbLimitTransport;
+  /** NVDB dedicated turn lanes, matched onto maneuver indexes. */
+  nvdbLanes?: NvdbLaneTransport;
   /**
    * ATK speed cameras (points + average-speed sections) matched onto a route
    * (ROADMAP §2.1). Same contract as `nvdbLimits`: optional and best-effort —
@@ -554,8 +557,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
     (session: NavigationSession, path: RoutePath): void => {
       enrichAbort.current?.abort();
       enrichAbort.current = null;
-      const { trace, nvdbCameras } = platformRef.current;
-      if (!trace && !nvdbCameras) return;
+      const { trace, nvdbCameras, nvdbLanes } = platformRef.current;
+      if (!trace && !nvdbCameras && !nvdbLanes) return;
       const controller = new AbortController();
       enrichAbort.current = controller;
       // Speed cameras ride the same fire-and-forget contract, but not the
@@ -578,6 +581,20 @@ export function useNavigationController(platform: NavPlatform): NavController {
           })
           .catch(() => {
             // Optional by design: offline, or no dataset on the server.
+          });
+      }
+      if (nvdbLanes && profileRef.current === 'car') {
+        void nvdbLanes(path, controller.signal)
+          .then((overrides) => {
+            if (sessionRef.current !== session || overrides.length === 0) return;
+            const refreshed = session.setLanes(overrides);
+            if (refreshed) {
+              setState(refreshed);
+              lastStateRef.current = refreshed;
+            }
+          })
+          .catch(() => {
+            // Optional by design: older offline pack, outside Norway, or no dataset.
           });
       }
       if (!trace) return;

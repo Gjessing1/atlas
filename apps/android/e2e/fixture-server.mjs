@@ -342,6 +342,10 @@ const server = createServer(async (request, response) => {
       await readJson(request);
       return json(response, { overrides: [] });
     }
+    if (url.pathname === '/api/route/nvdb-lanes' && request.method === 'POST') {
+      await readJson(request);
+      return json(response, { overrides: [] });
+    }
     if (url.pathname === '/api/route/nvdb-cameras' && request.method === 'POST') {
       await readJson(request);
       return json(response, { cameras: { points: [], sections: [] } });
