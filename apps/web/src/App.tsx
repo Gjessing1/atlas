@@ -389,8 +389,7 @@ export function App() {
   const nav = useWebNavigation();
   // The route mode owns cartography for the duration of guidance. In
   // particular, starting a drive from a Hike map must restore road-first Drive
-  // styling and its contextual layers. Walk has no dedicated map profile and
-  // deliberately leaves the chosen cartography alone.
+  // styling and its contextual layers, while plain Walk restores Explore.
   useEffect(() => {
     if (nav.activity !== 'guidance') return;
     const next = mapProfileForRouting(nav.profile);

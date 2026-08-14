@@ -207,7 +207,7 @@ function AppInner() {
   const profiles = useMapProfile(data);
   // Navigation's route mode owns the matching map cartography. A Drive trip
   // cannot retain Hike styling just because that was the previous activity;
-  // plain Walk has no dedicated profile and leaves the chosen map alone.
+  // plain Walk uses the general-purpose Explore map.
   useEffect(() => {
     if (nav.activity !== 'guidance') return;
     const next = mapProfileForRouting(nav.profile);

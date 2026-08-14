@@ -1152,6 +1152,43 @@ export function norwegianLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        id: 'protected-areas',
+        rev: 1,
+        title: 'Protected areas',
+        description:
+          'Established nature reserves, national parks and other protected areas. Tap an area ' +
+          'for its governing regulation.',
+        group: 'Nature',
+        attribution: '© Miljødirektoratet',
+        metadataUrl: 'https://kart.miljodirektoratet.no/arcgis/rest/services/vern/MapServer',
+        maxzoom: 18,
+        defaultOpacity: 0.68,
+        identify: true,
+        coverageNote:
+          'Advisory only: the boundary says where established protection applies, not what is ' +
+          'allowed. Tap the area and read its regulation before hunting, fishing or camping.',
+        profiles: ['fishing', 'hunting'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://kart.miljodirektoratet.no/arcgis/services/vern/MapServer/WMSServer',
+        version: '1.3.0',
+        // Layer 0 is established protection. Layer 4 is proposed protection and
+        // must never be drawn as though the same legal boundary already applies.
+        layers: 'naturvern_omrade',
+        identifyLayers: 'naturvern_omrade',
+        identifyFields: ['navn', 'verneform', 'kommune', 'verneforskrift', 'faktaark'],
+        identifyLabels: {
+          navn: 'Area',
+          verneform: 'Protection',
+          kommune: 'Municipality',
+          verneforskrift: 'Regulation',
+          faktaark: 'Fact sheet',
+        },
+      },
+    },
+    {
+      meta: {
         id: 'property',
         rev: 1,
         title: 'Property boundaries',
@@ -1223,7 +1260,10 @@ export function norwegianLayers(): OverlayLayer[] {
         maxzoom: 15,
         defaultOpacity: 0.9,
         identify: false,
-        profiles: ['hiking'],
+        // Fish & Hunt needs the same access network to reach water, a stand or
+        // a permit polygon. It remains optional there: its ground-reading
+        // overlays already start on, and another strong raster would obscure them.
+        profiles: ['hiking', 'fishing', 'hunting'],
       },
       upstream: {
         kind: 'wms',

@@ -255,7 +255,7 @@ describe('map appearance', () => {
     expect(result.some((layer) => layer.id === 'atlas-road_minor-unpaved')).toBe(false);
     expect(
       result.find((layer) => layer.id === 'road_path_pedestrian')?.paint['line-color'],
-    ).toEqual(['match', ['get', 'class'], 'path', '#a94f4b', '#b67870']);
+    ).toEqual(['match', ['get', 'class'], 'path', '#917b77', '#a08d89']);
   });
 
   it('paints frozen-lake winter cartography for Ski', () => {
@@ -481,10 +481,18 @@ describe('map appearance', () => {
     expect(filter).toContain('wilderness_hut');
     expect(filter).toContain('slipway');
     expect(filter).toContain('boatyard');
+    expect(filter).toContain('parking');
     expect(filter).not.toContain('subclass');
     // Icons are remapped because `class` no longer means what the base style
     // assumed — but every target is a sprite that already ships.
     expect(JSON.stringify(outdoor?.layout?.['icon-image'])).toContain('lodging');
+    expect(outdoor?.layout?.['symbol-sort-key']).toEqual([
+      'match',
+      ['get', 'class'],
+      'parking',
+      10,
+      0,
+    ]);
     // Text plumbing still comes from the base style (the clone only replaces
     // the icon), so the two paths cannot drift apart visually.
     expect(outdoor?.layout?.['text-size']).toBe(12);
@@ -569,6 +577,19 @@ describe('map appearance', () => {
     expect(
       result.find((layer) => layer.id === 'road_secondary_tertiary')?.paint['line-opacity'],
     ).toBe(0.8);
+  });
+
+  it('keeps pedestrian paths visible but subordinate on Drive', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'drive' }));
+    const paths = result.find((layer) => layer.id === 'road_path_pedestrian');
+    expect(paths?.paint['line-color']).toEqual([
+      'match',
+      ['get', 'class'],
+      'path',
+      '#917b77',
+      '#a08d89',
+    ]);
+    expect(paths?.paint['line-opacity']).toBe(0.46);
   });
 
   it('mutes access-restricted tracks on every profile without asserting the unsurveyed ones', () => {

@@ -148,6 +148,7 @@ node -e "
 const { statSync, writeFileSync, createReadStream, existsSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const out = process.argv[1];
+const builtAt = Date.now();
 // Streamed SHA-256 so the multi-hundred-MB tiles/routing files never load
 // wholesale; the device verifies each file against these digests before it
 // replaces a good pack.
@@ -175,8 +176,11 @@ const file = async (p) => ({ path: p, bytes: statSync(out + '/' + p).size, sha25
     id: process.argv[2],
     name: process.argv[3],
     bbox: { sw: { lat: $MINLAT, lng: $MINLNG }, ne: { lat: $MAXLAT, lng: $MAXLNG } },
-    version: Math.floor(Date.now() / 1000),
-    builtAt: Date.now(),
+    // Milliseconds keep published versions monotonic with partial pack refreshes
+    // (refresh-outdoor.sh) while still remaining an opaque comparable number to
+    // clients. A seconds value after one of those refreshes would look older.
+    version: builtAt,
+    builtAt,
     files,
   }, null, 2));
 })();

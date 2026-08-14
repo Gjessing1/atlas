@@ -156,6 +156,30 @@ test('driving guidance replaces a previously selected Hike map profile', async (
   );
 });
 
+test('plain walking guidance restores Explore instead of retaining Drive', async ({ page }) => {
+  await mockRouting(page);
+  await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
+  await waitForMap(page);
+
+  const profileSwitch = page.locator('.profile-switch');
+  await profileSwitch.getByRole('radio', { name: 'Drive' }).click();
+
+  await page.locator('.place-marker').click();
+  await page.getByRole('button', { name: 'Directions' }).click();
+  await page
+    .getByRole('group', { name: 'Routing profile' })
+    .getByRole('button', { name: 'Walk' })
+    .click();
+  await page.getByRole('button', { name: 'Start navigation' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await page.getByRole('button', { name: 'End' }).click();
+
+  await expect(profileSwitch.getByRole('radio', { name: 'Explore' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+});
+
 test('Start refreshes a preview route from the latest position', async ({ page, context }) => {
   const routeOrigins: Array<{ lat: number; lon: number }> = [];
   await mockRouting(page);

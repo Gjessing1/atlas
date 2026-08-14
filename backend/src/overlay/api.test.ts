@@ -327,6 +327,7 @@ describe('layer catalog', () => {
     expect(ids).toContain('satellite-2025');
     expect(ids).toContain('world-imagery');
     expect(ids).toContain('ice-weak');
+    expect(ids).toContain('protected-areas');
     expect(ids).toContain('heritage-sites');
     expect(ids).toContain('wrecks');
     expect(new Set(ids).size).toBe(ids.length);
@@ -339,6 +340,19 @@ describe('layer catalog', () => {
       meta: { rev: 2, maxzoom: 19 },
       upstream: { missingTile: 'arcgis-etag', fallbackMaxzoom: 18 },
     });
+    expect(catalog.find((l) => l.meta.id === 'protected-areas')).toMatchObject({
+      meta: { profiles: ['fishing', 'hunting'], identify: true },
+      upstream: {
+        layers: 'naturvern_omrade',
+        identifyLayers: 'naturvern_omrade',
+        identifyFields: expect.arrayContaining(['verneforskrift']),
+      },
+    });
+    expect(catalog.find((l) => l.meta.id === 'trails-hiking')?.meta.profiles).toEqual([
+      'hiking',
+      'fishing',
+      'hunting',
+    ]);
   });
 
   it('keeps every option-driven upstream parameter reachable from a declared choice', () => {

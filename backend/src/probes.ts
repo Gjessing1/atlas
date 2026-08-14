@@ -156,6 +156,10 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // species filter (big game) so the probe exercises the SLD path a user gets —
   // the filter is the part of this layer that fails silently. 2.0 kB / 0.9.
   'wildlife-areas': { kind: 'tile', lat: 59.883, lng: 6.448, z: 13, minBytes: 1400 },
+  // Nordmarka's Maridalen landscape-protection area: established protection
+  // with boundary linework, rather than a proposed area from layer 4. Measured
+  // 3.7 kB / 0.9 kB empty on 2026-08-14.
+  'protected-areas': { kind: 'tile', lat: 60.0, lng: 10.76, z: 12, minBytes: 1400 },
   // Cadastral lines need a built-up area and z14+ (89.0 kB / 0.3).
   property: { kind: 'tile', lat: 59.9139, lng: 10.7522, z: 14, minBytes: 2000 },
   // Hamar, by Mjøsa. Not Oslo: `Sykkelrute` in Turrutebasen is *recreational*

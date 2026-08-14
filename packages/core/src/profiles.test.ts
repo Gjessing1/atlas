@@ -31,7 +31,7 @@ describe('map profiles', () => {
     expect(mapProfileForRouting('bike')?.id).toBe('bike');
     expect(mapProfileForRouting('hike')?.id).toBe('hike');
     expect(mapProfileForRouting('run')?.id).toBe('run');
-    expect(mapProfileForRouting('foot')).toBeNull();
+    expect(mapProfileForRouting('foot')?.id).toBe('explore');
   });
 
   it('always offers untagged general-purpose layers', () => {
@@ -50,6 +50,12 @@ describe('map profiles', () => {
   it('matches the hiking tag from the hike profile despite the differing words', () => {
     expect(layerInProfile(meta('trails-hiking', ['hiking']), 'hike')).toBe(true);
     expect(layerInProfile(meta('trails-bike', ['bike']), 'bike')).toBe(true);
+  });
+
+  it('offers marked hiking trails in Fish & Hunt without starting them automatically', () => {
+    const trails = meta('trails-hiking', ['hiking', 'fishing', 'hunting']);
+    expect(layerInProfile(trails, 'fishhunt')).toBe(true);
+    expect(layerDefaultsOn('trails-hiking', 'fishhunt')).toBe(false);
   });
 
   it('filters a catalog while keeping the server order', () => {

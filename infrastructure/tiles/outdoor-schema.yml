@@ -105,6 +105,7 @@ layers:
           amenity: [shelter]
         exclude_when:
           tourism: [wilderness_hut, alpine_hut, chalet]
+          shelter_type: [public_transport]
         attributes:
           - key: class
             value: shelter
@@ -117,6 +118,7 @@ layers:
           amenity: [shelter]
         exclude_when:
           tourism: [wilderness_hut, alpine_hut, chalet]
+          shelter_type: [public_transport]
         attributes:
           - key: class
             value: shelter
@@ -184,6 +186,46 @@ layers:
           - key: class
             value: camp_site
           - key: name
+
+      # --- Trailhead parking ---------------------------------------------
+      # Parking matters to Hike and Fish & Hunt before the last street-level
+      # zoom: it decides which end of an access road the walk actually starts
+      # from. A real-map pass showed that every urban car park at z12 overwhelms
+      # the destinations it is meant to support, so named parking appears at
+      # planning zoom and anonymous parking waits until close inspection. The
+      # outdoor profiles render it; Drive/Explore never bind this archive.
+      - source: osm
+        geometry: point
+        min_zoom:
+          default_value: 14
+          overrides:
+            12:
+              name: __any__
+        include_when:
+          amenity: [parking]
+        attributes:
+          - key: class
+            value: parking
+          - key: name
+          - key: access
+          - key: parking
+          - key: capacity
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom:
+          default_value: 14
+          overrides:
+            12:
+              name: __any__
+        include_when:
+          amenity: [parking]
+        attributes:
+          - key: class
+            value: parking
+          - key: name
+          - key: access
+          - key: parking
+          - key: capacity
 
       # --- Caves -----------------------------------------------------------
       # `natural=cave_entrance` is absent from OpenMapTiles entirely, and there

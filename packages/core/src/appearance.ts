@@ -540,6 +540,7 @@ const OUTDOOR_POI_CLASSES = [
   'slipway',
   'boatyard',
   'cave_entrance',
+  'parking',
 ];
 
 /**
@@ -586,6 +587,10 @@ const OUTDOOR_ICON_IMAGE = [
   // cannot tell apart from a viewpoint is not on the map in any useful sense.
   'cave_entrance',
   'entrance',
+  // Trailhead parking is a trip primitive rather than urban parking clutter:
+  // the outdoor archive reveals it while the route is still being planned.
+  'parking',
+  'parking',
   // Unreachable — the layer filter admits only the classes above — but MapLibre
   // requires a default, and a real sprite name keeps it from ever warning.
   'attraction',
@@ -735,6 +740,11 @@ function outdoorPoiLayer(template: StyleLayer, dark: boolean, outdoor: boolean):
     layer['source-layer'] = OUTDOOR_SOURCE_LAYER;
     layer.layout ??= {};
     layer.layout['icon-image'] = OUTDOOR_ICON_IMAGE;
+    // Parking is intentionally broad (`amenity=parking` is the only national
+    // trailhead signal), and therefore far more numerous around towns. Place
+    // every real outdoor destination first so car parks can fill spare label
+    // space without hiding a cabin, cave, ramp or water point.
+    layer.layout['symbol-sort-key'] = ['match', ['get', 'class'], 'parking', 10, 0];
   }
   // The template is snapshotted before the theme pass touches it, so the clone
   // still carries Liberty's own `#666` label on a white halo — invisible on the
@@ -921,11 +931,11 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         'match',
         ['get', 'class'],
         'path',
-        dark ? '#e58b84' : '#a94f4b',
-        dark ? '#d0a19b' : '#b67870',
+        profile === 'drive' ? (dark ? '#9b8581' : '#917b77') : dark ? '#e58b84' : '#a94f4b',
+        profile === 'drive' ? (dark ? '#8c7d7a' : '#a08d89') : dark ? '#d0a19b' : '#b67870',
       ]);
       paint(layer, 'line-dasharray', [2, 1.35]);
-      paint(layer, 'line-opacity', profile === 'drive' ? 0.62 : 0.95);
+      paint(layer, 'line-opacity', profile === 'drive' ? 0.46 : 0.95);
       // Run leans harder on the foot network than Hike, and reveals it as early.
       if (pathWidthFactor !== 1) multiplyPaint(layer, 'line-width', pathWidthFactor);
       if (profile === 'hike' || profile === 'run')
