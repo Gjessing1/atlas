@@ -17,6 +17,16 @@ DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_DIR="$ROOT/apps/android"
 
+# An OTA is still an Android release: build/install the production-configured
+# bundle on the dedicated AVD and exercise the full app before copying a byte
+# into the update feed. A caller that already built this exact source may hand
+# its candidate APK in to avoid rebuilding it.
+if [ -n "${ATLAS_ANDROID_REGRESSION_APK:-}" ]; then
+  "$APP_DIR/e2e/run-regression.sh" --apk "$ATLAS_ANDROID_REGRESSION_APK"
+else
+  "$APP_DIR/e2e/run-regression.sh"
+fi
+
 RUNTIME="$(node -p 'require(process.argv[1]).expo.runtimeVersion' "$APP_DIR/app.json")"
 VERSION="$(node -p 'require(process.argv[1]).expo.version' "$APP_DIR/app.json")"
 if [ "$RUNTIME" = "undefined" ]; then

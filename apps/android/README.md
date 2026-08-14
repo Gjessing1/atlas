@@ -56,6 +56,32 @@ search, and the route sheet. The runner refuses to clear or exercise a device th
 fixture or an installed OTA. On failure, the current screenshot and accessibility tree are written
 to `e2e/artifacts/`.
 
+## Android release regression gate
+
+Every OTA and APK publication runs the broader deterministic gate first:
+
+```bash
+./e2e/run-regression.sh
+./e2e/run-regression.sh --apk /path/to/already-built-candidate.apk
+```
+
+The runner owns the complete test lifecycle. It builds a production-configured signed release APK
+unless one is supplied, starts `atlas_test` when needed, starts an isolated backend fixture on host
+port 3199, installs the candidate, and clears only Atlas data on that named AVD. The test changes
+the server through Atlas's own Settings UI, then covers saved places/folders/tracks and restart
+persistence, a road plan and route-choice navigation hand-off, transit guidance, sheet snap
+gestures, theme persistence, and portrait/landscape containment.
+
+The fixture serves the real self-hosted map style/assets but deterministic search, routing,
+traffic, elevation and transit answers. It never calls Photon, Valhalla, Entur or another live
+upstream. A failure writes the screenshot, accessibility hierarchy, logcat, activity state,
+package state, fixture log and emulator log to `e2e/artifacts/`.
+
+`publish-update.sh` builds and tests the source-equivalent release APK before exporting the OTA.
+Set `ATLAS_ANDROID_REGRESSION_APK` to an APK already built from the exact same worktree to reuse it.
+`publish-apk.sh` always tests the APK it was handed. Neither publication script copies artefacts
+before the gate is green.
+
 ## Release APK
 
 ```bash

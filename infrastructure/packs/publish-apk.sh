@@ -14,6 +14,9 @@ APK="${1:?path to .apk}"
 CODE="${2:?android versionCode (integer)}"
 NAME="${3:?versionName, e.g. 0.2.0}"
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+"$ROOT/apps/android/e2e/run-regression.sh" --apk "$APK"
+
 APP_DIR="$DATA_DIR/app"
 FILE="atlas-$NAME.apk"
 mkdir -p "$APP_DIR"
