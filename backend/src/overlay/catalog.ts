@@ -176,6 +176,13 @@ export interface XyzUpstream {
   kind: 'xyz';
   /** A {z}/{x}/{y} URL template. May reference env tokens as ${VAR}. */
   template: string;
+  /**
+   * `upstream` disables Atlas's permanent disk cache and forwards the source's
+   * browser-cache lifetime instead. Commercial imagery is the motivating case:
+   * it may be displayed and cached as HTTP permits, but not copied into Atlas's
+   * own long-lived tile store or exported into an offline pack.
+   */
+  cache?: 'disk' | 'upstream';
 }
 
 /**
@@ -613,6 +620,31 @@ export function norwegianLayers(): OverlayLayer[] {
         // Pin the acquisition year. Moving to a future mosaic is an explicit
         // catalog + rev change, so old CDN and disk tiles cannot bleed through.
         layers: '2025',
+      },
+    },
+    {
+      meta: {
+        id: 'world-imagery',
+        rev: 1,
+        title: 'Satellite & aerial (high-res)',
+        description: 'Detailed global satellite and aerial imagery, streamed from Esri.',
+        group: 'Imagery',
+        attribution: 'Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+        metadataUrl: 'https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9',
+        maxzoom: 19,
+        defaultOpacity: 1,
+        identify: false,
+        coverageNote:
+          'Streaming only — not included in offline regions. Resolution, capture date and cloud cover vary by location.',
+      },
+      upstream: {
+        kind: 'xyz',
+        // ArcGIS REST orders cached tiles as level/row/column, i.e. z/y/x.
+        template:
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        // The item explicitly excludes offline tile export. Do not let the
+        // overlay proxy turn streamed views into Atlas's permanent disk cache.
+        cache: 'upstream',
       },
     },
     {

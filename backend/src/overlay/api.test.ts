@@ -195,10 +195,33 @@ function testLayers(): OverlayLayer[] {
       upstream: { kind: 'xyz', template: 'https://xyz.example/${ORTHO_TOKEN}/{z}/{x}/{y}.png' },
       requiresEnv: 'ORTHO_TOKEN',
     },
+    {
+      meta: {
+        id: 'streamed-jpeg',
+        rev: 1,
+        title: 'Streamed JPEG',
+        description: 'Upstream-cache test layer',
+        group: 'Imagery',
+        attribution: '© Test',
+        maxzoom: 19,
+        defaultOpacity: 1,
+        identify: false,
+      },
+      upstream: {
+        kind: 'xyz',
+        template: 'https://imagery.example/tile/{z}/{y}/{x}',
+        cache: 'upstream',
+      },
+    },
   ];
 }
 
-type StubReply = { status?: number; contentType?: string; body: Buffer | string };
+type StubReply = {
+  status?: number;
+  contentType?: string;
+  cacheControl?: string;
+  body: Buffer | string;
+};
 
 /** Builds the API on a temp cache dir with a recording fetch stub. */
 async function build(replies: (url: URL) => StubReply, opts?: { env?: Record<string, string> }) {
@@ -210,7 +233,10 @@ async function build(replies: (url: URL) => StubReply, opts?: { env?: Record<str
     const reply = replies(url);
     return new Response(reply.body, {
       status: reply.status ?? 200,
-      headers: { 'content-type': reply.contentType ?? 'image/png' },
+      headers: {
+        'content-type': reply.contentType ?? 'image/png',
+        ...(reply.cacheControl ? { 'cache-control': reply.cacheControl } : {}),
+      },
     });
   }) as typeof fetch;
   const app = Fastify();
@@ -250,6 +276,7 @@ describe('layer catalog', () => {
       'coded',
       'filtered',
       'swapped',
+      'streamed-jpeg',
     ]);
     expect(JSON.stringify(layers)).not.toContain('upstream.example');
   });
@@ -272,6 +299,7 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-slope');
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
+    expect(ids).toContain('world-imagery');
     expect(ids).toContain('ice-weak');
     expect(ids).toContain('heritage-sites');
     expect(ids).toContain('wrecks');
@@ -651,6 +679,36 @@ describe('overlay tile proxy', () => {
     const res = await app.inject({ url: '/api/overlay/ortho/5/10/11.png' });
     expect(res.statusCode).toBe(200);
     expect(requests[0]!.toString()).toBe('https://xyz.example/secret/5/10/11.png');
+  });
+
+  it('streams restricted imagery without writing it to the permanent cache', async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const { app, cacheDir, requests } = await build(() => ({
+      body: jpeg,
+      contentType: 'image/jpeg',
+      cacheControl: 'public, max-age=86400',
+    }));
+    track(app, cacheDir);
+
+    const first = await app.inject({ url: '/api/overlay/streamed-jpeg/5/10/11.png' });
+    const second = await app.inject({ url: '/api/overlay/streamed-jpeg/5/10/11.png' });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['content-type']).toBe('image/jpeg');
+    expect(first.headers['cache-control']).toBe('public, max-age=86400');
+    expect(second.statusCode).toBe(200);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.toString()).toBe('https://imagery.example/tile/5/11/10');
+    await expect(
+      readFile(path.join(cacheDir, 'streamed-jpeg', 'v1', '5', '10', '11.png')),
+    ).rejects.toThrow();
+  });
+
+  it('does not invent a cache grant when a streamed source omits one', async () => {
+    const { app, cacheDir } = await build(() => ({ body: PNG_BYTES }));
+    track(app, cacheDir);
+    const res = await app.inject({ url: '/api/overlay/streamed-jpeg/5/10/11.png' });
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('answers a ServiceException body with a transparent tile', async () => {

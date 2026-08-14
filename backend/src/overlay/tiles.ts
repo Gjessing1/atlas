@@ -7,10 +7,9 @@ import { substituteEnv, wmsBaseParams } from './wms.js';
 
 /**
  * The raster tile proxy: /api/overlay/:id/:z/:x/:y.png converts z/x/y to a WMS
- * GetMap request in EPSG:3857 (or fills in an XYZ template) and caches the
- * result on disk. The cache dir is disposable — government topo data changes on
- * the order of months, so tiles are cached indefinitely and the directory can
- * be wiped freely.
+ * GetMap request in EPSG:3857 (or fills in an XYZ template). Government layers
+ * are cached on disk; sources marked `cache: upstream` remain streaming and
+ * only pass through the cache lifetime their HTTP response permits.
  */
 
 /** 1×1 fully transparent PNG — the "blank ≠ broken" fallback tile. */
@@ -79,16 +78,17 @@ export function registerTileRoute(ctx: OverlayContext): void {
       y < 2 ** z;
     if (!valid) return reply.code(400).send({ error: 'invalid tile coordinates' });
 
-    const servePng = (data: Buffer, maxAge = TILE_MAX_AGE_S) =>
-      reply
-        .header('content-type', 'image/png')
-        .header('cache-control', `public, max-age=${maxAge}`)
-        .send(data);
+    const serveImage = (
+      data: Buffer,
+      contentType = 'image/png',
+      cacheControl = `public, max-age=${TILE_MAX_AGE_S}`,
+    ) => reply.header('content-type', contentType).header('cache-control', cacheControl).send(data);
 
     const chosen = resolveOptions(layer, request.query);
     const file = cachePath(layer.meta.id, layer.meta.rev, layerOptionSignature(chosen), z, x, y);
-    const cached = await readFile(file).catch(() => null);
-    if (cached) return servePng(cached);
+    const diskCache = layer.upstream.kind !== 'xyz' || layer.upstream.cache !== 'upstream';
+    const cached = diskCache ? await readFile(file).catch(() => null) : null;
+    if (cached) return serveImage(cached);
 
     const upstream =
       layer.upstream.kind === 'wms'
@@ -129,11 +129,17 @@ export function registerTileRoute(ctx: OverlayContext): void {
         // short-lived so recovery isn't cached away.
         const body = (await res.text()).slice(0, 300);
         request.log.warn({ layer: layer.meta.id, contentType, body }, 'overlay non-image reply');
-        return servePng(TRANSPARENT_PNG, 60);
+        return serveImage(TRANSPARENT_PNG, 'image/png', 'public, max-age=60');
       }
       const data = Buffer.from(await res.arrayBuffer());
-      await writeCache(file, data);
-      return servePng(data);
+      if (diskCache) {
+        await writeCache(file, data);
+        return serveImage(data, contentType);
+      }
+      // Preserve only the cache behaviour the imagery provider granted. An
+      // absent header becomes no-store rather than Atlas inventing permission.
+      const cacheControl = res.headers.get('cache-control') ?? 'no-store';
+      return serveImage(data, contentType, cacheControl);
     } catch (err) {
       request.log.error({ err, layer: layer.meta.id }, 'overlay upstream unreachable');
       ctx.record(layer.meta.id, false, 'unreachable');
