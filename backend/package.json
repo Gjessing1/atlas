@@ -26,6 +26,7 @@
     "fastify": "^5.2.0",
     "fflate": "^0.8.2",
     "geotiff": "^3.0.5",
+    "jimp-compact": "0.16.1",
     "pg": "^8.13.0",
     "pmtiles": "^4.4.1",
     "pngjs": "^7.0.0"

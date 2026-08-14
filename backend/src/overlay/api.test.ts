@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
@@ -11,6 +12,22 @@ const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
   'base64',
 );
+
+function quadrantTile(): Buffer {
+  const png = new PNG({ width: 256, height: 256 });
+  for (let y = 0; y < 256; y += 1) {
+    for (let x = 0; x < 256; x += 1) {
+      const offset = (y * 256 + x) * 4;
+      const [r, g, b] =
+        y < 128 ? (x < 128 ? [255, 0, 0] : [0, 255, 0]) : x < 128 ? [0, 0, 255] : [255, 255, 0];
+      png.data[offset] = r;
+      png.data[offset + 1] = g;
+      png.data[offset + 2] = b;
+      png.data[offset + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
 
 function testLayers(): OverlayLayer[] {
   return [
@@ -220,33 +237,41 @@ type StubReply = {
   status?: number;
   contentType?: string;
   cacheControl?: string;
-  body: Buffer | string;
+  etag?: string;
+  body?: Buffer | string;
 };
 
 /** Builds the API on a temp cache dir with a recording fetch stub. */
-async function build(replies: (url: URL) => StubReply, opts?: { env?: Record<string, string> }) {
+async function build(
+  replies: (url: URL) => StubReply,
+  opts?: { env?: Record<string, string>; layers?: OverlayLayer[] },
+) {
   const cacheDir = await mkdtemp(path.join(tmpdir(), 'atlas-tilecache-'));
   const requests: URL[] = [];
-  const fetchImpl = (async (input: URL | RequestInfo) => {
+  const requestHeaders: Headers[] = [];
+  const fetchImpl = (async (input: URL | RequestInfo, init?: RequestInit) => {
     const url = new URL(String(input));
     requests.push(url);
+    requestHeaders.push(new Headers(init?.headers));
     const reply = replies(url);
-    return new Response(reply.body, {
-      status: reply.status ?? 200,
+    const status = reply.status ?? 200;
+    return new Response(status === 204 || status === 304 ? null : (reply.body ?? ''), {
+      status,
       headers: {
         'content-type': reply.contentType ?? 'image/png',
         ...(reply.cacheControl ? { 'cache-control': reply.cacheControl } : {}),
+        ...(reply.etag ? { etag: reply.etag } : {}),
       },
     });
   }) as typeof fetch;
   const app = Fastify();
   registerOverlayApi(app, {
     cacheDir,
-    layers: testLayers(),
+    layers: opts?.layers ?? testLayers(),
     fetchImpl,
     env: opts?.env ?? {},
   });
-  return { app, cacheDir, requests };
+  return { app, cacheDir, requests, requestHeaders };
 }
 
 let cleanup: (() => Promise<void>)[] = [];
@@ -293,7 +318,8 @@ describe('layer catalog', () => {
   });
 
   it('ships a plausible built-in Norwegian catalog', () => {
-    const ids = norwegianLayers().map((l) => l.meta.id);
+    const catalog = norwegianLayers();
+    const ids = catalog.map((l) => l.meta.id);
     expect(ids).toContain('lake-depth');
     expect(ids).toContain('hillshade');
     expect(ids).toContain('terrain-slope');
@@ -309,6 +335,10 @@ describe('layer catalog', () => {
     // as layer visibility. A catalog row claiming it would share that entry and
     // the two would switch each other off.
     expect(ids).not.toContain(BASEMAP_STATE_ID);
+    expect(catalog.find((l) => l.meta.id === 'world-imagery')).toMatchObject({
+      meta: { rev: 2, maxzoom: 19 },
+      upstream: { missingTile: 'arcgis-etag', fallbackMaxzoom: 18 },
+    });
   });
 
   it('keeps every option-driven upstream parameter reachable from a declared choice', () => {
@@ -702,6 +732,53 @@ describe('overlay tile proxy', () => {
     await expect(
       readFile(path.join(cacheDir, 'streamed-jpeg', 'v1', '5', '10', '11.png')),
     ).rejects.toThrow();
+  });
+
+  it('replaces an ArcGIS missing JPEG with the correctly aligned parent quadrant', async () => {
+    const source = testLayers().find((layer) => layer.meta.id === 'streamed-jpeg')!;
+    const layers: OverlayLayer[] = [
+      {
+        ...source,
+        upstream: {
+          kind: 'xyz',
+          template: 'https://imagery.example/tile/{z}/{y}/{x}',
+          cache: 'upstream',
+          missingTile: 'arcgis-etag',
+          fallbackMaxzoom: 18,
+        },
+      },
+    ];
+    const { app, cacheDir, requests, requestHeaders } = await build(
+      (url) => {
+        if (url.pathname.includes('/-1/0/0')) {
+          return { body: Buffer.from([0xff, 0xd8]), contentType: 'image/jpeg', etag: '"missing"' };
+        }
+        if (url.pathname.includes('/19/11/10')) {
+          return { status: 304, cacheControl: 'public, max-age=86400' };
+        }
+        return { body: quadrantTile(), contentType: 'image/png' };
+      },
+      { layers },
+    );
+    track(app, cacheDir);
+
+    const res = await app.inject({ url: '/api/overlay/streamed-jpeg/19/10/11.png' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.headers['cache-control']).toBe('public, max-age=86400');
+    const rendered = PNG.sync.read(res.rawPayload);
+    expect([rendered.width, rendered.height]).toEqual([256, 256]);
+    const center = (128 * rendered.width + 128) * 4;
+    // x=10 is the left half and y=11 the bottom half of parent 18/5/5.
+    expect([...rendered.data.subarray(center, center + 4)]).toEqual([0, 0, 255, 255]);
+    expect(requests.map(String)).toEqual([
+      'https://imagery.example/tile/-1/0/0',
+      'https://imagery.example/tile/19/11/10',
+      'https://imagery.example/tile/18/5/5',
+    ]);
+    expect(requestHeaders[1]!.get('if-none-match')).toBe('"missing"');
+    expect(requestHeaders[2]!.get('if-none-match')).toBe('"missing"');
   });
 
   it('does not invent a cache grant when a streamed source omits one', async () => {

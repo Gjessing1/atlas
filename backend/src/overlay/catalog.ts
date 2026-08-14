@@ -183,6 +183,10 @@ export interface XyzUpstream {
    * own long-lived tile store or exported into an offline pack.
    */
   cache?: 'disk' | 'upstream';
+  /** Detect ArcGIS's opaque missing-tile JPEG and turn it transparent. */
+  missingTile?: 'arcgis-etag';
+  /** Parent level used to synthesize correctly aligned missing detail tiles. */
+  fallbackMaxzoom?: number;
 }
 
 /**
@@ -625,7 +629,7 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'world-imagery',
-        rev: 1,
+        rev: 2,
         title: 'Satellite & aerial (high-res)',
         description: 'Detailed global satellite and aerial imagery, streamed from Esri.',
         group: 'Imagery',
@@ -642,6 +646,11 @@ export function norwegianLayers(): OverlayLayer[] {
         // ArcGIS REST orders cached tiles as level/row/column, i.e. z/y/x.
         template:
           'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        missingTile: 'arcgis-etag',
+        // Norway is consistently covered through z18, while local z19 detail
+        // exists in places such as central Oslo. Missing z19 tiles are cropped
+        // from their z18 parent; real z19 tiles pass through untouched.
+        fallbackMaxzoom: 18,
         // The item explicitly excludes offline tile export. Do not let the
         // overlay proxy turn streamed views into Atlas's permanent disk cache.
         cache: 'upstream',

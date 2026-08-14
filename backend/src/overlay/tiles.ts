@@ -1,4 +1,5 @@
 import { layerOptionSignature } from '@atlas/core';
+import Jimp from 'jimp-compact';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { OverlayContext } from './context.js';
@@ -20,8 +21,62 @@ const TRANSPARENT_PNG = Buffer.from(
 
 const TILE_MAX_AGE_S = 7 * 24 * 3600; // upstream data changes on the order of months
 
+async function overzoomParentTile(
+  parent: Buffer,
+  z: number,
+  x: number,
+  y: number,
+  parentZoom: number,
+): Promise<{ data: Buffer; contentType: string }> {
+  const divisions = 2 ** (z - parentZoom);
+  const cropSize = 256 / divisions;
+  if (!Number.isInteger(cropSize) || cropSize < 1) throw new Error('unsupported overzoom depth');
+  const image = await Jimp.read(parent);
+  if (image.bitmap.width !== 256 || image.bitmap.height !== 256) {
+    throw new Error('unexpected parent tile dimensions');
+  }
+  const contentType = image.getMIME();
+  const cropped = image
+    .crop((x % divisions) * cropSize, (y % divisions) * cropSize, cropSize, cropSize)
+    .resize(256, 256, Jimp.RESIZE_BILINEAR);
+  if (contentType === Jimp.MIME_JPEG) cropped.quality(90);
+  return { data: await cropped.getBufferAsync(contentType), contentType };
+}
+
 export function registerTileRoute(ctx: OverlayContext): void {
   const { app, byId, env, fetchImpl } = ctx;
+  const arcgisMissingEtags = new Map<string, Promise<string | null>>();
+
+  const xyzUrl = (template: string, z: number, x: number, y: number) =>
+    new URL(
+      substituteEnv(template, env)
+        .replace('{z}', String(z))
+        .replace('{x}', String(x))
+        .replace('{y}', String(y)),
+    );
+
+  /**
+   * ArcGIS cached map services answer a missing tile with an opaque JPEG and
+   * HTTP 200. The service documents level -1 / row 0 / column 0 as a guaranteed
+   * miss whose ETag can be used in If-None-Match requests; learn it once per
+   * process instead of hard-coding Esri's current sentinel value.
+   */
+  function arcgisMissingEtag(id: string, template: string): Promise<string | null> {
+    const existing = arcgisMissingEtags.get(id);
+    if (existing) return existing;
+    const pending = (async () => {
+      const url = xyzUrl(template, -1, 0, 0);
+      try {
+        const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
+        return response.ok ? response.headers.get('etag') : null;
+      } catch (err) {
+        app.log.warn({ err, layer: id }, 'could not learn ArcGIS missing-tile ETag');
+        return null;
+      }
+    })();
+    arcgisMissingEtags.set(id, pending);
+    return pending;
+  }
 
   // `variant` is a layer-option signature, empty for the layers that have none
   // (so their paths are byte-identical to before). It is only ever built from
@@ -99,12 +154,7 @@ export function registerTileRoute(ctx: OverlayContext): void {
             y,
             256 * Math.max(1, Math.round(layer.upstream.renderScale ?? 1)),
           )
-        : new URL(
-            substituteEnv(layer.upstream.template, env)
-              .replace('{z}', String(z))
-              .replace('{x}', String(x))
-              .replace('{y}', String(y)),
-          );
+        : xyzUrl(layer.upstream.template, z, x, y);
     if (layer.upstream.kind === 'wms') {
       upstream.searchParams.set('REQUEST', 'GetMap');
       for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
@@ -113,7 +163,52 @@ export function registerTileRoute(ctx: OverlayContext): void {
     }
 
     try {
-      const res = await fetchImpl(upstream, { signal: AbortSignal.timeout(15_000) });
+      const missingEtag =
+        layer.upstream.kind === 'xyz' && layer.upstream.missingTile === 'arcgis-etag'
+          ? await arcgisMissingEtag(layer.meta.id, layer.upstream.template)
+          : null;
+      const res = await fetchImpl(upstream, {
+        signal: AbortSignal.timeout(15_000),
+        ...(missingEtag ? { headers: { 'if-none-match': missingEtag } } : {}),
+      });
+      if (res.status === 304) {
+        // Esri has no tile at this detail level. Synthesize the correctly
+        // aligned child from its real parent so the client keeps one raster
+        // source: genuine z19 imagery still wins where it exists, while gaps
+        // behave exactly like MapLibre overzooming z18.
+        ctx.record(layer.meta.id, true);
+        const xyzLayer = layer.upstream.kind === 'xyz' ? layer.upstream : null;
+        const fallbackZoom = xyzLayer?.fallbackMaxzoom;
+        if (xyzLayer && fallbackZoom !== undefined && fallbackZoom >= 0 && fallbackZoom < z) {
+          const divisions = 2 ** (z - fallbackZoom);
+          const parentUrl = xyzUrl(
+            xyzLayer.template,
+            fallbackZoom,
+            Math.floor(x / divisions),
+            Math.floor(y / divisions),
+          );
+          const parent = await fetchImpl(parentUrl, {
+            signal: AbortSignal.timeout(15_000),
+            ...(missingEtag ? { headers: { 'if-none-match': missingEtag } } : {}),
+          });
+          const parentType = parent.headers.get('content-type') ?? '';
+          if (parent.ok && parentType.startsWith('image/')) {
+            const overzoomed = await overzoomParentTile(
+              Buffer.from(await parent.arrayBuffer()),
+              z,
+              x,
+              y,
+              fallbackZoom,
+            );
+            return serveImage(
+              overzoomed.data,
+              overzoomed.contentType,
+              res.headers.get('cache-control') ?? parent.headers.get('cache-control') ?? 'no-store',
+            );
+          }
+        }
+        return serveImage(TRANSPARENT_PNG, 'image/png', 'public, max-age=60');
+      }
       if (!res.ok) {
         request.log.error({ layer: layer.meta.id, status: res.status }, 'overlay upstream error');
         ctx.record(layer.meta.id, false, `HTTP ${res.status}`);
