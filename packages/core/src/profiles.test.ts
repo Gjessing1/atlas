@@ -152,6 +152,7 @@ describe('map profiles', () => {
       'sea-depth',
       'hillshade',
       'terrain-contours',
+      'topo-footpaths',
       'statskog-jaktfelt',
       'ice-weak',
       'ice-observations',
@@ -255,7 +256,10 @@ describe('map profile preferences', () => {
 
   it('uses Atlas defaults until a profile has an explicit layer selection', () => {
     const defaults = defaultMapProfilePreferences();
-    expect(preferredLayersForProfile(defaults, 'hike')).toEqual(['trails-hiking']);
+    expect(preferredLayersForProfile(defaults, 'hike')).toEqual([
+      'trails-hiking',
+      'topo-footpaths',
+    ]);
     expect(preferredLayersForProfile({ ...defaults, layers: { hike: [] } }, 'hike')).toEqual([]);
   });
 });

@@ -22,7 +22,7 @@
 # Build with infrastructure/tiles/build-outdoor.sh.
 
 schema_name: Atlas Outdoor
-schema_description: Outdoor POIs and barriers, revealed earlier than the basemap emits them
+schema_description: Outdoor POIs, barriers and named hills omitted by the basemap
 attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>
 
 # Norway is hardcoded rather than parameterised: this archive exists to carry
@@ -263,6 +263,26 @@ layers:
             value: viewpoint
           - key: name
 
+      # --- Named hills -----------------------------------------------------
+      # OpenMapTiles carries `natural=peak` in `mountain_peak`, but drops
+      # `natural=hill` entirely. Kartverket labels both: Klympen (1180 m) in
+      # Lom is the concrete regression that exposed the distinction. Keep this
+      # supplement narrow — named hills only, with the surveyed elevation when
+      # OSM has it — and let MapLibre's collision/sort rules decide label
+      # density beside the basemap's real peaks.
+      - source: osm
+        geometry: point
+        min_zoom: 12
+        include_when:
+          __all__:
+            natural: [hill]
+            name: __any__
+        attributes:
+          - key: class
+            value: hill
+          - key: name
+          - key: ele
+
       # --- Local detail ----------------------------------------------------
       # High counts and only useful once you are there, so these stay near the
       # basemap's own reveal zoom and never bloat the planning zooms.
@@ -293,3 +313,27 @@ layers:
           - key: class
             value: drinking_water
           - key: name
+
+examples:
+  - name: Named hill supplements the basemap
+    input:
+      source: osm
+      geometry: point
+      tags: { natural: hill, name: Klympen, ele: '1180' }
+    output:
+      - layer: outdoor
+        geometry: point
+        min_zoom: 12
+        tags: { class: hill, name: Klympen, ele: '1180' }
+  - name: Unnamed hill is not label payload
+    input:
+      source: osm
+      geometry: point
+      tags: { natural: hill, ele: '900' }
+    output: []
+  - name: An unrelated named point is not a hill
+    input:
+      source: osm
+      geometry: point
+      tags: { amenity: bench, name: View bench }
+    output: []

@@ -59,7 +59,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     label: 'Hike',
     routing: 'hike',
     layerTags: ['hiking'],
-    defaultLayers: ['trails-hiking'],
+    defaultLayers: ['trails-hiking', 'topo-footpaths'],
   },
   {
     id: 'run',
@@ -103,6 +103,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
       'sea-depth',
       'hillshade',
       'terrain-contours',
+      'topo-footpaths',
       'statskog-jaktfelt',
       'ice-weak',
       // Live Regobs points sit above NVE's static hydropower hazard polygons:

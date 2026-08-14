@@ -157,6 +157,9 @@ export function registerTileRoute(ctx: OverlayContext): void {
         : xyzUrl(layer.upstream.template, z, x, y);
     if (layer.upstream.kind === 'wms') {
       upstream.searchParams.set('REQUEST', 'GetMap');
+      for (const [key, value] of Object.entries(layer.upstream.getMapParams ?? {})) {
+        upstream.searchParams.set(key, value);
+      }
       for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
         upstream.searchParams.set(key, value);
       }

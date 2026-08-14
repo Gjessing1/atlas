@@ -6,7 +6,12 @@ import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
-import { norwegianLayers, registerOverlayApi, type OverlayLayer } from './index.js';
+import {
+  norwegianLayers,
+  registerOverlayApi,
+  topoFootpathsSld,
+  type OverlayLayer,
+} from './index.js';
 
 const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
@@ -49,6 +54,7 @@ function testLayers(): OverlayLayer[] {
         version: '1.3.0',
         layers: 'Dybdekart,DybdeKurve',
         identifyLayers: 'DybdePunkt',
+        getMapParams: { FIXED_STYLE: 'paths-only' },
       },
     },
     {
@@ -616,6 +622,24 @@ describe('layer catalog', () => {
       }
     }
   });
+
+  it('keeps Kartverket footpaths filtered and exposes the full topo reference separately', () => {
+    const footpaths = norwegianLayers().find((layer) => layer.meta.id === 'topo-footpaths')!;
+    expect(footpaths.meta.profiles).toEqual(['hiking', 'fishing', 'hunting']);
+    expect(footpaths.meta.minzoom).toBe(14);
+    expect(footpaths.meta.maxzoom).toBe(15);
+    expect(footpaths.upstream.kind).toBe('wms');
+    if (footpaths.upstream.kind !== 'wms') throw new Error('expected WMS footpaths');
+    expect(footpaths.upstream.layers).toBe('N50Veger');
+    expect(footpaths.upstream.getMapParams?.['SLD_BODY']).toBe(topoFootpathsSld());
+    expect(topoFootpathsSld()).toContain('<ogc:PropertyName>typeveg</ogc:PropertyName>');
+    expect(topoFootpathsSld()).toContain('<ogc:Literal>sti</ogc:Literal>');
+
+    const topo = norwegianLayers().find((layer) => layer.meta.id === 'topographic-map')!;
+    expect(topo.upstream.kind).toBe('xyz');
+    if (topo.upstream.kind !== 'xyz') throw new Error('expected XYZ topo map');
+    expect(topo.upstream.template).toContain('/topo/default/webmercator/{z}/{y}/{x}.png');
+  });
 });
 
 describe('overlay tile proxy', () => {
@@ -638,6 +662,7 @@ describe('overlay tile proxy', () => {
     expect(p.get('LAYERS')).toBe('Dybdekart,DybdeKurve');
     expect(p.get('WIDTH')).toBe('256');
     expect(p.get('TRANSPARENT')).toBe('TRUE');
+    expect(p.get('FIXED_STYLE')).toBe('paths-only');
     const bbox = p.get('BBOX')!.split(',').map(Number);
     expect(bbox[0]).toBeCloseTo(0, 3);
     expect(bbox[3]).toBeCloseTo(20037508.342789244, 3);

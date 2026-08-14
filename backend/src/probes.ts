@@ -124,12 +124,18 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // 8.9 / 0.3, 8.3 / 0.3 kB.
   hillshade: { kind: 'tile', lat: 60.05, lng: 10.7, z: 12, minBytes: 2000 },
   'terrain-contours': { kind: 'tile', lat: 60.05, lng: 10.7, z: 13, minBytes: 2000 },
+  // Full Kartverket topo at Klympen: dense contours, labels and path detail
+  // (85 kB measured 2026-08-14; an empty PNG from the proxy is under 1 kB).
+  'topographic-map': { kind: 'tile', lat: 61.9447, lng: 8.8364, z: 14, minBytes: 10_000 },
   'satellite-2025': { kind: 'tile', lat: 60.05, lng: 10.7, z: 12, minBytes: 2000 },
   // Esri World Imagery over central Oslo: one of Norway's genuine z19 detail
   // tiles, rather than the opaque 2.5 kB missing-image sentinel returned where
   // coverage stops at z18 (14.9 kB measured 2026-08-14).
   'world-imagery': { kind: 'tile', lat: 59.9139, lng: 10.7522, z: 19, minBytes: 5000 },
   'trails-hiking': { kind: 'tile', lat: 60.05, lng: 10.7, z: 13, minBytes: 2000 },
+  // N50's path-only SLD over Nordmarka (7.5 kB / 0.3 kB empty). z14 is the
+  // first web level inside the source's 1:50k–1:12k scale band.
+  'topo-footpaths': { kind: 'tile', lat: 60.05, lng: 10.7, z: 14, minBytes: 1500 },
   'trails-ski': { kind: 'tile', lat: 60.05, lng: 10.7, z: 13, minBytes: 2000 },
   // AR5 refuses to draw below 1:50 000, so this one must be asked at z14+
   // (17.2 kB there, 0.3 at z13 — the scale floor and a dead layer look alike,

@@ -113,6 +113,14 @@ const style = JSON.stringify({
       layout: { 'text-size': 12 },
       paint: { 'text-color': '#000' },
     },
+    {
+      id: 'route_names',
+      type: 'symbol',
+      source: 'openmaptiles',
+      'source-layer': 'transportation_name',
+      layout: { 'text-size': 12 },
+      paint: { 'text-color': '#000' },
+    },
   ],
 });
 
@@ -174,6 +182,51 @@ describe('map appearance', () => {
       2.24,
     );
     expect(result.find((layer) => layer.id === 'label_city')?.paint['text-color']).toBe('#eef2f5');
+  });
+
+  it('draws ranked summits, named hills and relation-derived red-T hiking networks', () => {
+    const parsed = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        outdoorTiles: 'https://atlas.test/api/tiles/outdoor/{z}/{x}/{y}.pbf',
+      }),
+    ) as { layers: TestLayer[] };
+
+    const peak = parsed.layers.find((layer) => layer.id === 'atlas-summit-labels');
+    expect(peak?.source).toBe('openmaptiles');
+    expect(peak?.['source-layer']).toBe('mountain_peak');
+    expect(peak?.layout?.['symbol-sort-key']).toEqual(['coalesce', ['get', 'rank'], 99]);
+    expect(JSON.stringify(peak?.layout?.['text-field'])).toContain('\\n');
+
+    const hill = parsed.layers.find((layer) => layer.id === 'atlas-outdoor-summit-labels');
+    expect(hill?.source).toBe('atlas-outdoor');
+    expect(hill?.minzoom).toBe(12);
+    expect(hill?.filter).toContainEqual(['match', ['get', 'class'], ['hill'], true, false]);
+
+    const network = parsed.layers.find((layer) => layer.id === 'atlas-hiking-network');
+    const markers = parsed.layers.find((layer) => layer.id === 'atlas-hiking-network-markers');
+    expect(network?.['source-layer']).toBe('transportation_name');
+    expect(network?.filter).toContainEqual([
+      'any',
+      ['match', ['get', 'route_1_network'], ['iwn', 'nwn', 'rwn'], true, false],
+      ['match', ['get', 'route_2_network'], ['iwn', 'nwn', 'rwn'], true, false],
+      ['match', ['get', 'route_3_network'], ['iwn', 'nwn', 'rwn'], true, false],
+    ]);
+    expect(markers?.layout?.['text-field']).toBe('T');
+    expect(markers?.filter).toContainEqual([
+      'any',
+      ['has', 'route_1_ref'],
+      ['has', 'route_2_ref'],
+      ['has', 'route_3_ref'],
+    ]);
+    expect(parsed.layers.indexOf(network!)).toBeLessThan(parsed.layers.indexOf(markers!));
+  });
+
+  it('keeps hike-only summits and network markers off unrelated profiles', () => {
+    const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'drive' }));
+    expect(result.some((layer) => layer.id.includes('summit'))).toBe(false);
+    expect(result.some((layer) => layer.id.startsWith('atlas-hiking-network'))).toBe(false);
   });
 
   it('widens driving roads without wrapping native-incompatible width expressions', () => {

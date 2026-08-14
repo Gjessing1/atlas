@@ -465,6 +465,9 @@ const BARRIER_PROFILES = ['fishhunt', 'hike', 'bike'];
  */
 const OUTDOOR_POI_PROFILES = ['fishhunt', 'hike', 'curiosities'];
 
+/** Profiles that read named summits and regional/national hiking networks. */
+const HIKE_CARTOGRAPHY_PROFILES = ['fishhunt', 'hike'];
+
 /** Named, because the user's POI-size setting has to reach this layer too. */
 const OUTDOOR_POI_LAYER_ID = 'atlas-outdoor-poi';
 
@@ -664,6 +667,150 @@ function barrierLayer(template: StyleLayer, dark: boolean, outdoor: boolean): St
       'circle-opacity': 0.95,
     },
   };
+}
+
+const HIKING_NETWORKS = ['iwn', 'nwn', 'rwn'];
+
+/**
+ * The relation-derived regional/national hiking network already carried by
+ * OpenMapTiles's `transportation_name` layer, but never drawn by Liberty.
+ *
+ * `route_N_network` comes from OSM hiking relations (including the DNT routes
+ * that carry Norwegian regional-network refs), so this is a real vector
+ * distinction rather than a second treatment of Kartverket's undifferentiated
+ * Fotrute raster. A quiet red line establishes the route and repeated T marks
+ * make the distinction survive where the raster uses the same red hue.
+ */
+function hikingNetworkLayers(template: StyleLayer, dark: boolean): StyleLayer[] {
+  const networkFilter = [
+    'any',
+    matchesAny('route_1_network', HIKING_NETWORKS),
+    matchesAny('route_2_network', HIKING_NETWORKS),
+    matchesAny('route_3_network', HIKING_NETWORKS),
+  ];
+  const shared = {
+    source: template.source,
+    'source-layer': 'transportation_name',
+    filter: [
+      'all',
+      ['match', ['geometry-type'], ['LineString', 'MultiLineString'], true, false],
+      networkFilter,
+    ],
+  };
+  // `rwn`/`nwn` says this is a regional/national walking network, not that it
+  // uses Norway's red T. OpenMapTiles drops `osmc:symbol`, but retains the
+  // relation ref used by the Norwegian waymarked/DNT route records. Require a
+  // ref for the T glyph so named pilgrim/local networks are distinguished by
+  // the red line without being falsely labelled as T-marked.
+  const markerFilter = [
+    'all',
+    shared.filter,
+    ['any', ['has', 'route_1_ref'], ['has', 'route_2_ref'], ['has', 'route_3_ref']],
+  ];
+  return [
+    {
+      id: 'atlas-hiking-network',
+      type: 'line',
+      ...shared,
+      minzoom: 10,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': dark ? '#f06f64' : '#b52d2a',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.7, 14, 1.25, 18, 2.2],
+        'line-opacity': 0.82,
+      },
+    },
+    {
+      id: 'atlas-hiking-network-markers',
+      type: 'symbol',
+      ...shared,
+      filter: markerFilter,
+      minzoom: 12,
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 110,
+        'text-field': 'T',
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 12, 9, 16, 11],
+        'text-keep-upright': true,
+        'text-rotation-alignment': 'map',
+      },
+      paint: {
+        'text-color': dark ? '#ff8b80' : '#a92320',
+        'text-halo-color': dark ? '#172025' : '#fffdf8',
+        'text-halo-width': 1.4,
+        'text-halo-blur': 0.3,
+      },
+    },
+  ];
+}
+
+/**
+ * Summit point + name/elevation label for either OpenMapTiles peaks or the
+ * outdoor archive's named-hill supplement.
+ *
+ * The basemap carries a useful `rank` derived from peak prominence; placing
+ * lower ranks first gives major summits collision priority. Hills have no
+ * national prominence metric, so their later layer and z12 floor naturally
+ * make them local detail. This reproduces Norgeskart's hierarchy without
+ * inventing elevations: absent `ele` means a name only.
+ */
+function summitLayers(source: unknown, dark: boolean, outdoor: boolean): StyleLayer[] {
+  const sourceLayer = outdoor ? OUTDOOR_SOURCE_LAYER : 'mountain_peak';
+  const filter = [
+    'all',
+    ['match', ['geometry-type'], ['MultiPoint', 'Point'], true, false],
+    matchesAny('class', outdoor ? ['hill'] : ['peak']),
+    ['has', 'name'],
+  ];
+  const minzoom = outdoor ? 12 : 9;
+  const shared = {
+    source: outdoor ? OUTDOOR_SOURCE_ID : source,
+    'source-layer': sourceLayer,
+    minzoom,
+    filter,
+  };
+  return [
+    {
+      id: outdoor ? 'atlas-outdoor-summits' : 'atlas-summits',
+      type: 'circle',
+      ...shared,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], minzoom, 2.2, 16, 3.6],
+        'circle-color': dark ? '#e6d4c2' : '#5f4635',
+        'circle-stroke-color': dark ? '#1b2327' : '#fffdf8',
+        'circle-stroke-width': 1,
+      },
+    },
+    {
+      id: outdoor ? 'atlas-outdoor-summit-labels' : 'atlas-summit-labels',
+      type: 'symbol',
+      ...shared,
+      layout: {
+        'text-field': [
+          'case',
+          ['has', 'ele'],
+          ['concat', ['get', 'name'], '\n', ['to-string', ['get', 'ele']], ' m'],
+          ['get', 'name'],
+        ],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], minzoom, 10.5, 14, 12.5, 17, 14],
+        'text-anchor': 'bottom',
+        'text-offset': [0, -0.55],
+        'text-max-width': 9,
+        'text-padding': 3,
+        // OpenMapTiles rank 1 is the most prominent. Hills have no rank and
+        // deliberately sort after every ranked peak in the shared label field.
+        'symbol-sort-key': outdoor ? 100 : ['coalesce', ['get', 'rank'], 99],
+      },
+      paint: {
+        'text-color': dark ? '#f1e6dc' : '#463327',
+        'text-halo-color': dark ? '#182125' : '#fffdf8',
+        'text-halo-width': 1.5,
+        'text-halo-blur': 0.4,
+      },
+    },
+  ];
 }
 
 /**
@@ -886,13 +1033,15 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     : 'neutral';
   const wantsBarriers = BARRIER_PROFILES.includes(profile);
   const wantsOutdoorPoi = OUTDOOR_POI_PROFILES.includes(profile);
+  const wantsHikeCartography = HIKE_CARTOGRAPHY_PROFILES.includes(profile);
   // Bind the overlay archive only where a layer will actually read it, so Drive
   // and Explore never open a source they have no use for.
   const outdoorTiles =
     typeof appearance.outdoorTiles === 'string' && appearance.outdoorTiles.length > 0
       ? appearance.outdoorTiles
       : undefined;
-  const useOutdoor = outdoorTiles !== undefined && (wantsBarriers || wantsOutdoorPoi);
+  const useOutdoor =
+    outdoorTiles !== undefined && (wantsBarriers || wantsOutdoorPoi || wantsHikeCartography);
 
   // Exact-class clone layers (dashed tracks, hatched stairs, gravel roads) to
   // splice in right after the shared base layer they refine.
@@ -920,6 +1069,12 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   const found = style.layers.find((l) => l.type === 'symbol' && l['source-layer'] === 'poi');
   const poiTemplate = found ? (JSON.parse(JSON.stringify(found)) as StyleLayer) : undefined;
   const lastPoiId = [...style.layers].reverse().find((l) => l['source-layer'] === 'poi')?.id;
+  const transportationNameTemplate = style.layers.find(
+    (l) => l['source-layer'] === 'transportation_name',
+  );
+  const lastTransportationNameId = [...style.layers]
+    .reverse()
+    .find((l) => l['source-layer'] === 'transportation_name')?.id;
   for (const layer of style.layers) {
     tuneLightLayer(layer);
     if (dark) tuneDarkLayer(layer);
@@ -1117,6 +1272,18 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   // lands directly after the same anchor): barriers below the outdoor icons, so
   // a cabin label is never obscured by the gate beside it.
   if (poiTemplate && lastPoiId) {
+    if (wantsHikeCartography && typeof poiTemplate.source === 'string') {
+      // Push labels before points because every splice targets the same base:
+      // the later point push lands below its label in the final style order.
+      const [peakPoint, peakLabel] = summitLayers(poiTemplate.source, dark, false);
+      insertAfterBase.push({ layer: peakLabel!, baseId: lastPoiId });
+      insertAfterBase.push({ layer: peakPoint!, baseId: lastPoiId });
+      if (useOutdoor) {
+        const [hillPoint, hillLabel] = summitLayers(OUTDOOR_SOURCE_ID, dark, true);
+        insertAfterBase.push({ layer: hillLabel!, baseId: lastPoiId });
+        insertAfterBase.push({ layer: hillPoint!, baseId: lastPoiId });
+      }
+    }
     if (wantsOutdoorPoi) {
       insertAfterBase.push({
         layer: outdoorPoiLayer(poiTemplate, dark, useOutdoor),
@@ -1134,6 +1301,13 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
         baseId: lastPoiId,
       });
     }
+  }
+
+  if (wantsHikeCartography && transportationNameTemplate && lastTransportationNameId) {
+    const [networkLine, networkMarkers] = hikingNetworkLayers(transportationNameTemplate, dark);
+    // Same reverse-splice rule: line first in the final style, T markers above.
+    insertAfterBase.push({ layer: networkMarkers!, baseId: lastTransportationNameId });
+    insertAfterBase.push({ layer: networkLine!, baseId: lastTransportationNameId });
   }
 
   // Declared last, and only once a layer above actually referenced it — an

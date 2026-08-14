@@ -24,7 +24,7 @@ import { registerTileRoute } from './tiles.js';
 export type { OverlayApiOptions } from './context.js';
 export type { OverlayLayer } from './catalog.js';
 import type { OverlayLayer } from './catalog.js';
-export { norwegianLayers, speedCameraLayerMeta } from './catalog.js';
+export { norwegianLayers, speedCameraLayerMeta, topoFootpathsSld } from './catalog.js';
 
 /**
  * Returns the layers it actually configured (tokenless ones already dropped) —

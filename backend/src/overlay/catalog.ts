@@ -90,6 +90,13 @@ export interface WmsUpstream {
   labels?: ArcGisLabelSource;
   styles?: string;
   /**
+   * Fixed GetMap-only parameters for a layer whose useful view is a styled
+   * subset of its upstream. Unlike `optionParams`, these do not create a UI
+   * choice: Kartverket's N50 footpaths are always `typeveg=sti` and should
+   * never fall back to drawing the entire road layer.
+   */
+  getMapParams?: Record<string, string>;
+  /**
    * Extra GetMap parameters contributed by a selected layer option
    * (`LayerMeta.options` → option key → choice value → params). Data, not code,
    * so the whole variant surface of a layer is readable in one place and
@@ -290,6 +297,30 @@ export function artfunksjonSld(species: readonly string[]): string {
     '<CssParameter name="stroke">#7c2d12</CssParameter>' +
     '<CssParameter name="stroke-width">1.2</CssParameter></Stroke></PolygonSymbolizer>' +
     '</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>'
+  );
+}
+
+/**
+ * N50's path subset, restyled as quiet local access rather than a marked route.
+ *
+ * The live `N50Veger` service exposes paths as `typeveg=sti`; its default
+ * style also draws every public/private road, which would double the basemap.
+ * Keep the filter in the SLD and let the separate Fotrute overlay carry the
+ * strong marked-route treatment above it.
+ */
+export function topoFootpathsSld(): string {
+  return (
+    '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" ' +
+    'xmlns:ogc="http://www.opengis.net/ogc"><NamedLayer><Name>N50Veger</Name>' +
+    '<UserStyle><FeatureTypeStyle><Rule><ogc:Filter><ogc:PropertyIsEqualTo>' +
+    '<ogc:PropertyName>typeveg</ogc:PropertyName><ogc:Literal>sti</ogc:Literal>' +
+    '</ogc:PropertyIsEqualTo></ogc:Filter><LineSymbolizer><Stroke>' +
+    '<CssParameter name="stroke">#8b5a44</CssParameter>' +
+    '<CssParameter name="stroke-width">1.1</CssParameter>' +
+    '<CssParameter name="stroke-opacity">0.82</CssParameter>' +
+    '<CssParameter name="stroke-dasharray">2 2</CssParameter>' +
+    '</Stroke></LineSymbolizer></Rule></FeatureTypeStyle></UserStyle></NamedLayer>' +
+    '</StyledLayerDescriptor>'
   );
 }
 
@@ -600,6 +631,29 @@ export function norwegianLayers(): OverlayLayer[] {
         // and drawing nothing from z16 in — the "contours disappear when you zoom
         // in" bug. Requesting both lets the server pick per scale as intended.
         layers: 'kd_hoydekurver,fkb_hoydekurver',
+      },
+    },
+    {
+      meta: {
+        id: 'topographic-map',
+        rev: 1,
+        title: 'Kartverket topographic map',
+        description:
+          'Norway’s official topographic map, including terrain names, paths and map-sheet detail.',
+        group: 'Imagery',
+        attribution: '© Kartverket',
+        metadataUrl: 'https://www.kartverket.no/api-og-data/kartbilder',
+        maxzoom: 18,
+        defaultOpacity: 1,
+        identify: false,
+        coverageNote: 'Norway only. Select this as a full map reference; it covers the basemap.',
+        profiles: ['hiking', 'fishing', 'hunting'],
+      },
+      upstream: {
+        kind: 'xyz',
+        // Kartverket WMTS uses z/row/column, i.e. z/y/x, in its REST template.
+        template:
+          'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png',
       },
     },
     {
@@ -1270,6 +1324,32 @@ export function norwegianLayers(): OverlayLayer[] {
         url: 'https://wms.geonorge.no/skwms1/wms.friluftsruter2',
         version: '1.3.0',
         layers: 'Fotrute',
+      },
+    },
+    {
+      meta: {
+        id: 'topo-footpaths',
+        rev: 1,
+        title: 'Minor footpaths (N50)',
+        description:
+          'Smaller mapped paths from Kartverket N50, drawn quietly beneath marked hiking routes.',
+        group: 'Trails',
+        attribution: '© Kartverket',
+        metadataUrl: 'https://www.kartverket.no/api-og-data/kartdata',
+        // N50Veger publishes at 1:50k–1:12k. z14/z15 are the two web-mercator
+        // levels inside that band; MapLibre overzooms z15 for closer reading.
+        minzoom: 14,
+        maxzoom: 15,
+        defaultOpacity: 0.72,
+        identify: false,
+        profiles: ['hiking', 'fishing', 'hunting'],
+      },
+      upstream: {
+        kind: 'wms',
+        url: 'https://wms.geonorge.no/skwms1/wms.topo',
+        version: '1.3.0',
+        layers: 'N50Veger',
+        getMapParams: { SLD_BODY: topoFootpathsSld() },
       },
     },
     {
