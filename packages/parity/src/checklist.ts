@@ -57,6 +57,24 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Both draw the same server-classified colours (`@atlas/traffic` owns the levels) and both offset the line right of the direction of travel, because every corridor has a reverse twin over the same road. Off by default on both: the ETA already carries the measurement, so this layer answers "why", which is a question you ask rather than one you want asked for you.',
   },
   {
+    id: 'map-live-transit-vehicles',
+    surface: 'map',
+    capability: 'Watch live public-transport vehicles and inspect delay and occupancy',
+    web: {
+      file: 'apps/web/src/map/useTransitVehicleLayer.ts',
+      contains: 'useTransitVehicleLayer',
+    },
+    android: {
+      file: 'apps/android/src/layers/useTransitVehicles.ts',
+      contains: 'useTransitVehicles',
+    },
+    route: {
+      file: 'backend/src/transit-api.ts',
+      contains: "'/api/overlay/transit-vehicles/features'",
+    },
+    note: 'Both clients ask only for the settled viewport every 20 seconds, draw the same mode colours and line labels, and build the tap card from `@atlas/transit`. The row is a standing, off-by-default layer because watching a corridor does not require a planned journey.',
+  },
+  {
     id: 'map-potential-target',
     surface: 'map',
     capability: 'Pick what you are after — the Fish & Hunt sub-profile — in one tap',

@@ -289,6 +289,57 @@ describe('POST /api/transit', () => {
   });
 });
 
+describe('GET /api/overlay/transit-vehicles/features', () => {
+  it('proxies a bounded live-position query as map GeoJSON', async () => {
+    respond = () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            vehicles: [
+              {
+                vehicleId: 'RUT:Vehicle:31',
+                mode: 'BUS',
+                line: { publicCode: '31', lineName: 'Snarøya–Tonsenhagen' },
+                destinationName: 'Tonsenhagen',
+                lastUpdated: '2026-08-14T19:18:34Z',
+                location: { latitude: 59.9123, longitude: 10.7468 },
+                delay: 180,
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      );
+
+    const res = await app.inject('/api/overlay/transit-vehicles/features?bbox=10.6,59.8,10.9,60');
+
+    expect(res.statusCode, res.payload).toBe(200);
+    expect(res.headers['cache-control']).toContain('max-age=10');
+    expect(res.json().features[0]).toMatchObject({
+      id: 'RUT:Vehicle:31',
+      geometry: { coordinates: [10.7468, 59.9123] },
+      properties: { line: '31', delayS: 180 },
+    });
+    expect(captured).toMatchObject({
+      url: 'https://api.entur.io/realtime/v2/vehicles/graphql',
+      headers: { 'ET-Client-Name': 'atlas-journeyplanner' },
+      body: {
+        variables: { box: { minLat: 59.8, minLon: 10.6, maxLat: 60, maxLon: 10.9 } },
+      },
+    });
+  });
+
+  it('refuses absent, inverted and country-sized bounds', async () => {
+    expect((await app.inject('/api/overlay/transit-vehicles/features')).statusCode).toBe(400);
+    expect(
+      (await app.inject('/api/overlay/transit-vehicles/features?bbox=11,60,10,59')).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject('/api/overlay/transit-vehicles/features?bbox=4,57,32,72')).statusCode,
+    ).toBe(400);
+  });
+});
+
 describe('GET /api/transit/stops', () => {
   const geocoderReply = {
     type: 'FeatureCollection',

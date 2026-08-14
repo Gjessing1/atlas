@@ -1,6 +1,7 @@
 import {
   buildEnturDeparturesRequest,
   buildEnturRequest,
+  buildEnturVehiclesRequest,
   commuteEmptyReason,
   commuteRefreshAtMs,
   commuteTransitQueries,
@@ -16,6 +17,7 @@ import {
   parseEnturResponse,
   parseEnturGeocoderResponse,
   parseEnturStopLinesResponse,
+  parseEnturVehiclesResponse,
   transitCoverage,
   transitCoversPoint,
   ENTUR_STOP_LINES_QUERY,
@@ -39,6 +41,7 @@ import type {
   TransitWeekday,
   TransitWidgetBoard,
 } from '@atlas/transit';
+import type { LayerMeta } from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
 import type { StatusRegistry } from './status.js';
 
@@ -64,7 +67,9 @@ import type { StatusRegistry } from './status.js';
 
 const ENTUR_URL = 'https://api.entur.io/journey-planner/v3/graphql';
 const ENTUR_GEOCODER_URL = 'https://api.entur.io/geocoder/v1/autocomplete';
+const ENTUR_VEHICLES_URL = 'https://api.entur.io/realtime/v2/vehicles/graphql';
 const TRANSIT_PROBE = 'entur';
+const VEHICLES_PROBE = 'entur-vehicles';
 /** Entur asks consumers to identify themselves; this is that identity. */
 const CLIENT_NAME = 'atlas-journeyplanner';
 const UPSTREAM_TIMEOUT_MS = 10_000;
@@ -74,12 +79,55 @@ export interface TransitApiOptions {
   enturUrl?: string;
   /** Entur autocomplete endpoint (ENTUR_GEOCODER_URL to override). */
   geocoderUrl?: string;
+  /** Entur realtime vehicle GraphQL endpoint. */
+  vehicleUrl?: string;
   /** Value for the mandatory ET-Client-Name header (ENTUR_CLIENT_NAME to override). */
   clientName?: string;
   /** Test seam: upstream HTTP. */
   fetchImpl?: typeof fetch;
   /** Health registry: Entur is one probed source. */
   status?: StatusRegistry;
+}
+
+/** Standing, optional map layer; every request is bounded to the visible map. */
+export function transitVehicleLayerMeta(): LayerMeta {
+  return {
+    id: 'transit-vehicles',
+    rev: 1,
+    title: 'Live public transport',
+    description: 'Current positions, delays and occupancy from participating Norwegian feeds.',
+    group: 'Public transport',
+    attribution: 'Data made available by Entur (NLOD)',
+    metadataUrl: 'https://developer.entur.org/pages-real-time-vehicle/',
+    minzoom: 8,
+    maxzoom: 18,
+    defaultOpacity: 1,
+    identify: false,
+    coverageNote:
+      'Norway only; an internet connection is required. Operators without live positions are absent.',
+    vector: true,
+  };
+}
+
+function vehicleBounds(
+  value: unknown,
+): { west: number; south: number; east: number; north: number } | null {
+  if (typeof value !== 'string') return null;
+  const values = value.split(',').map(Number);
+  if (values.length !== 4 || values.some((part) => !Number.isFinite(part))) return null;
+  const [west, south, east, north] = values as [number, number, number, number];
+  if (
+    west < -180 ||
+    east > 180 ||
+    south < -90 ||
+    north > 90 ||
+    west >= east ||
+    south >= north ||
+    (east - west) * (north - south) > 100
+  ) {
+    return null;
+  }
+  return { west, south, east, north };
 }
 
 function parsePoint(value: unknown): TransitLocation | null {
@@ -311,9 +359,56 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
   const fetchImpl = opts.fetchImpl ?? fetch;
   const status = opts.status;
   status?.register(TRANSIT_PROBE, 'Entur (public transport)', 'Public transport');
+  status?.register(VEHICLES_PROBE, 'Entur live vehicles', 'Public transport');
   const enturUrl = opts.enturUrl ?? process.env.ENTUR_URL ?? ENTUR_URL;
   const geocoderUrl = opts.geocoderUrl ?? process.env.ENTUR_GEOCODER_URL ?? ENTUR_GEOCODER_URL;
+  const vehicleUrl = opts.vehicleUrl ?? process.env.ENTUR_VEHICLES_URL ?? ENTUR_VEHICLES_URL;
   const clientName = opts.clientName ?? process.env.ENTUR_CLIENT_NAME ?? CLIENT_NAME;
+
+  app.get('/api/overlay/transit-vehicles/features', async (request, reply) => {
+    const raw = request.query as { bbox?: unknown };
+    const bounds = vehicleBounds(raw.bbox);
+    if (!bounds) {
+      return reply.code(400).send({ error: 'bbox must be west,south,east,north within 100 deg²' });
+    }
+    try {
+      const response = await fetchImpl(vehicleUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'ET-Client-Name': clientName,
+        },
+        body: JSON.stringify(buildEnturVehiclesRequest(bounds)),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        status?.record(VEHICLES_PROBE, false, `HTTP ${response.status}`);
+        return reply.code(502).send({ error: 'live vehicle positions unavailable' });
+      }
+      const body: unknown = await response.json();
+      if (
+        body !== null &&
+        typeof body === 'object' &&
+        Array.isArray((body as { errors?: unknown }).errors) &&
+        (body as { errors: unknown[] }).errors.length > 0
+      ) {
+        status?.record(VEHICLES_PROBE, false, 'GraphQL error');
+        return reply.code(502).send({ error: 'live vehicle positions unavailable' });
+      }
+      const features = parseEnturVehiclesResponse(body);
+      status?.record(VEHICLES_PROBE, true);
+      status?.setDetail(VEHICLES_PROBE, `${features.features.length} vehicles in last viewport`);
+      return reply
+        .header('cache-control', 'public, max-age=10, stale-while-revalidate=20')
+        .send(features);
+    } catch (error) {
+      request.log.error({ err: error }, 'Entur live vehicles unreachable');
+      status?.record(VEHICLES_PROBE, false, 'unreachable');
+      status?.setDetail(VEHICLES_PROBE, null);
+      return reply.code(502).send({ error: 'live vehicle positions unavailable' });
+    }
+  });
 
   app.get('/api/transit/stops', async (request, reply) => {
     const raw = request.query as {

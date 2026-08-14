@@ -9,6 +9,7 @@ import {
   trafficFlowIdentify,
   trafficIdentify,
 } from '@atlas/core';
+import { transitVehicleIdentify } from '@atlas/transit';
 import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
 import { tappedFlowProperties } from '@atlas/traffic';
 import type maplibregl from 'maplibre-gl';
@@ -18,6 +19,7 @@ import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
 import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
+import { TRANSIT_VEHICLE_IDENTIFY_LAYERS } from './useTransitVehicleLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -337,6 +339,7 @@ export function useOverlayIdentify(
         iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
         trafficIdentify(drawn(TRAFFIC_IDENTIFY_LAYERS)),
+        transitVehicleIdentify(drawn(TRANSIT_VEHICLE_IDENTIFY_LAYERS)),
         // Not `drawn`: a box over the corridor layer catches both directions of
         // the same road, so the tapped one has to be chosen rather than taken.
         trafficFlowIdentify(tappedFlowProperties(at, hits(TRAFFIC_FLOW_IDENTIFY_LAYERS))),

@@ -8,6 +8,7 @@ import {
   overlayProbe,
   ProbeRunner,
   regobsProbe,
+  transitVehiclesProbe,
   yearSuccessorProbe,
   type ProbeSpec,
 } from './probes.js';
@@ -52,9 +53,39 @@ describe('probe coverage', () => {
     expect(ids).toContain('overlay:lake-depth');
     expect(ids).toContain('overlay:statskog-jaktfelt:year');
     expect(ids).toContain('regobs');
+    expect(ids).toContain('entur-vehicles');
     expect(ids).toContain('input:dtm');
     expect(ids).toContain('input:streams');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('checks the Entur vehicle feed with an identified bounded query', async () => {
+    const fetchImpl = vi.fn(async () =>
+      json({
+        data: {
+          vehicles: [
+            {
+              vehicleId: 'RUT:Vehicle:31',
+              mode: 'BUS',
+              location: { latitude: 59.91, longitude: 10.75 },
+            },
+          ],
+        },
+      }),
+    );
+    await expect(transitVehiclesProbe().run(fetchImpl as typeof fetch)).resolves.toMatchObject({
+      ok: true,
+      detail: '1 fresh vehicles in Oslo probe',
+      warning: null,
+    });
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(init.headers).toMatchObject({ 'ET-Client-Name': 'atlas-health' });
+    expect(JSON.parse(String(init.body)).variables.box).toEqual({
+      minLat: 59.8,
+      minLon: 10.6,
+      maxLat: 60,
+      maxLon: 10.9,
+    });
   });
 
   it('checks that the Regobs search still returns usable ice registrations', async () => {

@@ -44,7 +44,11 @@ import {
   registerIceObservationsApi,
   type IceObservationsApiOptions,
 } from './ice-observations-api.js';
-import { registerTransitApi, type TransitApiOptions } from './transit-api.js';
+import {
+  registerTransitApi,
+  transitVehicleLayerMeta,
+  type TransitApiOptions,
+} from './transit-api.js';
 import { registerTrafficApi, type TrafficApiOptions } from './traffic-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
 import { createPgStores } from './pg.js';
@@ -657,6 +661,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     extraMeta: [
       ...(nvdb?.hasCameraData ? [speedCameraLayerMeta()] : []),
       ...traffic.metas,
+      transitVehicleLayerMeta(),
       iceObservationLayerMeta(),
       ...derivedLayerMetas(),
     ],

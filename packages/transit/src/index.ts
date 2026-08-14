@@ -88,6 +88,15 @@ export {
   type TransitStopSearchQuery,
 } from './geocoder.js';
 export {
+  ENTUR_VEHICLES_QUERY,
+  buildEnturVehiclesRequest,
+  parseEnturVehiclesResponse,
+  transitVehicleFeaturesUrl,
+  transitVehicleIdentify,
+  type TransitVehicleBounds,
+  type TransitVehicleFeatureCollection,
+} from './vehicles.js';
+export {
   fetchTransitStops,
   fetchTransitTrips,
   fetchTransitDepartures,

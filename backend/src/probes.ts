@@ -1,4 +1,5 @@
 import { normalizeLayerOptions } from '@atlas/core';
+import { buildEnturVehiclesRequest, parseEnturVehiclesResponse } from '@atlas/transit';
 import type { FastifyBaseLogger } from 'fastify';
 import type { OverlayLayer } from './overlay/catalog.js';
 import { optionGetMapParams } from './overlay/options.js';
@@ -797,6 +798,46 @@ export function regobsProbe(): ProbeSpec {
   };
 }
 
+/** Entur's rolling vehicle GraphQL feed is a vector source outside the WMS catalog. */
+export function transitVehiclesProbe(): ProbeSpec {
+  return {
+    id: 'entur-vehicles',
+    label: 'Entur live vehicles',
+    group: 'Public transport',
+    async run(fetchImpl) {
+      const res = await fetchImpl('https://api.entur.io/realtime/v2/vehicles/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'ET-Client-Name': 'atlas-health',
+        },
+        body: JSON.stringify(
+          buildEnturVehiclesRequest({ west: 10.6, south: 59.8, east: 10.9, north: 60 }),
+        ),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+      const body = (await res.json()) as unknown;
+      const vehicles =
+        body !== null &&
+        typeof body === 'object' &&
+        (body as { data?: unknown }).data !== null &&
+        typeof (body as { data?: unknown }).data === 'object'
+          ? ((body as { data: { vehicles?: unknown } }).data.vehicles ?? null)
+          : null;
+      if (!Array.isArray(vehicles)) return { ok: false, message: 'vehicle reply shape changed' };
+      const parsed = parseEnturVehiclesResponse(body);
+      return {
+        ok: true,
+        detail: `${parsed.features.length} fresh vehicles in Oslo probe`,
+        // Zero is possible overnight; the contract and usable shape are the health assertion.
+        warning: null,
+      };
+    },
+  };
+}
+
 /**
  * Every non-catalog upstream the derived engine reads. Counts in the floors come
  * from docs/DATA-SOURCES.md, measured against the live services.
@@ -879,7 +920,7 @@ export function allProbes(
     const year = yearSuccessorProbe(layer);
     if (year) specs.push(year);
   }
-  return [...specs, regobsProbe(), ...inputProbes(env)];
+  return [...specs, regobsProbe(), transitVehiclesProbe(), ...inputProbes(env)];
 }
 
 /**

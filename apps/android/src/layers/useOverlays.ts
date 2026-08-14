@@ -26,6 +26,7 @@ const RENDERABLE_VECTOR_IDS = new Set([
   'ice-observations',
   'traffic',
   'traffic-flow',
+  'transit-vehicles',
 ]);
 
 // Visibility/opacity are device-local preferences (`local.` keys never sync).

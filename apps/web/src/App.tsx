@@ -81,6 +81,7 @@ import { useExploreLayer } from './map/useExploreLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
+import { useTransitVehicleLayer } from './map/useTransitVehicleLayer.js';
 import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -381,6 +382,7 @@ export function App() {
   useSpeedCameraLayer(map, overlays);
   useTrafficFlowLayer(map, overlays);
   useTrafficLayer(map, overlays);
+  useTransitVehicleLayer(map, overlays, mapViewport);
   useHuntingFieldsLayer(map, overlays);
   useIceObservationsLayer(map, overlays);
 

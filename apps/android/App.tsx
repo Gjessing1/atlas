@@ -87,6 +87,7 @@ import { useIceObservations } from './src/layers/useIceObservations';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
 import { useTrafficFlow } from './src/layers/useTrafficFlow';
+import { useTransitVehicles } from './src/layers/useTransitVehicles';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
 import {
@@ -491,6 +492,7 @@ function AppInner() {
   const speedCameras = useSpeedCameras(overlays, serverOrigin);
   const traffic = useTraffic(overlays, serverOrigin);
   const trafficFlow = useTrafficFlow(overlays, serverOrigin);
+  const transitVehicles = useTransitVehicles(overlays, serverOrigin, camera.mapViewport);
 
   // The system consumes the first Back press while the keyboard is visible.
   // Once it is hidden, keep the next press inside Atlas by closing the search
@@ -1109,6 +1111,7 @@ function AppInner() {
         speedCameras={speedCameras}
         traffic={traffic}
         trafficFlow={trafficFlow}
+        transitVehicles={transitVehicles}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         exploreResults={exploreResults}
         measure={measure.open ? measure.features : null}

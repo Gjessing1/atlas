@@ -101,6 +101,12 @@ export const TRAFFIC_LAYER_IDS = ['atlas-traffic-symbol', 'atlas-traffic-dot'];
 /** Measured congestion corridors hit-tested for their travel time. */
 export const TRAFFIC_FLOW_LAYER_IDS = ['atlas-traffic-flow-line'];
 
+/** Live Entur vehicles hit-tested for line, delay and occupancy. */
+export const TRANSIT_VEHICLE_LAYER_IDS = [
+  'atlas-transit-vehicles-label',
+  'atlas-transit-vehicles-dot',
+];
+
 /** Regobs marker layers hit-tested for exact observation time and details. */
 export const ICE_OBSERVATION_LAYER_IDS = [
   'atlas-ice-observations-symbol',
@@ -210,6 +216,8 @@ interface MapSceneProps {
   traffic: VectorOverlayData | null;
   /** Measured corridor congestion (null when the layer is off/offline). */
   trafficFlow: VectorOverlayData | null;
+  /** Live public-transport vehicles in the current viewport. */
+  transitVehicles: VectorOverlayData | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
   /** Numbered category-browse results, retained while the picked card is open. */
@@ -286,6 +294,7 @@ export function MapScene({
   speedCameras,
   traffic,
   trafficFlow,
+  transitVehicles,
   spots,
   exploreResults,
   measure,
@@ -721,6 +730,43 @@ export function MapScene({
                   trafficFlow.opacity * 0.5,
                   trafficFlow.opacity,
                 ],
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Participating Entur realtime feeds, refreshed in the settled viewport. */}
+        {!inPip && transitVehicles ? (
+          <GeoJSONSource id="atlas-transit-vehicles" data={transitVehicles.data}>
+            <Layer
+              type="circle"
+              id="atlas-transit-vehicles-dot"
+              minzoom={8}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 4, 12, 7, 16, 9],
+                'circle-color': ['get', 'markerColor'],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': transitVehicles.opacity,
+                'circle-stroke-opacity': transitVehicles.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-transit-vehicles-label"
+              minzoom={10}
+              layout={{
+                'text-field': ['get', 'line'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 15, 12],
+                'text-offset': [0, 1.35],
+                'text-anchor': 'top',
+                'text-optional': true,
+              }}
+              paint={{
+                'text-color': '#172033',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.5,
+                'text-opacity': transitVehicles.opacity,
               }}
             />
           </GeoJSONSource>
