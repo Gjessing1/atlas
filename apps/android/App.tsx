@@ -1539,6 +1539,7 @@ function AppInner() {
           ) : null}
 
           <WeatherSheet
+            origin={serverOrigin}
             visible={weatherTarget !== null}
             onClose={() => setWeatherTarget(null)}
             target={weatherTarget}

@@ -180,10 +180,17 @@ export interface FishSpecies {
   readonly seasonalDepthShiftM: Record<Season, number>;
   /**
    * Highest lake altitude the species is plausible at, in metres — the
-   * *fallback* only. A GBIF occurrence inside the lake polygon is far stronger
+   * *fallback* only. An Artskart occurrence inside the lake polygon is far stronger
    * evidence and takes precedence; null means altitude says nothing useful.
    */
   readonly plausibleMaxAltitudeM: number | null;
+  /**
+   * Artskart taxon id for positive presence evidence. Null when this target is
+   * not a lake species (the anadromous river rows use their mapped reaches
+   * instead). Kept on the row so adding a species cannot require an adapter
+   * switch statement.
+   */
+  readonly presenceTaxonId: number | null;
   /** Sea-run, so the anadromous gate and barrier-pool boost apply. */
   readonly anadromous: boolean;
   /**
@@ -210,6 +217,7 @@ export const FISH_SPECIES = [
     depthBandM: { min: 0.3, peakMin: 1, peakMax: 6, max: 12 },
     seasonalDepthShiftM: { spring: 0, summer: 3, autumn: 0, winter: 2 },
     plausibleMaxAltitudeM: null,
+    presenceTaxonId: 26165,
     anadromous: false,
     conditionsSpecies: 'trout',
     lakeWeights: {
@@ -242,6 +250,7 @@ export const FISH_SPECIES = [
     depthBandM: { min: 5, peakMin: 12, peakMax: 30, max: 45 },
     seasonalDepthShiftM: { spring: 0, summer: 6, autumn: 0, winter: 4 },
     plausibleMaxAltitudeM: null,
+    presenceTaxonId: 189732,
     anadromous: false,
     conditionsSpecies: 'char',
     lakeWeights: {
@@ -265,6 +274,7 @@ export const FISH_SPECIES = [
     depthBandM: { min: 0.5, peakMin: 2, peakMax: 8, max: 16 },
     seasonalDepthShiftM: { spring: 0, summer: 1, autumn: 0, winter: 3 },
     plausibleMaxAltitudeM: 800,
+    presenceTaxonId: 26439,
     anadromous: false,
     conditionsSpecies: 'perch',
     lakeWeights: {
@@ -288,6 +298,7 @@ export const FISH_SPECIES = [
     depthBandM: { min: 0.2, peakMin: 0.5, peakMax: 4, max: 9 },
     seasonalDepthShiftM: { spring: 0, summer: 1, autumn: 0, winter: 1 },
     plausibleMaxAltitudeM: 500,
+    presenceTaxonId: 26181,
     anadromous: false,
     conditionsSpecies: 'pike',
     lakeWeights: {
@@ -310,6 +321,7 @@ export const FISH_SPECIES = [
     depthBandM: null,
     seasonalDepthShiftM: { spring: 0, summer: 0, autumn: 0, winter: 0 },
     plausibleMaxAltitudeM: null,
+    presenceTaxonId: null,
     anadromous: true,
     conditionsSpecies: 'trout',
     lakeWeights: {},
@@ -331,6 +343,7 @@ export const FISH_SPECIES = [
     depthBandM: null,
     seasonalDepthShiftM: { spring: 0, summer: 0, autumn: 0, winter: 0 },
     plausibleMaxAltitudeM: null,
+    presenceTaxonId: null,
     anadromous: true,
     conditionsSpecies: 'trout',
     lakeWeights: {},
@@ -376,7 +389,7 @@ export function describeDepthBand(species: FishSpecies, season: Season): string 
 
 /**
  * Is this target plausible in a lake at this altitude? Presence data beats the
- * rule outright — pass `observed` from GBIF and the altitude never gets a say,
+ * rule outright — pass `observed` from Artskart and the altitude never gets a say,
  * because presence-only data means absence proves nothing in the other
  * direction either.
  */
@@ -415,13 +428,14 @@ export interface Quarry {
   readonly disturbanceBufferM: number;
   /**
    * The season's kommune harvest that reads as **strong ground** for this
-   * quarry, or null where SSB publishes no per-kommune table (every småvilt
-   * species: the rype series was discontinued in 1991-92).
+   * quarry, or null where SSB publishes no per-kommune table.
    *
    * Measured against the live tables for 2025-2026 rather than guessed, and
    * per quarry because the two distributions are not remotely alike — among the
    * kommuner that shoot any at all, elg runs median 73 / p90 228 / max 629
-   * (Trysil) while hjort runs median 64 / p90 634 / max 2 373 (Sunnfjord). One
+   * (Trysil) while hjort runs median 64 / p90 634 / max 2 373 (Sunnfjord). SSB
+   * 14380 supplies the existing small-game rows for 2024–2025; its counts are
+   * rounded to tens and suppressed cells stay unknown, never zero. One
    * shared ceiling would have called an ordinary moose kommune excellent and a
    * serious deer one merely good; the first version of this did exactly that,
    * rating Oslo's 73 elg — the national *median* — "Excellent".
@@ -539,7 +553,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 10, peakMin: 16, peakMax: 30, max: 40 },
     treeLineBandM: null,
     disturbanceBufferM: 300,
-    strongHarvest: null,
+    strongHarvest: 150,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
@@ -558,7 +572,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 2, peakMax: 10, max: 20 },
     treeLineBandM: null,
     disturbanceBufferM: 250,
-    strongHarvest: null,
+    strongHarvest: 200,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 25, max: 55 },
     standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
@@ -576,7 +590,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 0, peakMax: 3, max: 8 },
     treeLineBandM: { min: -250, peakMin: -100, peakMax: 100, max: 300 },
     disturbanceBufferM: 200,
-    strongHarvest: null,
+    strongHarvest: 1110,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {
@@ -596,7 +610,7 @@ export const QUARRIES = [
     treeHeightBandM: null,
     treeLineBandM: { min: 0, peakMin: 200, peakMax: 900, max: 1400 },
     disturbanceBufferM: 200,
-    strongHarvest: null,
+    strongHarvest: 650,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 45, max: 80 },
     standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: { treeline: 1, 'rocky-ridge': 0.9, slope: 0.4, artfunksjon: 0.4, quiet: 0.3 },
@@ -608,7 +622,7 @@ export const QUARRIES = [
     treeHeightBandM: { min: 0, peakMin: 1, peakMax: 8, max: 18 },
     treeLineBandM: null,
     disturbanceBufferM: 100,
-    strongHarvest: null,
+    strongHarvest: 120,
     slopeBandPercent: { min: -1, peakMin: 0, peakMax: 30, max: 60 },
     standDistanceBandM: GENERAL_STAND_DISTANCE_M,
     weights: {

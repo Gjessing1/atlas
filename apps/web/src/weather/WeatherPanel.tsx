@@ -1,3 +1,4 @@
+import { useTerrainSlope } from '@atlas/app-hooks';
 import {
   bestWindows,
   buildPlanner,
@@ -27,6 +28,7 @@ interface SettingsAccess {
 }
 
 interface WeatherPanelProps {
+  origin?: string;
   target: LatLng;
   weather: WeatherState;
   settings: SettingsAccess;
@@ -239,6 +241,7 @@ function WeatherTable({
  * transparent fishing/hunting conditions layer (score + why + best windows).
  */
 export function WeatherPanel({
+  origin = '',
   target,
   weather,
   settings,
@@ -248,6 +251,7 @@ export function WeatherPanel({
   const [mode, setMode] = useState<Mode>('weather');
   const [species, setSpecies] = useState<string>('trout');
   const [selected, setSelected] = useState(0);
+  const terrain = useTerrainSlope(origin, target, mode === 'hunting');
   const { status: settingsStatus, getSetting, setSetting } = settings;
 
   // Restore persisted mode/species once storage is ready.
@@ -276,9 +280,11 @@ export function WeatherPanel({
         ? buildPlanner(weather.forecast, {
             kind: mode === 'weather' ? null : mode,
             species,
+            slopeDeg: mode === 'hunting' ? terrain.fit?.slopeDeg : undefined,
+            aspectDeg: mode === 'hunting' ? terrain.fit?.aspectDeg : undefined,
           })
         : [],
-    [weather.forecast, mode, species],
+    [weather.forecast, mode, species, terrain.fit],
   );
   const windows = useMemo(() => (mode === 'weather' ? [] : bestWindows(rows)), [rows, mode]);
 

@@ -214,7 +214,7 @@ export const huntModel: DeriveModel = {
   })),
   // v3: every hunt cell also persists hunter-side terrain/canopy sight lines
   // and their pairing with the quarry-specific habitat surface (E8).
-  rev: 4,
+  rev: 5,
   catalog: true,
   inputs: {
     terrain: true,
@@ -339,11 +339,19 @@ function describeCell(
     notes.push(describeProtection(inputs.protectedAreas));
   }
 
-  const felt = ctx.harvest?.felt[quarry.harvestKey ?? quarry.id] ?? null;
+  const harvestKey = quarry.harvestKey ?? quarry.id;
+  const felt = ctx.harvest?.felt[harvestKey] ?? null;
+  const harvestSeason = ctx.harvest?.seasons?.[harvestKey] ?? ctx.harvest?.season ?? null;
   if (ctx.harvest?.kommuneName && felt !== null) {
+    const smallGame = ['storfugl', 'orrfugl', 'lirype', 'fjellrype', 'hare'].includes(harvestKey);
     notes.push(
-      `${ctx.harvest.kommuneName} felled ${felt} ${quarry.nameNo.toLowerCase()} in ${ctx.harvest.season} (SSB). ` +
-        'A kommune-wide count, so it sets how good the ground is *at all*, never where in it.',
+      `${ctx.harvest.kommuneName} felled ${felt} ${quarry.nameNo.toLowerCase()} in ${harvestSeason ?? 'the latest published season'} (SSB). ` +
+        'A kommune-wide count, so it sets how good the ground is *at all*, never where in it.' +
+        (smallGame ? ' Small-game figures are rounded to the nearest 10.' : ''),
+    );
+  } else if (ctx.harvest?.kommuneName && quarry.strongHarvest !== null) {
+    notes.push(
+      `SSB has no usable ${quarry.nameNo.toLowerCase()} figure for ${ctx.harvest.kommuneName}; suppressed or unavailable figures stay unknown and do not lower the tier.`,
     );
   }
 

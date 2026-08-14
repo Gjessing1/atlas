@@ -106,10 +106,56 @@ describe('probe coverage', () => {
       'input:anadromous',
       'input:artfunksjon',
       'input:vern',
+      'input:artskart',
+      'input:harvest',
       'input:hydapi',
     ]) {
       expect(ids).toContain(id);
     }
+  });
+
+  it('checks Artskart with the exact target and polygon filters the derive uses', async () => {
+    const probe = inputProbes({}).find((spec) => spec.id === 'input:artskart')!;
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        Observations: [{ TaxonId: 26165, East: 243656.99, North: 6644634, Precision: '100' }],
+      }),
+    );
+    await expect(probe.run(fetchImpl)).resolves.toMatchObject({ ok: true, warning: null });
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.get('Taxons')).toBe('26165');
+    expect(url.searchParams.get('TaxonId')).toBeNull();
+    expect(url.searchParams.get('WktPolygon')).toMatch(/^POLYGON \(\(/);
+    expect(url.searchParams.get('Projection')).toBe('32633');
+  });
+
+  it('health-checks both big-game and small-game StatBank query shapes', async () => {
+    const probe = inputProbes({}).find((spec) => spec.id === 'input:harvest')!;
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          value: [26_609],
+          dimension: { Tid: { category: { index: { '2025-2026': 0 } } } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          value: [93_340],
+          dimension: { Tid: { category: { index: { '2024-2025': 0 } } } },
+        }),
+      );
+    await expect(probe.run(fetchImpl)).resolves.toMatchObject({
+      ok: true,
+      warning: null,
+      detail: expect.stringContaining('93 340 lirype'),
+    });
+    const smallBody = JSON.parse(String(fetchImpl.mock.calls[1]![1]?.body)) as {
+      query: { code: string; selection: { values: string[] } }[];
+    };
+    expect(smallBody.query.find((row) => row.code === 'Smaviltjakt')?.selection.values).toEqual([
+      '03.1',
+    ]);
   });
 });
 

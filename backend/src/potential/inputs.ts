@@ -1,4 +1,4 @@
-import { bboxToUtm33, type LngLatBbox } from '@atlas/core';
+import { bboxToUtm33, utm33ToWgs84, type LngLatBbox } from '@atlas/core';
 import { createGrid, type Grid, type PotentialInputRecord } from '@atlas/potential';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -60,6 +60,7 @@ const AR5_WMS = 'https://wms.nibio.no/cgi-bin/ar5';
 const SR16_WMS = 'https://wms.nibio.no/cgi-bin/sr16';
 const KOMMUNEINFO = 'https://api.kartverket.no/kommuneinfo/v1';
 const SSB_TABLE = 'https://data.ssb.no/api/v0/no/table';
+const ARTSKART = 'https://artskart.artsdatabanken.no/publicapi/api/observations/list';
 
 /**
  * AR5 `Arealtype` palette → `artype` code, **measured against the live service
@@ -354,6 +355,16 @@ export interface HarvestPrior {
   readonly felt: Readonly<Record<string, number | null>>;
   /** The season the figures are from, e.g. `2025-2026`. */
   readonly season: string | null;
+  /** Per-quarry season: big game and small game publish on different schedules. */
+  readonly seasons: Readonly<Record<string, string | null>>;
+}
+
+/** One precise, positive species record returned for the derive cell. */
+export interface SpeciesObservation {
+  readonly position: readonly [number, number];
+  /** `dd.MM.yyyy` parsed without JavaScript's locale-dependent Date parser. */
+  readonly observedYear: number | null;
+  readonly precisionM: number;
 }
 
 /** Everything one derive run has to work with. */
@@ -388,6 +399,8 @@ export interface CellInputs {
   readonly treeSpecies: Grid | null;
   readonly wildlifeAreas: readonly WildlifeArea[];
   readonly protectedAreas: readonly ProtectedArea[];
+  /** Positive evidence for the selected target; an empty list is never absence. */
+  readonly observations: readonly SpeciesObservation[];
   /** Null when not requested; a record with null fields when nothing answered. */
   readonly harvest: HarvestPrior | null;
   /**
@@ -430,6 +443,8 @@ export interface InputRequest {
   readonly wildlifeAreas?: boolean;
   readonly protectedAreas?: boolean;
   readonly harvest?: boolean;
+  /** Artskart taxon id for a target-specific, positive-only presence pull. */
+  readonly observationsTaxonId?: number;
 }
 
 // ---- disk cache -----------------------------------------------------------
@@ -809,14 +824,108 @@ async function loadProtectedAreas(
   });
 }
 
+// ---- positive species presence -------------------------------------------
+
+/**
+ * Artskart dates are `dd.MM.yyyy`; `new Date()` does not parse that contract.
+ * Keeping this tiny parser explicit also prevents the E10 failure mode where
+ * slicing the first four characters turns the day into the year.
+ */
+export function artskartYear(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[3]);
+  return year >= 1800 && year <= new Date().getUTCFullYear() ? year : null;
+}
+
+/**
+ * Positive observations for one target inside a derive cell.
+ *
+ * Artskart silently ignores misspelled filters, so the exact `Taxons` spelling
+ * and a defensive response-side taxon check both matter. Coordinates come from
+ * East/North: the latitude/longitude strings use decimal commas and parsing
+ * them directly would move every record by tens of kilometres. Deliberate
+ * kommune-centre placements are excluded with the source's metre precision;
+ * they are useful administrative records, not evidence for one lake.
+ */
+async function loadObservations(
+  ctx: PotentialContext,
+  bounds: LngLatBbox,
+  taxonId: number,
+): Promise<SpeciesObservation[]> {
+  const [xmin, ymin, xmax, ymax] = bboxToUtm33(bounds);
+  const wkt = `POLYGON ((${xmin} ${ymin}, ${xmax} ${ymin}, ${xmax} ${ymax}, ${xmin} ${ymax}, ${xmin} ${ymin}))`;
+  const observations: SpeciesObservation[] = [];
+  let totalPages = 1;
+  for (let page = 0; page < Math.min(totalPages, MAX_PAGES); page++) {
+    const url = new URL(ARTSKART);
+    url.searchParams.set('Taxons', String(taxonId));
+    url.searchParams.set('WktPolygon', wkt);
+    // Artskart names WGS84 UTM33 as 32633; the metre coordinates are compatible
+    // with the ETRS89 UTM33 transform used by the Norwegian source adapters.
+    url.searchParams.set('Projection', '32633');
+    url.searchParams.set('PageSize', String(PAGE_SIZE));
+    url.searchParams.set('PageIndex', String(page));
+    const res = await ctx.fetchImpl(url, {
+      headers: { 'User-Agent': ctx.userAgent, Accept: 'application/json' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Artskart HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      Observations?: {
+        TaxonId?: unknown;
+        East?: unknown;
+        North?: unknown;
+        Precision?: unknown;
+        CollectedDate?: unknown;
+      }[];
+      TotalPages?: unknown;
+    };
+    totalPages =
+      typeof body.TotalPages === 'number' && Number.isFinite(body.TotalPages)
+        ? Math.max(1, Math.floor(body.TotalPages))
+        : 1;
+    for (const row of body.Observations ?? []) {
+      if (Number(row.TaxonId) !== taxonId) continue;
+      const east = Number(row.East);
+      const north = Number(row.North);
+      const precisionM = Number(row.Precision);
+      if (
+        !Number.isFinite(east) ||
+        !Number.isFinite(north) ||
+        !Number.isFinite(precisionM) ||
+        precisionM < 0 ||
+        precisionM > 100
+      ) {
+        continue;
+      }
+      const point = utm33ToWgs84(east, north);
+      observations.push({
+        position: [point.lng, point.lat],
+        observedYear: artskartYear(row.CollectedDate),
+        precisionM,
+      });
+    }
+  }
+  return observations;
+}
+
 // ---- the regional harvest prior -------------------------------------------
 
-/** Which SSB table answers "how many were shot here", per quarry. */
-const HARVEST_TABLES: Readonly<Record<string, string>> = {
+/** Which big-game table answers "how many were shot here", per quarry. */
+const BIG_GAME_HARVEST_TABLES: Readonly<Record<string, string>> = {
   elg: '03432', // Felte elg, per kommune, 1986-87 →
   hjort: '03434', // Felte hjort, same shape
-  // No småvilt equivalent exists: the per-kommune rype series ended in 1991-92,
-  // so grouse and hare quarries simply have no prior and say so.
+};
+
+/** SSB 14380 species codes for every existing small-game quarry. */
+const SMALL_GAME_HARVEST_CODES: Readonly<Record<string, string>> = {
+  storfugl: '01',
+  orrfugl: '02',
+  lirype: '03.1',
+  fjellrype: '03.2',
+  hare: '20.1',
 };
 
 /**
@@ -847,9 +956,10 @@ async function loadHarvest(
   const kommuneName = place.kommunenavn ?? null;
 
   const felt: Record<string, number | null> = {};
+  const seasons: Record<string, string | null> = {};
   let season: string | null = null;
   if (kommuneNumber) {
-    for (const [id, table] of Object.entries(HARVEST_TABLES)) {
+    for (const [id, table] of Object.entries(BIG_GAME_HARVEST_TABLES)) {
       const body = {
         query: [
           { code: 'Region', selection: { filter: 'item', values: [kommuneNumber] } },
@@ -868,20 +978,67 @@ async function loadHarvest(
       // A kommune outside the table's own region list answers 4xx. That is a
       // fact about the join, not a broken upstream, so it must not fail the
       // input for the other quarries.
-      if (!answer.ok) {
+      if (answer.status >= 400 && answer.status < 500) {
         felt[id] = null;
+        seasons[id] = null;
         continue;
       }
+      if (!answer.ok) throw new Error(`SSB ${table} HTTP ${answer.status}`);
       const stat = (await answer.json()) as {
         value?: (number | null)[];
         dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
       };
       const value = stat.value?.[0];
       felt[id] = typeof value === 'number' ? value : null;
-      season ??= Object.keys(stat.dimension?.Tid?.category?.index ?? {})[0] ?? null;
+      const published = Object.keys(stat.dimension?.Tid?.category?.index ?? {})[0] ?? null;
+      seasons[id] = published;
+      season ??= published;
+    }
+
+    // One query for all five rows: JSON-stat's value order follows the selected
+    // species order when Region/Contents/Tid each have one value. Null is kept
+    // as null — in this table it often means confidentiality suppression, and
+    // interpreting it as zero would turn sparse-reporting kommuner into bad
+    // habitat.
+    const smallEntries = Object.entries(SMALL_GAME_HARVEST_CODES);
+    const smallAnswer = await ctx.fetchImpl(`${SSB_TABLE}/14380`, {
+      method: 'POST',
+      headers: { 'User-Agent': ctx.userAgent, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: [
+          { code: 'Region', selection: { filter: 'item', values: [kommuneNumber] } },
+          {
+            code: 'Smaviltjakt',
+            selection: { filter: 'item', values: smallEntries.map(([, code]) => code) },
+          },
+          { code: 'ContentsCode', selection: { filter: 'item', values: ['Smaavilt'] } },
+          { code: 'Tid', selection: { filter: 'top', values: ['1'] } },
+        ],
+        response: { format: 'json-stat2' },
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (smallAnswer.status >= 400 && smallAnswer.status < 500) {
+      for (const [id] of smallEntries) {
+        felt[id] = null;
+        seasons[id] = null;
+      }
+    } else {
+      if (!smallAnswer.ok) throw new Error(`SSB 14380 HTTP ${smallAnswer.status}`);
+      const stat = (await smallAnswer.json()) as {
+        value?: (number | null)[];
+        dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
+      };
+      const published = Object.keys(stat.dimension?.Tid?.category?.index ?? {})[0] ?? null;
+      smallEntries.forEach(([id], index) => {
+        const value = stat.value?.[index];
+        felt[id] = typeof value === 'number' ? value : null;
+        seasons[id] = published;
+      });
+      season ??= published;
     }
   }
-  return { kommuneNumber, kommuneName, felt, season };
+  return { kommuneNumber, kommuneName, felt, season, seasons };
 }
 
 // ---- elevation ------------------------------------------------------------
@@ -1184,8 +1341,13 @@ const INPUT_META: Record<string, { label: string; source: string; probe: string 
   },
   harvest: {
     label: 'Regional harvest',
-    source: 'SSB 03432/03434 per kommune (Kartverket kommuneinfo)',
+    source: 'SSB 03432/03434 + 14380 per kommune (Kartverket kommuneinfo)',
     probe: 'input:harvest',
+  },
+  observations: {
+    label: 'Species presence',
+    source: 'Artsdatabanken Artskart observations',
+    probe: 'input:artskart',
   },
 };
 
@@ -1262,9 +1424,10 @@ export async function gatherInputs(
     fetchFresh: () => Promise<{ value: T; detail: string }>,
     describe: (value: T) => string,
     fallback: T,
+    cacheKey: string = id,
   ): Promise<T> => {
     const meta = INPUT_META[id]!;
-    const file = cachePath(ctx, id, raster, ext);
+    const file = cachePath(ctx, cacheKey, raster, ext);
     const cached = await readCache(file);
     if (cached) {
       try {
@@ -1542,6 +1705,22 @@ export async function gatherInputs(
       )
     : [];
 
+  const observations = need.observationsTaxonId
+    ? await load<SpeciesObservation[]>(
+        'observations',
+        'json.gz',
+        (buf) => json<SpeciesObservation[]>(buf),
+        toJson,
+        async () => {
+          const value = await loadObservations(ctx, raster.bounds, need.observationsTaxonId!);
+          return { value, detail: describeObservations(value) };
+        },
+        describeObservations,
+        [],
+        `observations-${need.observationsTaxonId}`,
+      )
+    : [];
+
   const harvest = need.harvest
     ? await load<HarvestPrior | null>(
         'harvest',
@@ -1555,6 +1734,7 @@ export async function gatherInputs(
         },
         (value) => (value ? describeHarvest(value) : 'absent'),
         null,
+        'harvest-v2',
       )
     : null;
 
@@ -1572,6 +1752,7 @@ export async function gatherInputs(
     treeSpecies,
     wildlifeAreas,
     protectedAreas,
+    observations,
     harvest,
     records,
   };
@@ -1605,9 +1786,18 @@ function describeHarvest(prior: HarvestPrior): string {
   if (!prior.kommuneNumber) return 'outside any kommune';
   const felt = Object.entries(prior.felt)
     .filter(([, n]) => n !== null)
-    .map(([id, n]) => `${n} ${id}`)
+    .map(([id, n]) => `${n} ${id}${prior.seasons?.[id] ? ` (${prior.seasons[id]})` : ''}`)
     .join(', ');
-  return `${prior.kommuneName ?? prior.kommuneNumber}${felt ? `: ${felt} (${prior.season})` : ': no figures'}`;
+  return `${prior.kommuneName ?? prior.kommuneNumber}${felt ? `: ${felt}` : ': no figures'}`;
+}
+
+function describeObservations(observations: readonly SpeciesObservation[]): string {
+  if (observations.length === 0) return 'no precise records in this cell';
+  const years = observations
+    .map((observation) => observation.observedYear)
+    .filter((year): year is number => year !== null);
+  const newest = years.length > 0 ? Math.max(...years) : null;
+  return `${observations.length} precise positive record${observations.length === 1 ? '' : 's'}${newest ? `, newest ${newest}` : ''}`;
 }
 
 function describeLakes(lakes: readonly LakeFeature[]): string {

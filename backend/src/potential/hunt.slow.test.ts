@@ -184,6 +184,8 @@ interface StubOptions {
   dead?: string[];
   /** SSB answers this many felte elg, or 4xx when null. */
   felt?: number | null;
+  /** SSB 14380 rows; null is the confidentiality marker, not zero. */
+  smallFelt?: readonly (number | null)[];
 }
 
 /** Farmland north of the edge, forest south of it. */
@@ -217,6 +219,12 @@ function upstreamStub(over: StubOptions = {}) {
       return Response.json({ kommunenummer: '3203', kommunenavn: 'Asker' });
     }
     if (raw.includes('data.ssb.no')) {
+      if (raw.endsWith('/14380')) {
+        return Response.json({
+          value: over.smallFelt ?? [150, 200, 1110, 650, 120],
+          dimension: { Tid: { category: { index: { '2024-2025': 0 } } } },
+        });
+      }
       const felt = over.felt === undefined ? 63 : over.felt;
       if (felt === null) return new Response('unknown region', { status: 400 });
       // Hjort is asked for too; one figure answers both in this fixture.
@@ -450,6 +458,26 @@ describe('what the hunt surface says in words', () => {
 
     const noPrior = await deriveCell(dataDir, huntModel, 'elg', CELL, context({ felt: null }));
     expect(noPrior.manifest.tier).toBeNull();
+  });
+
+  it('uses rounded small-game harvest but keeps suppressed figures unknown', async () => {
+    const withPrior = await deriveCell(dataDir, huntModel, 'storfugl', CELL, context());
+    const notes = withPrior.manifest.notes.join('\n');
+    expect(withPrior.manifest.tier).not.toBeNull();
+    expect(notes).toContain('felled 150 storfugl in 2024-2025');
+    expect(notes).toContain('rounded to the nearest 10');
+
+    const suppressed = await deriveCell(
+      dataDir,
+      huntModel,
+      'storfugl',
+      CELL,
+      context({ smallFelt: [null, 200, 1110, 650, 120] }),
+    );
+    expect(suppressed.manifest.tier).toBeNull();
+    expect(suppressed.manifest.notes.join('\n')).toContain(
+      'suppressed or unavailable figures stay unknown',
+    );
   });
 });
 

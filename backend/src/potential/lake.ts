@@ -21,10 +21,12 @@ import {
 } from '@atlas/potential';
 import { burnPaths, projectToRaster, type CellRaster } from './cells.js';
 import {
+  inputFailed,
   STREAM_REAL_CHANNEL,
   type CellInputs,
   type DepthContour,
   type LakeFeature,
+  type SpeciesObservation,
   type StreamFeature,
 } from './inputs.js';
 import type { DeriveModel, ModelResult } from './models.js';
@@ -359,9 +361,13 @@ export const lakeModel: DeriveModel = {
     label: s.nameNo,
     caption: weightsCaption(s.nameEn, s.lakeWeights, 'shoreline structure'),
   })),
-  rev: 1,
+  rev: 2,
   catalog: true,
   inputs: { terrain: true, lakes: true, streams: true, depthContours: true, landCover: true },
+  targetInputs(target) {
+    const species = fishSpecies(target);
+    return species?.presenceTaxonId ? { observationsTaxonId: species.presenceTaxonId } : {};
+  },
   vocabulary: 'fishing',
   describeSignal(key, value, target, derivedAt) {
     const species = fishSpecies(target) ?? LAKE_TARGETS[0]!;
@@ -381,6 +387,7 @@ export const lakeModel: DeriveModel = {
     }
 
     const painted = paintLakes(raster, lakes);
+    const observed = observedLakes(raster, painted, inputs.observations);
     const { inflows, outflows } = classifyMouths(
       raster,
       inputs.streams,
@@ -430,7 +437,10 @@ export const lakeModel: DeriveModel = {
     return {
       score: surface.score,
       absolute: absoluteTier(lakes, painted),
-      notes: [...surface.notes, ...describeCell(lakes, species, surveyed, surface.depthBandLabel)],
+      notes: [
+        ...surface.notes,
+        ...describeCell(inputs, lakes, species, surveyed, surface.depthBandLabel, observed),
+      ],
       terms: surface.terms,
     };
   },
@@ -453,12 +463,40 @@ function absoluteTier(lakes: readonly LakeFeature[], painted: PaintedLakes): num
   return weights > 0 ? weighted / weights : undefined;
 }
 
+interface ObservedLakes {
+  readonly indexes: ReadonlySet<number>;
+  readonly observations: readonly SpeciesObservation[];
+}
+
+/** Assign precise point records to the lake polygons already painted for scoring. */
+function observedLakes(
+  raster: CellRaster,
+  painted: PaintedLakes,
+  observations: readonly SpeciesObservation[],
+): ObservedLakes {
+  const indexes = new Set<number>();
+  const inside: SpeciesObservation[] = [];
+  for (const observation of observations) {
+    const [px, py] = project(raster, observation.position);
+    const x = Math.round(px);
+    const y = Math.round(py);
+    if (x < 0 || y < 0 || x >= raster.size || y >= raster.size) continue;
+    const owner = painted.owner[y * raster.size + x]!;
+    if (owner === 0) continue;
+    indexes.add(owner - 1);
+    inside.push(observation);
+  }
+  return { indexes, observations: inside };
+}
+
 /** Plain-language notes for the manifest — coverage, model choice, caveats. */
 function describeCell(
+  inputs: CellInputs,
   lakes: readonly LakeFeature[],
   species: FishSpecies,
   surveyed: number,
   depthBandLabel: string | null,
+  observed: ObservedLakes,
 ): string[] {
   const notes: string[] = [];
   notes.push(
@@ -472,7 +510,9 @@ function describeCell(
   // rather than silently applied: presence-only data means a lake with no
   // recorded observation proves nothing either way.
   const implausible = lakes.filter(
-    (l) => l.elevationM !== null && !altitudePlausible(species, l.elevationM),
+    (l, index) =>
+      l.elevationM !== null &&
+      !altitudePlausible(species, l.elevationM, observed.indexes.has(index) ? true : undefined),
   );
   if (
     implausible.length > 0 &&
@@ -481,6 +521,18 @@ function describeCell(
     notes.push(
       `${species.nameNo} is unlikely this high — these lakes sit above ${species.plausibleMaxAltitudeM} m. Try ørret or røye.`,
     );
+  }
+
+  if (observed.observations.length > 0) {
+    const years = observed.observations
+      .map((observation) => observation.observedYear)
+      .filter((year): year is number => year !== null);
+    const newest = years.length > 0 ? Math.max(...years) : null;
+    notes.push(
+      `Artskart has ${observed.observations.length} precise ${species.nameNo.toLowerCase()} record${observed.observations.length === 1 ? '' : 's'} inside ${observed.indexes.size} lake${observed.indexes.size === 1 ? '' : 's'} here${newest ? ` (newest ${newest})` : ''}. This confirms presence; an unrecorded lake would not prove absence.`,
+    );
+  } else if (species.presenceTaxonId && inputFailed(inputs, 'observations')) {
+    notes.push('Artskart did not answer, so target plausibility uses the altitude fallback only.');
   }
 
   const reservoirs = lakes.filter((l) => l.reservoirPurpose?.includes('Vannforsyning'));

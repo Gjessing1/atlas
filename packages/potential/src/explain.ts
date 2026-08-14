@@ -43,7 +43,7 @@ export interface ExplainContext {
   readonly rank: Grid;
   readonly vocabulary?: SurfaceVocabulary;
   /**
-   * Factors from outside the raster — the target's depth band, a GBIF presence
+   * Factors from outside the raster — the target's depth band, an Artskart presence
    * check, the `@atlas/conditions` window. Weighted alongside the raster terms.
    */
   readonly extra?: readonly ConditionFactor[];

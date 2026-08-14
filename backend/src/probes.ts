@@ -580,8 +580,8 @@ function hydapiProbe(env: Record<string, string | undefined>): ProbeSpec {
 }
 
 /**
- * The regional harvest prior behind the hunt surface's absolute tier: SSB's
- * felte-elg table, asked nationally.
+ * The regional harvest priors behind the hunt surface's absolute tier: one
+ * big-game and one small-game row, asked nationally.
  *
  * Probed on the national row rather than a kommune, because the failure that
  * matters is the query *shape* — StatBank renames a dimension or retires a
@@ -595,7 +595,7 @@ function harvestProbe(): ProbeSpec {
     label: 'SSB felte elg (regional prior)',
     group: 'Engine inputs',
     async run(fetchImpl) {
-      const res = await fetchImpl('https://data.ssb.no/api/v0/no/table/03432', {
+      const big = await fetchImpl('https://data.ssb.no/api/v0/no/table/03432', {
         method: 'POST',
         headers: { 'User-Agent': PROBE_USER_AGENT, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -609,18 +609,48 @@ function harvestProbe(): ProbeSpec {
         }),
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
-      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-      const body = (await res.json()) as {
+      if (!big.ok) return { ok: false, message: `03432 HTTP ${big.status}` };
+      const bigBody = (await big.json()) as {
         value?: (number | null)[];
         dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
       };
-      const felt = body.value?.[0];
-      const season = Object.keys(body.dimension?.Tid?.category?.index ?? {})[0] ?? 'unknown season';
-      if (typeof felt !== 'number') return { ok: false, message: 'no figure in the reply' };
+      const elg = bigBody.value?.[0];
+      const bigSeason =
+        Object.keys(bigBody.dimension?.Tid?.category?.index ?? {})[0] ?? 'unknown season';
+      if (typeof elg !== 'number') return { ok: false, message: 'no elg figure in the reply' };
+
+      const small = await fetchImpl('https://data.ssb.no/api/v0/no/table/14380', {
+        method: 'POST',
+        headers: { 'User-Agent': PROBE_USER_AGENT, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: [
+            { code: 'Region', selection: { filter: 'item', values: ['0'] } },
+            { code: 'Smaviltjakt', selection: { filter: 'item', values: ['03.1'] } },
+            { code: 'ContentsCode', selection: { filter: 'item', values: ['Smaavilt'] } },
+            { code: 'Tid', selection: { filter: 'top', values: ['1'] } },
+          ],
+          response: { format: 'json-stat2' },
+        }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (!small.ok) return { ok: false, message: `14380 HTTP ${small.status}` };
+      const smallBody = (await small.json()) as {
+        value?: (number | null)[];
+        dimension?: { Tid?: { category?: { index?: Record<string, number> } } };
+      };
+      const lirype = smallBody.value?.[0];
+      const smallSeason =
+        Object.keys(smallBody.dimension?.Tid?.category?.index ?? {})[0] ?? 'unknown season';
+      if (typeof lirype !== 'number') {
+        return { ok: false, message: 'no lirype figure in the reply' };
+      }
       return {
         ok: true,
-        detail: `${groupDigits(felt)} elg felt nationally, ${season}`,
-        warning: felt < 10_000 ? `only ${groupDigits(felt)} — query shape may have changed` : null,
+        detail: `${groupDigits(elg)} elg (${bigSeason}); ${groupDigits(lirype)} lirype (${smallSeason})`,
+        warning:
+          elg < 10_000 || lirype < 20_000
+            ? `only ${groupDigits(elg)} elg / ${groupDigits(lirype)} lirype — a query shape may have changed`
+            : null,
       };
     },
   };
@@ -656,32 +686,48 @@ function kommuneProbe(): ProbeSpec {
   };
 }
 
-/** GBIF answers species presence keyless; used to sanity-check a target. */
-function gbifProbe(): ProbeSpec {
+/** Artskart answers precise Norwegian species presence keylessly. */
+function artskartProbe(): ProbeSpec {
   return {
-    id: 'input:gbif',
-    label: 'GBIF (species presence)',
+    id: 'input:artskart',
+    label: 'Artskart (species presence)',
     group: 'Engine inputs',
     async run(fetchImpl) {
-      const url =
-        'https://api.gbif.org/v1/occurrence/search' +
-        '?scientificName=Salmo%20trutta&country=NO&hasCoordinate=true&limit=0';
+      const url = new URL('https://artskart.artsdatabanken.no/publicapi/api/observations/list');
+      url.searchParams.set('Taxons', '26165');
+      url.searchParams.set(
+        'WktPolygon',
+        'POLYGON ((243452 6644229, 243827 6644229, 243827 6644809, 243452 6644809, 243452 6644229))',
+      );
+      url.searchParams.set('Projection', '32633');
+      url.searchParams.set('PageSize', '5');
       const res = await fetchImpl(url, {
         headers: { 'User-Agent': PROBE_USER_AGENT },
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-      const body = (await res.json()) as { count?: number };
-      const count = body.count ?? 0;
+      const body = (await res.json()) as {
+        Observations?: {
+          TaxonId?: unknown;
+          East?: unknown;
+          North?: unknown;
+          Precision?: unknown;
+        }[];
+      };
+      const precise = (body.Observations ?? []).filter(
+        (row) =>
+          Number(row.TaxonId) === 26165 &&
+          Number.isFinite(Number(row.East)) &&
+          Number.isFinite(Number(row.North)) &&
+          Number(row.Precision) <= 100,
+      );
+      if (precise.length === 0) {
+        return { ok: false, message: 'Semsvannet trout query returned no precise record' };
+      }
       return {
         ok: true,
-        detail: `${groupDigits(count)} Salmo trutta records in Norway`,
-        // Over a million were recorded 2026-07; a five-figure answer means the
-        // query shape changed, not that the trout left.
-        warning:
-          count < 100_000
-            ? `only ${groupDigits(count)} records — query shape may have changed`
-            : null,
+        detail: `${precise.length} precise trout record${precise.length === 1 ? '' : 's'} in Semsvannet`,
+        warning: null,
       };
     },
   };
@@ -817,7 +863,7 @@ export function inputProbes(env: Record<string, string | undefined>): ProbeSpec[
     harvestProbe(),
     kommuneProbe(),
     hydapiProbe(env),
-    gbifProbe(),
+    artskartProbe(),
   ];
 }
 

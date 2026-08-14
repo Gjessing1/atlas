@@ -1,3 +1,4 @@
+import { useTerrainSlope } from '@atlas/app-hooks';
 import {
   bestWindows,
   buildPlanner,
@@ -57,6 +58,7 @@ const fmtStep = (ms: number): string => fmtDayClock(ms);
  * OTA-friendly, like the Layers sheet.
  */
 export function WeatherSheet({
+  origin,
   visible,
   onClose,
   target,
@@ -64,6 +66,7 @@ export function WeatherSheet({
   data,
   bottomInset = 0,
 }: {
+  origin: string;
   visible: boolean;
   onClose: () => void;
   target: LatLng | null;
@@ -74,6 +77,7 @@ export function WeatherSheet({
   const [mode, setMode] = useState<Mode>('weather');
   const [species, setSpecies] = useState<string>('trout');
   const [selected, setSelected] = useState(0);
+  const terrain = useTerrainSlope(origin, target, visible && mode === 'hunting');
   const { status: settingsStatus, getSetting, setSetting } = data;
 
   // Restore persisted mode/species once storage is ready.
@@ -99,9 +103,14 @@ export function WeatherSheet({
   const rows = useMemo(
     () =>
       weather.forecast
-        ? buildPlanner(weather.forecast, { kind: mode === 'weather' ? null : mode, species })
+        ? buildPlanner(weather.forecast, {
+            kind: mode === 'weather' ? null : mode,
+            species,
+            slopeDeg: mode === 'hunting' ? terrain.fit?.slopeDeg : undefined,
+            aspectDeg: mode === 'hunting' ? terrain.fit?.aspectDeg : undefined,
+          })
         : [],
-    [weather.forecast, mode, species],
+    [weather.forecast, mode, species, terrain.fit],
   );
   const windows = useMemo(() => (mode === 'weather' ? [] : bestWindows(rows)), [rows, mode]);
 

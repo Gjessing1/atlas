@@ -8,7 +8,7 @@ import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cellRaster, type Cell } from './cells.js';
 import { deriveCell, readSignal, signalsPath } from './derive.js';
-import { gatherInputs, type PotentialContext } from './inputs.js';
+import { artskartYear, gatherInputs, type PotentialContext } from './inputs.js';
 import { registerPotentialApi } from './index.js';
 import { lakeModel } from './lake.js';
 
@@ -130,6 +130,7 @@ interface StubOptions {
   contours?: unknown[];
   landCover?: [number, number, number];
   failAr5?: boolean;
+  observations?: unknown[];
 }
 
 function upstreamStub(over: StubOptions = {}) {
@@ -144,6 +145,15 @@ function upstreamStub(over: StubOptions = {}) {
     if (url.includes('Innsjodatabase2/MapServer/2')) return geojson(over.contours ?? []);
     if (url.includes('Elvenett1/MapServer/2')) {
       return geojson(over.streams ?? [northChannel, southChannel]);
+    }
+    if (url.includes('artskart.artsdatabanken.no')) {
+      return Response.json({
+        Observations: over.observations ?? [],
+        PageIndex: 0,
+        PageSize: 1000,
+        TotalCount: over.observations?.length ?? 0,
+        TotalPages: 1,
+      });
     }
     if (url.includes('cgi-bin/ar5')) {
       if (over.failAr5) return new Response('nope', { status: 500 });
@@ -253,6 +263,64 @@ describe('the lake adapter', () => {
     const notes = result.manifest.notes.join(' ');
     expect(notes).toMatch(/None of the 1 lakes here has an NVE depth/);
     expect(notes).toMatch(/607 of Norway's 267 194/);
+  });
+
+  it('uses precise Artskart presence to override the altitude fallback', async () => {
+    const observation = {
+      TaxonId: 26439,
+      East: 243656.99,
+      North: 6644634,
+      Precision: '100',
+      CollectedDate: '30.09.2009',
+      // These strings are deliberately unusable with parseFloat; East/North
+      // above are the contract the adapter must read.
+      Latitude: '59,859542',
+      Longitude: '10,421164',
+    };
+    const result = await deriveCell(
+      dataDir,
+      lakeModel,
+      'abbor',
+      CELL,
+      context({ lakes: [lakeFeature({ hoyde: 950 })], observations: [observation] }),
+    );
+    const notes = result.manifest.notes.join('\n');
+    expect(notes).toContain('precise abbor record');
+    expect(notes).toContain('newest 2009');
+    expect(notes).not.toContain('unlikely this high');
+
+    const call = (contexts.at(-1)!.fetchImpl as ReturnType<typeof vi.fn>).mock.calls
+      .map((entry) => new URL(String(entry[0])))
+      .find((url) => url.hostname === 'artskart.artsdatabanken.no')!;
+    expect(call.searchParams.get('Taxons')).toBe('26439');
+    expect(call.searchParams.get('TaxonId')).toBeNull();
+    expect(call.searchParams.get('Projection')).toBe('32633');
+    expect(call.searchParams.get('WktPolygon')).toMatch(/^POLYGON \(\(/);
+  });
+
+  it('does not treat imprecise or unrelated Artskart rows as lake presence', async () => {
+    const result = await deriveCell(
+      dataDir,
+      lakeModel,
+      'abbor',
+      CELL,
+      context({
+        lakes: [lakeFeature({ hoyde: 950 })],
+        observations: [
+          { TaxonId: 26439, East: 243656.99, North: 6644634, Precision: 7071 },
+          { TaxonId: 26165, East: 243656.99, North: 6644634, Precision: 10 },
+        ],
+      }),
+    );
+    const notes = result.manifest.notes.join('\n');
+    expect(notes).toContain('unlikely this high');
+    expect(notes).not.toContain('precise abbor record');
+  });
+
+  it('parses Artskart dates by contract rather than locale', () => {
+    expect(artskartYear('30.09.2009')).toBe(2009);
+    expect(artskartYear('2009-09-30')).toBeNull();
+    expect(artskartYear(null)).toBeNull();
   });
 
   it('scores a regulated lake down through its own term, not through a footnote', async () => {

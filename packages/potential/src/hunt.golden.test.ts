@@ -311,12 +311,11 @@ describe('hunt quality — the absolute tier', () => {
     );
   });
 
-  it('has no opinion where no table exists', () => {
+  it('has no opinion without a figure and reads the small-game ceiling when present', () => {
     expect(huntQuality({ harvest: null, strongHarvest: 230 })).toBeUndefined();
-    // Every småvilt quarry: SSB discontinued the per-kommune rype series in
-    // 1991-92, so there is no prior to have an opinion with.
-    expect(LIRYPE.strongHarvest).toBeNull();
-    expect(huntQuality({ harvest: 12, strongHarvest: LIRYPE.strongHarvest })).toBeUndefined();
+    // Existing small-game rows now carry their own measured SSB 14380 ceiling.
+    expect(LIRYPE.strongHarvest).toBe(1110);
+    expect(huntQuality({ harvest: 12, strongHarvest: LIRYPE.strongHarvest })).toBeDefined();
   });
 });
 

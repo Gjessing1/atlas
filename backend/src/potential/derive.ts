@@ -263,7 +263,11 @@ export async function deriveCell(
 ): Promise<DeriveResult> {
   const target = resolveTarget(model, requestedTarget);
   const raster = cellRaster(cell);
-  const inputs = await gatherInputs(raster, model.inputs, ctx);
+  const inputs = await gatherInputs(
+    raster,
+    model.targetInputs ? { ...model.inputs, ...model.targetInputs(target) } : model.inputs,
+    ctx,
+  );
   const result = model.run(inputs, target);
   if (result.score.width !== raster.size || result.score.height !== raster.size) {
     throw new Error(

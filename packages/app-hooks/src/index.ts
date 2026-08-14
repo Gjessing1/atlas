@@ -155,6 +155,12 @@ export {
 } from './useExplore.js';
 export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
+  fetchTerrainSlope,
+  terrainSlopeRing,
+  useTerrainSlope,
+  type TerrainSlopeState,
+} from './useTerrainSlope.js';
+export {
   useRouteStops,
   routeStopCategories,
   routeSampleCircles,

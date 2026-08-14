@@ -58,6 +58,8 @@ export interface DeriveModel {
    */
   readonly rev: number;
   readonly inputs: InputRequest;
+  /** Target-specific inputs such as an Artskart taxon id, merged over `inputs`. */
+  readonly targetInputs?: (target: string) => InputRequest;
   /** Vocabulary for the legend words — a fisher casts, a hunter looks. */
   readonly vocabulary: 'fishing' | 'hunt';
   run(inputs: CellInputs, target: string): ModelResult;
