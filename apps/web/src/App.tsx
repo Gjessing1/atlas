@@ -29,6 +29,7 @@ import {
   useCommute,
   useNavAddStop,
   useNavPrefs,
+  useVehicleProfile,
   useBestSpots,
   useStandBoard,
   type StandBoardRow,
@@ -224,7 +225,10 @@ export function App() {
 
   // ---- route planning ----
 
-  const route = useRoute();
+  // The described vehicle shapes both the planned route and the driven one, so
+  // it is read before the planner and handed straight to it.
+  const vehicle = useVehicleProfile(userData);
+  const route = useRoute(vehicle.vehicle);
   // Public transport for the same two endpoints — a travel mode beside the road
   // profiles. The panel lists the journeys; the map draws the selected one, and
   // the road line stands down while it does.
@@ -1319,6 +1323,7 @@ export function App() {
             appearance={appearance}
             mapStyle={mapStyleEditor}
             navPrefs={navPrefs}
+            vehicle={vehicle}
             layers={layers}
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}

@@ -1,5 +1,5 @@
 import { useRoute as useSharedRoute, type RouteFn, type RoutePlanner } from '@atlas/app-hooks';
-import { enrichPlannedResult, httpElevationProfile } from '@atlas/routing';
+import { enrichPlannedResult, httpElevationProfile, type VehicleProfile } from '@atlas/routing';
 import { useMemo } from 'react';
 
 import { useServerOrigin } from '../serverOrigin';
@@ -12,7 +12,7 @@ export type { RoutePlanner, RouteWaypoint } from '@atlas/app-hooks';
  * Valhalla when a downloaded pack covers the query, else the server) — the
  * same provider navigation uses.
  */
-export function useRoute(): RoutePlanner {
+export function useRoute(vehicle?: VehicleProfile | null): RoutePlanner {
   const baseUrl = useServerOrigin();
   const route = useMemo<RouteFn>(() => {
     const provider = makeRouteProvider(baseUrl);
@@ -23,5 +23,5 @@ export function useRoute(): RoutePlanner {
       return query.details ? enrichPlannedResult(result, query, trace, elevation, signal) : result;
     };
   }, [baseUrl]);
-  return useSharedRoute(route);
+  return useSharedRoute(route, vehicle);
 }

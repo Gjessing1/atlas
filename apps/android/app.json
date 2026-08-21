@@ -3,7 +3,7 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.171.0",
+    "version": "0.172.0",
     "runtimeVersion": "14",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",
@@ -25,8 +25,17 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
-          "data": [{ "scheme": "https", "host": "atlas.gjessing.io", "path": "/" }]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "atlas.gjessing.io",
+              "path": "/"
+            }
+          ]
         }
       ],
       "adaptiveIcon": {

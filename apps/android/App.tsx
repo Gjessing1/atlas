@@ -9,6 +9,7 @@ import {
   routePlanState,
   useNavAddStop,
   useNavPrefs,
+  useVehicleProfile,
   useNavResume,
   usePotential,
   useRoutePlanPersistence,
@@ -199,7 +200,9 @@ function AppInner() {
   const navDiagnostics = useNavigationDiagnostics(data, sync.email, sync.status);
   const nav = useNavigation();
   useNavigationDiagnosticState(nav);
-  const route = useRoute();
+  // The described vehicle shapes both the planned route and the driven one.
+  const vehicle = useVehicleProfile(data);
+  const route = useRoute(vehicle.vehicle);
   const transit = useTransitPlan(route);
   const directions = useDirections(route);
   // Geometry of the visible tracks, for the map's track line layer.
@@ -1617,6 +1620,7 @@ function AppInner() {
             appearance={appearance}
             mapStyleEditor={mapStyleEditor}
             navPrefs={navPrefs}
+            vehicle={vehicle}
             navDiagnostics={navDiagnostics}
             pip={pip}
             regionJobs={regionJobs}

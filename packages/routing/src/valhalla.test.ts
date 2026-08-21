@@ -168,6 +168,65 @@ describe('buildValhallaRequest', () => {
     });
   });
 
+  it('sends a described vehicle as auto costing options, never truck', () => {
+    // The whole point of the measurements behind VehicleProfile: truck costing
+    // honours hgv access tags that do not bind a car-registered motorhome, and
+    // auto enforces height at exactly the same threshold.
+    const body = buildValhallaRequest({
+      profile: 'car',
+      points: [oslo, sognsvann],
+      preferences: { vehicle: { heightM: 2.8, widthM: 2.22, topSpeedKph: 80 } },
+    });
+    expect(body['costing']).toBe('auto');
+    expect(body['costing_options']).toEqual({
+      auto: { height: 2.8, width: 2.22, top_speed: 80 },
+    });
+  });
+
+  it('combines a vehicle with the ordinary driving preferences', () => {
+    expect(
+      buildValhallaRequest({
+        profile: 'car',
+        points: [oslo, sognsvann],
+        preferences: {
+          avoidTolls: true,
+          avoidFerries: true,
+          vehicle: { heightM: 3.1, widthM: 2.5, topSpeedKph: 90 },
+        },
+      })['costing_options'],
+    ).toEqual({
+      auto: { use_ferry: 0, use_tolls: 0, height: 3.1, width: 2.5, top_speed: 90 },
+    });
+  });
+
+  it('ignores a vehicle on profiles that are not driving', () => {
+    // A height restriction is meaningless to a walker, and sending it to
+    // pedestrian costing would be a silently rejected option.
+    for (const profile of ['bike', 'foot', 'hike', 'run'] as const) {
+      const options = buildValhallaRequest({
+        profile,
+        points: [oslo, sognsvann],
+        preferences: { vehicle: { heightM: 2.8, widthM: 2.22, topSpeedKph: 80 } },
+      })['costing_options'] as Record<string, Record<string, unknown>>;
+      for (const costing of Object.keys(options)) {
+        expect(options[costing]).not.toHaveProperty('height');
+        expect(options[costing]).not.toHaveProperty('top_speed');
+      }
+    }
+  });
+
+  it('drops a corrupt vehicle rather than routing on a wrong height', () => {
+    // A restored setting that lost its height must fall back to "an ordinary
+    // car" — never to a default height the driver never chose.
+    expect(
+      buildValhallaRequest({
+        profile: 'car',
+        points: [oslo, sognsvann],
+        preferences: { vehicle: { widthM: 2.22 } as never },
+      })['costing_options'],
+    ).toBeUndefined();
+  });
+
   it('keeps ferries off walking and cycling routes, but not driving ones', () => {
     // Choosing Walk means walking: a boat leg belongs to public transport.
     // (A preference, not a prohibition — Valhalla still sails when a crossing

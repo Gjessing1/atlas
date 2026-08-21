@@ -31,6 +31,106 @@ export interface RoutePreferences {
   preferTrails: boolean;
   /** Prefer a paved route where the graph offers a reasonable alternative. */
   avoidUnpaved: boolean;
+  /**
+   * The vehicle being driven, when it is not an ordinary car. Driving profiles
+   * only; absent means "a car", which is what the engine assumes anyway.
+   */
+  vehicle?: VehicleProfile | undefined;
+}
+
+/**
+ * The preferences that are plain on/off switches — everything a "Customize"
+ * checkbox list may offer. Derived rather than hand-listed so that adding a
+ * value-carrying preference (the vehicle was the first) cannot silently land a
+ * non-boolean in a checkbox.
+ */
+export type RoutePreferenceToggle = {
+  [K in keyof RoutePreferences]-?: RoutePreferences[K] extends boolean ? K : never;
+}[keyof RoutePreferences];
+
+/**
+ * A described vehicle — a motorhome, a van, anything tall or slow enough that
+ * the default car assumptions produce the wrong route.
+ *
+ * Sent as **`auto` costing options, never `truck`**. Truck costing honours
+ * `hgv=*` access tags, and those do not bind a vehicle registered as a car: on
+ * a 42-route Norwegian sample truck costing diverged from `auto` on 21 % of
+ * routes, worst case Voss→Lom +22.8 km via a ferry it had no reason to take,
+ * and truck-with-real-dimensions was byte-identical to truck-with-tiny-
+ * dimensions in every divergent case — so the cause was access, not size.
+ * `auto` enforces `height` at exactly the same threshold (both pass 4.00 m and
+ * detour at 4.11 m on Rv55), so staying on `auto` costs nothing. The
+ * `weight`/`length`/`axle_load` fields only `truck` accepts are ones such a
+ * vehicle does not need: at ~3 t and under 6 m it clears every Norwegian
+ * weight (7.5/12/50 t) and length (12.4/19.5 m) limit.
+ */
+export interface VehicleProfile {
+  /**
+   * Overall height in metres, roof fittings included. The one dimension the
+   * engine actually enforces — it is what keeps a route out of a tunnel or
+   * under-bridge the vehicle does not clear.
+   *
+   * **Avoidance help, not a guarantee.** Measured 2026-08-21: NVDB publishes
+   * 4841 signed height restrictions for Norway, while the OSM extract the tiles
+   * are built from carries 3640 `maxheight` tags of which 2772 are usable
+   * numbers. So a route being offered is not proof that every bridge on it was
+   * checked, and no caller may present it as one.
+   */
+  heightM: number;
+  /** Overall width in metres, mirrors excluded. */
+  widthM: number;
+  /**
+   * Realistic cruising speed in km/h. Not a comfort setting: capping it changes
+   * which route the engine picks, because a motorway stops earning its detour
+   * once the vehicle cannot use its speed (Oslo–Trondheim is +66 min and a
+   * different line at 80 km/h). It also tends to surface more alternatives, by
+   * flattening the fast road's advantage.
+   */
+  topSpeedKph: number;
+}
+
+/**
+ * Bounds for a described vehicle. These are Atlas's own sanity limits, not the
+ * engine's: `auto` costing accepts 0 and 300 alike without complaint, and a
+ * Valhalla 400 usually means "no route found" rather than a rejected value —
+ * `height: 5` fails on Lom→Sogndal and succeeds on Oslo→Drammen.
+ */
+export const VEHICLE_LIMITS = {
+  heightM: { min: 1, max: 5 },
+  widthM: { min: 1, max: 4 },
+  topSpeedKph: { min: 30, max: 130 },
+} as const;
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+/**
+ * Narrow an untrusted vehicle (a restored setting, a synced record) to one the
+ * engine can be asked about. Returns null when nothing usable is there, so a
+ * corrupt setting falls back to "an ordinary car" rather than to a silently
+ * wrong height.
+ */
+export function normalizeVehicle(value: unknown): VehicleProfile | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const num = (key: string): number | null => {
+    const v = raw[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const heightM = num('heightM');
+  const widthM = num('widthM');
+  const topSpeedKph = num('topSpeedKph');
+  // Height is the field with consequences; without it there is no profile.
+  if (heightM === null) return null;
+  return {
+    heightM: clamp(heightM, VEHICLE_LIMITS.heightM.min, VEHICLE_LIMITS.heightM.max),
+    widthM: clamp(widthM ?? 2, VEHICLE_LIMITS.widthM.min, VEHICLE_LIMITS.widthM.max),
+    topSpeedKph: clamp(
+      topSpeedKph ?? 80,
+      VEHICLE_LIMITS.topSpeedKph.min,
+      VEHICLE_LIMITS.topSpeedKph.max,
+    ),
+  };
 }
 
 /** Atlas defaults, including the long-standing ferry avoidance off the road network. */

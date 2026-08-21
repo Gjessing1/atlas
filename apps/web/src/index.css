@@ -6202,6 +6202,32 @@ button.transit-notice-summary {
   grid-template-columns: repeat(2, 1fr);
 }
 
+.vehicle-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.vehicle-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vehicle-field input {
+  /* 44 px keeps the field within the touch-size baseline of ROADMAP §7.3. */
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
 .settings-note-leading {
   margin-top: 0;
   margin-bottom: 10px;

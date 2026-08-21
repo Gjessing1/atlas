@@ -1,6 +1,6 @@
 import { decodePolyline, haversineM, type LatLng } from '@atlas/core';
 import type { TrackPoint } from '@atlas/gpx';
-import { defaultRoutePreferences } from './model.js';
+import { defaultRoutePreferences, normalizeVehicle } from './model.js';
 import type {
   RoutePreferences,
   LaneDirection,
@@ -314,6 +314,19 @@ export function buildValhallaRequest(query: RouteQuery): Record<string, unknown>
         ...costingOptions['auto'],
         ...(preferences.avoidHighways ? { use_highways: 0 } : {}),
         ...(preferences.avoidTolls ? { use_tolls: 0 } : {}),
+      };
+    }
+    // A described vehicle rides on `auto`, never `truck` — see VehicleProfile
+    // for the measurements behind that. `height` is the field that changes
+    // which roads are legal; `top_speed` is the field that changes which route
+    // is worth taking, and both matter for the same drive.
+    const vehicle = normalizeVehicle(preferences.vehicle);
+    if (vehicle) {
+      costingOptions['auto'] = {
+        ...costingOptions['auto'],
+        height: vehicle.heightM,
+        width: vehicle.widthM,
+        top_speed: vehicle.topSpeedKph,
       };
     }
   } else if (query.profile === 'bike') {

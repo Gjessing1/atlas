@@ -3,6 +3,8 @@ export type {
   RoutingProfileInfo,
   RoundTripDirection,
   RoutePreferences,
+  RoutePreferenceToggle,
+  VehicleProfile,
   RouteQuery,
   RoutePath,
   RouteEnrichment,
@@ -16,6 +18,8 @@ export type {
 } from './model.js';
 export {
   isRoutingProfile,
+  normalizeVehicle,
+  VEHICLE_LIMITS,
   ROUTING_PROFILES,
   routePathToTrackData,
   formatExitSign,

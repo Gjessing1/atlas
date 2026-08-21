@@ -501,6 +501,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Web renders the list as a tab strip, Android as a drill-down menu; `SETTINGS_SECTIONS` in @atlas/core owns the sections themselves.',
   },
   {
+    id: 'settings-vehicle',
+    surface: 'settings',
+    capability: 'Describe a taller or slower vehicle, and route and time trips for it',
+    hook: 'useVehicleProfile',
+    web: { file: 'apps/web/src/App.tsx', contains: 'useVehicleProfile' },
+    android: { file: 'apps/android/App.tsx', contains: 'useVehicleProfile' },
+    note: 'Sent as `auto` costing options (height/width/top_speed), never `truck` — truck costing honours hgv access tags that do not bind a car-registered motorhome. The vehicle rides inside the driving RoutePreferences, which is what both clients already hand to navigation, so the planned and driven trips cannot disagree.',
+  },
+  {
     id: 'settings-theme',
     surface: 'settings',
     capability: 'Light/dark/system theme',

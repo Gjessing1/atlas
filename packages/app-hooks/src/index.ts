@@ -41,6 +41,11 @@ export {
   type RegionPackJobsController,
 } from './useRegionPackJobs.js';
 export {
+  useVehicleProfile,
+  type VehicleProfileController,
+  type VehicleProfileSettings,
+} from './useVehicleProfile.js';
+export {
   useNavPrefs,
   type NavFollowMode,
   type NavPrefsController,

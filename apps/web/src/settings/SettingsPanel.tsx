@@ -10,6 +10,7 @@ import {
   type NavPrefsController,
   type StorageAvailability,
   type ThemeModeController,
+  type VehicleProfileController,
 } from '@atlas/app-hooks';
 import {
   layersForProfile,
@@ -35,6 +36,7 @@ interface SettingsPanelProps {
   appearance: ThemeModeController;
   mapStyle: MapStyleEditorController;
   navPrefs: NavPrefsController;
+  vehicle: VehicleProfileController;
   layers: LayerCatalog;
   mapZoom: number;
   profilePreferences: MapProfilePreferencesController;
@@ -259,6 +261,106 @@ function StatusSection({ data, status }: { data: SystemStatus; status: StatusSta
   );
 }
 
+/**
+ * The described vehicle. Height is the field with consequences, so it leads and
+ * says what it does — and, just as importantly, what it does not do: the OSM
+ * data behind routing carries usable numbers for roughly 2 800 of the 4 800
+ * height restrictions Norway signs, so a route is avoidance help and never
+ * proof that every bridge on it was checked.
+ */
+function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
+  const current = vehicle.vehicle;
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const value = (key: 'heightM' | 'widthM' | 'topSpeedKph', fallback: number): string =>
+    draft?.[key] ?? String(current?.[key] ?? fallback);
+
+  const commit = (next: Record<string, string>) => {
+    const num = (key: string, fallback: number): number => {
+      // Commas are how a Norwegian keyboard offers a decimal point.
+      const parsed = Number.parseFloat((next[key] ?? '').replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    vehicle.setVehicle({
+      heightM: num('heightM', 2.8),
+      widthM: num('widthM', 2.2),
+      topSpeedKph: num('topSpeedKph', 80),
+    });
+  };
+
+  return (
+    <>
+      <h3>Vehicle</h3>
+      <div className="theme-options" role="radiogroup" aria-label="Vehicle type">
+        {(
+          [
+            [false, 'Ordinary car'],
+            [true, 'Taller or slower'],
+          ] as const
+        ).map(([described, label]) => (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={Boolean(current) === described}
+            className={
+              Boolean(current) === described ? 'theme-option theme-option-on' : 'theme-option'
+            }
+            onClick={() => {
+              setDraft(null);
+              vehicle.setVehicle(described ? { heightM: 2.8, widthM: 2.2, topSpeedKph: 80 } : null);
+            }}
+            key={label}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {current && (
+        <div className="vehicle-fields">
+          {(
+            [
+              ['heightM', 'Height (m)', 2.8, 0.05],
+              ['widthM', 'Width (m)', 2.2, 0.05],
+              ['topSpeedKph', 'Cruising speed (km/h)', 80, 5],
+            ] as const
+          ).map(([key, label, fallback, step]) => (
+            <label className="vehicle-field" key={key}>
+              <span>{label}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step={step}
+                value={value(key, fallback)}
+                onChange={(e) => {
+                  const next = {
+                    heightM: value('heightM', 2.8),
+                    widthM: value('widthM', 2.2),
+                    topSpeedKph: value('topSpeedKph', 80),
+                    [key]: e.target.value,
+                  };
+                  setDraft(next);
+                }}
+                onBlur={() => {
+                  if (!draft) return;
+                  commit(draft);
+                  setDraft(null);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="settings-note">
+        {current
+          ? 'Routes avoid the height restrictions in the map data and are timed at your cruising' +
+            ' speed — which can change the road chosen, not just the arrival time. Measure the' +
+            ' height including roof fittings, and treat this as help avoiding low bridges rather' +
+            ' than a guarantee that every one on the route has been checked.'
+          : 'Set a height and cruising speed if you drive something taller or slower than a car.'}
+      </p>
+    </>
+  );
+}
+
 /** Settings grouped by task so map, profile, navigation and account controls do not mix. */
 export function SettingsPanel({
   sync,
@@ -266,6 +368,7 @@ export function SettingsPanel({
   appearance,
   mapStyle,
   navPrefs,
+  vehicle,
   layers,
   mapZoom,
   profilePreferences,
@@ -341,6 +444,7 @@ export function SettingsPanel({
 
         {tab === 'navigation' && (
           <div className="settings-section">
+            <VehicleSection vehicle={vehicle} />
             <h3>Direction arrow</h3>
             <div className="theme-options" role="radiogroup" aria-label="Direction arrow source">
               {(

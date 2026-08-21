@@ -25,7 +25,7 @@ import {
   routePathToTrackData,
   routeSurfaceBreakdown,
   type RoutePath,
-  type RoutePreferences,
+  type RoutePreferenceToggle,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import { formatTrafficDelay } from '@atlas/traffic';
@@ -242,7 +242,7 @@ function AlongRouteStops({
 }
 
 const CUSTOM_OPTIONS: readonly {
-  key: keyof RoutePreferences;
+  key: RoutePreferenceToggle;
   label: string;
   profiles: readonly string[];
 }[] = [

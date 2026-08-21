@@ -5,6 +5,7 @@ import type {
   SyncState,
   ThemeModeController,
   NavPrefsController,
+  VehicleProfileController,
 } from '@atlas/app-hooks';
 import type { TrackRecord } from '@atlas/storage';
 
@@ -47,6 +48,7 @@ interface AppSheetsProps {
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   navPrefs: NavPrefsController;
+  vehicle: VehicleProfileController;
   navDiagnostics: NavigationDiagnosticsController;
   pip: NavPipController;
   regionJobs: RegionPackJobsController;
@@ -92,6 +94,7 @@ export function AppSheets({
   appearance,
   mapStyleEditor,
   navPrefs,
+  vehicle,
   navDiagnostics,
   pip,
   regionJobs,
@@ -183,6 +186,7 @@ export function AppSheets({
         overlays={overlays}
         profilePreferences={profilePreferences}
         navPrefs={navPrefs}
+        vehicle={vehicle}
         navDiagnostics={navDiagnostics}
         pip={pip}
         regionJobs={regionJobs}

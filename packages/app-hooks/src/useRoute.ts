@@ -7,6 +7,7 @@ import {
   type RoutePath,
   type RouteQuery,
   type RoutePreferences,
+  type VehicleProfile,
   type RouteResult,
   type RoundTripDirection,
   type RoutingProfile,
@@ -166,15 +167,24 @@ export interface RoutePlanner {
   selectPath: (index: number) => void;
 }
 
-export function useRoute(route: RouteFn): RoutePlanner {
+export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): RoutePlanner {
   const [active, setActive] = useState(false);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [preferencesByProfile, setPreferencesByProfile] = useState<
     Partial<Record<RoutingProfile, Partial<RoutePreferences>>>
   >({});
   const preferences = useMemo<RoutePreferences>(
-    () => ({ ...defaultRoutePreferences(profile), ...preferencesByProfile[profile] }),
-    [profile, preferencesByProfile],
+    () => ({
+      ...defaultRoutePreferences(profile),
+      ...preferencesByProfile[profile],
+      // The vehicle rides in the driving preferences rather than beside them,
+      // because that is the object both apps already hand to navigation when a
+      // trip starts. Anything else would plan for the van and then drive as a
+      // car. Non-driving modes never carry it: a height restriction means
+      // nothing to a walker.
+      ...(profile === 'car' && vehicle ? { vehicle } : {}),
+    }),
+    [profile, preferencesByProfile, vehicle],
   );
   const [waypoints, setWaypoints] = useState<RouteWaypoint[]>([]);
   const [roundTrip, setRoundTripState] = useState(false);

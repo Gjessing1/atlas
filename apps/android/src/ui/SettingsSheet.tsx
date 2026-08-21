@@ -20,6 +20,7 @@ import {
   type MapStyleEditorController,
   type MapProfilePreferencesController,
   type NavPrefsController,
+  type VehicleProfileController,
   type RegionPackJobsController,
   type StorageAvailability,
   type ThemeModeController,
@@ -1181,6 +1182,108 @@ function NavigationDiagnosticsSection({
  * names and order the web tab strip shows (ROADMAP §7.5). Android keeps two
  * more, Map tiles and Offline regions, which a browser cannot have.
  */
+/**
+ * The described vehicle, in the same words web uses — two hand-maintained
+ * copies of this explanation is how the clients drift (ROADMAP §7.4). Height
+ * leads because it is the field with consequences, and the note is careful not
+ * to promise a fit: routing knows roughly 2 800 of the 4 800 height
+ * restrictions Norway signs.
+ */
+function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
+  const current = vehicle.vehicle;
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const value = (key: 'heightM' | 'widthM' | 'topSpeedKph', fallback: number): string =>
+    draft?.[key] ?? String(current?.[key] ?? fallback);
+
+  const commit = (next: Record<string, string>) => {
+    const num = (key: string, fallback: number): number => {
+      // A Norwegian keyboard offers a comma where the parser wants a point.
+      const parsed = Number.parseFloat((next[key] ?? '').replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    vehicle.setVehicle({
+      heightM: num('heightM', 2.8),
+      widthM: num('widthM', 2.2),
+      topSpeedKph: num('topSpeedKph', 80),
+    });
+    setDraft(null);
+  };
+
+  return (
+    <>
+      <Text style={styles.heading}>Vehicle</Text>
+      <View style={styles.themeRow} accessibilityRole="radiogroup">
+        {(
+          [
+            [false, 'Ordinary car'],
+            [true, 'Taller or slower'],
+          ] as const
+        ).map(([described, label]) => (
+          <Pressable
+            key={label}
+            style={[styles.themeOption, Boolean(current) === described && styles.themeOptionOn]}
+            onPress={() => {
+              setDraft(null);
+              vehicle.setVehicle(described ? { heightM: 2.8, widthM: 2.2, topSpeedKph: 80 } : null);
+            }}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: Boolean(current) === described }}
+          >
+            <Text
+              style={[
+                styles.themeOptionText,
+                Boolean(current) === described && styles.themeOptionTextOn,
+              ]}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {current ? (
+        <View style={styles.vehicleFields}>
+          {(
+            [
+              ['heightM', 'Height (m)', 2.8],
+              ['widthM', 'Width (m)', 2.2],
+              ['topSpeedKph', 'Cruising speed (km/h)', 80],
+            ] as const
+          ).map(([key, label, fallback]) => (
+            <View style={styles.vehicleField} key={key}>
+              <Text style={styles.muted}>{label}</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="decimal-pad"
+                value={value(key, fallback)}
+                onChangeText={(text) =>
+                  setDraft({
+                    heightM: value('heightM', 2.8),
+                    widthM: value('widthM', 2.2),
+                    topSpeedKph: value('topSpeedKph', 80),
+                    [key]: text,
+                  })
+                }
+                onBlur={() => {
+                  if (draft) commit(draft);
+                }}
+                accessibilityLabel={label}
+              />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <Text style={styles.muted}>
+        {current
+          ? 'Routes avoid the height restrictions in the map data and are timed at your cruising' +
+            ' speed — which can change the road chosen, not just the arrival time. Measure the' +
+            ' height including roof fittings, and treat this as help avoiding low bridges rather' +
+            ' than a guarantee that every one on the route has been checked.'
+          : 'Set a height and cruising speed if you drive something taller or slower than a car.'}
+      </Text>
+    </>
+  );
+}
+
 const SETTINGS_SECTIONS = settingsSectionsFor('android');
 
 export function SettingsSheet({
@@ -1198,6 +1301,7 @@ export function SettingsSheet({
   overlays,
   profilePreferences,
   navPrefs,
+  vehicle,
   navDiagnostics,
   pip,
   regionJobs,
@@ -1223,6 +1327,7 @@ export function SettingsSheet({
   overlays: OverlaysController;
   profilePreferences: MapProfilePreferencesController;
   navPrefs: NavPrefsController;
+  vehicle: VehicleProfileController;
   navDiagnostics: NavigationDiagnosticsController;
   /** Whether guidance continues in a floating mini window when Atlas is left. */
   pip: NavPipController;
@@ -1313,6 +1418,7 @@ export function SettingsSheet({
         ) : null}
         {section === 'navigation' ? (
           <>
+            <VehicleSection vehicle={vehicle} />
             <Text style={styles.heading}>Direction arrow</Text>
             <View style={styles.themeRow} accessibilityRole="radiogroup">
               {(
@@ -1509,6 +1615,8 @@ const styles = StyleSheet.create({
   subForm: { marginTop: 14 },
   accountManage: { marginTop: 4 },
   themeRow: { flexDirection: 'row', gap: 6 },
+  vehicleFields: { marginTop: 10, gap: 10 },
+  vehicleField: { gap: 4 },
   widgetOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   themeOption: {
     flex: 1,

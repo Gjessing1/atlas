@@ -4,6 +4,7 @@ import {
   httpElevationProfile,
   httpRouteProvider,
   httpTraceTransport,
+  type VehicleProfile,
 } from '@atlas/routing';
 import { httpTrafficClosures, httpTrafficDelay, trafficAwareRouteProvider } from '@atlas/traffic';
 
@@ -22,6 +23,6 @@ const route: RouteFn = async (query, signal) => {
   return query.details ? enrichPlannedResult(result, query, trace, elevation, signal) : result;
 };
 
-export function useRoute(): RoutePlanner {
-  return useSharedRoute(route);
+export function useRoute(vehicle?: VehicleProfile | null): RoutePlanner {
+  return useSharedRoute(route, vehicle);
 }
