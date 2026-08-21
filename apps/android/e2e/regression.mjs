@@ -49,9 +49,48 @@ async function waitFor(label, read, accept, timeoutMs = 45_000) {
   throw new Error(`Timed out waiting for ${label}; last value was ${lastValue}`);
 }
 
-function hierarchy() {
+function readWindow() {
   shell('uiautomator', 'dump', '/sdcard/atlas-regression-window.xml');
   return command(['exec-out', 'cat', '/sdcard/atlas-regression-window.xml']);
+}
+
+function nodeForText(xml, text) {
+  return xml.match(new RegExp(`<node[^>]*text="${escapeRegex(text)}"[^>]*/?>`))?.[0] ?? null;
+}
+
+/**
+ * The window the scenario is asking about — with Play Services' interruptions
+ * taken off it first.
+ *
+ * Play Services asks for "Location Accuracy" consent the first time something
+ * wants a fine fix. That dialog belongs to com.google.android.gms and covers
+ * the app, so every wait after it reads the wrong window and times out on a
+ * screen Atlas had rendered correctly underneath — which is exactly how it
+ * presents: a route that is drawn and progressing, reported as a missing
+ * sheet. It cannot be pre-answered from our side (`pm clear` reaches only our
+ * own package, and the `network_location_opt_in` secure setting does not gate
+ * it on this image), so it is answered where it appears.
+ *
+ * Always **"Turn on"**, never "No thanks". This dialog is not about our
+ * permissions — those are granted directly in setup — it is Play Services'
+ * `checkLocationSettings` resolution, and declining it leaves the device
+ * settings unsatisfied for the fix Atlas asks for. The app then correctly
+ * reports "Location request failed due to unsatisfied device settings" and
+ * navigation never starts, so dismissing this politely fails the run just as
+ * surely as ignoring it.
+ */
+function hierarchy() {
+  const xml = readWindow();
+  if (xml.includes('package="com.google.android.gms"') && !xml.includes(`package="${PACKAGE}"`)) {
+    for (const label of ['Turn on', 'TURN ON', 'Yes', 'OK']) {
+      const bounds = boundsForNode(nodeForText(xml, label));
+      if (!bounds) continue;
+      console.log(`Android regression: answering a Play Services dialog ("${label}")`);
+      tapBounds(bounds);
+      return readWindow();
+    }
+  }
+  return xml;
 }
 
 function escapeRegex(value) {
@@ -208,15 +247,29 @@ async function replaceText(id, text, expectedText = text) {
   // React-controlled TextInputs can lose the first part of one fast `adb input
   // text` event while JS is reconciling it. Key characters individually so the
   // value observed by the app is the value the scenario asked for.
-  for (const character of text) {
-    if (character === ' ') shell('input', 'keyevent', 'KEYCODE_SPACE');
-    else shell('input', 'text', character);
-    await delay(80);
-  }
-  await waitFor(`${id} to contain ${expectedText}`, hierarchy, (next) => {
+  const holds = (next) => {
     const value = nodeForId(next, id)?.match(/text="([^"]*)"/)?.[1] ?? '';
     return value.toLocaleLowerCase().includes(expectedText.toLocaleLowerCase());
-  });
+  };
+  const type = async () => {
+    for (const character of text) {
+      if (character === ' ') shell('input', 'keyevent', 'KEYCODE_SPACE');
+      else shell('input', 'text', character);
+      await delay(80);
+    }
+  };
+  await type();
+  // The soft keyboard can keep what was typed as *composing* text: it shows in
+  // the IME's suggestion strip while the field the app reads is still empty, so
+  // waiting longer never resolves it. Retype once — the second pass starts from
+  // a focused field with the IME already up, which commits.
+  if (!holds(hierarchy())) {
+    shell('input', 'keyevent', 'KEYCODE_MOVE_END');
+    shell('input', 'keyevent', ...Array.from({ length: 100 }, () => 'KEYCODE_DEL'));
+    await delay(300);
+    await type();
+  }
+  await waitFor(`${id} to contain ${expectedText}`, hierarchy, holds);
 }
 
 async function openMenuItem(id) {
@@ -480,6 +533,10 @@ async function main() {
 
   shell('settings', 'put', 'system', 'accelerometer_rotation', '0');
   shell('settings', 'put', 'system', 'user_rotation', '0');
+  // High accuracy (gps + network). This is what Play Services' location-settings
+  // check wants; satisfying it up front usually keeps its consent dialog off the
+  // screen entirely, and `hierarchy()` answers the dialog if it appears anyway.
+  shell('settings', 'put', 'secure', 'location_mode', '3');
   shell('input', 'keyevent', 'KEYCODE_WAKEUP');
   shell('wm', 'dismiss-keyguard');
   shell('pm', 'clear', PACKAGE);
