@@ -117,9 +117,35 @@ describe('pipCardMetrics', () => {
       [240, 135],
       [400, 225],
       [1200, 675],
+      // The 3:4 window Atlas actually asks for, at the sizes Android hands it
+      // out in — and the same window pinched larger.
+      [90, 120],
+      [110, 147],
+      [165, 220],
+      [240, 320],
     ]) {
       expect(pipCardMetrics(w!, h!).height).toBeLessThan(h! / 2);
     }
+  });
+
+  it('stacks the clock under the turn in the portrait window, and only there', () => {
+    // 3:4 at the size Android gives it: too narrow for arrow, distance and
+    // clock across one row, with height to spare for a second line.
+    const portrait = pipCardMetrics(110, 147);
+    expect(portrait.stack).toBe(true);
+    // Both lines actually fit in the height the camera is told to keep clear.
+    expect(portrait.height).toBeGreaterThanOrEqual(portrait.icon + portrait.gap + portrait.footer);
+
+    // Pinched wide enough for one row again.
+    expect(pipCardMetrics(240, 320).stack).toBe(false);
+    // A short, wide window (the old 16:9 shape) has no second line to give.
+    expect(pipCardMetrics(160, 90).stack).toBe(false);
+  });
+
+  it('pays for the stacked line out of the strip, not out of the map', () => {
+    const stacked = pipCardMetrics(110, 147);
+    expect(stacked.height).toBeGreaterThan(pipCardMetrics(148, 110).height);
+    expect(stacked.height).toBeLessThan(147 * 0.48);
   });
 
   it('drops maneuver detail before the arrival clock at narrow sizes', () => {

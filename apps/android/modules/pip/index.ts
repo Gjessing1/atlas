@@ -17,6 +17,7 @@ interface PipNativeModule {
   setMuted(on: boolean): void;
   isArmed(): boolean;
   setSourceRect(x: number, y: number, width: number, height: number): void;
+  windowSize(): { width: number; height: number } | null;
   inPictureInPicture(): boolean;
   openSettings(): boolean;
   addListener(
@@ -26,6 +27,10 @@ interface PipNativeModule {
 }
 
 export type PipAction = 'toggleMute' | 'endTrip';
+export interface PipWindowSize {
+  width: number;
+  height: number;
+}
 
 /** Null in builds that predate the native module (and in unit tests). */
 const Native = requireOptionalNativeModule<PipNativeModule>('AtlasPip');
@@ -109,6 +114,27 @@ export function setPipSourceRect(
     // Older build without the function, or a finishing activity: the module
     // falls back to the whole content view, which is what it always used.
   }
+}
+
+/**
+ * The activity's current window in Android configuration dp.
+ *
+ * React Native normally reports `useWindowDimensions()` in dp, but on the
+ * measured Android 16 PiP transition it returned the task's 400x533 physical
+ * pixels while Yoga still interpreted style values as dp. That made a 152 dp
+ * wide window choose the wide card and clip its arrival clock. Native reads
+ * those task bounds and normalizes them to 152x203 dp, so use that for the
+ * compact presentation and keep the React value only as an older-binary
+ * fallback.
+ */
+export function pipWindowSize(fallback: PipWindowSize): PipWindowSize {
+  try {
+    const measured = Native?.windowSize();
+    if (measured && measured.width > 0 && measured.height > 0) return measured;
+  } catch {
+    // A runtime-13 binary has no size function; its existing layout remains.
+  }
+  return fallback;
 }
 
 export function inPictureInPicture(): boolean {

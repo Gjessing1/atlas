@@ -37,10 +37,11 @@ export function navViewport(
   bottomInset: number,
   compact = false,
 ): NavViewport {
-  // A picture-in-picture window is wider than it is tall, but it is not a
-  // landscape *screen*: there is no room beside the map for a guidance rail, so
-  // splitting the window in two would leave the camera pointing at the wrong
-  // half of a very small map.
+  // A picture-in-picture window is never a landscape *screen*, whichever way
+  // round it happens to be: there is no room beside the map for a guidance
+  // rail, so splitting the window in two would leave the camera pointing at the
+  // wrong half of a very small map. Atlas now asks for a portrait window, but a
+  // pinch can still make one wider than it is tall.
   const landscape = !compact && width > height;
   const guidanceLeft = side.left + EDGE_GAP;
   const guidanceWidth = landscape
@@ -54,7 +55,14 @@ export function navViewport(
   // ahead: a little higher in landscape because that screen is much shorter.
   const rightPadding = side.right;
   const leftPadding = landscape ? mapLeft : side.left;
-  const targetY = height * (landscape ? 0.68 : 0.72);
+  // Full-screen, guidance covers a small enough share of the phone that 72% of
+  // the *window* is still well above it. A mini window is not like that: its
+  // strip is nearer 40% of a 147 dp-tall window, so the same fraction puts the
+  // puck behind the very strip whose height was passed in to clear it. Compact
+  // therefore measures the fraction over the map that is actually uncovered.
+  const targetY = compact
+    ? topInset + (height - bottomInset - topInset) * 0.72
+    : height * (landscape ? 0.68 : 0.72);
   const courseTop = Math.max(topInset, Math.round(2 * targetY - height + bottomInset));
   const coursePadding = {
     top: courseTop,
@@ -78,11 +86,14 @@ export function navViewport(
     mapRight,
     coursePadding,
     flatPadding,
+    // Overview breathing room is in screen dp, so the full-screen margins would
+    // be most of a mini window (60 + 40 of 110 dp wide). A window entered while
+    // the map was in overview still has to show the route.
     overviewPadding: {
-      top: topInset + 40,
-      right: rightPadding + 40,
-      bottom: bottomInset + 40,
-      left: landscape ? mapLeft + 28 : side.left + 60,
+      top: topInset + (compact ? 12 : 40),
+      right: rightPadding + (compact ? 12 : 40),
+      bottom: bottomInset + (compact ? 12 : 40),
+      left: landscape ? mapLeft + 28 : side.left + (compact ? 12 : 60),
     },
     courseAnchor: {
       x: anchorX,

@@ -107,6 +107,7 @@ import { NavBanner } from './src/nav/NavBanner';
 import { NavChrome, useNavPuck } from './src/nav/NavChrome';
 import { NavPipCard } from './src/nav/NavPipCard';
 import { pipCardMetrics } from './src/nav/pipGuidance';
+import { pipWindowSize } from './modules/pip';
 import { navViewport } from './src/nav/navViewport';
 import { RoutePreview } from './src/nav/RoutePreview';
 import { useNavCamera } from './src/nav/useNavCamera';
@@ -519,21 +520,33 @@ function AppInner() {
   // guidance rail, and only the compact card at the bottom to keep clear of.
   const pip = useNavigationPip(nav, data);
   const inPip = pip.inPictureInPicture;
+  // Android's configuration stays in dp when React Native briefly reports the
+  // physical PiP task bounds. Both camera and card must use the same real size.
+  const compactWin = inPip ? pipWindowSize(win) : win;
   const viewport = useMemo(
     () =>
       inPip
         ? navViewport(
-            win.width,
-            win.height,
+            compactWin.width,
+            compactWin.height,
             NO_SIDE_INSETS,
             0,
             // Keep the puck clear of the guidance strip, whose height is the
             // window's own (NavPipCard scales with the size the user gave it).
-            pipCardMetrics(win.width, win.height).height,
+            pipCardMetrics(compactWin.width, compactWin.height).height,
             true,
           )
         : navViewport(win.width, win.height, side, topInset, bottomInset),
-    [win.width, win.height, side, topInset, bottomInset, inPip],
+    [
+      win.width,
+      win.height,
+      compactWin.width,
+      compactWin.height,
+      side,
+      topInset,
+      bottomInset,
+      inPip,
+    ],
   );
   const landscape = viewport.landscape;
   // Mute and map orientation survive across trips (device-local, web parity).
@@ -1153,7 +1166,12 @@ function AppInner() {
           camera and follow mode, because MapScene and the navigation session
           were never unmounted. */}
       {inPip ? (
-        <NavPipCard nav={nav} />
+        <NavPipCard
+          nav={nav}
+          width={compactWin.width}
+          height={compactWin.height}
+          fontScale={win.fontScale}
+        />
       ) : (
         <>
           {offlineRegion ? (

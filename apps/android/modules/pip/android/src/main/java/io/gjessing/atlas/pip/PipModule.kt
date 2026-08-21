@@ -136,6 +136,34 @@ class PipModule : Module() {
       }
     }
 
+    /**
+     * The current activity window in dp. React Native's window event was
+     * measured returning the PiP task's physical pixel bounds on Android 16,
+     * even though Yoga continued to size views in dp. Read the task window
+     * itself and normalize it by density: the resources configuration can
+     * still describe the old full-screen window during the first PiP render.
+     */
+    Function("windowSize") {
+      val current = activity
+      val resources = current?.resources ?: appContext.reactContext?.resources
+      val configuration = resources?.configuration ?: return@Function null
+      val density = resources.displayMetrics.density
+      val bounds =
+        when {
+          current == null -> null
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+            current.windowManager.currentWindowMetrics.bounds
+          current.window.decorView.width > 0 && current.window.decorView.height > 0 ->
+            Rect(0, 0, current.window.decorView.width, current.window.decorView.height)
+          else -> null
+        }
+      mapOf(
+        "width" to (bounds?.let { Math.round(it.width() / density) } ?: configuration.screenWidthDp),
+        "height" to
+          (bounds?.let { Math.round(it.height() / density) } ?: configuration.screenHeightDp),
+      )
+    }
+
     /** Whether the activity is in PiP right now (for the first render). */
     Function("inPictureInPicture") {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity?.isInPictureInPictureMode == true
@@ -302,13 +330,23 @@ class PipModule : Module() {
     )
 
   /**
-   * A 16:9 window that flies out of the map viewport it continues to show,
-   * falling back to the whole content view before React has measured it. The
-   * live map resizes cleanly, so seamless resize avoids a stale cropped
+   * A window shaped for a map, flying out of the map viewport it continues to
+   * show and falling back to the whole content view before React has measured
+   * it. The live map resizes cleanly, so seamless resize avoids a stale cropped
    * snapshot while React commits the compact guidance strip.
+   *
+   * The shape is the window's whole usefulness. Android sizes PiP from the
+   * aspect ratio alone (the shorter edge is a fixed fraction of the screen), so
+   * the 16:9 this used to ask for came back as a letterbox — around 160x90 dp,
+   * of which the guidance strip took nearly half and the map was left a 160x50
+   * dp sliver with no ground ahead of the puck. Asking for 3:4 spends the same
+   * budget on height instead: about 110x147 dp, roughly twice the map, and the
+   * road ahead is the direction a course-up map needs. The strip stacks itself
+   * into two lines at that width (`pipCardMetrics`), which is what keeps the
+   * arrival clock rather than running it off the edge.
    */
   private fun params(current: Activity, autoEnter: Boolean): PictureInPictureParams {
-    val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+    val builder = PictureInPictureParams.Builder().setAspectRatio(PIP_ASPECT_RATIO)
     (sourceRect ?: contentRect(current))?.let { builder.setSourceRectHint(it) }
     if (active) {
       val end = endAction(current)
@@ -356,6 +394,8 @@ class PipModule : Module() {
   }
 
   companion object {
+    /** Portrait: guidance needs the road ahead more than it needs width. */
+    private val PIP_ASPECT_RATIO = Rational(3, 4)
     private const val CHANGE_EVENT = "onPictureInPictureChange"
     private const val ACTION_EVENT = "onPictureInPictureAction"
     private const val ACTION_TOGGLE_MUTE = "io.gjessing.atlas.pip.TOGGLE_MUTE"

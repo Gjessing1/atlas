@@ -27,7 +27,7 @@ describe('navViewport', () => {
   });
 
   it('treats a picture-in-picture window as one small map, not a landscape screen', () => {
-    // 16:9 mini window: wider than tall, but no rail and no system bars.
+    // A mini window pinched wider than tall: still no rail, no system bars.
     const view = navViewport(320, 180, { left: 0, right: 0 }, 0, 46, true);
 
     expect(view.landscape).toBe(false);
@@ -35,7 +35,24 @@ describe('navViewport', () => {
     expect(view.mapRight).toBe(320);
     expect(view.courseAnchor.x).toBe(160);
     // The compact card owns the bottom strip, so the puck stays above it.
-    expect(view.courseAnchor.y).toBeLessThan(180 - 46 / 2);
+    expect(view.courseAnchor.y).toBeLessThan(180 - 46);
+    // Overview keeps a small margin rather than the full-screen one, which
+    // would be most of a window this size.
+    expect(view.overviewPadding.left).toBe(12);
+  });
+
+  it('keeps the puck above the stacked strip of the portrait mini window', () => {
+    // The 3:4 window Atlas asks for, with the two-line strip's own height.
+    const view = navViewport(110, 147, { left: 0, right: 0 }, 0, 58, true);
+
+    expect(view.landscape).toBe(false);
+    expect(view.mapRight).toBe(110);
+    expect(view.courseAnchor.x).toBe(55);
+    // Above the strip, with the ground ahead that course-up is for — not at
+    // 72% of the window, which in this shape is behind the strip.
+    expect(view.courseAnchor.y).toBeLessThan(147 - 58);
+    expect(view.courseAnchor.y).toBeGreaterThan((147 - 58) / 2);
+    expect(view.coursePadding.top + view.coursePadding.bottom).toBeLessThan(147);
   });
 
   it('clears a landscape system bar on either side', () => {

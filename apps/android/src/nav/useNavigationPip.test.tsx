@@ -95,8 +95,16 @@ describe('useNavigationPip', () => {
     expect(native.setActive).toHaveBeenLastCalledWith(false);
   });
 
-  it('arms while a requested route is still starting', () => {
-    renderHook(() => useNavigationPip(nav('starting'), settings));
+  it('leaves a starting trip unarmed until guidance is under way', () => {
+    // `starting` asks for background location, and Android 11+ answers with a
+    // settings screen. Armed there, auto-enter reads that dialog as "the user
+    // left" and the trip begins by shrinking itself into a floating window.
+    const view = renderHook(({ phase }) => useNavigationPip(nav(phase), settings), {
+      initialProps: { phase: 'starting' as NavController['phase'] },
+    });
+    expect(native.setActive).not.toHaveBeenCalledWith(true);
+
+    view.rerender({ phase: 'navigating' });
     expect(native.setActive).toHaveBeenLastCalledWith(true);
   });
 

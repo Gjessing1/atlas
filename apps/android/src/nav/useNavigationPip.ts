@@ -45,11 +45,23 @@ export interface NavPipController {
 /**
  * Keeps guidance visible when the user leaves Atlas mid-trip.
  *
- * The native module is armed from route startup through active guidance (or
- * rerouting) while the setting is on; the system does the entering,
- * so pressing Home or opening Recents shrinks the running trip into a floating
- * window instead of hiding it. Disarming on any other phase is what guarantees
- * an ended trip leaves no idle Atlas window behind.
+ * The native module is armed for exactly as long as guidance is running —
+ * navigating or rerouting — while the setting is on; the system does the
+ * entering, so pressing Home or opening Recents shrinks the running trip into a
+ * floating window instead of hiding it. Disarming on any other phase is what
+ * guarantees an ended trip leaves no idle Atlas window behind.
+ *
+ * `starting` is deliberately *not* armed, and this is the whole reason the trip
+ * used to shrink itself the instant it began. Auto-enter hands the decision to
+ * the system, which takes it whenever the activity stops being the one in
+ * front — it cannot tell a Home gesture from anything else that covers Atlas.
+ * That phase is precisely where something does: `currentFix` asks for
+ * foreground *and* background location, and Android 11+ answers the latter with
+ * its own settings screen. So the trip was armed at the moment a dialog was
+ * about to cover it, and the user watched navigation start by disappearing into
+ * a floating window. Nothing is lost by waiting: `starting` is the seconds
+ * spent finding a fix and a route, when the window would have nothing to guide
+ * with anyway.
  *
  * Nothing about the trip changes: the same NavigationSession, the same location
  * foreground service, the same voice prompts. `inPictureInPicture` only tells
@@ -113,10 +125,7 @@ export function useNavigationPip(nav: NavController, settings: NavPipSettings): 
   }, [refreshNativeState]);
 
   const available = supported && !blockedByUser;
-  const armed =
-    available &&
-    enabled &&
-    (nav.phase === 'starting' || nav.phase === 'navigating' || nav.phase === 'rerouting');
+  const armed = available && enabled && (nav.phase === 'navigating' || nav.phase === 'rerouting');
 
   // Arming and geometry are intentionally separate. In particular, a PiP
   // resize must never run an effect cleanup that disarms the native module.

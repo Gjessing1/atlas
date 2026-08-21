@@ -33,6 +33,12 @@ export interface PipCardMetrics {
   height: number;
   /** Street/maneuver detail yields first; ETA is retained at every width. */
   showDetail: boolean;
+  /**
+   * Put the arrival clock on its own line under the turn, instead of beside it.
+   * A portrait window is narrow, and a single row of arrow · distance · clock
+   * simply runs off the edge there — the clock, being last, is what falls off.
+   */
+  stack: boolean;
 }
 
 /**
@@ -40,23 +46,37 @@ export interface PipCardMetrics {
  *
  * The user resizes this window — pinch it larger and the strip has to use the
  * room rather than float a 12 px line along the bottom of it. Everything scales
- * off the window's *height*, since a PiP window keeps its aspect ratio: width
- * follows, and height is what decides how much of it guidance may take before
- * the map underneath stops being a map.
+ * off the window's *shorter* dimension, since a PiP window keeps its aspect
+ * ratio: that is what decides how much of it guidance may take before the map
+ * underneath stops being a map.
+ *
+ * Both shapes have to work. Atlas asks for 3:4, which Android hands back at
+ * roughly 110x147 dp — deliberately taller than the old 16:9 letterbox, and so
+ * narrow that the row has to become two lines to keep the clock. A pinch
+ * upwards, or an older window still on the previous shape, is wider than it is
+ * tall and stays a single row.
  */
 export function pipCardMetrics(width: number, height: number, fontScale = 1): PipCardMetrics {
   // 0 at a ~90 dp-tall window, 1 at ~220 dp — the range Android's PiP allows.
   const room = Math.max(0, Math.min(1, (Math.min(height, width * 0.75) - 90) / 130));
   const at = (small: number, large: number) => Math.round(small + (large - small) * room);
   const safeFontScale = Math.max(1, Math.min(1.3, fontScale));
-  const baseHeight = at(40, 66);
+  const footer = at(10, 13);
+  // Arrow, distance and clock side by side need about 170 dp before the clock
+  // starts running past the right edge; below that the clock drops to a second
+  // line, which costs its own type height plus the breathing room under it.
+  // Only in a window with height to spend, though: a short wide one has no
+  // second line to give, and would buy the clock by taking it from the map.
+  const stack = width < 190 && height > width;
+  const gap = at(8, 12);
+  const baseHeight = at(40, 66) + (stack ? footer + gap : 0);
   return {
     icon: at(22, 34),
     headline: at(15, 24),
     detail: at(11, 15),
-    footer: at(10, 13),
+    footer,
     padding: at(8, 12),
-    gap: at(8, 12),
+    gap,
     // Respect large text without letting guidance consume the map. The Text
     // nodes use the same 1.3 cap, so this height and their actual glyphs agree.
     height: Math.max(
@@ -67,6 +87,7 @@ export function pipCardMetrics(width: number, height: number, fontScale = 1): Pi
     // arrive?" The road/maneuver wording is useful context, but it yields in
     // the smallest window so the arrival clock never does.
     showDetail: width >= 250,
+    stack,
   };
 }
 
