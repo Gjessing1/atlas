@@ -851,6 +851,9 @@ test('a planned route saves as a track and reopens as an editable route', async 
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 
+  // Saving a *drive* as a track is a real capability but not a driver's first
+  // reach, so the driving toolbar folds it under "More" (`routeActionsFor`).
+  await page.getByRole('button', { name: 'More' }).click();
   await page.getByRole('button', { name: 'Save track' }).click();
   const save = page.locator('.route-save-track');
   await save.getByLabel('Track name').fill('Desktop ride');

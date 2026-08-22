@@ -4,6 +4,8 @@ import {
   normalizeVehicle,
   ROUTE_OPTIONS,
   routeOptionsFor,
+  ROUTE_ACTIONS,
+  routeActionsFor,
   ROUTING_PROFILES,
   VEHICLE_LIMITS,
   vehicleChipLabel,
@@ -90,6 +92,61 @@ describe('routeOptionsFor', () => {
     const defaults = defaultRoutePreferences('car');
     for (const option of ROUTE_OPTIONS) {
       expect(typeof defaults[option.key]).toBe('boolean');
+    }
+  });
+});
+
+describe('routeActionsFor', () => {
+  it('gives each mode a toolbar of its own', () => {
+    // Driving edits a plan for fuel and rest; walking plans a track to keep and
+    // carry. Neither wants to read past the other's actions to reach Clear.
+    expect(routeActionsFor('car').primary.map((a) => a.key)).toEqual([
+      'alongRoute',
+      'reverse',
+      'clear',
+      'share',
+    ]);
+    expect(routeActionsFor('bike').primary.map((a) => a.key)).toEqual([
+      'exportGpx',
+      'reverse',
+      'clear',
+      'share',
+    ]);
+    expect(routeActionsFor('hike').primary.map((a) => a.key)).toEqual([
+      'saveTrack',
+      'exportGpx',
+      'clear',
+      'share',
+    ]);
+  });
+
+  it('folds every remaining action rather than dropping it', () => {
+    // The split is placement, never capability: a mode that hid an action
+    // would be a planner that can do less depending on how you travel.
+    for (const profile of ROUTING_PROFILES) {
+      const { primary, more } = routeActionsFor(profile.id);
+      expect([...primary, ...more].map((a) => a.key).sort()).toEqual(
+        ROUTE_ACTIONS.map((a) => a.key).sort(),
+      );
+      expect(primary.some((a) => more.includes(a))).toBe(false);
+    }
+  });
+
+  it('keeps the mode-independent actions in every visible row', () => {
+    // Clear and Share mean the same thing whatever is being planned, so a mode
+    // that folded them would be trading a constant for nothing.
+    for (const profile of ROUTING_PROFILES) {
+      const keys = routeActionsFor(profile.id).primary.map((a) => a.key);
+      expect(keys).toContain('clear');
+      expect(keys).toContain('share');
+    }
+  });
+
+  it('keeps the visible row short enough to stay one row of chrome', () => {
+    // Four was the point of the split: six same-weight buttons wrapped to two
+    // rows above the answer on every phone this panel opens on.
+    for (const profile of ROUTING_PROFILES) {
+      expect(routeActionsFor(profile.id).primary.length).toBeLessThanOrEqual(4);
     }
   });
 });

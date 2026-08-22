@@ -21,8 +21,11 @@ import {
 import type { TrackData } from '@atlas/gpx';
 import {
   pathViaLabels,
+  routeActionsFor,
   routeOptionsFor,
   ROUTING_PROFILES,
+  type RouteActionInfo,
+  type RouteActionKey,
   routePathToTrackData,
   routeSurfaceBreakdown,
   type RoutePath,
@@ -160,12 +163,19 @@ function AlongRouteStops({
   route,
   path,
   fetchNearby,
+  onPicked,
 }: {
   route: RoutePlanner;
   path: RoutePath;
   fetchNearby: FetchNearbyFn;
+  /** Close the browser once a stop has joined the plan. */
+  onPicked: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Always open: the disclosure that used to live here is now the toolbar's
+  // "Stops along route" button, which is where a driver looks for it (ROADMAP:
+  // "Give each routing type an intentional toolbar"). Kept as a constant so
+  // useRouteStops keeps its "only search while the panel is showing" contract.
+  const open = true;
   const waypoints = useMemo(() => route.waypoints.map((w) => w.pos), [route.waypoints]);
   const { category, setCategory, hits, status } = useRouteStops({
     path,
@@ -177,66 +187,51 @@ function AlongRouteStops({
   const categories = routeStopCategories(route.profile);
 
   return (
-    <View style={styles.alongSearch}>
-      <Pressable
-        style={[styles.alongToggle, open && styles.alongToggleSelected]}
-        onPress={() => setOpen((value) => !value)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        testID="route-along-toggle"
-      >
-        <Text style={styles.alongToggleText}>Stops along route</Text>
-      </Pressable>
-      {open ? (
-        <>
-          <View style={styles.alongCategories}>
-            {categories.map((item) => (
-              <Pressable
-                key={item.id}
-                style={[styles.alongCategory, category === item.id && styles.alongCategoryOn]}
-                onPress={() => setCategory(item.id)}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: category === item.id }}
-                testID={`route-along-${item.id}`}
-              >
-                <Text style={styles.alongCategoryText}>{item.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {status === 'loading' ? <Text style={styles.hint}>Looking along the route…</Text> : null}
-          {status === 'error' ? (
-            <Text style={styles.hint}>Search unavailable right now.</Text>
-          ) : null}
-          {status === 'ready' && hits.length === 0 ? (
-            <Text style={styles.hint}>Nothing in this category along this route.</Text>
-          ) : null}
-          {hits.length > 0 ? (
-            <View style={styles.stopResults}>
-              {hits.map((hit, index) => (
-                <Pressable
-                  key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}
-                  style={styles.stopResult}
-                  testID={`route-along-result-${index}`}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
-                    setOpen(false);
-                  }}
-                >
-                  <Text style={styles.stopResultName} numberOfLines={1}>
-                    {hit.name}
-                  </Text>
-                  <Text style={styles.stopResultLabel} numberOfLines={1}>
-                    {stopAlongLabel(hit.alongM)}
-                    {/* Only worth saying when it is a real detour. */}
-                    {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
-                    {hit.label ? ` · ${hit.label}` : ''}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </>
+    <View style={styles.alongSearch} testID="route-along-panel">
+      <View style={styles.alongCategories}>
+        {categories.map((item) => (
+          <Pressable
+            key={item.id}
+            style={[styles.alongCategory, category === item.id && styles.alongCategoryOn]}
+            onPress={() => setCategory(item.id)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: category === item.id }}
+            testID={`route-along-${item.id}`}
+          >
+            <Text style={styles.alongCategoryText}>{item.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {status === 'loading' ? <Text style={styles.hint}>Looking along the route…</Text> : null}
+      {status === 'error' ? <Text style={styles.hint}>Search unavailable right now.</Text> : null}
+      {status === 'ready' && hits.length === 0 ? (
+        <Text style={styles.hint}>Nothing in this category along this route.</Text>
+      ) : null}
+      {hits.length > 0 ? (
+        <View style={styles.stopResults}>
+          {hits.map((hit, index) => (
+            <Pressable
+              key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}
+              style={styles.stopResult}
+              testID={`route-along-result-${index}`}
+              onPress={() => {
+                Keyboard.dismiss();
+                route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
+                onPicked();
+              }}
+            >
+              <Text style={styles.stopResultName} numberOfLines={1}>
+                {hit.name}
+              </Text>
+              <Text style={styles.stopResultLabel} numberOfLines={1}>
+                {stopAlongLabel(hit.alongM)}
+                {/* Only worth saying when it is a real detour. */}
+                {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
+                {hit.label ? ` · ${hit.label}` : ''}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       ) : null}
     </View>
   );
@@ -334,6 +329,11 @@ export function RoutePanel({
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  // The mode-dependent toolbar's fold, and the category browser one of its
+  // buttons opens. Both live here rather than in their own components so the
+  // toolbar can own what it shows (ROADMAP: "an intentional toolbar").
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [alongOpen, setAlongOpen] = useState(false);
   const [saveName, setSaveName] = useState('Planned route');
   const [saveCollection, setSaveCollection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -362,6 +362,13 @@ export function RoutePanel({
   useEffect(() => {
     if (editing !== null && !stops.some((w) => w.id === editing)) setEditing(null);
   }, [editing, stops]);
+
+  // A cleared or shortened plan closes the stops browser. Without this, a fresh
+  // plan re-opened it the moment it reached two stops — and firing an explore
+  // request nobody asked for is worse than a panel that has to be re-opened.
+  useEffect(() => {
+    if (stops.length < 2) setAlongOpen(false);
+  }, [stops.length]);
 
   // Leaving transit mode drops the "a trip is on the map" state so Back doesn't
   // spend a press re-opening a panel the user is no longer looking at a trip in.
@@ -417,6 +424,67 @@ export function RoutePanel({
 
   // Guidance needs somewhere to go; the last stop is it.
   const destination = stops.length > 0 ? stops[stops.length - 1]!.pos : null;
+
+  /**
+   * Whether each secondary action can currently act. Placement is the shared
+   * descriptor's job (`routeActionsFor`); existence stays here, because it is
+   * read off this panel's own state. An action that cannot act is absent from
+   * both the visible row and the fold — never greyed out, and never a dead
+   * entry behind "More".
+   */
+  const actionAvailable: Record<RouteActionKey, boolean> = {
+    // Every one of these needs a computed path to act on, which a timetable
+    // never produces: a journey is legs and times, not a track.
+    alongRoute: Boolean(path) && !transitMode && !route.roundTrip && stops.length >= 2,
+    saveTrack: Boolean(path) && !transitMode,
+    exportGpx: Boolean(path) && !transitMode,
+    // Reverse works in transit mode too — swapping the ends is the commonest
+    // thing anyone does to a journey ("now get me home"), and unlike Optimize
+    // it means something to a timetable.
+    reverse: !route.roundTrip && stops.length >= 2,
+    optimize: !transitMode && !route.roundTrip && stops.length >= 4,
+    clear: stops.length > 0,
+    share: stops.length > 0,
+  };
+  const toolbar = routeActionsFor(route.profile);
+  const primaryActions = toolbar.primary.filter((action) => actionAvailable[action.key]);
+  const moreActions = toolbar.more.filter((action) => actionAvailable[action.key]);
+
+  const renderAction = (action: RouteActionInfo) => {
+    const press = {
+      alongRoute: () => setAlongOpen((open) => !open),
+      saveTrack: () => {
+        setSaved(false);
+        setSaveOpen((open) => !open);
+      },
+      exportGpx: () => path && onExport(path),
+      reverse: route.reverse,
+      optimize: route.optimize,
+      clear: route.clear,
+      // A link needs stops, not a routed path: it carries the plan and the
+      // recipient's app routes it — including a transit journey, which reopens
+      // as the same endpoints in transit mode.
+      share: onShareLink,
+    }[action.key];
+    const lit = action.key === 'alongRoute' && alongOpen;
+    const label =
+      action.key === 'saveTrack' && saved
+        ? 'Saved as track'
+        : action.key === 'exportGpx'
+          ? 'Export GPX'
+          : action.label;
+    return (
+      <Pressable
+        key={action.key}
+        style={[styles.button, styles.buttonQuiet, lit && styles.buttonQuietOn]}
+        onPress={press}
+        accessibilityRole="button"
+        testID={`route-action-${action.key}`}
+      >
+        <Text style={styles.buttonQuietText}>{label}</Text>
+      </Pressable>
+    );
+  };
 
   return (
     <BottomSheet
@@ -629,10 +697,6 @@ export function RoutePanel({
           />
         ) : null}
 
-        {!route.roundTrip && !transitMode && path && stops.length >= 2 ? (
-          <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />
-        ) : null}
-
         <View style={styles.sourceRow}>
           <Pressable
             style={[styles.chip, locating && styles.chipBusy]}
@@ -756,87 +820,165 @@ export function RoutePanel({
           </Text>
         ) : null}
 
-        {/* This panel is the only travel-mode picker in the app, so guidance
-          starts here. Transit has no turn-by-turn, so it shows the board below
-          instead of a button that would promise directions it cannot give. */}
-        {!transitMode ? (
-          <Pressable
-            style={[styles.navigate, !destination && styles.buttonDisabled]}
-            disabled={!destination}
-            // Guidance replaces the planned origin with the live position, so
-            // the stops between first and last ride along as via points.
-            onPress={() =>
-              destination &&
-              onNavigate(
-                destination,
-                stops.slice(1, -1).map((w) => w.pos),
-              )
-            }
-            testID="route-navigate"
-          >
-            <Text style={styles.navigateText}>Start navigation</Text>
-          </Pressable>
-        ) : null}
+        {!transitMode && route.error ? <Text style={styles.error}>{route.error}</Text> : null}
 
-        {/* Each action appears only once it can do something, rather than sitting
-          there greyed out: Reverse needs two ends, Optimize a tour to shorten,
-          Export a computed track, and Clear/Share something to act on. With no
-          stops the whole row is gone rather than a strip of dead buttons. */}
-        {route.waypoints.length > 0 ? (
-          <View style={styles.actionRow}>
-            {/* Reverse works in transit mode too — swapping the ends is the
-              commonest thing anyone does to a journey ("now get me home"), and
-              unlike Optimize it means something to a timetable. */}
-            {!route.roundTrip && route.waypoints.length >= 2 ? (
-              <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.reverse}>
-                <Text style={styles.buttonQuietText}>Reverse</Text>
-              </Pressable>
-            ) : null}
-            {!transitMode && !route.roundTrip && route.waypoints.length >= 4 ? (
-              <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.optimize}>
-                <Text style={styles.buttonQuietText}>Optimize</Text>
-              </Pressable>
-            ) : null}
-            <Pressable style={[styles.button, styles.buttonQuiet]} onPress={route.clear}>
-              <Text style={styles.buttonQuietText}>Clear</Text>
-            </Pressable>
-            {/* A journey is legs and times, not a track — nothing to export as
-              GPX, so the button is simply absent rather than dead. */}
-            {path && !transitMode ? (
+        {/* The answer, and the one thing you do with it, in the same block.
+          Both used to be somewhere else: "Start navigation" was a full-width
+          accent slab directly under the stops, and the distance/time/ETA the
+          sheet was opened for sat last — under the slab, under six same-weight
+          secondary buttons, well past the sheet's peek. So the loudest thing on
+          screen was the commitment and the quietest was what you were
+          committing to. Now the trip time leads, the rest of the numbers read
+          under it, and Start is a button beside them rather than a band across
+          them. Web's twin (apps/web/src/routing/RoutePanel.tsx). */}
+        {!transitMode && (path || destination) ? (
+          <View style={styles.result}>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryFigures}>
+                {path ? (
+                  <>
+                    <Text style={styles.summaryTime}>{fmtDuration(path.timeMs)}</Text>
+                    <Text style={styles.summaryDetail}>
+                      {fmtKm(path.distanceM)} · ETA {fmtEta(path.timeMs)}
+                      {/* The measured part of that time, named rather than
+                          silently folded in — an ETA that moved for a reason
+                          should say so. */}
+                      {formatTrafficDelay(path.trafficDelayMs)
+                        ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
+                        : ''}
+                    </Text>
+                    {/* Climb on its own line rather than a fourth clause on the
+                        one above: with Start beside it the detail line has no
+                        room left, and the wrap read as a broken layout. */}
+                    {path.ascentM > 0 || path.descentM > 0 ? (
+                      <Text style={styles.summaryDetail}>
+                        ↗ {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+                      </Text>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={styles.summaryDetail}>
+                    {route.loading
+                      ? 'Routing…'
+                      : // The place-card hand-off lands here with the
+                        // destination alone, and no route can be drawn until
+                        // there is a start. Say what Start will do rather than
+                        // leaving the button beside an empty readout.
+                        stops.length === 1
+                        ? 'Guidance starts from where you are.'
+                        : ''}
+                  </Text>
+                )}
+              </View>
+              {/* This panel is the app's only travel-mode picker, so guidance
+                starts here. Transit has no turn-by-turn, so it shows the board
+                below instead of a button that would promise directions it
+                cannot give. The visible word is short because the block it sits
+                in already says what is being started; the accessibility label
+                keeps the full sentence. */}
               <Pressable
-                style={[styles.button, styles.buttonQuiet]}
-                onPress={() => {
-                  setSaved(false);
-                  setSaveOpen((open) => !open);
-                }}
-                testID="route-save-track"
+                style={[styles.navigate, !destination && styles.buttonDisabled]}
+                disabled={!destination}
+                accessibilityRole="button"
+                accessibilityLabel="Start navigation"
+                // Guidance replaces the planned origin with the live position,
+                // so the stops between first and last ride along as via points.
+                onPress={() =>
+                  destination &&
+                  onNavigate(
+                    destination,
+                    stops.slice(1, -1).map((w) => w.pos),
+                  )
+                }
+                testID="route-navigate"
               >
-                <Text style={styles.buttonQuietText}>
-                  {saved ? 'Saved as track' : 'Save track'}
-                </Text>
+                <Text style={styles.navigateText}>Start</Text>
               </Pressable>
-            ) : null}
-            {path && !transitMode ? (
+            </View>
+            {profileData ? (
               <Pressable
-                style={[styles.button, styles.buttonQuiet]}
-                onPress={() => onExport(path)}
-                testID="route-export"
+                style={[styles.chip, profileOpen && styles.chipSelected, styles.selfStart]}
+                onPress={() => setProfileOpen((o) => !o)}
+                testID="route-profile-toggle"
               >
-                <Text style={styles.buttonQuietText}>Export GPX</Text>
+                <Text style={styles.chipText}>Profile</Text>
               </Pressable>
             ) : null}
-            {/* A link needs stops, not a routed path: it carries the plan and
-              the recipient's app routes it — including a transit journey,
-              which reopens as the same endpoints in transit mode. */}
-            <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={onShareLink}
-              testID="route-share-link"
-            >
-              <Text style={styles.buttonQuietText}>Share</Text>
-            </Pressable>
+            {surfaces.length > 0 ? (
+              <View style={styles.surfaceRow}>
+                <Text style={styles.surfaceTitle}>Surface</Text>
+                {surfaces.map((surface) => (
+                  <Text key={surface.label} style={styles.surfaceText}>
+                    {surface.label} {surface.percent}%
+                  </Text>
+                ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
+        {!transitMode && profileOpen && profileData ? (
+          <ElevationChart data={profileData} enrichment={path?.enrichment} />
+        ) : null}
+
+        {/* Beside the result, not below the toolbar: an alternative is a choice
+          about the answer, so it belongs where the answer is read. */}
+        {!transitMode && route.paths && route.paths.length > 1 ? (
+          <View style={styles.chipRow}>
+            {route.paths.map((p, i) => (
+              <Pressable
+                key={i}
+                style={[styles.chip, i === route.selectedPath && styles.chipSelected]}
+                onPress={() => route.selectPath(i)}
+                testID={`route-alt-${i}`}
+              >
+                <Text style={styles.chipText}>
+                  {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        {/* One toolbar per travel mode (`routeActionsFor`, @atlas/routing), not
+          the same six buttons at one weight for everyone: driving leads with
+          the stops along the way, walking with the track it will keep and
+          carry, and the rest fold under "More" — one tap away, never gone.
+          Availability still decides existence: an action that cannot act is
+          absent from both rows rather than folded into a menu of dead entries,
+          so with no stops the whole toolbar is gone. */}
+        {primaryActions.length > 0 || moreActions.length > 0 ? (
+          <View style={styles.actionRow}>
+            {primaryActions.map(renderAction)}
+            {moreActions.length > 0 ? (
+              <Pressable
+                style={[styles.button, styles.buttonQuiet, moreOpen && styles.buttonQuietOn]}
+                onPress={() => setMoreOpen((open) => !open)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: moreOpen }}
+                testID="route-more"
+              >
+                <Text style={styles.buttonQuietText}>More {moreOpen ? '▴' : '▾'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+        {moreOpen && moreActions.length > 0 ? (
+          <View style={[styles.actionRow, styles.actionRowMore]}>
+            {moreActions.map(renderAction)}
+          </View>
+        ) : null}
+
+        {/* The category browser the toolbar's "Stops along route" opens: fuel,
+          charging and rest areas on a drive, cafés and viewpoints on foot. */}
+        {alongOpen && path && !route.roundTrip && !transitMode && stops.length >= 2 ? (
+          <AlongRouteStops
+            route={route}
+            path={path}
+            fetchNearby={fetchNearby}
+            onPicked={() => setAlongOpen(false)}
+          />
+        ) : null}
+
         {saveOpen && path && !transitMode ? (
           <View style={styles.saveTrack}>
             <Text style={styles.fieldLabel}>Track name</Text>
@@ -912,61 +1054,6 @@ export function RoutePanel({
               onShowTransitTrip(trip);
             }}
           />
-        ) : null}
-
-        {!transitMode && route.error ? <Text style={styles.error}>{route.error}</Text> : null}
-        {!transitMode && path ? (
-          <View>
-            <View style={styles.statsRow}>
-              <Text style={styles.stats}>
-                {fmtKm(path.distanceM)} · {fmtDuration(path.timeMs)} · ETA {fmtEta(path.timeMs)} · ↗{' '}
-                {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
-                {/* The measured part of that time, named rather than silently
-                    folded in — an ETA that moved for a reason should say so. */}
-                {formatTrafficDelay(path.trafficDelayMs)
-                  ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
-                  : ''}
-              </Text>
-              {profileData ? (
-                <Pressable
-                  style={[styles.chip, profileOpen && styles.chipSelected]}
-                  onPress={() => setProfileOpen((o) => !o)}
-                  testID="route-profile-toggle"
-                >
-                  <Text style={styles.chipText}>Profile</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {surfaces.length > 0 ? (
-              <View style={styles.surfaceRow}>
-                <Text style={styles.surfaceTitle}>Surface</Text>
-                {surfaces.map((surface) => (
-                  <Text key={surface.label} style={styles.surfaceText}>
-                    {surface.label} {surface.percent}%
-                  </Text>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-        {!transitMode && profileOpen && profileData ? (
-          <ElevationChart data={profileData} enrichment={path?.enrichment} />
-        ) : null}
-        {!transitMode && route.paths && route.paths.length > 1 ? (
-          <View style={styles.chipRow}>
-            {route.paths.map((p, i) => (
-              <Pressable
-                key={i}
-                style={[styles.chip, i === route.selectedPath && styles.chipSelected]}
-                onPress={() => route.selectPath(i)}
-                testID={`route-alt-${i}`}
-              >
-                <Text style={styles.chipText}>
-                  {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
         ) : null}
       </ScrollView>
     </BottomSheet>
@@ -1084,11 +1171,32 @@ const styles = StyleSheet.create({
   sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   chipBusy: { opacity: 0.6 },
   hint: { fontSize: 12, color: theme.textMuted },
+  /* The result and its one action, on one line: the trip time leads, the rest
+     of the numbers read beneath it, and Start sits beside them. It replaced a
+     full-width accent slab directly under the stops that was the loudest thing
+     on the sheet while the numbers it was about sat last, below six secondary
+     buttons and well past the peek. */
+  result: { gap: 6 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  summaryFigures: { flexGrow: 1, flexShrink: 1, gap: 1 },
+  /** The one number the sheet was opened for, so the one number set in display size. */
+  summaryTime: { fontSize: 24, fontWeight: '700', color: theme.text },
+  summaryDetail: { fontSize: 13, color: theme.textMuted },
+  selfStart: { alignSelf: 'flex-start' },
+  /* Still the only accent-filled control on the sheet — primary by being the
+     one thing that is coloured, not by being the widest. */
   navigate: {
+    flexShrink: 0,
     backgroundColor: theme.accent,
     borderRadius: 10,
-    paddingVertical: 12,
+    // Sized down from a full-width band, but not below a thumb: this is the one
+    // control that gets pressed in a car, so it keeps Android's 48dp minimum.
+    minHeight: 48,
+    minWidth: 92,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 15 },
   iconButton: { paddingHorizontal: 6, paddingVertical: 2 },
@@ -1104,10 +1212,20 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: theme.onAccent, fontWeight: '600' },
   buttonQuiet: { backgroundColor: theme.surfaceMuted },
+  /** A toolbar button whose panel is open, e.g. the stops browser. */
+  buttonQuietOn: { backgroundColor: theme.accentFaint },
   buttonQuietText: { color: theme.text, fontWeight: '600' },
+  /* The fold under "More": indented and ruled, so it reads as belonging to the
+     row above rather than as a second toolbar of equal standing. */
+  actionRowMore: {
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    // Not `theme.border`: on Android that resolves to colorForeground, a
+    // full-contrast rule where web's --border is a hairline. A faint accent
+    // reads as "these belong to the button above" in both themes.
+    borderLeftColor: theme.accentFaint,
+  },
   error: { fontSize: 13, color: theme.danger },
-  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  stats: { fontSize: 14, color: theme.text, fontWeight: '600', flexShrink: 1 },
   surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
   surfaceTitle: { fontSize: 12, color: theme.text, fontWeight: '700' },
   surfaceText: { fontSize: 12, color: theme.textMuted },
@@ -1134,7 +1252,15 @@ const styles = StyleSheet.create({
   stopResultName: { fontSize: 14, color: theme.text, fontWeight: '600' },
   stopResultLabel: { fontSize: 11, color: theme.textMuted },
   stopStatus: { fontSize: 11, color: theme.textMuted, paddingHorizontal: 10, paddingVertical: 6 },
-  alongSearch: { alignItems: 'stretch', gap: 4 },
+  /* Opened from the toolbar's "Stops along route" rather than from a disclosure
+     of its own, so it needs the frame that button no longer gives it. */
+  alongSearch: {
+    alignItems: 'stretch',
+    gap: 4,
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
+  },
   alongCategories: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   alongCategory: {
     borderRadius: 14,
@@ -1146,15 +1272,4 @@ const styles = StyleSheet.create({
   },
   alongCategoryOn: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   alongCategoryText: { fontSize: 12, color: theme.text, fontWeight: '600' },
-  alongToggle: {
-    alignSelf: 'flex-start',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: theme.surfaceActive,
-    borderWidth: 1,
-    borderColor: theme.border,
-  },
-  alongToggleSelected: { borderColor: theme.accent },
-  alongToggleText: { fontSize: 13, color: theme.text, fontWeight: '600' },
 });

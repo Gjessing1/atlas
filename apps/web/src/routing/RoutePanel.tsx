@@ -25,6 +25,9 @@ import {
   routePathToTrackData,
   routeSurfaceBreakdown,
   routeOptionsFor,
+  routeActionsFor,
+  type RouteActionInfo,
+  type RouteActionKey,
   type RoutePath,
   vehicleChipLabel,
 } from '@atlas/routing';
@@ -146,12 +149,19 @@ function AlongRouteStops({
   route,
   path,
   fetchNearby,
+  onPicked,
 }: {
   route: RoutePlanner;
   path: RoutePath;
   fetchNearby: FetchNearbyFn;
+  /** Close the browser once a stop has joined the plan. */
+  onPicked: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Always open: the disclosure that used to live here is now the toolbar's
+  // "Stops along route" button, which is where a driver looks for it (ROADMAP:
+  // "Give each routing type an intentional toolbar"). Kept as a constant so
+  // useRouteStops keeps its "only search while the panel is showing" contract.
+  const open = true;
   const waypoints = useMemo(() => route.waypoints.map((w) => w.pos), [route.waypoints]);
   const { category, setCategory, hits, status } = useRouteStops({
     path,
@@ -164,59 +174,47 @@ function AlongRouteStops({
 
   return (
     <div className="route-along-search">
-      <button
-        type="button"
-        className="route-along-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        Stops along route
-      </button>
-      {open && (
-        <>
-          <div className="route-along-categories" role="tablist" aria-label="Stop category">
-            {categories.map((item) => (
+      <div className="route-along-categories" role="tablist" aria-label="Stop category">
+        {categories.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={category === item.id}
+            className={`route-along-category${category === item.id ? ' on' : ''}`}
+            onClick={() => setCategory(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {status === 'loading' && <p className="route-hint">Looking along the route…</p>}
+      {status === 'error' && <p className="route-hint">Search unavailable right now.</p>}
+      {status === 'ready' && hits.length === 0 && (
+        <p className="route-hint">Nothing in this category along this route.</p>
+      )}
+      {hits.length > 0 && (
+        <ul>
+          {hits.map((hit) => (
+            <li key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}>
               <button
-                key={item.id}
                 type="button"
-                role="tab"
-                aria-selected={category === item.id}
-                className={`route-along-category${category === item.id ? ' on' : ''}`}
-                onClick={() => setCategory(item.id)}
+                onClick={() => {
+                  route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
+                  onPicked();
+                }}
               >
-                {item.label}
+                <span className="result-name">{hit.name}</span>
+                <span className="result-label">
+                  <strong>{stopAlongLabel(hit.alongM)}</strong>
+                  {/* Only worth saying when it is a real detour. */}
+                  {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
+                  {hit.label ? ` · ${hit.label}` : ''}
+                </span>
               </button>
-            ))}
-          </div>
-          {status === 'loading' && <p className="route-hint">Looking along the route…</p>}
-          {status === 'error' && <p className="route-hint">Search unavailable right now.</p>}
-          {status === 'ready' && hits.length === 0 && (
-            <p className="route-hint">Nothing in this category along this route.</p>
-          )}
-          {hits.length > 0 && (
-            <ul>
-              {hits.map((hit) => (
-                <li key={`${hit.name}/${hit.position.lat}/${hit.position.lng}`}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      route.insertWaypoint(hit.insertIndex, hit.position, hit.name);
-                      setOpen(false);
-                    }}
-                  >
-                    <span className="result-name">{hit.name}</span>
-                    <span className="result-label">
-                      <strong>{stopAlongLabel(hit.alongM)}</strong>
-                      {/* Only worth saying when it is a real detour. */}
-                      {hit.offRouteM > 250 ? ` · ${fmtDistanceM(hit.offRouteM)} off route` : ''}
-                      {hit.label ? ` · ${hit.label}` : ''}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -272,6 +270,11 @@ export function RoutePanel({
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  // The mode-dependent toolbar's fold, and the category browser one of its
+  // buttons opens. Both live here rather than in their own components so the
+  // toolbar can own what it shows (ROADMAP: "an intentional toolbar").
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [alongOpen, setAlongOpen] = useState(false);
   const [saveName, setSaveName] = useState('Planned route');
   const [saveCollection, setSaveCollection] = useState('');
   const [saving, setSaving] = useState(false);
@@ -316,6 +319,13 @@ export function RoutePanel({
   useEffect(() => {
     if (editing !== null && !stops.some((w) => w.id === editing)) setEditing(null);
   }, [editing, stops]);
+
+  // A cleared or shortened plan closes the stops browser. Without this, a fresh
+  // plan re-opened it the moment it reached two stops — and firing an explore
+  // request nobody asked for is worse than a panel that has to be re-opened.
+  useEffect(() => {
+    if (stops.length < 2) setAlongOpen(false);
+  }, [stops.length]);
 
   /**
    * Put the current position at the front of the plan. Always the start, never
@@ -373,6 +383,100 @@ export function RoutePanel({
     setSaving(false);
     setSaved(ok);
     if (ok) setSaveOpen(false);
+  };
+
+  /**
+   * Whether each secondary action can currently act. Placement is the shared
+   * descriptor's job (`routeActionsFor`); existence stays here, because it is
+   * read off this panel's own state. An action that cannot act is absent from
+   * both the visible row and the fold — never greyed out, and never a dead
+   * entry behind "More".
+   */
+  const actionAvailable: Record<RouteActionKey, boolean> = {
+    // Every one of these needs a computed path to act on, which a timetable
+    // never produces: a journey is legs and times, not a track.
+    alongRoute: Boolean(path) && !transitMode && !route.roundTrip && stops.length >= 2,
+    saveTrack: Boolean(path) && !transitMode,
+    exportGpx: Boolean(path) && !transitMode,
+    // Reverse works in transit mode too — swapping the ends is the commonest
+    // thing anyone does to a journey ("now get me home"), and unlike Optimize
+    // it means something to a timetable, which ignores via points entirely.
+    reverse: !route.roundTrip && stops.length >= 2,
+    optimize: !transitMode && !route.roundTrip && stops.length >= 4,
+    clear: stops.length > 0,
+    share: stops.length > 0,
+  };
+  const toolbar = routeActionsFor(route.profile);
+  const primaryActions = toolbar.primary.filter((action) => actionAvailable[action.key]);
+  const moreActions = toolbar.more.filter((action) => actionAvailable[action.key]);
+
+  const renderAction = (action: RouteActionInfo) => {
+    switch (action.key) {
+      case 'alongRoute':
+        return (
+          <button
+            key={action.key}
+            type="button"
+            aria-expanded={alongOpen}
+            onClick={() => setAlongOpen((open) => !open)}
+          >
+            {action.label}
+          </button>
+        );
+      case 'saveTrack':
+        return (
+          <button
+            key={action.key}
+            type="button"
+            onClick={() => {
+              setSaved(false);
+              setSaveOpen((open) => !open);
+            }}
+          >
+            {saved ? 'Saved as track' : action.label}
+          </button>
+        );
+      case 'exportGpx':
+        return (
+          <button key={action.key} type="button" onClick={exportGpx}>
+            {action.label}
+          </button>
+        );
+      case 'reverse':
+        return (
+          <button key={action.key} type="button" onClick={route.reverse}>
+            {action.label}
+          </button>
+        );
+      case 'optimize':
+        return (
+          <button
+            key={action.key}
+            type="button"
+            onClick={route.optimize}
+            title="Reorder intermediate stops for a shorter tour"
+          >
+            {action.label}
+          </button>
+        );
+      case 'clear':
+        return (
+          <button key={action.key} type="button" onClick={route.clear}>
+            {action.label}
+          </button>
+        );
+      case 'share':
+        return (
+          <button
+            key={action.key}
+            type="button"
+            onClick={copyLink}
+            title="Copy a link that reopens this plan"
+          >
+            {copied ? 'Link copied' : action.label}
+          </button>
+        );
+    }
   };
 
   return (
@@ -530,10 +634,6 @@ export function RoutePanel({
           </div>
         )}
 
-        {!route.roundTrip && !transitMode && path && route.waypoints.length >= 2 && (
-          <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />
-        )}
-
         {route.waypoints.length > 0 ? (
           <ol className="route-waypoints">
             {route.waypoints.map((w, i) => {
@@ -679,77 +779,174 @@ export function RoutePanel({
           wrong slot — clicking the line is off there, and the hint says only
           what a loop can actually do. */}
         {!transitMode && route.waypoints.length >= 2 && (
-          <p className="route-hint">
-            Drag rows to reorder · drag markers to move
-            {route.roundTrip ? '.' : ' · click the route line to add a via point.'}
+          <p className="route-hint route-hint-quiet">
+            Drag to reorder · drag a marker to move it
+            {route.roundTrip ? '' : ' · click the line for a via point'}
           </p>
         )}
 
-        {/* This panel is the only travel-mode picker, so guidance starts here.
-          Transit has no turn-by-turn — it shows the journey board below instead
-          of a button that would promise directions it cannot give. */}
-        {!transitMode && destination && (
-          <button
-            type="button"
-            className="route-navigate"
-            // Guidance replaces the planned origin with the live position, so
-            // the stops between first and last ride along as via points.
-            onClick={() =>
-              onNavigate(
-                destination,
-                route.waypoints.slice(1, -1).map((w) => w.pos),
-              )
-            }
-          >
-            Start navigation
-          </button>
-        )}
+        {!transitMode && route.error && <div className="route-error">{route.error}</div>}
 
-        {/* Each action appears only once it can do something, rather than sitting
-          there greyed out: Reverse needs two ends, Optimize a tour to shorten,
-          Export a computed track, and Clear/Share something to act on. With no
-          stops the whole row is gone rather than a strip of dead buttons. */}
-        {route.waypoints.length > 0 && (
-          <div className="route-actions">
-            {!route.roundTrip && route.waypoints.length >= 2 && (
-              <button type="button" onClick={route.reverse}>
-                Reverse
-              </button>
-            )}
-            {!route.roundTrip && route.waypoints.length >= 4 && (
-              <button
-                type="button"
-                onClick={route.optimize}
-                title="Reorder intermediate stops for a shorter tour"
-              >
-                Optimize
-              </button>
-            )}
-            <button type="button" onClick={route.clear}>
-              Clear
-            </button>
-            {/* A journey is a timetable, not a track: there is nothing to export. */}
-            {path && !transitMode && (
-              <>
+        {/* The answer, and the one thing you do with it, in the same block.
+          Both used to be somewhere else: "Start navigation" was a full-width
+          accent slab directly under the stops, and the distance/time/ETA the
+          panel was opened for sat last — under the slab, under six same-weight
+          secondary buttons, off the bottom of a phone sheet. So the loudest
+          thing on screen was the commitment and the quietest was what you were
+          committing to. Now the trip time leads, the rest of the numbers read
+          under it, and Start is a button beside them rather than a band across
+          them. It is still the only accent-filled control in the panel.
+
+          `route-stats` wraps the whole result — figures, ferry and surface —
+          because those three are one readout of one path. */}
+        {!transitMode && (path || destination) && (
+          <div className="route-stats">
+            <div className="route-summary">
+              <div className="route-summary-figures">
+                {path ? (
+                  <>
+                    <strong className="route-summary-time">{fmtDuration(path.timeMs)}</strong>
+                    <span className="route-summary-detail">
+                      {fmtKm(path.distanceM)} · ETA {fmtEta(path.timeMs)}
+                      {/* The measured part of that time, named rather than
+                          silently folded in — an ETA that moved for a reason
+                          should say so. */}
+                      {formatTrafficDelay(path.trafficDelayMs) && (
+                        <span className="route-traffic-delay">
+                          {' '}
+                          · {formatTrafficDelay(path.trafficDelayMs)}
+                        </span>
+                      )}
+                    </span>
+                    {/* Climb gets its own line rather than a fourth clause on
+                        the one above: with Start beside it the detail line has
+                        about 190px, and "↗ 455 m ↘ 455 m" is what pushed it
+                        into a wrap that read as a broken layout. The profile
+                        adapter fills terrain heights where coverage exists;
+                        0/0 still means "unknown" elsewhere. */}
+                    {(path.ascentM > 0 || path.descentM > 0) && (
+                      <span className="route-summary-detail">
+                        ↗ {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="route-summary-detail">
+                    {route.loading
+                      ? 'Routing…'
+                      : // The place-card hand-off lands here with the destination
+                        // alone, and no route can be drawn until there is a start.
+                        // Say what Start will do rather than leaving the button
+                        // beside an empty readout.
+                        stops.length === 1
+                        ? 'Guidance starts from where you are.'
+                        : null}
+                  </span>
+                )}
+              </div>
+              {/* This panel is the only travel-mode picker, so guidance starts
+                here. Transit has no turn-by-turn — it shows the journey board
+                below instead of a button that would promise directions it
+                cannot give. The visible word is short because the block it sits
+                in already says what is being started; the accessible name keeps
+                the full sentence. */}
+              {destination && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSaved(false);
-                    setSaveOpen((open) => !open);
-                  }}
+                  className="route-navigate"
+                  aria-label="Start navigation"
+                  // Guidance replaces the planned origin with the live position,
+                  // so the stops between first and last ride along as via points.
+                  onClick={() =>
+                    onNavigate(
+                      destination,
+                      route.waypoints.slice(1, -1).map((w) => w.pos),
+                    )
+                  }
                 >
-                  {saved ? 'Saved as track' : 'Save track'}
+                  Start
                 </button>
-                <button type="button" onClick={exportGpx}>
-                  Export GPX
-                </button>
-              </>
+              )}
+            </div>
+            {/* A ferry is timetabled and, on foot or by bike, the one stretch you
+              cannot simply set off along. Non-car routes avoid ferries where a
+              land route exists, so if one survived, it is the only way across
+              and the traveller needs to know before setting out. */}
+            {path?.hasFerry && (
+              <div className="route-ferry-note">
+                ⛴️ This route crosses by ferry
+                {route.profile === 'car'
+                  ? '.'
+                  : ' — there is no land route. Check sailing times, or try public transport.'}
+              </div>
             )}
-            <button type="button" onClick={copyLink} title="Copy a link that reopens this plan">
-              {copied ? 'Link copied' : 'Share'}
-            </button>
+            {surfaces.length > 0 && (
+              <div className="surface-breakdown" aria-label="Route surfaces">
+                <strong>Surface</strong>
+                {surfaces.map((surface) => (
+                  <span key={surface.label}>
+                    {surface.label} {surface.percent}%
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
+
+        {/* Beside the result, not below the toolbar: an alternative is a choice
+          about the answer, so it belongs where the answer is read. */}
+        {!transitMode && route.paths && route.paths.length > 1 && (
+          <div className="route-alternatives" role="group" aria-label="Route alternatives">
+            {route.paths.map((p, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-pressed={i === route.selectedPath}
+                onClick={() => route.selectPath(i)}
+              >
+                {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* One toolbar per travel mode (`routeActionsFor`, @atlas/routing), not
+          the same six buttons at one weight for everyone: driving leads with
+          the stops along the way, walking with the track it will keep and
+          carry, and the rest fold under "More" — one tap away, never gone.
+          Availability still decides existence: an action that cannot act is
+          absent from both rows rather than folded into a menu of dead entries,
+          so with no stops the whole toolbar is gone. */}
+        {(primaryActions.length > 0 || moreActions.length > 0) && (
+          <div className="route-actions">
+            {primaryActions.map(renderAction)}
+            {moreActions.length > 0 && (
+              <button
+                type="button"
+                className="route-more"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                More <span aria-hidden="true">{moreOpen ? '▴' : '▾'}</span>
+              </button>
+            )}
+          </div>
+        )}
+        {moreOpen && moreActions.length > 0 && (
+          <div className="route-actions route-actions-more">{moreActions.map(renderAction)}</div>
+        )}
+
+        {/* The category browser the toolbar's "Stops along route" opens: fuel,
+          charging and rest areas on a drive, cafés and viewpoints on foot. */}
+        {alongOpen && path && !route.roundTrip && !transitMode && route.waypoints.length >= 2 && (
+          <AlongRouteStops
+            route={route}
+            path={path}
+            fetchNearby={fetchNearby}
+            onPicked={() => setAlongOpen(false)}
+          />
+        )}
+
         {saveOpen && path && !transitMode && (
           <div className="route-save-track">
             <label>
@@ -799,63 +996,6 @@ export function RoutePanel({
         )}
         {transitMode && (
           <TransitResults transit={transit} onStartGuidance={onStartTransitGuidance} />
-        )}
-
-        {!transitMode && route.error && <div className="route-error">{route.error}</div>}
-        {!transitMode && path && (
-          <div className="route-stats">
-            <strong>{fmtKm(path.distanceM)}</strong> · {fmtDuration(path.timeMs)} · ETA{' '}
-            {fmtEta(path.timeMs)}
-            {/* The measured part of that time, named rather than silently
-                folded in — an ETA that moved for a reason should say so. */}
-            {formatTrafficDelay(path.trafficDelayMs) && (
-              <span className="route-traffic-delay">
-                {' '}
-                · {formatTrafficDelay(path.trafficDelayMs)}
-              </span>
-            )}
-            {/* The profile adapter fills terrain heights where coverage exists;
-                0/0 still means "unknown" elsewhere. */}
-            {path.ascentM > 0 || path.descentM > 0
-              ? ` · ↗ ${Math.round(path.ascentM)} m ↘ ${Math.round(path.descentM)} m`
-              : null}
-            {/* A ferry is timetabled and, on foot or by bike, the one stretch you
-              cannot simply set off along. Non-car routes avoid ferries where a
-              land route exists, so if one survived, it is the only way across
-              and the traveller needs to know before setting out. */}
-            {path.hasFerry && (
-              <div className="route-ferry-note">
-                ⛴️ This route crosses by ferry
-                {route.profile === 'car'
-                  ? '.'
-                  : ' — there is no land route. Check sailing times, or try public transport.'}
-              </div>
-            )}
-            {surfaces.length > 0 && (
-              <div className="surface-breakdown" aria-label="Route surfaces">
-                <strong>Surface</strong>
-                {surfaces.map((surface) => (
-                  <span key={surface.label}>
-                    {surface.label} {surface.percent}%
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {!transitMode && route.paths && route.paths.length > 1 && (
-          <div className="route-alternatives" role="group" aria-label="Route alternatives">
-            {route.paths.map((p, i) => (
-              <button
-                key={i}
-                type="button"
-                aria-pressed={i === route.selectedPath}
-                onClick={() => route.selectPath(i)}
-              >
-                {altChipLabel(route.paths!, i, vias)} · {fmtKm(p.distanceM)}
-              </button>
-            ))}
-          </div>
         )}
       </div>
     </div>

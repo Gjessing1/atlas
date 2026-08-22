@@ -463,6 +463,78 @@ export function routeOptionsFor(profile: RoutingProfile): readonly RouteOptionIn
 }
 
 /**
+ * One secondary action of the planner's toolbar.
+ *
+ * The row used to be the same six buttons for every profile, at one weight:
+ * Reverse, Optimize, Clear, Save track, Export GPX, Share — a strip that asked
+ * a driver to read past GPX export to reach Clear, and a hiker to read past
+ * Optimize to reach the export that is the whole point of planning a walk
+ * (ROADMAP: "Give each routing type an intentional toolbar"). Nothing is
+ * removed; what changes is which actions a mode shows without being asked.
+ */
+export type RouteActionKey =
+  'alongRoute' | 'saveTrack' | 'exportGpx' | 'reverse' | 'optimize' | 'clear' | 'share';
+
+export interface RouteActionInfo {
+  readonly key: RouteActionKey;
+  /** The button's own words, on both clients. */
+  readonly label: string;
+  /**
+   * The profiles that keep this action in the visible row. Everywhere else it
+   * folds under "More" — still one tap away, never gone, because a planner
+   * that *hides* a capability per mode is worse than one that lists them all.
+   */
+  readonly primary: readonly RoutingProfile[];
+}
+
+/** Every profile — for the actions that are constant whatever is being planned. */
+const EVERY_PROFILE: readonly RoutingProfile[] = ROUTING_PROFILES.map((p) => p.id);
+
+/** Walking in all its shapes, which want the same toolbar. */
+const ON_FOOT: readonly RoutingProfile[] = ['foot', 'hike', 'run'];
+
+/**
+ * Every secondary action, in the order both clients show them — mode-specific
+ * first, then the two that mean the same thing in every mode.
+ *
+ * Availability is *not* here: whether an action can act (Reverse needs two
+ * ends, Optimize a tour to shorten, the exports a computed path) is state the
+ * clients already hold, and an action that cannot act is absent from both rows
+ * rather than folded into "More". This list decides placement only.
+ */
+export const ROUTE_ACTIONS: readonly RouteActionInfo[] = [
+  // Fuel, charging and rest areas are what a driving plan is edited for after
+  // the ends are set; on foot the same browser offers cafés and viewpoints,
+  // which is a detour worth taking but not the reason the panel is open.
+  { key: 'alongRoute', label: 'Stops along route', primary: ['car'] },
+  // A planned walk is a thing you keep; a planned drive is a thing you do.
+  { key: 'saveTrack', label: 'Save track', primary: ON_FOOT },
+  // The reason a bike or hiking route is planned on a desktop at all: it has
+  // to reach the device that will be carried.
+  { key: 'exportGpx', label: 'Export GPX', primary: ['bike', ...ON_FOOT] },
+  // "Now get me home" — the commonest edit to a drive, and to a ride out.
+  { key: 'reverse', label: 'Reverse', primary: ['car', 'bike'] },
+  // Only ever offered on a four-stop tour, which is rare in every mode.
+  { key: 'optimize', label: 'Optimize', primary: [] },
+  { key: 'clear', label: 'Clear', primary: EVERY_PROFILE },
+  { key: 'share', label: 'Share', primary: EVERY_PROFILE },
+];
+
+/** The toolbar for one profile: what it shows, and what folds under "More". */
+export interface RouteToolbar {
+  primary: readonly RouteActionInfo[];
+  more: readonly RouteActionInfo[];
+}
+
+/** Split the actions into the visible row and the fold, in display order. */
+export function routeActionsFor(profile: RoutingProfile): RouteToolbar {
+  return {
+    primary: ROUTE_ACTIONS.filter((action) => action.primary.includes(profile)),
+    more: ROUTE_ACTIONS.filter((action) => !action.primary.includes(profile)),
+  };
+}
+
+/**
  * The vehicle chip's text: what is being routed for, short enough for a chip.
  *
  * Null outside driving and while no vehicle is described, because the chip is

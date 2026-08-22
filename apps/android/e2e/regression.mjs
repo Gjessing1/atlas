@@ -371,7 +371,9 @@ async function planRoadRoute(folderId) {
   // mounted into UiAutomator's visible tree yet. This route-only control is
   // the first stable signal that the detailed road result has landed; the two
   // choices are asserted later in the navigation preview where both are shown.
-  await waitForId('route-along-toggle', true, 30_000);
+  // It needs a computed path to exist, and driving is the mode that keeps it in
+  // the visible toolbar rather than under "More" (`routeActionsFor`).
+  await waitForId('route-action-alongRoute', true, 30_000);
 
   const initial = boundsForNode(nodeForId(hierarchy(), 'route-sheet'));
   await tap('route-sheet-handle');
@@ -391,7 +393,10 @@ async function planRoadRoute(folderId) {
     return Boolean(next && next.height < expanded.height - 80);
   });
 
-  await tapAfterScroll('route-save-track', 'route-scroll');
+  // Saving a *drive* as a track is a real capability but not a driver's first
+  // reach, so the driving toolbar folds it under "More" (`routeActionsFor`).
+  await tapAfterScroll('route-more', 'route-scroll');
+  await tapAfterScroll('route-action-saveTrack', 'route-scroll');
   await focusAfterScroll('route-save-name', 'route-scroll');
   await replaceText('route-save-name', 'regression track');
   await dismissKeyboard();

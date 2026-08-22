@@ -1650,8 +1650,10 @@ button {
   gap: 4px;
 }
 
+/* Basis 72px so six modes wrap 3 + 3 in the panel's 276px of content rather
+   than 4 + 2 with Run and Transit stretched to half the panel each. */
 .route-profiles button {
-  flex: 1 1 48px;
+  flex: 1 1 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1867,16 +1869,54 @@ button {
   color: var(--text-muted);
 }
 
-/* The planner is the app's one travel-mode picker, so guidance starts here —
-   the primary action of the panel, above the secondary row (Android parity). */
+/* The result and its one action, on one line: the trip time leads, the rest of
+   the numbers read beneath it, and Start sits beside them. It replaced a
+   full-width accent band directly under the stops that was the loudest thing in
+   the panel while the numbers it was about sat last, below six secondary
+   buttons and off the bottom of a phone sheet. */
+.route-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.route-summary-figures {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* The one number the panel was opened for, so it is the one number set in
+   display size. Nothing else in the panel is above 15px. */
+.route-summary-time {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.route-summary-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Still the only accent-filled control in the panel — primary by being the one
+   thing that is coloured, not by being the widest. */
 .route-navigate {
-  padding: 9px 12px;
+  flex-shrink: 0;
+  /* Sized down from a full-width band, but not below a thumb: this is the one
+     control that gets pressed in a car, and at 8px of padding it measured 34px
+     tall on a phone — under every touch-target minimum there is. */
+  min-height: 44px;
+  min-width: 88px;
+  padding: 10px 20px;
   border: none;
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -1891,6 +1931,13 @@ button {
   gap: 6px;
 }
 
+/* The fold under "More": indented and quieter, so it reads as belonging to the
+   row above rather than as a second toolbar of equal standing. */
+.route-actions-more {
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
 .route-actions button {
   padding: 4px 9px;
   border: 1px solid var(--border);
@@ -1899,6 +1946,11 @@ button {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+
+.route-actions button[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
 }
 
 .route-actions button:hover:enabled,
@@ -1954,7 +2006,22 @@ button {
 }
 
 .route-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 13px;
+}
+
+/* The shared breakdown is indented to sit under the elevation chart's y-axis;
+   in the planner there is no axis to align to. */
+.route-stats .surface-breakdown {
+  padding: 0;
+}
+
+/* Help that is read once and then never again: kept, but not at the weight of
+   the plan it sits under. */
+.route-hint-quiet {
+  font-size: 11px;
 }
 
 /* Measured congestion already inside the ETA — coloured because it is the one
@@ -1974,6 +2041,8 @@ button {
   font-size: 12px;
 }
 
+/* Directly under the result since the summary block landed: an alternative is
+   a choice about the answer, so it belongs where the answer is read. */
 .route-alternatives {
   display: flex;
   flex-direction: column;
@@ -3499,27 +3568,16 @@ button.transit-notice-summary {
   font-size: 11px;
 }
 
+/* Opened from the toolbar's "Stops along route" rather than from a disclosure
+   of its own, so it needs the frame that button no longer gives it. */
 .route-along-search {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.route-along-toggle {
-  align-self: flex-start;
-  padding: 3px 8px;
+  padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-selected);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.route-along-toggle[aria-expanded='true'] {
-  border-color: var(--accent);
+  border-radius: 8px;
+  background: var(--surface-muted);
 }
 
 /* One tap per category — the same chip row as the mid-drive add-a-stop panel. */
@@ -6757,6 +6815,14 @@ button.transit-notice-summary {
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /* The sheet is the full width of the phone, which fits all six modes in one
+     row. The 72px basis exists for the desktop panel's 276px, where it is what
+     makes six wrap 3 + 3 instead of 4 + 2 with two modes stretched to half the
+     panel each; applied here it would strand Transit on a row of its own. */
+  .route-profiles button {
+    flex: 1 1 48px;
   }
 
   /* Above the attribution and scale bar, which must stay readable. */
