@@ -392,3 +392,92 @@ export interface RouteResult {
 export function routePathToTrackData(path: RoutePath, name: string): TrackData {
   return { name, segments: [path.points], waypoints: [] };
 }
+
+/**
+ * One curated costing control, as both clients offer it.
+ *
+ * Lived as a hand-copied `CUSTOM_OPTIONS` array in each client's RoutePanel
+ * until v0.173.0 — the same drift `SETTINGS_SECTIONS` was moved here to end.
+ * Two copies of a list this small is not a maintenance cost, it is a
+ * correctness one: a preference offered on one client and not the other routes
+ * two devices differently from the same plan.
+ */
+export interface RouteOptionInfo {
+  readonly key: RoutePreferenceToggle;
+  /**
+   * The full sentence, for an accessible name and any list with room for it.
+   * Says what turning it on *does*, which the chip has no space to.
+   */
+  readonly label: string;
+  /**
+   * The chip's own text, where the row's width is the constraint.
+   *
+   * Phrased as the constraint the route is under rather than the thing being
+   * avoided: a lit chip reading "Ferries" is genuinely ambiguous about whether
+   * ferries are wanted or refused, and that ambiguity is expensive on a route
+   * that is about to put a vehicle on a boat.
+   */
+  readonly chipLabel: string;
+  /** The profiles this control is offered for; it is meaningless elsewhere. */
+  readonly profiles: readonly RoutingProfile[];
+}
+
+/** Every costing control, in the order both clients show them. */
+export const ROUTE_OPTIONS: readonly RouteOptionInfo[] = [
+  {
+    key: 'avoidFerries',
+    label: 'Avoid ferries',
+    chipLabel: 'No ferries',
+    profiles: ['car'],
+  },
+  {
+    key: 'avoidHighways',
+    label: 'Avoid highways / main roads',
+    chipLabel: 'No main roads',
+    profiles: ['car', 'bike'],
+  },
+  { key: 'avoidTolls', label: 'Avoid toll roads', chipLabel: 'No tolls', profiles: ['car'] },
+  {
+    key: 'avoidHills',
+    label: 'Prefer flatter ways',
+    chipLabel: 'Flatter',
+    profiles: ['bike', 'foot', 'hike', 'run'],
+  },
+  {
+    key: 'preferTrails',
+    label: 'Prefer trails',
+    chipLabel: 'Trails',
+    profiles: ['bike', 'hike', 'run'],
+  },
+  {
+    key: 'avoidUnpaved',
+    label: 'Avoid unpaved surfaces',
+    chipLabel: 'Paved',
+    profiles: ['bike'],
+  },
+];
+
+/** The costing controls that mean something for a profile, in display order. */
+export function routeOptionsFor(profile: RoutingProfile): readonly RouteOptionInfo[] {
+  return ROUTE_OPTIONS.filter((option) => option.profiles.includes(profile));
+}
+
+/**
+ * The vehicle chip's text: what is being routed for, short enough for a chip.
+ *
+ * Null outside driving and while no vehicle is described, because the chip is
+ * then not worth a slot — an ordinary car is what the engine already assumes.
+ * Formatted here rather than in either client so the two cannot round the same
+ * height differently.
+ */
+export function vehicleChipLabel(
+  profile: RoutingProfile,
+  vehicle: VehicleProfile | null | undefined,
+): string | null {
+  if (profile !== 'car') return null;
+  const clean = normalizeVehicle(vehicle);
+  if (!clean) return null;
+  // Metric and hand-formatted, like every other measurement Atlas prints.
+  const height = clean.heightM.toFixed(2).replace(/\.?0+$/, '');
+  return `${height} m · ${Math.round(clean.topSpeedKph)} km/h`;
+}

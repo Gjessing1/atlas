@@ -40,6 +40,7 @@ import {
   type NearbyPlaceArticle,
   type SearchResult,
   type VisibilityFolder,
+  type SettingsSectionId,
 } from '@atlas/core';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
@@ -248,6 +249,20 @@ function AppInner() {
   const [exploreResults, setExploreResults] = useState<SearchResult[]>([]);
   const [exploreSelection, setExploreSelection] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which section Settings drills into on open. Only ever set by a deep link
+  // from elsewhere — the sheet owns the drill-down once it is up.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
+  /**
+   * Open Settings, optionally straight into one section. Every caller goes
+   * through this: the sheet stays mounted between opens, so an opener that only
+   * flipped `settingsOpen` would inherit whichever section a *previous* deep
+   * link left behind.
+   */
+  const openSettings = useCallback((section: SettingsSectionId | null = null) => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }, []);
+  const openVehicleSettings = useCallback(() => openSettings('navigation'), [openSettings]);
   const [commuteOpen, setCommuteOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -1267,6 +1282,7 @@ function AppInner() {
               following={following}
               onOpenSearch={() => setSearchOpen(true)}
               onPlanRoute={() => route.start()}
+              onExplore={startExplorer}
             />
           ) : null}
 
@@ -1451,7 +1467,7 @@ function AppInner() {
             }}
             onOpenMeasure={() => measure.setOpen(true)}
             onOpenCommute={() => setCommuteOpen(true)}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => openSettings()}
             bottomInset={bottomInset}
           />
 
@@ -1616,6 +1632,7 @@ function AppInner() {
             profilePreferences={profilePreferences}
             tiles={tiles}
             settingsOpen={settingsOpen}
+            settingsSection={settingsSection}
             onCloseSettings={() => setSettingsOpen(false)}
             appearance={appearance}
             mapStyleEditor={mapStyleEditor}
@@ -1656,7 +1673,7 @@ function AppInner() {
                   // Straight into the same background download every pack uses,
                   // and into the screen that shows its progress.
                   downloads.start(manifest);
-                  setSettingsOpen(true);
+                  openSettings('offline');
                 })
                 .catch((error: unknown) =>
                   Alert.alert(
@@ -1678,7 +1695,7 @@ function AppInner() {
               const bbox = pendingRegion;
               const name = value.trim() || 'Custom offline region';
               setPendingRegion(null);
-              setSettingsOpen(true);
+              openSettings('offline');
               void regionJobs.create(name, bbox);
             }}
           />
@@ -1697,7 +1714,7 @@ function AppInner() {
                 (await data.saveTrack(trackData, name, collectionId)) !== null
               }
               onNavigate={startNavigation}
-              onExplore={startExplorer}
+              onOpenVehicleSettings={openVehicleSettings}
               onShowTransitTrip={showTransitTrip}
               onStartTransitGuidance={startTransitGuidance}
               getMyLocation={directions.getMyLocation}

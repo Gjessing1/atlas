@@ -1308,6 +1308,7 @@ export function SettingsSheet({
   downloads,
   offlinePrefs,
   onDrawRegion,
+  section: requestedSection,
   bottomInset = 0,
 }: {
   visible: boolean;
@@ -1337,10 +1338,22 @@ export function SettingsSheet({
   offlinePrefs: OfflinePrefsController;
   /** Close Settings and let the user select two corners on the map. */
   onDrawRegion: () => void;
+  /**
+   * Which section to drill into when the sheet opens. Unlike web, the sheet
+   * stays mounted between opens, so this is applied on the transition to
+   * visible rather than seeded once — otherwise a deep link (the planner's
+   * vehicle chip) would land on whatever section was last left open.
+   */
+  section?: SettingsSectionId | null;
   /** System nav-bar inset — keeps the Close button clear of it (edge-to-edge). */
   bottomInset?: number;
 }) {
   const [section, setSection] = useState<SettingsSectionId | null>(null);
+  // Only on the way *in*: while the sheet is up the user owns the drill-down,
+  // so a re-render must not yank them back to where they were sent.
+  useEffect(() => {
+    if (visible) setSection(requestedSection ?? null);
+  }, [visible, requestedSection]);
   const active = SETTINGS_SECTIONS.find((s) => s.id === section);
   return (
     <BottomSheet

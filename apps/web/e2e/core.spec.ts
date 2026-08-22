@@ -875,9 +875,11 @@ test('running and custom trail preferences reach the routing engine', async ({ p
   await waitForMap(page);
   await page.getByRole('button', { name: 'Route' }).click();
   await page.getByRole('button', { name: 'Run' }).click();
-  await page.getByText('Customize Run').click();
-  await expect(page.getByRole('checkbox', { name: 'Avoid ferries' })).toHaveCount(0);
-  await page.getByRole('checkbox', { name: 'Prefer trails' }).check();
+  // The options are chips in the panel now, not a disclosure to open first
+  // (v0.173.0). A chip's accessible name is its own words, so voice control can
+  // reach what the user can see; the full sentence is the tooltip.
+  await expect(page.getByRole('switch', { name: 'No ferries' })).toHaveCount(0);
+  await page.getByRole('switch', { name: 'Trails', exact: true }).click();
 
   const customizedRequest = page.waitForRequest((request) => {
     if (!request.url().endsWith('/api/route') || request.method() !== 'POST') return false;
@@ -961,9 +963,10 @@ test('a round trip keeps the stops already planned and rides through them', asyn
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 
-  // Ticking "round trip" used to throw the destination away and draw an
-  // arbitrary loop from the start; both stops must survive it.
-  await page.getByRole('checkbox', { name: 'Round trip' }).check();
+  // Turning "round trip" on used to throw the destination away and draw an
+  // arbitrary loop from the start; both stops must survive it. A chip in the
+  // options row since v0.173.0, not a checkbox.
+  await page.getByRole('switch', { name: 'Round trip' }).click();
   await expect(page.locator('.route-waypoints li')).toHaveCount(2);
   await expect(page.locator('.route-waypoints li').first()).toContainText('A');
   await expect(page.locator('.route-waypoints li').nth(1)).toContainText('B');

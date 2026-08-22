@@ -7,6 +7,7 @@ import type {
   NavPrefsController,
   VehicleProfileController,
 } from '@atlas/app-hooks';
+import type { SettingsSectionId } from '@atlas/core';
 import type { TrackRecord } from '@atlas/storage';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -42,6 +43,8 @@ interface AppSheetsProps {
   overlays: OverlaysController;
   profilePreferences: MapProfilePreferencesController;
   settingsOpen: boolean;
+  /** Which section Settings should drill into when it opens (deep links). */
+  settingsSection?: SettingsSectionId | null;
   onCloseSettings: () => void;
   /** Basemap tile source — Settings owns the "stream tiles anyway" switch. */
   tiles: TileSource;
@@ -89,6 +92,7 @@ export function AppSheets({
   overlays,
   profilePreferences,
   settingsOpen,
+  settingsSection,
   onCloseSettings,
   tiles,
   appearance,
@@ -173,6 +177,7 @@ export function AppSheets({
       />
       <SettingsSheet
         visible={settingsOpen}
+        section={settingsSection}
         onClose={onCloseSettings}
         sync={sync}
         packs={packs}

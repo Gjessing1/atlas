@@ -24,15 +24,16 @@ import {
   ROUTING_PROFILES,
   routePathToTrackData,
   routeSurfaceBreakdown,
+  routeOptionsFor,
   type RoutePath,
-  type RoutePreferenceToggle,
+  vehicleChipLabel,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
 import { formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
-import { ROUTING_ICON, TrainIcon } from '../icons.js';
+import { CarIcon, ROUTING_ICON, TrainIcon } from '../icons.js';
 import { TransitResults } from './TransitResults.js';
 import { useGeocode } from './useGeocode.js';
 import type { RoutePlanner } from './useRoute.js';
@@ -221,23 +222,6 @@ function AlongRouteStops({
   );
 }
 
-const CUSTOM_OPTIONS: readonly {
-  key: RoutePreferenceToggle;
-  label: string;
-  profiles: readonly string[];
-}[] = [
-  {
-    key: 'avoidFerries',
-    label: 'Avoid ferries',
-    profiles: ['car'],
-  },
-  { key: 'avoidHighways', label: 'Avoid highways / main roads', profiles: ['car', 'bike'] },
-  { key: 'avoidTolls', label: 'Avoid toll roads', profiles: ['car'] },
-  { key: 'avoidHills', label: 'Prefer flatter ways', profiles: ['bike', 'foot', 'hike', 'run'] },
-  { key: 'preferTrails', label: 'Prefer trails', profiles: ['bike', 'hike', 'run'] },
-  { key: 'avoidUnpaved', label: 'Avoid unpaved surfaces', profiles: ['bike'] },
-];
-
 /** Route-planning panel: profile, stops, round trip, result stats, GPX export. */
 export function RoutePanel({
   route,
@@ -249,7 +233,7 @@ export function RoutePanel({
   locatingOrigin,
   fetchNearby,
   onNavigate,
-  onExplore,
+  onOpenVehicleSettings,
   onStartTransitGuidance,
   onSaveTrack,
 }: {
@@ -275,7 +259,8 @@ export function RoutePanel({
    */
   onNavigate: (destination: LatLng, viaPoints: LatLng[]) => void;
   /** Start a destination-free live map in the selected travel mode. */
-  onExplore: () => void;
+  /** Open Settings → Navigation, where the vehicle is described. */
+  onOpenVehicleSettings: () => void;
   /** Start the timetable-driven passenger companion for one selected journey. */
   onStartTransitGuidance: (trip: TransitTrip) => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
@@ -315,6 +300,11 @@ export function RoutePanel({
     : undefined;
   // "via …" labels distinguishing the alternatives (needs instructions).
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
+
+  // What the driving plan is actually being costed for. Read from the merged
+  // preferences rather than the setting, so the chip can only ever say what was
+  // sent to the engine.
+  const vehicleLabel = vehicleChipLabel(route.profile, route.preferences.vehicle);
 
   const stops = route.waypoints;
   // Which end the add-a-stop box fills: the first stop is the start, anything
@@ -451,75 +441,94 @@ export function RoutePanel({
           )}
         </div>
 
+        {/* One row of chips for everything that shapes the route. It replaced a
+          "Customize <profile>" disclosure, a full-width follow-position button
+          and a round-trip row of its own (ROADMAP: "Declutter the navigation
+          picker") — three stacked bands of chrome above the stops, of which the
+          disclosure *hid* the controls that change the route and the button was
+          not about routing at all. Chips state the constraint they impose, so
+          the row reads as the plan's terms rather than as a settings list. */}
         {!transitMode && (
-          <button type="button" className="route-navigate" onClick={onExplore}>
-            Follow my position · no destination
-          </button>
-        )}
-
-        {!transitMode && (
-          <details className="route-custom">
-            <summary>
-              Customize {ROUTING_PROFILES.find((p) => p.id === route.profile)?.label}
-            </summary>
-            <div className="route-custom-options">
-              {CUSTOM_OPTIONS.filter((option) => option.profiles.includes(route.profile)).map(
-                (option) => (
-                  <label key={option.key}>
-                    <input
-                      type="checkbox"
-                      checked={route.preferences[option.key]}
-                      onChange={(event) =>
-                        route.setPreference(option.key, event.currentTarget.checked)
-                      }
-                    />
-                    {option.label}
-                  </label>
-                ),
-              )}
-            </div>
-          </details>
-        )}
-
-        <div className="route-roundtrip" hidden={transitMode}>
-          <label>
-            <input
-              type="checkbox"
-              checked={route.roundTrip}
-              onChange={(e) => route.setRoundTrip(e.target.checked)}
-            />
-            Round trip
-          </label>
-          {route.roundTrip && (
-            <>
-              <input
-                type="number"
-                min={1}
-                max={500}
-                value={route.roundTripKm}
-                onChange={(e) => route.setRoundTripKm(Math.max(Number(e.target.value) || 1, 1))}
-                aria-label="Round trip distance in kilometers"
-              />
-              <span>km</span>
-              <select
-                value={route.roundTripDirection}
-                onChange={(event) =>
-                  route.setRoundTripDirection(
-                    event.currentTarget.value as typeof route.roundTripDirection,
-                  )
-                }
-                aria-label="Round trip direction"
+          <div className="route-options" role="group" aria-label="Route options">
+            {routeOptionsFor(route.profile).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className="route-chip"
+                role="switch"
+                aria-checked={route.preferences[option.key]}
+                title={option.label}
+                onClick={() => route.setPreference(option.key, !route.preferences[option.key])}
               >
-                <option value="either">Either direction</option>
-                <option value="clockwise">Clockwise</option>
-                <option value="counterclockwise">Counterclockwise</option>
-              </select>
-              <button type="button" onClick={route.newLoop} disabled={route.waypoints.length === 0}>
-                New loop
+                {option.chipLabel}
               </button>
-            </>
-          )}
-        </div>
+            ))}
+            <button
+              type="button"
+              className="route-chip"
+              role="switch"
+              aria-checked={route.roundTrip}
+              onClick={() => route.setRoundTrip(!route.roundTrip)}
+            >
+              Round trip
+            </button>
+            {/* Driving only, and the whole reason this row exists: a described
+              vehicle changes both the road chosen and the arrival time, but it
+              lives in Settings → Navigation, where a motorhome driver planning
+              a trip has no reason to look. Lit and carrying the height once one
+              is set, so the plan says what it was built for; unlit and named
+              when it is not, so the capability is discoverable from the panel
+              that uses it. Reads `preferences.vehicle` — what will actually be
+              sent to the engine — never the raw setting. */}
+            {route.profile === 'car' && (
+              <button
+                type="button"
+                className={vehicleLabel ? 'route-chip route-chip-set' : 'route-chip'}
+                onClick={onOpenVehicleSettings}
+                title="Height, width and cruising speed — opens Settings → Navigation"
+                aria-label={
+                  vehicleLabel
+                    ? `Vehicle: ${vehicleLabel}. Change in settings`
+                    : 'Vehicle: describe a taller or slower one'
+                }
+              >
+                <CarIcon size={14} /> {vehicleLabel ?? 'Vehicle'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* The loop's length and direction, once there is a loop to describe.
+          Folded away with the switch rather than sitting inert beside it. */}
+        {route.roundTrip && !transitMode && (
+          <div className="route-roundtrip">
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={route.roundTripKm}
+              onChange={(e) => route.setRoundTripKm(Math.max(Number(e.target.value) || 1, 1))}
+              aria-label="Round trip distance in kilometers"
+            />
+            <span>km</span>
+            <select
+              value={route.roundTripDirection}
+              onChange={(event) =>
+                route.setRoundTripDirection(
+                  event.currentTarget.value as typeof route.roundTripDirection,
+                )
+              }
+              aria-label="Round trip direction"
+            >
+              <option value="either">Either direction</option>
+              <option value="clockwise">Clockwise</option>
+              <option value="counterclockwise">Counterclockwise</option>
+            </select>
+            <button type="button" onClick={route.newLoop} disabled={route.waypoints.length === 0}>
+              New loop
+            </button>
+          </div>
+        )}
 
         {!route.roundTrip && !transitMode && path && route.waypoints.length >= 2 && (
           <AlongRouteStops route={route} path={path} fetchNearby={fetchNearby} />

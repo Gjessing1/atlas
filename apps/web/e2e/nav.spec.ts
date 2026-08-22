@@ -22,7 +22,9 @@ test('Explorer mode follows live GPS without creating a route', async ({ page, c
 
   await page.locator('.topbar button[aria-label="Route"]').click();
   await page.getByRole('button', { name: 'Hike' }).click();
-  await page.getByRole('button', { name: 'Follow my position · no destination' }).click();
+  // Follow-position lives in the map controls, not the planner: it plans
+  // nothing, and the profile it follows is still the planner's (v0.173.0).
+  await page.locator('.map-follow-control').click();
 
   await expect(page.getByText('Explorer mode')).toBeVisible();
   await expect(page.getByText('Hike · Following your position')).toBeVisible();

@@ -18,6 +18,7 @@ import {
   type OverlayIdentifyGroup,
   type PlaceTarget,
   type SearchResult,
+  type SettingsSectionId,
   type ShareFormat,
   type VisibilityFolder,
 } from '@atlas/core';
@@ -57,6 +58,7 @@ import { MeasureTool } from './MeasureTool.js';
 import {
   CompassIcon,
   CrosshairIcon,
+  NavArrowIcon,
   RouteIcon,
   RulerIcon,
   SettingsIcon,
@@ -202,6 +204,20 @@ export function App() {
   const closePanels = useCallback(() => setPanel(null), []);
   const sidebarOpen = panel === 'collections';
   const settingsOpen = panel === 'settings';
+  // Which tab Settings opens on. Only ever set by a deep link from elsewhere —
+  // the panel owns its own tab once it is up, so this seeds the mount and is
+  // not a second source of truth for what is showing.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('appearance');
+  const openVehicleSettings = useCallback(() => {
+    setSettingsSection('navigation');
+    setPanel('settings');
+  }, []);
+  // The ordinary opener. Resets the tab, so a Settings opened from the sidebar
+  // never inherits the section a previous deep link asked for.
+  const toggleSettings = useCallback(() => {
+    setSettingsSection('appearance');
+    togglePanel('settings');
+  }, [togglePanel]);
   const commuteOpen = panel === 'commute';
   const exploreOpen = panel === 'explore';
   const [exploreResults, setExploreResults] = useState<SearchResult[]>([]);
@@ -1040,7 +1056,7 @@ export function App() {
           aria-label="Settings"
           title="Settings"
           aria-expanded={settingsOpen}
-          onClick={() => togglePanel('settings')}
+          onClick={toggleSettings}
         >
           <SettingsIcon size={18} />
         </button>
@@ -1177,6 +1193,20 @@ export function App() {
               <CompassIcon size={18} />
             </button>
           </div>
+          {/* Follow the live position with no destination. It spent a full row
+              inside the route planner until v0.173.0, under the mode icons,
+              where it read as a routing option and pushed the stops down the
+              sheet — but it plans nothing. It belongs beside locate: both are
+              "put the map on me", one once and one continuously. */}
+          <button
+            type="button"
+            className="map-follow-control"
+            aria-label="Follow my position without a destination"
+            title="Follow my position"
+            onClick={onStartExplorer}
+          >
+            <NavArrowIcon size={19} />
+          </button>
           <button
             type="button"
             className="map-locate-control"
@@ -1291,7 +1321,7 @@ export function App() {
             locatingOrigin={directions.locatingOrigin}
             fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
-            onExplore={onStartExplorer}
+            onOpenVehicleSettings={openVehicleSettings}
             onStartTransitGuidance={startTransitGuidance}
             onSaveTrack={async (data, name, collectionId) =>
               (await userData.saveTrack(data, name, collectionId)) !== null
@@ -1318,6 +1348,7 @@ export function App() {
         )}
         {settingsOpen && (
           <SettingsPanel
+            section={settingsSection}
             sync={sync}
             storage={userData}
             appearance={appearance}

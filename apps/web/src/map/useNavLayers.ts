@@ -361,8 +361,16 @@ export function useNavLayers(
     if (!map) return;
     // Arrival keeps the fix watch running until Done, so the puck stays too:
     // the last stretch to the door is exactly where it is being watched.
+    // Explorer mode has a live position but no route, so it is deliberately
+    // absent from `active` (which gates the route line, arrows, flag and vias)
+    // and has to be named here instead: "follow my position" that draws no
+    // position is the one thing the mode cannot afford to get wrong. Regressed
+    // in v0.153.0 when `active` was narrowed for pause, unnoticed because the
+    // e2e suite that covers it does not run in the gate.
     const snapped =
-      active || nav.phase === 'arrived' ? (nav.state?.snapped ?? nav.position) : undefined;
+      active || nav.phase === 'exploring' || nav.phase === 'arrived'
+        ? (nav.state?.snapped ?? nav.position)
+        : undefined;
     if (snapped) {
       if (!puckRef.current) {
         const el = document.createElement('div');

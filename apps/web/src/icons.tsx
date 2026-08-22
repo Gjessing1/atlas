@@ -122,6 +122,25 @@ export function CompassIcon(props: IconProps) {
   );
 }
 
+/**
+ * The navigation arrow, for starting a destination-free follow. Deliberately
+ * the same silhouette as the map puck the button produces — a filled triangle
+ * with a notched base — so the control looks like what it turns on.
+ */
+export function NavArrowIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12 3 20 20 12 16 4 20Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function CrosshairIcon(props: IconProps) {
   return (
     <IconFrame {...props}>

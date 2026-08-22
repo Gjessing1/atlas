@@ -30,6 +30,13 @@ import { AccountPanel } from '../sync/AccountPanel.js';
 import type { SyncState } from '../sync/useSync.js';
 
 interface SettingsPanelProps {
+  /**
+   * Which tab to open on. Seeds the mount only — the panel owns the tab from
+   * then on, and it is remounted per open, so a deep link (the planner's
+   * vehicle chip) lands on its section without a second source of truth for
+   * what is showing.
+   */
+  section?: SettingsSectionId;
   sync: SyncState;
   /** Whether the local database is open — sign-in cannot work without it. */
   storage: StorageAvailability;
@@ -363,6 +370,7 @@ function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
 
 /** Settings grouped by task so map, profile, navigation and account controls do not mix. */
 export function SettingsPanel({
+  section,
   sync,
   storage,
   appearance,
@@ -375,7 +383,7 @@ export function SettingsPanel({
   onExportAll,
   onClose,
 }: SettingsPanelProps) {
-  const [tab, setTab] = useState<SettingsSectionId>('appearance');
+  const [tab, setTab] = useState<SettingsSectionId>(section ?? 'appearance');
   // Do not wake every upstream status row until the user opens System.
   const status = useStatus('', tab === 'system');
 

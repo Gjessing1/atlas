@@ -679,10 +679,21 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'planner-costing-options',
     surface: 'planner',
-    capability: 'Cycling costing controls: flatter ways, avoid main roads, avoid unpaved',
+    capability:
+      'Costing controls for the chosen profile: ferries, main roads, tolls, hills, surface',
     hook: 'useRoute',
-    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'avoidUnpaved' },
-    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'avoidUnpaved' },
+    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'routeOptionsFor' },
+    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'routeOptionsFor' },
+    note: 'Both render `ROUTE_OPTIONS` from @atlas/routing as one chip row. The list lived as a hand-copied array in each panel until v0.173.0 — two copies of it is not a maintenance cost but a correctness one, since a control offered on one client and not the other routes two devices differently from the same plan.',
+  },
+  {
+    id: 'planner-vehicle-chip',
+    surface: 'planner',
+    capability: 'See what vehicle the driving plan is costed for, and change it from the planner',
+    hook: 'useVehicleProfile',
+    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'onOpenVehicleSettings' },
+    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'onOpenVehicleSettings' },
+    note: 'The chip reads `preferences.vehicle` — what is actually sent to the engine — and deep-links into Settings → Navigation, which owns the fields. Added in v0.173.0 because v0.172.0 shipped the profile with no route to it from the surface that uses it: the planner said nothing about the height it was routing for.',
   },
   {
     id: 'planner-elevation-profile',
@@ -811,9 +822,9 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability:
       'Follow the live GPS position in any road or pedestrian profile without a destination',
     hook: 'useNavigationController',
-    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'onExplore' },
-    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'onExplore' },
-    note: 'The shared controller owns one destination-free `exploring` phase: raw GPS drives the same follow camera and readouts, while route requests, instructions, voice, rerouting and arrival stay absent by construction.',
+    web: { file: 'apps/web/src/App.tsx', contains: 'onStartExplorer' },
+    android: { file: 'apps/android/src/ui/MenuCluster.tsx', contains: 'onExplore' },
+    note: 'The shared controller owns one destination-free `exploring` phase: raw GPS drives the same follow camera and readouts, while route requests, instructions, voice, rerouting and arrival stay absent by construction. Reached from the map controls on both clients since v0.173.0 — web beside locate, Android beside plan-a-route — having spent a full row inside the route planner, where it read as a routing option despite planning nothing. The profile followed is still `route.profile`, which the planner owns. Web can show both at once, so the mode is picked and the follow started in one place; Android hides the whole map chrome behind the planner sheet (`showIdleChrome`), so a non-default profile is picked in the planner, which persists, and the follow started after closing it. That extra step is the cost of the sheet owning the bottom, not a lost capability — but it is the one place this move made Android worse, and it is why the button was in the planner to begin with.',
   },
   {
     id: 'nav-voice',
