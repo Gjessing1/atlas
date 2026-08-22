@@ -422,7 +422,17 @@ export interface RouteOptionInfo {
   readonly profiles: readonly RoutingProfile[];
 }
 
-/** Every costing control, in the order both clients show them. */
+/**
+ * Every costing control, in the order both clients show them.
+ *
+ * A key may appear more than once when the same Valhalla option means
+ * genuinely different things to different travellers — never more than once
+ * per profile, which is all {@link routeOptionsFor} ever returns. `use_highways`
+ * is the case: for a driver it drops motorways and the fast main roads that
+ * behave like them, for a cyclist it is `use_roads: 0.05`, which is not a
+ * refusal of anything but a preference for quiet ones. Calling both of those
+ * "No main roads" (as v0.173.0 did) described neither.
+ */
 export const ROUTE_OPTIONS: readonly RouteOptionInfo[] = [
   {
     key: 'avoidFerries',
@@ -432,11 +442,27 @@ export const ROUTE_OPTIONS: readonly RouteOptionInfo[] = [
   },
   {
     key: 'avoidHighways',
-    label: 'Avoid highways / main roads',
-    chipLabel: 'No main roads',
-    profiles: ['car', 'bike'],
+    label: 'Avoid motorways and other fast main roads',
+    chipLabel: 'No motorways',
+    profiles: ['car'],
   },
-  { key: 'avoidTolls', label: 'Avoid toll roads', chipLabel: 'No tolls', profiles: ['car'] },
+  {
+    key: 'avoidHighways',
+    label: 'Prefer quiet roads over main ones',
+    chipLabel: 'Quiet roads',
+    profiles: ['bike'],
+  },
+  {
+    key: 'avoidTolls',
+    // A preference, not a promise: Valhalla weights tolls heavily but will
+    // still use one where the alternative is unreasonable (Oslo → Trondheim
+    // avoiding tolls is +34 km and still passes a toll point), and Norway's
+    // urban toll rings are unavoidable by construction. Saying "avoid" rather
+    // than "no tolls" in the sentence keeps that honest; the chip has no room.
+    label: 'Avoid toll roads where there is a reasonable alternative',
+    chipLabel: 'No tolls',
+    profiles: ['car'],
+  },
   {
     key: 'avoidHills',
     label: 'Prefer flatter ways',
@@ -460,6 +486,52 @@ export const ROUTE_OPTIONS: readonly RouteOptionInfo[] = [
 /** The costing controls that mean something for a profile, in display order. */
 export function routeOptionsFor(profile: RoutingProfile): readonly RouteOptionInfo[] {
   return ROUTE_OPTIONS.filter((option) => option.profiles.includes(profile));
+}
+
+/** What the collapsed options button says, and what it is worth opening for. */
+export interface RouteOptionsSummary {
+  /** Constraints in force: this profile's costing toggles, plus the loop. */
+  readonly count: number;
+  /** The button's own words — narrow enough to share a row on a phone. */
+  readonly label: string;
+  /** The accessible name: what the button opens, and what is set behind it. */
+  readonly ariaLabel: string;
+  /** Every constraint in force, in display order — for the accessible name. */
+  readonly active: readonly string[];
+}
+
+/**
+ * Fold the route's terms into one button's worth of text.
+ *
+ * The chips they summarise are unchanged behind it: v0.173.0's finding — that a
+ * lit chip reading "Ferries" is genuinely ambiguous about whether ferries are
+ * wanted or refused — is exactly why the collapsed button *names the constraint*
+ * when there is only one rather than showing a count of anonymous settings.
+ * Past one it falls back to the count, because the row it sits in also carries
+ * "My location" and, when driving, the vehicle: two joined constraints
+ * ("No ferries · No motorways") wrap that row on a phone, and re-introducing a
+ * band of chrome above the stops is the thing this fold exists to undo.
+ *
+ * Shared rather than written twice so the two clients cannot describe the same
+ * plan differently — the same reason the chip list itself moved here.
+ */
+export function routeOptionsSummary(
+  profile: RoutingProfile,
+  preferences: RoutePreferences,
+  roundTrip: boolean,
+): RouteOptionsSummary {
+  const active = routeOptionsFor(profile)
+    .filter((option) => preferences[option.key])
+    .map((option) => option.chipLabel);
+  if (roundTrip) active.push('Round trip');
+  const label = active.length === 0 ? 'Options' : (active[0] ?? 'Options');
+  return {
+    count: active.length,
+    label: active.length > 1 ? `Options · ${active.length}` : label,
+    ariaLabel:
+      active.length === 0 ? 'Route options' : `Route options: ${active.join(', ').toLowerCase()}`,
+    active,
+  };
 }
 
 /**

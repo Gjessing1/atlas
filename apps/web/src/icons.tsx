@@ -1,4 +1,4 @@
-import type { RoutingProfile } from '@atlas/routing';
+import type { RouteActionKey, RoutingProfile } from '@atlas/routing';
 import type { ReactNode } from 'react';
 
 export interface IconProps {
@@ -369,6 +369,199 @@ export function EyeIcon({ off = false, ...props }: IconProps & { off?: boolean }
     </IconFrame>
   );
 }
+
+/*
+ * The route planner's toolbar, as glyphs.
+ *
+ * The panel used to spend two full bands on six same-weight text buttons —
+ * "Reverse Optimize Clear Save track Export GPX Share" wrapped over two rows on
+ * a phone — for actions nobody opens the planner to perform. Drawn instead,
+ * they cost one short row, and Share finally looks like Share does everywhere
+ * else. Their names are not lost: every button keeps the descriptor's sentence
+ * as its accessible name and its tooltip, and the fold under ⋯ shows the words
+ * beside the glyph. Android draws the same paths (apps/android/src/ui/icons.tsx).
+ */
+
+/** Sliders: the route's terms, folded behind one button. */
+export function SlidersIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M4 7.5h4.5M13 7.5h7M4 16.5h7M15.5 16.5h4.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <circle cx="10.8" cy="7.5" r="2.3" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="13.3" cy="16.5" r="2.3" stroke="currentColor" strokeWidth="1.7" />
+    </IconFrame>
+  );
+}
+
+/** The overflow: everything the mode's toolbar did not lead with. */
+export function MoreIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="5.2" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="18.8" cy="12" r="1.7" fill="currentColor" />
+    </IconFrame>
+  );
+}
+
+/** A pin with a plus: add somewhere to stop on the way. */
+export function PinPlusIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12 21.2s6.6-6.4 6.6-10.7a6.6 6.6 0 1 0-13.2 0C5.4 14.8 12 21.2 12 21.2z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 7.6v5.9M9.05 10.55h5.9"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Bookmark: keep this route as a track. */
+export function BookmarkIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M6.5 3.8h11a1 1 0 0 1 1 1v15.6L12 16.8l-6.5 3.6V4.8a1 1 0 0 1 1-1z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Download: the route leaves as a file. */
+export function DownloadIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12 3.8v10.6M7.8 10.6L12 14.8l4.2-4.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.6 17.6v1.6a1 1 0 0 0 1 1h12.8a1 1 0 0 0 1-1v-1.6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Two arrows passing: turn the journey around. */
+export function SwapIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M7.6 4.6v14.8M4.1 15.9l3.5 3.5 3.5-3.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16.4 19.4V4.6M12.9 8.1l3.5-3.5 3.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Sparkles: let the planner choose the order of the stops. */
+export function SparkleIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M10 3.8l1.6 4.1 4.1 1.6-4.1 1.6L10 15.2l-1.6-4.1-4.1-1.6 4.1-1.6z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M17.2 14.2l.85 2.15 2.15.85-2.15.85-.85 2.15-.85-2.15-2.15-.85 2.15-.85z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Bin: throw the whole plan away. */
+export function TrashIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M5.5 6.8h13M9.8 6.8V5.3a1 1 0 0 1 1-1h2.4a1 1 0 0 1 1 1v1.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.2 6.8l.75 12.1a1 1 0 0 0 1 .94h6.1a1 1 0 0 0 1-.94l.75-12.1"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10.5 10.2v6.2M13.5 10.2v6.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Share, drawn the way every other app draws it: three nodes and two links. */
+export function ShareIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="18" cy="5.4" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="6" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="18" cy="18.6" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M8.35 10.75l7.3-4.05M8.35 13.25l7.3 4.05"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </IconFrame>
+  );
+}
+
+/**
+ * One glyph per secondary action, keyed by the shared descriptor so the two
+ * clients cannot end up drawing different pictures for the same button.
+ */
+export const ROUTE_ACTION_ICON: Record<RouteActionKey, IconComponent> = {
+  alongRoute: PinPlusIcon,
+  saveTrack: BookmarkIcon,
+  exportGpx: DownloadIcon,
+  reverse: SwapIcon,
+  optimize: SparkleIcon,
+  clear: TrashIcon,
+  share: ShareIcon,
+};
 
 export const ROUTING_ICON: Record<RoutingProfile, IconComponent> = {
   car: CarIcon,

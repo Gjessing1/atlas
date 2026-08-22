@@ -878,9 +878,13 @@ test('running and custom trail preferences reach the routing engine', async ({ p
   await waitForMap(page);
   await page.getByRole('button', { name: 'Route' }).click();
   await page.getByRole('button', { name: 'Run' }).click();
-  // The options are chips in the panel now, not a disclosure to open first
-  // (v0.173.0). A chip's accessible name is its own words, so voice control can
-  // reach what the user can see; the full sentence is the tooltip.
+  // The options are chips behind one button (v0.175.0), which states the
+  // constraint itself when only one is set — so the fold is opened by the name
+  // it carries while the plan is under none. A chip's accessible name is its
+  // own words, so voice control can reach what the user can see; the full
+  // sentence is the tooltip.
+  await page.getByRole('button', { name: 'Route options' }).click();
+  // Ferries mean nothing on foot, so running's fold does not offer them.
   await expect(page.getByRole('switch', { name: 'No ferries' })).toHaveCount(0);
   await page.getByRole('switch', { name: 'Trails', exact: true }).click();
 
@@ -968,7 +972,9 @@ test('a round trip keeps the stops already planned and rides through them', asyn
 
   // Turning "round trip" on used to throw the destination away and draw an
   // arbitrary loop from the start; both stops must survive it. A chip in the
-  // options row since v0.173.0, not a checkbox.
+  // options row since v0.173.0, not a checkbox — and behind the options fold
+  // since v0.175.0, which is why the row has to be opened first.
+  await page.getByRole('button', { name: 'Route options' }).click();
   await page.getByRole('switch', { name: 'Round trip' }).click();
   await expect(page.locator('.route-waypoints li')).toHaveCount(2);
   await expect(page.locator('.route-waypoints li').first()).toContainText('A');

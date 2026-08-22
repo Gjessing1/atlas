@@ -1669,12 +1669,22 @@ button {
 }
 
 /* The route's terms, one chip each: costing controls, the loop switch and the
-   described vehicle. A single wrapping row rather than the disclosure + button +
-   round-trip band it replaced, so the stops stay above the fold on a phone. */
+   described vehicle. Folded away behind one button since v0.175.0 — framed and
+   indented so an open fold reads as belonging to the button that opened it,
+   rather than as a band of chrome the panel always carries. */
 .route-options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+/* The loop's own fields take the fold's full width, under the chips. */
+.route-options .route-roundtrip {
+  flex-basis: 100%;
 }
 
 .route-chip {
@@ -1938,17 +1948,35 @@ button {
   border-left: 2px solid var(--border);
 }
 
+/* Glyph buttons: square, evenly weighted, and big enough for a thumb — these
+   are secondary actions, so they read as a toolbar rather than as six offers. */
 .route-actions button {
-  padding: 4px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface-muted);
+  color: var(--text);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
-.route-actions button[aria-expanded='true'] {
+/* In the fold the glyph keeps its words, because that is where the actions a
+   mode does not lead with live — a row of unfamiliar icons is not a menu. */
+.route-actions button.route-action-labelled {
+  width: auto;
+  height: 30px;
+  padding: 0 10px 0 8px;
+}
+
+.route-actions button[aria-expanded='true'],
+.route-actions button[data-done] {
   border-color: var(--accent);
   background: var(--surface-selected);
 }
@@ -2022,6 +2050,16 @@ button {
    the plan it sits under. */
 .route-hint-quiet {
   font-size: 11px;
+}
+
+/* …and gone entirely on the phone sheet, where every line of it costs the
+   answer below room: it is advice about a pointer ("drag a marker", "click the
+   line"), so on the layout that has no pointer it is two lines of chrome
+   describing interactions the reader cannot perform. */
+@media (max-width: 640px) {
+  .route-hint-quiet {
+    display: none;
+  }
 }
 
 /* Measured congestion already inside the ETA — coloured because it is the one
@@ -3487,32 +3525,17 @@ button.transit-notice-summary {
   min-width: 0;
 }
 
-/* "My location as start" beside the "or click the map" reminder — the two ways
-   of setting the start sit together. */
+/* Where the plan starts from, and the terms it is planned under: two chips on
+   one line. The "or click the map" reminder that used to sit here is in the
+   empty state above, which says it while it is still news. */
 .route-source-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.route-my-location {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-muted);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.route-my-location:hover:enabled {
-  border-color: var(--accent);
-}
-
-.route-my-location:disabled {
+.route-chip:disabled {
   opacity: 0.6;
   cursor: default;
 }

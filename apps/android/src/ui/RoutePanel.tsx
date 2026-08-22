@@ -23,6 +23,7 @@ import {
   pathViaLabels,
   routeActionsFor,
   routeOptionsFor,
+  routeOptionsSummary,
   ROUTING_PROFILES,
   type RouteActionInfo,
   type RouteActionKey,
@@ -54,7 +55,14 @@ import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
 import { useGeocode } from './useGeocode';
-import { CarIcon, PROFILE_ICON, TramIcon } from './modeIcons';
+import {
+  CarIcon,
+  MoreIcon,
+  PROFILE_ICON,
+  ROUTE_ACTION_ICON,
+  SlidersIcon,
+  TramIcon,
+} from './modeIcons';
 import { theme } from './theme';
 import { TransitResults } from './TransitResults';
 
@@ -334,6 +342,11 @@ export function RoutePanel({
   // toolbar can own what it shows (ROADMAP: "an intentional toolbar").
   const [moreOpen, setMoreOpen] = useState(false);
   const [alongOpen, setAlongOpen] = useState(false);
+  // The route's terms, folded away until asked for. Closed on every open of
+  // the planner: the terms persist, so the common case is a plan under the
+  // same ones as last time, and a fold that remembers being open would spend
+  // the space this fold exists to give back.
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [saveName, setSaveName] = useState('Planned route');
   const [saveCollection, setSaveCollection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -355,6 +368,9 @@ export function RoutePanel({
   // preferences rather than the setting, so the chip can only ever say what was
   // sent to the engine.
   const vehicleLabel = vehicleChipLabel(route.profile, route.preferences.vehicle);
+  // What the collapsed options button says — shared with web, so one plan
+  // cannot be described two ways.
+  const optionsSummary = routeOptionsSummary(route.profile, route.preferences, route.roundTrip);
 
   const stops = route.waypoints;
   // A stop that disappears (cleared, removed, reversed away) must not leave an
@@ -450,7 +466,16 @@ export function RoutePanel({
   const primaryActions = toolbar.primary.filter((action) => actionAvailable[action.key]);
   const moreActions = toolbar.more.filter((action) => actionAvailable[action.key]);
 
-  const renderAction = (action: RouteActionInfo) => {
+  /**
+   * One toolbar button: the glyph, with the descriptor's sentence as its
+   * TalkBack name.
+   *
+   * `labelled` is the fold under ⋯, which shows the words beside the glyph —
+   * an icon-only row is only legible for the actions a mode leads with, and the
+   * fold is where the unfamiliar ones live. A saved track is worth saying out
+   * loud rather than drawing, since nothing else on the sheet reports it.
+   */
+  const renderAction = (action: RouteActionInfo, labelled = false) => {
     const press = {
       alongRoute: () => setAlongOpen((open) => !open),
       saveTrack: () => {
@@ -466,22 +491,24 @@ export function RoutePanel({
       // as the same endpoints in transit mode.
       share: onShareLink,
     }[action.key];
-    const lit = action.key === 'alongRoute' && alongOpen;
-    const label =
-      action.key === 'saveTrack' && saved
-        ? 'Saved as track'
-        : action.key === 'exportGpx'
-          ? 'Export GPX'
-          : action.label;
+    const lit = (action.key === 'alongRoute' && alongOpen) || (action.key === 'saveTrack' && saved);
+    const label = action.key === 'saveTrack' && saved ? 'Saved as track' : action.label;
+    const Icon = ROUTE_ACTION_ICON[action.key];
     return (
       <Pressable
         key={action.key}
-        style={[styles.button, styles.buttonQuiet, lit && styles.buttonQuietOn]}
+        style={[
+          labelled ? styles.iconAction : styles.iconOnly,
+          styles.buttonQuiet,
+          lit && styles.buttonQuietOn,
+        ]}
         onPress={press}
         accessibilityRole="button"
+        accessibilityLabel={label}
         testID={`route-action-${action.key}`}
       >
-        <Text style={styles.buttonQuietText}>{label}</Text>
+        <Icon color={theme.icon} size={18} />
+        {labelled ? <Text style={styles.iconActionText}>{label}</Text> : null}
       </Pressable>
     );
   };
@@ -572,108 +599,6 @@ export function RoutePanel({
           ) : null}
         </View>
 
-        {/* One row of chips for everything that shapes the route — web's twin
-          (apps/web/src/routing/RoutePanel.tsx). It replaced a "Customize
-          <profile>" disclosure, a full-width follow-position button and a
-          round-trip row of its own (ROADMAP: "Declutter the navigation
-          picker"): three stacked bands above the stops on a sheet that has none
-          to spare, of which the disclosure *hid* the controls that change the
-          route and the button was not about routing at all. */}
-        {!transitMode ? (
-          <View style={styles.optionsRow}>
-            {routeOptionsFor(route.profile).map((option) => (
-              <Pressable
-                key={option.key}
-                style={[styles.chip, route.preferences[option.key] && styles.chipSelected]}
-                onPress={() => route.setPreference(option.key, !route.preferences[option.key])}
-                accessibilityRole="checkbox"
-                // The full sentence rather than the chip's own words, unlike
-                // web: there is no hover here to carry it, so TalkBack is the
-                // only place "Paved" can be spelled out as what it does.
-                accessibilityLabel={option.label}
-                accessibilityState={{ checked: route.preferences[option.key] }}
-                testID={`route-option-${option.key}`}
-              >
-                <Text style={styles.chipText}>{option.chipLabel}</Text>
-              </Pressable>
-            ))}
-            <Pressable
-              style={[styles.chip, route.roundTrip && styles.chipSelected]}
-              onPress={() => route.setRoundTrip(!route.roundTrip)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: route.roundTrip }}
-              testID="route-roundtrip"
-            >
-              <Text style={styles.chipText}>Round trip</Text>
-            </Pressable>
-            {/* Driving only, and the whole reason this row exists: a described
-              vehicle changes both the road chosen and the arrival time, but it
-              lives in Settings → Navigation, where a motorhome driver planning
-              a trip has no reason to look. Lit and carrying the height once one
-              is set, so the plan says what it was built for; unlit and named
-              when it is not, so the capability is discoverable from the panel
-              that uses it. Reads `preferences.vehicle` — what will actually be
-              sent to the engine — never the raw setting. */}
-            {route.profile === 'car' ? (
-              <Pressable
-                style={[styles.chip, vehicleLabel && styles.chipSelected]}
-                onPress={onOpenVehicleSettings}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  vehicleLabel
-                    ? `Vehicle: ${vehicleLabel}. Change in settings`
-                    : 'Describe a taller or slower vehicle'
-                }
-                testID="route-vehicle"
-              >
-                <CarIcon color={theme.icon} size={14} />
-                <Text style={styles.chipText}>{vehicleLabel ?? 'Vehicle'}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
-        {/* The loop's length and direction, once there is a loop to describe.
-          Folded away with the switch rather than sitting inert beside it. A
-          timetable has no notion of a loop, so transit never shows it. */}
-        {route.roundTrip && !transitMode ? (
-          <View style={styles.roundRow}>
-            <TextInput
-              style={styles.kmInput}
-              keyboardType="numeric"
-              value={String(route.roundTripKm)}
-              onChangeText={(t) => route.setRoundTripKm(Math.max(Number(t) || 1, 1))}
-              testID="route-roundtrip-km"
-            />
-            <Text style={styles.muted}>km</Text>
-            {(
-              [
-                ['either', 'Either way'],
-                ['clockwise', 'Clockwise'],
-                ['counterclockwise', 'Counterclockwise'],
-              ] as const
-            ).map(([direction, label]) => (
-              <Pressable
-                key={direction}
-                style={[styles.chip, route.roundTripDirection === direction && styles.chipSelected]}
-                onPress={() => route.setRoundTripDirection(direction)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: route.roundTripDirection === direction }}
-                testID={`route-roundtrip-${direction}`}
-              >
-                <Text style={styles.chipText}>{label}</Text>
-              </Pressable>
-            ))}
-            <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={route.newLoop}
-              disabled={route.waypoints.length === 0}
-            >
-              <Text style={styles.buttonQuietText}>New loop</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
         {/* While a stop is being re-pointed, the add-a-stop box stands down —
           two open search boxes with two different meanings is how you end up
           appending a stop you meant to replace. */}
@@ -697,17 +622,158 @@ export function RoutePanel({
           />
         ) : null}
 
+        {/* One row for the two things that are neither a stop nor the answer:
+          where the plan starts from, and the terms it is planned under.
+
+          Both used to be bands of their own. "My location as start" sat beside
+          an "or tap the map" reminder that the empty state below already gives,
+          and the route's terms were a wrapping row of chips — five of them
+          driving — parked above the stops, where a phone sheet has the least
+          room and the user is doing something else. Folding them behind one
+          button costs a tap for the rare change and gives the stops the space;
+          the button still *names* the constraint when there is exactly one
+          (`routeOptionsSummary`), so a plan under terms never looks like a plan
+          under none. Web's twin (apps/web/src/routing/RoutePanel.tsx). */}
         <View style={styles.sourceRow}>
           <Pressable
             style={[styles.chip, locating && styles.chipBusy]}
             disabled={locating}
             onPress={() => void addMyLocation()}
+            accessibilityRole="button"
+            accessibilityLabel="Use my location as the start"
             testID="route-my-location"
           >
-            <Text style={styles.chipText}>{locating ? 'Locating…' : '◎ My location as start'}</Text>
+            <Text style={styles.chipText}>{locating ? 'Locating…' : '◎ My location'}</Text>
           </Pressable>
-          <Text style={styles.hint}>or tap the map</Text>
+          {!transitMode ? (
+            <Pressable
+              style={[styles.chip, optionsSummary.count > 0 && styles.chipSelected]}
+              onPress={() => setOptionsOpen((open) => !open)}
+              accessibilityRole="button"
+              accessibilityLabel={optionsSummary.ariaLabel}
+              accessibilityState={{ expanded: optionsOpen }}
+              testID="route-options"
+            >
+              <SlidersIcon color={theme.icon} size={14} />
+              <Text style={styles.chipText}>{optionsSummary.label}</Text>
+            </Pressable>
+          ) : null}
+          {/* Outside the fold, and only once a vehicle is described: the height
+            a plan is costed for is the strongest thing the panel can say about
+            it, and hiding it behind a tap would undo v0.173.0, which put it
+            here because a motorhome driver had no reason to believe the feature
+            existed. Unset, it is one more control and lives inside the fold. */}
+          {!transitMode && vehicleLabel ? (
+            <Pressable
+              style={[styles.chip, styles.chipSelected]}
+              onPress={onOpenVehicleSettings}
+              accessibilityRole="button"
+              accessibilityLabel={`Vehicle: ${vehicleLabel}. Change in settings`}
+              testID="route-vehicle"
+            >
+              <CarIcon color={theme.icon} size={14} />
+              <Text style={styles.chipText}>{vehicleLabel}</Text>
+            </Pressable>
+          ) : null}
         </View>
+
+        {/* The fold: every term of the plan, as the chips that state it. Chips
+          say the constraint they impose ("No ferries"), never the thing avoided
+          — a lit chip reading "Ferries" is genuinely ambiguous about whether
+          ferries are wanted or refused, and that is expensive on a route about
+          to put a vehicle on a boat. */}
+        {optionsOpen && !transitMode ? (
+          <View style={styles.optionsFold} testID="route-options-fold">
+            <View style={styles.optionsRow}>
+              {routeOptionsFor(route.profile).map((option) => (
+                <Pressable
+                  key={option.key}
+                  style={[styles.chip, route.preferences[option.key] && styles.chipSelected]}
+                  onPress={() => route.setPreference(option.key, !route.preferences[option.key])}
+                  accessibilityRole="checkbox"
+                  // The full sentence rather than the chip's own words, unlike
+                  // web: there is no hover here to carry it, so TalkBack is the
+                  // only place "Paved" can be spelled out as what it does.
+                  accessibilityLabel={option.label}
+                  accessibilityState={{ checked: route.preferences[option.key] }}
+                  testID={`route-option-${option.key}`}
+                >
+                  <Text style={styles.chipText}>{option.chipLabel}</Text>
+                </Pressable>
+              ))}
+              <Pressable
+                style={[styles.chip, route.roundTrip && styles.chipSelected]}
+                onPress={() => route.setRoundTrip(!route.roundTrip)}
+                accessibilityRole="checkbox"
+                accessibilityLabel="Come back to the start instead of ending at a destination"
+                accessibilityState={{ checked: route.roundTrip }}
+                testID="route-roundtrip"
+              >
+                <Text style={styles.chipText}>Round trip</Text>
+              </Pressable>
+              {/* Driving only: a described vehicle changes both the road chosen
+                and the arrival time, but it lives in Settings → Navigation,
+                where a driver planning a trip has no reason to look. Reads
+                `preferences.vehicle` — what will actually be sent to the engine
+                — never the raw setting. */}
+              {route.profile === 'car' && !vehicleLabel ? (
+                <Pressable
+                  style={styles.chip}
+                  onPress={onOpenVehicleSettings}
+                  accessibilityRole="button"
+                  accessibilityLabel="Describe a taller or slower vehicle"
+                  testID="route-vehicle"
+                >
+                  <CarIcon color={theme.icon} size={14} />
+                  <Text style={styles.chipText}>Vehicle</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {/* The loop's length and direction, once there is a loop to
+              describe — inert beside a switch that is off. */}
+            {route.roundTrip ? (
+              <View style={styles.roundRow}>
+                <TextInput
+                  style={styles.kmInput}
+                  keyboardType="numeric"
+                  value={String(route.roundTripKm)}
+                  onChangeText={(t) => route.setRoundTripKm(Math.max(Number(t) || 1, 1))}
+                  testID="route-roundtrip-km"
+                />
+                <Text style={styles.muted}>km</Text>
+                {(
+                  [
+                    ['either', 'Either way'],
+                    ['clockwise', 'Clockwise'],
+                    ['counterclockwise', 'Counterclockwise'],
+                  ] as const
+                ).map(([direction, label]) => (
+                  <Pressable
+                    key={direction}
+                    style={[
+                      styles.chip,
+                      route.roundTripDirection === direction && styles.chipSelected,
+                    ]}
+                    onPress={() => route.setRoundTripDirection(direction)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: route.roundTripDirection === direction }}
+                    testID={`route-roundtrip-${direction}`}
+                  >
+                    <Text style={styles.chipText}>{label}</Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  style={[styles.button, styles.buttonQuiet]}
+                  onPress={route.newLoop}
+                  disabled={route.waypoints.length === 0}
+                >
+                  <Text style={styles.buttonQuietText}>New loop</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         {/* A silent no-op would read as a dead button; say why nothing happened. */}
         {locateFailed ? (
           <Text style={styles.muted}>
@@ -942,29 +1008,36 @@ export function RoutePanel({
         {/* One toolbar per travel mode (`routeActionsFor`, @atlas/routing), not
           the same six buttons at one weight for everyone: driving leads with
           the stops along the way, walking with the track it will keep and
-          carry, and the rest fold under "More" — one tap away, never gone.
+          carry, and the rest fold under ⋯ — one tap away, never gone.
           Availability still decides existence: an action that cannot act is
           absent from both rows rather than folded into a menu of dead entries,
-          so with no stops the whole toolbar is gone. */}
+          so with no stops the whole toolbar is gone.
+
+          Glyphs, since v0.175.0: these are the sheet's *secondary* actions, and
+          six of them spelled out wrapped into two bands of text that outweighed
+          the answer above them. Drawn, they are one short row, and Share looks
+          like Share. The words survive as the TalkBack name and as the fold's
+          own labels. */}
         {primaryActions.length > 0 || moreActions.length > 0 ? (
           <View style={styles.actionRow}>
-            {primaryActions.map(renderAction)}
+            {primaryActions.map((action) => renderAction(action))}
             {moreActions.length > 0 ? (
               <Pressable
-                style={[styles.button, styles.buttonQuiet, moreOpen && styles.buttonQuietOn]}
+                style={[styles.iconOnly, styles.buttonQuiet, moreOpen && styles.buttonQuietOn]}
                 onPress={() => setMoreOpen((open) => !open)}
                 accessibilityRole="button"
+                accessibilityLabel="More route actions"
                 accessibilityState={{ expanded: moreOpen }}
                 testID="route-more"
               >
-                <Text style={styles.buttonQuietText}>More {moreOpen ? '▴' : '▾'}</Text>
+                <MoreIcon color={theme.icon} size={18} />
               </Pressable>
             ) : null}
           </View>
         ) : null}
         {moreOpen && moreActions.length > 0 ? (
           <View style={[styles.actionRow, styles.actionRowMore]}>
-            {moreActions.map(renderAction)}
+            {moreActions.map((action) => renderAction(action, true))}
           </View>
         ) : null}
 
@@ -1084,6 +1157,14 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   /** The route's terms, one chip each — costing, loop and described vehicle. */
   optionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  /* Framed and inset, so an open fold reads as belonging to the button that
+     opened it rather than as a band of chrome the sheet always carries. */
+  optionsFold: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
+  },
   // Icon-only mode picker: equal-width tabs under a shared rule, with the
   // selected one underlined rather than filled — a filled pill at this size
   // fights the line badges further down the panel for attention.
@@ -1202,7 +1283,27 @@ const styles = StyleSheet.create({
   iconButton: { paddingHorizontal: 6, paddingVertical: 2 },
   iconText: { fontSize: 16, color: theme.text },
   iconDisabled: { color: theme.textMuted },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  /* Square glyph buttons at Android's 44dp minimum: these are pressed with a
+     thumb, on a sheet, often in a moving vehicle. */
+  iconOnly: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /* In the fold the glyph keeps its words — that is where the actions a mode
+     does not lead with live, and a row of unfamiliar icons is not a menu. */
+  iconAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 40,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+  },
+  iconActionText: { color: theme.text, fontWeight: '600' },
   button: {
     backgroundColor: theme.accent,
     borderRadius: 8,

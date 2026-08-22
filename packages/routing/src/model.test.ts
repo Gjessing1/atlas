@@ -4,6 +4,7 @@ import {
   normalizeVehicle,
   ROUTE_OPTIONS,
   routeOptionsFor,
+  routeOptionsSummary,
   ROUTE_ACTIONS,
   routeActionsFor,
   ROUTING_PROFILES,
@@ -86,6 +87,64 @@ describe('routeOptionsFor', () => {
       expect(option.chipLabel.length).toBeLessThanOrEqual(14);
       expect(option.label.length).toBeGreaterThan(option.chipLabel.length);
     }
+  });
+
+  it('never offers the same preference twice to one traveller', () => {
+    // `avoidHighways` is listed once per meaning — a driver's motorways and a
+    // cyclist's quiet roads — so the row must still show it exactly once.
+    for (const profile of ROUTING_PROFILES) {
+      const keys = routeOptionsFor(profile.id).map((o) => o.key);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+
+  it('says what avoiding main roads means for the traveller asking', () => {
+    const carHighways = routeOptionsFor('car').find((o) => o.key === 'avoidHighways');
+    const bikeHighways = routeOptionsFor('bike').find((o) => o.key === 'avoidHighways');
+    expect(carHighways?.chipLabel).toBe('No motorways');
+    expect(bikeHighways?.chipLabel).toBe('Quiet roads');
+  });
+});
+
+describe('routeOptionsSummary', () => {
+  const prefs = (over: Partial<ReturnType<typeof defaultRoutePreferences>> = {}) => ({
+    ...defaultRoutePreferences('car'),
+    ...over,
+  });
+
+  it('names the button plainly when the plan is under no constraints', () => {
+    const summary = routeOptionsSummary('car', prefs(), false);
+    expect(summary).toMatchObject({ count: 0, label: 'Options', ariaLabel: 'Route options' });
+  });
+
+  it('names the constraint itself when there is only one', () => {
+    // The whole point of v0.173.0's chip wording survives the fold: a single
+    // constraint is worth more as words than as a count of hidden settings.
+    const summary = routeOptionsSummary('car', prefs({ avoidFerries: true }), false);
+    expect(summary.label).toBe('No ferries');
+    expect(summary.ariaLabel).toBe('Route options: no ferries');
+  });
+
+  it('falls back to a count past one, so the row still fits a phone', () => {
+    const summary = routeOptionsSummary(
+      'car',
+      prefs({ avoidFerries: true, avoidTolls: true }),
+      false,
+    );
+    expect(summary.label).toBe('Options · 2');
+    expect(summary.ariaLabel).toBe('Route options: no ferries, no tolls');
+  });
+
+  it('counts the loop switch, which shapes the route like any other term', () => {
+    const summary = routeOptionsSummary('hike', defaultRoutePreferences('hike'), true);
+    expect(summary).toMatchObject({ count: 1, label: 'Round trip' });
+  });
+
+  it('ignores a preference the profile does not offer', () => {
+    // A saved "avoid tolls" from a previous drive must not light the walking
+    // planner's button for a control walking never shows.
+    const summary = routeOptionsSummary('foot', prefs({ avoidTolls: true }), false);
+    expect(summary.count).toBe(0);
   });
 
   it('only ever names a boolean preference', () => {

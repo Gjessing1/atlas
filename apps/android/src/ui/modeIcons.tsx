@@ -1,4 +1,4 @@
-import type { RoutingProfile } from '@atlas/routing';
+import type { RouteActionKey, RoutingProfile } from '@atlas/routing';
 import type { TransitMode } from '@atlas/transit';
 import { filterModeOf } from '@atlas/transit';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
@@ -434,7 +434,213 @@ export function CuriositiesIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconPr
   );
 }
 
+/*
+ * The route planner's toolbar, as glyphs — the same paths web draws
+ * (apps/web/src/icons.tsx), so one action is one picture on both clients.
+ *
+ * The panel used to spend two bands on six same-weight text buttons for
+ * actions nobody opens the planner to perform. Drawn, they cost one short row,
+ * and Share finally looks like Share. Nothing is unlabelled: each button keeps
+ * the descriptor's sentence as its TalkBack name, and the fold under ⋯ shows
+ * the words beside the glyph.
+ */
+
+/** Sliders: the route's terms, folded behind one button. */
+export function SlidersIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M4 7.5h4.5M13 7.5h7M4 16.5h7M15.5 16.5h4.5"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Circle cx={10.8} cy={7.5} r={2.3} stroke={color} strokeWidth={1.7} fill="none" />
+      <Circle cx={13.3} cy={16.5} r={2.3} stroke={color} strokeWidth={1.7} fill="none" />
+    </Svg>
+  );
+}
+
+/** The overflow: everything the mode's toolbar did not lead with. */
+export function MoreIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={5.2} cy={12} r={1.7} fill={color} />
+      <Circle cx={12} cy={12} r={1.7} fill={color} />
+      <Circle cx={18.8} cy={12} r={1.7} fill={color} />
+    </Svg>
+  );
+}
+
+/** A pin with a plus: add somewhere to stop on the way. */
+export function PinPlusIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 21.2s6.6-6.4 6.6-10.7a6.6 6.6 0 1 0-13.2 0C5.4 14.8 12 21.2 12 21.2z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M12 7.6v5.9M9.05 10.55h5.9"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Bookmark: keep this route as a track. */
+export function BookmarkIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M6.5 3.8h11a1 1 0 0 1 1 1v15.6L12 16.8l-6.5 3.6V4.8a1 1 0 0 1 1-1z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Download: the route leaves as a file. */
+export function DownloadIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 3.8v10.6M7.8 10.6L12 14.8l4.2-4.2"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M4.6 17.6v1.6a1 1 0 0 0 1 1h12.8a1 1 0 0 0 1-1v-1.6"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Two arrows passing: turn the journey around. */
+export function SwapIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M7.6 4.6v14.8M4.1 15.9l3.5 3.5 3.5-3.5"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M16.4 19.4V4.6M12.9 8.1l3.5-3.5 3.5 3.5"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Sparkles: let the planner choose the order of the stops. */
+export function SparkleIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M10 3.8l1.6 4.1 4.1 1.6-4.1 1.6L10 15.2l-1.6-4.1-4.1-1.6 4.1-1.6z"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M17.2 14.2l.85 2.15 2.15.85-2.15.85-.85 2.15-.85-2.15-2.15-.85 2.15-.85z"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Bin: throw the whole plan away. */
+export function TrashIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M5.5 6.8h13M9.8 6.8V5.3a1 1 0 0 1 1-1h2.4a1 1 0 0 1 1 1v1.5"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path
+        d="M7.2 6.8l.75 12.1a1 1 0 0 0 1 .94h6.1a1 1 0 0 0 1-.94l.75-12.1"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path
+        d="M10.5 10.2v6.2M13.5 10.2v6.2"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Share, drawn the way every other app draws it: three nodes and two links. */
+export function ShareIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Circle cx={18} cy={5.4} r={2.6} stroke={color} strokeWidth={1.7} fill="none" />
+      <Circle cx={6} cy={12} r={2.6} stroke={color} strokeWidth={1.7} fill="none" />
+      <Circle cx={18} cy={18.6} r={2.6} stroke={color} strokeWidth={1.7} fill="none" />
+      <Path
+        d="M8.35 10.75l7.3-4.05M8.35 13.25l7.3 4.05"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 type ModeIcon = (props: ModeIconProps) => React.ReactElement;
+
+/**
+ * One glyph per secondary action, keyed by the shared descriptor so the two
+ * clients cannot end up drawing different pictures for the same button.
+ */
+export const ROUTE_ACTION_ICON: Record<RouteActionKey, ModeIcon> = {
+  alongRoute: PinPlusIcon,
+  saveTrack: BookmarkIcon,
+  exportGpx: DownloadIcon,
+  reverse: SwapIcon,
+  optimize: SparkleIcon,
+  clear: TrashIcon,
+  share: ShareIcon,
+};
 
 /** Road profiles, keyed by the ids in `ROUTING_PROFILES`. */
 export const PROFILE_ICON: Record<RoutingProfile, ModeIcon> = {

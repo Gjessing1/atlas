@@ -25,6 +25,7 @@ import {
   routePathToTrackData,
   routeSurfaceBreakdown,
   routeOptionsFor,
+  routeOptionsSummary,
   routeActionsFor,
   type RouteActionInfo,
   type RouteActionKey,
@@ -36,7 +37,15 @@ import type { TransitTrip } from '@atlas/transit';
 import { formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
-import { CarIcon, ROUTING_ICON, TrainIcon } from '../icons.js';
+import {
+  CarIcon,
+  CrosshairIcon,
+  MoreIcon,
+  ROUTE_ACTION_ICON,
+  ROUTING_ICON,
+  SlidersIcon,
+  TrainIcon,
+} from '../icons.js';
 import { TransitResults } from './TransitResults.js';
 import { useGeocode } from './useGeocode.js';
 import type { RoutePlanner } from './useRoute.js';
@@ -275,6 +284,11 @@ export function RoutePanel({
   // toolbar can own what it shows (ROADMAP: "an intentional toolbar").
   const [moreOpen, setMoreOpen] = useState(false);
   const [alongOpen, setAlongOpen] = useState(false);
+  // The route's terms, folded away until asked for. Closed on every open of
+  // the planner: the terms persist, so the common case is a plan under the
+  // same ones as last time, and a fold that remembers being open would spend
+  // the space this fold exists to give back.
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [saveName, setSaveName] = useState('Planned route');
   const [saveCollection, setSaveCollection] = useState('');
   const [saving, setSaving] = useState(false);
@@ -308,6 +322,9 @@ export function RoutePanel({
   // preferences rather than the setting, so the chip can only ever say what was
   // sent to the engine.
   const vehicleLabel = vehicleChipLabel(route.profile, route.preferences.vehicle);
+  // What the collapsed options button says — shared with Android, so one plan
+  // cannot be described two ways.
+  const optionsSummary = routeOptionsSummary(route.profile, route.preferences, route.roundTrip);
 
   const stops = route.waypoints;
   // Which end the add-a-stop box fills: the first stop is the start, anything
@@ -410,73 +427,58 @@ export function RoutePanel({
   const primaryActions = toolbar.primary.filter((action) => actionAvailable[action.key]);
   const moreActions = toolbar.more.filter((action) => actionAvailable[action.key]);
 
-  const renderAction = (action: RouteActionInfo) => {
-    switch (action.key) {
-      case 'alongRoute':
-        return (
-          <button
-            key={action.key}
-            type="button"
-            aria-expanded={alongOpen}
-            onClick={() => setAlongOpen((open) => !open)}
-          >
-            {action.label}
-          </button>
-        );
-      case 'saveTrack':
-        return (
-          <button
-            key={action.key}
-            type="button"
-            onClick={() => {
-              setSaved(false);
-              setSaveOpen((open) => !open);
-            }}
-          >
-            {saved ? 'Saved as track' : action.label}
-          </button>
-        );
-      case 'exportGpx':
-        return (
-          <button key={action.key} type="button" onClick={exportGpx}>
-            {action.label}
-          </button>
-        );
-      case 'reverse':
-        return (
-          <button key={action.key} type="button" onClick={route.reverse}>
-            {action.label}
-          </button>
-        );
-      case 'optimize':
-        return (
-          <button
-            key={action.key}
-            type="button"
-            onClick={route.optimize}
-            title="Reorder intermediate stops for a shorter tour"
-          >
-            {action.label}
-          </button>
-        );
-      case 'clear':
-        return (
-          <button key={action.key} type="button" onClick={route.clear}>
-            {action.label}
-          </button>
-        );
-      case 'share':
-        return (
-          <button
-            key={action.key}
-            type="button"
-            onClick={copyLink}
-            title="Copy a link that reopens this plan"
-          >
-            {copied ? 'Link copied' : action.label}
-          </button>
-        );
-    }
+  /**
+   * One toolbar button: the glyph, with the descriptor's sentence as its name.
+   *
+   * `labelled` is the fold under ⋯, which shows the words beside the glyph —
+   * an icon-only row is only legible for actions a mode leads with, and the
+   * fold is where the unfamiliar ones live. Two states are worth saying out
+   * loud rather than drawing: a saved track and a copied link, both of which
+   * are otherwise silent.
+   */
+  const renderAction = (action: RouteActionInfo, labelled = false) => {
+    const Icon = ROUTE_ACTION_ICON[action.key];
+    const done =
+      (action.key === 'saveTrack' && saved) || (action.key === 'share' && copied) ? true : false;
+    const label =
+      action.key === 'saveTrack' && saved
+        ? 'Saved as track'
+        : action.key === 'share' && copied
+          ? 'Link copied'
+          : action.label;
+    const title =
+      action.key === 'optimize'
+        ? 'Reorder intermediate stops for a shorter tour'
+        : action.key === 'share'
+          ? 'Copy a link that reopens this plan'
+          : action.label;
+    const onClick = {
+      alongRoute: () => setAlongOpen((open) => !open),
+      saveTrack: () => {
+        setSaved(false);
+        setSaveOpen((open) => !open);
+      },
+      exportGpx: exportGpx,
+      reverse: route.reverse,
+      optimize: route.optimize,
+      clear: route.clear,
+      share: copyLink,
+    }[action.key];
+    return (
+      <button
+        key={action.key}
+        type="button"
+        className={labelled ? 'route-action route-action-labelled' : 'route-action'}
+        aria-label={label}
+        aria-expanded={action.key === 'alongRoute' ? alongOpen : undefined}
+        data-done={done || undefined}
+        title={title}
+        onClick={onClick}
+      >
+        <Icon size={18} />
+        {labelled && <span>{label}</span>}
+      </button>
+    );
   };
 
   return (
@@ -544,95 +546,6 @@ export function RoutePanel({
             </button>
           )}
         </div>
-
-        {/* One row of chips for everything that shapes the route. It replaced a
-          "Customize <profile>" disclosure, a full-width follow-position button
-          and a round-trip row of its own (ROADMAP: "Declutter the navigation
-          picker") — three stacked bands of chrome above the stops, of which the
-          disclosure *hid* the controls that change the route and the button was
-          not about routing at all. Chips state the constraint they impose, so
-          the row reads as the plan's terms rather than as a settings list. */}
-        {!transitMode && (
-          <div className="route-options" role="group" aria-label="Route options">
-            {routeOptionsFor(route.profile).map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                className="route-chip"
-                role="switch"
-                aria-checked={route.preferences[option.key]}
-                title={option.label}
-                onClick={() => route.setPreference(option.key, !route.preferences[option.key])}
-              >
-                {option.chipLabel}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="route-chip"
-              role="switch"
-              aria-checked={route.roundTrip}
-              onClick={() => route.setRoundTrip(!route.roundTrip)}
-            >
-              Round trip
-            </button>
-            {/* Driving only, and the whole reason this row exists: a described
-              vehicle changes both the road chosen and the arrival time, but it
-              lives in Settings → Navigation, where a motorhome driver planning
-              a trip has no reason to look. Lit and carrying the height once one
-              is set, so the plan says what it was built for; unlit and named
-              when it is not, so the capability is discoverable from the panel
-              that uses it. Reads `preferences.vehicle` — what will actually be
-              sent to the engine — never the raw setting. */}
-            {route.profile === 'car' && (
-              <button
-                type="button"
-                className={vehicleLabel ? 'route-chip route-chip-set' : 'route-chip'}
-                onClick={onOpenVehicleSettings}
-                title="Height, width and cruising speed — opens Settings → Navigation"
-                aria-label={
-                  vehicleLabel
-                    ? `Vehicle: ${vehicleLabel}. Change in settings`
-                    : 'Vehicle: describe a taller or slower one'
-                }
-              >
-                <CarIcon size={14} /> {vehicleLabel ?? 'Vehicle'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* The loop's length and direction, once there is a loop to describe.
-          Folded away with the switch rather than sitting inert beside it. */}
-        {route.roundTrip && !transitMode && (
-          <div className="route-roundtrip">
-            <input
-              type="number"
-              min={1}
-              max={500}
-              value={route.roundTripKm}
-              onChange={(e) => route.setRoundTripKm(Math.max(Number(e.target.value) || 1, 1))}
-              aria-label="Round trip distance in kilometers"
-            />
-            <span>km</span>
-            <select
-              value={route.roundTripDirection}
-              onChange={(event) =>
-                route.setRoundTripDirection(
-                  event.currentTarget.value as typeof route.roundTripDirection,
-                )
-              }
-              aria-label="Round trip direction"
-            >
-              <option value="either">Either direction</option>
-              <option value="clockwise">Clockwise</option>
-              <option value="counterclockwise">Counterclockwise</option>
-            </select>
-            <button type="button" onClick={route.newLoop} disabled={route.waypoints.length === 0}>
-              New loop
-            </button>
-          </div>
-        )}
 
         {route.waypoints.length > 0 ? (
           <ol className="route-waypoints">
@@ -747,20 +660,141 @@ export function RoutePanel({
           />
         )}
 
-        {/* "My location" always seeds the start — the commonest plan begins where
-          you are. Kept beside the "or click the map" reminder so both ways of
-          setting the start sit together. */}
+        {/* One row for the two things that are neither a stop nor the answer:
+          where the plan starts from, and the terms it is planned under.
+
+          Both used to be bands of their own. "My location" sat beside an "or
+          click the map" reminder that the empty state above already gives, and
+          the route's terms were a wrapping row of chips — five of them driving
+          — parked above the stops, where a phone has the least room and the
+          user is doing something else. Folding them behind one button costs a
+          tap for the rare change and gives the stops the space; the button
+          still *names* the constraint when there is exactly one
+          (`routeOptionsSummary`), so a plan under terms never looks like a plan
+          under none. */}
         {editing === null && (
           <div className="route-source-row">
             <button
               type="button"
-              className="route-my-location"
+              className="route-chip"
               disabled={locating}
+              aria-label="Use my location as the start"
               onClick={() => void addMyLocation()}
             >
-              {locating ? 'Locating…' : '◎ My location as start'}
+              <CrosshairIcon size={14} /> {locating ? 'Locating…' : 'My location'}
             </button>
-            <span className="route-hint">or click the map</span>
+            {!transitMode && (
+              <button
+                type="button"
+                className={optionsSummary.count > 0 ? 'route-chip route-chip-set' : 'route-chip'}
+                aria-expanded={optionsOpen}
+                aria-label={optionsSummary.ariaLabel}
+                onClick={() => setOptionsOpen((open) => !open)}
+              >
+                <SlidersIcon size={14} /> {optionsSummary.label}
+              </button>
+            )}
+            {/* Outside the fold, and only once a vehicle is described: the
+              height a plan is costed for is the strongest thing the panel can
+              say about it, and hiding it behind a tap would undo v0.173.0,
+              which put it here because a motorhome driver had no reason to
+              believe the feature existed. Unset, it is one more control and
+              lives inside the fold with the rest. */}
+            {!transitMode && vehicleLabel && (
+              <button
+                type="button"
+                className="route-chip route-chip-set"
+                onClick={onOpenVehicleSettings}
+                title="Height, width and cruising speed — opens Settings → Navigation"
+                aria-label={`Vehicle: ${vehicleLabel}. Change in settings`}
+              >
+                <CarIcon size={14} /> {vehicleLabel}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* The fold: every term of the plan, as the chips that state it. Chips
+          say the constraint they impose ("No ferries"), never the thing avoided
+          — a lit chip reading "Ferries" is genuinely ambiguous about whether
+          ferries are wanted or refused, and that is expensive on a route about
+          to put a vehicle on a boat. */}
+        {optionsOpen && !transitMode && (
+          <div className="route-options" role="group" aria-label="Route options">
+            {routeOptionsFor(route.profile).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className="route-chip"
+                role="switch"
+                aria-checked={route.preferences[option.key]}
+                title={option.label}
+                onClick={() => route.setPreference(option.key, !route.preferences[option.key])}
+              >
+                {option.chipLabel}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="route-chip"
+              role="switch"
+              aria-checked={route.roundTrip}
+              title="Come back to the start instead of ending at a destination"
+              onClick={() => route.setRoundTrip(!route.roundTrip)}
+            >
+              Round trip
+            </button>
+            {/* Driving only: a described vehicle changes both the road chosen
+              and the arrival time, but it lives in Settings → Navigation, where
+              a driver planning a trip has no reason to look. Reads
+              `preferences.vehicle` — what will actually be sent to the engine —
+              never the raw setting. */}
+            {route.profile === 'car' && !vehicleLabel && (
+              <button
+                type="button"
+                className="route-chip"
+                onClick={onOpenVehicleSettings}
+                title="Height, width and cruising speed — opens Settings → Navigation"
+                aria-label="Vehicle: describe a taller or slower one"
+              >
+                <CarIcon size={14} /> Vehicle
+              </button>
+            )}
+            {/* The loop's length and direction, once there is a loop to
+              describe — inert beside a switch that is off. */}
+            {route.roundTrip && (
+              <div className="route-roundtrip">
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={route.roundTripKm}
+                  onChange={(e) => route.setRoundTripKm(Math.max(Number(e.target.value) || 1, 1))}
+                  aria-label="Round trip distance in kilometers"
+                />
+                <span>km</span>
+                <select
+                  value={route.roundTripDirection}
+                  onChange={(event) =>
+                    route.setRoundTripDirection(
+                      event.currentTarget.value as typeof route.roundTripDirection,
+                    )
+                  }
+                  aria-label="Round trip direction"
+                >
+                  <option value="either">Either direction</option>
+                  <option value="clockwise">Clockwise</option>
+                  <option value="counterclockwise">Counterclockwise</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={route.newLoop}
+                  disabled={route.waypoints.length === 0}
+                >
+                  New loop
+                </button>
+              </div>
+            )}
           </div>
         )}
         {/* A silent no-op would read as a dead button; say why nothing happened. */}
@@ -913,27 +947,37 @@ export function RoutePanel({
         {/* One toolbar per travel mode (`routeActionsFor`, @atlas/routing), not
           the same six buttons at one weight for everyone: driving leads with
           the stops along the way, walking with the track it will keep and
-          carry, and the rest fold under "More" — one tap away, never gone.
+          carry, and the rest fold under ⋯ — one tap away, never gone.
           Availability still decides existence: an action that cannot act is
           absent from both rows rather than folded into a menu of dead entries,
-          so with no stops the whole toolbar is gone. */}
+          so with no stops the whole toolbar is gone.
+
+          Glyphs, since v0.175.0: these are the panel's *secondary* actions, and
+          six of them spelled out wrapped into two bands of text that outweighed
+          the answer above them. Drawn, they are one short row, and Share looks
+          like Share. The words survive as the accessible name, the tooltip and
+          the fold's own labels. */}
         {(primaryActions.length > 0 || moreActions.length > 0) && (
-          <div className="route-actions">
-            {primaryActions.map(renderAction)}
+          <div className="route-actions" role="group" aria-label="Route actions">
+            {primaryActions.map((action) => renderAction(action))}
             {moreActions.length > 0 && (
               <button
                 type="button"
-                className="route-more"
+                className="route-action route-more"
                 aria-expanded={moreOpen}
+                aria-label="More route actions"
+                title="More route actions"
                 onClick={() => setMoreOpen((open) => !open)}
               >
-                More <span aria-hidden="true">{moreOpen ? '▴' : '▾'}</span>
+                <MoreIcon size={18} />
               </button>
             )}
           </div>
         )}
         {moreOpen && moreActions.length > 0 && (
-          <div className="route-actions route-actions-more">{moreActions.map(renderAction)}</div>
+          <div className="route-actions route-actions-more">
+            {moreActions.map((action) => renderAction(action, true))}
+          </div>
         )}
 
         {/* The category browser the toolbar's "Stops along route" opens: fuel,

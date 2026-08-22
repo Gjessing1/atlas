@@ -684,7 +684,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useRoute',
     web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'routeOptionsFor' },
     android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'routeOptionsFor' },
-    note: 'Both render `ROUTE_OPTIONS` from @atlas/routing as one chip row. The list lived as a hand-copied array in each panel until v0.173.0 — two copies of it is not a maintenance cost but a correctness one, since a control offered on one client and not the other routes two devices differently from the same plan.',
+    note: 'Both render `ROUTE_OPTIONS` from @atlas/routing as one chip row, folded behind a single button since v0.175.0 (`routeOptionsSummary`, shared so the two clients cannot describe one plan differently) — the row was five chips wide driving, parked above the stops where a phone has the least room. The button still names the constraint when there is exactly one, so a plan under terms never looks like a plan under none. The list lived as a hand-copied array in each panel until v0.173.0 — two copies of it is not a maintenance cost but a correctness one, since a control offered on one client and not the other routes two devices differently from the same plan.',
   },
   {
     id: 'planner-vehicle-chip',
@@ -711,7 +711,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useRoute',
     web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'routeActionsFor' },
     android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'routeActionsFor' },
-    note: 'Both render `ROUTE_ACTIONS` from @atlas/routing (ROADMAP: "Give each routing type an intentional toolbar"). Driving leads with the stops along the way, walking with the track it will keep and carry, and everything else folds under "More". The split is placement only — a mode that *hid* an action would be a planner that can do less depending on how you travel — and availability still decides existence, so an action that cannot act is absent from both rows rather than a dead entry behind a fold.',
+    note: 'Both render `ROUTE_ACTIONS` from @atlas/routing (ROADMAP: "Give each routing type an intentional toolbar"). Driving leads with the stops along the way, walking with the track it will keep and carry, and everything else folds under ⋯. The split is placement only — a mode that *hid* an action would be a planner that can do less depending on how you travel — and availability still decides existence, so an action that cannot act is absent from both rows rather than a dead entry behind a fold. Glyphs since v0.175.0 (`ROUTE_ACTION_ICON`, the same paths on both clients): spelled out, these secondary actions wrapped into two bands of text that outweighed the answer above them. The words survive as each button\'s accessible name and as the fold\'s own labels.',
   },
   {
     id: 'planner-elevation-profile',
