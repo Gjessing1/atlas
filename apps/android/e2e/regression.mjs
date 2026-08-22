@@ -201,6 +201,32 @@ async function tapAfterScroll(id, scrollerId, direction = 'up') {
   throw new Error(`Could not bring ${id} into view inside ${scrollerId}`);
 }
 
+/**
+ * Wait for a node that lives *below* the sheet's clipped edge, scrolling to look
+ * for it between polls.
+ *
+ * `waitForId` alone cannot see one: React Native does not lay out a
+ * ScrollView's off-screen children, so "not in the visible tree" and "not
+ * rendered yet" are the same observation from UiAutomator — which is why the
+ * route-landed signal used to be a control near the top of the sheet. Since
+ * v0.174.0 the result and its toolbar sit below the stops, where the answer
+ * belongs, so proving the road result arrived means scrolling to it.
+ */
+async function waitForIdAfterScroll(id, scrollerId, direction = 'up', timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '';
+  while (Date.now() < deadline) {
+    last = hierarchy();
+    if (visibleNode(last, id)) return last;
+    const scroller = visibleNode(last, scrollerId);
+    if (scroller) swipeWithin(scroller.bounds, direction);
+    await delay(500);
+  }
+  throw new Error(
+    `Timed out waiting for ${id} to scroll into view inside ${scrollerId}; saw ${nodeIds(last).join(', ')}`,
+  );
+}
+
 async function focusAfterScroll(id, scrollerId, direction = 'up') {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const xml = hierarchy();
@@ -367,13 +393,14 @@ async function planRoadRoute(folderId) {
   await waitForId('route-sheet');
   await addRouteStop('origin');
   await addRouteStop('destination');
-  // The alternatives live below the clipped half-sheet and therefore are not
-  // mounted into UiAutomator's visible tree yet. This route-only control is
-  // the first stable signal that the detailed road result has landed; the two
-  // choices are asserted later in the navigation preview where both are shown.
-  // It needs a computed path to exist, and driving is the mode that keeps it in
-  // the visible toolbar rather than under "More" (`routeActionsFor`).
-  await waitForId('route-action-alongRoute', true, 30_000);
+  // This route-only control is the first stable signal that the detailed road
+  // result has landed; the alternatives are asserted later in the navigation
+  // preview, where both choices are shown. It needs a computed path to exist,
+  // and driving is the mode that keeps it in the visible toolbar rather than
+  // under "More" (`routeActionsFor`) — so finding it also proves the
+  // mode-dependent toolbar rendered. It sits below the stops with the rest of
+  // the result, past the half-sheet's clipped edge, hence the scroll.
+  await waitForIdAfterScroll('route-action-alongRoute', 'route-scroll', 'up', 45_000);
 
   const initial = boundsForNode(nodeForId(hierarchy(), 'route-sheet'));
   await tap('route-sheet-handle');
