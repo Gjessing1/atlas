@@ -265,6 +265,14 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       return context.createConfigurationContext(config)
     }
 
+    /**
+     * `optString` answers `"null"` — the four-character string — for a field
+     * whose value is JSON null, which is how a widget ends up printing `null`
+     * in the column where a delay would go. Every optional string is read here.
+     */
+    private fun JSONObject.string(name: String): String =
+      if (isNull(name)) "" else optString(name)
+
     /** The one colour decision in the widget: what a row *is*. */
     private fun stateColor(res: Context, state: String): Int =
       res.getColor(
@@ -290,16 +298,19 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       // With one direction the heading *is* the title: "Engelsrud →
       // Nationaltheatret" says strictly more than "Engelsrud ↔ Nationaltheatret"
       // above it, and the line it saves is another departure.
-      val single = if (blocks == 1) directions.optJSONObject(0)?.optString("label") else null
+      val single = if (blocks == 1) directions.optJSONObject(0)?.string("label") else null
       val title = single?.takeUnless { it.isBlank() }
-        ?: board?.optString("route")?.takeUnless { it.isBlank() }
+        ?: board?.string("route")?.takeUnless { it.isBlank() }
         ?: res.getString(R.string.atlas_commute_widget_setup_route)
       views.setTextViewText(R.id.atlas_commute_route, title)
 
       val status = statusLine(res, context, widgetId, board, nowMs, widthDp)
       views.setTextViewText(R.id.atlas_commute_status, status.first)
       views.setTextColor(R.id.atlas_commute_status, status.second)
-      views.setContentDescription(R.id.atlas_commute_widget_root, "$title. ${status.first}")
+      // Deliberately no description on the root: it is the clickable node, and a
+      // clickable group that has one is read *instead of* everything inside it —
+      // which would announce the widget as its own title and hide every
+      // departure. The route, the status and each row speak for themselves.
 
       views.removeAllViews(R.id.atlas_commute_body)
       val perDirection = rowCapacity(heightDp, blocks.coerceAtLeast(1))
@@ -307,7 +318,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         val direction = directions.optJSONObject(block) ?: continue
         if (blocks > 1) {
           val label = RemoteViews(context.packageName, R.layout.atlas_commute_label)
-          label.setTextViewText(R.id.atlas_commute_label, direction.optString("label").uppercase())
+          label.setTextViewText(R.id.atlas_commute_label, direction.string("label").uppercase())
           views.addView(R.id.atlas_commute_body, label)
         }
         val rows = direction.optJSONArray("rows") ?: JSONArray()
@@ -319,7 +330,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         // A direction with nothing to show says why, instead of collapsing to an
         // empty block that reads as a broken widget; a direction that does show
         // departures gets its disruption headline only if a row slot is spare.
-        val note = if (shown == 0) direction.optString("note") else noteAmong(rows, shown)
+        val note = if (shown == 0) direction.string("note") else noteAmong(rows, shown)
         if (!note.isNullOrBlank() && (shown == 0 || shown < perDirection)) {
           val view = RemoteViews(context.packageName, R.layout.atlas_commute_note)
           view.setTextViewText(R.id.atlas_note_text, note)
@@ -366,7 +377,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     /** The first disruption headline among the rows actually on screen. */
     private fun noteAmong(rows: JSONArray, shown: Int): String? {
       for (index in 0 until shown) {
-        val note = rows.optJSONObject(index)?.optString("note")
+        val note = rows.optJSONObject(index)?.string("note")
         if (!note.isNullOrBlank()) return note
       }
       return null
@@ -413,14 +424,14 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         // been sitting there. A widget nobody could refresh — no network, a
         // sleeping device — used to keep the same confident line all morning.
         return Pair(
-          res.getString(R.string.atlas_commute_widget_stale, board.optString("checked")),
+          res.getString(R.string.atlas_commute_widget_stale, board.string("checked")),
           res.getColor(R.color.atlas_widget_warn),
         )
       }
       // Narrow instances drop the clock and keep the source: "Entur live".
-      val line = if (widthDp < NARROW_DP) board.optString("source") else board.optString("status")
+      val line = if (widthDp < NARROW_DP) board.string("source") else board.string("status")
       return Pair(
-        line.takeUnless { it.isBlank() } ?: board.optString("status"),
+        line.takeUnless { it.isBlank() } ?: board.string("status"),
         res.getColor(R.color.atlas_widget_muted),
       )
     }
@@ -435,8 +446,8 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     ): RemoteViews {
       val views = RemoteViews(context.packageName, R.layout.atlas_commute_row)
       val cancelled = row.optBoolean("cancelled")
-      val color = stateColor(res, row.optString("state"))
-      val time = row.optString("time")
+      val color = stateColor(res, row.string("state"))
+      val time = row.string("time")
 
       if (time.isBlank()) {
         // A board kept by the version before this one has no columns, only the
@@ -448,8 +459,8 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         }
         views.setViewVisibility(R.id.atlas_row_countdown, View.GONE)
         views.setViewVisibility(R.id.atlas_row_countdown_text, View.GONE)
-        setText(views, R.id.atlas_row_lines, row.optString("text"))
-        views.setContentDescription(R.id.atlas_row_root, row.optString("text"))
+        setText(views, R.id.atlas_row_lines, row.string("text"))
+        views.setContentDescription(R.id.atlas_row_root, row.string("text"))
         return views
       }
 
@@ -466,7 +477,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         if (cancelled) color else res.getColor(R.color.atlas_widget_text),
       )
 
-      val delay = row.optString("delayLabel")
+      val delay = row.string("delayLabel")
       setText(views, R.id.atlas_row_delay, delay)
       if (!delay.isNullOrBlank()) views.setTextColor(R.id.atlas_row_delay, color)
 
@@ -495,11 +506,11 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         views.setViewVisibility(R.id.atlas_row_countdown_text, View.GONE)
       } else {
         views.setViewVisibility(R.id.atlas_row_countdown, View.GONE)
-        setText(views, R.id.atlas_row_countdown_text, row.optString("countdown"))
+        setText(views, R.id.atlas_row_countdown_text, row.string("countdown"))
         views.setTextColor(R.id.atlas_row_countdown_text, color)
       }
 
-      setText(views, R.id.atlas_row_lines, row.optString("lines"))
+      setText(views, R.id.atlas_row_lines, row.string("lines"))
       views.setTextColor(
         R.id.atlas_row_lines,
         if (cancelled) res.getColor(R.color.atlas_widget_muted)
@@ -508,11 +519,11 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       setText(
         views,
         R.id.atlas_row_platform,
-        if (widthDp < NARROW_DP) "" else row.optString("platform"),
+        if (widthDp < NARROW_DP) "" else row.string("platform"),
       )
       // Read out as one row — "07:16 (+6) · in 6 min · 280 → RE10 · plt 2" —
       // rather than as five unrelated fragments.
-      views.setContentDescription(R.id.atlas_row_root, row.optString("text"))
+      views.setContentDescription(R.id.atlas_row_root, row.string("text"))
       return views
     }
 
