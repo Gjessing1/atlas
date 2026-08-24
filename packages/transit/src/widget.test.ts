@@ -88,10 +88,20 @@ describe('tripWidgetRow', () => {
       NOW,
     );
     expect(row.text).toBe('07:12 · in 12 min · 280 · plt 2');
+    // The same row, part by part — this is what the widget lays out, and `text`
+    // is only its one-line reading.
+    expect(row.time).toBe('07:12');
+    expect(row.countdown).toBe('in 12 min');
+    expect(row.lines).toBe('280');
+    expect(row.platform).toBe('plt 2');
+    expect(row.delayLabel).toBeNull();
     expect(row.delayMin).toBeNull();
     expect(row.aimed).toBeNull();
     expect(row.whenMs).toBe(at(7 * 60 + 12));
     expect(row.realtime).toBe(false);
+    // No live feed behind it: a weaker promise than a realtime departure, and
+    // the widget draws it as one.
+    expect(row.state).toBe('scheduled');
   });
 
   it('shows the delay against the timetable, and keeps the aimed time', () => {
@@ -99,10 +109,26 @@ describe('tripWidgetRow', () => {
     liveRide.startPredictionInaccurate = true;
     const row = tripWidgetRow(trip(liveRide), NOW);
     expect(row.text).toBe('07:16 (+6) · in 16 min · 280');
+    expect(row.time).toBe('07:16');
+    expect(row.delayLabel).toBe('+6');
     expect(row.delayMin).toBe(6);
     expect(row.aimed).toBe('07:10');
     expect(row.realtime).toBe(true);
     expect(row.predictionInaccurate).toBe(true);
+    expect(row.state).toBe('delayed');
+  });
+
+  it('calls a service running ahead of the timetable early, not late', () => {
+    const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 20), at(7 * 60 + 17))), NOW);
+    expect(row.delayLabel).toBe('-3');
+    expect(row.state).toBe('early');
+    expect(row.text).toBe('07:17 (-3) · in 17 min · 280');
+  });
+
+  it('is live when the feed is behind the time and it is running to it', () => {
+    const onTime = ride('280', at(7 * 60 + 20));
+    onTime.realtime = true;
+    expect(tripWidgetRow(trip(onTime), NOW).state).toBe('live');
   });
 
   it('names every vehicle in ride order', () => {
@@ -158,23 +184,39 @@ describe('departureWidgetRow', () => {
   });
 
   it('makes a cancellation explicit instead of counting down to it', () => {
-    const row = departureWidgetRow(departure({ cancelled: true }), NOW);
+    // The expected time of a cancelled departure is the ghost of a service that
+    // will not run, and there is no platform to walk to.
+    const row = departureWidgetRow(
+      departure({ cancelled: true, expectedDepartureMs: at(7 * 60 + 29) }),
+      NOW,
+    );
     expect(row.text).toBe('07:22 · cancelled · 280 → Dikemark');
+    expect(row.time).toBe('07:22');
+    expect(row.countdown).toBe('cancelled');
+    expect(row.platform).toBeNull();
+    expect(row.delayLabel).toBeNull();
     expect(row.cancelled).toBe(true);
+    expect(row.state).toBe('cancelled');
   });
 });
 
 describe('commuteRefreshAtMs', () => {
   const row = (whenMs: number): TransitWidgetRow => ({
     whenMs,
-    text: '',
+    time: '',
     aimed: null,
-    countdownMin: 0,
+    delayLabel: null,
     delayMin: null,
+    lines: '',
+    platform: null,
+    countdown: '',
+    countdownMin: 0,
     realtime: false,
     predictionInaccurate: false,
     cancelled: false,
+    state: 'scheduled',
     note: null,
+    text: '',
   });
 
   it('wakes two minutes before the next departure', () => {
@@ -236,6 +278,11 @@ describe('commuteWidgetBoard', () => {
     expect(board.directions[0]!.rows[0]!.text).toBe('07:12 · in 12 min · 280 · plt 2');
     expect(board.directions[0]!.note).toBeNull();
     expect(board.status).toBe('Entur live · checked 07:00');
+    // The clock is in the board twice on purpose: `status` for a surface that
+    // can only paint a line, `checkedMs` for one that can age it as it sits.
+    expect(board.source).toBe('Entur live');
+    expect(board.checked).toBe('checked 07:00');
+    expect(board.checkedMs).toBe(NOW);
   });
 
   it('tells "nothing runs" apart from "your lines removed everything"', () => {
@@ -246,6 +293,7 @@ describe('commuteWidgetBoard', () => {
       nowMs: NOW,
     });
     expect(upstream.status).toBe('Nothing runs in this window · checked 07:00');
+    expect(upstream.source).toBe('Nothing runs in this window');
     const filtered = commuteWidgetBoard({
       query: commute(),
       results: [{ key: 'inbound', result: empty, emptyReason: 'filtered' }],

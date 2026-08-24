@@ -6,11 +6,16 @@
   would ask on a wall clock as well — all night and all weekend — which is the
   cadence this rework removed.
 
-  Configuration is deliberately required on placement. Android does not
-  guarantee the first `onUpdate` when a provider names a configure activity,
-  and Pixel Launcher can otherwise bind only this static layout without giving
-  the provider the instance id. One tap on the preselected "whichever is next"
-  option is the reliable hand-off; later changes use the same screen through ⚙.
+  Configuration is required here, on Android 11 and older: those launchers have
+  no `configuration_optional`, and Android does not guarantee the first
+  `onUpdate` when a provider names a configure activity, so one tap on the
+  preselected "whichever is next" option is the reliable hand-off. From Android
+  12 (`xml-v31`) the same screen becomes optional — a widget dropped without it
+  works, because "whichever is next" is also its default — and the picker gets a
+  populated preview instead of this empty setup card.
+
+  Resizing goes down to roughly 3×2: the layout counts the rows it can fit from
+  the instance's own bounds rather than assuming three.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
   android:configure="io.gjessing.atlas.commutewidget.CommuteWidgetConfigureActivity"
@@ -18,6 +23,8 @@
   android:initialLayout="@layout/atlas_commute_widget"
   android:minWidth="250dp"
   android:minHeight="180dp"
+  android:minResizeWidth="180dp"
+  android:minResizeHeight="150dp"
   android:resizeMode="horizontal|vertical"
   android:targetCellWidth="4"
   android:targetCellHeight="3"

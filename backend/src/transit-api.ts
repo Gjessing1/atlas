@@ -11,7 +11,6 @@ import {
   filterCommuteResult,
   isTransitLineId,
   isTransitStopId,
-  norwayClock,
   commuteWidgetBoard,
   parseEnturDeparturesResponse,
   parseEnturResponse,
@@ -20,6 +19,9 @@ import {
   parseEnturVehiclesResponse,
   transitCoverage,
   transitCoversPoint,
+  widgetCheckedLabel,
+  widgetSourceLabel,
+  widgetStatusLine,
   ENTUR_STOP_LINES_QUERY,
   MINUTES_PER_DAY,
   RIDE_MODES,
@@ -330,13 +332,14 @@ function stopWidgetBoard({
   const rows = departures.departures.slice(0, maxRows).map((d) => departureWidgetRow(d, nowMs));
   const name = departures.stop?.name || label || 'Stop';
   const note = rows.length === 0 ? emptyDirectionNote('upstream') : null;
+  const source = widgetSourceLabel(rows.length > 0, note);
   return {
     route: name,
     directions: [{ key: 'outbound', label: name, rows, note }],
-    status:
-      rows.length > 0
-        ? `Entur live · checked ${norwayClock(nowMs)}`
-        : `${note} · checked ${norwayClock(nowMs)}`,
+    checkedMs: nowMs,
+    source,
+    checked: widgetCheckedLabel(nowMs),
+    status: widgetStatusLine(source, nowMs),
     // No saved commute window here, so an empty board is simply asked again
     // later; the shared helper's floor and ceiling still apply.
     nextRefreshMs: commuteRefreshAtMs(

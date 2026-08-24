@@ -136,10 +136,14 @@ export {
   emptyDirectionNote,
   minutesOfDayLabel,
   tripWidgetRow,
+  widgetCheckedLabel,
+  widgetSourceLabel,
+  widgetStatusLine,
   windowOpensAtMs,
   type TransitWidgetBoard,
   type TransitWidgetDirection,
   type TransitWidgetRow,
+  type TransitWidgetRowState,
 } from './widget.js';
 export {
   TRANSIT_ALIGHT_LEAD_MS,

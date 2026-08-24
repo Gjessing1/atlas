@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The widget paints; it formats nothing. Every string below is set from the rows
-  the backend rendered (`POST /api/transit/widget`), so a row reads
-  "07:16 (+6) · in 6 min · 280 → RE10 · plt 2" without Kotlin owning a second
-  copy of the trip labels. Three rows per direction rather than two: a commute
-  board that shows only the next departure is useless the moment you miss it.
+  the backend rendered (`POST /api/transit/widget`), part by part, so the clock
+  gets its own column and the delay its own colour without Kotlin owning a
+  second copy of the trip labels.
+
+  There is no fixed grid of row slots any more. `atlas_commute_body` is filled by
+  `RemoteViews.addView` with one `atlas_commute_row` per departure, as many as the
+  instance's measured bounds can hold — a 5×3 widget shows more than a 4×2 one,
+  and the worker asks upstream for exactly that many.
+
+  Chrome is down to one line: the route names the widget, so there is no second
+  "Atlas commute" title above it, and the freshness sits under the route beside
+  the ↻ that acts on it.
 -->
 <LinearLayout
   xmlns:android="http://schemas.android.com/apk/res/android"
@@ -19,138 +27,62 @@
     android:layout_height="wrap_content"
     android:gravity="center_vertical"
     android:orientation="horizontal">
-    <TextView
-      android:id="@+id/atlas_commute_title"
+    <LinearLayout
       android:layout_width="0dp"
       android:layout_height="wrap_content"
       android:layout_weight="1"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:text="Commute"
-      android:textColor="#FFFFFFFF"
-      android:textSize="16sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_commute_configure"
-      android:layout_width="34dp"
-      android:layout_height="32dp"
-      android:gravity="center"
-      android:text="⚙"
-      android:textColor="#FF9EABB9"
-      android:textSize="15sp" />
-    <TextView
+      android:orientation="vertical">
+      <TextView
+        android:id="@+id/atlas_commute_route"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/atlas_commute_widget_setup_route"
+        android:textColor="@color/atlas_widget_text"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+      <TextView
+        android:id="@+id/atlas_commute_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/atlas_commute_widget_setup_status"
+        android:textColor="@color/atlas_widget_muted"
+        android:textSize="10sp" />
+    </LinearLayout>
+    <!--
+      48dp of touch target for a 20dp glyph. Two of them eat a third of a 4-cell
+      width, which is why the padding does the sizing: the icon stays small while
+      the tappable box stays a thumb wide.
+    -->
+    <ImageView
       android:id="@+id/atlas_commute_refresh"
-      android:layout_width="34dp"
-      android:layout_height="32dp"
-      android:gravity="center"
-      android:text="↻"
-      android:textColor="#FFAFC8EA"
-      android:textSize="20sp"
-      android:textStyle="bold" />
-  </LinearLayout>
-
-  <TextView
-    android:id="@+id/atlas_commute_route"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:ellipsize="end"
-    android:maxLines="1"
-    android:text="Choose your stops in Atlas"
-    android:textColor="#FF9EABB9"
-    android:textSize="11sp" />
-
-  <LinearLayout
-    android:id="@+id/atlas_commute_block_1"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="8dp"
-    android:orientation="vertical">
-    <TextView
-      android:id="@+id/atlas_commute_label_1"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FF6CA8F7"
-      android:textSize="10sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_commute_row_1_1"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFFFFFFF"
-      android:textSize="13sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_commute_row_1_2"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFD3D9E0"
-      android:textSize="12sp" />
-    <TextView
-      android:id="@+id/atlas_commute_row_1_3"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFB9C2CC"
-      android:textSize="12sp" />
+      android:layout_width="48dp"
+      android:layout_height="48dp"
+      android:background="?android:attr/selectableItemBackgroundBorderless"
+      android:contentDescription="@string/atlas_commute_widget_refresh"
+      android:padding="14dp"
+      android:src="@drawable/atlas_widget_refresh" />
+    <ImageView
+      android:id="@+id/atlas_commute_configure"
+      android:layout_width="44dp"
+      android:layout_height="48dp"
+      android:background="?android:attr/selectableItemBackgroundBorderless"
+      android:contentDescription="@string/atlas_commute_widget_configure"
+      android:paddingStart="12dp"
+      android:paddingTop="14dp"
+      android:paddingEnd="12dp"
+      android:paddingBottom="14dp"
+      android:src="@drawable/atlas_widget_tune" />
   </LinearLayout>
 
   <LinearLayout
-    android:id="@+id/atlas_commute_block_2"
+    android:id="@+id/atlas_commute_body"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="7dp"
-    android:orientation="vertical">
-    <TextView
-      android:id="@+id/atlas_commute_label_2"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FF6CA8F7"
-      android:textSize="10sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_commute_row_2_1"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFFFFFFF"
-      android:textSize="13sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_commute_row_2_2"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFD3D9E0"
-      android:textSize="12sp" />
-    <TextView
-      android:id="@+id/atlas_commute_row_2_3"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:ellipsize="end"
-      android:maxLines="1"
-      android:textColor="#FFB9C2CC"
-      android:textSize="12sp" />
-  </LinearLayout>
-
-  <TextView
-    android:id="@+id/atlas_commute_status"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="7dp"
-    android:ellipsize="end"
-    android:maxLines="2"
-    android:text="Open Atlas to set up your commute"
-    android:textColor="#FF8996A4"
-    android:textSize="10sp" />
+    android:layout_marginTop="2dp"
+    android:layout_marginEnd="4dp"
+    android:orientation="vertical" />
 </LinearLayout>

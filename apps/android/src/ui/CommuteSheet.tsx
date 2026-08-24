@@ -17,9 +17,14 @@ import {
   type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import {
+  addCommuteWidget,
+  commuteWidgetSupport,
+  type CommuteWidgetSupport,
+} from '../commuteWidget';
 import { BottomSheet } from './BottomSheet';
 import { theme } from './theme';
 
@@ -228,6 +233,55 @@ function TripRow({ trip }: { trip: TransitTrip }) {
   );
 }
 
+/**
+ * The way onto the home screen, from inside the app.
+ *
+ * "Add it from your launcher's widget picker" was the whole of this before, which
+ * is an instruction to go and do something somewhere else — and on the launchers
+ * that bury the picker two long-presses deep, an instruction most people do not
+ * follow. Android takes a pin request directly (8.0+), so ask.
+ *
+ * The offer only appears when the launcher actually accepts one: a button that
+ * silently does nothing is worse than a sentence explaining the picker.
+ */
+function WidgetOffer() {
+  const [support, setSupport] = useState<CommuteWidgetSupport | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void commuteWidgetSupport().then((next) => {
+      if (alive) setSupport(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!support) return null;
+  return (
+    <View style={styles.widget}>
+      <Text style={styles.widgetNote}>
+        {support.count > 0
+          ? 'This saved board also fills your home screen. Tap a widget’s tuning icon to choose which direction it shows.'
+          : 'This saved board can sit on your home screen, with live delays and platforms.'}
+      </Text>
+      {support.pinnable ? (
+        <Pressable
+          style={styles.widgetAdd}
+          onPress={() => void addCommuteWidget()}
+          testID="commute-add-widget"
+        >
+          <Text style={styles.widgetAddText}>
+            {support.count > 0 ? 'Add another widget' : 'Add to home screen'}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.widgetNote}>
+          Add “Atlas commute” from your launcher’s widget picker.
+        </Text>
+      )}
+    </View>
+  );
+}
+
 export function CommuteSheet({
   visible,
   commute,
@@ -396,10 +450,7 @@ export function CommuteSheet({
             <Text style={styles.refreshText}>Refresh</Text>
           </Pressable>
         </View>
-        <Text style={styles.widgetNote}>
-          This saved board also powers the “Atlas commute” home-screen widget. Add it from your
-          launcher’s widget picker, then tap the widget’s ⚙ to choose which direction it shows.
-        </Text>
+        <WidgetOffer />
       </ScrollView>
     </BottomSheet>
   );
@@ -546,5 +597,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   refreshText: { color: theme.text, fontSize: 11, fontWeight: '700' },
-  widgetNote: { color: theme.textMuted, fontSize: 11, lineHeight: 16, marginTop: 14 },
+  widget: { marginTop: 16, gap: 9 },
+  widgetNote: { color: theme.textMuted, fontSize: 11, lineHeight: 16 },
+  widgetAdd: {
+    alignSelf: 'flex-start',
+    backgroundColor: theme.accentFaint,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  widgetAddText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
 });

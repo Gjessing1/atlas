@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One departure, in columns rather than in one sentence: the clock, the
+  correction against the timetable, the countdown, what you board and the
+  platform. Colour is set per row from the row's `state` — a cancellation is red
+  wherever it sits in the list, where the old layout faded rows two and three and
+  so said "less important" about it.
+
+  The countdown is a Chronometer, ticking locally against the departure instant.
+  A widget that paints a server-rendered "in 6 min" is telling the truth for one
+  minute and lying for the rest of the hour.
+-->
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@+id/atlas_row_root"
+  android:layout_width="match_parent"
+  android:layout_height="wrap_content"
+  android:baselineAligned="false"
+  android:focusable="true"
+  android:gravity="center_vertical"
+  android:orientation="horizontal"
+  android:paddingTop="2dp">
+  <TextView
+    android:id="@+id/atlas_row_time"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_text"
+    android:textSize="14sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_row_delay"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="3dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_warn"
+    android:textSize="11sp"
+    android:textStyle="bold" />
+  <Chronometer
+    android:id="@+id/atlas_row_countdown"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="7dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_accent"
+    android:textSize="12sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_row_countdown_text"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="7dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="12sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_row_lines"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_weight="1"
+    android:ellipsize="end"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_text"
+    android:textSize="12sp" />
+  <TextView
+    android:id="@+id/atlas_row_platform"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="6dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="11sp" />
+</LinearLayout>

@@ -9,9 +9,10 @@ import android.content.Context
  * App-owned (one copy): the server origin and the saved commute, written by
  * `configureCommuteWidget` whenever the shared `transit.commute` setting
  * changes. Instance-owned (one copy per `appWidgetId`): which direction this
- * widget shows — so two widgets can show two directions — and the last board the
+ * widget shows — so two widgets can show two directions — the last board the
  * backend rendered for it, held verbatim, because a widget that blanks when a
- * refresh fails is worse than one showing an answer it admits is old.
+ * refresh fails is worse than one showing an answer it admits is old, and what
+ * the instance is currently *doing*, which is the one thing the board cannot say.
  */
 internal object CommuteWidgetStore {
   private const val PREFS = "atlas_commute_widget"
@@ -20,6 +21,15 @@ internal object CommuteWidgetStore {
 
   /** The default: outbound before the outbound time, the way home after it. */
   const val DIRECTION_AUTO = "auto"
+
+  /**
+   * An instance's own state, which outranks the board's status line while it
+   * holds. Stored with the instant it was set: "Refreshing…" is only true for as
+   * long as a refresh could plausibly still be running.
+   */
+  const val STATE_REFRESHING = "refreshing"
+  const val STATE_FAILED = "failed"
+  const val STATE_SETUP = "setup"
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -46,18 +56,35 @@ internal object CommuteWidgetStore {
     prefs(context).getString("board_$widgetId", null)
 
   fun saveBoard(context: Context, widgetId: Int, board: String) {
-    prefs(context).edit().putString("board_$widgetId", board).remove("status_$widgetId").apply()
+    prefs(context).edit()
+      .putString("board_$widgetId", board)
+      .remove("state_$widgetId")
+      .remove("state_at_$widgetId")
+      .apply()
+  }
+
+  fun state(context: Context, widgetId: Int): String? =
+    prefs(context).getString("state_$widgetId", null)
+
+  fun stateAtMs(context: Context, widgetId: Int): Long =
+    prefs(context).getLong("state_at_$widgetId", 0L)
+
+  fun setState(context: Context, widgetId: Int, state: String) {
+    prefs(context).edit()
+      .putString("state_$widgetId", state)
+      .putLong("state_at_$widgetId", System.currentTimeMillis())
+      .apply()
   }
 
   /**
-   * A status that overrides the board's own — set when a refresh failed, so the
-   * kept rows stay on screen under an honest "couldn't refresh" line.
+   * How many rows per direction the last upstream call asked for. A resize only
+   * needs to ask again when the widget grew past what it already holds.
    */
-  fun status(context: Context, widgetId: Int): String? =
-    prefs(context).getString("status_$widgetId", null)
+  fun rowsAsked(context: Context, widgetId: Int): Int =
+    prefs(context).getInt("rows_$widgetId", 0)
 
-  fun saveStatus(context: Context, widgetId: Int, status: String) {
-    prefs(context).edit().putString("status_$widgetId", status).apply()
+  fun setRowsAsked(context: Context, widgetId: Int, rows: Int) {
+    prefs(context).edit().putInt("rows_$widgetId", rows).apply()
   }
 
   /** Drop the kept rows without forgetting which direction this widget shows. */
@@ -70,7 +97,9 @@ internal object CommuteWidgetStore {
     prefs(context).edit()
       .remove("direction_$widgetId")
       .remove("board_$widgetId")
-      .remove("status_$widgetId")
+      .remove("state_$widgetId")
+      .remove("state_at_$widgetId")
+      .remove("rows_$widgetId")
       .apply()
   }
 }

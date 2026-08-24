@@ -16,6 +16,10 @@ import org.json.JSONObject
  * cancellation, the platform and every disruption notice the trip model already
  * carried. `POST /api/transit/widget` now returns rows that are ready to paint,
  * so this worker only moves bytes and decides when to ask again.
+ *
+ * The one judgement it makes is *how many* rows to ask for: the instance's own
+ * bounds decide that, and fetching six departures to paint two is somebody's
+ * Entur quota.
  */
 class CommuteWidgetWorker(
   context: Context,
@@ -41,7 +45,7 @@ class CommuteWidgetWorker(
     }
     if (query == null || baseUrl == null) {
       ids.forEach {
-        CommuteWidgetStore.saveStatus(applicationContext, it, "Open Atlas to set up your commute")
+        CommuteWidgetStore.setState(applicationContext, it, CommuteWidgetStore.STATE_SETUP)
       }
       CommuteWidgetProvider.renderAll(applicationContext)
       return Result.success()
@@ -49,15 +53,17 @@ class CommuteWidgetWorker(
 
     var failed = false
     for (id in ids) {
+      val rows = CommuteWidgetProvider.rowsWanted(applicationContext, id)
       val body = JSONObject()
         .put("kind", "commute")
         .put("commute", query)
         .put("direction", CommuteWidgetStore.direction(applicationContext, id))
-        .put("maxRows", ROWS_PER_DIRECTION)
+        .put("maxRows", rows)
         .toString()
       try {
         val board = post("$baseUrl/api/transit/widget", body)
         CommuteWidgetStore.saveBoard(applicationContext, id, board)
+        CommuteWidgetStore.setRowsAsked(applicationContext, id, rows)
         // Ask again when the answer stops being true, not on a wall clock: two
         // minutes before the next departure, or — with nothing upcoming — before
         // the commute's own window reopens. A fixed fifteen-minute period asked
@@ -67,7 +73,7 @@ class CommuteWidgetWorker(
       } catch (_: Exception) {
         failed = true
         // Keep the last good rows; only the status line admits the failure.
-        CommuteWidgetStore.saveStatus(applicationContext, id, "Couldn’t refresh · tap ↻")
+        CommuteWidgetStore.setState(applicationContext, id, CommuteWidgetStore.STATE_FAILED)
       }
     }
     CommuteWidgetProvider.renderAll(applicationContext)
@@ -94,6 +100,5 @@ class CommuteWidgetWorker(
 
   companion object {
     const val WIDGET_ID = "widgetId"
-    const val ROWS_PER_DIRECTION = 3
   }
 }

@@ -1,0 +1,8 @@
+<resources>
+  <color name="atlas_widget_background">#F0181D23</color>
+  <color name="atlas_widget_text">#FFF2F5F9</color>
+  <color name="atlas_widget_muted">#FF9EABB9</color>
+  <color name="atlas_widget_accent">#FF9CC0FF</color>
+  <color name="atlas_widget_warn">#FFFFC078</color>
+  <color name="atlas_widget_error">#FFFF9B93</color>
+</resources>

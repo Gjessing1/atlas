@@ -1,0 +1,22 @@
+<!--
+  The widget's palette, resolved by the *launcher* rather than by Atlas.
+
+  RemoteViews are inflated in the host's context, so a colour named from the
+  layout XML picks up `values-night` when the home screen is dark — which
+  matters here because the app itself is pinned to `userInterfaceStyle: "light"`
+  (app.json) and would otherwise paint a light card onto a dark launcher. The
+  same reason is why `CommuteWidgetProvider` resolves its state colours through a
+  configuration context built from the *system* night mode, not from
+  `context.resources`.
+
+  `values-v31` swaps these for the device's own Material You tones; the delay and
+  cancellation colours stay fixed, because the system palette has no red.
+-->
+<resources>
+  <color name="atlas_widget_background">#FFF6F8FB</color>
+  <color name="atlas_widget_text">#FF0F1419</color>
+  <color name="atlas_widget_muted">#FF56626F</color>
+  <color name="atlas_widget_accent">#FF15599C</color>
+  <color name="atlas_widget_warn">#FF8A4B00</color>
+  <color name="atlas_widget_error">#FFB3261E</color>
+</resources>

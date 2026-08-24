@@ -8,17 +8,22 @@
  * the platform and the disruption notice. So the rows are built in this package
  * and the widget only paints them. Kotlin formats nothing.
  *
- * Two consequences worth stating, because they are the reason this file is not
+ * Three consequences worth stating, because they are the reason this file is not
  * simply `labels.ts`:
  *
  *  - **Times are Norwegian wall-clock times**, from `clock.ts`, not the
  *    formatter's local ones. This runs on the backend, whose container clock is
  *    UTC; `fmtClock` there would put the morning bus an hour early.
- *  - **A row is one string plus flags.** The widget cannot lay out what it
- *    cannot measure, and a `RemoteViews` row has no room for a second line, so
- *    everything a commuter reads goes into `text` and the flags exist only to
- *    choose a colour — a paint decision, which is the app's, not a format
- *    decision, which is not.
+ *  - **A row is its parts, not one string.** Each part arrives ready to paint —
+ *    `time`, `delayLabel`, `countdown`, `lines`, `platform` — so the widget can
+ *    give the clock its own column and the delay its own colour without
+ *    re-deriving anything. `text` is still built here, from those same parts, and
+ *    is what a screen reader reads out and what a surface with nowhere to lay
+ *    them out paints.
+ *  - **A row says what it *is*, in `state`.** Cancelled, delayed, early, live or
+ *    merely timetabled is the one thing a colour may be chosen from; colouring by
+ *    position in the list — which the first layout did, fading rows two and three
+ *    — says "less important" about a cancellation.
  */
 
 import {
@@ -30,7 +35,7 @@ import {
 } from './clock.js';
 import type { CommuteEmptyReason } from './commute.js';
 import { DELAY_THRESHOLD_MS } from './labels.js';
-import { isRideMode, legDelayMs } from './model.js';
+import { isRideMode } from './model.js';
 import type {
   TransitCommuteDirection,
   TransitCommuteQuery,
@@ -39,25 +44,51 @@ import type {
   TransitTrip,
 } from './model.js';
 
-/** One journey (or departure) as the widget shows it. */
+/**
+ * What a row *is* — the only thing a client may choose a colour from.
+ *
+ * `live` is a realtime departure running to time; `scheduled` is one the
+ * operator has published no live prediction for, which is a weaker promise and
+ * should read as one.
+ */
+export type TransitWidgetRowState = 'cancelled' | 'delayed' | 'early' | 'live' | 'scheduled';
+
+/** One journey (or departure) as the widget shows it, part by part. */
 export interface TransitWidgetRow {
-  /** Epoch ms of the departure — what a refresh schedules against. */
+  /** Epoch ms of the departure — what a countdown ticks towards and a refresh schedules against. */
   whenMs: number;
-  /** The whole row, ready to display: `"07:16 (+6) · in 6 min · 280 → RE10 · plt 2"`. */
-  text: string;
+  /** The departure as the clock shows it: `"07:16"`. Cancelled rows show the timetabled time. */
+  time: string;
   /** The departure time as the timetable prints it, when it is being corrected. */
   aimed: string | null;
-  /** Minutes until departure, floored at 0 — a bus does not leave "in -1 min". */
-  countdownMin: number;
+  /** `"+6"` / `"-2"` — the correction against the timetable, or null when there is none. */
+  delayLabel: string | null;
   /** Minutes late against the timetable (negative = early), or null when on time. */
   delayMin: number | null;
+  /** What you board, in ride order: `"280 → RE10"`, or `"walk"` for a journey with no ride. */
+  lines: string;
+  /** `"plt 2"`, or null — including for a cancelled departure, which has no platform to go to. */
+  platform: string | null;
+  /** The live phrase in the countdown's place: `"in 6 min"`, `"now"`, or `"cancelled"`. */
+  countdown: string;
+  /** Minutes until departure, floored at 0 — a bus does not leave "in -1 min". */
+  countdownMin: number;
   /** Whether the displayed expected time is backed by a realtime feed. */
   realtime: boolean;
   /** Entur has live data, but warns that this particular prediction is inaccurate. */
   predictionInaccurate: boolean;
   cancelled: boolean;
+  /** {@link TransitWidgetRowState} — colour by this, never by position. */
+  state: TransitWidgetRowState;
   /** A disruption headline, when the operator published one worth a glance. */
   note: string | null;
+  /**
+   * The whole row on one line: `"07:16 (+6) · in 6 min · 280 → RE10 · plt 2"`.
+   * Built from the parts above, so it cannot drift from them. This is what a
+   * screen reader reads out, and what a surface with nowhere to lay the parts
+   * out paints.
+   */
+  text: string;
 }
 
 /** One direction of the widget's board. */
@@ -75,7 +106,17 @@ export interface TransitWidgetBoard {
   /** `"Engelsrud ↔ Nationaltheatret · via Asker stasjon"`. */
   route: string;
   directions: TransitWidgetDirection[];
-  /** `"Entur live · checked 07:04"` — the answer's age, always visible. */
+  /**
+   * Epoch ms this board was rendered. A widget ages its own answer from this —
+   * "checked 07:04" is only true for a few minutes, and the difference between
+   * fresh and half an hour old is exactly what makes a widget worth trusting.
+   */
+  checkedMs: number;
+  /** Where the answer came from, with no clock in it: `"Entur live"`, or why there is nothing. */
+  source: string;
+  /** `"checked 07:04"` — the clock half on its own, for a client composing its own line. */
+  checked: string;
+  /** `"Entur live · checked 07:04"` — the whole line, for a client that cannot age it itself. */
   status: string;
   /** Epoch ms the widget should ask again at; see {@link commuteRefreshAtMs}. */
   nextRefreshMs: number;
@@ -134,36 +175,92 @@ function tripNote(trip: TransitTrip): string | null {
   return null;
 }
 
+function rowState(cancelled: boolean, delayMin: number | null, realtime: boolean) {
+  if (cancelled) return 'cancelled';
+  if (delayMin !== null && delayMin > 0) return 'delayed';
+  if (delayMin !== null && delayMin < 0) return 'early';
+  return realtime ? 'live' : 'scheduled';
+}
+
+/**
+ * One row, assembled from what a trip and a departure both have.
+ *
+ * Both kinds go through here so the parts and the one-line `text` are composed
+ * once: two composers is how a widget ends up reading `"07:16 (+6)"` in its
+ * clock column and `"07:16"` in its spoken description.
+ */
+function widgetRow({
+  whenMs,
+  aimedMs,
+  lines,
+  quay,
+  realtime,
+  predictionInaccurate,
+  cancelled,
+  note,
+  nowMs,
+}: {
+  whenMs: number;
+  aimedMs: number;
+  lines: string;
+  quay: string | undefined;
+  realtime: boolean;
+  predictionInaccurate: boolean;
+  cancelled: boolean;
+  note: string | null;
+  nowMs: number;
+}): TransitWidgetRow {
+  const delayMin = cancelled ? null : delayMinutes(whenMs - aimedMs, realtime);
+  const delayLabel = delayMin === null ? null : `${delayMin > 0 ? '+' : ''}${delayMin}`;
+  // A cancelled departure is only honest about the time it was *meant* to go:
+  // its "expected" time is the ghost of a service that will not run.
+  const time = norwayClock(cancelled ? aimedMs : whenMs);
+  const countdownMin = countdown(whenMs, nowMs);
+  // Nor does a cancelled departure have a platform to walk to.
+  const platform = !cancelled && quay ? `plt ${quay}` : null;
+  const countdownText = cancelled ? 'cancelled' : countdownLabel(countdownMin);
+  return {
+    whenMs,
+    time,
+    aimed: delayLabel === null ? null : norwayClock(aimedMs),
+    delayLabel,
+    delayMin,
+    lines,
+    platform,
+    countdown: countdownText,
+    countdownMin,
+    realtime,
+    predictionInaccurate: realtime && predictionInaccurate,
+    cancelled,
+    state: rowState(cancelled, delayMin, realtime),
+    note,
+    text: joinRow([
+      delayLabel === null ? time : `${time} (${delayLabel})`,
+      countdownText,
+      lines,
+      platform,
+    ]),
+  };
+}
+
 /** One journey as a widget row. */
 export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRow {
   const ride = firstRide(trip);
-  const aimedMs = ride?.aimedStartMs ?? trip.startMs;
-  const whenMs = ride?.expectedStartMs ?? trip.startMs;
-  const delay = delayMinutes(ride ? legDelayMs(ride) : 0, ride?.realtime === true);
-  const minutes = countdown(whenMs, nowMs);
-  const platform = ride?.from.quay?.publicCode;
-  const text = joinRow([
-    delay === null
-      ? norwayClock(whenMs)
-      : `${norwayClock(whenMs)} (${delay > 0 ? '+' : ''}${delay})`,
-    countdownLabel(minutes),
-    tripLines(trip),
-    platform ? `plt ${platform}` : null,
-  ]);
-  return {
-    whenMs,
-    text,
-    aimed: delay === null ? null : norwayClock(aimedMs),
-    countdownMin: minutes,
-    delayMin: delay,
-    realtime: ride?.realtime === true,
-    predictionInaccurate: ride?.realtime === true && ride.startPredictionInaccurate === true,
+  const realtime = ride?.realtime === true;
+  return widgetRow({
+    whenMs: ride?.expectedStartMs ?? trip.startMs,
+    aimedMs: ride?.aimedStartMs ?? trip.startMs,
+    lines: tripLines(trip),
+    quay: ride?.from.quay?.publicCode,
+    realtime,
+    predictionInaccurate: ride?.startPredictionInaccurate === true,
     // A planned journey carries no cancellation flag — the planner simply stops
     // offering a cancelled service. Its disruption notice is the honest signal,
     // and it lands in `note`.
     cancelled: false,
     note: tripNote(trip),
-  };
+    nowMs,
+  });
 }
 
 /**
@@ -173,39 +270,17 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
  * interleaved, so a row without its direction is half an answer.
  */
 export function departureWidgetRow(departure: TransitDeparture, nowMs: number): TransitWidgetRow {
-  const delay = delayMinutes(
-    departure.expectedDepartureMs - departure.aimedDepartureMs,
-    departure.realtime,
-  );
-  const whenMs = departure.expectedDepartureMs;
-  const minutes = countdown(whenMs, nowMs);
-  const clock =
-    delay === null
-      ? norwayClock(whenMs)
-      : `${norwayClock(whenMs)} (${delay > 0 ? '+' : ''}${delay})`;
-  const text = departure.cancelled
-    ? joinRow([
-        norwayClock(departure.aimedDepartureMs),
-        'cancelled',
-        `${departure.line.publicCode} → ${departure.destination}`,
-      ])
-    : joinRow([
-        clock,
-        countdownLabel(minutes),
-        `${departure.line.publicCode} → ${departure.destination}`,
-        departure.quay.publicCode ? `plt ${departure.quay.publicCode}` : null,
-      ]);
-  return {
-    whenMs,
-    text,
-    aimed: delay === null ? null : norwayClock(departure.aimedDepartureMs),
-    countdownMin: minutes,
-    delayMin: delay,
+  return widgetRow({
+    whenMs: departure.expectedDepartureMs,
+    aimedMs: departure.aimedDepartureMs,
+    lines: `${departure.line.publicCode} → ${departure.destination}`,
+    quay: departure.quay.publicCode,
     realtime: departure.realtime,
-    predictionInaccurate: departure.realtime && departure.predictionInaccurate === true,
+    predictionInaccurate: departure.predictionInaccurate === true,
     cancelled: departure.cancelled,
     note: departure.situations[0]?.summary ?? null,
-  };
+    nowMs,
+  });
 }
 
 /** `"Engelsrud ↔ Nationaltheatret · via Asker stasjon"`. */
@@ -266,11 +341,19 @@ export function windowOpensAtMs(query: TransitCommuteQuery, nowMs: number): numb
   return Math.min(...candidates);
 }
 
-/** `"Entur live · checked 07:04"`, or the reason there is nothing to show. */
-function statusLine(checkedMs: number, hasRows: boolean, note: string | null): string {
-  const checked = `checked ${norwayClock(checkedMs)}`;
-  if (hasRows) return `Entur live · ${checked}`;
-  return `${note ?? 'Nothing upcoming'} · ${checked}`;
+/** `"Entur live"`, or the reason there is nothing to show. */
+export function widgetSourceLabel(hasRows: boolean, note: string | null): string {
+  return hasRows ? 'Entur live' : (note ?? 'Nothing upcoming');
+}
+
+/** `"checked 07:04"` — when this answer was true, in the clock the commuter reads. */
+export function widgetCheckedLabel(checkedMs: number): string {
+  return `checked ${norwayClock(checkedMs)}`;
+}
+
+/** `"Entur live · checked 07:04"` — the one-line form, for a client that cannot age it. */
+export function widgetStatusLine(source: string, checkedMs: number): string {
+  return `${source} · ${widgetCheckedLabel(checkedMs)}`;
 }
 
 /** How a direction with no rows explains itself. */
@@ -285,7 +368,8 @@ export function emptyDirectionNote(reason: 'upstream' | 'filtered'): string {
  *
  * `directions` is what the caller asked for — a widget configured for one
  * direction costs one upstream call, not two — and the rows inside each are
- * already trimmed to what its layout can hold.
+ * already trimmed to what its layout can hold, which the widget measures from
+ * its own bounds and sends as `maxRows`.
  */
 export function commuteWidgetBoard({
   query,
@@ -312,14 +396,17 @@ export function commuteWidgetBoard({
     };
   });
   const allRows = directions.flatMap((direction) => direction.rows);
+  const source = widgetSourceLabel(
+    allRows.length > 0,
+    directions.find((direction) => direction.note)?.note ?? null,
+  );
   return {
     route: commuteRouteLabel(query),
     directions,
-    status: statusLine(
-      nowMs,
-      allRows.length > 0,
-      directions.find((direction) => direction.note)?.note ?? null,
-    ),
+    checkedMs: nowMs,
+    source,
+    checked: widgetCheckedLabel(nowMs),
+    status: widgetStatusLine(source, nowMs),
     nextRefreshMs: commuteRefreshAtMs(
       query,
       [...allRows].sort((a, b) => a.whenMs - b.whenMs),

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+. Two things the older descriptor cannot say:
+
+   - `previewLayout` — the picker draws a populated board instead of the empty
+     setup card that made the widget look broken before it was placed.
+   - `configuration_optional` — placing the widget no longer stops at a
+     four-option dialog. "Whichever is next" is the default the provider already
+     uses, so the widget can just appear and fill itself in; ⚙ still opens the
+     same screen for anyone who wants one fixed direction. This also covers the
+     in-app "Add to home screen" action, since a pinned widget is never given a
+     configuration pass at all.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:configure="io.gjessing.atlas.commutewidget.CommuteWidgetConfigureActivity"
+  android:description="@string/atlas_commute_widget_description"
+  android:initialLayout="@layout/atlas_commute_widget"
+  android:previewLayout="@layout/atlas_commute_widget_preview"
+  android:minWidth="250dp"
+  android:minHeight="180dp"
+  android:minResizeWidth="180dp"
+  android:minResizeHeight="150dp"
+  android:maxResizeWidth="500dp"
+  android:maxResizeHeight="440dp"
+  android:resizeMode="horizontal|vertical"
+  android:targetCellWidth="4"
+  android:targetCellHeight="3"
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen"
+  android:widgetFeatures="reconfigurable|configuration_optional" />

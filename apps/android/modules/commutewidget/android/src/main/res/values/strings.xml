@@ -1,4 +1,33 @@
+<!--
+  Words the *widget* owns, about its own state. Everything about the journeys
+  themselves — times, delays, platforms, "in 6 min" — is rendered by
+  `@atlas/transit` and arrives ready to paint; nothing below re-states any of it.
+-->
 <resources>
   <string name="atlas_commute_widget_name">Atlas commute</string>
   <string name="atlas_commute_widget_description">Live departures for your saved commute, with delays and platforms</string>
+
+  <string name="atlas_commute_widget_refresh">Refresh departures</string>
+  <string name="atlas_commute_widget_configure">Choose direction</string>
+  <string name="atlas_commute_widget_open">Open the commute board in Atlas</string>
+
+  <string name="atlas_commute_widget_setup_route">Choose your stops in Atlas</string>
+  <string name="atlas_commute_widget_setup_status">Open Atlas to set up your commute</string>
+  <string name="atlas_commute_widget_refreshing">Refreshing…</string>
+  <string name="atlas_commute_widget_failed">Couldn\'t refresh — tap to try again</string>
+  <!-- %1$s is the board's own "checked 07:04", rendered by @atlas/transit. -->
+  <string name="atlas_commute_widget_stale">%1$s · out of date</string>
+
+  <string name="atlas_commute_widget_preview_route">Engelsrud ↔ Nationaltheatret</string>
+  <string name="atlas_commute_widget_preview_status">Entur live · checked 07:04</string>
+  <string name="atlas_commute_widget_preview_label">ENGELSRUD → NATIONALTHEATRET</string>
+  <string name="atlas_commute_widget_preview_time_1">07:16</string>
+  <string name="atlas_commute_widget_preview_delay_1">+6</string>
+  <string name="atlas_commute_widget_preview_countdown_1">6:12</string>
+  <string name="atlas_commute_widget_preview_lines_1">280 → R14</string>
+  <string name="atlas_commute_widget_preview_platform_1">plt 2</string>
+  <string name="atlas_commute_widget_preview_time_2">07:34</string>
+  <string name="atlas_commute_widget_preview_countdown_2">cancelled</string>
+  <string name="atlas_commute_widget_preview_lines_2">280 → R14</string>
+  <string name="atlas_commute_widget_preview_note">Buss for tog Asker–Sandvika</string>
 </resources>
