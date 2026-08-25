@@ -1,15 +1,17 @@
 <!--
   Words the *widget* owns, about its own state. Everything about the journeys
-  themselves — times, delays, platforms, "in 6 min" — is rendered by
-  `@atlas/transit` and arrives ready to paint; nothing below re-states any of it.
+  themselves — times, delays, platforms, the legs and the changes between them —
+  is rendered by `@atlas/transit` and arrives ready to paint; nothing below
+  re-states any of it.
 -->
 <resources>
   <string name="atlas_commute_widget_name">Atlas commute</string>
   <string name="atlas_commute_widget_description">Live departures for your saved commute, with delays and platforms</string>
 
-  <!-- The arrow between a departure and its arrival. Drawn by the layout so no
-       row string is ever composed in Kotlin. -->
+  <!-- The arrow between a departure and its arrival, and the mark before a
+       change. Drawn by the layout so no row string is ever composed in Kotlin. -->
   <string name="atlas_commute_widget_to">→</string>
+  <string name="atlas_commute_widget_change">⇄</string>
 
   <string name="atlas_commute_widget_refresh">Refresh departures</string>
   <string name="atlas_commute_widget_configure">Choose direction</string>
@@ -29,13 +31,16 @@
   <string name="atlas_commute_widget_preview_arrival_1">08:14</string>
   <string name="atlas_commute_widget_preview_delay_1">+6</string>
   <string name="atlas_commute_widget_preview_duration_1">64 min</string>
-  <string name="atlas_commute_widget_preview_countdown_1">6:12</string>
-  <string name="atlas_commute_widget_preview_lines_1">280 → R14</string>
-  <string name="atlas_commute_widget_preview_changes_1">9 min at Asker</string>
   <string name="atlas_commute_widget_preview_platform_1">plt 2</string>
+  <string name="atlas_commute_widget_preview_leg_1a">280</string>
+  <string name="atlas_commute_widget_preview_window_1a">07:10 → 07:32</string>
+  <string name="atlas_commute_widget_preview_leg_1b">R14</string>
+  <string name="atlas_commute_widget_preview_window_1b">07:41 → 08:14</string>
+  <string name="atlas_commute_widget_preview_change_1b">9 min at Asker</string>
   <string name="atlas_commute_widget_preview_time_2">07:34</string>
   <string name="atlas_commute_widget_preview_arrival_2">08:38</string>
-  <string name="atlas_commute_widget_preview_countdown_2">cancelled</string>
-  <string name="atlas_commute_widget_preview_lines_2">280 → R14</string>
+  <string name="atlas_commute_widget_preview_status_2">Cancelled</string>
+  <string name="atlas_commute_widget_preview_leg_2a">280</string>
+  <string name="atlas_commute_widget_preview_window_2a">07:34 → 07:56</string>
   <string name="atlas_commute_widget_preview_note">Buss for tog Asker–Sandvika</string>
 </resources>

@@ -127,6 +127,7 @@ export {
   commuteDurationLabel,
   commuteEstimateLabel,
   commuteJourney,
+  commuteJourneyList,
   commuteLeaveNow,
   commuteNowLabel,
   commuteOffDayNote,
@@ -171,6 +172,7 @@ export {
   windowOpensAtMs,
   type TransitWidgetBoard,
   type TransitWidgetDirection,
+  type TransitWidgetLeg,
   type TransitWidgetRow,
   type TransitWidgetRowState,
 } from './widget.js';

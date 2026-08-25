@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One vehicle of a journey, with its own scheduled window and the change before
+  boarding it: "280  07:12 → 07:30    ⇄ 9 min".
+
+  The same facts the panel's leg chips carry, and the same strings — the window
+  is `CommuteRide.window` and the change is `CommuteConnection.chip`/`label`,
+  both rendered by @atlas/transit. Nothing here is composed in Kotlin.
+
+  The **change** is the weighted column, and that is the whole layout decision.
+  A 4-cell widget has about 230dp of row, and a leg line wants roughly 20 for
+  the line code, 75 for the window and up to 117 for "9 min at Asker stasjon" —
+  so something has to give, and it must not be the window. Weighting the change
+  makes it the column that shrinks, and Kotlin hands it the short form ("9 min")
+  on anything narrower than a five-cell widget.
+-->
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="wrap_content"
+  android:baselineAligned="false"
+  android:gravity="center_vertical"
+  android:orientation="horizontal">
+  <TextView
+    android:id="@+id/atlas_leg_line"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_text"
+    android:textSize="11sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_leg_window"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="5dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="11sp" />
+  <!--
+    The ⇄ is the layout's, like the row's →: it marks the number as a wait
+    rather than a ride, and "9 min" beside a window would otherwise read as how
+    long the train takes.
+  -->
+  <TextView
+    android:id="@+id/atlas_leg_change_mark"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="6dp"
+    android:maxLines="1"
+    android:text="@string/atlas_commute_widget_change"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp" />
+  <TextView
+    android:id="@+id/atlas_leg_change"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="3dp"
+    android:layout_weight="1"
+    android:ellipsize="end"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp" />
+</LinearLayout>

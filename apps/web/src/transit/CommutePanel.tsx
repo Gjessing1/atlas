@@ -7,7 +7,7 @@ import {
 } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import {
-  COMMUTE_STATE_LABEL,
+  commuteEstimateLabel,
   fetchTransitStopLines,
   liveTimetableLabel,
   type CommuteBoardRow,
@@ -75,6 +75,12 @@ const stateClass = (state: CommuteServiceState) => `commute-state-${state}`;
  * screen §12 says must show three journeys at a glance. So a collapsed row gets
  * the headline and the expanded legs get the whole notice, which is where
  * someone who has chosen a journey is actually reading.
+ *
+ * But a clamped headline is a *cut* sentence, and the cut usually falls exactly
+ * where the operator was about to say which stops are affected. So a brief
+ * notice opens on its own tap, independently of the journey row it sits in:
+ * scannable by default, complete on demand, and never at the price of burying
+ * the next departure.
  */
 function Disruptions({
   items,
@@ -83,23 +89,46 @@ function Disruptions({
   items: readonly CommuteDisruption[];
   brief?: boolean;
 }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
   if (items.length === 0) return null;
   return (
     <ul className={`commute-disruptions${brief ? ' brief' : ''}`}>
-      {items.map((item) => (
-        <li key={item.key} className={`commute-disruption sev-${item.severity}`}>
-          <strong>
-            {item.severity === 'info' ? 'ⓘ' : '⚠'} {item.kindLabel}
-          </strong>
-          <span>{item.summary}</span>
-          {!brief && item.detail && <em>{item.detail}</em>}
-          {!brief && item.url && (
-            <a href={item.url} target="_blank" rel="noreferrer noopener">
-              Operator’s notice
-            </a>
-          )}
-        </li>
-      ))}
+      {items.map((item) => {
+        const open = !brief || openKey === item.key;
+        const body = (
+          <>
+            <strong>
+              {item.severity === 'info' ? 'ⓘ' : '⚠'} {item.kindLabel}
+            </strong>
+            <span>{item.summary}</span>
+            {open && item.detail && <em>{item.detail}</em>}
+          </>
+        );
+        return (
+          <li
+            key={item.key}
+            className={`commute-disruption sev-${item.severity}${open ? ' open' : ''}`}
+          >
+            {brief ? (
+              <button
+                type="button"
+                className="commute-disruption-toggle"
+                aria-expanded={open}
+                onClick={() => setOpenKey((current) => (current === item.key ? null : item.key))}
+              >
+                {body}
+              </button>
+            ) : (
+              body
+            )}
+            {open && item.url && (
+              <a href={item.url} target="_blank" rel="noreferrer noopener">
+                Operator’s notice
+              </a>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -165,34 +194,38 @@ function JourneyRow({
         onClick={onToggle}
       >
         <span className="commute-journey-times">
-          <strong>{journey.departure.aimed}</strong>
+          {/* §3's shape, the same one the per-leg boards use: the scheduled time
+              is the number, and what the live feed says about it sits *under*
+              it rather than at the far end of the card. It used to share a line
+              with the leg strip, where a long strip pushed it off the panel and
+              a short one left it stranded a card's width from the time it was
+              about. */}
+          <span className="commute-journey-time">
+            <strong>{journey.departure.aimed}</strong>
+            <em>{commuteEstimateLabel(journey.departure, false)}</em>
+          </span>
           <i aria-hidden="true" />
-          <strong>{journey.arrival.aimed}</strong>
+          <span className="commute-journey-time end">
+            <strong>{journey.arrival.aimed}</strong>
+            {journey.dayNote && <em>{journey.dayNote}</em>}
+          </span>
         </span>
-        <span className="commute-journey-duration">{journey.duration}</span>
+        <span className="commute-journey-duration">
+          <strong>{journey.duration}</strong>
+          {/* The strip below names every change; "1 change" beside it is the
+              same fact, worse said. "direct" is not — nothing else says it. */}
+          {journey.connections.length === 0 && <em>{journey.transfers}</em>}
+        </span>
         {/* The row *is* expandable, so it has to look it: without a caret the
             legs below were a feature nobody found. */}
         <span className="commute-journey-caret" aria-hidden="true">
           {open ? '▴' : '▾'}
         </span>
       </button>
+      {/* The strip gets the card's full width now that nothing shares its line:
+          two vehicles and a change is more than fits beside a status. */}
       <div className="commute-journey-meta">
         <LegStrip journey={journey} />
-        <span className="commute-journey-note">
-          {[
-            journey.dayNote,
-            journey.departure.confidence === 'timetable'
-              ? COMMUTE_STATE_LABEL.scheduled
-              : journey.departure.delay
-                ? `${journey.departure.expected} est.`
-                : COMMUTE_STATE_LABEL.live,
-            // The strip already names every change; "1 change" beside it is the
-            // same fact, worse said. "direct" is not — nothing else says it.
-            journey.connections.length === 0 ? journey.transfers : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </span>
       </div>
       {/* Collapsed: the headline only. The full notice waits inside, under the
           leg it belongs to. */}
@@ -245,9 +278,17 @@ function JourneyRow({
   );
 }
 
-/** §11 — the two journeys you would catch by leaving the house now. */
+/**
+ * §11 — the journey you would catch by leaving the house now.
+ *
+ * One journey, not two. The "Following 08:48 →" line that used to close this
+ * card was the first row of the list directly beneath it, said again in a
+ * weaker form; the list starts there now (`laterJourneys`), so the card states
+ * one answer completely and the comparison happens where comparisons are
+ * scannable.
+ */
 function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
-  const { next, following } = dashboard.leaveNow;
+  const { next } = dashboard.leaveNow;
   if (!next) return null;
   return (
     <section className="commute-leavenow" aria-label="If I leave now">
@@ -257,15 +298,16 @@ function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
         <span>→ {next.arrival.aimed}</span>
         <em>{next.duration}</em>
       </p>
+      <p className="commute-leavenow-status">
+        {[commuteEstimateLabel(next.departure, false), next.dayNote].filter(Boolean).join(' · ')}
+      </p>
       {/* The same strip the journey rows carry: the top of the dashboard is the
           one place that must not answer "a bus and a train, at some point". */}
       <LegStrip journey={next} />
-      {next.dayNote && <p className="commute-leavenow-lines">{next.dayNote}</p>}
-      {following && (
-        <p className="commute-leavenow-next">
-          Following {following.departure.aimed} → {following.arrival.aimed} · {following.duration}
-        </p>
-      )}
+      {/* In full, not clamped: this is the journey the reader is being told to
+          leave for, and "Buss for tog Asker–…" is the half of the sentence that
+          decides whether they should. */}
+      <Disruptions items={next.disruptions} />
     </section>
   );
 }
@@ -430,11 +472,14 @@ export function CommutePanel({
                 )}
               </p>
             )}
-            {dashboard.journeys.length > 0 && (
+            {dashboard.laterJourneys.length > 0 && (
               <section aria-label="Next journeys">
+                {/* Not `journeys`: the one above is already answered in full,
+                    and a list that repeats it as its own first row costs the
+                    reader the departure they were actually looking for. */}
                 <h3 className="commute-section-head">Next journeys</h3>
                 <ol className="commute-journeys">
-                  {dashboard.journeys.map((journey) => (
+                  {dashboard.laterJourneys.map((journey) => (
                     <JourneyRow
                       journey={journey}
                       key={journey.key}

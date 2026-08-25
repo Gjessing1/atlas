@@ -117,7 +117,10 @@ describe('useCommuteDashboard', () => {
       '08:48 → 09:14 · 26 min',
     ]);
     expect(hook.current.leaveNow.next?.departure.aimed).toBe('08:36');
-    expect(hook.current.leaveNow.following?.departure.aimed).toBe('08:48');
+    // The list beneath the headline starts *after* it. Showing the 08:36 as its
+    // own first row put the same departure on one screen twice, in the slot
+    // where "and if I miss it?" belongs.
+    expect(hook.current.laterJourneys.map((journey) => journey.departure.aimed)).toEqual(['08:48']);
     unmount();
   });
 

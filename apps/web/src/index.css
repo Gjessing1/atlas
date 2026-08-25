@@ -6225,15 +6225,10 @@ button.transit-notice-summary {
   font-weight: 700;
 }
 
-.commute-leavenow-lines {
-  margin-top: 3px;
-  font-size: 12px;
-}
-
-.commute-leavenow-next {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
+/* What the live feed says about the headline departure, under the time it is
+   about — the same place the journey cards and the per-leg boards put it. */
+.commute-leavenow-status {
+  margin-top: 1px;
   color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -6279,11 +6274,33 @@ button.transit-notice-summary {
   align-items: center;
   gap: 6px;
   flex: 1;
+  min-width: 0;
+}
+
+/* Each end of the journey is a stack: the timetable's number, and beneath it
+   what the live feed says about that number (§3). */
+.commute-journey-time {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.commute-journey-time.end {
+  align-items: flex-end;
+  text-align: right;
 }
 
 .commute-journey-times strong {
   font-size: 17px;
   font-variant-numeric: tabular-nums;
+}
+
+.commute-journey-time em {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The arrow between the two times is drawn rather than typed: it has to stretch
@@ -6296,9 +6313,20 @@ button.transit-notice-summary {
 }
 
 .commute-journey-duration {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
   font-size: 13px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+
+.commute-journey-duration em {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
 }
 
 .commute-journey-caret {
@@ -6307,12 +6335,7 @@ button.transit-notice-summary {
 }
 
 .commute-journey-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-top: 5px;
+  margin-top: 6px;
 }
 
 /* --- The leg strip: every vehicle with its own window (§1, §2) --- */
@@ -6364,16 +6387,8 @@ button.transit-notice-summary {
   font-weight: 700;
 }
 
-.commute-journey-note {
-  color: var(--text-muted);
-  font-size: 10px;
-  text-align: right;
-  white-space: nowrap;
-  margin-left: auto;
-}
-
 .commute-leavenow .commute-journey-legs {
-  margin-top: 5px;
+  margin-top: 7px;
 }
 
 /* --- Expanded legs (§1, §2) --- */
@@ -6611,24 +6626,53 @@ button.transit-notice-summary {
    whole list until the arrival time and duration hung off the right edge of the
    panel — which the first live run showed and no unit test could. */
 .commute-disruptions.brief .commute-disruption {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 5px;
   min-width: 0;
   padding: 3px 7px;
 }
 
-.commute-disruptions.brief .commute-disruption strong {
+/* The whole collapsed notice is the button that opens it — a clamped headline
+   is a cut sentence, and the cut usually lands right where the operator was
+   about to name the stops. */
+.commute-disruption-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commute-disruptions.brief .commute-disruption.open .commute-disruption-toggle {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+}
+
+.commute-disruption-toggle strong {
   flex: none;
   white-space: nowrap;
 }
 
-.commute-disruptions.brief .commute-disruption span {
+.commute-disruption-toggle span {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Opened: the sentence in full, wrapping as many lines as it takes. */
+.commute-disruption.open .commute-disruption-toggle span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .commute-disruption em {

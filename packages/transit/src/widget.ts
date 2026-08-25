@@ -15,11 +15,10 @@
  *    formatter's local ones. This runs on the backend, whose container clock is
  *    UTC; `fmtClock` there would put the morning bus an hour early.
  *  - **A row is its parts, not one string.** Each part arrives ready to paint —
- *    `time`, `delayLabel`, `countdown`, `lines`, `platform` — so the widget can
- *    give the clock its own column and the delay its own colour without
- *    re-deriving anything. `text` is still built here, from those same parts, and
- *    is what a screen reader reads out and what a surface with nowhere to lay
- *    them out paints.
+ *    `time`, `delayLabel`, `legs`, `platform` — so the widget can give the clock
+ *    its own column and the delay its own colour without re-deriving anything.
+ *    `text` is still built here, from those same parts, and is what a screen
+ *    reader reads out and what a surface with nowhere to lay them out paints.
  *  - **A row says what it *is*, in `state`.** Cancelled, delayed, early, live or
  *    merely timetabled is the one thing a colour may be chosen from; colouring by
  *    position in the list — which the first layout did, fading rows two and three
@@ -33,6 +32,20 @@
  * change at Asker is. Those come from `commuteJourney` now rather than from a
  * second derivation here, so the two surfaces of one commute cannot quote
  * different numbers for one bus.
+ *
+ * That rule is why a row carries `legs` and no longer carries a countdown:
+ *
+ *  - **The legs are the panel's own leg strip.** `"280 → R14"` names the
+ *    vehicles and says nothing about when the train leaves Asker or when it
+ *    reaches town, which on a two-leg commute is the whole question. Each leg
+ *    now states its own scheduled window and the change before it, from
+ *    `CommuteRide.window` and `CommuteConnection`, so the home screen answers
+ *    what the board answers without being opened.
+ *  - **The countdown is gone.** "in 6 min" is the one number on the row that
+ *    the departure time already implies, it was the widest column on the line,
+ *    and it was the only part that had to be re-rendered to stay true. The row
+ *    is a timetable — scheduled time, correction, arrival, total — and a
+ *    timetable does not tick.
  */
 
 import {
@@ -46,13 +59,19 @@ import type { CommuteEmptyReason } from './commute.js';
 // The `import type` above this one, in dashboard.ts, is the other half of a
 // deliberate pair: this module owns the *state* vocabulary and the dashboard
 // borrows the type, so the runtime edge only ever runs this way.
-import { commuteJourney } from './dashboard.js';
+import {
+  COMMUTE_STATE_LABEL,
+  commuteJourney,
+  commuteJourneyList,
+  type CommuteServiceState,
+} from './dashboard.js';
 import { DELAY_THRESHOLD_MS, clockDelayMinutes } from './labels.js';
 import { isRideMode } from './model.js';
 import type {
   TransitCommuteDirection,
   TransitCommuteQuery,
   TransitDeparture,
+  TransitMode,
   TransitResult,
   TransitTrip,
 } from './model.js';
@@ -65,6 +84,36 @@ import type {
  * should read as one.
  */
 export type TransitWidgetRowState = 'cancelled' | 'delayed' | 'early' | 'live' | 'scheduled';
+
+/**
+ * One vehicle inside a row's journey — the board's leg strip, as far as a home
+ * screen carries it.
+ *
+ * Every part is ready to paint and none of it is re-derived: `window` is
+ * `CommuteRide.window`, `change` is `CommuteConnection.chip`, so a leg on the
+ * home screen and the same leg in the panel are the same two derivations. The
+ * change belongs to the leg it precedes — the strip reads "wait here, then
+ * board this" in the order a traveller does it.
+ */
+export interface TransitWidgetLeg {
+  /** `"280"`, `"R14"` — what is on the front of the vehicle. */
+  line: string;
+  mode: TransitMode;
+  /** `"07:12 → 07:30"` — this vehicle's own scheduled window. */
+  window: string;
+  /** `"280 07:12 → 07:30"` — the leg on one line, for a surface with one to give it. */
+  text: string;
+  /** The change before boarding: `"9 min at Asker stasjon"`, null on the first leg. */
+  change: string | null;
+  /**
+   * The same change with the stop left implicit: `"9 min"`. A narrow instance
+   * has room for one of the two, and dropping the change entirely would hide
+   * the number that decides whether the journey holds together.
+   */
+  wait: string | null;
+  /** What this vehicle is — the delayed half of a journey is the half that looks it. */
+  state: CommuteServiceState;
+}
 
 /** One journey (or departure) as the widget shows it, part by part. */
 export interface TransitWidgetRow {
@@ -98,14 +147,37 @@ export interface TransitWidgetRow {
   /**
    * The interchanges, as the board states them: `"9 min at Asker stasjon"`.
    * Null for a direct journey — and for a stop board, which has no journey.
+   *
+   * Superseded on screen by {@link legs}, which says the same thing per vehicle,
+   * and kept because a *widget* is not upgraded by the server that renders it: a
+   * home screen still running the build before the leg strip reads this field,
+   * and dropping it would blank the second line of every row until the APK
+   * catches up.
    */
   changes: string | null;
+  /**
+   * Every vehicle with its own window and the change before it — the panel's
+   * leg strip. Empty on a stop board, which knows a departure and not a journey.
+   */
+  legs: TransitWidgetLeg[];
+  /**
+   * The whole strip on one line: `"280 07:12 → 07:30 · 9 min at Asker stasjon ·
+   * R14 07:39 → 07:41"`. What an instance too short for a line per leg paints,
+   * and what a screen reader hears. Falls back to {@link lines} for a journey
+   * with one vehicle, whose window is the scan line already.
+   */
+  legsText: string;
   /** `"plt 2"`, or null — including for a cancelled departure, which has no platform to go to. */
   platform: string | null;
-  /** The live phrase in the countdown's place: `"in 6 min"`, `"now"`, or `"cancelled"`. */
-  countdown: string;
-  /** Minutes until departure, floored at 0 — a bus does not leave "in -1 min". */
-  countdownMin: number;
+  /**
+   * The word for a row whose state needs one — `"Cancelled"` — and null for
+   * every row whose time and correction already say everything there is.
+   *
+   * The countdown used to live in this column. It was removed: it restated the
+   * departure time, it was the widest thing on the line, and it was the only
+   * part of a row that went wrong simply by being looked at a minute later.
+   */
+  statusLabel: string | null;
   /** Whether the displayed expected time is backed by a realtime feed. */
   realtime: boolean;
   /** Entur has live data, but warns that this particular prediction is inaccurate. */
@@ -116,10 +188,10 @@ export interface TransitWidgetRow {
   /** A disruption headline, when the operator published one worth a glance. */
   note: string | null;
   /**
-   * The whole row on one line: `"07:10 (+6) → 08:14 · 48 min · in 6 min · 280 →
-   * RE10 · 9 min at Asker stasjon · plt 2"`. Built from the parts above, so it
-   * cannot drift from them. This is what a screen reader reads out, and what a
-   * surface with nowhere to lay the parts out paints.
+   * The whole row on one line: `"07:10 (+6) → 08:14 · 48 min · 280 07:10 →
+   * 07:30 · 9 min at Asker stasjon · R14 07:39 → 08:14 · plt 2"`. Built from the
+   * parts above, so it cannot drift from them. This is what a screen reader
+   * reads out, and what a surface with nowhere to lay the parts out paints.
    */
   text: string;
 }
@@ -163,18 +235,6 @@ const MAX_REFRESH_MS = 6 * 60 * 60_000;
 const REFRESH_LEAD_MS = 2 * 60_000;
 /** Wake this far before a commute window opens, so 07:12 is already right at 07:00. */
 const WINDOW_LEAD_MS = 15 * 60_000;
-
-const countdown = (whenMs: number, nowMs: number): number =>
-  Math.max(0, Math.round((whenMs - nowMs) / 60_000));
-
-/** `"in 6 min"` / `"now"` — a countdown is what a commuter actually reads. */
-function countdownLabel(minutes: number): string {
-  if (minutes <= 0) return 'now';
-  if (minutes < 60) return `in ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `in ${hours} h` : `in ${hours} h ${rest} min`;
-}
 
 /**
  * `"+6"` / `"-2"`, or null when the difference is timetable noise.
@@ -229,12 +289,12 @@ function widgetRow({
   duration,
   lines,
   changes,
+  legs,
   quay,
   realtime,
   predictionInaccurate,
   cancelled,
   note,
-  nowMs,
 }: {
   whenMs: number;
   aimedMs: number;
@@ -242,26 +302,32 @@ function widgetRow({
   duration: string | null;
   lines: string;
   changes: string | null;
+  legs: TransitWidgetLeg[];
   quay: string | undefined;
   realtime: boolean;
   predictionInaccurate: boolean;
   cancelled: boolean;
   note: string | null;
-  nowMs: number;
 }): TransitWidgetRow {
   const delayMin = cancelled ? null : delayMinutes(aimedMs, whenMs, realtime);
   const delayLabel = delayMin === null ? null : `${delayMin > 0 ? '+' : ''}${delayMin}`;
   const time = norwayClock(aimedMs);
-  const countdownMin = countdown(whenMs, nowMs);
   // A cancelled departure has no platform to walk to.
   const platform = !cancelled && quay ? `plt ${quay}` : null;
-  const countdownText = cancelled ? 'cancelled' : countdownLabel(countdownMin);
+  const statusLabel = cancelled ? COMMUTE_STATE_LABEL.cancelled : null;
   // The scan line the board leads with, as far as one widget row can carry it:
   // "07:10 (+6) → 08:14". The correction rides *with* the time rather than
   // replacing it, and the arrival is part of the same clause because
   // "07:10 · → 08:14" reads to a screen reader as two unrelated facts.
   const head =
     (delayLabel === null ? time : `${time} (${delayLabel})`) + (arrival ? ` → ${arrival}` : '');
+  // The strip in reading order, without the ⇄ the clients draw: a glyph a
+  // screen reader has to guess at is worse than the words either side of it.
+  //
+  // One vehicle earns no strip. Its window *is* the scan line — "07:12 → 07:22"
+  // twice on one row is a line spent to add a line number — so a direct journey
+  // says its vehicle the short way, exactly as it did before there were legs.
+  const legsText = legs.length > 1 ? joinRow(legs.flatMap((leg) => [leg.change, leg.text])) : lines;
   return {
     whenMs,
     time,
@@ -272,15 +338,16 @@ function widgetRow({
     duration,
     lines,
     changes,
+    legs,
+    legsText,
     platform,
-    countdown: countdownText,
-    countdownMin,
+    statusLabel,
     realtime,
     predictionInaccurate: realtime && predictionInaccurate,
     cancelled,
     state: rowState(cancelled, delayMin, realtime),
     note,
-    text: joinRow([head, duration, countdownText, lines, changes, platform]),
+    text: joinRow([head, statusLabel, duration, legsText, platform]),
   };
 }
 
@@ -309,6 +376,21 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
       journey.connections.length > 0
         ? journey.connections.map((change) => change.chip).join(' · ')
         : null,
+    // The strip the panel draws, leg by leg. A change belongs to the vehicle it
+    // precedes: `connections[i - 1]` is the wait before boarding `rides[i]`,
+    // which is the same indexing both dashboards use.
+    legs: journey.rides.map((entry, index) => {
+      const change = journey.connections[index - 1];
+      return {
+        line: entry.line,
+        mode: entry.mode,
+        window: entry.window,
+        text: `${entry.line} ${entry.window}`,
+        change: change?.chip ?? null,
+        wait: change?.label ?? null,
+        state: entry.state,
+      };
+    }),
     quay: ride?.from.quay?.publicCode,
     realtime,
     predictionInaccurate: ride?.startPredictionInaccurate === true,
@@ -317,7 +399,6 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
     // and it lands in `note`.
     cancelled: false,
     note: tripNote(trip),
-    nowMs,
   });
 }
 
@@ -327,23 +408,25 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
  * to `RUT:Line:280` returns departures towards Dikemark *and* towards Asker,
  * interleaved, so a row without its direction is half an answer.
  */
-export function departureWidgetRow(departure: TransitDeparture, nowMs: number): TransitWidgetRow {
+export function departureWidgetRow(departure: TransitDeparture): TransitWidgetRow {
   return widgetRow({
     whenMs: departure.expectedDepartureMs,
     aimedMs: departure.aimedDepartureMs,
     // A stop board knows when the 280 leaves and nothing about where its reader
     // is going; inventing an arrival for it would be the widget's one number
-    // nobody could check.
+    // nobody could check. For the same reason it has no legs: one departure is
+    // not a journey, and a strip of one vehicle with no window would be a
+    // journey's shape around a departure's facts.
     arrival: null,
     duration: null,
     lines: `${departure.line.publicCode} → ${departure.destination}`,
     changes: null,
+    legs: [],
     quay: departure.quay.publicCode,
     realtime: departure.realtime,
     predictionInaccurate: departure.predictionInaccurate === true,
     cancelled: departure.cancelled,
     note: departure.situations[0]?.summary ?? null,
-    nowMs,
   });
 }
 
@@ -451,7 +534,17 @@ export function commuteWidgetBoard({
   maxRows?: number;
 }): TransitWidgetBoard {
   const directions = results.map(({ key, result, emptyReason }) => {
-    const rows = result.trips.slice(0, maxRows).map((trip) => tripWidgetRow(trip, nowMs));
+    // Ordered the way the panel orders its list, and by the same function: in
+    // time order, one row per departure. Entur ranks rather than sorts, so the
+    // three rows a widget has room for were three of the planner's *favourites*
+    // — which on the live corridor meant 20:42 above 20:29, and the same 20:42
+    // bus twice because two trains connect from it. Trimming to `maxRows` after
+    // that, not before, is the point: the rows dropped are the late ones.
+    const rows = commuteJourneyList(
+      result.trips.map((trip, index) => commuteJourney(trip, nowMs, index)),
+    )
+      .slice(0, maxRows)
+      .map((journey) => tripWidgetRow(journey.trip, nowMs));
     return {
       key,
       label: commuteDirectionLabel(query, key),

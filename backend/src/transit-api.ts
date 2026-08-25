@@ -337,7 +337,7 @@ function stopWidgetBoard({
   nowMs: number;
   maxRows: number;
 }): TransitWidgetBoard {
-  const rows = departures.departures.slice(0, maxRows).map((d) => departureWidgetRow(d, nowMs));
+  const rows = departures.departures.slice(0, maxRows).map((d) => departureWidgetRow(d));
   const name = departures.stop?.name || label || 'Stop';
   const note = rows.length === 0 ? emptyDirectionNote('upstream') : null;
   const source = widgetSourceLabel(rows.length > 0, note);

@@ -16,6 +16,7 @@
 import {
   commuteBoardRows,
   commuteJourney,
+  commuteJourneyList,
   commuteLeaveNow,
   commuteNowLabel,
   commuteOffDayNote,
@@ -56,9 +57,24 @@ export interface CommuteDashboard {
   nowMs: number;
   view: CommuteDashboardView;
   setView: (view: CommuteDashboardView) => void;
-  /** Complete journey options for `direction`, most imminent first. */
+  /** Complete journey options for `direction`, most imminent first — the whole answer. */
   journeys: CommuteJourney[];
-  /** §11 — what leaving now actually gets you, and what the next one costs. */
+  /**
+   * The list a "Next journeys" section shows: {@link journeys} without the one
+   * §11 already states in full above it.
+   *
+   * The two used to be the same list, so the dashboard opened with the 08:36
+   * as its headline answer and then began its list with the 08:36 — the same
+   * departure, the same times, twice on one screen, and the second copy
+   * occupying the slot where the answer to "and if I miss it?" belongs. §11 is
+   * the first row now; this is everything after it.
+   *
+   * Falls back to the whole list when there is no headline at all — an answer
+   * old enough that every journey in it has left is still the last thing known,
+   * and an empty list would say something stronger and less true.
+   */
+  laterJourneys: CommuteJourney[];
+  /** §11 — what leaving now actually gets you. */
   leaveNow: CommuteLeaveNow;
   /** §5 — the per-leg boards, current direction's hops first. */
   boards: CommuteDashboardBoard[];
@@ -107,13 +123,24 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     pinned ?? (commute.query ? defaultCommuteDirection(commute.query, nowMs) : 'outbound');
 
   const result = commute.result;
+  // `commuteJourneyList` is what turns the planner's *ranked* answer into a
+  // timetable: in time order, one row per departure. Without it the second row
+  // can leave before the first, and the same bus appears twice because Entur
+  // offered two trains to catch after it.
   const journeys = useMemo(
     () =>
-      (result?.[direction].trips ?? []).map((trip, index) => commuteJourney(trip, nowMs, index)),
+      commuteJourneyList(
+        (result?.[direction].trips ?? []).map((trip, index) => commuteJourney(trip, nowMs, index)),
+      ),
     [result, direction, nowMs],
   );
 
   const leaveNow = useMemo(() => commuteLeaveNow(journeys, nowMs), [journeys, nowMs]);
+
+  // Not `journeys.slice(1)`: the headline is the first journey still *catchable*,
+  // which is not always the first one the planner returned, and the list has to
+  // drop the same departures the headline does.
+  const laterJourneys = leaveNow.next ? leaveNow.later : journeys;
 
   const segments = useMemo(
     () => (commute.query ? commuteSegments(commute.query) : []),
@@ -181,6 +208,7 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     view,
     setView,
     journeys,
+    laterJourneys,
     leaveNow,
     boards,
     expanded,

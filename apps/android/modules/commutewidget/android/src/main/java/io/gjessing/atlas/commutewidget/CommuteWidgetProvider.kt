@@ -10,7 +10,6 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import android.net.Uri
 import android.os.Bundle
-import android.os.SystemClock
 import android.text.SpannableString
 import android.text.style.StrikethroughSpan
 import android.view.View
@@ -43,10 +42,12 @@ import org.json.JSONObject
  *  - **Colour comes from the row's `state`, never from its position.** Fading
  *    rows two and three — which the first layout did — says "less important"
  *    about a cancellation that happens to be second.
- *  - **Nothing on screen may quietly go stale.** The countdown is a Chronometer
- *    ticking locally against the departure instant, so it cannot freeze at a
- *    server-rendered "in 6 min"; and the board's own age is checked on every
- *    paint, so an answer nobody could refresh says so instead of looking current.
+ *  - **Nothing on screen may quietly go stale.** The board's own age is checked
+ *    on every paint, so an answer nobody could refresh says so instead of
+ *    looking current. This is also why there is no countdown any more: a row is
+ *    a timetable — scheduled time, correction, arrival, total, legs — and a
+ *    timetable is as true in ten minutes as it is now. The one part that had to
+ *    tick was the part that restated the departure time.
  */
 class CommuteWidgetProvider : AppWidgetProvider() {
   override fun onUpdate(
@@ -123,11 +124,21 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     private const val PADDING_DP = 18
     private const val LABEL_DP = 15
 
-    /** A row on one line — time, delay, countdown, vehicles. */
+    /** A row's scan line on its own — time, correction, arrival, total. */
     private const val ROW_DP = 21
 
-    /** A row with its second line: the vehicles and the change between them. */
-    private const val ROW_TALL_DP = 33
+    /** Each leg line under it: one vehicle, its window and the change before it. */
+    private const val LEG_DP = 14
+
+    /**
+     * The most leg lines a row may spend, however tall the instance.
+     *
+     * Not a layout limit — a four-leg journey is drawn on four lines when four
+     * fit. It is a *planning* limit: the plan is uniform across rows, so an
+     * unusually long journey must not shrink every other row's allowance to pay
+     * for lines only it would use.
+     */
+    private const val MAX_LEG_LINES = 3
 
     /**
      * Below this many rows, the taller kind is not worth its height.
@@ -137,7 +148,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
      * two ordinary ones — a board showing a single departure cannot be glanced
      * at for "and if I miss it?", which is half of why anyone puts a commute on
      * their home screen. So a short instance, and each half of a two-direction
-     * one, falls back to the single-line row it had before.
+     * one, spends fewer lines per row rather than showing fewer rows.
      */
     private const val MIN_DETAILED_ROWS = 2
 
@@ -148,15 +159,16 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     /** Below this the platform column is dropped: the lines matter more than the quay. */
     private const val NARROW_DP = 210
 
-    /** And above this there is room for the journey's total beside the countdown. */
+    /** And above this there is room for the journey's total on the scan line. */
     private const val WIDE_DP = 250
 
     /**
-     * Past this the countdown stops ticking and states itself in words. A
-     * Chronometer reads "2:47:31" three hours out, which is both wide and less
-     * useful than "in 2 h 47 min".
+     * And above *this* a leg line can name the stop it changes at. Below it the
+     * change states only its length ("9 min"), which is the half that decides
+     * whether the connection holds; the stop is already the previous leg's
+     * destination.
      */
-    private const val TICKING_MAX_MIN = 90
+    private const val LEG_STOP_DP = 300
 
     /** An answer older than this is called out rather than quietly shown. */
     private const val STALE_MS = 10 * 60_000L
@@ -234,17 +246,53 @@ class CommuteWidgetProvider : AppWidgetProvider() {
      */
     fun rowsWanted(context: Context, widgetId: Int): Int {
       val blocks = if (CommuteWidgetStore.direction(context, widgetId) == "both") 2 else 1
-      return rowPlan(sizeOf(context, widgetId).second, blocks).second
+      // Planned against the board already held, because the plan depends on how
+      // many legs its journeys have. With nothing held yet, one leg line is the
+      // conservative guess: it under-asks for a two-leg commute's first refresh
+      // and the next one — moments later, board in hand — corrects it.
+      val board = CommuteWidgetStore.board(context, widgetId)?.let {
+        runCatching { JSONObject(it) }.getOrNull()
+      }
+      return rowPlan(sizeOf(context, widgetId).second, blocks, legsOf(board)).second
     }
 
     /**
-     * How this instance spends its height: whether a row can afford its second
-     * line, and how many rows fit either way.
+     * How many leg lines the longest journey on this board would use — what a
+     * plan has to budget for.
+     *
+     * Zero for a corridor of direct journeys, and for a stop board: a single
+     * vehicle is drawn on the scan line, so budgeting a line for it would buy
+     * height nothing spends.
      */
-    private fun rowPlan(heightDp: Int, blocks: Int): Pair<Boolean, Int> {
-      val tall = rowCapacity(heightDp, blocks, ROW_TALL_DP)
-      return if (tall >= MIN_DETAILED_ROWS) Pair(true, tall)
-      else Pair(false, rowCapacity(heightDp, blocks, ROW_DP))
+    private fun legsOf(board: JSONObject?): Int {
+      val directions = board?.optJSONArray("directions") ?: return 1
+      var most = 0
+      for (block in 0 until directions.length()) {
+        val rows = directions.optJSONObject(block)?.optJSONArray("rows") ?: continue
+        for (index in 0 until rows.length()) {
+          val legs = rows.optJSONObject(index)?.optJSONArray("legs")?.length() ?: 0
+          if (legs > most) most = legs
+        }
+      }
+      return if (most > 1) most.coerceAtMost(MAX_LEG_LINES) else 0
+    }
+
+    /**
+     * How this instance spends its height: how many lines each row may give its
+     * legs, and how many rows fit at that price.
+     *
+     * Spend down, not out. A journey drawn leg by leg is the whole point of the
+     * row — it is what lets the home screen answer "when does the train leave
+     * Asker" — so the plan starts by giving every leg its own line and gives
+     * lines back until enough rows fit. Zero is the old single-line row, where
+     * the vehicles ride on the scan line itself.
+     */
+    private fun rowPlan(heightDp: Int, blocks: Int, legs: Int): Pair<Int, Int> {
+      for (lines in legs.coerceAtMost(MAX_LEG_LINES) downTo 1) {
+        val rows = rowCapacity(heightDp, blocks, ROW_DP + lines * LEG_DP)
+        if (rows >= MIN_DETAILED_ROWS) return Pair(lines, rows)
+      }
+      return Pair(0, rowCapacity(heightDp, blocks, ROW_DP))
     }
 
     /** Rows that fit in `heightDp` once the header, padding and headings are paid for. */
@@ -343,7 +391,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       // departure. The route, the status and each row speak for themselves.
 
       views.removeAllViews(R.id.atlas_commute_body)
-      val (detailed, perDirection) = rowPlan(heightDp, blocks.coerceAtLeast(1))
+      val (legLines, perDirection) = rowPlan(heightDp, blocks.coerceAtLeast(1), legsOf(board))
       for (block in 0 until blocks) {
         val direction = directions.optJSONObject(block) ?: continue
         if (blocks > 1) {
@@ -355,10 +403,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         val shown = rows.length().coerceAtMost(perDirection)
         for (index in 0 until shown) {
           val row = rows.optJSONObject(index) ?: continue
-          views.addView(
-            R.id.atlas_commute_body,
-            rowViews(context, res, row, nowMs, widthDp, detailed),
-          )
+          views.addView(R.id.atlas_commute_body, rowViews(context, res, row, widthDp, legLines))
         }
         // A direction with nothing to show says why, instead of collapsing to an
         // empty block that reads as a broken widget; a direction that does show
@@ -474,9 +519,8 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       context: Context,
       res: Context,
       row: JSONObject,
-      nowMs: Long,
       widthDp: Int,
-      detailed: Boolean,
+      legLines: Int,
     ): RemoteViews {
       val views = RemoteViews(context.packageName, R.layout.atlas_commute_row)
       val cancelled = row.optBoolean("cancelled")
@@ -495,9 +539,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
           R.id.atlas_row_delay,
           R.id.atlas_row_duration,
           R.id.atlas_row_platform,
-          R.id.atlas_row_countdown,
-          R.id.atlas_row_countdown_text,
-          R.id.atlas_row_detail,
+          R.id.atlas_row_status,
         )) {
           views.setViewVisibility(id, View.GONE)
         }
@@ -523,7 +565,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       // and the half the widget used not to answer. A stop board has no
       // arrival — it knows when the 280 leaves, not where its reader is going —
       // and a compact row on a narrow instance needs the width for the vehicles.
-      val arrival = if (!detailed && widthDp < NARROW_DP) "" else row.string("arrival")
+      val arrival = if (legLines == 0 && widthDp < NARROW_DP) "" else row.string("arrival")
       setText(views, R.id.atlas_row_arrival, arrival)
       views.setViewVisibility(
         R.id.atlas_row_arrow,
@@ -532,79 +574,134 @@ class CommuteWidgetProvider : AppWidgetProvider() {
 
       val delay = row.string("delayLabel")
       setText(views, R.id.atlas_row_delay, delay)
-      if (!delay.isNullOrBlank()) views.setTextColor(R.id.atlas_row_delay, color)
-
-      val whenMs = row.optLong("whenMs")
-      val ticking =
-        !cancelled && whenMs > nowMs && row.optInt("countdownMin") <= TICKING_MAX_MIN
-      if (ticking) {
-        // Chronometer counts in elapsed-realtime, so the base is the departure
-        // expressed in that clock. It then ticks on its own: no wakeup of ours,
-        // and nothing to go stale between refreshes.
-        views.setChronometer(
-          R.id.atlas_row_countdown,
-          SystemClock.elapsedRealtime() + (whenMs - nowMs),
-          null,
-          true,
-        )
-        views.setChronometerCountDown(R.id.atlas_row_countdown, true)
+      if (delay.isNotBlank()) {
         views.setTextColor(
-          R.id.atlas_row_countdown,
+          R.id.atlas_row_delay,
           // A live prediction Entur itself flags as inaccurate should not look
-          // like one you can plan around.
+          // like a correction you can plan around.
           if (row.optBoolean("predictionInaccurate")) res.getColor(R.color.atlas_widget_muted)
           else color,
         )
-        views.setViewVisibility(R.id.atlas_row_countdown, View.VISIBLE)
-        views.setViewVisibility(R.id.atlas_row_countdown_text, View.GONE)
-      } else {
-        views.setViewVisibility(R.id.atlas_row_countdown, View.GONE)
-        setText(views, R.id.atlas_row_countdown_text, row.string("countdown"))
-        views.setTextColor(R.id.atlas_row_countdown_text, color)
       }
 
-      // The vehicles, on their own line when there is room for one. When there
-      // is not, `atlas_row_lines_inline` stops being a spacer and carries them
-      // on line one instead — the same string, one place further up.
+      // The one thing a time cannot say about itself. Everything else the old
+      // countdown occupied this column with is already on the line beside it.
+      setText(views, R.id.atlas_row_status, row.string("statusLabel"))
+      views.setTextColor(R.id.atlas_row_status, color)
+
+      val legs = row.optJSONArray("legs") ?: JSONArray()
       val lines = row.string("lines")
       val linesColor =
         if (cancelled) res.getColor(R.color.atlas_widget_muted)
         else res.getColor(R.color.atlas_widget_text)
-      if (detailed) {
-        views.setViewVisibility(R.id.atlas_row_detail, View.VISIBLE)
-        // INVISIBLE, not GONE: the weighted column is what holds the countdown
-        // against the right edge, and a GONE spacer would let it drift left.
-        views.setTextViewText(R.id.atlas_row_lines_inline, "")
-        views.setViewVisibility(R.id.atlas_row_lines_inline, View.INVISIBLE)
-        setText(views, R.id.atlas_row_lines, lines)
-        views.setTextColor(R.id.atlas_row_lines, linesColor)
-        setText(
-          views,
-          R.id.atlas_row_changes,
-          if (widthDp < NARROW_DP) "" else row.string("changes"),
-        )
-        setText(
-          views,
-          R.id.atlas_row_duration,
-          if (widthDp < WIDE_DP) "" else row.string("duration"),
-        )
-      } else {
-        views.setViewVisibility(R.id.atlas_row_detail, View.GONE)
-        views.setViewVisibility(R.id.atlas_row_duration, View.GONE)
-        setText(views, R.id.atlas_row_lines_inline, lines)
-        views.setTextColor(R.id.atlas_row_lines_inline, linesColor)
+      views.removeAllViews(R.id.atlas_row_legs)
+      when {
+        // Nothing to strip. A stop board has departures rather than journeys,
+        // and a direct journey's one vehicle runs the scan line's own window —
+        // "07:12 → 07:22" under "07:12 → 07:22" is a line spent to add a line
+        // number. Both put the vehicles on the scan line instead.
+        legs.length() <= 1 -> {
+          setText(views, R.id.atlas_row_lines_inline, lines)
+          views.setTextColor(R.id.atlas_row_lines_inline, linesColor)
+        }
+        // A line per vehicle: the panel's leg strip, which is what makes a
+        // two-leg commute answerable from the home screen.
+        legLines >= legs.length() -> {
+          hideInlineLines(views)
+          for (index in 0 until legs.length()) {
+            val leg = legs.optJSONObject(index) ?: continue
+            views.addView(R.id.atlas_row_legs, legViews(context, res, leg, widthDp))
+          }
+        }
+        // Room for one line but not for one per leg — the same strip, joined.
+        legLines >= 1 -> {
+          hideInlineLines(views)
+          val strip = RemoteViews(context.packageName, R.layout.atlas_commute_legs)
+          setText(strip, R.id.atlas_legs_text, row.string("legsText").ifBlank { lines })
+          strip.setTextColor(R.id.atlas_legs_text, linesColor)
+          views.addView(R.id.atlas_row_legs, strip)
+        }
+        // Not even one: `atlas_row_lines_inline` stops being a spacer and
+        // carries the vehicles on the scan line itself.
+        else -> {
+          setText(views, R.id.atlas_row_lines_inline, lines)
+          views.setTextColor(R.id.atlas_row_lines_inline, linesColor)
+        }
       }
+
+      setText(
+        views,
+        R.id.atlas_row_duration,
+        if (widthDp < WIDE_DP && legLines == 0) "" else row.string("duration"),
+      )
       setText(
         views,
         R.id.atlas_row_platform,
         if (widthDp < NARROW_DP) "" else row.string("platform"),
       )
-      // Read out as one row — "07:10 (+6) → 08:14 · 48 min · in 6 min · 280 →
-      // RE10 · 9 min at Asker stasjon · plt 2" — rather than as eight unrelated
-      // fragments.
+      // Read out as one row — "07:10 (+6) → 08:14 · 48 min · 280 07:10 → 07:30 ·
+      // 9 min at Asker stasjon · R14 07:39 → 08:14 · plt 2" — rather than as a
+      // dozen unrelated fragments.
       views.setContentDescription(R.id.atlas_row_root, row.string("text"))
       return views
     }
+
+    /**
+     * INVISIBLE, not GONE: the weighted column is what holds the total and the
+     * platform against the right edge, and a GONE spacer would let them drift
+     * back into the middle of the line.
+     */
+    private fun hideInlineLines(views: RemoteViews) {
+      views.setTextViewText(R.id.atlas_row_lines_inline, "")
+      views.setViewVisibility(R.id.atlas_row_lines_inline, View.INVISIBLE)
+    }
+
+    /** One vehicle of a journey: what you board, when it runs, and the wait before it. */
+    private fun legViews(
+      context: Context,
+      res: Context,
+      leg: JSONObject,
+      widthDp: Int,
+    ): RemoteViews {
+      val views = RemoteViews(context.packageName, R.layout.atlas_commute_leg)
+      val state = leg.string("state")
+      val cancelled = state == "cancelled"
+      setText(views, R.id.atlas_leg_line, leg.string("line"))
+      views.setTextColor(R.id.atlas_leg_line, legColor(res, state))
+      setText(views, R.id.atlas_leg_window, leg.string("window"))
+      // The stop is worth naming when there is width for it and worth dropping
+      // before the number is: "9 min" still tells you whether the change holds.
+      // Measured against the layout rather than guessed — the line code, the
+      // window and "9 min at Asker stasjon" want about 233dp, which is more
+      // than a four-cell widget's row has.
+      val change = if (widthDp < LEG_STOP_DP) leg.string("wait") else leg.string("change")
+      setText(views, R.id.atlas_leg_change, change)
+      views.setViewVisibility(
+        R.id.atlas_leg_change_mark,
+        if (change.isBlank()) View.GONE else View.VISIBLE,
+      )
+      if (cancelled) {
+        views.setTextViewText(
+          R.id.atlas_leg_window,
+          SpannableString(leg.string("window")).apply { setSpan(StrikethroughSpan(), 0, length, 0) },
+        )
+      }
+      return views
+    }
+
+    /**
+     * A leg's colour, which is deliberately quieter than a row's: every leg of a
+     * healthy journey being green would make the strip the loudest thing on the
+     * widget and leave nothing for the one leg that is in trouble.
+     */
+    private fun legColor(res: Context, state: String): Int =
+      res.getColor(
+        when (state) {
+          "cancelled" -> R.color.atlas_widget_error
+          "delayed", "early", "replacement" -> R.color.atlas_widget_warn
+          else -> R.color.atlas_widget_text
+        },
+      )
 
     private fun setText(views: RemoteViews, id: Int, value: String?) {
       val text = value.orEmpty()

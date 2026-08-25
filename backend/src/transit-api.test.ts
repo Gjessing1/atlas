@@ -950,9 +950,9 @@ describe('POST /api/transit/widget', () => {
     expect(captured!.body.variables.lines).toEqual({ lines: ['RUT:Line:280'] });
     const board = res.json();
     expect(board.route).toBe('Engelsrud');
-    // The clock and the direction are fixed by the fixture; the countdown is
-    // relative to now, so it is not asserted against a recorded departure time.
-    expect(board.directions[0].rows[0].text).toMatch(/^07:22 · .* · 280 → Dikemark · plt 1$/);
+    // A stop board row is a departure, not a journey: no arrival, no legs, and
+    // nothing in it that is only true for the minute it was rendered in.
+    expect(board.directions[0].rows[0].text).toBe('07:22 · 280 → Dikemark · plt 1');
   });
 
   it('refuses a stop board outside Norway and a commute it cannot read', async () => {

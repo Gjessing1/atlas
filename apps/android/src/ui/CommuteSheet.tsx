@@ -8,7 +8,7 @@ import {
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
-  COMMUTE_STATE_LABEL,
+  commuteEstimateLabel,
   liveTimetableLabel,
   type CommuteBoardRow,
   type CommuteDisruption,
@@ -88,6 +88,12 @@ const STATE_COLOUR: Record<CommuteServiceState, string> = {
  * one screen §12 says must show three journeys at a glance. So a collapsed row
  * gets the headline and the expanded legs get the whole notice, which is where
  * someone who has chosen a journey is actually reading.
+ *
+ * But a clamped headline is a *cut* sentence, and the cut usually falls exactly
+ * where the operator was about to say which stops are affected. So a brief
+ * notice opens on its own tap, independently of the journey row it sits in:
+ * scannable by default, complete on demand, and never at the price of burying
+ * the next departure.
  */
 function Disruptions({
   items,
@@ -96,6 +102,7 @@ function Disruptions({
   items: readonly CommuteDisruption[];
   brief?: boolean;
 }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
   if (items.length === 0) return null;
   return (
     <View style={styles.disruptions}>
@@ -106,23 +113,30 @@ function Disruptions({
             : item.severity === 'info'
               ? theme.textMuted
               : theme.warning;
+        const open = !brief || openKey === item.key;
         return (
-          <View key={item.key} style={[styles.disruption, { borderLeftColor: tone }]}>
+          <Pressable
+            key={item.key}
+            style={[styles.disruption, { borderLeftColor: tone }]}
+            disabled={!brief}
+            onPress={() => setOpenKey((current) => (current === item.key ? null : item.key))}
+            testID={`commute-disruption-${item.key}`}
+          >
             <Text style={[styles.disruptionKind, { color: tone }]}>
               {item.severity === 'info' ? 'ⓘ' : '⚠'} {item.kindLabel.toUpperCase()}
             </Text>
-            <Text style={styles.disruptionText} numberOfLines={brief ? 1 : undefined}>
+            <Text style={styles.disruptionText} numberOfLines={open ? undefined : 1}>
               {item.summary}
             </Text>
-            {!brief && item.detail ? (
+            {open && item.detail ? (
               <Text style={styles.disruptionDetail}>{item.detail}</Text>
             ) : null}
-            {!brief && item.url ? (
+            {open && item.url ? (
               <Pressable onPress={() => void Linking.openURL(item.url!)}>
                 <Text style={styles.disruptionLink}>Operator’s notice</Text>
               </Pressable>
             ) : null}
-          </View>
+          </Pressable>
         );
       })}
     </View>
@@ -194,32 +208,39 @@ function JourneyRow({
     <View style={[styles.journey, { borderLeftColor: STATE_COLOUR[journey.state] }]}>
       <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
         <View style={styles.journeyHead}>
-          <Text style={styles.journeyTime}>{journey.departure.aimed}</Text>
+          {/* §3's shape, the same one the per-leg boards use: the scheduled time
+              is the number, and what the live feed says about it sits *under*
+              it rather than at the far end of the card. It used to share a line
+              with the leg strip, where a long strip squeezed it to nothing and
+              a short one left it stranded a card's width from the time it was
+              about. */}
+          <View style={styles.journeyEnd}>
+            <Text style={styles.journeyTime}>{journey.departure.aimed}</Text>
+            <Text style={styles.journeyEndNote}>
+              {commuteEstimateLabel(journey.departure, false)}
+            </Text>
+          </View>
           <View style={styles.journeyRule} />
-          <Text style={styles.journeyTime}>{journey.arrival.aimed}</Text>
-          <Text style={styles.journeyDuration}>{journey.duration}</Text>
+          <View style={styles.journeyEndRight}>
+            <Text style={styles.journeyTime}>{journey.arrival.aimed}</Text>
+            {journey.dayNote ? <Text style={styles.journeyEndNote}>{journey.dayNote}</Text> : null}
+          </View>
+          <View style={styles.journeyEndRight}>
+            <Text style={styles.journeyDuration}>{journey.duration}</Text>
+            {/* The strip below names every change; "1 change" beside it is the
+                same fact, worse said. "direct" is not — nothing else says it. */}
+            {journey.connections.length === 0 ? (
+              <Text style={styles.journeyEndNote}>{journey.transfers}</Text>
+            ) : null}
+          </View>
           {/* The row *is* expandable, so it has to look it: without a caret the
               legs below were a feature nobody found. */}
           <Text style={styles.journeyCaret}>{open ? '▴' : '▾'}</Text>
         </View>
+        {/* The strip gets the card's full width now that nothing shares its
+            line: two vehicles and a change is more than fits beside a status. */}
         <View style={styles.journeyMeta}>
           <LegStrip journey={journey} />
-          <Text style={styles.journeyNote} numberOfLines={1}>
-            {[
-              journey.dayNote,
-              journey.departure.confidence === 'timetable'
-                ? COMMUTE_STATE_LABEL.scheduled
-                : journey.departure.delay
-                  ? `${journey.departure.expected} est.`
-                  : COMMUTE_STATE_LABEL.live,
-              // The strip already names every change; "1 change" beside it is
-              // the same fact, worse said. "direct" is not — nothing else
-              // says it.
-              journey.connections.length === 0 ? journey.transfers : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
         </View>
       </Pressable>
       {/* Collapsed: the headline only. The full notice waits inside, under the
@@ -281,9 +302,17 @@ function JourneyRow({
   );
 }
 
-/** §11 — the two journeys you would catch by walking out of the door now. */
+/**
+ * §11 — the journey you would catch by walking out of the door now.
+ *
+ * One journey, not two. The "Following 08:48 →" line that used to close this
+ * card was the first row of the list directly beneath it, said again in a
+ * weaker form; the list starts there now (`laterJourneys`), so the card states
+ * one answer completely and the comparison happens where comparisons are
+ * scannable.
+ */
 function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
-  const { next, following } = dashboard.leaveNow;
+  const { next } = dashboard.leaveNow;
   if (!next) return null;
   return (
     <View style={styles.leaveNow} testID="commute-leave-now">
@@ -293,15 +322,16 @@ function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
         <Text style={styles.leaveNowArrive}>→ {next.arrival.aimed}</Text>
         <Text style={styles.leaveNowDuration}>{next.duration}</Text>
       </View>
+      <Text style={styles.leaveNowStatus}>
+        {[commuteEstimateLabel(next.departure, false), next.dayNote].filter(Boolean).join(' · ')}
+      </Text>
       {/* The same strip the journey rows carry: the top of the dashboard is the
           one place that must not answer "a bus and a train, at some point". */}
       <LegStrip journey={next} />
-      {next.dayNote ? <Text style={styles.leaveNowLines}>{next.dayNote}</Text> : null}
-      {following ? (
-        <Text style={styles.leaveNowNext}>
-          Following {following.departure.aimed} → {following.arrival.aimed} · {following.duration}
-        </Text>
-      ) : null}
+      {/* In full, not clamped: this is the journey the reader is being told to
+          leave for, and "Buss for tog Asker–…" is the half of the sentence that
+          decides whether they should. */}
+      <Disruptions items={next.disruptions} />
     </View>
   );
 }
@@ -516,10 +546,13 @@ export function CommuteSheet({
                 ) : null}
               </View>
             ) : null}
-            {dashboard.journeys.length > 0 ? (
+            {/* Not `journeys`: the one above is already answered in full, and a
+                list that repeats it as its own first row costs the reader the
+                departure they were actually looking for. */}
+            {dashboard.laterJourneys.length > 0 ? (
               <>
                 <Text style={styles.sectionHead}>NEXT JOURNEYS</Text>
-                {dashboard.journeys.map((journey) => (
+                {dashboard.laterJourneys.map((journey) => (
                   <JourneyRow
                     journey={journey}
                     key={journey.key}
@@ -621,8 +654,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  leaveNowLines: { color: theme.text, fontSize: 12, marginTop: 3 },
-  leaveNowNext: { color: theme.textMuted, fontSize: 11, marginTop: 7 },
+  // What the live feed says about the headline departure, under the time it is
+  // about — the same place the journey cards and the per-leg boards put it.
+  leaveNowStatus: { color: theme.textMuted, fontSize: 11, marginTop: 1 },
 
   journey: {
     marginBottom: 7,
@@ -632,16 +666,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surfaceMuted,
   },
   journeyHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  // Each end of the journey is a stack: the timetable's number, and beneath it
+  // what the live feed says about that number (§3).
+  journeyEnd: { alignItems: 'flex-start' },
+  journeyEndRight: { alignItems: 'flex-end' },
+  journeyEndNote: { color: theme.textMuted, fontSize: 10 },
   journeyTime: { color: theme.text, fontSize: 17, fontWeight: '800' },
   journeyRule: { flex: 1, height: 1, minWidth: 12, backgroundColor: theme.border, opacity: 0.3 },
   journeyDuration: { color: theme.text, fontSize: 13, fontWeight: '800' },
-  journeyMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 6,
-  },
+  journeyMeta: { marginTop: 6 },
   journeyCaret: { color: theme.textMuted, fontSize: 10 },
   journeyLines: {
     flexDirection: 'row',
@@ -666,7 +699,6 @@ const styles = StyleSheet.create({
   lineChipCancelled: { textDecorationLine: 'line-through' },
   change: { color: theme.textMuted, fontSize: 10 },
   changeTight: { color: theme.warning, fontWeight: '700' },
-  journeyNote: { color: theme.textMuted, fontSize: 10, flexShrink: 0 },
 
   legs: { marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border },
   leg: { flexDirection: 'row', gap: 9, paddingTop: 6 },

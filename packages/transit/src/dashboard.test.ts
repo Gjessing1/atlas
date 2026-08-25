@@ -6,6 +6,7 @@ import {
   commuteDurationLabel,
   commuteEstimateLabel,
   commuteJourney,
+  commuteJourneyList,
   commuteLeaveNow,
   commuteNowLabel,
   commuteOffDayNote,
@@ -396,6 +397,64 @@ describe('commuteEstimateLabel', () => {
   });
 });
 
+describe('commuteJourneyList', () => {
+  /** One journey: a bus at `depart`, a train from Asker, arriving at `arrive`. */
+  const option = (depart: [number, number], arrive: [number, number], bus = '270') =>
+    commuteJourney(
+      trip(
+        ride({
+          line: bus,
+          from: 'Engelsrud terrasse',
+          to: 'Asker stasjon',
+          aimedStartMs: hm(...depart),
+          aimedEndMs: hm(...depart) + 11 * 60_000,
+        }),
+        ride({
+          line: 'L1',
+          mode: 'rail',
+          from: 'Asker stasjon',
+          to: 'Nationaltheatret',
+          aimedStartMs: hm(...arrive) - 18 * 60_000,
+          aimedEndMs: hm(...arrive),
+        }),
+      ),
+      NOW,
+    );
+
+  it('puts the planner’s ranking back into time order', () => {
+    // Measured shape of a live answer: options ranked, not sorted. A list whose
+    // second row leaves before its first is not a timetable.
+    const list = commuteJourneyList([
+      option([20, 42], [21, 17]),
+      option([20, 29], [21, 17], '71'),
+      option([20, 59], [21, 37], '71'),
+    ]);
+    expect(list.map((journey) => journey.departure.aimed)).toEqual(['20:29', '20:42', '20:59']);
+  });
+
+  it('shows one row per departure, keeping the one that gets there first', () => {
+    // The same 20:42 bus twice, differing only in which train it catches at
+    // Asker. That is not a choice anyone makes at Engelsrud.
+    const list = commuteJourneyList([
+      option([20, 42], [21, 35]),
+      option([20, 42], [21, 17]),
+      option([20, 59], [21, 37]),
+    ]);
+    expect(list.map((journey) => journey.scan)).toEqual([
+      '20:42 → 21:17 · 35 min',
+      '20:59 → 21:37 · 38 min',
+    ]);
+  });
+
+  it('keeps a different vehicle leaving the same minute — that one is a real choice', () => {
+    const list = commuteJourneyList([
+      option([20, 42], [21, 35], '280'),
+      option([20, 42], [21, 17]),
+    ]);
+    expect(list).toHaveLength(2);
+  });
+});
+
 describe('commuteLeaveNow', () => {
   const journeyAt = (h: number, m: number, expectedOffsetMs = 0) =>
     commuteJourney(
@@ -414,13 +473,21 @@ describe('commuteLeaveNow', () => {
       NOW,
     );
 
-  it('offers the next departure and what missing it costs', () => {
-    const { next, following } = commuteLeaveNow(
+  it('splits the headline off the list, so neither says the other twice', () => {
+    const { next, later } = commuteLeaveNow(
       [journeyAt(8, 36), journeyAt(8, 44), journeyAt(8, 51)],
       NOW,
     );
     expect(next?.departure.aimed).toBe('08:36');
-    expect(following?.departure.aimed).toBe('08:44');
+    expect(later.map((journey) => journey.departure.aimed)).toEqual(['08:44', '08:51']);
+  });
+
+  it('drops a departure already gone from the list as well as from the headline', () => {
+    // 08:15 at 08:32 is not an option, and a "next journeys" list that opens
+    // with it is a timetable of the past.
+    const { next, later } = commuteLeaveNow([journeyAt(8, 15), journeyAt(8, 44)], NOW);
+    expect(next?.departure.aimed).toBe('08:44');
+    expect(later).toEqual([]);
   });
 
   it('still offers a bus running late enough to still be catchable', () => {

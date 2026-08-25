@@ -279,6 +279,8 @@ export interface CommuteJourney {
   trip: TransitTrip;
   /** Epoch ms of the scheduled departure — what a countdown ticks towards. */
   startMs: number;
+  /** Epoch ms of the scheduled arrival, so two options leaving together can be ranked. */
+  endMs: number;
   /** Scheduled departure of the first vehicle (or of the walk, for an all-walk trip). */
   departure: LegTimeParts;
   /** Scheduled arrival at the far end. */
@@ -446,6 +448,7 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
     key: `${startMs}:${index}`,
     trip,
     startMs,
+    endMs,
     departure,
     arrival,
     duration,
@@ -623,19 +626,61 @@ export function commuteBoardRows(
   );
 }
 
+// ------------------------------------------------------------------ list ---
+
+/**
+ * The journeys as a board lists them: in time order, one row per departure.
+ *
+ * Both halves were measured against the live Engelsrud ↔ Nationaltheatret
+ * corridor on 2026-08-25, and both are Entur answering a slightly different
+ * question than a timetable asks.
+ *
+ *  - **In time order.** The planner returns options *ranked*, not chronological:
+ *    that run listed 20:42, 20:29, 20:42, 20:59, 21:22. A list whose second row
+ *    leaves before its first is not a timetable, and the reader who scans down
+ *    it for "the one after that" is reading noise. (`commuteBoardRows` learned
+ *    the same thing one level down.)
+ *  - **One row per departure.** Two of those five were the same 20:42 bus,
+ *    differing only in which train they caught at Asker — so the board printed
+ *    "20:42" twice, once arriving 21:17 and once 21:35. That is not a choice
+ *    anyone makes at Engelsrud: you board the same vehicle either way, and the
+ *    later arrival is strictly worse. The earliest arrival stands for the
+ *    departure, and the row's own legs say which train it means. A *different*
+ *    first vehicle at the same minute is a real alternative and is kept, which
+ *    is why the key is the vehicle and not just the clock.
+ */
+export function commuteJourneyList(journeys: readonly CommuteJourney[]): CommuteJourney[] {
+  const ordered = [...journeys].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  const seen = new Set<string>();
+  return ordered.filter((journey) => {
+    const first = journey.rides[0];
+    const key = `${journey.startMs}:${first?.line ?? 'walk'}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // ------------------------------------------------------------- leave now ---
 
 /**
- * §11 — the two journeys you would catch by walking out of the door now.
+ * §11 — what you would catch by walking out of the door now, and what follows
+ * it.
  *
- * Two rather than one because the useful question is comparative: the next one
- * and what it costs to miss it. Both are simply the head of the journey list,
- * named here so the two clients cannot disagree about which departures those
- * are, or about whether a journey that has already left still counts.
+ * The split is the dashboard's whole shape: `next` is the headline answer, and
+ * `later` is the list beneath it. They were one list before, so the board
+ * announced the 08:36 in full and then opened its journey list with the 08:36 —
+ * the same departure twice on one screen, the duplicate sitting exactly where
+ * "and if I miss it?" should have been.
+ *
+ * Both halves are filtered the same way, which is the other half of the point:
+ * a journey that has already gone is not an option in a headline *or* in a
+ * list, and the list used to show departures ten minutes into the past.
  */
 export interface CommuteLeaveNow {
   next: CommuteJourney | null;
-  following: CommuteJourney | null;
+  /** Every catchable journey after `next`, in departure order. */
+  later: CommuteJourney[];
 }
 
 export function commuteLeaveNow(
@@ -646,7 +691,7 @@ export function commuteLeaveNow(
   // running four minutes late at 08:36 is still catchable at 08:38, and telling
   // someone otherwise sends them to a stop the vehicle has not reached.
   const upcoming = journeys.filter((journey) => journey.trip.startMs >= nowMs - DELAY_THRESHOLD_MS);
-  return { next: upcoming[0] ?? null, following: upcoming[1] ?? null };
+  return { next: upcoming[0] ?? null, later: upcoming.slice(1) };
 }
 
 // ---------------------------------------------------------------- header ---
