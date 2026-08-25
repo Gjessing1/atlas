@@ -275,7 +275,10 @@ function AppInner() {
     data: TrackData | null;
   } | null>(null);
   const commuteFetch = useMemo<CommuteFn>(
-    () => (query, signal) => fetchTransitCommute(query, { baseUrl: serverOrigin, signal }),
+    () => (query, signal) =>
+      // `segments: true` brings the per-leg boards back in the same request
+      // (§6.4 §5) — one round trip over a phone's link, one failure to handle.
+      fetchTransitCommute(query, { baseUrl: serverOrigin, signal, segments: true }),
     [serverOrigin],
   );
   // The commute board picks stops and lines with the same seams the route

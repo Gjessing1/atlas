@@ -46,12 +46,12 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[
   nextPageCursor previousPageCursor
   routingErrors{ code inputField }
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance emission{co2}
-   legs{ mode distance duration realtime
+   legs{ mode transportSubmode distance duration realtime
     aimedStartTime expectedStartTime aimedEndTime expectedEndTime
     pointsOnLink{points}
     line{ id publicCode name presentation{colour textColour} }
     authority{name}
-    fromEstimatedCall{ predictionInaccurate destinationDisplay{frontText} }
+    fromEstimatedCall{ predictionInaccurate cancellation destinationDisplay{frontText} }
     toEstimatedCall{ predictionInaccurate }
     fromPlace{ name latitude longitude quay{id publicCode name} }
     toPlace{ name latitude longitude quay{id publicCode name} }
@@ -251,6 +251,14 @@ export function buildEnturDeparturesRequest(query: TransitDeparturesQuery): {
       };
 }
 
+/**
+ * Submodes that mean "this is not the service you booked". Entur has 21 rail
+ * submodes and two of them are replacements — the bus standing in for a train,
+ * and the train standing in for another train. Probed against the live schema
+ * on 2026-08-25; there is no separate flag, the submode *is* the signal.
+ */
+const REPLACEMENT_SUBMODES = new Set(['railReplacementBus', 'replacementRailService']);
+
 /** Entur transport modes Atlas renders; anything else degrades to `unknown`. */
 const MODES: Record<string, TransitMode> = {
   foot: 'foot',
@@ -419,6 +427,11 @@ function toSituations(wire: unknown): TransitSituation[] {
         ...(description && description !== summary ? { description } : {}),
         ...(advice ? { advice } : {}),
         severity: toSeverity(s.severity),
+        // `general` is Entur's word for announced-in-advance; `incident` (and an
+        // absent reportType, which older feeds send) is something that has
+        // happened. Only the true case is stored, so nothing has to distinguish
+        // "not planned" from "not said".
+        ...(s.reportType === 'general' ? { planned: true } : {}),
         ...(typeof uri === 'string' ? { url: uri } : {}),
       },
     ];
@@ -513,6 +526,8 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
     ? wire.intermediateEstimatedCalls
     : [];
   const booking = toBooking(wire.bookingArrangements);
+  const replacement =
+    typeof wire.transportSubmode === 'string' && REPLACEMENT_SUBMODES.has(wire.transportSubmode);
   return {
     mode: toMode(wire.mode),
     distanceM: toNumber(wire.distance),
@@ -526,6 +541,10 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
     realtime: wire.realtime === true,
     startPredictionInaccurate: fromCall?.predictionInaccurate === true,
     endPredictionInaccurate: toCall?.predictionInaccurate === true,
+    // Both stored only when true, so no consumer has to tell "false" apart from
+    // "the field was not in this build's query".
+    ...(fromCall?.cancellation === true ? { cancelled: true } : {}),
+    ...(replacement ? { replacement: true } : {}),
     from: toPlace(wire.fromPlace as WirePlace),
     to: toPlace(wire.toPlace as WirePlace),
     ...(line ? { line } : {}),

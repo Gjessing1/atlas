@@ -28,6 +28,7 @@ export type {
   TransitCommuteFilter,
   TransitCommuteQuery,
   TransitCommuteResult,
+  TransitCommuteSegmentResult,
 } from './model.js';
 export {
   isRideMode,
@@ -103,6 +104,7 @@ export {
   fetchTransitStopLines,
   fetchTransitCommute,
   type FetchTransitOptions,
+  type FetchTransitCommuteOptions,
   type FetchTransitStopsOptions,
 } from './client.js';
 export {
@@ -110,6 +112,7 @@ export {
   commuteEmptyReason,
   commuteIsActive,
   commuteLineFilter,
+  commuteSegmentQueries,
   commuteTransitQueries,
   defaultCommuteDirection,
   filterCommuteResult,
@@ -117,12 +120,38 @@ export {
   type CommuteEmptyReason,
 } from './commute.js';
 export {
+  COMMUTE_DISRUPTION_LABEL,
+  COMMUTE_STATE_LABEL,
+  commuteBoardRows,
+  commuteCountdown,
+  commuteDurationLabel,
+  commuteEstimateLabel,
+  commuteJourney,
+  commuteLeaveNow,
+  commuteNowLabel,
+  commuteOffDayNote,
+  commuteSegments,
+  type CommuteBoardRow,
+  type CommuteConnection,
+  type CommuteDisruption,
+  type CommuteDisruptionKind,
+  type CommuteJourney,
+  type CommuteLeaveNow,
+  type CommuteRide,
+  type CommuteSegment,
+  type CommuteServiceState,
+} from './dashboard.js';
+export {
   MINUTES_PER_DAY,
   nextCommuteInstant,
   norwayClock,
+  norwayDateLabel,
+  norwayDayNote,
+  norwayDayOffset,
   norwayOffsetMinutes,
   norwayInstant,
   norwayTime,
+  norwayWeekdayLabel,
   runsOnWeekday,
   type NorwayTime,
   type TransitWeekday,

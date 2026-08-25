@@ -800,6 +800,17 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The saved configuration is one synced setting (`transit.commute`), so the board is the same on both clients.',
   },
   {
+    id: 'planner-commute-dashboard',
+    surface: 'planner',
+    capability:
+      'The commute as a dashboard: what leaving now gets you, whole journeys with their connections, and a board per leg',
+    hook: 'useCommuteDashboard',
+    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteDashboard' },
+    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteDashboard' },
+    route: { file: 'backend/src/transit-api.ts', contains: 'commuteSegmentQueries' },
+    note: 'ROADMAP §6.4. The marker is the shared controller, not a phrase: the two surfaces used to be hand-written result lists that already disagreed about which time to print (the delayed one on both, which is the wrong one). Every clock time, status, connection and countdown now comes from @atlas/transit, so the panel, the sheet and the home-screen widget cannot quote three different departures for one bus.',
+  },
+  {
     id: 'planner-commute-lines',
     surface: 'planner',
     capability: 'Pick the commute’s lines from what actually calls at your stops',

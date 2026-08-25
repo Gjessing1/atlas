@@ -170,10 +170,19 @@ export async function fetchTransitStopLines(
   return json as TransitStopLines;
 }
 
+export interface FetchTransitCommuteOptions extends FetchTransitOptions {
+  /**
+   * Also answer the corridor's per-leg boards (§6.4 §5). Opt-in because the
+   * widget wants only the two directions, and four extra `trip` calls for a
+   * surface that will not draw them is upstream work spent on nothing.
+   */
+  segments?: boolean;
+}
+
 /** Fetch the saved commute's upcoming journeys in both directions. */
 export async function fetchTransitCommute(
   query: TransitCommuteQuery,
-  opts: FetchTransitOptions = {},
+  opts: FetchTransitCommuteOptions = {},
 ): Promise<TransitCommuteResult> {
   const places = [query.from, ...query.via, query.to];
   if (places.some((place) => !transitCoversPoint(place))) {
@@ -183,7 +192,7 @@ export async function fetchTransitCommute(
   const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/commute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(query),
+    body: JSON.stringify(opts.segments ? { ...query, segments: true } : query),
     signal: opts.signal,
   });
   const json: unknown = await res.json().catch(() => null);

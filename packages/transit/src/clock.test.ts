@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   nextCommuteInstant,
   norwayClock,
+  norwayDateLabel,
+  norwayDayNote,
+  norwayDayOffset,
   norwayInstant,
   norwayOffsetMinutes,
   norwayTime,
+  norwayWeekdayLabel,
   runsOnWeekday,
 } from './clock.js';
 
@@ -107,5 +111,29 @@ describe('runsOnWeekday', () => {
     expect(runsOnWeekday([], 7)).toBe(true);
     expect(runsOnWeekday([1, 2, 3, 4, 5], 7)).toBe(false);
     expect(runsOnWeekday([1, 2, 3, 4, 5], 3)).toBe(true);
+  });
+});
+
+describe('calendar labels', () => {
+  it('names the day and month off the Norwegian calendar', () => {
+    const tuesday = norwayInstant(2026, 7, 25, 8 * 60 + 32);
+    expect(norwayDateLabel(tuesday)).toBe('Tuesday 25 August');
+    expect(norwayDateLabel(tuesday, true)).toBe('Tue 25 Aug');
+    expect(norwayWeekdayLabel(tuesday)).toBe('Tuesday');
+  });
+
+  it('counts calendar days, not elapsed hours', () => {
+    const lateEvening = norwayInstant(2026, 7, 25, 23 * 60 + 50);
+    const justAfterMidnight = norwayInstant(2026, 7, 26, 10);
+    // Twenty minutes apart, and a different day. A board that called the second
+    // one "today" would send someone to the stop a day early.
+    expect(norwayDayOffset(lateEvening, justAfterMidnight)).toBe(1);
+    expect(norwayDayNote(lateEvening, justAfterMidnight)).toBe('Tomorrow');
+  });
+
+  it('says nothing at all about today', () => {
+    const morning = norwayInstant(2026, 7, 25, 8 * 60);
+    expect(norwayDayNote(morning, norwayInstant(2026, 7, 25, 17 * 60))).toBeNull();
+    expect(norwayDayNote(morning, norwayInstant(2026, 7, 28, 8 * 60))).toBe('Friday 28 August');
   });
 });

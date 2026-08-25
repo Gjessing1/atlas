@@ -4,6 +4,7 @@ import {
   buildEnturVehiclesRequest,
   commuteEmptyReason,
   commuteRefreshAtMs,
+  commuteSegmentQueries,
   commuteTransitQueries,
   defaultCommuteDirection,
   departureWidgetRow,
@@ -75,6 +76,13 @@ const VEHICLES_PROBE = 'entur-vehicles';
 /** Entur asks consumers to identify themselves; this is that identity. */
 const CLIENT_NAME = 'atlas-journeyplanner';
 const UPSTREAM_TIMEOUT_MS = 10_000;
+/**
+ * Rows per per-leg board. Five is what the spec draws and what fits a phone
+ * without scrolling past the journeys above it; each costs one cheap `trip`
+ * call, so the whole dashboard is two via-journeys (~3 s, the expensive half)
+ * plus four hops (~0.4 s) in parallel.
+ */
+const COMMUTE_SEGMENT_ROWS = 5;
 
 export interface TransitApiOptions {
   /** Entur Journey Planner GraphQL endpoint (ENTUR_URL to override). */
@@ -645,15 +653,46 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     return { ok: true, result, emptyReason: reason };
   };
 
+  /**
+   * Drop leg geometry from a commute answer.
+   *
+   * Measured on the live Engelsrud ↔ Nationaltheatret board (2026-08-25): the
+   * full dashboard response is 704 KB, of which **614 KB — 87% — is
+   * `leg.points`**, the decoded polyline of every leg of every option. The
+   * commute board has no map on either client (only the *planner's* trip is
+   * drawn, by `useTransitLayers`), so every one of those bytes crosses a phone's
+   * link on each refresh to be parsed and thrown away. Stripping them takes the
+   * same board to 90 KB.
+   *
+   * Deliberately not done on `/api/transit`, where the geometry is the answer:
+   * that endpoint's journeys *are* drawn.
+   */
+  const withoutGeometry = (result: TransitResult): TransitResult => ({
+    ...result,
+    trips: result.trips.map((trip) => ({
+      ...trip,
+      legs: trip.legs.map((leg) => ({ ...leg, points: [] })),
+    })),
+  });
+
   app.post('/api/transit/commute', async (request, reply) => {
     const parsed = parseCommuteQuery(request.body);
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
     const queries = commuteTransitQueries(parsed.query, Date.now());
+    // The dashboard's per-leg boards (§6.4 §5), fanned out here rather than by
+    // the client: one request over a phone's link instead of five, one failure
+    // to handle, and one place that knows the corridor's hops. Opt-in, because
+    // the widget and any older client want only the two directions.
+    const wantSegments = (request.body as { segments?: unknown } | null)?.segments === true;
+    const segmentQueries = wantSegments
+      ? commuteSegmentQueries(parsed.query, COMMUTE_SEGMENT_ROWS)
+      : [];
 
     try {
-      const [outbound, inbound] = await Promise.all([
+      const [outbound, inbound, ...segmentAnswers] = await Promise.all([
         askDirection(queries.outbound, parsed.query.filter),
         askDirection(queries.inbound, parsed.query.filter),
+        ...segmentQueries.map((segment) => askDirection(segment.query, parsed.query.filter)),
       ]);
       // Checked one at a time so each stays narrowed: `!a.ok || !b.ok` tells
       // TypeScript nothing about `b` inside the branch.
@@ -667,11 +706,24 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       status?.record(TRANSIT_PROBE, true);
       reply.header('cache-control', 'private, max-age=30');
       return {
-        outbound: outbound.result,
-        inbound: inbound.result,
+        outbound: withoutGeometry(outbound.result),
+        inbound: withoutGeometry(inbound.result),
         // Which nothing it was, per direction, so a board can offer the way out
         // of its own filter instead of blaming the timetable.
         emptyReason: { outbound: outbound.emptyReason, inbound: inbound.emptyReason },
+        // A hop that failed is dropped rather than failing the whole dashboard:
+        // the journeys above it are the answer people came for, and one dead
+        // per-leg board is worth strictly less than the board it sits under.
+        ...(wantSegments
+          ? {
+              segments: segmentQueries.flatMap((segment, index) => {
+                const answer = segmentAnswers[index];
+                return answer?.ok
+                  ? [{ id: segment.id, result: withoutGeometry(answer.result) }]
+                  : [];
+              }),
+            }
+          : {}),
       };
     } catch (err) {
       request.log.error({ err }, 'entur commute unreachable');

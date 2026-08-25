@@ -31,6 +31,16 @@ export const theme = {
   accentFaint: 'rgba(79,145,239,0.22)',
   warning: '#d08a28',
   danger: '#d84f55',
+  /**
+   * "Running as published" and "not the service you booked" — the two service
+   * states that are neither a warning nor an error. Fixed hex rather than a
+   * theme attribute for the same reason `warning` and `danger` are: these mark
+   * a *departure's* condition, and it must read identically in light and dark.
+   * `info` is deliberately not `accent`, which is reserved for the one control
+   * a screen wants tapped.
+   */
+  success: '#3f9d5f',
+  info: '#5a8fd0',
   onAccent: '#fff',
   backdrop: 'rgba(6,10,14,0.52)',
   handle: PlatformColor('?android:attr/colorForeground'),

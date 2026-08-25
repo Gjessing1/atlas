@@ -91,11 +91,93 @@ export function norwayInstant(
   return naive - norwayOffsetMinutes(guess) * 60_000;
 }
 
-/** Format an instant as a Norwegian 24-hour wall clock: `"07:12"`. */
+/**
+ * Format an instant as a Norwegian 24-hour wall clock: `"07:12"`.
+ *
+ * A non-finite input renders as `"--:--"` rather than `"NaN:NaN"`. Not
+ * hypothetical: the clients take the backend's journey JSON at its word (see
+ * `fetchTransitTrips`), so a field a newer or older server omits arrives here as
+ * `undefined` and would otherwise be painted, in a large font, where a departure
+ * time belongs.
+ */
 export function norwayClock(epochMs: number): string {
+  if (!Number.isFinite(epochMs)) return '--:--';
   const { minutesOfDay } = norwayTime(epochMs);
   const pad = (n: number) => `${n}`.padStart(2, '0');
   return `${pad(Math.floor(minutesOfDay / 60))}:${pad(minutesOfDay % 60)}`;
+}
+
+/**
+ * Weekday and month names, hand-held rather than asked of `Intl`.
+ *
+ * The same decision as `fmtClock` in `@atlas/core`: this module already computes
+ * Norway's UTC offset instead of trusting a runtime's tz database, and a date
+ * label that came from `Intl` would be Norwegian on a Norwegian phone, American
+ * on a container and absent on Hermes — three renderings of one commute. The
+ * app's copy is English throughout ("Leave at", "Any line"), so these are too.
+ */
+const WEEKDAY_NAMES = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+] as const;
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+/** `"Tuesday"` / `"Tue"` for an instant, read off the Norwegian calendar. */
+export function norwayWeekdayLabel(epochMs: number, short = false): string {
+  const name = WEEKDAY_NAMES[norwayTime(epochMs).weekday - 1] ?? '';
+  return short ? name.slice(0, 3) : name;
+}
+
+/** `"Tuesday 25 August"` — the dashboard header's date line. */
+export function norwayDateLabel(epochMs: number, short = false): string {
+  const { day, month } = norwayTime(epochMs);
+  const monthName = MONTH_NAMES[month] ?? '';
+  return `${norwayWeekdayLabel(epochMs, short)} ${day} ${short ? monthName.slice(0, 3) : monthName}`;
+}
+
+/**
+ * Whole Norwegian *calendar* days from one instant to another — 0 for today, 1
+ * for tomorrow — regardless of how many hours apart they are. 23:50 and 00:10
+ * are twenty minutes and one day apart, and a departure board that calls the
+ * second one "today" sends someone to the stop a day early.
+ */
+export function norwayDayOffset(fromMs: number, toMs: number): number {
+  const start = norwayTime(fromMs);
+  const end = norwayTime(toMs);
+  const midnight = (t: NorwayTime) => Date.UTC(t.year, t.month, t.day);
+  return Math.round((midnight(end) - midnight(start)) / 86_400_000);
+}
+
+/**
+ * How a departure names its day when it is not today: `null`, `"Tomorrow"`, or
+ * the date itself. Null for today is the point — a board that stamps every row
+ * with "Today" has spent its most valuable line saying nothing.
+ */
+export function norwayDayNote(nowMs: number, whenMs: number, short = false): string | null {
+  const offset = norwayDayOffset(nowMs, whenMs);
+  if (offset === 0) return null;
+  if (offset === 1) return 'Tomorrow';
+  if (offset === -1) return 'Yesterday';
+  return norwayDateLabel(whenMs, short);
 }
 
 /** Whether a weekday is one the commute runs. An empty list means every day. */

@@ -170,6 +170,14 @@ export interface TransitSituation {
   description?: string;
   advice?: string;
   severity: TransitSeverity;
+  /**
+   * Entur's `reportType: general` — engineering work announced weeks ahead
+   * rather than something that has just happened (`incident`). The distinction
+   * is the traveller's: a planned closure is read once and remembered, an
+   * incident is read now. It is also the *only* classification the wire
+   * carries; see `commuteDisruption` for what that does and does not allow.
+   */
+  planned?: boolean;
   /** Operator's own page about the disruption, when they published one. */
   url?: string;
 }
@@ -217,6 +225,22 @@ export interface TransitLeg {
   endPredictionInaccurate?: boolean;
   from: TransitPlace;
   to: TransitPlace;
+  /**
+   * The operator has cancelled the departure this leg boards. Rare in a journey
+   * answer — the planner normally stops offering a cancelled service rather than
+   * returning it — but not impossible while the cancellation is still
+   * propagating, and a board that renders it as an ordinary departure is the one
+   * failure a journey planner must not have.
+   */
+  cancelled?: boolean;
+  /**
+   * This leg is a *replacement* for the service the timetable names — Entur's
+   * `railReplacementBus` / `replacementRailService` submodes, the bus that turns
+   * up where a train was booked. Kept as its own flag rather than folded into
+   * `mode`: the leg genuinely is a bus, and the news is that it was meant to be
+   * a train.
+   */
+  replacement?: boolean;
   /** Present on ride legs only. */
   line?: TransitLine;
   /** Stops passed through without a change — for an expandable "12 stops" row. */
@@ -510,12 +534,25 @@ export interface TransitCommuteQuery {
  */
 export type CommuteEmptyReason = 'none' | 'upstream' | 'filtered';
 
+/** One directed hop of the corridor, answered as its own small board. */
+export interface TransitCommuteSegmentResult {
+  /** `"outbound-0"` — matches the `CommuteSegment` id the clients derive. */
+  id: string;
+  result: TransitResult;
+}
+
 /** Upcoming journeys in both directions. */
 export interface TransitCommuteResult {
   outbound: TransitResult;
   inbound: TransitResult;
   /** Which nothing it was, per direction; absent from an older backend. */
   emptyReason?: Record<TransitCommuteDirection, CommuteEmptyReason>;
+  /**
+   * Per-leg boards, when the caller asked for them and the commute has an
+   * interchange to have legs at. Absent — not empty — from a backend that
+   * predates them, so a client can tell "not supported" from "nothing runs".
+   */
+  segments?: TransitCommuteSegmentResult[];
 }
 
 /**

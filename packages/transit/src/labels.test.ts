@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { norwayInstant } from './clock.js';
 import {
   bookingDeadlineLabel,
   bookingHowLabel,
@@ -18,7 +19,11 @@ import {
 } from './labels.js';
 import type { TransitLeg, TransitMode, TransitPlace, TransitTrip } from './model.js';
 
-const at = (h: number, m: number) => new Date(2026, 6, 21, h, m).getTime();
+// Built on the Norwegian clock, because that is the clock these labels print:
+// a departure time out of Entur is a Norwegian wall-clock time on every device
+// that renders it (see the note at the top of labels.ts). Under a UTC test
+// runner a `new Date(...)` fixture read back two hours out.
+const at = (h: number, m: number) => norwayInstant(2026, 6, 21, h * 60 + m);
 
 const place = (name: string, quay?: string): TransitPlace => ({
   name,

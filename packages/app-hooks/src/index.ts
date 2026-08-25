@@ -114,6 +114,12 @@ export {
   type StopLinesFn,
 } from './useCommuteEditor.js';
 export {
+  useCommuteDashboard,
+  type CommuteDashboard,
+  type CommuteDashboardBoard,
+  type CommuteDashboardView,
+} from './useCommuteDashboard.js';
+export {
   mergeSearchResults,
   searchStatusText,
   useSearch,

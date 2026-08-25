@@ -1,11 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
-import type { TransitProblem, TransitTrip } from '@atlas/transit';
+import { norwayInstant, type TransitProblem, type TransitTrip } from '@atlas/transit';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useTransitBoard } from './useTransitBoard.js';
 import type { TransitPlan } from './useTransit.js';
 
-const at = (h: number, m: number) => new Date(2026, 6, 21, h, m).getTime();
+// The Norwegian clock, because that is the clock a transit label prints —
+// see the note at the top of @atlas/transit's labels.ts.
+const at = (h: number, m: number) => norwayInstant(2026, 6, 21, h * 60 + m);
 
 function tripAt(h: number, m: number): TransitTrip {
   return {

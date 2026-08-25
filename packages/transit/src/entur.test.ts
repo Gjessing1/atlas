@@ -387,6 +387,32 @@ describe('parseEnturResponse — degenerate payloads', () => {
     ).toMatchObject({ severity: 'info' });
   });
 
+  it('marks a notice announced in advance apart from one that just happened', () => {
+    // The only classification the wire carries: `general` is engineering work
+    // published weeks out, `incident` is something that has happened. Absent
+    // (older feeds) must read as "not said", never as "planned".
+    const planned = legWith({
+      situations: [{ reportType: 'general', summary: [{ value: 'Sporarbeid' }] }],
+    });
+    expect(planned.situations[0]!.planned).toBe(true);
+    expect(
+      legWith({ situations: [{ reportType: 'incident', summary: [{ value: 'Signalfeil' }] }] })
+        .situations[0]!.planned,
+    ).toBeUndefined();
+    expect(
+      legWith({ situations: [{ summary: [{ value: 'Signalfeil' }] }] }).situations[0]!.planned,
+    ).toBeUndefined();
+  });
+
+  it('reads a cancelled boarding call and a replacement submode off the leg', () => {
+    expect(legWith({ fromEstimatedCall: { cancellation: true } }).cancelled).toBe(true);
+    // `railReplacementBus` is the bus standing in for a booked train — probed
+    // against the live schema 2026-08-25; there is no separate flag for it.
+    expect(legWith({ transportSubmode: 'railReplacementBus' }).replacement).toBe(true);
+    expect(legWith({ transportSubmode: 'regionalRail' }).replacement).toBeUndefined();
+    expect(legWith({}).cancelled).toBeUndefined();
+  });
+
   it('drops a description that only repeats the summary', () => {
     const leg = legWith({
       situations: [{ summary: [{ value: 'Innstilt' }], description: [{ value: 'Innstilt' }] }],

@@ -53,30 +53,47 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   test.setTimeout(300_000);
   const now = Date.now();
   let requested: Record<string, unknown> | null = null;
-  const journey = {
-    startMs: now + 300_000,
-    endMs: now + 2_100_000,
+  // A complete leg, not a stub: the dashboard reads its clock times off the
+  // *ride* legs (the bus leaves when the bus leaves, not when you set off
+  // walking), so a fixture with only trip-level times exercises none of it.
+  const leg = (
+    mode: string,
+    publicCode: string,
+    startMs: number,
+    endMs: number,
+  ): Record<string, unknown> => ({
+    mode,
+    distanceM: 8_000,
+    durationMs: endMs - startMs,
+    aimedStartMs: startMs,
+    expectedStartMs: startMs,
+    aimedEndMs: endMs,
+    expectedEndMs: endMs,
+    realtime: false,
+    from: { name: 'Engelsrud', position: { lat: 59.82, lng: 10.42 } },
+    to: { name: 'Asker', position: { lat: 59.8337, lng: 10.4348 } },
+    line: { id: `X:Line:${publicCode}`, publicCode },
+    intermediateStops: [],
+    points: [],
+    situations: [],
+  });
+  const journeyFrom = (startMs: number) => ({
+    startMs,
+    endMs: startMs + 1_800_000,
     durationMs: 1_800_000,
     walkDistanceM: 300,
     legs: [
-      {
-        mode: 'bus',
-        line: { publicCode: '280' },
-        situations: [],
-      },
-      {
-        mode: 'rail',
-        line: { publicCode: 'R14' },
-        situations: [],
-      },
+      leg('bus', '280', startMs, startMs + 900_000),
+      leg('rail', 'R14', startMs + 1_200_000, startMs + 1_800_000),
     ],
-  };
+  });
+  const journey = journeyFrom(now + 300_000);
   await page.route('**/api/transit/commute', (route) => {
     requested = route.request().postDataJSON() as Record<string, unknown>;
     route.fulfill({
       json: {
         outbound: { trips: [journey], problems: [] },
-        inbound: { trips: [{ ...journey, startMs: now + 3_600_000 }], problems: [] },
+        inbound: { trips: [journeyFrom(now + 3_600_000)], problems: [] },
       },
     });
   });
@@ -156,6 +173,12 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
       filter: { select: [], exclude: [], modes: [] },
     });
 
+  // The dashboard leads with the answer: what leaving now gets you, and the
+  // journey list beneath it. Both are on screen without expanding anything.
+  await expect(panel).toContainText('If I leave now');
+  await expect(panel).toContainText('Next journeys');
+
   await panel.getByRole('tab', { name: 'Return' }).click();
-  await expect(panel).toContainText('Nationaltheatret → Engelsrud');
+  // The route line is the panel's header now, not a field halfway down a form.
+  await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');
 });

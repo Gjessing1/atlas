@@ -130,8 +130,11 @@ const CommutePanel = lazy(() =>
   import('./transit/CommutePanel.js').then((m) => ({ default: m.CommutePanel })),
 );
 
+// `segments: true` asks for the per-leg boards too (§6.4 §5) — one request that
+// answers the whole dashboard rather than five the panel would have to
+// orchestrate and fail independently.
 const fetchCommute = (query: TransitCommuteQuery, signal: AbortSignal) =>
-  fetchTransitCommute(query, { signal });
+  fetchTransitCommute(query, { signal, segments: true });
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 

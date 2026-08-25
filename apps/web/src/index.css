@@ -6102,12 +6102,501 @@ button.transit-notice-summary {
 
 .commute-route {
   margin-top: 12px;
-}
-
-.commute-route {
   align-items: flex-start;
   flex-direction: column;
   gap: 2px;
+}
+
+/* --- Commute dashboard (ROADMAP §6.4) ---
+   A timetable, not a form: scheduled times carry the weight, live estimates sit
+   under them in muted text, and the only saturated colour on the panel marks a
+   service that is in trouble. */
+
+.commute-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.commute-toolbar .commute-directions {
+  flex: 1;
+}
+
+.commute-edit {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.commute-edit.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.commute-editor {
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.commute-views {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.commute-views button {
+  flex: 1;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.commute-views button[aria-selected='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.commute-section-head,
+.commute-leavenow h3,
+.commute-board h3 {
+  margin: 14px 0 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* --- "If I leave now" (§11) --- */
+
+.commute-leavenow {
+  padding: 10px 11px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface-selected);
+}
+
+.commute-leavenow h3 {
+  margin-top: 0;
+  color: var(--accent);
+}
+
+.commute-leavenow-main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.commute-leavenow-main strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.commute-leavenow-main span {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-leavenow-main em {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.commute-leavenow-lines {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.commute-leavenow-next {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Journey options (§1) --- */
+
+.commute-journeys {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.commute-journey {
+  /* Grid items are `min-width: auto` too — the card must be allowed to shrink
+     to the panel rather than to its widest line of text. */
+  min-width: 0;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+}
+
+.commute-journey-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commute-journey-times {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.commute-journey-times strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The arrow between the two times is drawn rather than typed: it has to stretch
+   to whatever space the two clock faces leave, and a character cannot. */
+.commute-journey-times i {
+  flex: 1;
+  height: 1px;
+  min-width: 12px;
+  background: var(--border);
+}
+
+.commute-journey-duration {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-journey-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.commute-journey-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.commute-journey-lines > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.commute-journey-note {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* --- Expanded legs (§1, §2) --- */
+
+.commute-legs {
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.commute-leg {
+  display: flex;
+  gap: 9px;
+  padding-top: 7px;
+}
+
+.commute-leg-time {
+  display: flex;
+  flex-direction: column;
+  min-width: 44px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-leg-time strong {
+  font-size: 13px;
+}
+
+.commute-leg-time em,
+.commute-board-time em {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.commute-leg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+}
+
+.commute-leg-body span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.commute-leg-ride {
+  font-size: 10px !important;
+}
+
+/* The connection time, computed so the traveller never subtracts two clock
+   times on a platform (§2). */
+.commute-connection {
+  margin: 7px 0 0 53px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.commute-connection.tight {
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.commute-legs-total {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* --- Per-leg departure boards (§5) --- */
+
+.commute-board h3 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.commute-board h3 i {
+  font-style: normal;
+}
+
+.commute-board-rows {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.commute-board-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 7px;
+}
+
+.commute-board-time {
+  display: flex;
+  flex-direction: column;
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-board-time strong {
+  font-size: 16px;
+}
+
+.commute-board-line {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.commute-board-line span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-board-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.commute-board-when em {
+  font-size: 10px;
+  font-style: normal;
+}
+
+.commute-board-row .commute-disruptions {
+  grid-column: 1 / -1;
+}
+
+/* --- Status (§10). The border edge is the only place a state paints, so a
+   cancellation is visible without the row shouting. --- */
+
+.commute-state-live {
+  border-left-color: var(--success);
+}
+
+.commute-state-scheduled {
+  border-left-color: var(--border);
+}
+
+.commute-state-delayed,
+.commute-state-early {
+  border-left-color: var(--warning);
+}
+
+.commute-state-replacement {
+  border-left-color: var(--info);
+}
+
+.commute-state-cancelled {
+  border-left-color: var(--danger);
+}
+
+.commute-journey-lines > span.commute-state-cancelled {
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.commute-journey-lines > span.commute-state-delayed {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.commute-board-row.commute-state-cancelled .commute-board-time strong {
+  text-decoration: line-through;
+}
+
+/* --- Disruptions, beneath the service they affect (§4) --- */
+
+.commute-disruptions {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  margin: 7px 0 0;
+  list-style: none;
+}
+
+.commute-disruption {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.commute-disruption strong {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Collapsed form: the headline on one line, clamped. A standing operator notice
+   is often a paragraph, and three of them between two journeys is how a
+   scannable list stops being one.
+
+   The `min-width: 0` chain is load-bearing, not defensive. A flex/grid item's
+   default `min-width: auto` refuses to shrink below its content, so one
+   un-wrappable Norwegian sentence widened the notice, the journey card and the
+   whole list until the arrival time and duration hung off the right edge of the
+   panel — which the first live run showed and no unit test could. */
+.commute-disruptions.brief .commute-disruption {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+}
+
+.commute-disruptions.brief .commute-disruption strong {
+  flex: none;
+  white-space: nowrap;
+}
+
+.commute-disruptions.brief .commute-disruption span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commute-disruption em {
+  font-style: normal;
+  opacity: 0.85;
+}
+
+.commute-disruption.sev-severe {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.commute-disruption.sev-info {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.commute-disruption a {
+  color: inherit;
 }
 
 .commute-state {

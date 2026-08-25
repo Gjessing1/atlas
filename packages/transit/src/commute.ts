@@ -1,8 +1,10 @@
 import { nextCommuteInstant, norwayTime, runsOnWeekday, type TransitWeekday } from './clock.js';
+import { commuteSegments } from './dashboard.js';
 import { expandModeFilter, isRideMode, filterModeOf } from './model.js';
 import type {
   TransitCommuteDirection,
   TransitCommuteFilter,
+  TransitCommutePlace,
   TransitCommuteQuery,
   TransitCommuteTime,
   TransitLineFilter,
@@ -126,6 +128,41 @@ export function commuteTransitQueries(
       ...timeArguments(query.inboundTime, query.days, nowMs),
     },
   };
+}
+
+/**
+ * The per-leg board questions: one `trip` call per directed hop of the corridor.
+ *
+ * Asked as *journeys* rather than as stop boards, which is a deliberate choice
+ * with a measured reason. Entur's `estimatedCalls` at Engelsrud answers "the 270
+ * leaves at 08:36" for every 270 — including the ones heading away from Asker —
+ * and knowing which of them reach Asker means pulling each service journey's
+ * whole call list, tens of stops per row, and filtering locally. A `trip(A→B)`
+ * asks the planner the question directly, costs 0.3–0.5 s (measured
+ * 2026-08-25 on this corridor), and comes back already knowing the arrival at
+ * the far end — which a stop board never does.
+ *
+ * Always "from now", never at the commute's saved time: these boards exist for
+ * the traveller who is already moving, and the one thing they must answer is
+ * what leaves next.
+ */
+export function commuteSegmentQueries(
+  query: TransitCommuteQuery,
+  limit: number,
+): { id: string; from: TransitCommutePlace; to: TransitCommutePlace; query: TransitQuery }[] {
+  const lineFilter = commuteLineFilter(query.filter);
+  return commuteSegments(query).map((segment) => ({
+    id: segment.id,
+    from: segment.from,
+    to: segment.to,
+    query: {
+      from: segment.from,
+      to: segment.to,
+      limit,
+      ...(query.filter.modes.length > 0 ? { modes: query.filter.modes } : {}),
+      ...(lineFilter ? { lineFilter } : {}),
+    },
+  }));
 }
 
 /**

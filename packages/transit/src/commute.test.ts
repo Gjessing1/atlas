@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   commuteEmptyReason,
   commuteLineFilter,
+  commuteSegmentQueries,
   commuteTransitQueries,
   commuteTripMatches,
   defaultCommuteDirection,
@@ -253,5 +254,44 @@ describe('default direction', () => {
 
   it('stays outbound when no time is saved', () => {
     expect(defaultCommuteDirection(commute(), THURSDAY_0630)).toBe('outbound');
+  });
+});
+
+describe('commuteSegmentQueries', () => {
+  const withVia = commute({
+    via: [{ name: 'Asker stasjon', lat: 59.83, lng: 10.43, stopId: 'NSR:StopPlace:59616' }],
+    filter: filter({ select: [BUS_280], modes: ['bus'] }),
+  });
+
+  it('asks one question per directed hop, carrying the commute rules', () => {
+    const queries = commuteSegmentQueries(withVia, 5);
+    expect(queries.map((entry) => entry.id)).toEqual([
+      'outbound-0',
+      'outbound-1',
+      'inbound-0',
+      'inbound-1',
+    ]);
+    expect(queries[0]!.query).toMatchObject({
+      from: { stopId: 'NSR:StopPlace:3369' },
+      to: { stopId: 'NSR:StopPlace:59616' },
+      limit: 5,
+      modes: ['bus'],
+      lineFilter: { select: ['RUT:Line:280'] },
+    });
+  });
+
+  it('never pins a hop to the commute time — these boards answer "what leaves next"', () => {
+    const timed = commuteSegmentQueries(
+      commute({
+        via: [{ name: 'Asker stasjon', lat: 59.83, lng: 10.43 }],
+        outboundTime: { minutesOfDay: 7 * 60 + 10, arriveBy: false },
+      }),
+      5,
+    );
+    expect(timed.every((entry) => entry.query.dateTimeMs === undefined)).toBe(true);
+  });
+
+  it('asks nothing at all without an interchange', () => {
+    expect(commuteSegmentQueries(commute(), 5)).toEqual([]);
   });
 });

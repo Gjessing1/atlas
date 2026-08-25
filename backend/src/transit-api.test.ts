@@ -499,6 +499,84 @@ describe('POST /api/transit/commute', () => {
     expect(res.headers['cache-control']).toBe('private, max-age=30');
   });
 
+  it('answers the per-leg boards too, but only when asked (§6.4 §5)', async () => {
+    const plain = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
+    // Absent, not empty: an older client must be able to tell "this backend
+    // does not do boards" from "nothing runs on that hop".
+    expect(plain.json().segments).toBeUndefined();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, segments: true },
+    });
+    expect(res.json().segments.map((entry: { id: string }) => entry.id)).toEqual([
+      'outbound-0',
+      'outbound-1',
+      'inbound-0',
+      'inbound-1',
+    ]);
+  });
+
+  it('leaves the leg geometry behind — the commute board has no map', async () => {
+    // Measured on the live board: 614 KB of the 704 KB answer was polyline that
+    // no client draws.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, segments: true },
+    });
+    const body = res.json();
+    const legs = [
+      ...body.outbound.trips,
+      ...body.segments.flatMap((entry: { result: { trips: unknown[] } }) => entry.result.trips),
+    ].flatMap((trip: { legs: { points: unknown[] }[] }) => trip.legs);
+    expect(legs.length).toBeGreaterThan(0);
+    expect(legs.every((leg) => leg.points.length === 0)).toBe(true);
+    // But the times, lines and quays it is actually made of survive.
+    expect(body.outbound.trips[0].legs[0]).toMatchObject({ aimedStartMs: expect.any(Number) });
+  });
+
+  it('drops a hop whose upstream call failed rather than losing the journeys', async () => {
+    let call = 0;
+    respond = () => {
+      call += 1;
+      // The two directions answer; the first per-leg board does not.
+      return call === 3
+        ? new Response('nope', { status: 502 })
+        : new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, segments: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().outbound.trips).toHaveLength(1);
+    expect(res.json().segments).toHaveLength(3);
+  });
+
+  it('asks a hop about now, never about the commute time', async () => {
+    const dateTimes: unknown[] = [];
+    respond = () => {
+      dateTimes.push(captured!.body.variables.dateTime);
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: {
+        ...payload,
+        segments: true,
+        outboundTime: { minutesOfDay: 7 * 60 + 10, arriveBy: false },
+      },
+    });
+    // Two directions (the first pinned to 07:10) then four hops, all "now".
+    expect(dateTimes).toHaveLength(6);
+    expect(dateTimes[0]).not.toBeNull();
+    expect(dateTimes.slice(2)).toEqual([null, null, null, null]);
+  });
+
   /**
    * The rework's whole point: the lines go *into* the question. The previous
    * board asked unfiltered, discarded most of the answer locally, then re-asked

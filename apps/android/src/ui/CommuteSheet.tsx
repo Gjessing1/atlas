@@ -1,24 +1,24 @@
 import {
+  useCommuteDashboard,
   useCommuteEditor,
   type CommuteController,
-  type CommuteEditor,
-  type CommuteEndKey,
-  type CommuteLineOption,
+  type CommuteDashboard,
+  type CommuteDashboardBoard,
   type StopGeocodeFn,
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
-  defaultCommuteDirection,
-  emptyDirectionNote,
+  COMMUTE_STATE_LABEL,
   liveTimetableLabel,
-  minutesOfDayLabel,
-  tripSummary,
-  type TransitCommuteDirection,
-  type TransitTrip,
+  type CommuteBoardRow,
+  type CommuteDisruption,
+  type CommuteJourney,
+  type CommuteServiceState,
+  type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   addCommuteWidget,
@@ -26,209 +26,293 @@ import {
   type CommuteWidgetSupport,
 } from '../commuteWidget';
 import { BottomSheet } from './BottomSheet';
+import { CommuteEditorForm } from './CommuteEditor';
 import { theme } from './theme';
 
-/** One end of the commute: what it is now, and a stop search to change it. */
-function EndField({
-  field,
-  label,
-  editor,
-  places,
+/**
+ * The commute dashboard on Android — ROADMAP §6.4, the same model the web panel
+ * renders.
+ *
+ * What it replaced was a configuration form with a result list stapled under
+ * it: three stop pickers, two time fields, seven day chips and a wall of line
+ * chips before the first departure time. The sheet now opens on the answer —
+ * what leaving now gets you, the complete journey options as one scannable line
+ * each, and the per-leg boards for someone already on the bus — with the form
+ * behind "Edit commute".
+ *
+ * Nothing here formats a time or decides a status; `@atlas/transit` does both,
+ * so this sheet and the browser panel and the home-screen widget cannot
+ * disagree about when the 08:41 leaves.
+ */
+
+/** One glyph per mode. The word is in `modeLabel`; this is what you see first. */
+const MODE_GLYPH: Partial<Record<TransitMode, string>> = {
+  bus: '🚌',
+  coach: '🚌',
+  rail: '🚆',
+  metro: '🚇',
+  tram: '🚊',
+  water: '⛴️',
+  air: '✈️',
+  cableway: '🚡',
+  funicular: '🚞',
+  foot: '🚶',
+};
+
+const glyph = (mode: TransitMode) => MODE_GLYPH[mode] ?? '•';
+
+/**
+ * A colour comes from what a service *is* — never from where it sits in a list.
+ * Same rule and same vocabulary as the home-screen widget, so a delayed
+ * departure looks delayed on both surfaces of one commute.
+ */
+const STATE_COLOUR: Record<CommuteServiceState, string> = {
+  cancelled: theme.danger,
+  replacement: theme.info,
+  delayed: theme.warning,
+  early: theme.warning,
+  live: theme.success,
+  // Explicitly *not* `theme.border`, which resolves to `colorForeground` — a
+  // full-opacity black or white. A 3 px edge in it would make the calmest and
+  // commonest state the loudest thing on the sheet. Semi-transparent grey reads
+  // as an edge in both themes without claiming attention.
+  scheduled: 'rgba(128,138,148,0.45)',
+};
+
+/**
+ * Disruptions under the service they affect (§4).
+ *
+ * `brief` is the collapsed form, and it is not a nicety. Driven against the live
+ * board, the full form put two amber blocks and five lines of Norwegian
+ * operator prose between the first journey's scan line and the second's — on the
+ * one screen §12 says must show three journeys at a glance. So a collapsed row
+ * gets the headline and the expanded legs get the whole notice, which is where
+ * someone who has chosen a journey is actually reading.
+ */
+function Disruptions({
+  items,
+  brief = false,
 }: {
-  field: CommuteEndKey;
-  label: string;
-  editor: CommuteEditor;
-  places: readonly PlaceRecord[];
+  items: readonly CommuteDisruption[];
+  brief?: boolean;
 }) {
-  const open = editor.editing === field;
-  const end = editor.config[field];
-  if (!open) {
-    return (
-      <View style={styles.field}>
-        <Text style={styles.fieldLabel}>{label}</Text>
-        <Pressable
-          style={styles.endButton}
-          disabled={!editor.ready}
-          onPress={() => editor.edit(field)}
-          testID={`commute-end-${field}`}
-        >
-          <Text style={styles.endText} numberOfLines={1}>
-            {editor.endLabel(field)}
-          </Text>
-          {end && !editor.isStop(field) ? <Text style={styles.endHint}>coordinate</Text> : null}
-        </Pressable>
-      </View>
-    );
-  }
+  if (items.length === 0) return null;
   return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        style={styles.input}
-        value={editor.search.query}
-        placeholder="Search for a stop…"
-        placeholderTextColor={theme.textMuted}
-        autoFocus
-        autoCorrect={false}
-        onChangeText={editor.search.setQuery}
-        testID={`commute-search-${field}`}
-      />
-      {editor.search.statusText ? (
-        <Text style={styles.searchStatus}>{editor.search.statusText}</Text>
-      ) : null}
-      {editor.search.hits.map((hit) => (
-        <Pressable
-          key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}
-          style={styles.hit}
-          onPress={() => editor.pickHit(field, hit)}
-        >
-          <Text style={styles.hitName} numberOfLines={1}>
-            {hit.name}
-          </Text>
-          <Text style={styles.hitLabel} numberOfLines={1}>
-            {hit.transitStopId ? 'Stop' : hit.label}
-          </Text>
-        </Pressable>
-      ))}
-      {/* Favorites stay a shortcut — they are just no longer the only path.
-          Offered only before anything is typed: `useStopSearch` matches saved
-          places into its own hits, so showing both would list every favorite
-          twice. */}
-      {editor.search.query.trim().length === 0
-        ? places.slice(0, 4).map((place) => (
-            <Pressable
-              key={place.id}
-              style={styles.hit}
-              onPress={() => editor.pickPlace(field, place)}
-            >
-              <Text style={styles.hitName} numberOfLines={1}>
-                {place.name}
-              </Text>
-              <Text style={styles.hitLabel}>Saved place</Text>
-            </Pressable>
-          ))
-        : null}
-      <View style={styles.rowGap}>
-        <Pressable style={styles.smallButton} onPress={() => editor.edit(null)}>
-          <Text style={styles.smallButtonText}>Cancel</Text>
-        </Pressable>
-        {end ? (
-          <Pressable style={styles.smallButton} onPress={() => editor.clear(field)}>
-            <Text style={styles.smallButtonText}>Clear</Text>
-          </Pressable>
-        ) : null}
-      </View>
+    <View style={styles.disruptions}>
+      {items.map((item) => {
+        const tone =
+          item.severity === 'severe'
+            ? theme.danger
+            : item.severity === 'info'
+              ? theme.textMuted
+              : theme.warning;
+        return (
+          <View key={item.key} style={[styles.disruption, { borderLeftColor: tone }]}>
+            <Text style={[styles.disruptionKind, { color: tone }]}>
+              {item.severity === 'info' ? 'ⓘ' : '⚠'} {item.kindLabel.toUpperCase()}
+            </Text>
+            <Text style={styles.disruptionText} numberOfLines={brief ? 1 : undefined}>
+              {item.summary}
+            </Text>
+            {!brief && item.detail ? (
+              <Text style={styles.disruptionDetail}>{item.detail}</Text>
+            ) : null}
+            {!brief && item.url ? (
+              <Pressable onPress={() => void Linking.openURL(item.url!)}>
+                <Text style={styles.disruptionLink}>Operator’s notice</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 }
 
 /**
- * A ticked line, never a typed code: tap to require it, ✕ to avoid it. "Not the
- * local train that stops everywhere" is a line choice, which is what replaced
- * substring-matching a station name.
+ * One journey, collapsed to its scan line and expandable to its legs.
+ *
+ * The times are the *scheduled* ones — the numbers printed at the stop — with
+ * the live estimate beside them as a labelled secondary. Replacing 08:41 with
+ * 08:43 destroys the reference point the traveller is comparing against.
  */
-function LineChip({ line, editor }: { line: CommuteLineOption; editor: CommuteEditor }) {
-  return (
-    <View
-      style={[
-        styles.line,
-        line.state === 'select' && styles.lineSelect,
-        line.state === 'exclude' && styles.lineExclude,
-      ]}
-    >
-      <Pressable style={styles.lineMain} onPress={() => editor.toggleSelect(line)}>
-        <Text
-          style={[
-            styles.lineText,
-            line.state === 'select' && styles.lineTextSelect,
-            line.state === 'exclude' && styles.lineTextExclude,
-          ]}
-        >
-          {line.publicCode}
-          {line.seen ? ' ✓' : ''}
-        </Text>
-      </Pressable>
-      <Pressable style={styles.lineNot} onPress={() => editor.toggleExclude(line)}>
-        <Text style={[styles.lineNotText, line.state === 'exclude' && styles.lineTextExclude]}>
-          ✕
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-/** "Leave at 07:10" / "Arrive by 08:30", nudged in five-minute steps. */
-function TimeField({
-  direction,
-  label,
-  editor,
+function JourneyRow({
+  journey,
+  open,
+  onToggle,
 }: {
-  direction: TransitCommuteDirection;
-  label: string;
-  editor: CommuteEditor;
+  journey: CommuteJourney;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const time = direction === 'outbound' ? editor.config.outboundTime : editor.config.inboundTime;
-  const nudge = (deltaMinutes: number) => {
-    const base = time.minutesOfDay ?? 7 * 60;
-    editor.setTime(direction, (((base + deltaMinutes) % 1440) + 1440) % 1440);
-  };
   return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.rowGap}>
-        <Pressable
-          style={styles.smallButton}
-          onPress={() => editor.setArriveBy(direction, !time.arriveBy)}
-        >
-          <Text style={styles.smallButtonText}>{time.arriveBy ? 'Arrive by' : 'Leave at'}</Text>
-        </Pressable>
-        <Pressable style={styles.smallButton} onPress={() => nudge(-5)}>
-          <Text style={styles.smallButtonText}>−</Text>
-        </Pressable>
-        <Text style={styles.timeValue}>
-          {time.minutesOfDay === null ? 'now' : minutesOfDayLabel(time.minutesOfDay)}
-        </Text>
-        <Pressable style={styles.smallButton} onPress={() => nudge(5)}>
-          <Text style={styles.smallButtonText}>+</Text>
-        </Pressable>
-        {time.minutesOfDay !== null ? (
-          <Pressable style={styles.smallButton} onPress={() => editor.setTime(direction, null)}>
-            <Text style={styles.smallButtonText}>Now</Text>
-          </Pressable>
-        ) : null}
-      </View>
+    <View style={[styles.journey, { borderLeftColor: STATE_COLOUR[journey.state] }]}>
+      <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
+        <View style={styles.journeyHead}>
+          <Text style={styles.journeyTime}>{journey.departure.aimed}</Text>
+          <View style={styles.journeyRule} />
+          <Text style={styles.journeyTime}>{journey.arrival.aimed}</Text>
+          <Text style={styles.journeyDuration}>{journey.duration}</Text>
+        </View>
+        <View style={styles.journeyMeta}>
+          <View style={styles.journeyLines}>
+            {journey.rides.map((ride) => (
+              <View
+                key={ride.key}
+                style={[styles.lineChip, { borderColor: STATE_COLOUR[ride.state] }]}
+              >
+                <Text
+                  style={[
+                    styles.lineChipText,
+                    ride.state === 'cancelled' && styles.lineChipCancelled,
+                  ]}
+                >
+                  {glyph(ride.mode)} {ride.line}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.journeyNote} numberOfLines={1}>
+            {[
+              journey.dayNote,
+              journey.departure.confidence === 'timetable'
+                ? COMMUTE_STATE_LABEL.scheduled
+                : journey.departure.delay
+                  ? `${journey.departure.expected} est.`
+                  : COMMUTE_STATE_LABEL.live,
+              journey.transfers,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </View>
+      </Pressable>
+      {/* Collapsed: the headline only. The full notice waits inside, under the
+          leg it belongs to. */}
+      {!open ? <Disruptions items={journey.disruptions} brief /> : null}
+      {open ? (
+        <View style={styles.legs}>
+          {journey.rides.map((ride, index) => {
+            const connection = journey.connections[index - 1];
+            return (
+              <View key={ride.key}>
+                {connection ? (
+                  <Text style={[styles.connection, connection.tight && styles.connectionTight]}>
+                    Change at {connection.at} · {connection.label}
+                    {connection.tight ? ' — tight' : ''}
+                  </Text>
+                ) : null}
+                <View style={styles.leg}>
+                  <View style={styles.legTime}>
+                    <Text style={styles.legTimeText}>{ride.departure.aimed}</Text>
+                    {ride.departure.delay ? (
+                      <Text style={styles.legEstimate}>{ride.departure.expected} est.</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.legBody}>
+                    <Text style={styles.legLine}>
+                      {glyph(ride.mode)} {ride.line}
+                      {ride.towards ? ` → ${ride.towards}` : ''}
+                    </Text>
+                    <Text style={styles.legPlace}>
+                      {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
+                    </Text>
+                    <Text style={styles.legRide}>{ride.ride}</Text>
+                  </View>
+                </View>
+                <View style={styles.leg}>
+                  <View style={styles.legTime}>
+                    <Text style={styles.legTimeText}>{ride.arrival.aimed}</Text>
+                    {ride.arrival.delay ? (
+                      <Text style={styles.legEstimate}>{ride.arrival.expected} est.</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.legBody}>
+                    <Text style={styles.legPlace}>
+                      {[ride.to, ride.toQuay].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                </View>
+                <Disruptions items={ride.disruptions} />
+              </View>
+            );
+          })}
+          <Text style={styles.legsTotal}>
+            Total {journey.duration}
+            {journey.walk ? ` · ${journey.walk}` : ''}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-function TripRow({ trip }: { trip: TransitTrip }) {
-  const summary = tripSummary(trip);
+/** §11 — the two journeys you would catch by walking out of the door now. */
+function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
+  const { next, following } = dashboard.leaveNow;
+  if (!next) return null;
   return (
-    <View style={styles.trip}>
-      <View style={styles.tripHead}>
-        <Text style={styles.tripTime}>{summary.times}</Text>
-        <Text style={styles.tripMeta}>{summary.meta}</Text>
+    <View style={styles.leaveNow} testID="commute-leave-now">
+      <Text style={styles.leaveNowHead}>IF I LEAVE NOW</Text>
+      <View style={styles.leaveNowMain}>
+        <Text style={styles.leaveNowTime}>{next.departure.aimed}</Text>
+        <Text style={styles.leaveNowArrive}>→ {next.arrival.aimed}</Text>
+        <Text style={styles.leaveNowDuration}>{next.duration}</Text>
       </View>
-      {summary.departure ? (
-        <Text
-          style={[
-            styles.tripConfidence,
-            summary.departure.confidence === 'uncertain' && styles.warning,
-          ]}
-        >
-          {summary.departure.delay
-            ? `Departs ${summary.departure.expected}, planned ${summary.departure.aimed} · ${summary.departure.confidenceLabel}`
-            : `${summary.departure.confidenceLabel} departure`}
+      <Text style={styles.leaveNowLines}>
+        {next.rides.map((ride) => `${glyph(ride.mode)} ${ride.line}`).join('  ')}
+        {next.dayNote ? ` · ${next.dayNote}` : ''}
+      </Text>
+      {following ? (
+        <Text style={styles.leaveNowNext}>
+          Following {following.departure.aimed} → {following.arrival.aimed} · {following.duration}
         </Text>
       ) : null}
-      <View style={styles.lines}>
-        {summary.lineCodes.map((line, index) => (
-          <View style={styles.tripLine} key={`${line}-${index}`}>
-            <Text style={styles.tripLineText}>{line}</Text>
-          </View>
-        ))}
+    </View>
+  );
+}
+
+/** One row of a per-leg board: scheduled time first, estimate labelled beneath. */
+function BoardRow({ row }: { row: CommuteBoardRow }) {
+  return (
+    <View style={[styles.boardRow, { borderLeftColor: STATE_COLOUR[row.state] }]}>
+      <View style={styles.boardRowMain}>
+        <View style={styles.boardTime}>
+          <Text style={[styles.boardTimeText, row.state === 'cancelled' && styles.strike]}>
+            {row.aimed}
+          </Text>
+          <Text style={styles.boardEstimate}>{row.estimate}</Text>
+        </View>
+        <View style={styles.boardLine}>
+          <Text style={styles.boardLineText} numberOfLines={1}>
+            {glyph(row.mode)} {row.line}
+          </Text>
+          <Text style={styles.boardArrival}>arrives {row.arrival}</Text>
+        </View>
+        <View style={styles.boardWhen}>
+          <Text style={styles.boardWhenText}>{row.countdown}</Text>
+          {row.quay ? <Text style={styles.boardWhenSub}>plat. {row.quay}</Text> : null}
+          {row.dayNote ? <Text style={styles.boardWhenSub}>{row.dayNote}</Text> : null}
+        </View>
       </View>
-      {summary.severityLabel ? <Text style={styles.warning}>{summary.severityLabel}</Text> : null}
+      {/* A board row has nothing to expand into, so it carries the headline —
+          enough to know something is up, not enough to bury the next row. */}
+      <Disruptions items={row.disruptions} brief />
+    </View>
+  );
+}
+
+function Board({ board }: { board: CommuteDashboardBoard }) {
+  return (
+    <View style={styles.board}>
+      <Text style={styles.boardHead} numberOfLines={2}>
+        {board.segment.from.name.toUpperCase()} ↓ {board.segment.to.name.toUpperCase()}
+      </Text>
+      {board.rows.length === 0 ? (
+        <Text style={styles.state}>{board.note}</Text>
+      ) : (
+        board.rows.map((row) => <BoardRow row={row} key={row.key} />)
+      )}
     </View>
   );
 }
@@ -236,13 +320,10 @@ function TripRow({ trip }: { trip: TransitTrip }) {
 /**
  * The way onto the home screen, from inside the app.
  *
- * "Add it from your launcher's widget picker" was the whole of this before, which
- * is an instruction to go and do something somewhere else — and on the launchers
- * that bury the picker two long-presses deep, an instruction most people do not
- * follow. Android takes a pin request directly (8.0+), so ask.
- *
- * The offer only appears when the launcher actually accepts one: a button that
- * silently does nothing is worse than a sentence explaining the picker.
+ * "Add it from your launcher's widget picker" was the whole of this before,
+ * which is an instruction to go and do something somewhere else. Android takes
+ * a pin request directly (8.0+), so ask — but only when the launcher actually
+ * accepts one: a button that silently does nothing is worse than a sentence.
  */
 function WidgetOffer() {
   const [support, setSupport] = useState<CommuteWidgetSupport | null>(null);
@@ -300,20 +381,14 @@ export function CommuteSheet({
   bottomInset: number;
 }) {
   const editor = useCommuteEditor({ commute, places, geocode, fetchStopLines });
-  // The way out before the outbound time, the way home after it.
-  const initialDirection = useMemo(
-    () => (commute.query ? defaultCommuteDirection(commute.query, Date.now()) : 'outbound'),
-    [commute.query],
-  );
-  const [pinned, setPinned] = useState<TransitCommuteDirection | null>(null);
-  const direction = pinned ?? initialDirection;
-  const trips = commute.result?.[direction].trips ?? [];
-  const reason = commute.emptyReason(direction);
-  const [from, to] =
-    direction === 'outbound'
-      ? [editor.endLabel('from'), editor.endLabel('to')]
-      : [editor.endLabel('to'), editor.endLabel('from')];
-  const hasLineRules = editor.config.select.length > 0 || editor.config.exclude.length > 0;
+  const dashboard = useCommuteDashboard(commute);
+  const [editing, setEditing] = useState(false);
+  // §6.3: the editor opens by itself only when the board *cannot* ask a
+  // question — not on every launch, which is a moment every launch spends
+  // looking unconfigured while storage answers.
+  useEffect(() => {
+    if (commute.ready && !commute.query) setEditing(true);
+  }, [commute.ready, commute.query]);
 
   return (
     <BottomSheet
@@ -325,8 +400,10 @@ export function CommuteSheet({
     >
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Commute</Text>
-          <Text style={styles.subtitle}>Your saved journey, both ways</Text>
+          <Text style={styles.title} numberOfLines={1}>
+            {dashboard.routeLabel}
+          </Text>
+          <Text style={styles.subtitle}>{dashboard.nowLabel}</Text>
         </View>
         <Pressable style={styles.close} onPress={onClose} testID="commute-close">
           <Text style={styles.closeText}>✕</Text>
@@ -338,108 +415,90 @@ export function CommuteSheet({
         keyboardShouldPersistTaps="handled"
       >
         {!commute.ready ? <Text style={styles.state}>Loading saved commute…</Text> : null}
-        <EndField field="from" label="From" editor={editor} places={places} />
-        <EndField field="via" label="Via" editor={editor} places={places} />
-        <EndField field="to" label="To" editor={editor} places={places} />
-        <TimeField direction="outbound" label="Outbound" editor={editor} />
-        <TimeField direction="inbound" label="Return" editor={editor} />
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Days</Text>
-          <View style={styles.chipWrap}>
-            {editor.days.map((day) => (
-              <Pressable
-                key={day.day}
-                style={[styles.chip, day.on && styles.chipOn]}
-                onPress={() => editor.toggleDay(day.day)}
-              >
-                <Text style={[styles.chipText, day.on && styles.chipTextOn]}>{day.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        {editor.missing ? <Text style={styles.state}>{editor.missing}</Text> : null}
-        {editor.lineGroups.length > 0 ? (
-          <View style={styles.field}>
-            <View style={styles.servicesHead}>
-              <Text style={styles.fieldLabel}>Lines</Text>
-              {hasLineRules ? (
-                <Pressable style={styles.smallButton} onPress={editor.clearLines}>
-                  <Text style={styles.smallButtonText}>Any line</Text>
+        <View style={styles.toolbar}>
+          <View style={styles.direction}>
+            {(['outbound', 'inbound'] as const).map((item) => {
+              const selected = item === dashboard.direction;
+              return (
+                <Pressable
+                  key={item}
+                  style={[styles.directionButton, selected && styles.directionButtonOn]}
+                  onPress={() => dashboard.setDirection(item)}
+                  testID={`commute-direction-${item}`}
+                >
+                  <Text style={[styles.directionText, selected && styles.directionTextOn]}>
+                    {item === 'outbound' ? 'Outbound' : 'Return'}
+                  </Text>
                 </Pressable>
-              ) : null}
-            </View>
-            {editor.lineGroups.map((group) => (
-              <View style={styles.lineGroup} key={group.mode}>
-                <Text style={styles.lineGroupLabel}>{group.label}</Text>
-                <View style={styles.chipWrap}>
-                  {group.lines.map((line) => (
-                    <LineChip line={line} editor={editor} key={line.id} />
-                  ))}
-                </View>
-              </View>
-            ))}
-            <Text style={styles.rule}>
-              Tick the lines you use, or leave them all untouched for any service. ✓ marks a line
-              that runs between your stops; ✕ avoids one.
-            </Text>
+              );
+            })}
           </View>
-        ) : null}
-        {editor.linesLoading ? (
-          <Text style={styles.state}>Reading the lines at your stops…</Text>
-        ) : null}
-        {editor.linesError ? <Text style={styles.state}>{editor.linesError}</Text> : null}
-        <View style={styles.chipWrap}>
-          {editor.modes.map((mode) => (
-            <Pressable
-              key={mode.mode}
-              style={[styles.chip, mode.on && styles.chipOn]}
-              onPress={() => editor.toggleMode(mode.mode)}
-            >
-              <Text style={[styles.chipText, mode.on && styles.chipTextOn]}>{mode.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.direction}>
-          {(['outbound', 'inbound'] as const).map((item) => {
-            const selected = item === direction;
-            return (
-              <Pressable
-                key={item}
-                style={[styles.directionButton, selected && styles.directionButtonOn]}
-                onPress={() => setPinned(item)}
-              >
-                <Text style={[styles.directionText, selected && styles.directionTextOn]}>
-                  {item === 'outbound' ? 'Outbound' : 'Return'}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {editor.askable ? (
-          <View style={styles.route}>
-            <Text style={styles.routeTitle}>
-              {from} → {to}
+          <Pressable
+            style={[styles.editButton, editing && styles.editButtonOn]}
+            onPress={() => setEditing((open) => !open)}
+            testID="commute-edit"
+          >
+            <Text style={[styles.editText, editing && styles.editTextOn]}>
+              {editing ? 'Done' : 'Edit commute'}
             </Text>
-            <Text style={styles.routeVia}>{editor.timeLabel(direction)}</Text>
+          </Pressable>
+        </View>
+        {editing ? <CommuteEditorForm editor={editor} places={places} /> : null}
+        {dashboard.offDayNote ? <Text style={styles.state}>{dashboard.offDayNote}</Text> : null}
+        {/* §9's mode switch. It filters rather than scrolls: five journeys plus
+            four five-row boards is more than one glance holds, and the whole
+            dashboard exists to be glanced at. Journeys stay the landing view. */}
+        {dashboard.hasBoards ? (
+          <View style={styles.views}>
+            {(['overview', 'departures'] as const).map((item) => {
+              const selected = item === dashboard.view;
+              return (
+                <Pressable
+                  key={item}
+                  style={[styles.viewButton, selected && styles.viewButtonOn]}
+                  onPress={() => dashboard.setView(item)}
+                  testID={`commute-view-${item}`}
+                >
+                  <Text style={[styles.viewText, selected && styles.viewTextOn]}>
+                    {item === 'overview' ? 'Journeys' : 'Departures'}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         ) : null}
         {commute.loading ? <Text style={styles.state}>Checking upcoming journeys…</Text> : null}
         {commute.error ? <Text style={[styles.state, styles.error]}>{commute.error}</Text> : null}
-        {commute.result && trips.length === 0 ? (
-          <View>
-            <Text style={styles.state}>
-              {emptyDirectionNote(reason === 'filtered' ? 'filtered' : 'upstream')}.
-            </Text>
-            {reason === 'filtered' ? (
-              <Pressable style={styles.escape} onPress={editor.clearLines}>
-                <Text style={styles.escapeText}>Allow any line</Text>
-              </Pressable>
+        {dashboard.view === 'overview' ? (
+          <>
+            <LeaveNow dashboard={dashboard} />
+            {dashboard.emptyNote ? (
+              <View>
+                <Text style={styles.state}>{dashboard.emptyNote}</Text>
+                {dashboard.emptyFromFilter ? (
+                  <Pressable style={styles.escape} onPress={editor.clearLines}>
+                    <Text style={styles.escapeText}>Allow any line</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : null}
-          </View>
-        ) : null}
-        {trips.slice(0, 5).map((trip, index) => (
-          <TripRow trip={trip} key={`${trip.startMs}-${index}`} />
-        ))}
+            {dashboard.journeys.length > 0 ? (
+              <>
+                <Text style={styles.sectionHead}>NEXT JOURNEYS</Text>
+                {dashboard.journeys.map((journey) => (
+                  <JourneyRow
+                    journey={journey}
+                    key={journey.key}
+                    open={dashboard.expanded === journey.key}
+                    onToggle={() => dashboard.toggle(journey.key)}
+                  />
+                ))}
+              </>
+            ) : null}
+          </>
+        ) : (
+          dashboard.boards.map((board) => <Board board={board} key={board.segment.id} />)
+        )}
         <View style={styles.live}>
           <Text style={styles.liveText}>Entur · {liveTimetableLabel(commute.updatedMs)}</Text>
           <Pressable
@@ -459,92 +518,19 @@ export function CommuteSheet({
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 10 },
   headerText: { flex: 1 },
-  title: { color: theme.text, fontSize: 18, fontWeight: '800' },
-  subtitle: { color: theme.textMuted, fontSize: 12, marginTop: 1 },
+  title: { color: theme.text, fontSize: 17, fontWeight: '800' },
+  subtitle: { color: theme.textMuted, fontSize: 12, marginTop: 2 },
   close: { padding: 8 },
   closeText: { color: theme.textMuted, fontSize: 18 },
   body: { flex: 1 },
   bodyContent: { paddingHorizontal: 16, paddingBottom: 24 },
-  field: { marginBottom: 10 },
-  fieldLabel: { color: theme.textMuted, fontSize: 12, fontWeight: '700', marginBottom: 5 },
-  endButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    backgroundColor: theme.surfaceMuted,
-    borderRadius: 9,
-    paddingHorizontal: 11,
-    paddingVertical: 10,
-  },
-  endText: { color: theme.text, fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  endHint: { color: theme.textMuted, fontSize: 10 },
-  input: {
-    color: theme.text,
-    backgroundColor: theme.surfaceMuted,
-    borderRadius: 9,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    fontSize: 13,
-  },
-  hit: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    paddingVertical: 9,
-    paddingHorizontal: 4,
-  },
-  hitName: { color: theme.text, fontSize: 13, flexShrink: 1 },
-  hitLabel: { color: theme.textMuted, fontSize: 10 },
-  searchStatus: { color: theme.textMuted, fontSize: 11, paddingHorizontal: 4, paddingTop: 6 },
-  rowGap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' },
-  smallButton: {
-    backgroundColor: theme.surfaceMuted,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  smallButtonText: { color: theme.text, fontSize: 11, fontWeight: '700' },
-  timeValue: { color: theme.text, fontSize: 14, fontWeight: '800', minWidth: 46 },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: theme.surfaceMuted,
-  },
-  chipOn: { backgroundColor: theme.accent },
-  chipText: { color: theme.textMuted, fontSize: 11, fontWeight: '600' },
-  chipTextOn: { color: theme.onAccent },
-  servicesHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  lineGroup: { marginBottom: 7 },
-  lineGroupLabel: { color: theme.textMuted, fontSize: 11, fontWeight: '600', marginBottom: 4 },
-  line: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: theme.surfaceMuted,
-  },
-  lineSelect: { backgroundColor: theme.accentFaint },
-  lineExclude: { backgroundColor: theme.surfaceMuted },
-  lineMain: { paddingHorizontal: 9, paddingVertical: 6 },
-  lineText: { color: theme.text, fontSize: 11, fontWeight: '700' },
-  lineTextSelect: { color: theme.accent },
-  lineTextExclude: { color: theme.danger, textDecorationLine: 'line-through' },
-  lineNot: {
-    paddingHorizontal: 7,
-    paddingVertical: 6,
-    borderLeftWidth: 1,
-    borderLeftColor: theme.border,
-  },
-  lineNotText: { color: theme.textMuted, fontSize: 10, fontWeight: '700' },
-  rule: { color: theme.textMuted, fontSize: 11, lineHeight: 16, marginTop: 8 },
-  direction: { flexDirection: 'row', gap: 8, marginTop: 12 },
+
+  toolbar: { flexDirection: 'row', alignItems: 'stretch', gap: 6, marginBottom: 10 },
+  direction: { flex: 1, flexDirection: 'row', gap: 6 },
   directionButton: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 9,
     borderRadius: 9,
     backgroundColor: theme.surfaceMuted,
@@ -552,9 +538,159 @@ const styles = StyleSheet.create({
   directionButtonOn: { backgroundColor: theme.accentFaint },
   directionText: { color: theme.textMuted, fontSize: 13, fontWeight: '700' },
   directionTextOn: { color: theme.accent },
-  route: { marginTop: 14, marginBottom: 4 },
-  routeTitle: { color: theme.text, fontSize: 15, fontWeight: '800' },
-  routeVia: { color: theme.textMuted, fontSize: 12, marginTop: 2 },
+  editButton: {
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 9,
+    backgroundColor: theme.surfaceMuted,
+  },
+  editButtonOn: { backgroundColor: theme.accentFaint },
+  editText: { color: theme.textMuted, fontSize: 12, fontWeight: '700' },
+  editTextOn: { color: theme.accent },
+
+  views: {
+    flexDirection: 'row',
+    gap: 3,
+    padding: 3,
+    marginBottom: 10,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
+  },
+  viewButton: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 8 },
+  viewButtonOn: { backgroundColor: theme.surface },
+  viewText: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
+  viewTextOn: { color: theme.text, fontWeight: '800' },
+
+  sectionHead: {
+    color: theme.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+
+  leaveNow: {
+    padding: 11,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.accentFaint,
+  },
+  leaveNowHead: { color: theme.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  leaveNowMain: { flexDirection: 'row', alignItems: 'baseline', gap: 7, marginTop: 4 },
+  leaveNowTime: { color: theme.text, fontSize: 26, fontWeight: '800' },
+  leaveNowArrive: { color: theme.text, fontSize: 15, fontWeight: '600' },
+  leaveNowDuration: {
+    marginLeft: 'auto',
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  leaveNowLines: { color: theme.text, fontSize: 12, marginTop: 3 },
+  leaveNowNext: { color: theme.textMuted, fontSize: 11, marginTop: 7 },
+
+  journey: {
+    marginBottom: 7,
+    padding: 10,
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    backgroundColor: theme.surfaceMuted,
+  },
+  journeyHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  journeyTime: { color: theme.text, fontSize: 17, fontWeight: '800' },
+  journeyRule: { flex: 1, height: 1, minWidth: 12, backgroundColor: theme.border, opacity: 0.3 },
+  journeyDuration: { color: theme.text, fontSize: 13, fontWeight: '800' },
+  journeyMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 6,
+  },
+  journeyLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, flexShrink: 1 },
+  lineChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  lineChipText: { color: theme.text, fontSize: 11, fontWeight: '800' },
+  lineChipCancelled: { textDecorationLine: 'line-through' },
+  journeyNote: { color: theme.textMuted, fontSize: 10, flexShrink: 0 },
+
+  legs: { marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border },
+  leg: { flexDirection: 'row', gap: 9, paddingTop: 6 },
+  legTime: { minWidth: 46 },
+  legTimeText: { color: theme.text, fontSize: 13, fontWeight: '700' },
+  legEstimate: { color: theme.textMuted, fontSize: 10 },
+  legBody: { flex: 1 },
+  legLine: { color: theme.text, fontSize: 12, fontWeight: '700' },
+  legPlace: { color: theme.textMuted, fontSize: 11 },
+  legRide: { color: theme.textMuted, fontSize: 10 },
+  connection: {
+    marginTop: 8,
+    marginLeft: 55,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: theme.surface,
+    color: theme.textMuted,
+    fontSize: 11,
+  },
+  connectionTight: { color: theme.warning, fontWeight: '700' },
+  legsTotal: {
+    marginTop: 9,
+    paddingTop: 7,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    color: theme.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  board: { marginBottom: 6 },
+  boardHead: {
+    color: theme.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  boardRow: {
+    marginBottom: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    backgroundColor: theme.surfaceMuted,
+  },
+  boardRowMain: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  boardTime: { minWidth: 50 },
+  boardTimeText: { color: theme.text, fontSize: 16, fontWeight: '800' },
+  strike: { textDecorationLine: 'line-through' },
+  boardEstimate: { color: theme.textMuted, fontSize: 10 },
+  boardLine: { flex: 1 },
+  boardLineText: { color: theme.text, fontSize: 12, fontWeight: '700' },
+  boardArrival: { color: theme.textMuted, fontSize: 10 },
+  boardWhen: { alignItems: 'flex-end' },
+  boardWhenText: { color: theme.textMuted, fontSize: 11 },
+  boardWhenSub: { color: theme.textMuted, fontSize: 10 },
+
+  disruptions: { marginTop: 7, gap: 4 },
+  disruption: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderLeftWidth: 2,
+    borderRadius: 4,
+    backgroundColor: theme.surface,
+  },
+  disruptionKind: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  disruptionText: { color: theme.text, fontSize: 11, lineHeight: 15, marginTop: 1 },
+  disruptionDetail: { color: theme.textMuted, fontSize: 11, lineHeight: 15, marginTop: 1 },
+  disruptionLink: { color: theme.accent, fontSize: 11, fontWeight: '700', marginTop: 3 },
+
   state: {
     color: theme.textMuted,
     fontSize: 12,
@@ -564,6 +700,7 @@ const styles = StyleSheet.create({
     padding: 11,
     marginTop: 9,
   },
+  error: { color: theme.danger },
   escape: {
     alignSelf: 'flex-start',
     marginTop: 7,
@@ -573,22 +710,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   escapeText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
-  error: { color: theme.danger },
-  trip: { marginTop: 8, padding: 11, borderRadius: 10, backgroundColor: theme.surfaceMuted },
-  tripHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  tripTime: { color: theme.text, fontSize: 14, fontWeight: '800' },
-  tripMeta: { color: theme.textMuted, fontSize: 11 },
-  lines: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
-  tripLine: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 5,
-    backgroundColor: theme.accent,
-  },
-  tripLineText: { color: theme.onAccent, fontSize: 11, fontWeight: '800' },
-  tripConfidence: { color: theme.textMuted, fontSize: 11, fontWeight: '600', marginTop: 3 },
-  warning: { color: theme.warning, fontSize: 11, fontWeight: '700', marginTop: 5 },
-  live: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 12 },
+
+  live: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 14 },
   liveText: { flex: 1, color: theme.textMuted, fontSize: 10, lineHeight: 14 },
   refresh: {
     backgroundColor: theme.surfaceMuted,

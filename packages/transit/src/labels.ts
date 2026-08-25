@@ -14,10 +14,23 @@
  * Everything here is a pure function of the trip model: no React, no styling,
  * no platform. The apps keep the glyphs and the colours, which genuinely do
  * differ (emoji vs. vector icons, CSS classes vs. style objects).
+ *
+ * **Clock times are Norwegian wall-clock times** (`norwayClock`), not the
+ * device's — ROADMAP §6.3's "format all transit times consistently in Norway's
+ * time zone", and not a nicety. Every time in this file came out of Entur, and
+ * Entur is Norway by construction (`transitCoverage`): the departure of a
+ * Norwegian service *is* a Norwegian clock time, the same one printed on the
+ * platform sign. `fmtClock` renders the reader's zone instead, which was right
+ * on a phone in Oslo and wrong everywhere else the same code runs — the home
+ * screen widget (rendered in a UTC container, which is why `clock.ts` exists at
+ * all), a laptop that kept its travel timezone, a test runner. Three surfaces of
+ * one commute quoting three different departure times is the failure this
+ * closes.
  */
 
-import { fmtClock, fmtDuration, fmtKm } from '@atlas/core';
+import { fmtDuration, fmtKm } from '@atlas/core';
 
+import { norwayClock } from './clock.js';
 import {
   isRideMode,
   transferCount,
@@ -93,8 +106,8 @@ export function legTimeParts(time: {
   predictionInaccurate?: boolean;
 }): LegTimeParts {
   const delta = time.expectedMs - time.aimedMs;
-  const aimed = fmtClock(time.aimedMs);
-  const expected = fmtClock(time.expectedMs);
+  const aimed = norwayClock(time.aimedMs);
+  const expected = norwayClock(time.expectedMs);
   const confidence =
     time.realtime && time.predictionInaccurate
       ? 'uncertain'
@@ -190,7 +203,7 @@ export function walkLegLabel(leg: TransitLeg): string {
  */
 export function liveTimetableLabel(checkedMs: number | null): string {
   if (checkedMs === null) return 'Live timetable — needs a connection.';
-  return `Live timetable, checked ${fmtClock(checkedMs)} — needs a connection to update.`;
+  return `Live timetable, checked ${norwayClock(checkedMs)} — needs a connection to update.`;
 }
 
 /**
@@ -260,7 +273,7 @@ export function tripSummary(trip: TransitTrip): TripSummary {
       })
     : null;
   return {
-    times: `${fmtClock(trip.startMs)} – ${fmtClock(trip.endMs)}`,
+    times: `${norwayClock(trip.startMs)} – ${norwayClock(trip.endMs)}`,
     delay: departure?.delay ?? null,
     departure,
     severity,
