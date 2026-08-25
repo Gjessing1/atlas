@@ -87,16 +87,22 @@ describe('tripWidgetRow', () => {
       trip(walk(at(7 * 60 + 2)), ride('280', at(7 * 60 + 12), at(7 * 60 + 12), '2')),
       NOW,
     );
-    expect(row.text).toBe('07:12 · in 12 min · 280 · plt 2');
+    expect(row.text).toBe('07:12 → 07:22 · 10 min · in 12 min · 280 · plt 2');
     // The same row, part by part — this is what the widget lays out, and `text`
     // is only its one-line reading.
     expect(row.time).toBe('07:12');
+    // The board's own scan line, as far as one row carries it: a widget that
+    // says only when you leave answers half of what the panel two taps away
+    // would have told you.
+    expect(row.arrival).toBe('07:22');
+    expect(row.duration).toBe('10 min');
     expect(row.countdown).toBe('in 12 min');
     expect(row.lines).toBe('280');
+    expect(row.changes).toBeNull();
     expect(row.platform).toBe('plt 2');
     expect(row.delayLabel).toBeNull();
     expect(row.delayMin).toBeNull();
-    expect(row.aimed).toBeNull();
+    expect(row.expected).toBeNull();
     expect(row.whenMs).toBe(at(7 * 60 + 12));
     expect(row.realtime).toBe(false);
     // No live feed behind it: a weaker promise than a realtime departure, and
@@ -104,15 +110,24 @@ describe('tripWidgetRow', () => {
     expect(row.state).toBe('scheduled');
   });
 
-  it('shows the delay against the timetable, and keeps the aimed time', () => {
+  /**
+   * §3, on the home screen this time: the timetable's number is the primary one
+   * and the correction sits beside it. The widget used to print 07:16 — the
+   * *expected* time — which disagreed with the sign at the stop, with the app's
+   * own commute board and with the timetable the reader has memorised.
+   */
+  it('leads with the scheduled time and puts the correction beside it', () => {
     const liveRide = ride('280', at(7 * 60 + 10), at(7 * 60 + 16));
     liveRide.startPredictionInaccurate = true;
     const row = tripWidgetRow(trip(liveRide), NOW);
-    expect(row.text).toBe('07:16 (+6) · in 16 min · 280');
-    expect(row.time).toBe('07:16');
+    expect(row.text).toBe('07:10 (+6) → 07:20 · 10 min · in 16 min · 280');
+    expect(row.time).toBe('07:10');
+    expect(row.expected).toBe('07:16');
     expect(row.delayLabel).toBe('+6');
     expect(row.delayMin).toBe(6);
-    expect(row.aimed).toBe('07:10');
+    // The countdown still ticks to when the bus actually comes: a departure
+    // board may print 07:10 for ever, but nobody should be sent out for it.
+    expect(row.whenMs).toBe(at(7 * 60 + 16));
     expect(row.realtime).toBe(true);
     expect(row.predictionInaccurate).toBe(true);
     expect(row.state).toBe('delayed');
@@ -122,7 +137,26 @@ describe('tripWidgetRow', () => {
     const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 20), at(7 * 60 + 17))), NOW);
     expect(row.delayLabel).toBe('-3');
     expect(row.state).toBe('early');
-    expect(row.text).toBe('07:17 (-3) · in 17 min · 280');
+    expect(row.text).toBe('07:20 (-3) → 07:30 · 10 min · in 17 min · 280');
+  });
+
+  /**
+   * The complaint this batch answers, at widget scale: "🚌 280 → 🚆 RE10" says a
+   * train is involved and nothing about when it leaves Asker.
+   */
+  it('names the change, so a two-leg journey is not two mysteries', () => {
+    const bus = ride('280', at(7 * 60 + 12));
+    const train = ride('RE10', at(7 * 60 + 31));
+    train.from = place('Asker stasjon');
+    train.to = place('Nationaltheatret');
+    const row = tripWidgetRow(trip(walk(at(7 * 60)), bus, train), NOW);
+    expect(row.lines).toBe('280 → RE10');
+    expect(row.changes).toBe('9 min at Asker stasjon');
+    expect(row.arrival).toBe('07:41');
+    expect(row.duration).toBe('29 min');
+    expect(row.text).toBe(
+      '07:12 → 07:41 · 29 min · in 12 min · 280 → RE10 · 9 min at Asker stasjon',
+    );
   });
 
   it('is live when the feed is behind the time and it is running to it', () => {
@@ -204,10 +238,13 @@ describe('commuteRefreshAtMs', () => {
   const row = (whenMs: number): TransitWidgetRow => ({
     whenMs,
     time: '',
-    aimed: null,
+    expected: null,
     delayLabel: null,
     delayMin: null,
+    arrival: null,
+    duration: null,
     lines: '',
+    changes: null,
     platform: null,
     countdown: '',
     countdownMin: 0,
@@ -275,7 +312,9 @@ describe('commuteWidgetBoard', () => {
     });
     expect(board.route).toBe('Engelsrud ↔ Nationaltheatret · via Asker stasjon');
     expect(board.directions[0]!.label).toBe('Engelsrud → Nationaltheatret');
-    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 · in 12 min · 280 · plt 2');
+    expect(board.directions[0]!.rows[0]!.text).toBe(
+      '07:12 → 07:22 · 10 min · in 12 min · 280 · plt 2',
+    );
     expect(board.directions[0]!.note).toBeNull();
     expect(board.status).toBe('Entur live · checked 07:00');
     // The clock is in the board twice on purpose: `status` for a surface that

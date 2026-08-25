@@ -17,7 +17,7 @@ import {
   type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 
 import { useGeocode } from '../routing/useGeocode.js';
 import { CommuteEditorForm } from './CommuteEditor.js';
@@ -105,6 +105,41 @@ function Disruptions({
 }
 
 /**
+ * The vehicles of a journey with their own times, and the changes between them.
+ *
+ * This is the collapsed row's second line, and it exists because the first cut
+ * of it printed "🚌 270 🚆 L1" — which tells a reader that a train is involved
+ * and nothing about when it leaves Asker or when it reaches town. On a two-leg
+ * commute that is the whole question, and answering it meant expanding a row.
+ * Every vehicle now carries its own window and every change its own wait, so
+ * the journey is legible without opening anything (§1, §2).
+ */
+function LegStrip({ journey }: { journey: CommuteJourney }) {
+  return (
+    <span className="commute-journey-legs">
+      {journey.rides.map((ride, index) => {
+        const change = journey.connections[index - 1];
+        return (
+          <Fragment key={ride.key}>
+            {change && (
+              <span className={`commute-change${change.tight ? ' tight' : ''}`}>
+                <i aria-hidden="true">⇄</i>
+                {change.chip}
+              </span>
+            )}
+            <span className={`commute-leg-chip ${stateClass(ride.state)}`}>
+              <i aria-hidden="true">{glyph(ride.mode)}</i>
+              <b>{ride.line}</b>
+              <em>{ride.window}</em>
+            </span>
+          </Fragment>
+        );
+      })}
+    </span>
+  );
+}
+
+/**
  * One journey, collapsed to its scan line and expandable to its legs.
  *
  * The collapsed row is the whole point of §12: departure, arrival and total,
@@ -135,16 +170,14 @@ function JourneyRow({
           <strong>{journey.arrival.aimed}</strong>
         </span>
         <span className="commute-journey-duration">{journey.duration}</span>
+        {/* The row *is* expandable, so it has to look it: without a caret the
+            legs below were a feature nobody found. */}
+        <span className="commute-journey-caret" aria-hidden="true">
+          {open ? '▴' : '▾'}
+        </span>
       </button>
       <div className="commute-journey-meta">
-        <span className="commute-journey-lines">
-          {journey.rides.map((ride) => (
-            <span key={ride.key} className={stateClass(ride.state)}>
-              <i aria-hidden="true">{glyph(ride.mode)}</i>
-              {ride.line}
-            </span>
-          ))}
-        </span>
+        <LegStrip journey={journey} />
         <span className="commute-journey-note">
           {[
             journey.dayNote,
@@ -153,7 +186,9 @@ function JourneyRow({
               : journey.departure.delay
                 ? `${journey.departure.expected} est.`
                 : COMMUTE_STATE_LABEL.live,
-            journey.transfers,
+            // The strip already names every change; "1 change" beside it is the
+            // same fact, worse said. "direct" is not — nothing else says it.
+            journey.connections.length === 0 ? journey.transfers : null,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -170,8 +205,7 @@ function JourneyRow({
               <li key={ride.key}>
                 {connection && (
                   <p className={`commute-connection${connection.tight ? ' tight' : ''}`}>
-                    Change at {connection.at} · {connection.label}
-                    {connection.tight ? ' — tight' : ''}
+                    {connection.summary}
                   </p>
                 )}
                 <div className="commute-leg">
@@ -223,10 +257,10 @@ function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
         <span>→ {next.arrival.aimed}</span>
         <em>{next.duration}</em>
       </p>
-      <p className="commute-leavenow-lines">
-        {next.rides.map((ride) => `${glyph(ride.mode)} ${ride.line}`).join('  ')}
-        {next.dayNote ? ` · ${next.dayNote}` : ''}
-      </p>
+      {/* The same strip the journey rows carry: the top of the dashboard is the
+          one place that must not answer "a bus and a train, at some point". */}
+      <LegStrip journey={next} />
+      {next.dayNote && <p className="commute-leavenow-lines">{next.dayNote}</p>}
       {following && (
         <p className="commute-leavenow-next">
           Following {following.departure.aimed} → {following.arrival.aimed} · {following.duration}

@@ -235,6 +235,37 @@ describe('severity and transfer wording', () => {
     expect(delayLabel(4 * 60_000)).toBe('+4 min');
     expect(delayLabel(-2 * 60_000)).toBe('-2 min');
   });
+
+  /**
+   * Measured on the live Engelsrud board, 2026-08-25: aimed 18:59:00 with an
+   * expected 19:01:36 is 2.6 minutes, and a rounded correction printed
+   * "18:59 (+3)" one column away from an estimate reading 19:01. A clock that
+   * truncates needs a correction that truncates with it.
+   */
+  it('states the correction the two printed times actually differ by', () => {
+    const aimedMs = Date.UTC(2026, 7, 25, 16, 59, 0);
+    const parts = legTimeParts({
+      aimedMs,
+      expectedMs: aimedMs + 156_000,
+      realtime: true,
+    });
+    expect(parts.aimed).toBe('18:59');
+    expect(parts.expected).toBe('19:01');
+    expect(parts.delay).toBe('+2 min');
+  });
+
+  it('says nothing at all when the seconds do not cross a minute', () => {
+    const aimedMs = Date.UTC(2026, 7, 25, 16, 59, 0);
+    // 70 seconds late is past the "worth painting" threshold, but 18:59 → 19:00
+    // is the whole of what a clock can show, so "+1 min" it is.
+    expect(legTimeParts({ aimedMs, expectedMs: aimedMs + 70_000, realtime: true }).delay).toBe(
+      '+1 min',
+    );
+    // 40 seconds is timetable noise and the printed times are identical.
+    expect(
+      legTimeParts({ aimedMs, expectedMs: aimedMs + 40_000, realtime: true }).delay,
+    ).toBeNull();
+  });
 });
 
 describe('tripSummary', () => {

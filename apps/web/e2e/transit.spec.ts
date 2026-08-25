@@ -178,6 +178,22 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await expect(panel).toContainText('If I leave now');
   await expect(panel).toContainText('Next journeys');
 
+  // And each leg states its own window without expanding anything either. The
+  // fixture is a bus for 15 minutes, a 5-minute change, then a 10-minute train:
+  // "🚌 280 🚆 R14" was all a collapsed row used to say, which names the
+  // vehicles and answers neither "when does the train go" nor "when am I in".
+  const chips = panel.locator('.commute-journey').first().locator('.commute-leg-chip');
+  await expect(chips).toHaveCount(2);
+  const clock = (offsetMs: number) =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Oslo',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(now + 300_000 + offsetMs);
+  await expect(chips.first()).toContainText(`${clock(0)} → ${clock(900_000)}`);
+  await expect(chips.last()).toContainText(`${clock(1_200_000)} → ${clock(1_800_000)}`);
+  await expect(panel.locator('.commute-change').first()).toContainText('5 min at Asker');
+
   await panel.getByRole('tab', { name: 'Return' }).click();
   // The route line is the panel's header now, not a field halfway down a form.
   await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');

@@ -206,6 +206,17 @@ export interface CommuteRide {
   toQuay: string | null;
   departure: LegTimeParts;
   arrival: LegTimeParts;
+  /**
+   * `"08:36 → 09:02"` — when this particular vehicle leaves and when it gets in,
+   * on the timetable's own numbers.
+   *
+   * This is what makes a *collapsed* journey row answer the question a two-leg
+   * commute actually asks. "🚌 270 🚆 L1" says a train is involved and says
+   * nothing about when it leaves Asker or when it reaches town, so the reader
+   * has to expand a row to learn the thing they opened the board for. Every
+   * vehicle now states its own window on the row itself.
+   */
+  window: string;
   /** `"3 stops · 12 min"` — what the ride costs, without expanding further. */
   ride: string;
   state: CommuteServiceState;
@@ -231,10 +242,35 @@ export interface CommuteConnection {
   tight: boolean;
   /** Metres on foot between the two platforms, when the planner walked you. */
   walkM: number;
+  /** `"250 m walk"`, or null when the change is a platform step. */
+  walk: string | null;
+  /** `"9 min at Asker stasjon"` — the change as the collapsed leg strip states it. */
+  chip: string;
+  /**
+   * `"Change at Asker stasjon · 9 min · 250 m walk · tight"` — the whole line an
+   * expanded journey shows between two vehicles. Composed here so the two
+   * clients cannot describe one change with two different sentences; `tight`
+   * stays a flag beside it because the *colour* is a paint decision.
+   */
+  summary: string;
 }
 
 /** A connection under this is worth naming as tight. Two minutes is a platform change. */
 const TIGHT_CONNECTION_MS = 4 * 60_000;
+
+/**
+ * Metres between two platforms, phrased only when they are worth walking.
+ *
+ * Under twenty is the same platform measured with a router's precision, and a
+ * "12 m walk" under a nine-minute change is noise on the one screen that must
+ * stay scannable. Rounded to ten metres because that is the accuracy the number
+ * actually has.
+ */
+function changeWalkLabel(walkM: number): string | null {
+  if (walkM < 20) return null;
+  if (walkM < 1000) return `${Math.round(walkM / 10) * 10} m walk`;
+  return `${(walkM / 1000).toFixed(1)} km walk`;
+}
 
 /** One complete door-to-door option, with nothing left for the reader to compute. */
 export interface CommuteJourney {
@@ -332,6 +368,7 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
       toQuay: quayLabel(leg.to),
       departure,
       arrival,
+      window: `${departure.aimed} → ${arrival.aimed}`,
       ride: `${stops} ${stops === 1 ? 'stop' : 'stops'} · ${commuteDurationLabel(leg.durationMs)}`,
       state: serviceState(leg, departure),
       disruptions: notices,
@@ -354,15 +391,22 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
           leg.aimedEndMs <= after.aimedStartMs,
       )
       .reduce((total, leg) => total + leg.distanceM, 0);
+    const at = before.to.name || after.from.name;
+    const label = commuteDurationLabel(waitMs);
+    const tight = waitMs < TIGHT_CONNECTION_MS;
+    const walk = changeWalkLabel(walkM);
     return {
       key: `${ride.key}:change`,
-      at: before.to.name || after.from.name,
+      at,
       arrive: norwayClock(before.aimedEndMs),
       depart: norwayClock(after.aimedStartMs),
       waitMs,
-      label: commuteDurationLabel(waitMs),
-      tight: waitMs < TIGHT_CONNECTION_MS,
+      label,
+      tight,
       walkM: Math.round(walkM),
+      walk,
+      chip: `${label} at ${at}`,
+      summary: [`Change at ${at}`, label, walk, tight ? 'tight' : null].filter(Boolean).join(' · '),
     };
   });
 

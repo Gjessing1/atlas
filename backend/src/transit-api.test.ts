@@ -852,8 +852,15 @@ describe('POST /api/transit/widget', () => {
     expect(board.directions[0].label).toBe('Engelsrud → Nationaltheatret');
     // Norwegian wall-clock time, not the container's UTC: the fixture's train
     // leaves 07:33+02:00, and a UTC clock would render 05:33.
-    expect(board.directions[0].rows[0].text).toMatch(/^07:33 · /);
+    expect(board.directions[0].rows[0].text).toMatch(/^07:33 → 07:51 · 18 min · /);
     expect(board.directions[0].rows[0].text).toContain('R14');
+    // The row is the board's own journey, compressed: a widget that says only
+    // when you leave answers half of what the panel two taps away would.
+    expect(board.directions[0].rows[0]).toMatchObject({
+      time: '07:33',
+      arrival: '07:51',
+      duration: '18 min',
+    });
     expect(board.status).toContain('Entur live');
     expect(board.nextRefreshMs).toBeGreaterThan(Date.now());
   });

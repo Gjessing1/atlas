@@ -6301,29 +6301,67 @@ button.transit-notice-summary {
   font-variant-numeric: tabular-nums;
 }
 
+.commute-journey-caret {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .commute-journey-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 5px;
 }
 
-.commute-journey-lines {
+/* --- The leg strip: every vehicle with its own window (§1, §2) --- */
+
+.commute-journey-legs {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  /* Flex items are `min-width: auto`, so a long strip would push the note — and
+     with it the row's own width — past the panel instead of wrapping. */
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.commute-journey-lines > span {
+.commute-leg-chip {
   display: inline-flex;
-  align-items: center;
-  gap: 3px;
+  align-items: baseline;
+  gap: 4px;
   padding: 1px 6px;
   border: 1px solid var(--border);
   border-radius: 5px;
   font-size: 11px;
+}
+
+.commute-leg-chip b {
   font-weight: 800;
+}
+
+/* The window is the point of the chip, but the line is what identifies it: the
+   times are the same size, one weight down. */
+.commute-leg-chip em {
+  color: var(--text-muted);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.commute-change.tight {
+  color: var(--warning);
+  font-weight: 700;
 }
 
 .commute-journey-note {
@@ -6331,6 +6369,11 @@ button.transit-notice-summary {
   font-size: 10px;
   text-align: right;
   white-space: nowrap;
+  margin-left: auto;
+}
+
+.commute-leavenow .commute-journey-legs {
+  margin-top: 5px;
 }
 
 /* --- Expanded legs (§1, §2) --- */
@@ -6507,15 +6550,23 @@ button.transit-notice-summary {
   border-left-color: var(--danger);
 }
 
-.commute-journey-lines > span.commute-state-cancelled {
+/* A chip is coloured by what its own vehicle is, not by the journey's worst:
+   the delayed half of a journey should be the half that looks delayed. */
+.commute-leg-chip.commute-state-cancelled {
   border-color: var(--danger);
   color: var(--danger);
   text-decoration: line-through;
 }
 
-.commute-journey-lines > span.commute-state-delayed {
+.commute-leg-chip.commute-state-delayed,
+.commute-leg-chip.commute-state-early {
   border-color: var(--warning);
   color: var(--warning);
+}
+
+.commute-leg-chip.commute-state-replacement {
+  border-color: var(--info);
+  color: var(--info);
 }
 
 .commute-board-row.commute-state-cancelled .commute-board-time strong {

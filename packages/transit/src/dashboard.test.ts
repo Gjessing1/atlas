@@ -136,6 +136,53 @@ describe('commuteJourney', () => {
     });
   });
 
+  /**
+   * The collapsed row's whole job, and the gap this closed: "🚌 270 🚆 L1" says
+   * a train is involved and says nothing about when it leaves Asker or when it
+   * reaches town, so the one screen opened to answer that made the reader expand
+   * a row to find out.
+   */
+  it('gives every vehicle its own window, so a collapsed row still names the legs', () => {
+    const journey = commuteJourney(specJourney(), NOW);
+    expect(journey.rides.map((entry) => `${entry.line} ${entry.window}`)).toEqual([
+      '270 08:36 → 09:02',
+      'L1 09:11 → 09:24',
+    ]);
+    // And the change between them, phrased once for both clients.
+    expect(journey.connections[0]!.chip).toBe('9 min at Asker stasjon');
+    expect(journey.connections[0]!.summary).toBe('Change at Asker stasjon · 9 min · 120 m walk');
+    expect(journey.connections[0]!.walk).toBe('120 m walk');
+  });
+
+  it('calls a platform step no walk at all', () => {
+    // 120 m across Asker is worth knowing about; twelve is a router measuring
+    // the same platform, and printing it is noise on a scannable row.
+    const step = walk(hm(9, 2), hm(9, 3));
+    step.distanceM = 12;
+    const journey = commuteJourney(
+      trip(
+        ride({
+          line: '270',
+          from: 'Engelsrud Terrasse',
+          to: 'Asker stasjon',
+          aimedStartMs: hm(8, 36),
+          aimedEndMs: hm(9, 2),
+        }),
+        step,
+        ride({
+          line: 'L1',
+          from: 'Asker stasjon',
+          to: 'Nationaltheatret',
+          aimedStartMs: hm(9, 11),
+          aimedEndMs: hm(9, 24),
+        }),
+      ),
+      NOW,
+    );
+    expect(journey.connections[0]!.walk).toBeNull();
+    expect(journey.connections[0]!.summary).toBe('Change at Asker stasjon · 9 min');
+  });
+
   it('flags a connection with no slack rather than presenting it as ordinary', () => {
     const tight = trip(
       ride({ line: '270', from: 'A', to: 'B', aimedStartMs: hm(8, 36), aimedEndMs: hm(9, 2) }),

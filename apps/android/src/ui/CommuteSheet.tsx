@@ -17,7 +17,7 @@ import {
   type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -130,6 +130,51 @@ function Disruptions({
 }
 
 /**
+ * The vehicles of a journey with their own times, and the changes between them.
+ *
+ * The collapsed row's second line, and the gap this closed: it used to read
+ * "🚌 270 🚆 L1", which tells a reader that a train is involved and nothing
+ * about when it leaves Asker or when it reaches town. On a two-leg commute that
+ * is the whole question, and answering it meant expanding a row (§1, §2).
+ */
+function LegStrip({ journey }: { journey: CommuteJourney }) {
+  return (
+    <View style={styles.journeyLines}>
+      {journey.rides.map((ride, index) => {
+        const change = journey.connections[index - 1];
+        return (
+          <Fragment key={ride.key}>
+            {change ? (
+              <Text style={[styles.change, change.tight && styles.changeTight]}>
+                ⇄ {change.chip}
+              </Text>
+            ) : null}
+            <View style={[styles.lineChip, { borderColor: STATE_COLOUR[ride.state] }]}>
+              <Text
+                style={[
+                  styles.lineChipText,
+                  ride.state === 'cancelled' && styles.lineChipCancelled,
+                ]}
+              >
+                {glyph(ride.mode)} {ride.line}
+              </Text>
+              <Text
+                style={[
+                  styles.lineChipWindow,
+                  ride.state === 'cancelled' && styles.lineChipCancelled,
+                ]}
+              >
+                {ride.window}
+              </Text>
+            </View>
+          </Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
  * One journey, collapsed to its scan line and expandable to its legs.
  *
  * The times are the *scheduled* ones — the numbers printed at the stop — with
@@ -153,25 +198,12 @@ function JourneyRow({
           <View style={styles.journeyRule} />
           <Text style={styles.journeyTime}>{journey.arrival.aimed}</Text>
           <Text style={styles.journeyDuration}>{journey.duration}</Text>
+          {/* The row *is* expandable, so it has to look it: without a caret the
+              legs below were a feature nobody found. */}
+          <Text style={styles.journeyCaret}>{open ? '▴' : '▾'}</Text>
         </View>
         <View style={styles.journeyMeta}>
-          <View style={styles.journeyLines}>
-            {journey.rides.map((ride) => (
-              <View
-                key={ride.key}
-                style={[styles.lineChip, { borderColor: STATE_COLOUR[ride.state] }]}
-              >
-                <Text
-                  style={[
-                    styles.lineChipText,
-                    ride.state === 'cancelled' && styles.lineChipCancelled,
-                  ]}
-                >
-                  {glyph(ride.mode)} {ride.line}
-                </Text>
-              </View>
-            ))}
-          </View>
+          <LegStrip journey={journey} />
           <Text style={styles.journeyNote} numberOfLines={1}>
             {[
               journey.dayNote,
@@ -180,7 +212,10 @@ function JourneyRow({
                 : journey.departure.delay
                   ? `${journey.departure.expected} est.`
                   : COMMUTE_STATE_LABEL.live,
-              journey.transfers,
+              // The strip already names every change; "1 change" beside it is
+              // the same fact, worse said. "direct" is not — nothing else
+              // says it.
+              journey.connections.length === 0 ? journey.transfers : null,
             ]
               .filter(Boolean)
               .join(' · ')}
@@ -198,8 +233,7 @@ function JourneyRow({
               <View key={ride.key}>
                 {connection ? (
                   <Text style={[styles.connection, connection.tight && styles.connectionTight]}>
-                    Change at {connection.at} · {connection.label}
-                    {connection.tight ? ' — tight' : ''}
+                    {connection.summary}
                   </Text>
                 ) : null}
                 <View style={styles.leg}>
@@ -259,10 +293,10 @@ function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
         <Text style={styles.leaveNowArrive}>→ {next.arrival.aimed}</Text>
         <Text style={styles.leaveNowDuration}>{next.duration}</Text>
       </View>
-      <Text style={styles.leaveNowLines}>
-        {next.rides.map((ride) => `${glyph(ride.mode)} ${ride.line}`).join('  ')}
-        {next.dayNote ? ` · ${next.dayNote}` : ''}
-      </Text>
+      {/* The same strip the journey rows carry: the top of the dashboard is the
+          one place that must not answer "a bus and a train, at some point". */}
+      <LegStrip journey={next} />
+      {next.dayNote ? <Text style={styles.leaveNowLines}>{next.dayNote}</Text> : null}
       {following ? (
         <Text style={styles.leaveNowNext}>
           Following {following.departure.aimed} → {following.arrival.aimed} · {following.duration}
@@ -608,15 +642,30 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 6,
   },
-  journeyLines: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, flexShrink: 1 },
+  journeyCaret: { color: theme.textMuted, fontSize: 10 },
+  journeyLines: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    flexShrink: 1,
+  },
   lineChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 5,
     borderWidth: 1,
   },
   lineChipText: { color: theme.text, fontSize: 11, fontWeight: '800' },
+  // The window is the point of the chip; the line code is what identifies it.
+  // Same size, one weight and one tone down.
+  lineChipWindow: { color: theme.textMuted, fontSize: 11 },
   lineChipCancelled: { textDecorationLine: 'line-through' },
+  change: { color: theme.textMuted, fontSize: 10 },
+  changeTight: { color: theme.warning, fontWeight: '700' },
   journeyNote: { color: theme.textMuted, fontSize: 10, flexShrink: 0 },
 
   legs: { marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border },

@@ -122,7 +122,24 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     private const val HEADER_DP = 48
     private const val PADDING_DP = 18
     private const val LABEL_DP = 15
+
+    /** A row on one line — time, delay, countdown, vehicles. */
     private const val ROW_DP = 21
+
+    /** A row with its second line: the vehicles and the change between them. */
+    private const val ROW_TALL_DP = 33
+
+    /**
+     * Below this many rows, the taller kind is not worth its height.
+     *
+     * The trade is real and it is settled by the count: three complete journeys
+     * beat five half-answers, but *one* complete journey is a worse widget than
+     * two ordinary ones — a board showing a single departure cannot be glanced
+     * at for "and if I miss it?", which is half of why anyone puts a commute on
+     * their home screen. So a short instance, and each half of a two-direction
+     * one, falls back to the single-line row it had before.
+     */
+    private const val MIN_DETAILED_ROWS = 2
 
     /** What a 4×3 placement is worth when the launcher has not said yet. */
     private const val DEFAULT_WIDTH_DP = 250
@@ -130,6 +147,9 @@ class CommuteWidgetProvider : AppWidgetProvider() {
 
     /** Below this the platform column is dropped: the lines matter more than the quay. */
     private const val NARROW_DP = 210
+
+    /** And above this there is room for the journey's total beside the countdown. */
+    private const val WIDE_DP = 250
 
     /**
      * Past this the countdown stops ticking and states itself in words. A
@@ -214,14 +234,24 @@ class CommuteWidgetProvider : AppWidgetProvider() {
      */
     fun rowsWanted(context: Context, widgetId: Int): Int {
       val blocks = if (CommuteWidgetStore.direction(context, widgetId) == "both") 2 else 1
-      return rowCapacity(sizeOf(context, widgetId).second, blocks)
+      return rowPlan(sizeOf(context, widgetId).second, blocks).second
+    }
+
+    /**
+     * How this instance spends its height: whether a row can afford its second
+     * line, and how many rows fit either way.
+     */
+    private fun rowPlan(heightDp: Int, blocks: Int): Pair<Boolean, Int> {
+      val tall = rowCapacity(heightDp, blocks, ROW_TALL_DP)
+      return if (tall >= MIN_DETAILED_ROWS) Pair(true, tall)
+      else Pair(false, rowCapacity(heightDp, blocks, ROW_DP))
     }
 
     /** Rows that fit in `heightDp` once the header, padding and headings are paid for. */
-    private fun rowCapacity(heightDp: Int, blocks: Int): Int {
+    private fun rowCapacity(heightDp: Int, blocks: Int, rowDp: Int): Int {
       val body = heightDp - HEADER_DP - PADDING_DP
       val perBlock = body / blocks.coerceAtLeast(1) - if (blocks > 1) LABEL_DP else 0
-      return (perBlock / ROW_DP).coerceIn(1, MAX_ROWS)
+      return (perBlock / rowDp).coerceIn(1, MAX_ROWS)
     }
 
     /** This instance's bounds in dp, in the orientation the home screen is in. */
@@ -313,7 +343,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       // departure. The route, the status and each row speak for themselves.
 
       views.removeAllViews(R.id.atlas_commute_body)
-      val perDirection = rowCapacity(heightDp, blocks.coerceAtLeast(1))
+      val (detailed, perDirection) = rowPlan(heightDp, blocks.coerceAtLeast(1))
       for (block in 0 until blocks) {
         val direction = directions.optJSONObject(block) ?: continue
         if (blocks > 1) {
@@ -325,7 +355,10 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         val shown = rows.length().coerceAtMost(perDirection)
         for (index in 0 until shown) {
           val row = rows.optJSONObject(index) ?: continue
-          views.addView(R.id.atlas_commute_body, rowViews(context, res, row, nowMs, widthDp))
+          views.addView(
+            R.id.atlas_commute_body,
+            rowViews(context, res, row, nowMs, widthDp, detailed),
+          )
         }
         // A direction with nothing to show says why, instead of collapsing to an
         // empty block that reads as a broken widget; a direction that does show
@@ -436,13 +469,14 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       )
     }
 
-    /** One departure, in columns, coloured by what it is. */
+    /** One journey, in columns, coloured by what it is. */
     private fun rowViews(
       context: Context,
       res: Context,
       row: JSONObject,
       nowMs: Long,
       widthDp: Int,
+      detailed: Boolean,
     ): RemoteViews {
       val views = RemoteViews(context.packageName, R.layout.atlas_commute_row)
       val cancelled = row.optBoolean("cancelled")
@@ -454,12 +488,20 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         // single line it used to paint. It is replaced within seconds of the
         // upgrade — the package-replaced broadcast refreshes every instance —
         // and until then this is exactly the contract `text` exists for.
-        for (id in intArrayOf(R.id.atlas_row_time, R.id.atlas_row_delay, R.id.atlas_row_platform)) {
+        for (id in intArrayOf(
+          R.id.atlas_row_time,
+          R.id.atlas_row_arrow,
+          R.id.atlas_row_arrival,
+          R.id.atlas_row_delay,
+          R.id.atlas_row_duration,
+          R.id.atlas_row_platform,
+          R.id.atlas_row_countdown,
+          R.id.atlas_row_countdown_text,
+          R.id.atlas_row_detail,
+        )) {
           views.setViewVisibility(id, View.GONE)
         }
-        views.setViewVisibility(R.id.atlas_row_countdown, View.GONE)
-        views.setViewVisibility(R.id.atlas_row_countdown_text, View.GONE)
-        setText(views, R.id.atlas_row_lines, row.string("text"))
+        setText(views, R.id.atlas_row_lines_inline, row.string("text"))
         views.setContentDescription(R.id.atlas_row_root, row.string("text"))
         return views
       }
@@ -475,6 +517,17 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       views.setTextColor(
         R.id.atlas_row_time,
         if (cancelled) color else res.getColor(R.color.atlas_widget_text),
+      )
+
+      // Where this departure gets you, which is the other half of the question
+      // and the half the widget used not to answer. A stop board has no
+      // arrival — it knows when the 280 leaves, not where its reader is going —
+      // and a compact row on a narrow instance needs the width for the vehicles.
+      val arrival = if (!detailed && widthDp < NARROW_DP) "" else row.string("arrival")
+      setText(views, R.id.atlas_row_arrival, arrival)
+      views.setViewVisibility(
+        R.id.atlas_row_arrow,
+        if (arrival.isNullOrBlank()) View.GONE else View.VISIBLE,
       )
 
       val delay = row.string("delayLabel")
@@ -510,19 +563,45 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         views.setTextColor(R.id.atlas_row_countdown_text, color)
       }
 
-      setText(views, R.id.atlas_row_lines, row.string("lines"))
-      views.setTextColor(
-        R.id.atlas_row_lines,
+      // The vehicles, on their own line when there is room for one. When there
+      // is not, `atlas_row_lines_inline` stops being a spacer and carries them
+      // on line one instead — the same string, one place further up.
+      val lines = row.string("lines")
+      val linesColor =
         if (cancelled) res.getColor(R.color.atlas_widget_muted)
-        else res.getColor(R.color.atlas_widget_text),
-      )
+        else res.getColor(R.color.atlas_widget_text)
+      if (detailed) {
+        views.setViewVisibility(R.id.atlas_row_detail, View.VISIBLE)
+        // INVISIBLE, not GONE: the weighted column is what holds the countdown
+        // against the right edge, and a GONE spacer would let it drift left.
+        views.setTextViewText(R.id.atlas_row_lines_inline, "")
+        views.setViewVisibility(R.id.atlas_row_lines_inline, View.INVISIBLE)
+        setText(views, R.id.atlas_row_lines, lines)
+        views.setTextColor(R.id.atlas_row_lines, linesColor)
+        setText(
+          views,
+          R.id.atlas_row_changes,
+          if (widthDp < NARROW_DP) "" else row.string("changes"),
+        )
+        setText(
+          views,
+          R.id.atlas_row_duration,
+          if (widthDp < WIDE_DP) "" else row.string("duration"),
+        )
+      } else {
+        views.setViewVisibility(R.id.atlas_row_detail, View.GONE)
+        views.setViewVisibility(R.id.atlas_row_duration, View.GONE)
+        setText(views, R.id.atlas_row_lines_inline, lines)
+        views.setTextColor(R.id.atlas_row_lines_inline, linesColor)
+      }
       setText(
         views,
         R.id.atlas_row_platform,
         if (widthDp < NARROW_DP) "" else row.string("platform"),
       )
-      // Read out as one row — "07:16 (+6) · in 6 min · 280 → RE10 · plt 2" —
-      // rather than as five unrelated fragments.
+      // Read out as one row — "07:10 (+6) → 08:14 · 48 min · in 6 min · 280 →
+      // RE10 · 9 min at Asker stasjon · plt 2" — rather than as eight unrelated
+      // fragments.
       views.setContentDescription(R.id.atlas_row_root, row.string("text"))
       return views
     }

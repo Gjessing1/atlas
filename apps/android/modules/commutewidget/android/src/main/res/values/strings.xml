@@ -7,6 +7,10 @@
   <string name="atlas_commute_widget_name">Atlas commute</string>
   <string name="atlas_commute_widget_description">Live departures for your saved commute, with delays and platforms</string>
 
+  <!-- The arrow between a departure and its arrival. Drawn by the layout so no
+       row string is ever composed in Kotlin. -->
+  <string name="atlas_commute_widget_to">→</string>
+
   <string name="atlas_commute_widget_refresh">Refresh departures</string>
   <string name="atlas_commute_widget_configure">Choose direction</string>
   <string name="atlas_commute_widget_open">Open the commute board in Atlas</string>
@@ -21,12 +25,16 @@
   <string name="atlas_commute_widget_preview_route">Engelsrud ↔ Nationaltheatret</string>
   <string name="atlas_commute_widget_preview_status">Entur live · checked 07:04</string>
   <string name="atlas_commute_widget_preview_label">ENGELSRUD → NATIONALTHEATRET</string>
-  <string name="atlas_commute_widget_preview_time_1">07:16</string>
+  <string name="atlas_commute_widget_preview_time_1">07:10</string>
+  <string name="atlas_commute_widget_preview_arrival_1">08:14</string>
   <string name="atlas_commute_widget_preview_delay_1">+6</string>
+  <string name="atlas_commute_widget_preview_duration_1">64 min</string>
   <string name="atlas_commute_widget_preview_countdown_1">6:12</string>
   <string name="atlas_commute_widget_preview_lines_1">280 → R14</string>
+  <string name="atlas_commute_widget_preview_changes_1">9 min at Asker</string>
   <string name="atlas_commute_widget_preview_platform_1">plt 2</string>
   <string name="atlas_commute_widget_preview_time_2">07:34</string>
+  <string name="atlas_commute_widget_preview_arrival_2">08:38</string>
   <string name="atlas_commute_widget_preview_countdown_2">cancelled</string>
   <string name="atlas_commute_widget_preview_lines_2">280 → R14</string>
   <string name="atlas_commute_widget_preview_note">Buss for tog Asker–Sandvika</string>

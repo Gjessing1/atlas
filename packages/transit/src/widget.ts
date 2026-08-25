@@ -24,6 +24,15 @@
  *    merely timetabled is the one thing a colour may be chosen from; colouring by
  *    position in the list — which the first layout did, fading rows two and three
  *    — says "less important" about a cancellation.
+ *
+ * And one rule the rows learned late, from the board they sit beside: **a widget
+ * row is a dashboard journey, compressed**. It used to be a *departure* — the
+ * time you leave and the vehicles involved — which answers half of what someone
+ * glancing at their home screen wants and none of what the panel two taps away
+ * would have told them: when they arrive, how long it takes, and how long the
+ * change at Asker is. Those come from `commuteJourney` now rather than from a
+ * second derivation here, so the two surfaces of one commute cannot quote
+ * different numbers for one bus.
  */
 
 import {
@@ -34,7 +43,11 @@ import {
   runsOnWeekday,
 } from './clock.js';
 import type { CommuteEmptyReason } from './commute.js';
-import { DELAY_THRESHOLD_MS } from './labels.js';
+// The `import type` above this one, in dashboard.ts, is the other half of a
+// deliberate pair: this module owns the *state* vocabulary and the dashboard
+// borrows the type, so the runtime edge only ever runs this way.
+import { commuteJourney } from './dashboard.js';
+import { DELAY_THRESHOLD_MS, clockDelayMinutes } from './labels.js';
 import { isRideMode } from './model.js';
 import type {
   TransitCommuteDirection,
@@ -57,16 +70,36 @@ export type TransitWidgetRowState = 'cancelled' | 'delayed' | 'early' | 'live' |
 export interface TransitWidgetRow {
   /** Epoch ms of the departure — what a countdown ticks towards and a refresh schedules against. */
   whenMs: number;
-  /** The departure as the clock shows it: `"07:16"`. Cancelled rows show the timetabled time. */
+  /**
+   * **The** departure time, as the timetable prints it: `"07:10"`.
+   *
+   * The scheduled one, never the live estimate — the board's §3 rule, which the
+   * widget used to break. A row that replaces 07:10 with 07:16 disagrees with
+   * the sign at the stop, with the app's own commute board, and with the
+   * timetable the reader has memorised; the correction belongs beside the time
+   * (`delayLabel`), not on top of it.
+   */
   time: string;
-  /** The departure time as the timetable prints it, when it is being corrected. */
-  aimed: string | null;
+  /** The live estimate when it differs: `"07:16"`, else null. */
+  expected: string | null;
   /** `"+6"` / `"-2"` — the correction against the timetable, or null when there is none. */
   delayLabel: string | null;
   /** Minutes late against the timetable (negative = early), or null when on time. */
   delayMin: number | null;
+  /**
+   * Scheduled arrival at the far end: `"08:14"`. Null on a stop board, which
+   * knows when the 280 leaves and nothing about where the reader is going.
+   */
+  arrival: string | null;
+  /** `"48 min"` door to door, or null for the same reason as {@link arrival}. */
+  duration: string | null;
   /** What you board, in ride order: `"280 → RE10"`, or `"walk"` for a journey with no ride. */
   lines: string;
+  /**
+   * The interchanges, as the board states them: `"9 min at Asker stasjon"`.
+   * Null for a direct journey — and for a stop board, which has no journey.
+   */
+  changes: string | null;
   /** `"plt 2"`, or null — including for a cancelled departure, which has no platform to go to. */
   platform: string | null;
   /** The live phrase in the countdown's place: `"in 6 min"`, `"now"`, or `"cancelled"`. */
@@ -83,10 +116,10 @@ export interface TransitWidgetRow {
   /** A disruption headline, when the operator published one worth a glance. */
   note: string | null;
   /**
-   * The whole row on one line: `"07:16 (+6) · in 6 min · 280 → RE10 · plt 2"`.
-   * Built from the parts above, so it cannot drift from them. This is what a
-   * screen reader reads out, and what a surface with nowhere to lay the parts
-   * out paints.
+   * The whole row on one line: `"07:10 (+6) → 08:14 · 48 min · in 6 min · 280 →
+   * RE10 · 9 min at Asker stasjon · plt 2"`. Built from the parts above, so it
+   * cannot drift from them. This is what a screen reader reads out, and what a
+   * surface with nowhere to lay the parts out paints.
    */
   text: string;
 }
@@ -143,20 +176,20 @@ function countdownLabel(minutes: number): string {
   return rest === 0 ? `in ${hours} h` : `in ${hours} h ${rest} min`;
 }
 
-/** `"+6"` / `"-2"`, or null when the difference is timetable noise. */
-function delayMinutes(deltaMs: number, realtime: boolean): number | null {
-  if (!realtime || Math.abs(deltaMs) < DELAY_THRESHOLD_MS) return null;
-  return Math.round(deltaMs / 60_000);
+/**
+ * `"+6"` / `"-2"`, or null when the difference is timetable noise.
+ *
+ * The threshold is the real difference; the number is the one the printed times
+ * differ by (`clockDelayMinutes`), so "18:59 (+3)" can never sit beside an
+ * estimate of 19:01.
+ */
+function delayMinutes(aimedMs: number, expectedMs: number, realtime: boolean): number | null {
+  if (!realtime || Math.abs(expectedMs - aimedMs) < DELAY_THRESHOLD_MS) return null;
+  return clockDelayMinutes(aimedMs, expectedMs) || null;
 }
 
 function joinRow(parts: readonly (string | null)[]): string {
   return parts.filter((part): part is string => Boolean(part)).join(' · ');
-}
-
-/** A journey's ride legs as the traveller describes it: `"280 → RE10"`. */
-function tripLines(trip: TransitTrip): string {
-  const codes = trip.legs.flatMap((leg) => (leg.line ? [leg.line.publicCode] : []));
-  return codes.length > 0 ? codes.join(' → ') : 'walk';
 }
 
 /** The first thing boarded — the platform and delay that decide whether you make it. */
@@ -192,7 +225,10 @@ function rowState(cancelled: boolean, delayMin: number | null, realtime: boolean
 function widgetRow({
   whenMs,
   aimedMs,
+  arrival,
+  duration,
   lines,
+  changes,
   quay,
   realtime,
   predictionInaccurate,
@@ -202,7 +238,10 @@ function widgetRow({
 }: {
   whenMs: number;
   aimedMs: number;
+  arrival: string | null;
+  duration: string | null;
   lines: string;
+  changes: string | null;
   quay: string | undefined;
   realtime: boolean;
   predictionInaccurate: boolean;
@@ -210,22 +249,29 @@ function widgetRow({
   note: string | null;
   nowMs: number;
 }): TransitWidgetRow {
-  const delayMin = cancelled ? null : delayMinutes(whenMs - aimedMs, realtime);
+  const delayMin = cancelled ? null : delayMinutes(aimedMs, whenMs, realtime);
   const delayLabel = delayMin === null ? null : `${delayMin > 0 ? '+' : ''}${delayMin}`;
-  // A cancelled departure is only honest about the time it was *meant* to go:
-  // its "expected" time is the ghost of a service that will not run.
-  const time = norwayClock(cancelled ? aimedMs : whenMs);
+  const time = norwayClock(aimedMs);
   const countdownMin = countdown(whenMs, nowMs);
-  // Nor does a cancelled departure have a platform to walk to.
+  // A cancelled departure has no platform to walk to.
   const platform = !cancelled && quay ? `plt ${quay}` : null;
   const countdownText = cancelled ? 'cancelled' : countdownLabel(countdownMin);
+  // The scan line the board leads with, as far as one widget row can carry it:
+  // "07:10 (+6) → 08:14". The correction rides *with* the time rather than
+  // replacing it, and the arrival is part of the same clause because
+  // "07:10 · → 08:14" reads to a screen reader as two unrelated facts.
+  const head =
+    (delayLabel === null ? time : `${time} (${delayLabel})`) + (arrival ? ` → ${arrival}` : '');
   return {
     whenMs,
     time,
-    aimed: delayLabel === null ? null : norwayClock(aimedMs),
+    expected: delayLabel === null ? null : norwayClock(whenMs),
     delayLabel,
     delayMin,
+    arrival,
+    duration,
     lines,
+    changes,
     platform,
     countdown: countdownText,
     countdownMin,
@@ -234,23 +280,35 @@ function widgetRow({
     cancelled,
     state: rowState(cancelled, delayMin, realtime),
     note,
-    text: joinRow([
-      delayLabel === null ? time : `${time} (${delayLabel})`,
-      countdownText,
-      lines,
-      platform,
-    ]),
+    text: joinRow([head, duration, countdownText, lines, changes, platform]),
   };
 }
 
-/** One journey as a widget row. */
+/**
+ * One journey as a widget row — the dashboard's journey, compressed to a line.
+ *
+ * Built through `commuteJourney` rather than off the trip directly, which is
+ * what stops the home screen and the panel two taps away from disagreeing: the
+ * arrival, the total and the change at Asker are the same derivations the board
+ * prints, not a second reading of the same legs.
+ */
 export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRow {
+  const journey = commuteJourney(trip, nowMs);
+  // The same leg `commuteJourney` made its first ride from, read here for the
+  // live facts a *row* needs and a journey has no single value for: which
+  // vehicle's delay decides whether you make it, and which platform to stand on.
   const ride = firstRide(trip);
   const realtime = ride?.realtime === true;
   return widgetRow({
     whenMs: ride?.expectedStartMs ?? trip.startMs,
     aimedMs: ride?.aimedStartMs ?? trip.startMs,
-    lines: tripLines(trip),
+    arrival: journey.arrival.aimed,
+    duration: journey.duration,
+    lines: journey.rides.length > 0 ? journey.rides.map((entry) => entry.line).join(' → ') : 'walk',
+    changes:
+      journey.connections.length > 0
+        ? journey.connections.map((change) => change.chip).join(' · ')
+        : null,
     quay: ride?.from.quay?.publicCode,
     realtime,
     predictionInaccurate: ride?.startPredictionInaccurate === true,
@@ -273,7 +331,13 @@ export function departureWidgetRow(departure: TransitDeparture, nowMs: number): 
   return widgetRow({
     whenMs: departure.expectedDepartureMs,
     aimedMs: departure.aimedDepartureMs,
+    // A stop board knows when the 280 leaves and nothing about where its reader
+    // is going; inventing an arrival for it would be the widget's one number
+    // nobody could check.
+    arrival: null,
+    duration: null,
     lines: `${departure.line.publicCode} → ${departure.destination}`,
+    changes: null,
     quay: departure.quay.publicCode,
     realtime: departure.realtime,
     predictionInaccurate: departure.predictionInaccurate === true,

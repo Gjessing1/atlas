@@ -73,6 +73,24 @@ export function delayLabel(deltaMs: number): string {
   return `${minutes > 0 ? '+' : ''}${minutes} min`;
 }
 
+/**
+ * The correction between two instants **as the printed clock shows it**.
+ *
+ * Not `Math.round(delta / 60_000)`, which is the same number measured
+ * differently and therefore sometimes a different number. Probed against the
+ * live Engelsrud board on 2026-08-25: aimed 18:59:00, expected 19:01:36 is
+ * 2.6 minutes, so the row read "18:59 (+3)" beside an estimate of 19:01 — a
+ * board contradicting itself in two adjacent columns. A clock that truncates
+ * needs a correction that truncates with it; the sub-minute part is the
+ * *display's* rounding, and both halves must round the same way.
+ *
+ * Norway's UTC offset is a whole number of hours, so flooring to the minute in
+ * epoch ms is flooring to the minute on the printed clock.
+ */
+export function clockDelayMinutes(aimedMs: number, expectedMs: number): number {
+  return Math.floor(expectedMs / 60_000) - Math.floor(aimedMs / 60_000);
+}
+
 /** How a time reads against its timetable: as printed, or corrected late/early. */
 export type TransitTimeTone = 'ontime' | 'late' | 'early';
 
@@ -120,14 +138,18 @@ export function legTimeParts(time: {
       : confidence === 'realtime'
         ? 'Live'
         : 'Timetable';
-  if (!time.realtime || Math.abs(delta) < DELAY_THRESHOLD_MS) {
+  // The threshold is measured on the real difference — under a minute is
+  // timetable noise whichever way it rounds — but the *number shown* is the one
+  // the two printed times differ by, or the row contradicts itself.
+  const minutes = clockDelayMinutes(time.aimedMs, time.expectedMs);
+  if (!time.realtime || Math.abs(delta) < DELAY_THRESHOLD_MS || minutes === 0) {
     return { aimed, expected, delay: null, tone: 'ontime', confidence, confidenceLabel };
   }
   return {
     aimed,
     expected,
-    delay: delayLabel(delta),
-    tone: delta > 0 ? 'late' : 'early',
+    delay: `${minutes > 0 ? '+' : ''}${minutes} min`,
+    tone: minutes > 0 ? 'late' : 'early',
     confidence,
     confidenceLabel,
   };
