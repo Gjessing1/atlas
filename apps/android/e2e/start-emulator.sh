@@ -21,10 +21,17 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libpulse\.so\.0'; then
   export LD_LIBRARY_PATH="$lib_root:$lib_root/pulseaudio${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
+# -no-snapshot-save is what keeps a bad run from becoming a permanent one. The
+# emulator saves `default_boot` on exit by default, so a run whose system_server
+# ANRed saved *that* — and the next run loaded the wedged system back, hit the
+# same "Process system isn't responding" dialog, and saved it again. Two OTA
+# publishes died that way before the snapshot was deleted by hand. A cold boot
+# costs ~40 s; a release gate that can poison itself costs far more.
 exec "$emulator" \
   -avd "$avd_name" \
   -no-window \
   -no-audio \
   -no-boot-anim \
+  -no-snapshot-save \
   -gpu swiftshader_indirect \
   "$@"
