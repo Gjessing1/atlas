@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { norwayInstant } from './clock.js';
+import { commuteSegments } from './dashboard.js';
 import {
   commuteRefreshAtMs,
   commuteRouteLabel,
+  commuteSegmentWidgetBoard,
   commuteWidgetBoard,
   departureWidgetRow,
   tripWidgetRow,
@@ -428,6 +430,79 @@ describe('commuteWidgetBoard', () => {
     });
     expect(board.directions[0]!.rows).toHaveLength(2);
     expect(board.nextRefreshMs).toBe(at(7 * 60 + 38));
+  });
+});
+
+describe('commuteSegmentWidgetBoard', () => {
+  const via = { name: 'Asker stasjon', lat: 59.83, lng: 10.43 };
+  const query = commute({ via: [via] });
+  const segment = commuteSegments(query)[0]!;
+  const result = {
+    trips: [
+      trip(ride('270', at(7 * 60 + 40))),
+      trip(ride('270', at(7 * 60 + 12), at(7 * 60 + 12), '2')),
+    ],
+    problems: [],
+  };
+
+  /**
+   * §5's board, and the two things it has that the sketch does not: the arrival
+   * at the far end of the hop, and the total. A `trip(A→B)` knows both; the
+   * stop board the sketch was drawn from knows neither.
+   */
+  it('is titled by the hop and lists its next departures', () => {
+    const board = commuteSegmentWidgetBoard({
+      query,
+      segment,
+      result,
+      emptyReason: 'none',
+      nowMs: NOW,
+      maxRows: 5,
+    });
+    expect(segment.label).toBe('Engelsrud → Asker stasjon');
+    expect(board.directions).toHaveLength(1);
+    expect(board.directions[0]!.label).toBe('Engelsrud → Asker stasjon');
+    // The corridor stays on `route`: all four hops of one commute are one
+    // commute, and the block label is what the widget titles itself with.
+    expect(board.route).toBe('Engelsrud ↔ Nationaltheatret · via Asker stasjon');
+    // A hop belongs to a direction, so a client sorting or colouring by `key`
+    // sees the same vocabulary the two-direction board uses.
+    expect(board.directions[0]!.key).toBe('outbound');
+    // In time order, one vehicle, and its window on the scan line rather than on
+    // a leg strip repeating it.
+    expect(board.directions[0]!.rows.map((row) => row.time)).toEqual(['07:12', '07:40']);
+    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 → 07:22 · 10 min · 270 · plt 2');
+    expect(board.directions[0]!.rows[0]!.legsText).toBe('270');
+    expect(board.status).toBe('Entur live · checked 07:00');
+  });
+
+  it('says why it is empty, and sleeps against the commute window', () => {
+    const board = commuteSegmentWidgetBoard({
+      query: commute({ via: [via], outboundTime: { minutesOfDay: 8 * 60, arriveBy: false } }),
+      segment,
+      result: { trips: [], problems: [] },
+      emptyReason: 'upstream',
+      nowMs: NOW,
+      maxRows: 5,
+    });
+    expect(board.directions[0]!.rows).toHaveLength(0);
+    expect(board.directions[0]!.note).toBe('Nothing runs in this window');
+    expect(board.source).toBe('Nothing runs in this window');
+    // Nothing upcoming: wake a quarter of an hour before the commute reopens,
+    // not on a wall-clock period through the night.
+    expect(board.nextRefreshMs).toBe(at(7 * 60 + 45));
+  });
+
+  it('trims to what the instance can hold', () => {
+    const board = commuteSegmentWidgetBoard({
+      query,
+      segment,
+      result,
+      emptyReason: 'none',
+      nowMs: NOW,
+      maxRows: 1,
+    });
+    expect(board.directions[0]!.rows.map((row) => row.time)).toEqual(['07:12']);
   });
 });
 

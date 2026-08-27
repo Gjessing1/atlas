@@ -1,10 +1,9 @@
 import { nextCommuteInstant, norwayTime, runsOnWeekday, type TransitWeekday } from './clock.js';
-import { commuteSegments } from './dashboard.js';
+import { commuteSegments, type CommuteSegment } from './dashboard.js';
 import { expandModeFilter, isRideMode, filterModeOf } from './model.js';
 import type {
   TransitCommuteDirection,
   TransitCommuteFilter,
-  TransitCommutePlace,
   TransitCommuteQuery,
   TransitCommuteTime,
   TransitLineFilter,
@@ -149,12 +148,14 @@ export function commuteTransitQueries(
 export function commuteSegmentQueries(
   query: TransitCommuteQuery,
   limit: number,
-): { id: string; from: TransitCommutePlace; to: TransitCommutePlace; query: TransitQuery }[] {
+): { segment: CommuteSegment; query: TransitQuery }[] {
   const lineFilter = commuteLineFilter(query.filter);
   return commuteSegments(query).map((segment) => ({
-    id: segment.id,
-    from: segment.from,
-    to: segment.to,
+    // The hop itself travels with its question, not just its id: a caller
+    // answering *one* hop — a home-screen widget pointed at a leg — needs the
+    // label and the direction to render it, and looking those up a second time
+    // would be a second derivation of what a corridor's hops are.
+    segment,
     query: {
       from: segment.from,
       to: segment.to,

@@ -161,6 +161,7 @@ export {
   commuteDirectionLabel,
   commuteRefreshAtMs,
   commuteRouteLabel,
+  commuteSegmentWidgetBoard,
   commuteWidgetBoard,
   departureWidgetRow,
   emptyDirectionNote,

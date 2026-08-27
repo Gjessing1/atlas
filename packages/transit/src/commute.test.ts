@@ -265,12 +265,16 @@ describe('commuteSegmentQueries', () => {
 
   it('asks one question per directed hop, carrying the commute rules', () => {
     const queries = commuteSegmentQueries(withVia, 5);
-    expect(queries.map((entry) => entry.id)).toEqual([
+    expect(queries.map((entry) => entry.segment.id)).toEqual([
       'outbound-0',
       'outbound-1',
       'inbound-0',
       'inbound-1',
     ]);
+    // The hop travels with its question, so one lookup answers both "which hop
+    // is this" and "what do I ask about it" — which is what a widget pointed at
+    // a single leg needs.
+    expect(queries[0]!.segment.label).toBe('Engelsrud → Asker stasjon');
     expect(queries[0]!.query).toMatchObject({
       from: { stopId: 'NSR:StopPlace:3369' },
       to: { stopId: 'NSR:StopPlace:59616' },

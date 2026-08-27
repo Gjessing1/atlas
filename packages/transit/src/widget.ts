@@ -63,6 +63,7 @@ import {
   COMMUTE_STATE_LABEL,
   commuteJourney,
   commuteJourneyList,
+  type CommuteSegment,
   type CommuteServiceState,
 } from './dashboard.js';
 import { DELAY_THRESHOLD_MS, clockDelayMinutes } from './labels.js';
@@ -511,6 +512,30 @@ export function emptyDirectionNote(reason: 'upstream' | 'filtered'): string {
 }
 
 /**
+ * One planner answer as widget rows.
+ *
+ * Ordered the way the panel orders its list, and by the same function: in time
+ * order, one row per departure. Entur ranks rather than sorts, so the three rows
+ * a widget has room for were three of the planner's *favourites* — which on the
+ * live corridor meant 20:42 above 20:29, and the same 20:42 bus twice because
+ * two trains connect from it. Trimming to `maxRows` after that, not before, is
+ * the point: the rows dropped are the late ones.
+ */
+function widgetRows(result: TransitResult, nowMs: number, maxRows: number): TransitWidgetRow[] {
+  return commuteJourneyList(result.trips.map((trip, index) => commuteJourney(trip, nowMs, index)))
+    .slice(0, maxRows)
+    .map((journey) => tripWidgetRow(journey.trip, nowMs));
+}
+
+/** Why a block is empty, in words — and null when it is not empty to explain. */
+function boardNote(
+  rows: readonly TransitWidgetRow[],
+  emptyReason: CommuteEmptyReason,
+): string | null {
+  return rows.length === 0 && emptyReason !== 'none' ? emptyDirectionNote(emptyReason) : null;
+}
+
+/**
  * Assemble the board one widget instance renders.
  *
  * `directions` is what the caller asked for — a widget configured for one
@@ -534,22 +559,12 @@ export function commuteWidgetBoard({
   maxRows?: number;
 }): TransitWidgetBoard {
   const directions = results.map(({ key, result, emptyReason }) => {
-    // Ordered the way the panel orders its list, and by the same function: in
-    // time order, one row per departure. Entur ranks rather than sorts, so the
-    // three rows a widget has room for were three of the planner's *favourites*
-    // — which on the live corridor meant 20:42 above 20:29, and the same 20:42
-    // bus twice because two trains connect from it. Trimming to `maxRows` after
-    // that, not before, is the point: the rows dropped are the late ones.
-    const rows = commuteJourneyList(
-      result.trips.map((trip, index) => commuteJourney(trip, nowMs, index)),
-    )
-      .slice(0, maxRows)
-      .map((journey) => tripWidgetRow(journey.trip, nowMs));
+    const rows = widgetRows(result, nowMs, maxRows);
     return {
       key,
       label: commuteDirectionLabel(query, key),
       rows,
-      note: rows.length === 0 && emptyReason !== 'none' ? emptyDirectionNote(emptyReason) : null,
+      note: boardNote(rows, emptyReason),
     };
   });
   const allRows = directions.flatMap((direction) => direction.rows);
@@ -569,6 +584,71 @@ export function commuteWidgetBoard({
       [...allRows].sort((a, b) => a.whenMs - b.whenMs),
       nowMs,
     ),
+  };
+}
+
+/**
+ * The board a widget shows when it is pointed at **one hop** of the corridor —
+ * ROADMAP §6.4 §5's individual departure boards, on the surface they are most
+ * use on.
+ *
+ * The journey board answers "when do I leave home and when do I get to town".
+ * That is the right question at 07:05 and the wrong one at 08:55, when you are
+ * already on the bus and the only thing left to know is when the train leaves
+ * Asker. §5 puts the four per-leg boards under the panel for exactly that
+ * traveller; a home screen is where they cost no taps at all, so an instance may
+ * be configured for a hop instead of for a direction — and a second instance for
+ * the hop after it.
+ *
+ * Three things follow from a hop being a `trip(A→B)` rather than a stop board,
+ * and all three are why this shares `widgetRows` with the journey board instead
+ * of formatting departures of its own:
+ *
+ *  - **A row still carries its arrival.** Entur's `estimatedCalls` at Engelsrud
+ *    knows the 270 leaves at 08:36 and nothing about where its reader is going;
+ *    the hop knows it reaches Asker at 09:02. The row that results is the §5
+ *    sketch — `08:36  270` — with the half the sketch left out.
+ *  - **Rows come in time order, one per departure**, by the same function the
+ *    panel and the journey board use. A hop is one vehicle, so the leg strip
+ *    collapses onto the scan line by itself: `"08:36 → 09:02 · 26 min · 270"`.
+ *  - **The block is still a direction.** A hop belongs to the way out or the way
+ *    home, so `key` stays the direction it came from and only `label` narrows,
+ *    to `"Engelsrud terrasse → Asker stasjon"` — which is what the widget paints
+ *    as its title when it has a single block.
+ */
+export function commuteSegmentWidgetBoard({
+  query,
+  segment,
+  result,
+  emptyReason,
+  nowMs,
+  maxRows = 3,
+}: {
+  query: TransitCommuteQuery;
+  segment: CommuteSegment;
+  result: TransitResult;
+  emptyReason: CommuteEmptyReason;
+  nowMs: number;
+  maxRows?: number;
+}): TransitWidgetBoard {
+  const rows = widgetRows(result, nowMs, maxRows);
+  const note = boardNote(rows, emptyReason);
+  const source = widgetSourceLabel(rows.length > 0, note);
+  return {
+    // The corridor, not the hop: with one block the widget titles itself from
+    // the block's own label, and `route` is what a surface listing several
+    // instances has to tell them apart by — all four hops of one commute are
+    // the same commute.
+    route: commuteRouteLabel(query),
+    directions: [{ key: segment.direction, label: segment.label, rows, note }],
+    checkedMs: nowMs,
+    source,
+    checked: widgetCheckedLabel(nowMs),
+    status: widgetStatusLine(source, nowMs),
+    // Against the commute's own window, exactly as the journey board is: a hop
+    // board with nothing upcoming is a hop board at 23:40, and it should sleep
+    // until the commute reopens rather than ask through the night.
+    nextRefreshMs: commuteRefreshAtMs(query, rows, nowMs),
   };
 }
 

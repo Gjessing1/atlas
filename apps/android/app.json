@@ -3,8 +3,8 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.179.0",
-    "runtimeVersion": "17",
+    "version": "0.180.0",
+    "runtimeVersion": "18",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",
       "enabled": true,
@@ -16,7 +16,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 29,
+      "versionCode": 30,
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS"

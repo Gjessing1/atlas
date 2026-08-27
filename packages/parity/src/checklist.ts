@@ -833,7 +833,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     // The dependency that was invisible: the widget renders nothing it computes
     // itself, so without this route it is a permanent "Couldn't refresh".
     route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/widget'" },
-    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift.',
+    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift. An instance shows a direction or — ROADMAP §6.4 §5 — one hop of the corridor, whose legs come from the same commuteSegments the Departures tab draws.',
   },
 
   // ---------------------------------------------------------- navigation ---

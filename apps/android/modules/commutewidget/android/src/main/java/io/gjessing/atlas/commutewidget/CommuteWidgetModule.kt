@@ -11,9 +11,14 @@ class CommuteWidgetModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AtlasCommuteWidget")
 
-    AsyncFunction("configure") { baseUrl: String, queryJson: String? ->
+    /**
+     * The saved commute, plus the hops it generates — `[{"id","label"}, …]` as
+     * `commuteSegments` derived them, so the ⚙ screen can offer one leg's board
+     * without a Kotlin copy of that derivation.
+     */
+    AsyncFunction("configure") { baseUrl: String, queryJson: String?, segmentsJson: String? ->
       val context = appContext.reactContext ?: return@AsyncFunction
-      CommuteWidgetStore.configure(context, baseUrl, queryJson)
+      CommuteWidgetStore.configure(context, baseUrl, queryJson, segmentsJson)
       if (queryJson == null) {
         // No commute saved: say so on every instance, and drop the stale boards
         // rather than leaving yesterday's departures next to that sentence.

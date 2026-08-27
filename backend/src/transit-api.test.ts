@@ -955,6 +955,57 @@ describe('POST /api/transit/widget', () => {
     expect(board.directions[0].rows[0].text).toBe('07:22 · 280 → Dikemark · plt 1');
   });
 
+  /**
+   * ROADMAP §6.4 §5 on the surface it is most use on: a widget pointed at one
+   * hop, for the traveller already on the bus whose only open question is when
+   * the train leaves Asker. One `trip(A→B)` call, whatever the commute's shape.
+   */
+  it('answers one hop of the corridor when the widget is pointed at one', async () => {
+    const withVia = {
+      ...commute,
+      via: [{ name: 'Asker stasjon', lat: 59.83, lng: 10.43, stopId: 'NSR:StopPlace:337' }],
+    };
+    let calls = 0;
+    respond = () => {
+      calls += 1;
+      return new Response(JSON.stringify(enturReply), { status: 200 });
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute: withVia, direction: 'outbound-1', maxRows: 5 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(calls).toBe(1);
+    // The hop itself was asked, from now — a board for someone mid-journey has
+    // no use for the commute's saved departure time.
+    expect(captured!.body.variables.from.place).toBe('NSR:StopPlace:337');
+    expect(captured!.body.variables.to.place).toBe('NSR:StopPlace:58404');
+    expect(captured!.body.variables.dateTime).toBeNull();
+    const board = res.json();
+    expect(board.directions).toHaveLength(1);
+    expect(board.directions[0].label).toBe('Asker stasjon → Nationaltheatret');
+    // Still the corridor on `route`: four hop widgets are four boards of one
+    // commute, and the block label is what the widget titles itself with.
+    expect(board.route).toBe('Engelsrud ↔ Nationaltheatret · via Asker stasjon');
+    expect(board.directions[0].rows[0]).toMatchObject({ time: '07:33', arrival: '07:51' });
+  });
+
+  /**
+   * A widget keeps the hop it was pointed at; the commute under it can be
+   * re-saved with the interchange gone. Answering the journeys — and saying so
+   * in the board's own title — beats "couldn't refresh" at 07:40.
+   */
+  it('falls back to the journeys when the stored hop no longer exists', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/widget',
+      payload: { kind: 'commute', commute, direction: 'outbound-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().directions[0].label).toBe('Engelsrud → Nationaltheatret');
+  });
+
   it('refuses a stop board outside Norway and a commute it cannot read', async () => {
     expect(
       (

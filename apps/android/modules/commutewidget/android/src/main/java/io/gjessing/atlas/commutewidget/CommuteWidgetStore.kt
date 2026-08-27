@@ -6,18 +6,25 @@ import android.content.Context
  * What the widget knows, split into what the *app* owns and what each *instance*
  * owns.
  *
- * App-owned (one copy): the server origin and the saved commute, written by
- * `configureCommuteWidget` whenever the shared `transit.commute` setting
- * changes. Instance-owned (one copy per `appWidgetId`): which direction this
- * widget shows — so two widgets can show two directions — the last board the
- * backend rendered for it, held verbatim, because a widget that blanks when a
- * refresh fails is worse than one showing an answer it admits is old, and what
- * the instance is currently *doing*, which is the one thing the board cannot say.
+ * App-owned (one copy): the server origin, the saved commute and the corridor's
+ * hops, all written by `configureCommuteWidget` whenever the shared
+ * `transit.commute` setting changes. Instance-owned (one copy per
+ * `appWidgetId`): which board this widget shows — a direction, or one hop — so
+ * two widgets can show two boards; the last board the backend rendered for it,
+ * held verbatim, because a widget that blanks when a refresh fails is worse than
+ * one showing an answer it admits is old; and what the instance is currently
+ * *doing*, which is the one thing the board cannot say.
+ *
+ * The hops are stored rather than derived here for the same reason the rows are
+ * not formatted here: `commuteSegments` in `@atlas/transit` decides what a
+ * corridor's hops are and what each is called, and a Kotlin copy of that would
+ * be a second answer to the same question.
  */
 internal object CommuteWidgetStore {
   private const val PREFS = "atlas_commute_widget"
   private const val BASE_URL = "base_url"
   private const val QUERY = "query"
+  private const val SEGMENTS = "segments"
 
   /** The default: outbound before the outbound time, the way home after it. */
   const val DIRECTION_AUTO = "auto"
@@ -33,10 +40,11 @@ internal object CommuteWidgetStore {
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-  fun configure(context: Context, baseUrl: String, query: String?) {
+  fun configure(context: Context, baseUrl: String, query: String?, segments: String?) {
     prefs(context).edit()
       .putString(BASE_URL, baseUrl.trimEnd('/'))
       .apply { if (query == null) remove(QUERY) else putString(QUERY, query) }
+      .apply { if (segments == null) remove(SEGMENTS) else putString(SEGMENTS, segments) }
       .apply()
   }
 
@@ -44,6 +52,19 @@ internal object CommuteWidgetStore {
 
   fun query(context: Context): String? = prefs(context).getString(QUERY, null)
 
+  /**
+   * The corridor's hops as `[{"id","label"}, …]`, exactly as `@atlas/transit`
+   * derived them. Empty for a commute with no interchange, which is the honest
+   * answer rather than a gap: its only leg *is* the journey, so a hop board
+   * would be the journey board with a different heading.
+   */
+  fun segments(context: Context): String? = prefs(context).getString(SEGMENTS, null)
+
+  /**
+   * Which board this instance shows: a direction, or a hop id (`"outbound-0"`)
+   * from {@link segments}. Both go to `POST /api/transit/widget` in the same
+   * field, which is the one question the field ever asked.
+   */
   fun direction(context: Context, widgetId: Int): String =
     prefs(context).getString("direction_$widgetId", DIRECTION_AUTO) ?: DIRECTION_AUTO
 

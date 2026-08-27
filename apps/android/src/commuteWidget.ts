@@ -1,8 +1,8 @@
-import type { TransitCommuteQuery } from '@atlas/transit';
+import { commuteSegments, type TransitCommuteQuery } from '@atlas/transit';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 interface CommuteWidgetModule {
-  configure(baseUrl: string, queryJson: string | null): Promise<void>;
+  configure(baseUrl: string, queryJson: string | null, segmentsJson: string | null): Promise<void>;
   support(): Promise<CommuteWidgetSupport>;
   requestPin(): Promise<boolean>;
 }
@@ -19,12 +19,34 @@ const NONE: CommuteWidgetSupport = { pinnable: false, count: 0 };
 
 const native = requireOptionalNativeModule<CommuteWidgetModule>('AtlasCommuteWidget');
 
-/** Keep the native home-screen widget's private configuration aligned with Atlas storage. */
+/**
+ * Keep the native home-screen widget's private configuration aligned with Atlas
+ * storage.
+ *
+ * The hops travel with the commute rather than being worked out in Kotlin: the
+ * ⚙ screen offers a board per leg (ROADMAP §6.4 §5), and what a corridor's legs
+ * are — and what each is called — is `commuteSegments`' answer, given once here
+ * so the widget cannot come to a second one.
+ */
 export async function configureCommuteWidget(
   baseUrl: string,
   query: TransitCommuteQuery | null,
 ): Promise<void> {
-  await native?.configure(baseUrl, query ? JSON.stringify(query) : null);
+  const segments = query
+    ? commuteSegments(query).map((segment) => ({ id: segment.id, label: segment.label }))
+    : [];
+  try {
+    await native?.configure(
+      baseUrl,
+      query ? JSON.stringify(query) : null,
+      segments.length > 0 ? JSON.stringify(segments) : null,
+    );
+  } catch {
+    // Guarded for the same reason as everything below: a bundle can outrun the
+    // APK it runs on. Keeping the widget's previous configuration is the right
+    // failure — it goes on answering from the commute it already knows, which is
+    // the whole point of a home-screen widget.
+  }
 }
 
 /**

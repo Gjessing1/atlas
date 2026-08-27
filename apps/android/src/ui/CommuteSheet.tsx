@@ -405,7 +405,7 @@ function WidgetOffer() {
     <View style={styles.widget}>
       <Text style={styles.widgetNote}>
         {support.count > 0
-          ? 'This saved board also fills your home screen. Tap a widget’s tuning icon to choose which direction it shows.'
+          ? 'This saved board also fills your home screen. Tap a widget’s tuning icon to point it at a direction — or at a single leg, for the departures you need once you are already moving.'
           : 'This saved board can sit on your home screen, with live delays and platforms.'}
       </Text>
       {support.pinnable ? (

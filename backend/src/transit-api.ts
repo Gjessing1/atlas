@@ -5,6 +5,7 @@ import {
   commuteEmptyReason,
   commuteRefreshAtMs,
   commuteSegmentQueries,
+  commuteSegmentWidgetBoard,
   commuteTransitQueries,
   defaultCommuteDirection,
   departureWidgetRow,
@@ -692,7 +693,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       const [outbound, inbound, ...segmentAnswers] = await Promise.all([
         askDirection(queries.outbound, parsed.query.filter),
         askDirection(queries.inbound, parsed.query.filter),
-        ...segmentQueries.map((segment) => askDirection(segment.query, parsed.query.filter)),
+        ...segmentQueries.map((hop) => askDirection(hop.query, parsed.query.filter)),
       ]);
       // Checked one at a time so each stays narrowed: `!a.ok || !b.ok` tells
       // TypeScript nothing about `b` inside the branch.
@@ -716,10 +717,10 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
         // per-leg board is worth strictly less than the board it sits under.
         ...(wantSegments
           ? {
-              segments: segmentQueries.flatMap((segment, index) => {
+              segments: segmentQueries.flatMap((hop, index) => {
                 const answer = segmentAnswers[index];
                 return answer?.ok
-                  ? [{ id: segment.id, result: withoutGeometry(answer.result) }]
+                  ? [{ id: hop.segment.id, result: withoutGeometry(answer.result) }]
                   : [];
               }),
             }
@@ -785,7 +786,11 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
    *
    * Two board kinds, one response shape, because the widget renders them
    * identically:
-   *  - `commute` — the saved two-way board, one `trip` call per direction asked.
+   *  - `commute` — the saved board. `direction` says which part of it: a
+   *    direction (`outbound` / `inbound` / `both` / absent for whichever is
+   *    next), one `trip` call each; or one *hop* of the corridor by its id
+   *    (`outbound-0`), which is §5's individual departure board and costs one
+   *    call whatever the commute's shape.
    *  - `stop` — "when is my next 280", which is one line-filtered
    *    `estimatedCalls` call instead of two to six `trip` calls.
    */
@@ -844,10 +849,50 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
 
     const parsed = parseCommuteQuery(body.commute);
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+    const requested = body.direction;
+
+    // A widget pointed at one *hop* of the corridor rather than at a whole
+    // journey — ROADMAP §6.4 §5, for the reader who is already on the bus and
+    // only wants to know when the train leaves Asker. `direction` carries the
+    // hop id (`"outbound-0"`) because it is the same question the field always
+    // answered: which board is this instance showing.
+    //
+    // A `find` that misses is not an error to report: a home screen keeps the
+    // hop it was pointed at, and the commute under it can be re-saved with the
+    // interchange gone. It falls through to the direction path, where a widget
+    // that answers the whole journey — saying so in its own title — is worth
+    // more at 07:40 than one that says "couldn't refresh".
+    const hop = commuteSegmentQueries(parsed.query, maxRows).find(
+      (entry) => entry.segment.id === requested,
+    );
+    if (hop) {
+      try {
+        const answer = await askDirection(hop.query, parsed.query.filter);
+        if (!answer.ok) {
+          request.log.error({ status: answer.status }, 'entur widget segment error');
+          status?.record(TRANSIT_PROBE, false, `HTTP ${answer.status}`);
+          return reply.code(502).send({ error: 'departure board unavailable' });
+        }
+        status?.record(TRANSIT_PROBE, true);
+        reply.header('cache-control', 'private, max-age=15');
+        return commuteSegmentWidgetBoard({
+          query: parsed.query,
+          segment: hop.segment,
+          result: answer.result,
+          emptyReason: answer.emptyReason,
+          nowMs,
+          maxRows,
+        });
+      } catch (err) {
+        request.log.error({ err }, 'entur widget segment unreachable');
+        status?.record(TRANSIT_PROBE, false, 'unreachable');
+        return reply.code(502).send({ error: 'departure board unavailable' });
+      }
+    }
+
     // "auto" is the honest default for a widget: before the outbound time it
     // shows the way out, after it the way home — which is what a glance at 16:30
     // is for. A widget configured for one direction costs one upstream call.
-    const requested = body.direction;
     const directions: TransitCommuteDirection[] =
       requested === 'outbound' || requested === 'inbound'
         ? [requested]

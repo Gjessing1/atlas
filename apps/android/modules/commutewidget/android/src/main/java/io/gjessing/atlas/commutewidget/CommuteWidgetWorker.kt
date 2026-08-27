@@ -64,12 +64,24 @@ class CommuteWidgetWorker(
         val board = post("$baseUrl/api/transit/widget", body)
         CommuteWidgetStore.saveBoard(applicationContext, id, board)
         CommuteWidgetStore.setRowsAsked(applicationContext, id, rows)
-        // Ask again when the answer stops being true, not on a wall clock: two
-        // minutes before the next departure, or — with nothing upcoming — before
-        // the commute's own window reopens. A fixed fifteen-minute period asked
-        // all night and all weekend and could still be stale at 08:05.
-        val nextRefreshMs = JSONObject(board).optLong("nextRefreshMs", 0L)
-        CommuteWidgetProvider.scheduleNext(applicationContext, id, nextRefreshMs)
+        // How many rows fit depends on how many legs the journeys have, which is
+        // only knowable from a board — so the ask before the first one is a
+        // guess, and for a one-leg board (a hop, or a direct commute) it is a
+        // guess two rows short. Correct it immediately rather than at the next
+        // scheduled refresh, which on a sparse route is hours away. It converges
+        // in one step: the second board plans from real legs, so `wanted` then
+        // equals what was asked.
+        if (CommuteWidgetProvider.rowsWanted(applicationContext, id) > rows) {
+          CommuteWidgetProvider.refresh(applicationContext, id)
+        } else {
+          // Ask again when the answer stops being true, not on a wall clock: two
+          // minutes before the next departure, or — with nothing upcoming —
+          // before the commute's own window reopens. A fixed fifteen-minute
+          // period asked all night and all weekend and could still be stale at
+          // 08:05.
+          val nextRefreshMs = JSONObject(board).optLong("nextRefreshMs", 0L)
+          CommuteWidgetProvider.scheduleNext(applicationContext, id, nextRefreshMs)
+        }
       } catch (_: Exception) {
         failed = true
         // Keep the last good rows; only the status line admits the failure.
