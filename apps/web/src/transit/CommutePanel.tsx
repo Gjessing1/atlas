@@ -10,11 +10,11 @@ import {
   commuteEstimateLabel,
   fetchTransitStopLines,
   liveTimetableLabel,
+  transitModeGlyph,
   type CommuteBoardRow,
   type CommuteDisruption,
   type CommuteJourney,
   type CommuteServiceState,
-  type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { Fragment, useEffect, useState } from 'react';
@@ -43,21 +43,16 @@ import { CommuteEditorForm } from './CommuteEditor.js';
  * departure time.
  */
 
-/** One glyph per mode. The word is in `modeLabel`; this is the thing you see first. */
-const MODE_GLYPH: Partial<Record<TransitMode, string>> = {
-  bus: '🚌',
-  coach: '🚌',
-  rail: '🚆',
-  metro: '🚇',
-  tram: '🚊',
-  water: '⛴️',
-  air: '✈️',
-  cableway: '🚡',
-  funicular: '🚞',
-  foot: '🚶',
-};
-
-const glyph = (mode: TransitMode) => MODE_GLYPH[mode] ?? '•';
+/**
+ * One glyph per mode — from `@atlas/transit`, not from a table here.
+ *
+ * This panel and the Android sheet each kept an identical copy, which read as a
+ * styling choice until the home-screen widget wanted one: its rows are rendered
+ * on the backend and painted by Kotlin that formats nothing, so a table living
+ * in two React files could never reach it. The widget was the board with no
+ * icons for exactly as long as the copies existed.
+ */
+const glyph = transitModeGlyph;
 
 /**
  * A colour comes from what a service *is*, never from where it sits in a list —

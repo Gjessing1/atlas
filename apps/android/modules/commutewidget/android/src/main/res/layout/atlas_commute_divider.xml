@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A hairline between two journeys.
+
+  The body used to be a plain stack of rows separated by 2dp of padding, which
+  was legible while a row was one line and stopped being legible the moment a
+  row grew a leg strip underneath it: "🚆 R14 07:39 → 08:14" sitting directly
+  above the next departure's time reads as part of that departure. Two vehicles
+  and a change is a *paragraph*, and paragraphs need a boundary.
+
+  Its own layout rather than a divider on the parent: `RemoteViews` fills the
+  body with `addView`, and `setShowDividers` is not in its allow-list — so the
+  separator has to be something the same loop can add.
+
+  And a `FrameLayout` rather than the `<View>` this obviously wants to be:
+  RemoteViews inflates through a filter that admits only `@RemoteView` classes,
+  and `android.view.View` is not one. Nothing else in this widget uses a bare
+  View either — the weighted spacers are all TextViews for the same reason —
+  and the failure is an InflateException at paint time, which no test here can
+  reach.
+-->
+<FrameLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@+id/atlas_divider"
+  android:layout_width="match_parent"
+  android:layout_height="1dp"
+  android:layout_marginTop="5dp"
+  android:layout_marginBottom="1dp"
+  android:background="@color/atlas_widget_divider" />

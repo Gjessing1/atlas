@@ -19,4 +19,10 @@
   <color name="atlas_widget_accent">#FF15599C</color>
   <color name="atlas_widget_warn">#FF8A4B00</color>
   <color name="atlas_widget_error">#FFB3261E</color>
+  <!--
+    The hairline between two journeys. Low contrast on purpose: it has to
+    separate rows without competing with the times, which are the only thing
+    on the widget anyone is actually reading.
+  -->
+  <color name="atlas_widget_divider">#1F0F1419</color>
 </resources>

@@ -4,4 +4,5 @@
   <color name="atlas_widget_text">@android:color/system_neutral1_900</color>
   <color name="atlas_widget_muted">@android:color/system_neutral2_700</color>
   <color name="atlas_widget_accent">@android:color/system_accent1_600</color>
+  <color name="atlas_widget_divider">#1F0F1419</color>
 </resources>

@@ -89,7 +89,7 @@ describe('tripWidgetRow', () => {
       trip(walk(at(7 * 60 + 2)), ride('280', at(7 * 60 + 12), at(7 * 60 + 12), '2')),
       NOW,
     );
-    expect(row.text).toBe('07:12 → 07:22 · 10 min · 280 · plt 2');
+    expect(row.text).toBe('07:12 → 07:22 · 10 min · 🚌 280 · plat. 2');
     // The same row, part by part — this is what the widget lays out, and `text`
     // is only its one-line reading.
     expect(row.time).toBe('07:12');
@@ -98,23 +98,25 @@ describe('tripWidgetRow', () => {
     // would have told you.
     expect(row.arrival).toBe('07:22');
     expect(row.duration).toBe('10 min');
-    expect(row.lines).toBe('280');
+    expect(row.lines).toBe('🚌 280');
     expect(row.changes).toBeNull();
-    expect(row.platform).toBe('plt 2');
+    expect(row.platform).toBe('plat. 2');
     // One vehicle, whose window is the scan line already: the leg is there for
     // a client that lays legs out, but the one-line form does not repeat it.
     expect(row.legs).toEqual([
       {
         line: '280',
         mode: 'bus',
+        icon: '🚌',
         window: '07:12 → 07:22',
-        text: '280 07:12 → 07:22',
+        text: '🚌 280 07:12 → 07:22',
         change: null,
         wait: null,
+        quay: 'plat. 2',
         state: 'scheduled',
       },
     ]);
-    expect(row.legsText).toBe('280');
+    expect(row.legsText).toBe('🚌 280');
     expect(row.statusLabel).toBeNull();
     expect(row.delayLabel).toBeNull();
     expect(row.delayMin).toBeNull();
@@ -136,10 +138,10 @@ describe('tripWidgetRow', () => {
     const liveRide = ride('280', at(7 * 60 + 10), at(7 * 60 + 16));
     liveRide.startPredictionInaccurate = true;
     const row = tripWidgetRow(trip(liveRide), NOW);
-    expect(row.text).toBe('07:10 (+6) → 07:20 · 10 min · 280');
+    expect(row.text).toBe('07:10 (+6 min) → 07:20 · 10 min · 🚌 280');
     expect(row.time).toBe('07:10');
     expect(row.expected).toBe('07:16');
-    expect(row.delayLabel).toBe('+6');
+    expect(row.delayLabel).toBe('+6 min');
     expect(row.delayMin).toBe(6);
     // The row still knows when the bus actually comes — a departure board may
     // print 07:10 for ever, and the refresh schedule is measured from this.
@@ -151,9 +153,9 @@ describe('tripWidgetRow', () => {
 
   it('calls a service running ahead of the timetable early, not late', () => {
     const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 20), at(7 * 60 + 17))), NOW);
-    expect(row.delayLabel).toBe('-3');
+    expect(row.delayLabel).toBe('-3 min');
     expect(row.state).toBe('early');
-    expect(row.text).toBe('07:20 (-3) → 07:30 · 10 min · 280');
+    expect(row.text).toBe('07:20 (-3 min) → 07:30 · 10 min · 🚌 280');
   });
 
   /**
@@ -166,20 +168,25 @@ describe('tripWidgetRow', () => {
     train.from = place('Asker stasjon');
     train.to = place('Nationaltheatret');
     const row = tripWidgetRow(trip(walk(at(7 * 60)), bus, train), NOW);
-    expect(row.lines).toBe('280 → RE10');
+    expect(row.lines).toBe('🚌 280 → 🚌 RE10');
     expect(row.changes).toBe('9 min at Asker stasjon');
     expect(row.arrival).toBe('07:41');
     expect(row.duration).toBe('29 min');
     // The panel's leg strip, part by part: when the bus goes, when the train
     // goes, and how long you stand at Asker between them.
-    expect(row.legs.map((leg) => leg.text)).toEqual(['280 07:12 → 07:22', 'RE10 07:31 → 07:41']);
+    expect(row.legs.map((leg) => leg.text)).toEqual([
+      '🚌 280 07:12 → 07:22',
+      '🚌 RE10 07:31 → 07:41',
+    ]);
     // The change belongs to the vehicle it precedes, not to the one it follows.
     expect(row.legs[0]!.change).toBeNull();
     expect(row.legs[1]!.change).toBe('9 min at Asker stasjon');
     expect(row.legs[1]!.wait).toBe('9 min');
-    expect(row.legsText).toBe('280 07:12 → 07:22 · 9 min at Asker stasjon · RE10 07:31 → 07:41');
+    expect(row.legsText).toBe(
+      '🚌 280 07:12 → 07:22 · 9 min at Asker stasjon · 🚌 RE10 07:31 → 07:41',
+    );
     expect(row.text).toBe(
-      '07:12 → 07:41 · 29 min · 280 07:12 → 07:22 · 9 min at Asker stasjon · RE10 07:31 → 07:41',
+      '07:12 → 07:41 · 29 min · 🚌 280 07:12 → 07:22 · 9 min at Asker stasjon · 🚌 RE10 07:31 → 07:41',
     );
   });
 
@@ -194,7 +201,7 @@ describe('tripWidgetRow', () => {
       trip(walk(at(7 * 60)), ride('280', at(7 * 60 + 12)), ride('RE10', at(7 * 60 + 30))),
       NOW,
     );
-    expect(row.lines).toBe('280 → RE10');
+    expect(row.lines).toBe('🚌 280 → 🚌 RE10');
     expect(row.legs.map((leg) => leg.line)).toEqual(['280', 'RE10']);
   });
 
@@ -220,9 +227,70 @@ describe('tripWidgetRow', () => {
    */
   it('states a timetable rather than counting down to it', () => {
     const row = tripWidgetRow(trip(ride('280', at(6 * 60 + 55))), NOW);
-    expect(row.text).toBe('06:55 → 07:05 · 10 min · 280');
+    expect(row.text).toBe('06:55 → 07:05 · 10 min · 🚌 280');
     expect(row.text).not.toMatch(/\b(now|in \d)\b/);
     expect(row.statusLabel).toBeNull();
+  });
+  /**
+   * The complaint that produced this test, from a home screen rather than from
+   * a fixture: on the way home the widget named a platform and on the way in it
+   * named none — for the same commute, on the same train.
+   *
+   * The row's own platform is the *first* ride's, which going out is a bus stop
+   * with no platform to name, and the number the traveller actually needs is the
+   * train's at the change. Nothing else on the row could carry it, so nothing
+   * did.
+   */
+  it('names the platform of every vehicle, not only the one boarded first', () => {
+    const bus = ride('280', at(7 * 60 + 12));
+    const train = ride('RE10', at(7 * 60 + 31), at(7 * 60 + 31), '3');
+    train.mode = 'rail';
+    train.from = place('Asker stasjon', '3');
+    train.to = place('Nationaltheatret');
+    const row = tripWidgetRow(trip(bus, train), NOW);
+    // The bus leaves from a stop with no platform; the train's is the answer.
+    expect(row.platform).toBeNull();
+    expect(row.legs.map((leg) => leg.quay)).toEqual([null, 'plat. 3']);
+    // And spelled as both panels spell it — one commute, one word for a platform.
+    expect(row.legs[1]!.quay).toBe('plat. 3');
+  });
+
+  /** A glyph per vehicle, rendered here because Kotlin renders nothing. */
+  it('gives every vehicle its mode glyph, so the widget can have icons at all', () => {
+    const bus = ride('280', at(7 * 60 + 12));
+    const train = ride('RE10', at(7 * 60 + 31));
+    train.mode = 'rail';
+    train.from = place('Asker stasjon');
+    const row = tripWidgetRow(trip(bus, train), NOW);
+    expect(row.legs.map((leg) => leg.icon)).toEqual(['🚌', '🚆']);
+    expect(row.lines).toBe('🚌 280 → 🚆 RE10');
+  });
+
+  /**
+   * A correction has to say what it counts and what it corrects.
+   *
+   * The column printed a bare "+6" in a row that also holds a duration in
+   * minutes and two clock times, and it sat *after* the arrival — so the one
+   * number with no unit was also the one attached to the wrong time.
+   */
+  it('states the correction with its unit, and keeps the time it corrects to', () => {
+    const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 10), at(7 * 60 + 16))), NOW);
+    expect(row.time).toBe('07:10');
+    expect(row.delayLabel).toBe('+6 min');
+    expect(row.expected).toBe('07:16');
+    // The panel's own phrasing, so the home screen and the board two taps away
+    // correct the same departure with the same words.
+    expect(row.expectedLabel).toBe('07:16 est.');
+    // Bracketed against the time in the one-line form: a correction floating
+    // after the arrival is a correction with two candidates to belong to.
+    expect(row.text.startsWith('07:10 (+6 min) → ')).toBe(true);
+  });
+
+  it('has nothing to correct when the service runs to time', () => {
+    const row = tripWidgetRow(trip(ride('280', at(7 * 60 + 12))), NOW);
+    expect(row.delayLabel).toBeNull();
+    expect(row.expected).toBeNull();
+    expect(row.expectedLabel).toBeNull();
   });
 });
 
@@ -243,11 +311,11 @@ describe('departureWidgetRow', () => {
 
   it('always states the direction — one line at one stop runs both ways', () => {
     const row = departureWidgetRow(departure());
-    expect(row.text).toBe('07:22 · 280 → Dikemark · plt 1');
+    expect(row.text).toBe('07:22 · 🚌 280 → Dikemark · plat. 1');
     // A departure is not a journey: there is no strip to draw, and no arrival
     // at a far end this board was never told about.
     expect(row.legs).toEqual([]);
-    expect(row.legsText).toBe('280 → Dikemark');
+    expect(row.legsText).toBe('🚌 280 → Dikemark');
     expect(row.arrival).toBeNull();
   });
 
@@ -257,7 +325,7 @@ describe('departureWidgetRow', () => {
     const row = departureWidgetRow(
       departure({ cancelled: true, expectedDepartureMs: at(7 * 60 + 29) }),
     );
-    expect(row.text).toBe('07:22 · Cancelled · 280 → Dikemark');
+    expect(row.text).toBe('07:22 · Cancelled · 🚌 280 → Dikemark');
     expect(row.time).toBe('07:22');
     expect(row.statusLabel).toBe('Cancelled');
     expect(row.platform).toBeNull();
@@ -346,7 +414,7 @@ describe('commuteWidgetBoard', () => {
     });
     expect(board.route).toBe('Engelsrud ↔ Nationaltheatret · via Asker stasjon');
     expect(board.directions[0]!.label).toBe('Engelsrud → Nationaltheatret');
-    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 → 07:22 · 10 min · 280 · plt 2');
+    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 → 07:22 · 10 min · 🚌 280 · plat. 2');
     expect(board.directions[0]!.note).toBeNull();
     expect(board.status).toBe('Entur live · checked 07:00');
     // The clock is in the board twice on purpose: `status` for a surface that
@@ -471,8 +539,8 @@ describe('commuteSegmentWidgetBoard', () => {
     // In time order, one vehicle, and its window on the scan line rather than on
     // a leg strip repeating it.
     expect(board.directions[0]!.rows.map((row) => row.time)).toEqual(['07:12', '07:40']);
-    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 → 07:22 · 10 min · 270 · plt 2');
-    expect(board.directions[0]!.rows[0]!.legsText).toBe('270');
+    expect(board.directions[0]!.rows[0]!.text).toBe('07:12 → 07:22 · 10 min · 🚌 270 · plat. 2');
+    expect(board.directions[0]!.rows[0]!.legsText).toBe('🚌 270');
     expect(board.status).toBe('Entur live · checked 07:00');
   });
 

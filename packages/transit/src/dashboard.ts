@@ -37,6 +37,7 @@ import {
   DELAY_THRESHOLD_MS,
   TRANSIT_MODE_LABEL,
   legTimeParts,
+  expectedTimeLabel,
   quayLabel,
   transfersLabel,
   type LegTimeParts,
@@ -562,7 +563,7 @@ export function commuteCountdown(whenMs: number, nowMs: number): string {
 export function commuteEstimateLabel(parts: LegTimeParts, cancelled: boolean): string {
   if (cancelled) return COMMUTE_STATE_LABEL.cancelled;
   if (parts.confidence === 'timetable') return COMMUTE_STATE_LABEL.scheduled;
-  if (parts.delay) return `${parts.expected} est.`;
+  if (parts.delay) return expectedTimeLabel(parts.expected);
   return parts.confidence === 'uncertain' ? 'Live estimate uncertain' : COMMUTE_STATE_LABEL.live;
 }
 

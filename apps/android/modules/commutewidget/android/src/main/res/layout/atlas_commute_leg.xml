@@ -1,7 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  One vehicle of a journey, with its own scheduled window and the change before
-  boarding it: "280  07:12 → 07:30    ⇄ 9 min".
+  One vehicle of a journey: what it is, its own scheduled window, the platform it
+  leaves from and the change before boarding it —
+  "🚆 R14  07:39 → 08:14  plat. 3   ⇄ 9 min".
+
+  The **glyph** comes down with the row (`TransitWidgetLeg.icon`) rather than
+  from a table here. Both panels had one and this widget had none, which looked
+  like a deliberate austerity and was not: the panels each kept a private copy of
+  the table, and a copy in React cannot reach a row rendered on the backend.
+
+  The **platform** is per leg for the same reason it is per leg in the panel. The
+  row's own `atlas_row_platform` is the *first* ride's — a bus stop, on the way
+  out — so the number the traveller actually stands on, the train's platform at
+  the change, was the one the widget never printed. Read the same commute the
+  other way and the train comes first, which is why it showed a platform going
+  home and none going in.
 
   The same facts the panel's leg chips carry, and the same strings — the window
   is `CommuteRide.window` and the change is `CommuteConnection.chip`/`label`,
@@ -22,6 +35,14 @@
   android:gravity="center_vertical"
   android:orientation="horizontal">
   <TextView
+    android:id="@+id/atlas_leg_icon"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="3dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp" />
+  <TextView
     android:id="@+id/atlas_leg_line"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
@@ -37,6 +58,20 @@
     android:maxLines="1"
     android:textColor="@color/atlas_widget_muted"
     android:textSize="11sp" />
+  <!--
+    Before the change rather than after it: the platform belongs to boarding
+    this vehicle, and the weighted column has to stay last or it stops being the
+    one that shrinks.
+  -->
+  <TextView
+    android:id="@+id/atlas_leg_quay"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="5dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_accent"
+    android:textSize="10sp"
+    android:textStyle="bold" />
   <!--
     The ⇄ is the layout's, like the row's →: it marks the number as a wait
     rather than a ride, and "9 min" beside a window would otherwise read as how

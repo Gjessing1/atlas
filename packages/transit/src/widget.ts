@@ -66,7 +66,14 @@ import {
   type CommuteSegment,
   type CommuteServiceState,
 } from './dashboard.js';
-import { DELAY_THRESHOLD_MS, clockDelayMinutes } from './labels.js';
+import {
+  DELAY_THRESHOLD_MS,
+  clockDelayLabel,
+  clockDelayMinutes,
+  expectedTimeLabel,
+  platformLabel,
+  transitModeGlyph,
+} from './labels.js';
 import { isRideMode } from './model.js';
 import type {
   TransitCommuteDirection,
@@ -100,6 +107,15 @@ export interface TransitWidgetLeg {
   /** `"280"`, `"R14"` — what is on the front of the vehicle. */
   line: string;
   mode: TransitMode;
+  /**
+   * The mode's glyph, rendered here rather than by the client.
+   *
+   * Both panels drew one from a table of their own and the widget drew none,
+   * which is not a styling difference but a missing board: Kotlin formats
+   * nothing, so a glyph the backend does not send is a glyph the home screen
+   * cannot have. {@link transitModeGlyph} is now the one table all three read.
+   */
+  icon: string;
   /** `"07:12 → 07:30"` — this vehicle's own scheduled window. */
   window: string;
   /** `"280 07:12 → 07:30"` — the leg on one line, for a surface with one to give it. */
@@ -112,6 +128,17 @@ export interface TransitWidgetLeg {
    * the number that decides whether the journey holds together.
    */
   wait: string | null;
+  /**
+   * Where this vehicle leaves from: `"plat. 3"`, or null at a stop with no
+   * platform to name.
+   *
+   * Per leg, because a row-level platform is the *first* ride's and only the
+   * first ride's — which on a bus-then-train commute is a bus stop, while the
+   * number the traveller actually needs is the train's platform at the change.
+   * The same journey read the other way round starts on the train and did show
+   * it, so the widget named a platform on the way home and not on the way out.
+   */
+  quay: string | null;
   /** What this vehicle is — the delayed half of a journey is the half that looks it. */
   state: CommuteServiceState;
 }
@@ -132,7 +159,25 @@ export interface TransitWidgetRow {
   time: string;
   /** The live estimate when it differs: `"07:16"`, else null. */
   expected: string | null;
-  /** `"+6"` / `"-2"` — the correction against the timetable, or null when there is none. */
+  /**
+   * The live estimate as a board states it — `"07:16 est."` — or null when
+   * there is nothing to correct.
+   *
+   * {@link expected} on its own is a bare time in a row that already holds two,
+   * and a widget cannot afford a column the reader has to work out. This is the
+   * panel's own phrasing (`commuteEstimateLabel`), so the correction reads the
+   * same on the home screen as it does two taps away.
+   */
+  expectedLabel: string | null;
+  /**
+   * `"+6 min"` / `"-2 min"` — the correction against the timetable, or null when
+   * there is none.
+   *
+   * The unit is not padding. This column used to print a bare `"+6"` beside a
+   * panel printing `"+6 min"`, in a row that also carries a duration in minutes
+   * and two clock times — so the one number with no unit was the one number
+   * whose meaning had to be guessed at.
+   */
   delayLabel: string | null;
   /** Minutes late against the timetable (negative = early), or null when on time. */
   delayMin: number | null;
@@ -168,7 +213,15 @@ export interface TransitWidgetRow {
    * with one vehicle, whose window is the scan line already.
    */
   legsText: string;
-  /** `"plt 2"`, or null — including for a cancelled departure, which has no platform to go to. */
+  /**
+   * `"plat. 2"`, or null — including for a cancelled departure, which has no
+   * platform to go to.
+   *
+   * The *first* ride's platform, which is all a scan line can hold; the rest of
+   * the journey states its own on {@link TransitWidgetLeg.quay}. Spelled as the
+   * panels spell it (`quayLabel`) rather than as the abbreviation this row
+   * invented — one commute should not have two words for one platform.
+   */
   platform: string | null;
   /**
    * The word for a row whose state needs one — `"Cancelled"` — and null for
@@ -304,22 +357,25 @@ function widgetRow({
   lines: string;
   changes: string | null;
   legs: TransitWidgetLeg[];
-  quay: string | undefined;
+  quay: string | null;
   realtime: boolean;
   predictionInaccurate: boolean;
   cancelled: boolean;
   note: string | null;
 }): TransitWidgetRow {
   const delayMin = cancelled ? null : delayMinutes(aimedMs, whenMs, realtime);
-  const delayLabel = delayMin === null ? null : `${delayMin > 0 ? '+' : ''}${delayMin}`;
+  const delayLabel = delayMin === null ? null : clockDelayLabel(delayMin);
   const time = norwayClock(aimedMs);
+  const expected = delayLabel === null ? null : norwayClock(whenMs);
   // A cancelled departure has no platform to walk to.
-  const platform = !cancelled && quay ? `plt ${quay}` : null;
+  const platform = cancelled ? null : platformLabel(quay);
   const statusLabel = cancelled ? COMMUTE_STATE_LABEL.cancelled : null;
   // The scan line the board leads with, as far as one widget row can carry it:
-  // "07:10 (+6) → 08:14". The correction rides *with* the time rather than
-  // replacing it, and the arrival is part of the same clause because
-  // "07:10 · → 08:14" reads to a screen reader as two unrelated facts.
+  // "07:10 (+6 min) → 08:14". The correction rides *with* the time rather than
+  // replacing it — and inside brackets against it, because a "+6" floating
+  // after the arrival is a correction with two candidate times to belong to —
+  // and the arrival is part of the same clause because "07:10 · → 08:14" reads
+  // to a screen reader as two unrelated facts.
   const head =
     (delayLabel === null ? time : `${time} (${delayLabel})`) + (arrival ? ` → ${arrival}` : '');
   // The strip in reading order, without the ⇄ the clients draw: a glyph a
@@ -332,7 +388,8 @@ function widgetRow({
   return {
     whenMs,
     time,
-    expected: delayLabel === null ? null : norwayClock(whenMs),
+    expected,
+    expectedLabel: expected === null ? null : expectedTimeLabel(expected),
     delayLabel,
     delayMin,
     arrival,
@@ -372,7 +429,10 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
     aimedMs: ride?.aimedStartMs ?? trip.startMs,
     arrival: journey.arrival.aimed,
     duration: journey.duration,
-    lines: journey.rides.length > 0 ? journey.rides.map((entry) => entry.line).join(' → ') : 'walk',
+    lines:
+      journey.rides.length > 0
+        ? journey.rides.map((entry) => `${transitModeGlyph(entry.mode)} ${entry.line}`).join(' → ')
+        : 'walk',
     changes:
       journey.connections.length > 0
         ? journey.connections.map((change) => change.chip).join(' · ')
@@ -385,14 +445,19 @@ export function tripWidgetRow(trip: TransitTrip, nowMs: number): TransitWidgetRo
       return {
         line: entry.line,
         mode: entry.mode,
+        icon: transitModeGlyph(entry.mode),
         window: entry.window,
-        text: `${entry.line} ${entry.window}`,
+        text: `${transitModeGlyph(entry.mode)} ${entry.line} ${entry.window}`,
         change: change?.chip ?? null,
         wait: change?.label ?? null,
+        // Where this vehicle is boarded, not where the journey started: the
+        // train's platform at the change is the number a traveller already on
+        // the bus is looking for, and the only one nothing else on the row says.
+        quay: entry.fromQuay,
         state: entry.state,
       };
     }),
-    quay: ride?.from.quay?.publicCode,
+    quay: ride?.from.quay?.publicCode ?? null,
     realtime,
     predictionInaccurate: ride?.startPredictionInaccurate === true,
     // A planned journey carries no cancellation flag — the planner simply stops
@@ -420,10 +485,10 @@ export function departureWidgetRow(departure: TransitDeparture): TransitWidgetRo
     // journey's shape around a departure's facts.
     arrival: null,
     duration: null,
-    lines: `${departure.line.publicCode} → ${departure.destination}`,
+    lines: `${transitModeGlyph(departure.mode)} ${departure.line.publicCode} → ${departure.destination}`,
     changes: null,
     legs: [],
-    quay: departure.quay.publicCode,
+    quay: departure.quay.publicCode ?? null,
     realtime: departure.realtime,
     predictionInaccurate: departure.predictionInaccurate === true,
     cancelled: departure.cancelled,

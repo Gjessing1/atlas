@@ -10,11 +10,11 @@ import {
 import {
   commuteEstimateLabel,
   liveTimetableLabel,
+  transitModeGlyph,
   type CommuteBoardRow,
   type CommuteDisruption,
   type CommuteJourney,
   type CommuteServiceState,
-  type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { Fragment, useEffect, useState } from 'react';
@@ -45,21 +45,14 @@ import { theme } from './theme';
  * disagree about when the 08:41 leaves.
  */
 
-/** One glyph per mode. The word is in `modeLabel`; this is what you see first. */
-const MODE_GLYPH: Partial<Record<TransitMode, string>> = {
-  bus: '🚌',
-  coach: '🚌',
-  rail: '🚆',
-  metro: '🚇',
-  tram: '🚊',
-  water: '⛴️',
-  air: '✈️',
-  cableway: '🚡',
-  funicular: '🚞',
-  foot: '🚶',
-};
-
-const glyph = (mode: TransitMode) => MODE_GLYPH[mode] ?? '•';
+/**
+ * One glyph per mode — from `@atlas/transit`, so the widget can have them too.
+ *
+ * See the note in the browser panel: this table and its twin there were the
+ * reason the home-screen widget, whose rows the backend renders, had no icons
+ * at all.
+ */
+const glyph = transitModeGlyph;
 
 /**
  * A colour comes from what a service *is* — never from where it sits in a list.

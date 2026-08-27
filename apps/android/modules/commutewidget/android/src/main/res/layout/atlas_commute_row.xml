@@ -20,8 +20,11 @@
 
   There is no countdown. It restated the departure time, it was the widest
   column on the line, and it was the one part of a row that went wrong just by
-  being looked at a minute later. `atlas_row_status` stands where it did, for the
-  one thing a time cannot say about itself: "Cancelled".
+  being looked at a minute later. `atlas_row_status` stands where it did, for
+  the one thing a time cannot say about itself — "Cancelled" — and, on an
+  instance wide enough to hold it, for the panel's own phrasing of a correction:
+  "08:47 est.". The two never collide: a cancelled departure has no delay to
+  state, and a delayed one has not been cancelled.
 
   Colour is set per row from the row's `state`, and per leg from the leg's own —
   the delayed half of a journey should be the half that looks delayed.
@@ -50,6 +53,23 @@
       android:textSize="14sp"
       android:textStyle="bold" />
     <!--
+      Immediately after the time it corrects, and before the arrow.
+
+      It used to sit *after* the arrival, so a delayed journey read
+      "08:41 → 09:29 +6" — a correction with two candidate times to belong to,
+      and the reader's eye picks the nearer one. Which is the wrong one: the
+      arrival is scheduled, and it is the departure that is running late.
+    -->
+    <TextView
+      android:id="@+id/atlas_row_delay"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="4dp"
+      android:maxLines="1"
+      android:textColor="@color/atlas_widget_warn"
+      android:textSize="11sp"
+      android:textStyle="bold" />
+    <!--
       The arrow is drawn by the layout, not composed in Kotlin: every string in
       this widget comes from @atlas/transit ready to paint, and "→ " prepended
       here would be the thin end of a second set of labels.
@@ -71,15 +91,6 @@
       android:maxLines="1"
       android:textColor="@color/atlas_widget_muted"
       android:textSize="12sp"
-      android:textStyle="bold" />
-    <TextView
-      android:id="@+id/atlas_row_delay"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_marginStart="4dp"
-      android:maxLines="1"
-      android:textColor="@color/atlas_widget_warn"
-      android:textSize="11sp"
       android:textStyle="bold" />
     <TextView
       android:id="@+id/atlas_row_lines_inline"

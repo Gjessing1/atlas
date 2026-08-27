@@ -12,8 +12,16 @@
  * itself about whether a bus must be booked leaves someone at a rural stop.
  *
  * Everything here is a pure function of the trip model: no React, no styling,
- * no platform. The apps keep the glyphs and the colours, which genuinely do
- * differ (emoji vs. vector icons, CSS classes vs. style objects).
+ * no platform. The apps keep the colours, which genuinely do differ (CSS
+ * classes vs. style objects).
+ *
+ * The **glyphs** used to be kept by the apps too, on the same reasoning, and
+ * that reasoning had a hole in it: a third surface renders here. The home-screen
+ * widget's rows are built on the backend and painted by Kotlin that formats
+ * nothing, so a glyph living in `CommutePanel.tsx` and `CommuteSheet.tsx` could
+ * reach two of the three boards. The widget went without icons entirely while
+ * both panels had them — the same divergence a byte-identical copy always ends
+ * in, arriving by omission rather than by drift.
  *
  * **Clock times are Norwegian wall-clock times** (`norwayClock`), not the
  * device's — ROADMAP §6.3's "format all transit times consistently in Norway's
@@ -61,6 +69,37 @@ export const TRANSIT_MODE_LABEL: Record<TransitMode, string> = {
 };
 
 /**
+ * One glyph per mode — what a reader sees before they read anything.
+ *
+ * Beside {@link TRANSIT_MODE_LABEL} rather than in either board, because there
+ * are three boards: the browser panel, the Android sheet, and the home-screen
+ * widget whose rows are rendered on the backend. Only the first two could hold
+ * a copy, which is exactly how the widget came to be the one board with no
+ * icons on it.
+ *
+ * `unknown` gets a neutral dot rather than a guessed vehicle: naming a mode the
+ * feed did not name is worse than admitting it.
+ */
+export const TRANSIT_MODE_GLYPH: Record<TransitMode, string> = {
+  foot: '🚶',
+  bus: '🚌',
+  coach: '🚌',
+  tram: '🚊',
+  metro: '🚇',
+  rail: '🚆',
+  water: '⛴️',
+  air: '✈️',
+  funicular: '🚞',
+  cableway: '🚡',
+  unknown: '•',
+};
+
+/** The glyph for a mode, including one the feed did not name. */
+export function transitModeGlyph(mode: TransitMode): string {
+  return TRANSIT_MODE_GLYPH[mode] ?? TRANSIT_MODE_GLYPH.unknown;
+}
+
+/**
  * A delay worth painting: under a minute is timetable noise, not news. Shared
  * because a board that flags a 40-second delay on one platform and not the
  * other is reporting the same vehicle as both late and on time.
@@ -89,6 +128,36 @@ export function delayLabel(deltaMs: number): string {
  */
 export function clockDelayMinutes(aimedMs: number, expectedMs: number): number {
   return Math.floor(expectedMs / 60_000) - Math.floor(aimedMs / 60_000);
+}
+
+/**
+ * A clock-truncated correction, in words: `"+3 min"`, `"-2 min"`.
+ *
+ * Takes the minutes rather than the millisecond delta, because the number has
+ * already been decided by {@link clockDelayMinutes} and deciding it twice is how
+ * "18:59 (+3)" ended up beside an estimate of 19:01. This function only supplies
+ * the sign and the unit — and it supplies them to every board, which is the
+ * point: the widget printed a bare "+6" beside a panel that printed "+6 min",
+ * so the shortest row in the app was the one that never said what it counted.
+ */
+export function clockDelayLabel(minutes: number): string {
+  return `${minutes > 0 ? '+' : ''}${minutes} min`;
+}
+
+/**
+ * The corrected time, marked as a prediction: `"08:47 est."`.
+ *
+ * The "est." is not decoration — it is the difference between a time the
+ * operator promised and one a feed is guessing at, and dropping it turns an
+ * estimate into a timetable.
+ */
+export function expectedTimeLabel(expected: string): string {
+  return `${expected} est.`;
+}
+
+/** `"plat. 3"`, or null where there is no platform to name. */
+export function platformLabel(code: string | null | undefined): string | null {
+  return code ? `plat. ${code}` : null;
 }
 
 /** How a time reads against its timetable: as printed, or corrected late/early. */
@@ -148,7 +217,7 @@ export function legTimeParts(time: {
   return {
     aimed,
     expected,
-    delay: `${minutes > 0 ? '+' : ''}${minutes} min`,
+    delay: clockDelayLabel(minutes),
     tone: minutes > 0 ? 'late' : 'early',
     confidence,
     confidenceLabel,
@@ -157,8 +226,7 @@ export function legTimeParts(time: {
 
 /** The platform/track/stand as the sign says it — "plat. 3" — or null when the stop has none. */
 export function quayLabel(place: TransitPlace): string | null {
-  const code = place.quay?.publicCode;
-  return code ? `plat. ${code}` : null;
+  return platformLabel(place.quay?.publicCode);
 }
 
 /** The mark that leads a disruption well: a warning is not an aside. */

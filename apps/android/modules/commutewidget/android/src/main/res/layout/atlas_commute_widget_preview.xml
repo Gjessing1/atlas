@@ -11,6 +11,12 @@
   Sample rows, not live ones: one delayed two-leg journey with its change named,
   and one cancelled departure — because those are what the widget is *for*, and
   the legs are what someone deciding whether to place it is choosing between.
+
+  Kept in step with `atlas_commute_row` and `atlas_commute_leg` by hand, since a
+  picture that has drifted from the thing it pictures is worse than no picture:
+  the correction sits beside the time it corrects and states its unit, the legs
+  carry their mode glyph and the train names its platform, and a rule separates
+  one journey from the next.
 -->
 <LinearLayout
   xmlns:android="http://schemas.android.com/apk/res/android"
@@ -98,6 +104,14 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="4dp"
+        android:text="@string/atlas_commute_widget_preview_delay_1"
+        android:textColor="@color/atlas_widget_warn"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
         android:text="@string/atlas_commute_widget_to"
         android:textColor="@color/atlas_widget_muted"
         android:textSize="11sp" />
@@ -110,17 +124,17 @@
         android:textSize="12sp"
         android:textStyle="bold" />
       <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="4dp"
-        android:text="@string/atlas_commute_widget_preview_delay_1"
-        android:textColor="@color/atlas_widget_warn"
-        android:textSize="11sp"
-        android:textStyle="bold" />
-      <TextView
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1" />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:text="@string/atlas_commute_widget_preview_expected_1"
+        android:textColor="@color/atlas_widget_warn"
+        android:textSize="11sp"
+        android:textStyle="bold" />
       <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -146,6 +160,13 @@
       <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="3dp"
+        android:text="@string/atlas_commute_widget_preview_icon_1a"
+        android:textColor="@color/atlas_widget_muted"
+        android:textSize="10sp" />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:text="@string/atlas_commute_widget_preview_leg_1a"
         android:textColor="@color/atlas_widget_text"
         android:textSize="11sp"
@@ -168,6 +189,13 @@
       <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="3dp"
+        android:text="@string/atlas_commute_widget_preview_icon_1b"
+        android:textColor="@color/atlas_widget_muted"
+        android:textSize="10sp" />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:text="@string/atlas_commute_widget_preview_leg_1b"
         android:textColor="@color/atlas_widget_text"
         android:textSize="11sp"
@@ -180,6 +208,14 @@
         android:text="@string/atlas_commute_widget_preview_window_1b"
         android:textColor="@color/atlas_widget_muted"
         android:textSize="11sp" />
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="5dp"
+        android:text="@string/atlas_commute_widget_preview_quay_1b"
+        android:textColor="@color/atlas_widget_accent"
+        android:textSize="10sp"
+        android:textStyle="bold" />
       <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -199,6 +235,18 @@
         android:textSize="10sp" />
     </LinearLayout>
   </LinearLayout>
+
+  <!--
+    The hairline the real board draws between two journeys. A FrameLayout, not a
+    View: RemoteViews admits only @RemoteView classes and android.view.View is
+    not one — see atlas_commute_divider.
+  -->
+  <FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="1dp"
+    android:layout_marginTop="5dp"
+    android:layout_marginBottom="1dp"
+    android:background="@color/atlas_widget_divider" />
 
   <LinearLayout
     android:layout_width="match_parent"
@@ -237,6 +285,13 @@
         One vehicle, so it rides the scan line rather than spending a line of
         its own: its window is the scan line's two times already.
       -->
+      <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="3dp"
+        android:text="@string/atlas_commute_widget_preview_icon_2a"
+        android:textColor="@color/atlas_widget_muted"
+        android:textSize="10sp" />
       <TextView
         android:layout_width="0dp"
         android:layout_height="wrap_content"

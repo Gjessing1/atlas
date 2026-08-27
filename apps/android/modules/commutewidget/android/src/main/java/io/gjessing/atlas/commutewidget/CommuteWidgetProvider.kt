@@ -131,6 +131,18 @@ class CommuteWidgetProvider : AppWidgetProvider() {
     private const val LEG_DP = 14
 
     /**
+     * The hairline between two journeys, plus its margins — 1dp of rule and 6dp
+     * of air (`atlas_commute_divider`).
+     *
+     * Charged to every row rather than to the gaps, which over-budgets by one
+     * divider: `rowCapacity` divides a height by a per-row price, and the price
+     * is where a separator has to be paid for. Erring high costs a row on an
+     * instance sitting exactly on the boundary; erring low clips the last row it
+     * promised, which is the failure a measured layout exists to avoid.
+     */
+    private const val DIVIDER_DP = 7
+
+    /**
      * The most leg lines a row may spend, however tall the instance.
      *
      * Not a layout limit — a four-leg journey is drawn on four lines when four
@@ -289,10 +301,10 @@ class CommuteWidgetProvider : AppWidgetProvider() {
      */
     private fun rowPlan(heightDp: Int, blocks: Int, legs: Int): Pair<Int, Int> {
       for (lines in legs.coerceAtMost(MAX_LEG_LINES) downTo 1) {
-        val rows = rowCapacity(heightDp, blocks, ROW_DP + lines * LEG_DP)
+        val rows = rowCapacity(heightDp, blocks, ROW_DP + DIVIDER_DP + lines * LEG_DP)
         if (rows >= MIN_DETAILED_ROWS) return Pair(lines, rows)
       }
-      return Pair(0, rowCapacity(heightDp, blocks, ROW_DP))
+      return Pair(0, rowCapacity(heightDp, blocks, ROW_DP + DIVIDER_DP))
     }
 
     /** Rows that fit in `heightDp` once the header, padding and headings are paid for. */
@@ -403,6 +415,17 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         val shown = rows.length().coerceAtMost(perDirection)
         for (index in 0 until shown) {
           val row = rows.optJSONObject(index) ?: continue
+          // Between journeys, not above the first one: a block that opens on a
+          // rule looks like it is continuing something. Two dp of padding was
+          // enough while a row was one line, and stopped being enough the moment
+          // a row grew a leg strip — "🚆 R14 07:39 → 08:14" directly above the
+          // next departure's time reads as belonging to it.
+          if (index > 0) {
+            views.addView(
+              R.id.atlas_commute_body,
+              RemoteViews(context.packageName, R.layout.atlas_commute_divider),
+            )
+          }
           views.addView(R.id.atlas_commute_body, rowViews(context, res, row, widthDp, legLines))
         }
         // A direction with nothing to show says why, instead of collapsing to an
@@ -584,9 +607,18 @@ class CommuteWidgetProvider : AppWidgetProvider() {
         )
       }
 
-      // The one thing a time cannot say about itself. Everything else the old
-      // countdown occupied this column with is already on the line beside it.
-      setText(views, R.id.atlas_row_status, row.string("statusLabel"))
+      // The one thing a time cannot say about itself — "Cancelled" — and, where
+      // there is width for it, the panel's own phrasing of the correction beside
+      // the time: "08:47 est.". A bare "+6 min" says how far off the timetable
+      // is without ever saying what to turn up for, which is the question.
+      //
+      // The two cannot collide: a cancelled departure has no delay to state and
+      // a delayed one has not been cancelled, so the column stays single-valued
+      // and `color` stays the row's own state colour for whichever it holds.
+      val status = row.string("statusLabel").ifBlank {
+        if (widthDp < WIDE_DP) "" else row.string("expectedLabel")
+      }
+      setText(views, R.id.atlas_row_status, status)
       views.setTextColor(R.id.atlas_row_status, color)
 
       val legs = row.optJSONArray("legs") ?: JSONArray()
@@ -666,9 +698,22 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       val views = RemoteViews(context.packageName, R.layout.atlas_commute_leg)
       val state = leg.string("state")
       val cancelled = state == "cancelled"
+      // The glyph is rendered upstream like every other string here; Kotlin owns
+      // no table of its own, which is exactly why this widget could go without
+      // icons while both panels had them.
+      setText(views, R.id.atlas_leg_icon, leg.string("icon"))
       setText(views, R.id.atlas_leg_line, leg.string("line"))
       views.setTextColor(R.id.atlas_leg_line, legColor(res, state))
       setText(views, R.id.atlas_leg_window, leg.string("window"))
+      // Which platform this vehicle leaves from — dropped on a narrow instance
+      // on the same threshold as the row's own, and for the same reason: below
+      // it the vehicles matter more than the quay. A cancelled leg has no
+      // platform to stand on.
+      setText(
+        views,
+        R.id.atlas_leg_quay,
+        if (cancelled || widthDp < NARROW_DP) "" else leg.string("quay"),
+      )
       // The stop is worth naming when there is width for it and worth dropping
       // before the number is: "9 min" still tells you whether the change holds.
       // Measured against the layout rather than guessed — the line code, the

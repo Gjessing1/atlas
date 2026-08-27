@@ -952,7 +952,7 @@ describe('POST /api/transit/widget', () => {
     expect(board.route).toBe('Engelsrud');
     // A stop board row is a departure, not a journey: no arrival, no legs, and
     // nothing in it that is only true for the minute it was rendered in.
-    expect(board.directions[0].rows[0].text).toBe('07:22 · 280 → Dikemark · plt 1');
+    expect(board.directions[0].rows[0].text).toBe('07:22 · 🚌 280 → Dikemark · plat. 1');
   });
 
   /**

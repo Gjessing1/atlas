@@ -5,4 +5,5 @@
   <color name="atlas_widget_accent">#FF9CC0FF</color>
   <color name="atlas_widget_warn">#FFFFC078</color>
   <color name="atlas_widget_error">#FFFF9B93</color>
+  <color name="atlas_widget_divider">#26F2F5F9</color>
 </resources>
