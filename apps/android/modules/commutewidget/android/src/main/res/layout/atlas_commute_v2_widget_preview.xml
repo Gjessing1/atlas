@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the widget picker shows for **v2** (`previewLayout`, Android 12+), and
+  what the in-app "Add to home screen" hands the launcher as its pin preview.
+
+  Deliberately not the real layout: `initialLayout` is what a freshly placed
+  widget wears until its first board arrives, and a placed widget showing
+  invented departures would be a lie. This one is only ever a picture.
+
+  It pictures the *mid-journey* case on purpose. Standing at Asker with the train
+  in six minutes is the moment v2 exists for and the one v1 cannot answer — so
+  someone choosing between two widgets with near-identical names in the same
+  picker sees the difference rather than reading it.
+
+  Kept in step with `atlas_commute_v2_widget` and `atlas_commute_v2_row` by hand,
+  since a picture that has drifted from the thing it pictures is worse than no
+  picture.
+-->
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/atlas_commute_widget_background"
+  android:orientation="vertical">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="30dp"
+      android:layout_marginEnd="4dp"
+      android:background="@drawable/atlas_v2_chip_on"
+      android:gravity="center"
+      android:letterSpacing="0.04"
+      android:maxLines="1"
+      android:paddingStart="9dp"
+      android:paddingEnd="9dp"
+      android:text="@string/atlas_commute_v2_preview_auto"
+      android:textColor="@color/atlas_widget_accent"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="30dp"
+      android:layout_marginEnd="4dp"
+      android:background="@drawable/atlas_v2_chip_off"
+      android:gravity="center"
+      android:letterSpacing="0.04"
+      android:maxLines="1"
+      android:paddingStart="9dp"
+      android:paddingEnd="9dp"
+      android:text="@string/atlas_commute_v2_preview_out"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="30dp"
+      android:layout_weight="1"
+      android:background="@drawable/atlas_v2_chip_off"
+      android:ellipsize="end"
+      android:gravity="center"
+      android:letterSpacing="0.04"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_home"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+    <ImageView
+      android:layout_width="40dp"
+      android:layout_height="40dp"
+      android:contentDescription="@string/atlas_commute_v2_refresh"
+      android:padding="11dp"
+      android:src="@drawable/atlas_widget_refresh" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="3dp"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginEnd="6dp"
+      android:letterSpacing="0.05"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_phase"
+      android:textColor="@color/atlas_widget_accent"
+      android:textSize="9sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_direction"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="9sp" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_action"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="16sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="8dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_when"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="20sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="3dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_delay"
+      android:textColor="@color/atlas_widget_warn"
+      android:textSize="11sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginEnd="6dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_countdown"
+      android:textColor="@color/atlas_widget_accent"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginEnd="6dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_platform"
+      android:textColor="@color/atlas_widget_accent"
+      android:textSize="11sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_detail"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="11sp" />
+  </LinearLayout>
+
+  <FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="1dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="2dp"
+    android:background="@color/atlas_widget_divider" />
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp">
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row1_time"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="4dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_widget_to"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="2dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row1_arrival"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="11sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="6dp"
+      android:layout_weight="1"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row1_lines"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="11sp" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="5dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row1_duration"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp">
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row2_time"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="13sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="4dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_widget_to"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="2dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row2_arrival"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="11sp"
+      android:textStyle="bold" />
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="6dp"
+      android:layout_weight="1"
+      android:ellipsize="end"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row2_lines"
+      android:textColor="@color/atlas_widget_text"
+      android:textSize="11sp" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="5dp"
+      android:maxLines="1"
+      android:text="@string/atlas_commute_v2_preview_row2_duration"
+      android:textColor="@color/atlas_widget_muted"
+      android:textSize="10sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+
+  <TextView
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:ellipsize="end"
+    android:maxLines="1"
+    android:text="@string/atlas_commute_v2_preview_status"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="9sp" />
+</LinearLayout>

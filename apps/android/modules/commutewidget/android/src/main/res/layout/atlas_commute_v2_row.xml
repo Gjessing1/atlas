@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One journey on the v2 board, and — unlike every row in v1 — a **control**.
+
+  A tap on it is the commitment (§6.5 §2 tier 1): "this is the one I am taking".
+  That is not a new interaction imposed on the reader; it is the decision they
+  already make when they glance at the widget and pick which bus to run for, and
+  it is what buys the whole state ladder without a location permission. Tapping
+  the committed row again releases it, which is §3's "explicit release".
+
+  One line per row on purpose. v2 spends its height on the focus above — the
+  answer — and these rows are the "and if I miss it?" list, where a departure
+  time, an arrival and the vehicles are the whole of what anyone reads. v1's
+  leg-by-leg strip stays v1's: it is the right shape for a widget whose rows
+  *are* the answer.
+
+  `atlas_v2_row_mark` is the committed dot. It leads the row rather than
+  trailing it, because the eye finds the start of a line first and "which one am
+  I on" is the question the mark exists to answer.
+-->
+<LinearLayout
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@+id/atlas_v2_row_root"
+  android:layout_width="match_parent"
+  android:layout_height="wrap_content"
+  android:background="?android:attr/selectableItemBackground"
+  android:baselineAligned="false"
+  android:clickable="true"
+  android:focusable="true"
+  android:gravity="center_vertical"
+  android:orientation="horizontal"
+  android:paddingTop="3dp"
+  android:paddingBottom="3dp">
+  <TextView
+    android:id="@+id/atlas_v2_row_mark"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="4dp"
+    android:maxLines="1"
+    android:text="@string/atlas_commute_v2_committed_mark"
+    android:textColor="@color/atlas_widget_accent"
+    android:textSize="10sp" />
+  <TextView
+    android:id="@+id/atlas_v2_row_time"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_text"
+    android:textSize="13sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_v2_row_delay"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="3dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_warn"
+    android:textSize="10sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_v2_row_arrow"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="4dp"
+    android:maxLines="1"
+    android:text="@string/atlas_commute_widget_to"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp" />
+  <TextView
+    android:id="@+id/atlas_v2_row_arrival"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="2dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="11sp"
+    android:textStyle="bold" />
+  <!--
+    The weighted column, so the vehicles are what shrinks on a narrow instance
+    and the two clock times either side of them never move.
+  -->
+  <TextView
+    android:id="@+id/atlas_v2_row_lines"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="6dp"
+    android:layout_weight="1"
+    android:ellipsize="end"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_text"
+    android:textSize="11sp" />
+  <TextView
+    android:id="@+id/atlas_v2_row_duration"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="5dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp"
+    android:textStyle="bold" />
+  <TextView
+    android:id="@+id/atlas_v2_row_platform"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="5dp"
+    android:maxLines="1"
+    android:textColor="@color/atlas_widget_muted"
+    android:textSize="10sp" />
+</LinearLayout>

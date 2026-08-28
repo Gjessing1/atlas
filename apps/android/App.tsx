@@ -125,7 +125,11 @@ import { useAutoPackUpdate, usePackFreshness } from './src/regions/usePackFreshn
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
-import { configureCommuteWidget } from './src/commuteWidget';
+import {
+  configureCommuteWidget,
+  configureCommuteWidgetV2,
+  reportCommutePlace,
+} from './src/commuteWidget';
 import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
 import { useDirections } from './src/routing/useDirections';
@@ -297,7 +301,12 @@ function AppInner() {
   // the app, so it must never be reset by the app merely starting.
   useEffect(() => {
     if (!commute.ready) return;
+    // Both widgets, from the one saved commute: v1 ("Atlas commute") and v2
+    // ("Atlas commute (live)", ROADMAP §6.5) coexist on the home screen while v2
+    // is being commuted with, and each keeps its own native store — so each is
+    // told separately rather than through one call with a flag.
     void configureCommuteWidget(serverOrigin, commute.query);
+    void configureCommuteWidgetV2(serverOrigin, commute.query);
   }, [commute.query, commute.ready, serverOrigin]);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
@@ -1073,10 +1082,19 @@ function AppInner() {
         center: [cur.coords.longitude, cur.coords.latitude],
         duration: 700,
       });
+      // §6.5 §2's cached coarse fix, written where a fix is already in hand:
+      // this is the app in the foreground with a position the user asked for, so
+      // it costs no extra permission and no extra battery. The v2 widget may use
+      // it to choose AUTO's *presentation* and nothing else — never the journey,
+      // the state or the committed leg — and it is ignored once stale.
+      void reportCommutePlace(commute.query, {
+        lat: cur.coords.latitude,
+        lng: cur.coords.longitude,
+      });
     } catch {
       // Location unavailable — nothing to recentre on.
     }
-  }, [following, resumeFollow]);
+  }, [commute.query, following, resumeFollow]);
 
   const refreshPacks = useCallback(() => {
     void listLocalPacks().then(setPacks);

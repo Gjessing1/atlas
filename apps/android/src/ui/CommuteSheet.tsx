@@ -22,7 +22,9 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 
 import {
   addCommuteWidget,
+  addCommuteWidgetV2,
   commuteWidgetSupport,
+  commuteWidgetV2Support,
   type CommuteWidgetSupport,
 } from '../commuteWidget';
 import { BottomSheet } from './BottomSheet';
@@ -375,40 +377,77 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
 }
 
 /**
- * The way onto the home screen, from inside the app.
+ * The way onto the home screen, from inside the app — for **both** widgets.
  *
  * "Add it from your launcher's widget picker" was the whole of this before,
- * which is an instruction to go and do something somewhere else. Android takes
- * a pin request directly (8.0+), so ask — but only when the launcher actually
+ * which is an instruction to go and do something somewhere else. Android takes a
+ * pin request directly (8.0+), so ask — but only when the launcher actually
  * accepts one: a button that silently does nothing is worse than a sentence.
+ *
+ * Two offers, because two widgets ship (ROADMAP §6.5) and they answer different
+ * questions:
+ *
+ *  - **Atlas commute (v1)** — one board, pinned. The right widget when what you
+ *    want on the home screen is a timetable.
+ *  - **Atlas commute (live) (v2)** — the whole commute on one instance, both
+ *    directions behind a selector, following the leg you are on.
+ *
+ * v2 leads because it is what the section was written for, and v1 stays offered
+ * rather than hidden: it is the fallback and the reference until v2 has survived
+ * real commuting (§7), and hiding a fallback is how you find out too late that
+ * it was the one people wanted.
  */
 function WidgetOffer() {
   const [support, setSupport] = useState<CommuteWidgetSupport | null>(null);
+  const [supportV2, setSupportV2] = useState<CommuteWidgetSupport | null>(null);
   useEffect(() => {
     let alive = true;
     void commuteWidgetSupport().then((next) => {
       if (alive) setSupport(next);
+    });
+    void commuteWidgetV2Support().then((next) => {
+      if (alive) setSupportV2(next);
     });
     return () => {
       alive = false;
     };
   }, []);
   if (!support) return null;
+  // An APK built before v2 answers `pinnable: false, count: 0` for it — the
+  // module simply has no `supportV2` — which is exactly the state that should
+  // hide the offer rather than show a button that cannot work.
+  const v2 = supportV2 ?? { pinnable: false, count: 0 };
   return (
     <View style={styles.widget}>
       <Text style={styles.widgetNote}>
+        {v2.count > 0
+          ? 'Your commute is on the home screen. Tap a journey on the widget to say which one you are taking — it then follows you through the change and tells you what to do next.'
+          : 'This saved board can sit on your home screen: both directions on one widget, following the leg you are on.'}
+      </Text>
+      {v2.pinnable ? (
+        <Pressable
+          style={styles.widgetAdd}
+          onPress={() => void addCommuteWidgetV2()}
+          testID="commute-add-widget-v2"
+        >
+          <Text style={styles.widgetAddText}>
+            {v2.count > 0 ? 'Add another live widget' : 'Add to home screen'}
+          </Text>
+        </Pressable>
+      ) : null}
+      <Text style={styles.widgetNote}>
         {support.count > 0
-          ? 'This saved board also fills your home screen. Tap a widget’s tuning icon to point it at a direction — or at a single leg, for the departures you need once you are already moving.'
-          : 'This saved board can sit on your home screen, with live delays and platforms.'}
+          ? 'The simpler “Atlas commute” widget is also placed. It shows one board — a direction, or a single leg — chosen from its own tuning icon.'
+          : 'Prefer a plain timetable? “Atlas commute” shows one board — a direction, or a single leg — and nothing else.'}
       </Text>
       {support.pinnable ? (
         <Pressable
-          style={styles.widgetAdd}
+          style={styles.widgetAddQuiet}
           onPress={() => void addCommuteWidget()}
           testID="commute-add-widget"
         >
-          <Text style={styles.widgetAddText}>
-            {support.count > 0 ? 'Add another widget' : 'Add to home screen'}
+          <Text style={styles.widgetAddQuietText}>
+            {support.count > 0 ? 'Add another simple widget' : 'Add the simple widget'}
           </Text>
         </Pressable>
       ) : (
@@ -804,4 +843,12 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   widgetAddText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
+  // The v1 offer, deliberately quieter than v2's: both are real choices, and
+  // only one of them is the one this screen is recommending.
+  widgetAddQuiet: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  widgetAddQuietText: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
 });

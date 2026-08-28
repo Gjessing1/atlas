@@ -6,4 +6,6 @@
   <color name="atlas_widget_warn">#FFFFC078</color>
   <color name="atlas_widget_error">#FFFF9B93</color>
   <color name="atlas_widget_divider">#26F2F5F9</color>
+  <!-- The v2 selector's live chip, tinted for a dark home screen. -->
+  <color name="atlas_widget_chip">#332E4C7A</color>
 </resources>

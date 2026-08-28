@@ -5,7 +5,15 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', 'backend/public/**'],
+    // `.livecheck/` holds ad-hoc probes against the real Entur corridor — local
+    // only (gitignored), run by hand against backend/dist, never built or shipped.
+    ignores: [
+      '**/dist/**',
+      '**/build/**',
+      '**/node_modules/**',
+      'backend/public/**',
+      'backend/.livecheck/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

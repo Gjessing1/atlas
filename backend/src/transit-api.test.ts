@@ -1006,6 +1006,141 @@ describe('POST /api/transit/widget', () => {
     expect(res.json().directions[0].label).toBe('Engelsrud → Nationaltheatret');
   });
 
+  /**
+   * ROADMAP §6.5 — the **v2** board, which is a second widget rather than a new
+   * version of the one above. Its request carries a selector and a commitment
+   * where v1's carries only "which board", and those are what these cover.
+   */
+  describe('variant: v2', () => {
+    /**
+     * The shared fixture's journey is dated July 2026, and a commitment
+     * deliberately releases once its journey is over — so a commitment to it
+     * would always be expired, whatever the code did. These tests need a
+     * journey that is happening *now*, which is what this builds: the same two
+     * legs, moved onto the clock the board is rendered against.
+     */
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const DEPARTURE_MS = Math.floor((Date.now() + 20 * 60_000) / 60_000) * 60_000;
+    const ARRIVAL_MS = DEPARTURE_MS + 18 * 60_000;
+    const liveReply = {
+      data: {
+        trip: {
+          tripPatterns: [
+            {
+              duration: 1080,
+              walkDistance: 44,
+              legs: [
+                {
+                  ...enturReply.data.trip.tripPatterns[0]!.legs[1]!,
+                  aimedStartTime: iso(DEPARTURE_MS),
+                  expectedStartTime: iso(DEPARTURE_MS),
+                  aimedEndTime: iso(ARRIVAL_MS),
+                  expectedEndTime: iso(ARRIVAL_MS),
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    it('answers one direction, a selector and a focus', async () => {
+      let calls = 0;
+      respond = () => {
+        calls += 1;
+        return new Response(JSON.stringify(enturReply), { status: 200 });
+      };
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/widget',
+        payload: { kind: 'commute', commute, variant: 'v2', selector: 'outbound' },
+      });
+      expect(res.statusCode).toBe(200);
+      const board = res.json();
+      // The wire says which board this is: a stored one has to be told apart
+      // from a v1 board by the client holding it.
+      expect(board.variant).toBe('v2');
+      // One direction shown is one upstream call — the commitment adds none
+      // when there is nothing committed.
+      expect(calls).toBe(1);
+      expect(board.blocks).toHaveLength(1);
+      expect(board.blocks[0].key).toBe('outbound');
+      expect(board.selector.mode).toBe('outbound');
+      expect(board.selector.options.map((o: { key: string }) => o.key)).toEqual([
+        'auto',
+        'outbound',
+        'inbound',
+      ]);
+      // Next action first: what to do, and what a tap on that row would commit
+      // to.
+      expect(board.focus.action).toContain('R14');
+      expect(board.blocks[0].rows[0].id).toMatch(/^outbound:\d+:R14$/);
+      // Nothing committed, so nothing is claimed about where the traveller is.
+      expect(board.focus.phase).toBeNull();
+      expect(board.commitId).toBeNull();
+    });
+
+    it('re-reads a committed journey around its own departure', async () => {
+      respond = () => new Response(JSON.stringify(liveReply), { status: 200 });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/widget',
+        payload: {
+          kind: 'commute',
+          commute,
+          variant: 'v2',
+          commit: { direction: 'outbound', departureMs: DEPARTURE_MS, line: 'R14' },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const board = res.json();
+      // The commitment is echoed back only because the journey was actually
+      // found in the answer — a withdrawn departure releases it instead.
+      expect(board.commitId).toBe(`outbound:${DEPARTURE_MS}:R14`);
+      // And the row it came from is marked, so the list says which one you are
+      // on rather than making you remember.
+      expect(board.blocks[0].rows[0].committed).toBe(true);
+    });
+
+    it('releases a commitment whose journey is no longer offered', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/widget',
+        payload: {
+          kind: 'commute',
+          commute,
+          variant: 'v2',
+          commit: { direction: 'outbound', departureMs: DEPARTURE_MS, line: '999' },
+        },
+      });
+      expect(res.json().commitId).toBeNull();
+    });
+
+    it('ignores a commitment it cannot read rather than inventing one', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/widget',
+        payload: {
+          kind: 'commute',
+          commute,
+          variant: 'v2',
+          commit: { direction: 'sideways', departureMs: 'soon' },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().commitId).toBeNull();
+    });
+
+    it('draws both directions where AUTO declines to guess', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/widget',
+        payload: { kind: 'commute', commute, variant: 'v2', place: 'interchange' },
+      });
+      expect(res.json().blocks.map((b: { key: string }) => b.key)).toEqual(['outbound', 'inbound']);
+    });
+  });
+
   it('refuses a stop board outside Norway and a commute it cannot read', async () => {
     expect(
       (

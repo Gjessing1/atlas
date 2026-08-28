@@ -162,6 +162,43 @@ export {
   type NorwayTime,
   type TransitWeekday,
 } from './clock.js';
+/**
+ * The **v2** home-screen widget (ROADMAP §6.5) — a second widget beside the one
+ * above, not a replacement for it. See the header of `widget-v2.ts` for which is
+ * which; the short of it is that v1 pins a *board* and v2 pins the *commute*.
+ */
+export {
+  COMMUTE_PHASE_LABEL,
+  commuteCommitHolds,
+  commuteCommitId,
+  commuteCommitKey,
+  commuteCommitQuery,
+  commuteConnectionBreak,
+  commuteDirectionPinReleaseMs,
+  commuteJourneyProgress,
+  commutePlaceAt,
+  commuteSelectorOptions,
+  commuteShortfallLabel,
+  commuteWidgetV2Board,
+  commuteWidgetV2Queries,
+  findCommittedTrip,
+  resolveCommuteV2Directions,
+  type CommuteConnectionBreak,
+  type CommuteJourneyPhase,
+  type CommuteJourneyProgress,
+  type CommutePhaseSource,
+  type TransitWidgetV2Block,
+  type TransitWidgetV2Board,
+  type TransitWidgetV2Commit,
+  type TransitWidgetV2Focus,
+  type TransitWidgetV2Option,
+  type TransitWidgetV2Place,
+  type TransitWidgetV2Resolution,
+  type TransitWidgetV2Row,
+  type TransitWidgetV2Selector,
+  type TransitWidgetV2SelectorState,
+} from './widget-v2.js';
+/** The **v1** home-screen widget — "Atlas commute", one instance per board. */
 export {
   commuteDirectionLabel,
   commuteRefreshAtMs,

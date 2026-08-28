@@ -45,3 +45,7 @@ coverage/
 .vite/
 test-results/
 playwright-report/
+
+# Ad-hoc live probes against the real Entur corridor — throwaway scripts that
+# import backend/dist and hit the network; findings belong in docs, not here.
+backend/.livecheck/

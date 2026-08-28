@@ -223,6 +223,26 @@ export interface TransitLeg {
   startPredictionInaccurate?: boolean;
   /** The same warning for the arrival prediction at the end of this leg. */
   endPredictionInaccurate?: boolean;
+  /**
+   * When the vehicle *actually* left and arrived — the operator's own record of
+   * a departure that has already happened, not a prediction about one that has
+   * not.
+   *
+   * This is the one fact that tells "the bus has gone" apart from "the bus is
+   * two minutes late", and it is published rather than sensed, which is why the
+   * v2 widget's state ladder (ROADMAP §6.5 §2, tier 2) rests on it instead of on
+   * a location permission. Absent until the event happens, and absent for good
+   * on a service with no live feed — every reader must fall back to the clock.
+   *
+   * Measured before it was scoped, as §6.5 asks: past calls at Jernbanetorget on
+   * 2026-08-27 carried it on 20/20 Ruter buses, 9/9 trams and 11/11 metros, and
+   * at Oslo S on 27/28 Vy trains — and a `trip()` asked with a `dateTime` in the
+   * past returns the departed journey with both fields set (the 280 that left
+   * Engelsrud at 22:44:24 and reached Asker at 23:02:00), which is what makes a
+   * committed journey re-readable after it has left.
+   */
+  actualStartMs?: number;
+  actualEndMs?: number;
   from: TransitPlace;
   to: TransitPlace;
   /**

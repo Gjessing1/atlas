@@ -25,4 +25,10 @@
     on the widget anyone is actually reading.
   -->
   <color name="atlas_widget_divider">#1F0F1419</color>
+  <!--
+    The fill behind the v2 widget's live selector chip. A tint of the accent
+    rather than the accent itself: the chip has to be unmistakably the lit one
+    without being louder than the action line under it.
+  -->
+  <color name="atlas_widget_chip">#2415599C</color>
 </resources>

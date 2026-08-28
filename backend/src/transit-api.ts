@@ -6,8 +6,13 @@ import {
   commuteRefreshAtMs,
   commuteSegmentQueries,
   commuteSegmentWidgetBoard,
+  commuteCommitQuery,
   commuteTransitQueries,
+  commuteWidgetV2Board,
+  commuteWidgetV2Queries,
   defaultCommuteDirection,
+  findCommittedTrip,
+  resolveCommuteV2Directions,
   departureWidgetRow,
   emptyDirectionNote,
   filterCommuteResult,
@@ -44,6 +49,9 @@ import type {
   TransitResult,
   TransitWeekday,
   TransitWidgetBoard,
+  TransitWidgetV2Commit,
+  TransitWidgetV2Place,
+  TransitWidgetV2Selector,
 } from '@atlas/transit';
 import type { LayerMeta } from '@atlas/core';
 import type { FastifyInstance } from 'fastify';
@@ -318,6 +326,56 @@ function parseCommuteQuery(body: unknown): { query: TransitCommuteQuery } | { er
         ? { limit: Math.min(Math.max(Math.trunc(raw.limit), 1), 10) }
         : {}),
     },
+  };
+}
+
+// ------------------------------------------------- the v2 widget's request ---
+//
+// ROADMAP §6.5. Everything a v2 instance sends beyond the saved commute is
+// parsed here, defensively and in one place: it arrives from a
+// `SharedPreferences` blob written by an APK that may be older than this
+// backend, so an unrecognised value must degrade to the default rather than
+// 400 a home screen into permanent "Couldn't refresh".
+
+/** The selector's setting. Anything else is AUTO, which is also its default. */
+function parseV2Selector(raw: unknown): TransitWidgetV2Selector {
+  return raw === 'outbound' || raw === 'inbound' ? raw : 'auto';
+}
+
+/**
+ * The cached coarse fix, which may choose AUTO's *presentation* and nothing
+ * else. Absent is the normal case — the widget never asks for a fix of its own,
+ * and the app writes one only when it happens to be in the foreground.
+ */
+function parseV2Place(raw: unknown): TransitWidgetV2Place | null {
+  return raw === 'home' || raw === 'interchange' || raw === 'away' || raw === 'unknown'
+    ? raw
+    : null;
+}
+
+/**
+ * The journey the user tapped — §6.5 §2 tier 1.
+ *
+ * Rejected rather than repaired when any part is missing: a half-read
+ * commitment would be a commitment to *something*, and an invented one is the
+ * single failure mode §3 calls out as having no visible cause.
+ */
+function parseV2Commit(raw: unknown): TransitWidgetV2Commit | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const entry = raw as Record<string, unknown>;
+  const direction = entry.direction;
+  const departureMs = entry.departureMs;
+  const line = entry.line;
+  if (direction !== 'outbound' && direction !== 'inbound') return null;
+  if (typeof departureMs !== 'number' || !Number.isFinite(departureMs)) return null;
+  if (typeof line !== 'string' || !line) return null;
+  return {
+    direction,
+    departureMs,
+    line: line.slice(0, 20),
+    ...(typeof entry.committedAtMs === 'number' && Number.isFinite(entry.committedAtMs)
+      ? { committedAtMs: entry.committedAtMs }
+      : {}),
   };
 }
 
@@ -849,6 +907,83 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
 
     const parsed = parseCommuteQuery(body.commute);
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+
+    // The **v2** board — ROADMAP §6.5, and a second widget rather than a new
+    // version of the one below it. Its whole difference is that the *commute*
+    // is the unit: the instance carries both directions behind a selector and
+    // shows the part of the journey the traveller is in, which is why the
+    // request carries a commitment and a selector where v1 carries only
+    // "which board".
+    if (body.variant === 'v2') {
+      const selector = parseV2Selector(body.selector);
+      const commit = parseV2Commit(body.commit);
+      const resolution = resolveCommuteV2Directions({
+        query: parsed.query,
+        selector,
+        pinnedAtMs: typeof body.pinnedAtMs === 'number' ? body.pinnedAtMs : 0,
+        commit,
+        place: parseV2Place(body.place),
+        nowMs,
+      });
+      // Almost the v1 questions, with one v2 difference the package owns: the
+      // direction you are committed to is asked *from now*, because a traveller
+      // mid-journey needs "what leaves next", not the saved 07:00 departure
+      // resolved to tomorrow.
+      const queries = commuteWidgetV2Queries({
+        query: parsed.query,
+        directions: resolution.directions,
+        commit,
+        nowMs,
+        maxRows,
+      });
+      try {
+        // The committed journey is asked for *separately*, around its own
+        // departure: a board asked "from now" cannot contain a journey that has
+        // already left, and that same call is what brings back the published
+        // record the §6.5 §2 ladder's tier 2 rests on.
+        const [committed, answers] = await Promise.all([
+          commit
+            ? askDirection(commuteCommitQuery(parsed.query, commit), parsed.query.filter)
+            : Promise.resolve(null),
+          Promise.all(
+            queries.map(async ({ key, query }) => ({
+              key,
+              answer: await askDirection(query, parsed.query.filter),
+            })),
+          ),
+        ]);
+        const failed = answers.find((entry) => !entry.answer.ok);
+        if (failed && !failed.answer.ok) {
+          request.log.error({ status: failed.answer.status }, 'entur widget v2 error');
+          status?.record(TRANSIT_PROBE, false, `HTTP ${failed.answer.status}`);
+          return reply.code(502).send({ error: 'commute board unavailable' });
+        }
+        status?.record(TRANSIT_PROBE, true);
+        reply.header('cache-control', 'private, max-age=15');
+        return commuteWidgetV2Board({
+          query: parsed.query,
+          results: answers.flatMap(({ key, answer }) =>
+            answer.ok ? [{ key, result: answer.result, emptyReason: answer.emptyReason }] : [],
+          ),
+          resolution,
+          selector,
+          commit,
+          // A commitment whose journey the upstream no longer offers comes back
+          // null, and the board releases it rather than freezing on a plan
+          // nothing will run. The failure of that one extra call is treated the
+          // same way, deliberately: the timetable is still worth showing.
+          committedTrip:
+            commit && committed?.ok ? findCommittedTrip(committed.result, commit, nowMs) : null,
+          nowMs,
+          maxRows,
+        });
+      } catch (err) {
+        request.log.error({ err }, 'entur widget v2 unreachable');
+        status?.record(TRANSIT_PROBE, false, 'unreachable');
+        return reply.code(502).send({ error: 'commute board unavailable' });
+      }
+    }
+
     const requested = body.direction;
 
     // A widget pointed at one *hop* of the corridor rather than at a whole

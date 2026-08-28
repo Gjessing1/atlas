@@ -48,4 +48,53 @@
   <string name="atlas_commute_widget_preview_leg_2a">280</string>
   <string name="atlas_commute_widget_preview_window_2a">07:34 → 07:56</string>
   <string name="atlas_commute_widget_preview_note">Buss for tog Asker–Sandvika</string>
+
+  <!--
+    ============================ the v2 widget =============================
+    ROADMAP §6.5. A second widget beside the one above, not a new version of it:
+    v1 pins a *board* and stays the fallback; v2 pins the *commute* — both
+    directions behind a compact selector, and content that follows where you are
+    in the journey. The name says so in the launcher's picker, where the two sit
+    next to each other and the reader has to be able to tell them apart.
+
+    Same rule as above: these are words the widget owns about its *own* state.
+    Every time, delay, platform, action and phase comes from @atlas/transit ready
+    to paint.
+  -->
+  <string name="atlas_commute_v2_name">Atlas commute (live)</string>
+  <string name="atlas_commute_v2_description">Your whole commute on one widget: both directions, and the leg you are on</string>
+
+  <string name="atlas_commute_v2_refresh">Refresh, and take a fresh look at where I am</string>
+  <string name="atlas_commute_v2_open">Open the commute board in Atlas</string>
+
+  <!-- The dot that marks the journey you tapped. -->
+  <string name="atlas_commute_v2_committed_mark">●</string>
+
+  <string name="atlas_commute_v2_setup_status">Open Atlas to set up your commute</string>
+  <string name="atlas_commute_v2_setup_action">Set up your commute</string>
+  <string name="atlas_commute_v2_refreshing">Refreshing…</string>
+  <string name="atlas_commute_v2_failed">Couldn\'t refresh — tap ↻ to try again</string>
+  <!-- %1$s is the board's own "checked 07:04", rendered by @atlas/transit. -->
+  <string name="atlas_commute_v2_stale">%1$s · out of date</string>
+
+  <string name="atlas_commute_v2_preview_auto">AUTO</string>
+  <string name="atlas_commute_v2_preview_out">TO OSLO</string>
+  <string name="atlas_commute_v2_preview_home">TO HOME</string>
+  <string name="atlas_commute_v2_preview_phase">ON BOARD</string>
+  <string name="atlas_commute_v2_preview_direction">Engelsrud → Nationaltheatret</string>
+  <string name="atlas_commute_v2_preview_action">Change to 🚆 R14</string>
+  <string name="atlas_commute_v2_preview_when">07:41</string>
+  <string name="atlas_commute_v2_preview_delay">+2 min</string>
+  <string name="atlas_commute_v2_preview_countdown">in 6 min</string>
+  <string name="atlas_commute_v2_preview_platform">plat. 3</string>
+  <string name="atlas_commute_v2_preview_detail">9 min · arrives 08:14 · 1 h 4 min</string>
+  <string name="atlas_commute_v2_preview_row1_time">07:34</string>
+  <string name="atlas_commute_v2_preview_row1_arrival">08:38</string>
+  <string name="atlas_commute_v2_preview_row1_lines">🚌 280 → 🚆 R14</string>
+  <string name="atlas_commute_v2_preview_row1_duration">1 h 4 min</string>
+  <string name="atlas_commute_v2_preview_row2_time">07:58</string>
+  <string name="atlas_commute_v2_preview_row2_arrival">09:02</string>
+  <string name="atlas_commute_v2_preview_row2_lines">🚌 280 → 🚆 L1</string>
+  <string name="atlas_commute_v2_preview_row2_duration">1 h 4 min</string>
+  <string name="atlas_commute_v2_preview_status">Entur live · checked 07:35</string>
 </resources>

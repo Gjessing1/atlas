@@ -51,8 +51,8 @@ export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[
     pointsOnLink{points}
     line{ id publicCode name presentation{colour textColour} }
     authority{name}
-    fromEstimatedCall{ predictionInaccurate cancellation destinationDisplay{frontText} }
-    toEstimatedCall{ predictionInaccurate }
+    fromEstimatedCall{ predictionInaccurate cancellation actualDepartureTime destinationDisplay{frontText} }
+    toEstimatedCall{ predictionInaccurate actualArrivalTime }
     fromPlace{ name latitude longitude quay{id publicCode name} }
     toPlace{ name latitude longitude quay{id publicCode name} }
     intermediateEstimatedCalls{ aimedDepartureTime expectedDepartureTime quay{id publicCode name latitude longitude} }
@@ -283,6 +283,20 @@ function toMs(value: unknown, fallback = 0): number {
   if (typeof value !== 'string') return fallback;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : fallback;
+}
+
+/**
+ * A timestamp that is genuinely allowed to be absent — `actualDepartureTime` on
+ * a departure that has not happened yet.
+ *
+ * Separate from {@link toMs} because that one falls back: "no live update means
+ * on time as far as anyone knows" is right for `expectedStartTime` and wrong
+ * here, where the whole meaning of the field is that the event is on the record.
+ */
+function toOptionalMs(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -520,6 +534,8 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
   const fromCall = wire.fromEstimatedCall as Record<string, unknown> | null;
   const toCall = wire.toEstimatedCall as Record<string, unknown> | null;
   const headsign = (fromCall?.destinationDisplay as { frontText?: unknown } | null)?.frontText;
+  const actualStartMs = toOptionalMs(fromCall?.actualDepartureTime);
+  const actualEndMs = toOptionalMs(toCall?.actualArrivalTime);
   if (line && typeof headsign === 'string' && headsign.trim()) line.headsign = headsign;
 
   const calls = Array.isArray(wire.intermediateEstimatedCalls)
@@ -541,6 +557,12 @@ function toLeg(wire: Record<string, unknown>): TransitLeg {
     realtime: wire.realtime === true,
     startPredictionInaccurate: fromCall?.predictionInaccurate === true,
     endPredictionInaccurate: toCall?.predictionInaccurate === true,
+    // What the operator *recorded*, not what they predict — see
+    // `TransitLeg.actualStartMs`. Absent until the event has happened, so it is
+    // spread in only when the wire actually carried one: a `0` here would read
+    // as "left at the epoch" to every ladder that tests for presence.
+    ...(actualStartMs !== null ? { actualStartMs } : {}),
+    ...(actualEndMs !== null ? { actualEndMs } : {}),
     // Both stored only when true, so no consumer has to tell "false" apart from
     // "the field was not in this build's query".
     ...(fromCall?.cancellation === true ? { cancelled: true } : {}),

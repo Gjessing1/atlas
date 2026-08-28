@@ -836,6 +836,23 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift. An instance shows a direction or — ROADMAP §6.4 §5 — one hop of the corridor, whose legs come from the same commuteSegments the Departures tab draws.',
   },
 
+  {
+    id: 'planner-commute-widget-v2',
+    surface: 'planner',
+    capability: 'The whole commute on one home-screen widget, following the leg you are on',
+    web: null,
+    android: {
+      file: 'apps/android/modules/commutewidget/android/src/main/java/io/gjessing/atlas/commutewidget/v2/CommuteWidgetV2Provider.kt',
+      contains: 'atlas_commute_v2_widget',
+    },
+    // Same invisible dependency as v1's row: the widget renders nothing it
+    // computes itself, so without the route it is a permanent "Couldn't
+    // refresh". The marker is the *board builder*, not the route string, because
+    // v1 and v2 share one endpoint and only the v2 branch is this row's.
+    route: { file: 'backend/src/transit-api.ts', contains: 'commuteWidgetV2Board' },
+    why: 'Android-only by nature (§7), like the v1 widget beside it — a browser has nowhere to put a home-screen widget. ROADMAP §6.5: a second widget rather than a new version of the first, so both are pinnable while v2 is being commuted with and v1 stays the fallback. Where v1 pins one *board*, this pins the *commute*: both directions behind a compact selector, and content that follows where you are in the journey. Where it is decided from is the point — a tap on a row commits to a journey, the operator’s own published departure and arrival records place you inside it, the clock takes over where they are silent, and only then does the time of day decide. No location permission, no activity recognition; a cached coarse fix may choose AUTO’s presentation and nothing else.',
+  },
+
   // ---------------------------------------------------------- navigation ---
   {
     id: 'nav-guidance',
