@@ -1,6 +1,7 @@
 package io.gjessing.atlas.commutewidget.v2
 
 import android.content.Context
+import org.json.JSONObject
 
 /**
  * What the **v2** widget knows — ROADMAP §6.5.
@@ -117,6 +118,37 @@ internal object CommuteWidgetV2Store {
     prefs(context).edit()
       .apply { if (commit == null) remove("commit_$widgetId") else putString("commit_$widgetId", commit) }
       .apply()
+  }
+
+  /**
+   * When a stored commitment was made, or 0 for one that does not say.
+   *
+   * The tie-breaker between the two places a commitment can be made — a tap on
+   * a widget row and the Track control on the app's own board — and the reason
+   * the shape is shared rather than merely similar. Read here rather than in
+   * the module because the field is this store's own business; a second parser
+   * elsewhere would be a second opinion on which of two taps came last.
+   */
+  fun committedAtMs(commit: String?): Long =
+    commit?.let { runCatching { JSONObject(it).optLong("committedAtMs", 0L) }.getOrNull() } ?: 0L
+
+  /** Every field a commitment is made of — the whole of it, in one place. */
+  private val COMMIT_FIELDS = listOf("direction", "departureMs", "line", "committedAtMs")
+
+  /**
+   * Whether two stored commitments are the same decision about the same journey.
+   *
+   * Field by field rather than string against string, because the two writers
+   * do not agree on key order and never needed to: Kotlin builds one when a row
+   * is tapped, JavaScript re-serializes one when the board pushes its own. A
+   * textual comparison would call those different, rewrite the store and spend
+   * a board request per instance every time the app came to the foreground.
+   */
+  fun sameCommit(a: String?, b: String?): Boolean {
+    if (a == b) return true
+    val left = a?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return b == null
+    val right = b?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return false
+    return COMMIT_FIELDS.all { left.opt(it)?.toString() == right.opt(it)?.toString() }
   }
 
   /** The rendered board, exactly as the backend sent it. */

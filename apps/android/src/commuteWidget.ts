@@ -1,5 +1,11 @@
+import { parseCommuteCommit } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
-import { commutePlaceAt, commuteSegments, type TransitCommuteQuery } from '@atlas/transit';
+import {
+  commutePlaceAt,
+  commuteSegments,
+  type TransitCommuteQuery,
+  type TransitWidgetV2Commit,
+} from '@atlas/transit';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
@@ -9,9 +15,9 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  *  - **v1 — "Atlas commute"**: `configureCommuteWidget`, `commuteWidgetSupport`,
  *    `addCommuteWidget`. One instance answers one board.
  *  - **v2 — "Atlas commute (live)"**: `configureCommuteWidgetV2`,
- *    `commuteWidgetV2Support`, `addCommuteWidgetV2`, `reportCommutePlace`. One
- *    instance holds the whole commute, both directions, following the leg you
- *    are on.
+ *    `commuteWidgetV2Support`, `addCommuteWidgetV2`, `reportCommutePlace`,
+ *    `setCommuteWidgetCommit`, `readCommuteWidgetCommit`. One instance holds the
+ *    whole commute, both directions, following the leg you are on.
  *
  * v1 stays the fallback and the reference until v2 has survived real commuting
  * (§7), so the two never share a store and never share a call.
@@ -21,6 +27,8 @@ interface CommuteWidgetModule {
   support(): Promise<CommuteWidgetSupport>;
   requestPin(): Promise<boolean>;
   configureV2(baseUrl: string, queryJson: string | null): Promise<void>;
+  setCommitV2(commitJson: string | null): Promise<void>;
+  commitV2(): Promise<string | null>;
   setPlace(place: string): Promise<void>;
   supportV2(): Promise<CommuteWidgetSupport>;
   requestPinV2(): Promise<boolean>;
@@ -138,6 +146,45 @@ export async function reportCommutePlace(
     // An older APK has no `setPlace`. The fix is never load-bearing, so its
     // absence costs nothing: AUTO falls back to the clock, which is exactly
     // what §6.5 §2 says must happen when the fix is stale or switched off.
+  }
+}
+
+/**
+ * Hand the v2 widget the journey the *board* is tracking — ROADMAP §6.4 §7.
+ *
+ * Before this existed the app and the widget each kept an honest commitment and
+ * nothing made them the same one: tapping Track on the board left the widget on
+ * the home screen still following whatever it had last been told, and neither
+ * was wrong. The shape has been shared since the commitment shipped
+ * (`TransitWidgetV2Commit`), so this is a copy, not a translation.
+ *
+ * Called on every change including release — `null` clears every instance —
+ * and never on a mere launch: `useCommute` reads the saved commitment before it
+ * reports `ready`, so "nothing is tracked" is only ever said because nothing is.
+ */
+export async function setCommuteWidgetCommit(commit: TransitWidgetV2Commit | null): Promise<void> {
+  try {
+    await native?.setCommitV2(commit ? JSON.stringify(commit) : null);
+  } catch {
+    // An older APK has no `setCommitV2`. The two commitments then stay
+    // independent, which is what they were before this shipped: each honest on
+    // its own, neither invented.
+  }
+}
+
+/**
+ * The commitment made on the *widget*, for the app to consider adopting.
+ *
+ * Parsed through `parseCommuteCommit` — the board's own reader — rather than
+ * trusted as JSON: this value crosses a process boundary from a store an older
+ * APK also writes, and the one definition of what a commitment is lives in
+ * `@atlas/app-hooks`.
+ */
+export async function readCommuteWidgetCommit(): Promise<TransitWidgetV2Commit | null> {
+  try {
+    return parseCommuteCommit((await native?.commitV2()) ?? null);
+  } catch {
+    return null;
   }
 }
 

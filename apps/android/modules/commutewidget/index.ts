@@ -7,7 +7,8 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  *  - **v1 — "Atlas commute"** (`configure` / `support` / `requestPin`). One
  *    instance answers one board: a direction, both, or one hop, chosen in its ⚙.
  *  - **v2 — "Atlas commute (live)"** (`configureV2` / `supportV2` /
- *    `requestPinV2` / `setPlace`). One instance holds the whole commute.
+ *    `requestPinV2` / `setPlace` / `setCommitV2` / `commitV2`). One instance
+ *    holds the whole commute.
  *
  * They keep separate native stores, which is why the surface is two sets of
  * functions and not one with a flag: configuring one must never touch the
@@ -29,6 +30,14 @@ export interface CommuteWidgetNativeModule {
   // ---------------------------------------------------------------- v2 ---
   /** The saved commute, for v2. No hop list — a v2 instance holds the whole commute. */
   configureV2(baseUrl: string, queryJson: string | null): Promise<void>;
+  /**
+   * The journey the app's board is tracking, onto every v2 instance; `null`
+   * clears them. The same `{"direction","departureMs","line","committedAtMs"}`
+   * the widget writes when a row is tapped — one commitment, two hands on it.
+   */
+  setCommitV2(commitJson: string | null): Promise<void>;
+  /** The newest commitment any instance holds, for a tap made on the home screen. */
+  commitV2(): Promise<string | null>;
   /**
    * The coarse place the app observed while in the foreground — `home`,
    * `interchange`, `away` or `unknown`. It may choose AUTO's presentation and

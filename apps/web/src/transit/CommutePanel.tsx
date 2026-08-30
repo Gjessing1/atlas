@@ -257,14 +257,41 @@ function Changes({ row }: { row: CommuteDashboardRow }) {
   );
 }
 
-/** The vehicles of an expanded journey, stop by stop. */
-function Legs({ journey }: { journey: CommuteJourney }) {
+/**
+ * The vehicles of a journey, stop by stop: each leg's platform, its departure
+ * and its arrival, with the live estimate under whichever of the two moved.
+ *
+ * Shared by the expanded journey row and the tracked card, which is the point.
+ * The tracked card used to be the one place on the board that could *not* tell
+ * you which platform to stand on — the journey it is about has left the list
+ * the legs would otherwise have been read from.
+ */
+function Legs({
+  journey,
+  /**
+   * The ride the traveller is on or about to board, from the phase ladder.
+   * Legs before it are dimmed rather than dropped: a journey is read as a
+   * shape, and removing its first half moves everything that is left.
+   */
+  activeIndex = null,
+}: {
+  journey: CommuteJourney;
+  activeIndex?: number | null;
+}) {
   return (
     <ol className="commute-legs">
       {journey.rides.map((ride, index) => {
         const connection = journey.connections[index - 1];
+        const mark =
+          activeIndex === null
+            ? ''
+            : index === activeIndex
+              ? ' now'
+              : index < activeIndex
+                ? ' past'
+                : '';
         return (
-          <li key={ride.key}>
+          <li key={ride.key} className={mark.trim() || undefined}>
             {connection && (
               <p className={`commute-connection${connection.tight ? ' tight' : ''}`}>
                 {connection.summary}
@@ -368,7 +395,16 @@ function JourneyRow({
  * for the home-screen widget, so the widget knew which leg you were on and the
  * board did not.
  */
-function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
+function HereCard({
+  here,
+  journey,
+  onStop,
+}: {
+  here: CommuteHere;
+  /** The tracked journey whole, for the leg detail below the ribbon. */
+  journey: CommuteJourney | null;
+  onStop: () => void;
+}) {
   return (
     <section className="commute-card here" aria-label="You are here">
       <p className="commute-eyebrow">
@@ -398,6 +434,10 @@ function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
           </ul>
         </>
       )}
+      {/* The detail the ribbon compresses: which platform, and the two clock
+          times per leg. Below the connection block on purpose — that block is
+          the decision, this is the reference you check once you have made it. */}
+      {journey && <Legs journey={journey} activeIndex={here.rideIndex} />}
       <button type="button" className="commute-track" onClick={onStop}>
         Stop tracking
       </button>
@@ -515,7 +555,13 @@ function Journeys({
 }) {
   return (
     <>
-      {dashboard.here && <HereCard here={dashboard.here} onStop={() => dashboard.track(null)} />}
+      {dashboard.here && (
+        <HereCard
+          here={dashboard.here}
+          journey={dashboard.hereJourney}
+          onStop={() => dashboard.track(null)}
+        />
+      )}
       {/* One notice on every journey in the list is the corridor's, not any
           journey's — said once, above them, rather than five times inside
           them. */}

@@ -627,6 +627,24 @@ async function scrollToDynamicId(pattern, label, scrollerId, direction = 'up') {
   throw new Error(`Could not bring ${label} into view inside ${scrollerId}`);
 }
 
+/**
+ * Scroll a sheet until a piece of text is on screen, and hand back that dump.
+ *
+ * The text twin of {@link scrollToDynamicId}, needed for the same reason:
+ * UiAutomator reports what is laid out, so a string inside a card taller than
+ * the window is "missing" until that part of the card is brought into view.
+ */
+async function scrollToString(needle, label, scrollerId, direction = 'up') {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const xml = hierarchy();
+    if (windowStrings(xml).some((value) => value.includes(needle))) return xml;
+    const scroller = visibleNode(xml, scrollerId);
+    if (scroller) swipeWithin(scroller.bounds, direction);
+    await delay(400);
+  }
+  throw new Error(`Could not bring ${label} ("${needle}") into view inside ${scrollerId}`);
+}
+
 /** The emulator's screen, for gestures that are not about a node. */
 function screenSize() {
   const match = shell('wm', 'size').match(/(\d+)x(\d+)/);
@@ -778,7 +796,17 @@ async function saveCommuteAndReadBoard() {
   // "Tracking" before the first vehicle leaves, never "you are here": the
   // traveller is following a journey, not standing in it.
   expectStrings(tracked, ['TRACKING', 'UPCOMING', 'NEXT CONNECTION'], 'the tracked journey');
-  await tapAfterScroll('commute-stop-tracking', 'commute-sheet', 'down');
+  // Each leg's own platform, inside the tracked card. Tracking used to show
+  // strictly *less* than not tracking — a ribbon and the next connection, but
+  // never a platform or a per-leg time — and this is the one surface where the
+  // journey cannot simply be looked up again: a board asked "from now" drops it
+  // the moment it leaves. Two scrolls, not one dump, because both platforms
+  // rarely fit on screen together and "B4" is a bus stop while "3" is a track.
+  await scrollToString('plat. B4', 'the tracked journey’s first leg', 'commute-sheet');
+  await scrollToString('plat. 3', 'the tracked journey’s second leg', 'commute-sheet');
+  // Scrolled *down* the list, not back to the top: the card's control now sits
+  // under its legs rather than a few lines under its ribbon.
+  await tapAfterScroll('commute-stop-tracking', 'commute-sheet', 'up');
   await waitForId('commute-here', false, 20_000);
 
   // One journey opened to its legs: every leg states its *own* platform, which
@@ -882,6 +910,28 @@ async function verifyLiveWidget() {
   await waitForHomeScreen('the replaced connection', (xml) =>
     windowStrings(xml).some((value) => value.includes(alert)),
   );
+  return broken;
+}
+
+/**
+ * §6.4 §7 — one commitment, two hands on it: the journey tapped on the *widget*
+ * is the journey the *board* is tracking.
+ *
+ * The board is holding none when this runs — `saveCommuteAndReadBoard` stops
+ * tracking before it finishes — so a "you are here" block existing at all is
+ * proof the app read the widget's store, and the departure printed inside it is
+ * proof it read the right row. Neither could be asserted before the tracked
+ * card carried the journey's legs; the card said a phase and a connection, and
+ * both of those are true of more than one departure.
+ *
+ * It is checked on the way back from the launcher rather than by opening the
+ * sheet, because that is the honest sequence: Atlas returns with the sheet it
+ * left open, so "the board opened" never fires for the one journey that needs
+ * the read.
+ */
+async function verifyCommitReachedTheBoard(row) {
+  await waitForIdAfterScroll('commute-here', 'commute-sheet', 'down', 45_000);
+  await scrollToString(row.time, 'the adopted journey’s departure', 'commute-sheet');
 }
 
 /** The **v1** widget — "Atlas commute" — one board, pinned, painted from the same route. */
@@ -1026,9 +1076,10 @@ async function main() {
   await verifyPersistence({ ...ids, trackId });
   console.log('Android regression: commute board, then both widgets on the home screen');
   await saveCommuteAndReadBoard();
-  await verifyLiveWidget();
+  const committedRow = await verifyLiveWidget();
   await returnToApp();
   await openCommuteSheet();
+  await verifyCommitReachedTheBoard(committedRow);
   await verifySimpleWidget();
   await returnToApp();
   await closeCommuteSheet();

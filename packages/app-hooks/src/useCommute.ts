@@ -348,22 +348,29 @@ export function useCommute(
   const [commit, setCommitState] = useState<TransitWidgetV2Commit | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Both settings before `ready`, not each on its own promise. Two reasons, and
+  // the second is why it changed: the board's first request would otherwise go
+  // out without the commitment and be replaced the moment it arrived — two
+  // upstream calls for one opening — and `ready` is the signal Android hands
+  // the home-screen widget, which must never be told "nothing is tracked"
+  // merely because the app started.
   useEffect(() => {
     if (status !== 'ready' || loaded) return;
     let current = true;
-    void getSetting(COMMUTE_SETTING_KEY).then((saved) => {
+    void Promise.all([
+      getSetting(COMMUTE_SETTING_KEY),
+      getSetting(COMMUTE_COMMIT_SETTING_KEY),
+    ]).then(([saved, savedCommit]) => {
       if (!current) return;
       const next = parseCommuteConfig(saved) ?? EMPTY_COMMUTE_CONFIG;
       setConfigState(next);
+      setCommitState(parseCommuteCommit(savedCommit));
       // Write back only to finish a migration. A first run writes nothing: an
       // empty commute is not worth a synced row on every device.
       if (saved && isLegacyCommuteSetting(saved)) {
         saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
       }
       setLoaded(true);
-    });
-    void getSetting(COMMUTE_COMMIT_SETTING_KEY).then((saved) => {
-      if (current) setCommitState(parseCommuteCommit(saved));
     });
     return () => {
       current = false;

@@ -6657,6 +6657,20 @@ button.transit-notice-summary {
   font-weight: 700;
 }
 
+/* The same list inside the tracked card, where the phase ladder can say which
+   leg is being ridden. Position only marks it — the colour channels are spent
+   on service state everywhere else on this board, and a leg that is merely
+   *current* is not a state. */
+.commute-legs > li.now {
+  margin-left: -11px;
+  padding-left: 8px;
+  border-left: 3px solid var(--accent);
+}
+
+.commute-legs > li.past {
+  opacity: 0.5;
+}
+
 /* --- Per-leg departure boards (§5) --- */
 
 .commute-board h3 {

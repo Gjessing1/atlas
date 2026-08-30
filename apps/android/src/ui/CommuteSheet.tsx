@@ -2,7 +2,6 @@ import {
   useCommuteDashboard,
   useCommuteEditor,
   type CommuteController,
-  type CommuteDashboard,
   type CommuteDashboardBoard,
   type CommuteDashboardRow,
   type StopGeocodeFn,
@@ -320,6 +319,91 @@ function Changes({ row }: { row: CommuteDashboardRow }) {
 }
 
 /**
+ * The vehicles of a journey, stop by stop: each leg's platform, its departure
+ * and its arrival, with the live estimate under whichever of the two moved.
+ *
+ * Shared by the expanded journey row and the tracked card, which is the point.
+ * The tracked card used to be the one place on this sheet that could *not* say
+ * which platform to stand on — the journey it is about has left the list the
+ * legs would otherwise have been read from.
+ */
+function Legs({
+  journey,
+  /**
+   * The ride the traveller is on or about to board, from the phase ladder.
+   * Legs before it are dimmed rather than dropped: a journey is read as a
+   * shape, and removing its first half moves everything that is left.
+   */
+  activeIndex = null,
+}: {
+  journey: CommuteJourney;
+  activeIndex?: number | null;
+}) {
+  return (
+    <View style={styles.legs}>
+      {journey.rides.map((ride, index) => {
+        const connection = journey.connections[index - 1];
+        return (
+          <View
+            key={ride.key}
+            style={[
+              activeIndex !== null && index === activeIndex && styles.legNow,
+              activeIndex !== null && index < activeIndex && styles.legPast,
+            ]}
+          >
+            {connection ? (
+              <Text style={[styles.connection, connection.tight && styles.connectionTight]}>
+                {connection.summary}
+              </Text>
+            ) : null}
+            <View style={styles.leg}>
+              <View style={styles.legTime}>
+                <Text style={styles.legTimeText}>{ride.departure.aimed}</Text>
+                {ride.departure.delay ? (
+                  <Text style={styles.legEstimate}>{ride.departure.expected} est.</Text>
+                ) : null}
+              </View>
+              <View style={styles.legBody}>
+                <View style={styles.legLineRow}>
+                  <Badge badge={ride.badge} mode={ride.mode} line={ride.line} />
+                  {ride.towards ? (
+                    <Text style={styles.legLine} numberOfLines={1}>
+                      → {ride.towards}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.legPlace}>
+                  {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
+                </Text>
+                <Text style={styles.legRide}>{ride.ride}</Text>
+              </View>
+            </View>
+            <View style={styles.leg}>
+              <View style={styles.legTime}>
+                <Text style={styles.legTimeText}>{ride.arrival.aimed}</Text>
+                {ride.arrival.delay ? (
+                  <Text style={styles.legEstimate}>{ride.arrival.expected} est.</Text>
+                ) : null}
+              </View>
+              <View style={styles.legBody}>
+                <Text style={styles.legPlace}>
+                  {[ride.to, ride.toQuay].filter(Boolean).join(' · ')}
+                </Text>
+              </View>
+            </View>
+            <Disruptions items={ride.disruptions} />
+          </View>
+        );
+      })}
+      <Text style={styles.legsTotal}>
+        Total {journey.duration}
+        {journey.walk ? ` · ${journey.walk}` : ''}
+      </Text>
+    </View>
+  );
+}
+
+/**
  * One journey, collapsed to its scan line and ribbon, expandable to its legs.
  *
  * Tracking lives inside the expansion rather than on the collapsed row: a
@@ -357,65 +441,14 @@ function JourneyRow({
       <Changes row={row} />
       {!open ? <Disruptions items={row.disruptions} brief /> : null}
       {open ? (
-        <View style={styles.legs}>
-          {journey.rides.map((ride, index) => {
-            const connection = journey.connections[index - 1];
-            return (
-              <View key={ride.key}>
-                {connection ? (
-                  <Text style={[styles.connection, connection.tight && styles.connectionTight]}>
-                    {connection.summary}
-                  </Text>
-                ) : null}
-                <View style={styles.leg}>
-                  <View style={styles.legTime}>
-                    <Text style={styles.legTimeText}>{ride.departure.aimed}</Text>
-                    {ride.departure.delay ? (
-                      <Text style={styles.legEstimate}>{ride.departure.expected} est.</Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.legBody}>
-                    <View style={styles.legLineRow}>
-                      <Badge badge={ride.badge} mode={ride.mode} line={ride.line} />
-                      {ride.towards ? (
-                        <Text style={styles.legLine} numberOfLines={1}>
-                          → {ride.towards}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Text style={styles.legPlace}>
-                      {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
-                    </Text>
-                    <Text style={styles.legRide}>{ride.ride}</Text>
-                  </View>
-                </View>
-                <View style={styles.leg}>
-                  <View style={styles.legTime}>
-                    <Text style={styles.legTimeText}>{ride.arrival.aimed}</Text>
-                    {ride.arrival.delay ? (
-                      <Text style={styles.legEstimate}>{ride.arrival.expected} est.</Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.legBody}>
-                    <Text style={styles.legPlace}>
-                      {[ride.to, ride.toQuay].filter(Boolean).join(' · ')}
-                    </Text>
-                  </View>
-                </View>
-                <Disruptions items={ride.disruptions} />
-              </View>
-            );
-          })}
-          <Text style={styles.legsTotal}>
-            Total {journey.duration}
-            {journey.walk ? ` · ${journey.walk}` : ''}
-          </Text>
+        <>
+          <Legs journey={journey} />
           <Pressable style={styles.track} onPress={onTrack} testID="commute-track-row">
             <Text style={styles.trackText}>
               {row.tracked ? 'Stop tracking' : 'Track this journey'}
             </Text>
           </Pressable>
-        </View>
+        </>
       ) : null}
     </View>
   );
@@ -429,7 +462,16 @@ function JourneyRow({
  * home-screen widget, so the widget knew which leg you were on and the board —
  * the surface you actually open once you are moving — did not.
  */
-function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
+function HereCard({
+  here,
+  journey,
+  onStop,
+}: {
+  here: CommuteHere;
+  /** The tracked journey whole, for the leg detail below the connection block. */
+  journey: CommuteJourney | null;
+  onStop: () => void;
+}) {
   return (
     <View style={[styles.card, styles.cardAccent]} testID="commute-here">
       <View style={styles.eyebrowRow}>
@@ -465,6 +507,10 @@ function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
           ))}
         </>
       ) : null}
+      {/* The detail the ribbon compresses: which platform, and the two clock
+          times per leg. Below the connection block on purpose — that block is
+          the decision, this is the reference you check once you have made it. */}
+      {journey ? <Legs journey={journey} activeIndex={here.rideIndex} /> : null}
       <Pressable style={styles.track} onPress={onStop} testID="commute-stop-tracking">
         <Text style={styles.trackText}>Stop tracking</Text>
       </Pressable>
@@ -768,7 +814,11 @@ export function CommuteSheet({
         {dashboard.view === 'overview' ? (
           <>
             {dashboard.here ? (
-              <HereCard here={dashboard.here} onStop={() => dashboard.track(null)} />
+              <HereCard
+                here={dashboard.here}
+                journey={dashboard.hereJourney}
+                onStop={() => dashboard.track(null)}
+              />
             ) : null}
             {/* One notice on every journey in the list is the corridor's, not
                 any journey's — said once, above them, rather than five times
@@ -1060,6 +1110,11 @@ const styles = StyleSheet.create({
   legLine: { color: theme.text, fontSize: 12, fontWeight: '700' },
   legPlace: { color: theme.textMuted, fontSize: 11 },
   legRide: { color: theme.textMuted, fontSize: 10 },
+  // The tracked card's two marks. Position and weight only — every colour
+  // channel on this board is already spent saying what a service *is*, and a
+  // leg that is merely the current one is not a service state.
+  legNow: { marginLeft: -11, paddingLeft: 8, borderLeftWidth: 3, borderLeftColor: theme.accent },
+  legPast: { opacity: 0.5 },
   connection: {
     marginTop: 8,
     marginLeft: 55,

@@ -103,6 +103,63 @@ class CommuteWidgetModule : Module() {
     }
 
     /**
+     * The journey the *app's* board is tracking, pushed onto every v2 instance —
+     * ROADMAP §6.4 §7's last piece.
+     *
+     * A commitment is one fact with two hands on it: a tap on a widget row and
+     * the Track control on the board mean the same thing, and until this existed
+     * they were two independent facts that could disagree while both were
+     * honest. Both write the same `{"direction","departureMs","line",
+     * "committedAtMs"}` — the shape was shared from the start precisely so this
+     * call could be a copy rather than a translation.
+     *
+     * Every instance, and `null` clears them all: the app holds *one*
+     * commitment, so an instance keeping a different one would be a second
+     * answer to "which bus am I on". Instances already holding the incoming
+     * value are skipped rather than rewritten — the repaint is cheap but the
+     * refresh behind it is somebody's Entur quota, and a commitment adopted
+     * back out of this same store must not cost a round trip per widget. That
+     * check is `sameCommit`, field by field: the two writers build the JSON in
+     * different key orders and a textual comparison would call every push a
+     * change.
+     */
+    AsyncFunction("setCommitV2") { commitJson: String? ->
+      val context = appContext.reactContext ?: return@AsyncFunction
+      val changed =
+        CommuteWidgetV2Provider.widgetIds(context).filter { id ->
+          !CommuteWidgetV2Store.sameCommit(CommuteWidgetV2Store.commit(context, id), commitJson)
+        }
+      if (changed.isEmpty()) return@AsyncFunction
+      changed.forEach { CommuteWidgetV2Store.setCommit(context, it, commitJson) }
+      // Paint first, ask second — the same order a tap on the widget itself
+      // uses. The mark has to move before the network is consulted, and the
+      // board that confirms it is a round trip away.
+      CommuteWidgetV2Provider.renderAll(context)
+      changed.forEach { CommuteWidgetV2Provider.refresh(context, it) }
+    }
+
+    /**
+     * The newest commitment any v2 instance holds, or null — the other
+     * direction of the same fact, for a tap made on the home screen while the
+     * app was closed.
+     *
+     * Newest by `committedAtMs`, because instances are peers: nothing makes one
+     * widget's tap more current than another's except when it happened. The
+     * *app* decides whether to adopt what comes back; this only reports.
+     */
+    AsyncFunction("commitV2") {
+      val context = appContext.reactContext
+      if (context == null) null
+      else
+        // `toList` first: `widgetIds` is an `IntArray`, and the primitive-array
+        // overloads stop at `map`.
+        CommuteWidgetV2Provider.widgetIds(context)
+          .toList()
+          .mapNotNull { CommuteWidgetV2Store.commit(context, it) }
+          .maxByOrNull { CommuteWidgetV2Store.committedAtMs(it) }
+    }
+
+    /**
      * The coarse place the app observed while it was in the foreground — §6.5
      * §2's cached fix, which may choose AUTO's *presentation* and nothing else.
      *

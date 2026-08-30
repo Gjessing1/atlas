@@ -92,10 +92,12 @@ export {
   type TransitDeparturesFn,
 } from './useTransitDepartures.js';
 export {
+  COMMUTE_COMMIT_SETTING_KEY,
   COMMUTE_SETTING_KEY,
   EMPTY_COMMUTE_CONFIG,
   commuteQueryFrom,
   isLegacyCommuteSetting,
+  parseCommuteCommit,
   parseCommuteConfig,
   serializeCommuteConfig,
   useCommute,

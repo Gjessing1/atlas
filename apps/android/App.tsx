@@ -66,6 +66,7 @@ import {
   Alert,
   Animated,
   Appearance,
+  AppState,
   BackHandler,
   Pressable,
   Share,
@@ -128,7 +129,9 @@ import { useServerOrigin } from './src/serverOrigin';
 import {
   configureCommuteWidget,
   configureCommuteWidgetV2,
+  readCommuteWidgetCommit,
   reportCommutePlace,
+  setCommuteWidgetCommit,
 } from './src/commuteWidget';
 import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
@@ -310,6 +313,47 @@ function AppInner() {
     void configureCommuteWidget(serverOrigin, commute.query);
     void configureCommuteWidgetV2(serverOrigin, commute.query);
   }, [commute.query, commute.ready, serverOrigin]);
+  // §6.4 §7's last piece: the journey the board tracks is the journey the
+  // widget tracks. Gated on `ready` for the same reason as the configuration
+  // above — the saved commitment is read before `ready`, so this can never push
+  // "nothing is tracked" merely because the app has just started.
+  useEffect(() => {
+    if (!commute.ready) return;
+    void setCommuteWidgetCommit(commute.commit);
+  }, [commute.commit, commute.ready]);
+  // The other direction: a tap made on the *widget*, which happens on the home
+  // screen with the app in the background or gone. Read on every return to the
+  // foreground — not when the board opens, because Atlas comes back from the
+  // launcher with the sheet it left open and "the board opened" would never
+  // fire for the one journey that needs it.
+  //
+  // Adopted only when it is *newer* than what the board holds, and never the
+  // absence of one. That asymmetry is the load-bearing part: a released widget
+  // and a home screen with no v2 widget on it answer identically here (null),
+  // so adopting null would quietly drop the commitment of every user who has
+  // never pinned one.
+  const commitRef = useRef(commute.commit);
+  commitRef.current = commute.commit;
+  const setCommuteCommit = commute.setCommit;
+  useEffect(() => {
+    if (!commute.ready) return;
+    let current = true;
+    const adopt = () => {
+      void readCommuteWidgetCommit().then((pinned) => {
+        if (!current || !pinned) return;
+        if ((pinned.committedAtMs ?? 0) <= (commitRef.current?.committedAtMs ?? 0)) return;
+        setCommuteCommit(pinned);
+      });
+    };
+    adopt();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') adopt();
+    });
+    return () => {
+      current = false;
+      subscription.remove();
+    };
+  }, [commute.ready, setCommuteCommit]);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
   const measure = useMeasure();

@@ -123,6 +123,18 @@ export interface CommuteDashboard {
   sharedDisruptions: CommuteDisruption[];
   /** §6.4 §7 — where the traveller is in the journey they are tracking. */
   here: CommuteHere | null;
+  /**
+   * That journey whole, so the tracked card can show its legs — each one's
+   * platform, departure and arrival.
+   *
+   * Exposed beside {@link here} rather than folded into it because it is not
+   * the same fact: `here` is the ladder's answer about *one* vehicle, and once
+   * a journey has departed it is the only thing on screen about it. The board's
+   * list cannot supply the rest — it is asked "from now", so the journey being
+   * ridden has already fallen out of it — which is exactly why tracking used to
+   * show less than not tracking.
+   */
+  hereJourney: CommuteJourney | null;
   /** Start tracking a journey, or stop (null). */
   track: (journey: CommuteJourney | null) => void;
   /** Whether `journey` is the one being tracked. */
@@ -383,6 +395,9 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     rows,
     sharedDisruptions,
     here,
+    // Only alongside `here`: without a placed traveller there is nothing for a
+    // leg list to be *about*, and the journey is already in the list below.
+    hereJourney: here ? trackedJourney : null,
     track,
     isTracked,
     boards,

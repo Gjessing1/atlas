@@ -322,6 +322,37 @@ describe('tracking a journey', () => {
     unmount();
   });
 
+  it('hands out the tracked journey whole, so its legs can be read', () => {
+    // The gap this closed: tracking used to show *less* than not tracking —
+    // the ribbon and the next connection, but never a platform or a per-leg
+    // time, because the journey it is about falls out of a board asked "from
+    // now" the moment it departs.
+    const departed = twoLeg(hm(8, 10));
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({
+          result: { ...trackedResult, committed: { trip: departed, replaced: null } },
+          commit: commitFor(hm(8, 10)),
+        }),
+      ),
+    );
+    expect(hook.current.hereJourney?.rides).toHaveLength(2);
+    expect(hook.current.hereJourney?.rides[0]?.fromQuay).toBeDefined();
+    // The same journey the card is placed in, not merely a journey.
+    expect(hook.current.hereJourney?.rides[hook.current.here!.rideIndex]?.line).toBe(
+      hook.current.here?.ride.line,
+    );
+    unmount();
+  });
+
+  it('offers no journey to draw legs from when nothing is tracked', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(controller({ result: trackedResult })),
+    );
+    expect(hook.current.hereJourney).toBeNull();
+    unmount();
+  });
+
   it('offers the next departure of the hop the change lands on', () => {
     const { result: hook, unmount } = renderHook(() =>
       useCommuteDashboard(controller({ result: trackedResult, commit: commitFor(hm(8, 36)) })),

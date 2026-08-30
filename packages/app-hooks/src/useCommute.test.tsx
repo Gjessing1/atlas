@@ -301,16 +301,6 @@ describe('useCommute', () => {
    * and syncing it would put a laptop's board on a bus it is not on.
    */
   describe('the tracked journey', () => {
-    const configured = () =>
-      settings(() =>
-        Promise.resolve(
-          serializeCommuteConfig({
-            ...EMPTY_COMMUTE_CONFIG,
-            from: ENGELSRUD,
-            to: NATIONALTHEATRET,
-          }),
-        ),
-      );
     const commit = { direction: 'outbound' as const, departureMs: 1_756_276_200_000, line: '280' };
 
     it('reads a saved commitment and hands it to the board', async () => {
@@ -337,6 +327,56 @@ describe('useCommute', () => {
       // a journey that has already left.
       await waitFor(() => expect(fetchCommute).toHaveBeenCalled());
       expect(fetchCommute.mock.calls.at(-1)?.[2]).toMatchObject(commit);
+    });
+
+    /**
+     * The contract Android's widget bridge leans on for the *commitment*, the
+     * way the test above states it for the query: `ready` means the saved state
+     * has been read, all of it. Two independent reads would let the app push
+     * "nothing is tracked" onto every home-screen widget during the window
+     * before the commitment arrived — and cost a second upstream call when it
+     * did, because the board re-asks by name for the journey it is tracking.
+     */
+    it('is not ready until the commitment has been read too', async () => {
+      let release: (value: string | null) => void = () => {};
+      const pending = new Promise<string | null>((resolve) => {
+        release = resolve;
+      });
+      const fetchCommute = vi.fn().mockResolvedValue({
+        outbound: { trips: [], problems: [] },
+        inbound: { trips: [], problems: [] },
+      });
+      const { result } = renderHook(() =>
+        useCommute(
+          settings((key) =>
+            key === COMMUTE_COMMIT_SETTING_KEY
+              ? pending
+              : Promise.resolve(
+                  serializeCommuteConfig({
+                    ...EMPTY_COMMUTE_CONFIG,
+                    from: ENGELSRUD,
+                    to: NATIONALTHEATRET,
+                  }),
+                ),
+          ),
+          [],
+          fetchCommute,
+          true,
+        ),
+      );
+      // The config is in hand; the commitment is not, so neither is `ready`.
+      await Promise.resolve();
+      expect(result.current.ready).toBe(false);
+      expect(fetchCommute).not.toHaveBeenCalled();
+      await act(async () => {
+        release(JSON.stringify(commit));
+      });
+      await waitFor(() => expect(result.current.ready).toBe(true));
+      // Already there at the instant `ready` is: never a moment of "ready, and
+      // tracking nothing" for the widget push to act on.
+      expect(result.current.commit).toMatchObject(commit);
+      await waitFor(() => expect(fetchCommute).toHaveBeenCalledTimes(1));
+      expect(fetchCommute.mock.calls[0]?.[2]).toMatchObject(commit);
     });
 
     it('writes the commitment where it cannot sync', async () => {
