@@ -314,11 +314,23 @@ function AppInner() {
     void configureCommuteWidgetV2(serverOrigin, commute.query);
   }, [commute.query, commute.ready, serverOrigin]);
   // §6.4 §7's last piece: the journey the board tracks is the journey the
-  // widget tracks. Gated on `ready` for the same reason as the configuration
-  // above — the saved commitment is read before `ready`, so this can never push
-  // "nothing is tracked" merely because the app has just started.
+  // widget tracks. Every *change* goes down, including a release, which clears
+  // every instance.
+  //
+  // Every change, and pointedly not the value the app started with. That value
+  // is not a decision — it is what was already on disk — and pushing it at
+  // launch would clear a commitment made by tapping the widget while the app
+  // was closed, before the read below could ever see it. A widget pinned after
+  // a commitment was made therefore starts untracked and catches up on the next
+  // tap, which is the right way round: §6.5 §3 forbids inventing a commitment,
+  // never withholding one.
+  const pushedCommitRef = useRef(false);
   useEffect(() => {
     if (!commute.ready) return;
+    if (!pushedCommitRef.current) {
+      pushedCommitRef.current = true;
+      return;
+    }
     void setCommuteWidgetCommit(commute.commit);
   }, [commute.commit, commute.ready]);
   // The other direction: a tap made on the *widget*, which happens on the home
