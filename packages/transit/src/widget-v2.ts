@@ -74,6 +74,7 @@ import {
   commuteDurationLabel,
   commuteJourney,
   commuteJourneyList,
+  commuteSegments,
   type CommuteJourney,
   type CommuteServiceState,
 } from './dashboard.js';
@@ -314,6 +315,169 @@ export function commuteConnectionBreak(
     };
   }
   return null;
+}
+
+// -------------------------------------------------------- the substitute ---
+//
+// The replacement for a connection the numbers have broken — §6.5 §4, the half
+// that had to wait for real commuting because a leg offered from a board asked
+// seconds earlier is a promise about a connection nobody has stood at yet.
+//
+// **The journey is replaced, not the ladder.** The trap that decides this
+// design: when the change breaks and the traveller takes a different train, the
+// *original* leg 2 still publishes `actualStartMs` — so tier 2, the strongest
+// rung of the ladder, would read `riding` on a vehicle nobody boarded,
+// confidently and with the operator's own record behind it. Patching the phase
+// enum around that is how a widget grows ten special cases. Splicing the
+// substitute into the committed trip instead means every derivation downstream
+// — phase, action, arrival, detail, expiry — is right without knowing that a
+// substitution happened at all.
+
+/**
+ * The upstream question that re-plans the rest of a journey from the
+ * interchange the connection broke at.
+ *
+ * Anchored on the corridor's own stops rather than on the leg's coordinates:
+ * `commuteSegments` is already the one definition of what a corridor's hops
+ * are and its places carry `stopId`, which is the difference between asking
+ * about Asker stasjon and asking about a point 40 metres from one of its
+ * entrances. Everything after the break that the corridor names stays a `via`,
+ * so a three-hop commute re-plans generically rather than by a rule about the
+ * one interchange this was written for.
+ */
+export function commuteSubstituteQuery(
+  query: TransitCommuteQuery,
+  direction: TransitCommuteDirection,
+  journey: CommuteJourney,
+  broken: CommuteConnectionBreak,
+  nowMs: number,
+): TransitQuery | null {
+  const legs = rideLegs(journey.trip);
+  const previous = legs[broken.index - 1];
+  const next = legs[broken.index];
+  if (!previous || !next) return null;
+  // The same arithmetic the break itself used — same legs, same helper — so the
+  // question cannot be asked about a moment the warning did not mean.
+  const readyMs = arrivalMs(previous) + transferFloorMs(journey.trip, previous, next);
+  const hops = commuteSegments(query).filter((hop) => hop.direction === direction);
+  const stops = hops.length > 0 ? [...hops.map((hop) => hop.from), hops[hops.length - 1]!.to] : [];
+  const at = stops.findIndex((stop) => stop.name === broken.at);
+  // A change at a stop the commute does not name — a planner's own idea of how
+  // to get there — has no corridor place to anchor on, so the leg's arrival
+  // point stands in. Worse, and still much better than not offering a way on.
+  const from = at >= 0 ? stops[at]! : previous.to.position;
+  const to = stops.at(-1) ?? (direction === 'outbound' ? query.to : query.from);
+  const via = at >= 0 ? stops.slice(at + 1, -1) : [];
+  const lineFilter = commuteLineFilter(query.filter);
+  return {
+    from,
+    to,
+    ...(via.length > 0 ? { via } : {}),
+    // Never earlier than now: a substitute is something still catchable, and a
+    // `dateTime` in the past is what returns journeys that have already gone.
+    // The two differ exactly when the missed change has already happened, which
+    // is the case this is most likely to be read in.
+    dateTimeMs: Math.max(readyMs, nowMs),
+    limit: 3,
+    ...(query.filter.modes.length > 0 ? { modes: query.filter.modes } : {}),
+    ...(lineFilter ? { lineFilter } : {}),
+  };
+}
+
+/**
+ * The substitute worth offering out of an answer: the earliest journey that
+ * leaves after the traveller can be standing there.
+ *
+ * Through `commuteJourneyList` rather than down `result.trips`, for the reason
+ * `findCommittedTrip` is: Entur's answer is *ranked*, not ordered, so its first
+ * trip is not its earliest — and the two surfaces of one commute must not come
+ * to different ideas of which journey is next.
+ */
+export function commuteSubstituteTrip(
+  result: TransitResult,
+  notBeforeMs: number,
+  nowMs: number,
+): TransitTrip | null {
+  for (const journey of commuteJourneyList(
+    result.trips.map((trip, index) => commuteJourney(trip, nowMs, index)),
+  )) {
+    const first = rideLegs(journey.trip)[0];
+    if (!first) continue;
+    if ((first.actualStartMs ?? first.expectedStartMs) >= notBeforeMs) return journey.trip;
+  }
+  return null;
+}
+
+/**
+ * The committed journey with its remaining legs replaced by the substitute's.
+ *
+ * The commitment survives the splice and keeps naming the *original* journey:
+ * `commuteCommitId` is the first ride's scheduled departure and line, both of
+ * which are kept here. This is the same commitment re-planned, not a new one,
+ * and a commitment that renamed itself mid-journey would release the pin it is
+ * holding.
+ *
+ * Null when there is nothing to splice — no ride before the break, or an empty
+ * substitute — because the caller's fallback is v0.182.0's behaviour, which is
+ * the break stated and no replacement offered.
+ */
+export function commuteSpliceTrip(
+  committed: TransitTrip,
+  substitute: TransitTrip,
+  breakIndex: number,
+): TransitTrip | null {
+  const substituteStartMs = substitute.legs[0]?.aimedStartMs;
+  if (substituteStartMs === undefined || breakIndex < 1) return null;
+
+  const kept: TransitLeg[] = [];
+  let rides = 0;
+  for (const leg of committed.legs) {
+    if (isRideMode(leg.mode)) {
+      if (rides >= breakIndex) break;
+      rides += 1;
+      kept.push(leg);
+      continue;
+    }
+    // The walk across the platform still happens and is kept; the walk out of
+    // the far station belongs to the journey that replaced this one, and
+    // keeping both would count the same minutes twice.
+    if (rides >= breakIndex && leg.aimedStartMs >= substituteStartMs) break;
+    kept.push(leg);
+  }
+  if (rides < breakIndex) return null;
+
+  const legs = [...kept, ...substitute.legs];
+  const startMs = legs[0]?.aimedStartMs ?? committed.startMs;
+  const endMs = legs.at(-1)?.aimedEndMs ?? substitute.endMs;
+  return {
+    startMs,
+    endMs,
+    durationMs: endMs - startMs,
+    walkDistanceM: legs
+      .filter((leg) => !isRideMode(leg.mode))
+      .reduce((total, leg) => total + leg.distanceM, 0),
+    // Only when both halves carry one: a figure that silently covers half a
+    // journey is worse than none beside a mode comparison.
+    ...(committed.co2Grams !== undefined && substitute.co2Grams !== undefined
+      ? { co2Grams: committed.co2Grams + substitute.co2Grams }
+      : {}),
+    legs,
+  };
+}
+
+/**
+ * What a spliced journey says instead of the warning it replaced.
+ *
+ * Carried beside the journey rather than derived from it, because a spliced
+ * journey is — deliberately — indistinguishable from one that always looked
+ * like this: that is the whole point of replacing the journey the ladder runs
+ * on. The board needs to be *told* a substitution happened to be able to say so.
+ */
+export interface CommuteConnectionReplacement {
+  /** Where the original connection broke: `"Asker stasjon"`. */
+  at: string;
+  /** Which ride of the spliced journey is the replacement — `rides[index]`. */
+  index: number;
 }
 
 // -------------------------------------------------------- the commitment ---
@@ -818,6 +982,7 @@ function focusOf({
   journey,
   progress,
   broken,
+  replaced,
   nowMs,
 }: {
   query: TransitCommuteQuery;
@@ -831,6 +996,8 @@ function focusOf({
    */
   progress: CommuteJourneyProgress | null;
   broken: CommuteConnectionBreak | null;
+  /** Set when this journey's own connection was re-planned — §6.5 §4. */
+  replaced: CommuteConnectionReplacement | null;
   nowMs: number;
 }): TransitWidgetV2Focus {
   const directionLabel = commuteDirectionLabel(query, direction);
@@ -915,12 +1082,23 @@ function focusOf({
   })();
 
   // The transfer information §6 puts fourth: how long the change is, or — once
-  // the numbers have broken it — that it is gone. A disruption headline takes
-  // the same slot when there is no break, because both answer "is this plan
-  // still true" and a widget has room for one of them.
+  // the numbers have broken it — that it is gone, and then which vehicle takes
+  // over instead (§4). A disruption headline takes the same slot when there is
+  // neither, because all three answer "is this plan still true" and a widget has
+  // room for one of them.
+  //
+  // The break outranks the replacement deliberately: a substitute's *own*
+  // connection can break in turn, and that is the more urgent of the two things
+  // to say.
+  const replacedRide = replaced ? (journey.rides[replaced.index] ?? null) : null;
+  const replacedChange = replaced ? (journey.connections[replaced.index - 1] ?? null) : null;
   const alert = broken
     ? `${broken.label} at ${broken.at} — ${broken.detail}`
-    : (journey.disruptions[0]?.summary ?? null);
+    : replaced && replacedRide
+      ? `Connection replaced at ${replaced.at} — ${replacedRide.departure.aimed} ${
+          replacedRide.line
+        }${replacedChange ? `, ${replacedChange.label} change` : ''}`
+      : (journey.disruptions[0]?.summary ?? null);
   const detail =
     phase === 'interchange' && connection
       ? joinLine([connection.label, journeyDetail(journey)])
@@ -985,6 +1163,7 @@ export function commuteWidgetV2Board({
   selector,
   commit,
   committedTrip,
+  replaced = null,
   nowMs,
   maxRows = 3,
 }: {
@@ -999,6 +1178,12 @@ export function commuteWidgetV2Board({
   commit: TransitWidgetV2Commit | null;
   /** The committed journey re-read at its own departure time, when there is one. */
   committedTrip: TransitTrip | null;
+  /**
+   * Set when `committedTrip` is a *spliced* journey — §6.5 §4. A spliced
+   * journey is deliberately indistinguishable from one that always looked like
+   * this, so the board has to be told in order to say so.
+   */
+  replaced?: CommuteConnectionReplacement | null;
   nowMs: number;
   maxRows?: number;
 }): TransitWidgetV2Board {
@@ -1054,6 +1239,7 @@ export function commuteWidgetV2Board({
     journey: focusJourney,
     progress,
     broken,
+    replaced: commitShown ? replaced : null,
     nowMs,
   });
 

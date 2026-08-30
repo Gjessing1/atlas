@@ -63,11 +63,15 @@ function EndField({
       {editor.search.statusText ? (
         <Text style={styles.searchStatus}>{editor.search.statusText}</Text>
       ) : null}
-      {editor.search.hits.map((hit) => (
+      {editor.search.hits.map((hit, index) => (
         <Pressable
           key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}
           style={styles.hit}
           onPress={() => editor.pickHit(field, hit)}
+          // Named per field, because all three ends can be searched in one
+          // session and the regression has to say *which* end it is picking
+          // (ROADMAP §7.4).
+          testID={`commute-hit-${field}-${index}`}
         >
           <Text style={styles.hitName} numberOfLines={1}>
             {hit.name}

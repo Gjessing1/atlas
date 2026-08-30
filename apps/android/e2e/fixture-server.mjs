@@ -4,6 +4,17 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 
+// Rendered by `@atlas/transit`, from its built `dist/` — so a commute board and
+// a widget board in this fixture are the ones the backend would send, not a
+// second implementation of them. Needs `npm run build:packages` to have run,
+// which every path that reaches the regression (the gate, both publish scripts)
+// already has.
+import {
+  commuteFixtureResponse,
+  lastWidgetBoard,
+  widgetFixtureResponse,
+} from './transit-fixture.mjs';
+
 const host = process.env.ATLAS_E2E_HOST ?? '0.0.0.0';
 const port = Number(process.env.ATLAS_E2E_PORT ?? 3199);
 const assetsRoot = process.env.ATLAS_E2E_ASSETS ?? '/mnt/data/atlas/assets';
@@ -11,6 +22,13 @@ const assetsRoot = process.env.ATLAS_E2E_ASSETS ?? '/mnt/data/atlas/assets';
 const ORIGIN = { lat: 59.8337, lng: 10.4348 };
 const DESTINATION = { lat: 59.9147, lng: 10.7333 };
 const SAVED = { lat: 59.876, lng: 10.55 };
+/** The commute's interchange — a corridor needs three stops to have a change. */
+const INTERCHANGE = { lat: 59.8334, lng: 10.4343 };
+const COMMUTE_STOPS = [
+  { match: 'engelsrud', name: 'Engelsrud E2E', position: ORIGIN, stopId: 'NSR:StopPlace:59872' },
+  { match: 'asker', name: 'Asker E2E', position: INTERCHANGE, stopId: 'NSR:StopPlace:59873' },
+  { match: 'oslo', name: 'Oslo E2E', position: DESTINATION, stopId: 'NSR:StopPlace:58404' },
+];
 
 const json = (response, body, status = 200) => {
   response.writeHead(status, {
@@ -125,6 +143,22 @@ function searchResults(query, transit = false) {
         label: 'Oslo, Norway',
         position: DESTINATION,
         ...(transit ? { transitStopId: 'NSR:StopPlace:58404' } : {}),
+      },
+    ];
+  }
+  // The commute corridor's three stops (ROADMAP §7.4). Named for real places
+  // rather than "E2E Origin" for one reason that shows on the widget: the
+  // selector's chip is the *first word* of the far end (`directionShort`), so a
+  // corridor whose ends both begin "E2E" would draw two chips reading "TO E2E"
+  // and the regression could not tell the two directions apart.
+  const stop = COMMUTE_STOPS.find((entry) => lower.includes(entry.match));
+  if (stop) {
+    return [
+      {
+        name: stop.name,
+        label: 'Fixture, Norway',
+        position: stop.position,
+        ...(transit ? { transitStopId: stop.stopId } : {}),
       },
     ];
   }
@@ -289,6 +323,31 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/api/transit' && request.method === 'POST') {
       await readJson(request);
       return json(response, transitResult());
+    }
+    // The commute board and the home-screen widget — ROADMAP §7.4. Both boards
+    // come back rendered by `@atlas/transit`, so what the regression reads off
+    // the launcher is what the backend would have sent.
+    if (url.pathname === '/api/transit/commute' && request.method === 'POST') {
+      return json(response, commuteFixtureResponse(await readJson(request), Date.now()));
+    }
+    if (url.pathname === '/api/transit/widget' && request.method === 'POST') {
+      const board = widgetFixtureResponse(await readJson(request), Date.now());
+      return json(response, board, board?.error ? 400 : 200);
+    }
+    // What the widget was last *told* to paint. The regression asserts the home
+    // screen against this rather than against a copy of the expected rows kept
+    // in the test, which would be a second thing to keep true.
+    if (url.pathname === '/api/e2e/widget-board') {
+      return json(response, lastWidgetBoard(url.searchParams.get('variant') ?? 'v2'));
+    }
+    if (url.pathname === '/api/transit/stop-lines') {
+      return json(response, {
+        stop: { id: url.searchParams.get('stopId') ?? '', name: 'E2E stop' },
+        lines: [
+          { id: 'RUT:Line:280', publicCode: '280', name: 'Asker – Engelsrud', mode: 'bus' },
+          { id: 'VYG:Line:R14', publicCode: 'R14', name: 'Asker – Oslo', mode: 'rail' },
+        ],
+      });
     }
     if (url.pathname === '/api/route' && request.method === 'POST') {
       const body = await readJson(request);

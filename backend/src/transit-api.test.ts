@@ -1131,6 +1131,150 @@ describe('POST /api/transit/widget', () => {
       expect(res.json().commitId).toBeNull();
     });
 
+    /**
+     * ROADMAP §6.5 §4 — the substitute journey. Two things are asserted about
+     * it, and the first matters as much as the second: a refresh with nothing
+     * broken must cost exactly what it cost before, because this call lands on
+     * the worst morning of the year.
+     */
+    describe('a broken connection', () => {
+      const viaCommute = {
+        ...commute,
+        via: [{ name: 'Asker stasjon', lat: 59.8334, lng: 10.4343, stopId: 'NSR:StopPlace:59872' }],
+      };
+      const rail = enturReply.data.trip.tripPatterns[0]!.legs[1]!;
+      const asker = { name: 'Asker stasjon', latitude: 59.8334, longitude: 10.4343 };
+      const leg = (over: Record<string, unknown>) => ({ ...rail, ...over });
+      const pattern = (...legs: unknown[]) => ({
+        data: { trip: { tripPatterns: [{ duration: 1080, walkDistance: 0, legs }] } },
+      });
+
+      // The 280 is twelve minutes down, so the change onto the train it was
+      // planned to meet is gone by seven.
+      const BUS_END_MS = DEPARTURE_MS + 18 * 60_000;
+      const TRAIN_MS = BUS_END_MS + 6 * 60_000;
+      const brokenReply = pattern(
+        leg({
+          mode: 'bus',
+          line: { publicCode: '280', name: 'Engelsrud – Asker' },
+          aimedStartTime: iso(DEPARTURE_MS),
+          expectedStartTime: iso(DEPARTURE_MS + 12 * 60_000),
+          aimedEndTime: iso(BUS_END_MS),
+          expectedEndTime: iso(BUS_END_MS + 12 * 60_000),
+          fromPlace: { name: 'Engelsrud', latitude: 59.82, longitude: 10.42 },
+          toPlace: asker,
+        }),
+        leg({
+          aimedStartTime: iso(TRAIN_MS),
+          expectedStartTime: iso(TRAIN_MS),
+          aimedEndTime: iso(TRAIN_MS + 20 * 60_000),
+          expectedEndTime: iso(TRAIN_MS + 20 * 60_000),
+          fromPlace: asker,
+        }),
+      );
+      // The train Asker actually offers once the bus has got there.
+      const SUBSTITUTE_MS = BUS_END_MS + 20 * 60_000;
+      const substituteReply = pattern(
+        leg({
+          line: { publicCode: 'R11', name: 'Asker – Oslo S' },
+          aimedStartTime: iso(SUBSTITUTE_MS),
+          expectedStartTime: iso(SUBSTITUTE_MS),
+          aimedEndTime: iso(SUBSTITUTE_MS + 22 * 60_000),
+          expectedEndTime: iso(SUBSTITUTE_MS + 22 * 60_000),
+          fromPlace: asker,
+        }),
+      );
+
+      const commit = { direction: 'outbound', departureMs: DEPARTURE_MS, line: '280' };
+
+      it('costs no second call while the plan still holds', async () => {
+        let calls = 0;
+        respond = () => {
+          calls += 1;
+          return new Response(JSON.stringify(liveReply), { status: 200 });
+        };
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/transit/widget',
+          payload: {
+            kind: 'commute',
+            commute: viaCommute,
+            variant: 'v2',
+            selector: 'outbound',
+            commit: { ...commit, line: 'R14' },
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        // The board, and the commitment re-read at its own departure. Nothing
+        // else: an intact journey has nothing to re-plan.
+        expect(calls).toBe(2);
+        expect(res.json().focus.alert).toBeNull();
+      });
+
+      it('re-plans the rest of the journey and says which vehicle takes over', async () => {
+        let calls = 0;
+        respond = () => {
+          calls += 1;
+          return new Response(JSON.stringify(calls > 2 ? substituteReply : brokenReply), {
+            status: 200,
+          });
+        };
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/transit/widget',
+          payload: {
+            kind: 'commute',
+            commute: viaCommute,
+            variant: 'v2',
+            selector: 'outbound',
+            commit,
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        const board = res.json();
+        // One extra call, and only because the numbers broke the change.
+        expect(calls).toBe(3);
+        expect(board.focus.alert).toMatch(/^Connection replaced at Asker stasjon — .*R11/);
+        // The same commitment, re-planned — not a new one. A commitment that
+        // renamed itself mid-journey would release the pin it is holding.
+        expect(board.commitId).toBe(`outbound:${DEPARTURE_MS}:280`);
+        // And the journey it now expires with is the one the traveller will
+        // actually arrive on.
+        expect(board.focus.detail).toContain(
+          new Date(SUBSTITUTE_MS + 22 * 60_000).toLocaleTimeString('en-GB', {
+            timeZone: 'Europe/Oslo',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        );
+      });
+
+      it('states the break and offers nothing when the substitute call fails', async () => {
+        let calls = 0;
+        respond = () => {
+          calls += 1;
+          return calls > 2
+            ? new Response('upstream is having a morning', { status: 503 })
+            : new Response(JSON.stringify(brokenReply), { status: 200 });
+        };
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/transit/widget',
+          payload: {
+            kind: 'commute',
+            commute: viaCommute,
+            variant: 'v2',
+            selector: 'outbound',
+            commit,
+          },
+        });
+        // The announcement is the half that must never be wrong; the
+        // replacement is the half worth doing without.
+        expect(res.statusCode).toBe(200);
+        expect(res.json().focus.alert).toMatch(/^Connection missed at Asker stasjon/);
+      });
+    });
+
     it('draws both directions where AUTO declines to guess', async () => {
       const res = await app.inject({
         method: 'POST',

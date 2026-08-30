@@ -3,9 +3,13 @@ import { norwayInstant } from './clock.js';
 import { commuteJourney } from './dashboard.js';
 import type { TransitCommuteQuery, TransitLeg, TransitResult, TransitTrip } from './model.js';
 import {
+  commuteCommitHolds,
   commuteCommitId,
   findCommittedTrip,
   commutePlaceAt,
+  commuteSpliceTrip,
+  commuteSubstituteQuery,
+  commuteSubstituteTrip,
   commuteWidgetV2Queries,
   commuteConnectionBreak,
   commuteDirectionPinReleaseMs,
@@ -230,6 +234,238 @@ describe('commuteConnectionBreak — ROADMAP §6.5 §4', () => {
       hm(7, 0),
     );
     expect(commuteConnectionBreak(journey, hm(7, 0))?.shortfallMs).toBe(60_000);
+  });
+});
+
+// -------------------------------------------------------- the substitute ---
+
+describe('the substitute journey — ROADMAP §6.5 §4', () => {
+  /** The 280 twelve minutes down, so the 07:41 at Asker is gone. */
+  const brokenJourney = () => commuteJourney(twoLegTrip({ delayMs: 12 * 60_000 }), hm(7, 20));
+  const brokenAt = (nowMs: number) => commuteConnectionBreak(brokenJourney(), nowMs)!;
+  /** The train that replaces it: the next one Asker offers towards town. */
+  const substituteTrip = () =>
+    trip(
+      ride({
+        line: 'R11',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        startMs: hm(7, 57),
+        endMs: hm(8, 30),
+        quay: '3',
+      }),
+    );
+
+  it('asks from the interchange to the destination, on the corridor own stops', () => {
+    const query = commuteSubstituteQuery(
+      commute(),
+      'outbound',
+      brokenJourney(),
+      brokenAt(hm(7, 30)),
+      hm(7, 30),
+    )!;
+    // The commute's own `via`, which carries a stopId — not the leg's bare
+    // coordinates, which are a point near one of Asker's entrances.
+    expect(query.from).toEqual(commute().via[0]);
+    expect(query.to).toEqual(commute().to);
+    expect(query.limit).toBe(3);
+    // 07:44 at Asker plus the planner's own two-minute change: the same
+    // arithmetic the break itself did, so the question cannot be about a moment
+    // the warning did not mean.
+    expect(query.dateTimeMs).toBe(hm(7, 46));
+  });
+
+  it('never asks about a departure that has already gone', () => {
+    // Read at 08:10, half an hour after the missed change: anchoring on the
+    // original arrival would return journeys nobody can still catch.
+    const query = commuteSubstituteQuery(
+      commute(),
+      'outbound',
+      brokenJourney(),
+      brokenAt(hm(7, 30)),
+      hm(8, 10),
+    )!;
+    expect(query.dateTimeMs).toBe(hm(8, 10));
+  });
+
+  it('leaves the rest of the corridor as vias, rather than knowing about Asker', () => {
+    const corridor = commute({
+      via: [
+        { name: 'Asker stasjon', lat: 59.83, lng: 10.43 },
+        { name: 'Sandvika', lat: 59.89, lng: 10.52 },
+      ],
+    });
+    const query = commuteSubstituteQuery(
+      corridor,
+      'outbound',
+      brokenJourney(),
+      brokenAt(hm(7, 30)),
+      hm(7, 30),
+    )!;
+    expect(query.via).toEqual([corridor.via[1]]);
+    expect(query.to).toEqual(corridor.to);
+  });
+
+  it('re-plans the way home from the same interchange, reversed', () => {
+    const query = commuteSubstituteQuery(
+      commute(),
+      'inbound',
+      brokenJourney(),
+      brokenAt(hm(7, 30)),
+      hm(7, 30),
+    )!;
+    expect(query.from).toEqual(commute().via[0]);
+    expect(query.to).toEqual(commute().from);
+  });
+
+  it('picks the earliest catchable journey out of a ranked answer', () => {
+    // Entur ranks rather than orders, so the first trip is not the earliest —
+    // the same trap `findCommittedTrip` walks `commuteJourneyList` for.
+    const late = substituteTrip();
+    const early = trip(
+      ride({
+        line: 'R12',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        startMs: hm(7, 50),
+        endMs: hm(8, 26),
+      }),
+    );
+    const tooEarly = trip(
+      ride({
+        line: 'R13',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        startMs: hm(7, 41),
+        endMs: hm(8, 14),
+      }),
+    );
+    expect(
+      commuteSubstituteTrip(result(late, tooEarly, early), hm(7, 46), hm(7, 30))?.legs[0]?.line
+        ?.publicCode,
+    ).toBe('R12');
+    // Nothing after the floor is a real outcome, not a failure to report.
+    expect(commuteSubstituteTrip(result(tooEarly), hm(7, 46), hm(7, 30))).toBeNull();
+    expect(commuteSubstituteTrip(result(), hm(7, 46), hm(7, 30))).toBeNull();
+  });
+
+  it('splices the substitute onto the legs already travelled', () => {
+    const spliced = commuteSpliceTrip(twoLegTrip({ delayMs: 12 * 60_000 }), substituteTrip(), 1)!;
+    // The bus that was ridden, the walk across the platform that still happens,
+    // then the train that replaced the one nobody caught.
+    expect(spliced.legs.map((leg) => leg.line?.publicCode ?? leg.mode)).toEqual([
+      '280',
+      'foot',
+      'R11',
+    ]);
+    expect(spliced.startMs).toBe(hm(7, 10));
+    expect(spliced.endMs).toBe(hm(8, 30));
+    expect(spliced.durationMs).toBe(hm(8, 30) - hm(7, 10));
+    // Recomputed from the legs that survived, not carried over from either half.
+    expect(spliced.walkDistanceM).toBe(120);
+    expect(spliced.co2Grams).toBeUndefined();
+    // The commitment still names the journey it was made about: the first
+    // ride's scheduled departure and line are untouched, so the pin holds.
+    expect(commuteCommitId('outbound', commuteJourney(spliced, hm(7, 50)))).toBe(
+      commuteCommitId('outbound', commuteJourney(twoLegTrip(), hm(7, 50))),
+    );
+  });
+
+  it('has nothing to splice onto a journey with no ride before the break', () => {
+    expect(commuteSpliceTrip(twoLegTrip(), substituteTrip(), 0)).toBeNull();
+    expect(commuteSpliceTrip(twoLegTrip(), { ...substituteTrip(), legs: [] }, 1)).toBeNull();
+    expect(commuteSpliceTrip(twoLegTrip(), substituteTrip(), 4)).toBeNull();
+  });
+
+  it('stops the ladder reading "riding" off a vehicle nobody boarded', () => {
+    // The trap this whole design exists for: the *original* 07:41 leaves on
+    // time and publishes its own record, while the traveller is still on a bus
+    // that has not reached Asker. Tier 2 is the strongest rung of the ladder,
+    // so it says "riding" — confidently, with the operator behind it.
+    const committed = trip(
+      ride({
+        line: '280',
+        from: 'Engelsrud',
+        to: 'Asker stasjon',
+        startMs: hm(7, 10),
+        endMs: hm(7, 32),
+        delayMs: 12 * 60_000,
+        quay: '2',
+      }),
+      change(hm(7, 32), hm(7, 34)),
+      ride({
+        line: 'R14',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        startMs: hm(7, 41),
+        endMs: hm(8, 14),
+        actualStartMs: hm(7, 41),
+        actualEndMs: hm(8, 14),
+        quay: '3',
+      }),
+    );
+    expect(commuteJourneyProgress(commuteJourney(committed, hm(7, 50)), hm(7, 50))).toEqual({
+      phase: 'riding',
+      rideIndex: 1,
+      source: 'record',
+    });
+    // Replacing the journey the ladder runs on — rather than teaching the
+    // ladder about substitutions — makes every derivation right at once.
+    const spliced = commuteSpliceTrip(committed, substituteTrip(), 1)!;
+    expect(commuteJourneyProgress(commuteJourney(spliced, hm(7, 50)), hm(7, 50)).phase).toBe(
+      'interchange',
+    );
+  });
+
+  it('expires the commitment at the arrival the traveller will actually make', () => {
+    const spliced = commuteSpliceTrip(twoLegTrip({ delayMs: 12 * 60_000 }), substituteTrip(), 1)!;
+    const late = hm(8, 40);
+    // The original journey is over and its commitment has let go; the one the
+    // traveller is on has not arrived yet.
+    expect(commuteCommitHolds(commuteJourney(twoLegTrip(), late), late)).toBe(false);
+    expect(commuteCommitHolds(commuteJourney(spliced, late), late)).toBe(true);
+  });
+
+  it('says the connection was replaced where it said it was missed', () => {
+    const spliced = commuteSpliceTrip(twoLegTrip({ delayMs: 12 * 60_000 }), substituteTrip(), 1)!;
+    const commit: TransitWidgetV2Commit = {
+      direction: 'outbound',
+      departureMs: hm(7, 10),
+      line: '280',
+    };
+    const board = (over: Parameters<typeof commuteWidgetV2Board>[0]) =>
+      commuteWidgetV2Board(over).focus.alert;
+    const shared = {
+      query: commute(),
+      results: [
+        { key: 'outbound' as const, result: result(twoLegTrip()), emptyReason: 'none' as const },
+      ],
+      resolution: resolveCommuteV2Directions({
+        query: commute(),
+        selector: 'outbound' as const,
+        pinnedAtMs: 0,
+        commit,
+        place: null,
+        nowMs: hm(7, 38),
+      }),
+      selector: 'outbound' as const,
+      commit,
+      // Before the 07:41 leaves: past it the change is history rather than a
+      // warning, which is a rule of the break itself.
+      nowMs: hm(7, 38),
+    };
+    // Before: the warning, which is the half that must never be wrong.
+    expect(board({ ...shared, committedTrip: twoLegTrip({ delayMs: 12 * 60_000 }) })).toBe(
+      'Connection missed at Asker stasjon — 07:44 arrival misses the 07:41',
+    );
+    // After: which vehicle takes them on, in the same slot.
+    expect(
+      board({
+        ...shared,
+        committedTrip: spliced,
+        replaced: { at: 'Asker stasjon', index: 1 },
+      }),
+    ).toBe('Connection replaced at Asker stasjon — 07:57 R11, 25 min change');
   });
 });
 

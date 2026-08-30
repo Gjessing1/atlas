@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 const PACKAGE = 'io.gjessing.atlas';
 const EXPECTED_AVD = 'atlas_test';
 const FIXTURE_ORIGIN = 'http://10.0.2.2:3199';
+/** The same server as {@link FIXTURE_ORIGIN}, from this side of the emulator. */
+const FIXTURE_HOST = 'http://127.0.0.1:3199';
 const sdkRoot = process.env.ANDROID_HOME ?? join(homedir(), 'android-sdk');
 const adb = process.env.ADB ?? join(sdkRoot, 'platform-tools', 'adb');
 const artifactsDir = resolve(import.meta.dirname, 'artifacts');
@@ -38,7 +40,9 @@ async function waitFor(label, read, accept, timeoutMs = 45_000) {
   const deadline = Date.now() + timeoutMs;
   let value;
   while (Date.now() < deadline) {
-    value = read();
+    // Awaited, so the same helper can poll the fixture server as well as the
+    // device: a sync read is unaffected.
+    value = await read();
     if (accept(value)) return value;
     await delay(750);
   }
@@ -89,6 +93,19 @@ function hierarchy() {
       tapBounds(bounds);
       return readWindow();
     }
+  }
+  // "Process system isn't responding". The software-rendered AVD surfaces a
+  // system_server ANR whenever the host is busy, and it covers whatever Atlas
+  // had rendered underneath — so every wait after it reads the wrong window and
+  // times out on a screen that was correct. Answered here rather than only
+  // during startup, because host load does not confine itself to the first
+  // minute of a run. Always **Wait**: closing it kills the shell the rest of the
+  // scenario needs, turning host contention into a false app regression.
+  const wait = boundsForNode(nodeForId(xml, 'android:id/aerr_wait'));
+  if (wait) {
+    console.log('Android regression: waiting out a system ANR dialog');
+    tapBounds(wait);
+    return readWindow();
   }
   return xml;
 }
@@ -285,15 +302,27 @@ async function replaceText(id, text, expectedText = text) {
     }
   };
   await type();
-  // The soft keyboard can keep what was typed as *composing* text: it shows in
+  // The soft keyboard can keep what was typed as *composing* text: it stands in
   // the IME's suggestion strip while the field the app reads is still empty, so
-  // waiting longer never resolves it. Retype once — the second pass starts from
-  // a focused field with the IME already up, which commits.
+  // waiting longer never resolves it — and neither does retyping, which composes
+  // exactly the same way. This AVD runs `hw.keyboard = no`, so every typed field
+  // goes through that path; on 2026-08-30 "engelsrud" sat in the strip through
+  // both passes and the run died on a field showing its own hint.
+  //
+  // Closing the keyboard ends the input connection, and *that* is what commits.
+  // Deliberately not a trailing space: a space commits the IME's correction —
+  // the bold middle candidate — where finishing the input commits what was
+  // actually typed.
+  if (!holds(hierarchy())) await dismissKeyboard();
   if (!holds(hierarchy())) {
     shell('input', 'keyevent', 'KEYCODE_MOVE_END');
     shell('input', 'keyevent', ...Array.from({ length: 100 }, () => 'KEYCODE_DEL'));
     await delay(300);
+    // The second pass types into a field with no keyboard in front of it, which
+    // is the more reliable of the two: with no IME view there is nothing to
+    // compose in.
     await type();
+    await dismissKeyboard();
   }
   await waitFor(`${id} to contain ${expectedText}`, hierarchy, holds);
 }
@@ -514,6 +543,372 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
   await tap('favorites-close');
 }
 
+/**
+ * The commute board and both home-screen widgets — ROADMAP §7.4.
+ *
+ * Twice running, the only real bugs in a release were on this surface, and both
+ * were found by a human looking at a home screen: v0.176.0's `optString`
+ * printing the string `"null"` in two of five columns, and v0.181.0's four
+ * rendering faults. The gate tested the row *model* and could not see any of
+ * them, because a row model says nothing about what Kotlin painted.
+ *
+ * So this scenario ends where those bugs were: on the launcher, reading a
+ * pinned instance out of `uiautomator dump` and comparing it against the board
+ * the fixture server rendered for it (`/api/e2e/widget-board`). Not against a
+ * copy of the expected rows kept here — the board comes from `@atlas/transit`,
+ * and a second copy of it in the test is a second thing to keep true.
+ */
+
+/** The board the fixture last rendered for a widget variant, and which rows it broke. */
+async function servedWidgetBoard(variant) {
+  const response = await fetch(`${FIXTURE_HOST}/api/e2e/widget-board?variant=${variant}`);
+  if (!response.ok) {
+    throw new Error(`fixture widget board unavailable (HTTP ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
+ * A string as it appears inside a `uiautomator dump` attribute.
+ *
+ * Astral-plane characters are the ones that matter here: UiAutomator's XML
+ * serializer writes 🚌 as `&#128652;` while leaving →, ·, ⇄ and ⚠ alone — so a
+ * literal search for the mode glyphs the board and the widget are full of finds
+ * nothing at all, which is exactly how this was discovered.
+ */
+function xmlAttr(value) {
+  const named = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+  return [...value]
+    .map((character) => {
+      const code = character.codePointAt(0);
+      return code > 0xffff ? `&#${code};` : (named[character] ?? character);
+    })
+    .join('');
+}
+
+function nodeForDesc(xml, description) {
+  const pattern = new RegExp(
+    `<node[^>]*content-desc="${escapeRegex(xmlAttr(description))}"[^>]*/?>`,
+  );
+  return xml.match(pattern)?.[0] ?? null;
+}
+
+/** Every string a window paints or announces, unescaped — see {@link xmlAttr}. */
+function windowStrings(xml) {
+  return [...xml.matchAll(/(?:text|content-desc)="([^"]*)"/g)].map((match) =>
+    match[1]
+      .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+      .replace(/&quot;/g, '"')
+      .replace(/&gt;/g, '>')
+      .replace(/&lt;/g, '<')
+      .replace(/&amp;/g, '&'),
+  );
+}
+
+function expectStrings(xml, expected, where) {
+  const strings = windowStrings(xml);
+  const missing = expected.filter((value) => !strings.some((seen) => seen.includes(value)));
+  if (missing.length > 0) {
+    throw new Error(`${where} is missing: ${missing.map((value) => `"${value}"`).join(', ')}`);
+  }
+}
+
+/** A dynamic id that may be below the fold, scrolling to look for it. */
+async function scrollToDynamicId(pattern, label, scrollerId, direction = 'up') {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const xml = hierarchy();
+    const found = nodeIds(xml).find((id) => pattern.test(id));
+    if (found) return found;
+    const scroller = visibleNode(xml, scrollerId);
+    if (scroller) swipeWithin(scroller.bounds, direction);
+    await delay(500);
+  }
+  throw new Error(`Could not bring ${label} into view inside ${scrollerId}`);
+}
+
+/** The emulator's screen, for gestures that are not about a node. */
+function screenSize() {
+  const match = shell('wm', 'size').match(/(\d+)x(\d+)/);
+  return { width: Number(match?.[1] ?? 1080), height: Number(match?.[2] ?? 1920) };
+}
+
+/**
+ * Poll the launcher until a widget paints what is being looked for, paging
+ * across the home screen while waiting.
+ *
+ * "Add automatically" places an instance wherever there is room, which is not
+ * always the page in front of you — and a widget one swipe away is invisible to
+ * `uiautomator dump`, which reads the window and not the workspace.
+ */
+async function waitForHomeScreen(label, accept, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  const { width, height } = screenSize();
+  let attempt = 0;
+  let xml = '';
+  while (Date.now() < deadline) {
+    xml = hierarchy();
+    if (accept(xml)) return xml;
+    attempt += 1;
+    if (attempt % 6 === 0) {
+      const y = String(Math.round(height * 0.5));
+      shell(
+        'input',
+        'swipe',
+        String(Math.round(width * 0.8)),
+        y,
+        String(Math.round(width * 0.2)),
+        y,
+        '300',
+      );
+    }
+    await delay(1_000);
+  }
+  throw new Error(`Timed out waiting for ${label} on the home screen`);
+}
+
+/** Pick one end of the commute from the fixture server's stop search. */
+async function setCommuteEnd(field, query, name) {
+  await tapAfterScroll(`commute-end-${field}`, 'commute-sheet');
+  await replaceText(`commute-search-${field}`, query);
+  await waitForId(`commute-hit-${field}-0`, true, 20_000);
+  await dismissKeyboard();
+  await tap(`commute-hit-${field}-0`);
+  // The field collapses back to the chosen stop; the search box going away is
+  // what says the pick was taken rather than merely tapped at.
+  await waitForId(`commute-search-${field}`, false);
+  await waitFor(`${field} to read ${name}`, hierarchy, (xml) => xml.includes(xmlAttr(name)));
+}
+
+/**
+ * Put a widget on the home screen and leave the launcher in front.
+ *
+ * The confirmation is the launcher's own, not ours: `requestPinAppWidget` hands
+ * the decision to whichever launcher is running, and its button is worded
+ * differently on each. Tapping whichever of them is present is the only way
+ * this can be driven without pinning the test to one launcher build.
+ */
+async function pinWidget(testId) {
+  await tapAfterScroll(testId, 'commute-sheet');
+  const labels = ['Add automatically', 'ADD AUTOMATICALLY', 'Add to home screen', 'Add', 'ADD'];
+  const dialog = await waitFor(
+    'the launcher to offer to place the widget',
+    hierarchy,
+    (xml) => labels.some((label) => nodeForText(xml, label)),
+    30_000,
+  );
+  const label = labels.find((value) => nodeForText(dialog, value));
+  tapBounds(boundsForNode(nodeForText(dialog, label)));
+  shell('input', 'keyevent', 'KEYCODE_HOME');
+  await delay(1_500);
+}
+
+/**
+ * Back into Atlas from the launcher, with the commute sheet left as it was.
+ *
+ * `waitForAppReady` cannot be used here: it waits for the map's menu button,
+ * and Atlas comes back with the sheet that was open still covering it — which
+ * is the correct behaviour and would read as a hung app.
+ */
+async function returnToApp() {
+  shell('am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
+  await waitFor(
+    'Atlas to come back to the front',
+    hierarchy,
+    (xml) =>
+      xml.includes(`package="${PACKAGE}"`) &&
+      Boolean(visibleNode(xml, 'open-menu') || visibleNode(xml, 'commute-sheet')),
+    60_000,
+  );
+}
+
+async function openCommuteSheet() {
+  if (visibleNode(hierarchy(), 'commute-sheet')) return;
+  await openMenuItem('open-commute');
+  await waitForId('commute-sheet');
+}
+
+/**
+ * Leave the map uncovered for whatever runs next.
+ *
+ * `returnToApp` deliberately accepts the sheet still being up — that *is* the
+ * correct behaviour coming back from the launcher — so the scenario that opened
+ * it is the one that has to put it away, exactly as the favourites and search
+ * scenarios do with theirs.
+ */
+async function closeCommuteSheet() {
+  await tap('commute-close');
+  await waitForId('commute-sheet', false);
+  await waitForId('search-open');
+}
+
+/** The saved commute, and the board the app draws from it. */
+async function saveCommuteAndReadBoard() {
+  await openCommuteSheet();
+  // Nothing is saved after `pm clear`, so the editor opens by itself (§6.3) —
+  // which is the state this asserts by finding its fields at all.
+  await waitForId('commute-end-from', true, 20_000);
+  await setCommuteEnd('from', 'engelsrud', 'Engelsrud E2E');
+  await setCommuteEnd('via', 'asker', 'Asker E2E');
+  await setCommuteEnd('to', 'oslo', 'Oslo E2E');
+  // "Done": the board is what the reader came for, the editor is not.
+  await tapAfterScroll('commute-edit', 'commute-sheet', 'down');
+  const board = await waitFor(
+    'the commute board to answer',
+    hierarchy,
+    (xml) => Boolean(nodeForId(xml, 'commute-leave-now')),
+    60_000,
+  );
+  // The leg strip, with the mode glyphs and the change the widget was missing
+  // until v0.181.0. Both vehicles, because a row that names only the first is
+  // exactly the bug that shipped.
+  expectStrings(board, ['🚌 280', '🚆 R14', 'at Asker E2E'], 'the commute board');
+
+  // One journey opened to its legs: every leg states its *own* platform, which
+  // is the fault v0.181.0 fixed — a row knows only the first ride's, and on a
+  // bus→train commute that is a bus stop.
+  //
+  // Scrolled for rather than read off the window: the list sits under the
+  // "if I leave now" card, and React Native does not lay out a ScrollView's
+  // off-screen children — so "no journey row" and "not scrolled to yet" are the
+  // same observation from UiAutomator.
+  const journeyId = await scrollToDynamicId(/^commute-journey-/, 'a journey row', 'commute-sheet');
+  await tapAfterScroll(journeyId, 'commute-sheet');
+  const opened = await waitFor(
+    'the journey to open its legs',
+    hierarchy,
+    (xml) => windowStrings(xml).some((value) => value.includes('plat. 3')),
+    20_000,
+  );
+  expectStrings(opened, ['plat. B4', 'plat. 3', 'Total '], 'the opened journey');
+
+  // §6.4 §5's per-leg boards, the tab a reader already on the bus opens.
+  await tapAfterScroll('commute-view-departures', 'commute-sheet', 'down');
+  const boards = await waitFor(
+    'the per-leg departure boards',
+    hierarchy,
+    (xml) => windowStrings(xml).some((value) => value.includes('ENGELSRUD E2E ↓ ASKER E2E')),
+    30_000,
+  );
+  expectStrings(boards, ['ASKER E2E ↓ OSLO E2E'], 'the per-leg boards');
+  await tapAfterScroll('commute-view-overview', 'commute-sheet', 'down');
+}
+
+/**
+ * The **v2** widget — "Atlas commute (live)" — pinned, painted, and committed to.
+ *
+ * The commitment is the half no unit test can reach: tapping a row is what buys
+ * the whole state ladder (§6.5 §2), and the fixture's timetable deliberately
+ * breaks one journey's connection so the announcement §6.5 §4 rests on is read
+ * off a home screen rather than eyeballed on the one morning it matters.
+ */
+async function verifyLiveWidget() {
+  await pinWidget('commute-add-widget-v2');
+  const served = await waitFor(
+    'the pinned live widget to ask for its board',
+    () => servedWidgetBoard('v2'),
+    (value) => Boolean(value.board),
+    120_000,
+  );
+  const rows = served.board.blocks.flatMap((block) => block.rows);
+  if (rows.length === 0) throw new Error('the fixture rendered a live widget board with no rows');
+  const painted = await waitForHomeScreen(
+    'the pinned live widget to paint the rows it was sent',
+    (xml) => rows.some((row) => nodeForDesc(xml, row.text)),
+  );
+  // Painted from the board, part by part — the columns v0.176.0 filled with the
+  // string "null" and v0.181.0 filled with a unit-less delay. `duration` and
+  // `platform` are deliberately not asserted: a narrow instance drops both
+  // columns on purpose (`NARROW_DP`), and how wide the launcher placed this one
+  // is not something a test should decide.
+  const shown = rows.filter((row) => nodeForDesc(painted, row.text));
+  const strings = windowStrings(painted);
+  for (const row of shown) {
+    const parts = [row.time, row.arrival, row.lines, row.delayLabel];
+    const missing = parts.filter((part) => part && !strings.includes(part));
+    if (missing.length > 0) {
+      throw new Error(
+        `the live widget's row "${row.text}" is missing ${missing.join(', ')} on the home screen`,
+      );
+    }
+  }
+  if (strings.includes('null')) {
+    throw new Error('the live widget painted the string "null" where a value belongs');
+  }
+  expectStrings(painted, [served.board.focus.action], 'the live widget');
+
+  // §6.5 §4: commit to the journey whose connection this timetable breaks, and
+  // the widget must say the change no longer holds.
+  const brokenId = served.broken[0];
+  const broken = shown.find((row) => row.id === brokenId);
+  if (!broken) {
+    throw new Error(
+      `the broken journey ${brokenId} is not among the painted rows: ${shown
+        .map((row) => row.id)
+        .join(', ')}`,
+    );
+  }
+  tapBounds(boundsForNode(nodeForDesc(painted, broken.text)));
+  const committed = await waitFor(
+    'the widget to take the commitment and re-ask',
+    () => servedWidgetBoard('v2'),
+    (value) => value.board?.commitId === brokenId,
+    120_000,
+  );
+  const alert = committed.board.focus.alert;
+  // §6.5 §4: the broken change is not merely announced, it is re-planned — and
+  // the vehicle that takes over has to be on the home screen, which is the one
+  // place this could ever be read.
+  if (!alert?.startsWith('Connection replaced at')) {
+    throw new Error(`a committed broken journey was not re-planned: ${alert}`);
+  }
+  await waitForHomeScreen('the replaced connection', (xml) =>
+    windowStrings(xml).some((value) => value.includes(alert)),
+  );
+}
+
+/** The **v1** widget — "Atlas commute" — one board, pinned, painted from the same route. */
+async function verifySimpleWidget() {
+  await pinWidget('commute-add-widget');
+  const served = await waitFor(
+    'the pinned simple widget to ask for its board',
+    () => servedWidgetBoard('v1'),
+    (value) => Boolean(value.board),
+    120_000,
+  );
+  const rows = served.board.directions.flatMap((direction) => direction.rows);
+  if (rows.length === 0) throw new Error('the fixture rendered a simple widget board with no rows');
+  const painted = await waitForHomeScreen(
+    'the pinned simple widget to paint the rows it was sent',
+    (xml) => rows.some((row) => nodeForDesc(xml, row.text)),
+  );
+  const strings = windowStrings(painted);
+  if (strings.includes('null')) {
+    throw new Error('the simple widget painted the string "null" where a value belongs');
+  }
+  // v1 paints the leg strip a line per vehicle rather than one `lines` column,
+  // so this is where v0.181.0's four faults are actually visible: the delay with
+  // its unit beside the time it corrects, a mode icon per vehicle, and each
+  // leg's own window — the row-level platform is the *first* ride's, which on a
+  // bus→train commute is a bus stop. `quay`, `duration` and `platform` are left
+  // out on purpose: all three are dropped below `NARROW_DP`, and how wide the
+  // launcher placed this instance is not something a test should decide.
+  for (const row of rows.filter((entry) => nodeForDesc(painted, entry.text))) {
+    const parts = [
+      row.time,
+      row.arrival,
+      row.delayLabel,
+      ...row.legs.flatMap((leg) => [leg.icon, leg.line, leg.window]),
+    ];
+    const missing = parts.filter((part) => part && !strings.includes(part));
+    if (missing.length > 0) {
+      throw new Error(
+        `the simple widget's row "${row.text}" is missing ${missing.join(', ')} on the home screen`,
+      );
+    }
+  }
+}
+
 function saveArtifacts(error) {
   mkdirSync(artifactsDir, { recursive: true });
   let xml = '';
@@ -612,6 +1007,14 @@ async function main() {
   await setDarkTheme();
   const trackId = await recordTrackId(ids.folderId);
   await verifyPersistence({ ...ids, trackId });
+  console.log('Android regression: commute board, then both widgets on the home screen');
+  await saveCommuteAndReadBoard();
+  await verifyLiveWidget();
+  await returnToApp();
+  await openCommuteSheet();
+  await verifySimpleWidget();
+  await returnToApp();
+  await closeCommuteSheet();
 
   await tap('search-open');
   await waitForId('search-sheet');
@@ -624,7 +1027,7 @@ async function main() {
   await tap('search-close');
 
   console.log(
-    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, sheet snaps, Back-compatible surfaces, and rotation.',
+    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, the commute board and both home-screen widgets, sheet snaps, Back-compatible surfaces, and rotation.',
   );
 }
 

@@ -7,6 +7,11 @@ import {
   commuteSegmentQueries,
   commuteSegmentWidgetBoard,
   commuteCommitQuery,
+  commuteConnectionBreak,
+  commuteJourney,
+  commuteSpliceTrip,
+  commuteSubstituteQuery,
+  commuteSubstituteTrip,
   commuteTransitQueries,
   commuteWidgetV2Board,
   commuteWidgetV2Queries,
@@ -36,6 +41,7 @@ import {
   WIDE_SEARCH_WINDOW_MINUTES,
 } from '@atlas/transit';
 import type {
+  CommuteConnectionReplacement,
   CommuteEmptyReason,
   TransitCommuteDirection,
   TransitCommutePlace,
@@ -47,6 +53,7 @@ import type {
   TransitMode,
   TransitQuery,
   TransitResult,
+  TransitTrip,
   TransitWeekday,
   TransitWidgetBoard,
   TransitWidgetV2Commit,
@@ -713,6 +720,43 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
   };
 
   /**
+   * The re-planned rest of a committed journey — ROADMAP §6.5 §4.
+   *
+   * **One extra upstream call, and only when the numbers say the change is
+   * gone.** A normal refresh costs exactly what it costs today; this one lands
+   * on the worst morning of the year, so every way it can fail — a dead
+   * upstream, an empty answer, nothing splice-able — degrades to v0.182.0's
+   * behaviour, which is the break stated and no replacement offered. The
+   * announcement is the half that must never be wrong; the substitute is the
+   * half worth doing without.
+   */
+  const commuteSubstitution = async (
+    query: TransitCommuteQuery,
+    direction: TransitCommuteDirection,
+    trip: TransitTrip,
+    nowMs: number,
+  ): Promise<{ trip: TransitTrip; replaced: CommuteConnectionReplacement } | null> => {
+    const journey = commuteJourney(trip, nowMs);
+    const broken = commuteConnectionBreak(journey, nowMs);
+    if (!broken) return null;
+    const question = commuteSubstituteQuery(query, direction, journey, broken, nowMs);
+    if (!question) return null;
+    try {
+      const answer = await askDirection(question, query.filter);
+      if (!answer.ok) return null;
+      // The same floor the question was asked from: a "substitute" leaving
+      // before the traveller can be standing there is not one.
+      const substitute = commuteSubstituteTrip(answer.result, question.dateTimeMs ?? nowMs, nowMs);
+      if (!substitute) return null;
+      const spliced = commuteSpliceTrip(trip, substitute, broken.index);
+      return spliced ? { trip: spliced, replaced: { at: broken.at, index: broken.index } } : null;
+    } catch (err) {
+      app.log.warn({ err }, 'entur commute substitute unreachable');
+      return null;
+    }
+  };
+
+  /**
    * Drop leg geometry from a commute answer.
    *
    * Measured on the live Engelsrud ↔ Nationaltheatret board (2026-08-25): the
@@ -960,6 +1004,20 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
         }
         status?.record(TRANSIT_PROBE, true);
         reply.header('cache-control', 'private, max-age=15');
+        // A commitment whose journey the upstream no longer offers comes back
+        // null, and the board releases it rather than freezing on a plan
+        // nothing will run. The failure of that one extra call is treated the
+        // same way, deliberately: the timetable is still worth showing.
+        const committedTrip =
+          commit && committed?.ok ? findCommittedTrip(committed.result, commit, nowMs) : null;
+        // §6.5 §4. The *journey the ladder runs on* is replaced rather than the
+        // ladder being taught about substitutions: the original leg 2 goes on
+        // publishing its own `actualStartMs`, so a phase derived from it would
+        // read "riding" on a vehicle nobody boarded.
+        const substitution =
+          commit && committedTrip
+            ? await commuteSubstitution(parsed.query, commit.direction, committedTrip, nowMs)
+            : null;
         return commuteWidgetV2Board({
           query: parsed.query,
           results: answers.flatMap(({ key, answer }) =>
@@ -968,12 +1026,8 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
           resolution,
           selector,
           commit,
-          // A commitment whose journey the upstream no longer offers comes back
-          // null, and the board releases it rather than freezing on a plan
-          // nothing will run. The failure of that one extra call is treated the
-          // same way, deliberately: the timetable is still worth showing.
-          committedTrip:
-            commit && committed?.ok ? findCommittedTrip(committed.result, commit, nowMs) : null,
+          committedTrip: substitution?.trip ?? committedTrip,
+          replaced: substitution?.replaced ?? null,
           nowMs,
           maxRows,
         });
