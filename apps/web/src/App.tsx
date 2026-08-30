@@ -43,10 +43,11 @@ import {
   useLayerFilters,
   usePlanningAreas,
   useThemeMode,
+  type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
-import { fetchTransitCommute, type TransitCommuteQuery, type TransitTrip } from '@atlas/transit';
+import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
@@ -133,8 +134,10 @@ const CommutePanel = lazy(() =>
 // `segments: true` asks for the per-leg boards too (§6.4 §5) — one request that
 // answers the whole dashboard rather than five the panel would have to
 // orchestrate and fail independently.
-const fetchCommute = (query: TransitCommuteQuery, signal: AbortSignal) =>
-  fetchTransitCommute(query, { signal, segments: true });
+// `commit` carries the journey the board is tracking (§6.4 §7), so the answer
+// still contains it once it has left — the moment the block is worth having.
+const fetchCommute: CommuteFn = (query, signal, commit) =>
+  fetchTransitCommute(query, { signal, segments: true, commit });
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 

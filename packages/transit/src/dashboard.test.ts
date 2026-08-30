@@ -8,9 +8,13 @@ import {
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
+  commuteLineBadge,
   commuteNowLabel,
   commuteOffDayNote,
+  commuteRibbon,
+  commuteRibbonProgress,
   commuteSegments,
+  commuteSharedDisruptions,
 } from './dashboard.js';
 import { legTimeParts } from './labels.js';
 import type {
@@ -515,5 +519,175 @@ describe('labels', () => {
     expect(commuteOffDayNote([1, 2, 3, 4, 5], 6)).toContain('not saved for today');
     expect(commuteOffDayNote([1, 2, 3, 4, 5], 2)).toBeNull();
     expect(commuteOffDayNote([], 6)).toBeNull();
+  });
+});
+
+describe('commuteLineBadge', () => {
+  it('uses the operator’s published pair when there is one', () => {
+    expect(
+      commuteLineBadge({ publicCode: '280', colour: '#E60000', textColour: '#FFFFFF' }),
+    ).toEqual({ fill: '#E60000', text: '#FFFFFF' });
+  });
+
+  it('falls back to one neutral rather than inventing a colour per mode', () => {
+    const badge = commuteLineBadge({ publicCode: '280' });
+    expect(badge.fill).toBe(commuteLineBadge(undefined).fill);
+    expect(badge.text).toBe('#ffffff');
+  });
+
+  it('chooses a legible foreground when the operator published only a fill', () => {
+    // Ruter's own yellow: white on it is unreadable at 11 px, which is the
+    // whole reason this is computed rather than defaulted.
+    expect(commuteLineBadge({ publicCode: '1', colour: '#FFD520' }).text).toBe('#101418');
+    expect(commuteLineBadge({ publicCode: '1', colour: '#00685E' }).text).toBe('#ffffff');
+  });
+
+  it('ignores a colour that is not a hex triple', () => {
+    expect(commuteLineBadge({ publicCode: '1', colour: 'red' })).toEqual(
+      commuteLineBadge(undefined),
+    );
+  });
+});
+
+describe('commuteRibbon', () => {
+  const journey = () => commuteJourney(specJourney(), NOW);
+
+  it('lays the journey out as vehicle, change, vehicle', () => {
+    expect(commuteRibbon(journey()).map((part) => part.kind)).toEqual(['ride', 'change', 'ride']);
+  });
+
+  it('weights every part by its own minutes', () => {
+    const [bus, change, train] = commuteRibbon(journey());
+    // 08:36→09:02, 09:02→09:11, 09:11→09:24.
+    expect(bus?.weight).toBe(26);
+    expect(change?.weight).toBe(9);
+    expect(train?.weight).toBe(13);
+  });
+
+  it('gives a short change a floor, so a change is always visible', () => {
+    const tight = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Asker stasjon',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+      }),
+      ride({
+        line: 'L1',
+        mode: 'rail',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(9, 3),
+        aimedEndMs: hm(9, 24),
+      }),
+    );
+    const change = commuteRibbon(commuteJourney(tight, NOW))[1];
+    expect(change?.kind).toBe('change');
+    // One minute of wall clock, four of ribbon: below the floor a change rounds
+    // to nothing and two vehicles appear to touch.
+    expect(change?.weight).toBe(4);
+    expect(change?.kind === 'change' && change.label).toBe('1m');
+  });
+
+  it('puts the correction on the leg carrying it, not on the journey', () => {
+    const late = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Asker stasjon',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+        expectedStartMs: hm(8, 39),
+        expectedEndMs: hm(9, 5),
+        realtime: true,
+      }),
+      ride({
+        line: 'L1',
+        mode: 'rail',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(9, 11),
+        aimedEndMs: hm(9, 24),
+      }),
+    );
+    const parts = commuteRibbon(commuteJourney(late, NOW));
+    expect(parts[0]?.kind === 'ride' && parts[0].delay).toBe('+3');
+    expect(parts[2]?.kind === 'ride' && parts[2].delay).toBeNull();
+  });
+
+  it('marks the change the caller says is broken, and only that one', () => {
+    const parts = commuteRibbon(journey(), { brokenIndex: 1 });
+    expect(parts[1]?.kind === 'change' && parts[1].broken).toBe(true);
+    expect(commuteRibbon(journey())[1]?.kind === 'change' && commuteRibbon(journey())[1]).toEqual(
+      expect.objectContaining({ broken: false }),
+    );
+  });
+});
+
+describe('commuteRibbonProgress', () => {
+  const parts = () => commuteRibbon(commuteJourney(specJourney(), NOW));
+
+  it('is null before the journey starts', () => {
+    expect(commuteRibbonProgress(parts(), hm(8, 30))).toBeNull();
+  });
+
+  it('is 100 once it has finished', () => {
+    expect(commuteRibbonProgress(parts(), hm(9, 40))).toBe(100);
+  });
+
+  it('is measured on the ribbon’s weights, not on elapsed minutes', () => {
+    // Half way through the 26-minute bus: 13 of the bar's 48 weight units.
+    const half = commuteRibbonProgress(parts(), hm(8, 49));
+    expect(half).toBeCloseTo((13 / 48) * 100, 5);
+  });
+
+  it('lands inside the change while the traveller is standing at it', () => {
+    const at904 = commuteRibbonProgress(parts(), hm(9, 4))!;
+    const busShare = (26 / 48) * 100;
+    const changeShare = (9 / 48) * 100;
+    expect(at904).toBeGreaterThan(busShare);
+    expect(at904).toBeLessThan(busShare + changeShare);
+  });
+});
+
+describe('commuteSharedDisruptions', () => {
+  const withNotice = (id: string, aimedStartMs: number) =>
+    commuteJourney(
+      trip(
+        ride({
+          line: '270',
+          from: 'Engelsrud Terrasse',
+          to: 'Asker stasjon',
+          aimedStartMs,
+          aimedEndMs: aimedStartMs + 20 * 60_000,
+          situations: [
+            {
+              id,
+              severity: 'warning',
+              summary: 'Signal problems',
+              planned: false,
+            } as TransitSituation,
+          ],
+        }),
+      ),
+      NOW,
+    );
+
+  it('lifts a notice every listed journey carries', () => {
+    const shared = commuteSharedDisruptions([
+      withNotice('S1', hm(8, 36)),
+      withNotice('S1', hm(8, 48)),
+    ]);
+    expect(shared.map((item) => item.key)).toEqual(['S1']);
+  });
+
+  it('leaves a notice that only some journeys carry where it is', () => {
+    const clean = commuteJourney(specJourney(), NOW);
+    expect(commuteSharedDisruptions([withNotice('S1', hm(8, 36)), clean])).toEqual([]);
+  });
+
+  it('lifts nothing out of a single journey, which has no “every” to speak of', () => {
+    expect(commuteSharedDisruptions([withNotice('S1', hm(8, 36))])).toEqual([]);
   });
 });

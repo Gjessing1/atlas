@@ -1,6 +1,7 @@
 import { TransitError } from '@atlas/transit';
 import type {
   CommuteEmptyReason,
+  TransitWidgetV2Commit,
   TransitCommuteDirection,
   TransitCommutePlace,
   TransitCommuteQuery,
@@ -32,6 +33,44 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  */
 
 export const COMMUTE_SETTING_KEY = 'transit.commute';
+
+/**
+ * Where the board keeps the journey it is tracking — §6.4 §7's one decision.
+ *
+ * `local.` is load-bearing, not a naming habit: settings under that prefix
+ * never sync (see the storage package's outbox rules), and "the journey I am on
+ * right now" is the least portable fact this app holds. Syncing it would put a
+ * laptop's board on a bus it is not on, and hand the tablet at home a
+ * commitment that expires while nobody is looking at it.
+ *
+ * The value is a {@link TransitWidgetV2Commit} — the *same* shape the
+ * home-screen widget stores per instance, so a tap in the app and a tap on the
+ * widget mean one thing. Two stores with no shared shape between them is how
+ * "the journey I'm on" grows a second definition.
+ */
+export const COMMUTE_COMMIT_SETTING_KEY = 'local.transit.commit';
+
+/** Read a stored commitment, ignoring anything that is not one. */
+export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit | null {
+  if (!value) return null;
+  try {
+    const raw: unknown = JSON.parse(value);
+    if (!isRecord(raw)) return null;
+    const direction = raw.direction === 'inbound' ? 'inbound' : 'outbound';
+    const departureMs = raw.departureMs;
+    const line = raw.line;
+    if (typeof departureMs !== 'number' || !Number.isFinite(departureMs)) return null;
+    if (typeof line !== 'string') return null;
+    return {
+      direction,
+      departureMs,
+      line,
+      ...(typeof raw.committedAtMs === 'number' ? { committedAtMs: raw.committedAtMs } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** The shape written today. Bumped when a migration has to tell versions apart. */
 const CONFIG_VERSION = 2;
@@ -86,6 +125,8 @@ export interface CommuteSettings {
 export type CommuteFn = (
   query: TransitCommuteQuery,
   signal: AbortSignal,
+  /** The journey being tracked, so the answer carries it once it has left. */
+  commit: TransitWidgetV2Commit | null,
 ) => Promise<TransitCommuteResult>;
 
 export interface CommuteController {
@@ -101,6 +142,13 @@ export interface CommuteController {
   refresh: () => void;
   /** Why a direction is empty, so a board can offer the way out of its own filter. */
   emptyReason: (direction: TransitCommuteDirection) => CommuteEmptyReason;
+  /** The journey the board is tracking (§6.4 §7), or null. */
+  commit: TransitWidgetV2Commit | null;
+  /**
+   * Start or stop tracking a journey. Writing it re-asks the board, which is
+   * the point: the tracked journey has to come back even once it has left.
+   */
+  setCommit: (commit: TransitWidgetV2Commit | null) => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -297,6 +345,7 @@ export function useCommute(
   const [error, setError] = useState<string | null>(null);
   const [updatedMs, setUpdatedMs] = useState<number | null>(null);
   const [seed, setSeed] = useState(0);
+  const [commit, setCommitState] = useState<TransitWidgetV2Commit | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -313,6 +362,9 @@ export function useCommute(
       }
       setLoaded(true);
     });
+    void getSetting(COMMUTE_COMMIT_SETTING_KEY).then((saved) => {
+      if (current) setCommitState(parseCommuteCommit(saved));
+    });
     return () => {
       current = false;
     };
@@ -320,6 +372,7 @@ export function useCommute(
 
   const query = useMemo(() => commuteQueryFrom(config, places), [config, places]);
   const queryKey = query ? JSON.stringify(query) : '';
+  const commitKey = commit ? `${commit.direction}:${commit.departureMs}:${commit.line}` : '';
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -335,7 +388,7 @@ export function useCommute(
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const next = await fetchCommute(query, controller.signal);
+        const next = await fetchCommute(query, controller.signal, commit);
         if (controller.signal.aborted) return;
         setResult(next);
         setError(null);
@@ -358,12 +411,23 @@ export function useCommute(
       controller.abort();
     };
     // query enters through its stable serialized value; callers rebuild it.
-  }, [active, fetchCommute, loaded, queryKey, seed]);
+    // `commitKey` rather than `commit`: a re-read of the same commitment must
+    // not re-ask the board, or every answer would trigger the next request.
+  }, [active, commitKey, fetchCommute, loaded, queryKey, seed]);
 
   const setConfig = useCallback(
     (next: CommuteConfig) => {
       setConfigState(next);
       saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
+    },
+    [saveSetting],
+  );
+  const setCommit = useCallback(
+    (next: TransitWidgetV2Commit | null) => {
+      setCommitState(next);
+      // Written even when clearing, so a board reopened later starts untracked
+      // rather than re-reading a commitment the user let go of.
+      saveSetting(COMMUTE_COMMIT_SETTING_KEY, next ? JSON.stringify(next) : '');
     },
     [saveSetting],
   );
@@ -388,5 +452,7 @@ export function useCommute(
     updatedMs,
     refresh,
     emptyReason,
+    commit,
+    setCommit,
   };
 }

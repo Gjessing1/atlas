@@ -781,7 +781,8 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
   app.post('/api/transit/commute', async (request, reply) => {
     const parsed = parseCommuteQuery(request.body);
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
-    const queries = commuteTransitQueries(parsed.query, Date.now());
+    const nowMs = Date.now();
+    const queries = commuteTransitQueries(parsed.query, nowMs);
     // The dashboard's per-leg boards (§6.4 §5), fanned out here rather than by
     // the client: one request over a phone's link instead of five, one failure
     // to handle, and one place that knows the corridor's hops. Opt-in, because
@@ -790,9 +791,18 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     const segmentQueries = wantSegments
       ? commuteSegmentQueries(parsed.query, COMMUTE_SEGMENT_ROWS)
       : [];
+    // §6.4 §7. The board carries the same commitment the home-screen widget
+    // does, and needs the same one extra call for the same reason: a board
+    // asked "from now" cannot contain a journey that has already left, which is
+    // precisely the journey a traveller mid-commute is asking about. Costs
+    // nothing on a board nobody has committed to.
+    const commit = parseV2Commit((request.body as { commit?: unknown } | null)?.commit);
 
     try {
-      const [outbound, inbound, ...segmentAnswers] = await Promise.all([
+      const [committed, outbound, inbound, ...segmentAnswers] = await Promise.all([
+        commit
+          ? askDirection(commuteCommitQuery(parsed.query, commit), parsed.query.filter)
+          : Promise.resolve(null),
         askDirection(queries.outbound, parsed.query.filter),
         askDirection(queries.inbound, parsed.query.filter),
         ...segmentQueries.map((hop) => askDirection(hop.query, parsed.query.filter)),
@@ -807,10 +817,30 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       if (!outbound.ok) return unavailable(outbound.status);
       if (!inbound.ok) return unavailable(inbound.status);
       status?.record(TRANSIT_PROBE, true);
+      // The committed journey, re-planned if its change has gone (§6.5 §4) —
+      // the same two steps, in the same order, as the v2 widget below. A
+      // commitment the upstream no longer offers, or one whose extra call
+      // failed, comes back absent and the board releases it rather than
+      // freezing on a plan nothing will run.
+      const committedTrip =
+        commit && committed?.ok ? findCommittedTrip(committed.result, commit, nowMs) : null;
+      const substitution =
+        commit && committedTrip
+          ? await commuteSubstitution(parsed.query, commit.direction, committedTrip, nowMs)
+          : null;
+      const committedAnswer = substitution?.trip ?? committedTrip;
       reply.header('cache-control', 'private, max-age=30');
       return {
         outbound: withoutGeometry(outbound.result),
         inbound: withoutGeometry(inbound.result),
+        ...(committedAnswer
+          ? {
+              committed: {
+                trip: withoutGeometry({ trips: [committedAnswer], problems: [] }).trips[0]!,
+                replaced: substitution?.replaced ?? null,
+              },
+            }
+          : {}),
         // Which nothing it was, per direction, so a board can offer the way out
         // of its own filter instead of blaming the timetable.
         emptyReason: { outbound: outbound.emptyReason, inbound: inbound.emptyReason },

@@ -4,20 +4,24 @@ import {
   type CommuteController,
   type CommuteDashboard,
   type CommuteDashboardBoard,
+  type CommuteDashboardRow,
 } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import {
-  commuteEstimateLabel,
+  commuteCountdown,
   fetchTransitStopLines,
   liveTimetableLabel,
   transitModeGlyph,
   type CommuteBoardRow,
   type CommuteDisruption,
+  type CommuteHere,
   type CommuteJourney,
+  type CommuteLineBadge,
+  type CommuteRibbonPart,
   type CommuteServiceState,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useGeocode } from '../routing/useGeocode.js';
 import { CommuteEditorForm } from './CommuteEditor.js';
@@ -30,12 +34,20 @@ import { CommuteEditorForm } from './CommuteEditor.js';
  * before the first departure time. It answered "is my commute set up correctly"
  * on a screen opened to answer "when do I leave".
  *
- * So the order is inverted and the emphasis with it. Reading down: which
- * direction and when it is now; what leaving *now* actually gets you; the
- * complete journey options as one scannable line each, expandable to their legs
- * and connections; then the per-leg boards for someone already mid-journey.
- * Configuration is one button, opened on demand — or by itself when there is
- * not yet enough saved to ask a question at all.
+ * So the order is inverted and the emphasis with it. Reading down: where you
+ * are in the journey you are tracking, if you are tracking one; what leaving
+ * *now* actually gets you; the complete journey options as one scannable line
+ * and one ribbon each, expandable to their legs; then the per-leg boards for
+ * someone already mid-journey. Configuration is one button, opened on demand —
+ * or by itself when there is not yet enough saved to ask a question at all.
+ *
+ * **The ribbon is the change worth knowing about.** Every journey used to state
+ * its vehicles as a wrapping strip of bordered chips, which in a 360 px panel
+ * became two or three lines of near-identical text per row: five journeys, ten
+ * boxes, thirty clock times, and no way to see that the first leg is a long bus
+ * and the second a short train without reading all of it. `commuteRibbon` draws
+ * the journey as one proportional bar in the operators' own colours, so the
+ * shape of a commute is legible before a digit is.
  *
  * Everything shown here is computed in `@atlas/transit` and `useCommuteDashboard`;
  * this file is markup and CSS classes. The Android sheet renders the same model
@@ -60,6 +72,12 @@ const glyph = transitModeGlyph;
  * surfaces of one commute cannot disagree about which departure is in trouble.
  */
 const stateClass = (state: CommuteServiceState) => `commute-state-${state}`;
+
+/** The operator's own colours, as inline style — the one place they may appear. */
+const badgeStyle = (badge: CommuteLineBadge) => ({
+  background: badge.fill,
+  color: badge.text,
+});
 
 /**
  * Disruptions under the service they affect (§4).
@@ -129,147 +147,261 @@ function Disruptions({
 }
 
 /**
- * The vehicles of a journey with their own times, and the changes between them.
+ * The journey as one proportional bar — every vehicle as wide as it is long,
+ * in the operator's own colours, with the changes as literal gaps between them.
  *
- * This is the collapsed row's second line, and it exists because the first cut
- * of it printed "🚌 270 🚆 L1" — which tells a reader that a train is involved
- * and nothing about when it leaves Asker or when it reaches town. On a two-leg
- * commute that is the whole question, and answering it meant expanding a row.
- * Every vehicle now carries its own window and every change its own wait, so
- * the journey is legible without opening anything (§1, §2).
+ * Two colour channels run through this and they never trade places: the *fill*
+ * is the line's identity (the 280 is Ruter red whether or not it is late) and
+ * the *edge* is its state. A reader who learned "red means trouble" here would
+ * misread every bus in Oslo.
  */
-function LegStrip({ journey }: { journey: CommuteJourney }) {
+function Ribbon({
+  parts,
+  progress = null,
+  tall = false,
+}: {
+  parts: readonly CommuteRibbonPart[];
+  /** Where "now" sits along it, 0–100, when this is the journey being tracked. */
+  progress?: number | null;
+  tall?: boolean;
+}) {
+  if (parts.length === 0) return null;
   return (
-    <span className="commute-journey-legs">
-      {journey.rides.map((ride, index) => {
-        const change = journey.connections[index - 1];
-        return (
-          <Fragment key={ride.key}>
-            {change && (
-              <span className={`commute-change${change.tight ? ' tight' : ''}`}>
-                <i aria-hidden="true">⇄</i>
-                {change.chip}
-              </span>
-            )}
-            <span className={`commute-leg-chip ${stateClass(ride.state)}`}>
-              <i aria-hidden="true">{glyph(ride.mode)}</i>
-              <b>{ride.line}</b>
-              <em>{ride.window}</em>
-            </span>
-          </Fragment>
-        );
-      })}
-    </span>
+    <div className={`commute-ribbon${tall ? ' tall' : ''}`}>
+      {parts.map((part) =>
+        part.kind === 'ride' ? (
+          <span
+            key={part.key}
+            className={`commute-seg ${stateClass(part.state)}`}
+            style={{ flexGrow: part.weight, ...badgeStyle(part.badge) }}
+            title={`${part.line} · ${part.weight} min`}
+          >
+            <i aria-hidden="true">{glyph(part.mode)}</i>
+            <b>{part.line}</b>
+            {/* The correction on the leg carrying it: on a bus→train commute,
+                "the bus is nine late" and "the train is nine late" are different
+                mornings, and one number on the row cannot tell them apart. */}
+            {part.delay && <u>{part.delay}</u>}
+          </span>
+        ) : (
+          <span
+            key={part.key}
+            className={`commute-gap${part.broken ? ' broken' : part.tight ? ' tight' : ''}`}
+            style={{ flexGrow: part.weight }}
+          >
+            <i>{part.broken ? '×' : part.label}</i>
+          </span>
+        ),
+      )}
+      {progress !== null && (
+        <span className="commute-ribbon-now" style={{ left: `${progress}%` }} aria-hidden="true" />
+      )}
+    </div>
   );
 }
 
 /**
- * One journey, collapsed to its scan line and expandable to its legs.
+ * The scan line: departure, arrival and total, all on the timetable's own
+ * numbers, in one line comparable against the row above it without reading
+ * either (§12).
  *
- * The collapsed row is the whole point of §12: departure, arrival and total,
- * all scheduled times, in one line that can be compared against the row above
- * it without reading either. The live estimate sits under the departure as a
- * labelled secondary, never in place of it.
+ * The live correction that used to sit under the departure has moved onto the
+ * ribbon segment it is about. It was saying the same thing in a weaker place —
+ * a journey-level `+3 min` cannot name which of two vehicles is late.
  */
-function JourneyRow({
+function ScanLine({
   journey,
-  open,
-  onToggle,
+  big = false,
+  countdown = null,
 }: {
   journey: CommuteJourney;
-  open: boolean;
-  onToggle: () => void;
+  big?: boolean;
+  countdown?: string | null;
 }) {
   return (
-    <li className={`commute-journey ${stateClass(journey.state)}`}>
+    <span className={`commute-scan${big ? ' big' : ''}`}>
+      <strong>{journey.departure.aimed}</strong>
+      {countdown && <span className="commute-in">{countdown}</span>}
+      <i aria-hidden="true" />
+      <strong className="end">{journey.arrival.aimed}</strong>
+      <em>{journey.duration}</em>
+      {journey.dayNote && <em className="day">{journey.dayNote}</em>}
+    </span>
+  );
+}
+
+/** The change, in the two numbers the traveller would otherwise subtract (§2). */
+function Changes({ row }: { row: CommuteDashboardRow }) {
+  return (
+    <>
+      {row.journey.connections.map((change, index) => {
+        const broken = row.broken?.index === index + 1;
+        return (
+          <p
+            key={change.key}
+            className={`commute-change${broken ? ' broken' : change.tight ? ' tight' : ''}`}
+          >
+            <i aria-hidden="true">⇄</i>
+            <span>{change.at}</span>
+            {broken ? (
+              <b className="detail">{row.broken?.detail}</b>
+            ) : (
+              <b>
+                {change.arrive} → {change.depart}
+              </b>
+            )}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
+/** The vehicles of an expanded journey, stop by stop. */
+function Legs({ journey }: { journey: CommuteJourney }) {
+  return (
+    <ol className="commute-legs">
+      {journey.rides.map((ride, index) => {
+        const connection = journey.connections[index - 1];
+        return (
+          <li key={ride.key}>
+            {connection && (
+              <p className={`commute-connection${connection.tight ? ' tight' : ''}`}>
+                {connection.summary}
+              </p>
+            )}
+            <div className="commute-leg">
+              <span className="commute-leg-time">
+                <strong>{ride.departure.aimed}</strong>
+                {ride.departure.delay && <em>{ride.departure.expected} est.</em>}
+              </span>
+              <span className="commute-leg-body">
+                <strong>
+                  <span className="commute-badge" style={badgeStyle(ride.badge)}>
+                    {glyph(ride.mode)} {ride.line}
+                  </span>
+                  {ride.towards ? ` → ${ride.towards}` : ''}
+                </strong>
+                <span>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</span>
+                <span className="commute-leg-ride">{ride.ride}</span>
+              </span>
+            </div>
+            <div className="commute-leg">
+              <span className="commute-leg-time">
+                <strong>{ride.arrival.aimed}</strong>
+                {ride.arrival.delay && <em>{ride.arrival.expected} est.</em>}
+              </span>
+              <span className="commute-leg-body">
+                <span>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</span>
+              </span>
+            </div>
+            <Disruptions items={ride.disruptions} />
+          </li>
+        );
+      })}
+      <li className="commute-legs-total">
+        Total {journey.duration}
+        {journey.walk ? ` · ${journey.walk}` : ''}
+      </li>
+    </ol>
+  );
+}
+
+/**
+ * One journey, collapsed to its scan line and ribbon, expandable to its legs.
+ *
+ * Tracking lives inside the expansion rather than on the collapsed row. A
+ * button per row was four more bordered boxes on a list whose whole job is to
+ * be scanned, and the journey people track is almost always the one stated in
+ * full above the list, which has its own.
+ */
+function JourneyRow({
+  row,
+  open,
+  onToggle,
+  onTrack,
+}: {
+  row: CommuteDashboardRow;
+  open: boolean;
+  onToggle: () => void;
+  onTrack: () => void;
+}) {
+  const { journey } = row;
+  // No state edge on the card: the ribbon paints state per vehicle, which is
+  // strictly more than a row-level tint could say, and a 1 px green sliver
+  // beside every healthy journey reads as an accident rather than a signal.
+  // `cancelled` keeps one, because it is the state that invalidates the row.
+  return (
+    <li
+      className={`commute-journey${journey.state === 'cancelled' ? ' cancelled' : ''}${
+        row.tracked ? ' tracked' : ''
+      }`}
+    >
       <button
         type="button"
         className="commute-journey-head"
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span className="commute-journey-times">
-          {/* §3's shape, the same one the per-leg boards use: the scheduled time
-              is the number, and what the live feed says about it sits *under*
-              it rather than at the far end of the card. It used to share a line
-              with the leg strip, where a long strip pushed it off the panel and
-              a short one left it stranded a card's width from the time it was
-              about. */}
-          <span className="commute-journey-time">
-            <strong>{journey.departure.aimed}</strong>
-            <em>{commuteEstimateLabel(journey.departure, false)}</em>
-          </span>
-          <i aria-hidden="true" />
-          <span className="commute-journey-time end">
-            <strong>{journey.arrival.aimed}</strong>
-            {journey.dayNote && <em>{journey.dayNote}</em>}
-          </span>
-        </span>
-        <span className="commute-journey-duration">
-          <strong>{journey.duration}</strong>
-          {/* The strip below names every change; "1 change" beside it is the
-              same fact, worse said. "direct" is not — nothing else says it. */}
-          {journey.connections.length === 0 && <em>{journey.transfers}</em>}
-        </span>
-        {/* The row *is* expandable, so it has to look it: without a caret the
-            legs below were a feature nobody found. */}
-        <span className="commute-journey-caret" aria-hidden="true">
-          {open ? '▴' : '▾'}
-        </span>
+        <ScanLine journey={journey} />
+        <Ribbon parts={row.parts} />
       </button>
-      {/* The strip gets the card's full width now that nothing shares its line:
-          two vehicles and a change is more than fits beside a status. */}
-      <div className="commute-journey-meta">
-        <LegStrip journey={journey} />
-      </div>
-      {/* Collapsed: the headline only. The full notice waits inside, under the
-          leg it belongs to. */}
-      {!open && <Disruptions items={journey.disruptions} brief />}
+      <Changes row={row} />
+      {!open && <Disruptions items={row.disruptions} brief />}
       {open && (
-        <ol className="commute-legs">
-          {journey.rides.map((ride, index) => {
-            const connection = journey.connections[index - 1];
-            return (
-              <li key={ride.key}>
-                {connection && (
-                  <p className={`commute-connection${connection.tight ? ' tight' : ''}`}>
-                    {connection.summary}
-                  </p>
-                )}
-                <div className="commute-leg">
-                  <span className="commute-leg-time">
-                    <strong>{ride.departure.aimed}</strong>
-                    {ride.departure.delay && <em>{ride.departure.expected} est.</em>}
-                  </span>
-                  <span className="commute-leg-body">
-                    <strong>
-                      {glyph(ride.mode)} {ride.line}
-                      {ride.towards ? ` → ${ride.towards}` : ''}
-                    </strong>
-                    <span>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</span>
-                    <span className="commute-leg-ride">{ride.ride}</span>
-                  </span>
-                </div>
-                <div className="commute-leg">
-                  <span className="commute-leg-time">
-                    <strong>{ride.arrival.aimed}</strong>
-                    {ride.arrival.delay && <em>{ride.arrival.expected} est.</em>}
-                  </span>
-                  <span className="commute-leg-body">
-                    <span>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</span>
-                  </span>
-                </div>
-                <Disruptions items={ride.disruptions} />
-              </li>
-            );
-          })}
-          <li className="commute-legs-total">
-            Total {journey.duration}
-            {journey.walk ? ` · ${journey.walk}` : ''}
-          </li>
-        </ol>
+        <>
+          <Legs journey={journey} />
+          <button type="button" className="commute-track" onClick={onTrack}>
+            {row.tracked ? 'Stop tracking' : 'Track this journey'}
+          </button>
+        </>
       )}
     </li>
+  );
+}
+
+/**
+ * §6.4 §7 — where you are in the journey you are tracking.
+ *
+ * The block every part of which already existed and none of which reached this
+ * screen: the phase ladder, the connection break and the commitment all shipped
+ * for the home-screen widget, so the widget knew which leg you were on and the
+ * board did not.
+ */
+function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
+  return (
+    <section className="commute-card here" aria-label="You are here">
+      <p className="commute-eyebrow">
+        {here.heading} <b>{here.phaseLabel}</b>
+      </p>
+      <p className="commute-here-lead">
+        <span className="commute-badge" style={badgeStyle(here.ride.badge)}>
+          {glyph(here.ride.mode)} {here.ride.line}
+        </span>
+        <span>{here.lead}</span>
+      </p>
+      <Ribbon parts={here.parts} progress={here.progress} tall />
+      {here.connections.length > 0 && (
+        <>
+          <p className="commute-eyebrow next">Next connection</p>
+          <ul className="commute-conns">
+            {here.connections.map((connection) => (
+              <li key={connection.key} className={connection.missed ? 'missed' : ''}>
+                <b>{connection.aimed}</b>
+                <span className="commute-badge" style={badgeStyle(connection.badge)}>
+                  {glyph(connection.mode)} {connection.line}
+                </span>
+                <span>{connection.towards}</span>
+                <em>{connection.note}</em>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <button type="button" className="commute-track" onClick={onStop}>
+        Stop tracking
+      </button>
+    </section>
   );
 }
 
@@ -282,27 +414,44 @@ function JourneyRow({
  * one answer completely and the comparison happens where comparisons are
  * scannable.
  */
-function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
-  const { next } = dashboard.leaveNow;
-  if (!next) return null;
+function LeaveNow({
+  row,
+  nowMs,
+  primary,
+  showTrack,
+  onTrack,
+}: {
+  row: CommuteDashboardRow;
+  nowMs: number;
+  /** Nothing is being tracked, so this card is the board's answer. */
+  primary: boolean;
+  /**
+   * False once the card above is already tracking this same journey — two
+   * "Stop tracking" buttons for one commitment is two controls for one state.
+   */
+  showTrack: boolean;
+  onTrack: () => void;
+}) {
   return (
-    <section className="commute-leavenow" aria-label="If I leave now">
-      <h3>If I leave now</h3>
-      <p className="commute-leavenow-main">
-        <strong>{next.departure.aimed}</strong>
-        <span>→ {next.arrival.aimed}</span>
-        <em>{next.duration}</em>
-      </p>
-      <p className="commute-leavenow-status">
-        {[commuteEstimateLabel(next.departure, false), next.dayNote].filter(Boolean).join(' · ')}
-      </p>
-      {/* The same strip the journey rows carry: the top of the dashboard is the
-          one place that must not answer "a bus and a train, at some point". */}
-      <LegStrip journey={next} />
-      {/* In full, not clamped: this is the journey the reader is being told to
-          leave for, and "Buss for tog Asker–…" is the half of the sentence that
-          decides whether they should. */}
-      <Disruptions items={next.disruptions} />
+    <section className={`commute-card${primary ? ' primary' : ''}`} aria-label="If I leave now">
+      <p className="commute-eyebrow">If I leave now</p>
+      {/* Counted to the *expected* departure, not the timetabled one: a bus
+          four minutes late is four minutes more to walk to the stop, and that
+          is the number a person deciding whether to run is actually asking
+          for. */}
+      <ScanLine
+        journey={row.journey}
+        big
+        countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
+      />
+      <Ribbon parts={row.parts} tall />
+      <Changes row={row} />
+      <Disruptions items={row.disruptions} />
+      {showTrack && (
+        <button type="button" className="commute-track wide" onClick={onTrack}>
+          {row.tracked ? 'Stop tracking' : 'Track this journey'}
+        </button>
+      )}
     </section>
   );
 }
@@ -317,7 +466,9 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
       </span>
       <span className="commute-board-line">
         <strong>
-          {glyph(row.mode)} {row.line}
+          <span className="commute-badge" style={badgeStyle(row.badge)}>
+            {glyph(row.mode)} {row.line}
+          </span>
         </strong>
         <span>arrives {row.arrival}</span>
       </span>
@@ -351,6 +502,70 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
         </ul>
       )}
     </section>
+  );
+}
+
+/** The journey list, or the reason there is none. */
+function Journeys({
+  dashboard,
+  editor,
+}: {
+  dashboard: CommuteDashboard;
+  editor: { clearLines: () => void };
+}) {
+  return (
+    <>
+      {dashboard.here && <HereCard here={dashboard.here} onStop={() => dashboard.track(null)} />}
+      {/* One notice on every journey in the list is the corridor's, not any
+          journey's — said once, above them, rather than five times inside
+          them. */}
+      <Disruptions items={dashboard.sharedDisruptions} />
+      {dashboard.leadRow && (
+        <LeaveNow
+          row={dashboard.leadRow}
+          nowMs={dashboard.nowMs}
+          primary={!dashboard.here}
+          showTrack={!dashboard.leadRow.tracked || !dashboard.here}
+          onTrack={() =>
+            dashboard.track(
+              dashboard.leadRow?.tracked ? null : (dashboard.leadRow?.journey ?? null),
+            )
+          }
+        />
+      )}
+      {dashboard.emptyNote && (
+        <p className="commute-state">
+          {dashboard.emptyNote}
+          {dashboard.emptyFromFilter && (
+            <>
+              {' '}
+              <button type="button" className="link-button" onClick={editor.clearLines}>
+                Allow any line
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {dashboard.rows.length > 0 && (
+        <section aria-label="Next journeys">
+          {/* Not `journeys`: the one above is already answered in full, and a
+              list that repeats it as its own first row costs the reader the
+              departure they were actually looking for. */}
+          <h3 className="commute-section-head">Next journeys</h3>
+          <ol className="commute-journeys">
+            {dashboard.rows.map((row) => (
+              <JourneyRow
+                row={row}
+                key={row.journey.key}
+                open={dashboard.expanded === row.journey.key}
+                onToggle={() => dashboard.toggle(row.journey.key)}
+                onTrack={() => dashboard.track(row.tracked ? null : row.journey)}
+              />
+            ))}
+          </ol>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -452,40 +667,7 @@ export function CommutePanel({
         {commute.loading && <p className="commute-state">Checking upcoming journeys…</p>}
         {commute.error && <p className="commute-state commute-error">{commute.error}</p>}
         {dashboard.view === 'overview' ? (
-          <>
-            <LeaveNow dashboard={dashboard} />
-            {dashboard.emptyNote && (
-              <p className="commute-state">
-                {dashboard.emptyNote}
-                {dashboard.emptyFromFilter && (
-                  <>
-                    {' '}
-                    <button type="button" className="link-button" onClick={editor.clearLines}>
-                      Allow any line
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-            {dashboard.laterJourneys.length > 0 && (
-              <section aria-label="Next journeys">
-                {/* Not `journeys`: the one above is already answered in full,
-                    and a list that repeats it as its own first row costs the
-                    reader the departure they were actually looking for. */}
-                <h3 className="commute-section-head">Next journeys</h3>
-                <ol className="commute-journeys">
-                  {dashboard.laterJourneys.map((journey) => (
-                    <JourneyRow
-                      journey={journey}
-                      key={journey.key}
-                      open={dashboard.expanded === journey.key}
-                      onToggle={() => dashboard.toggle(journey.key)}
-                    />
-                  ))}
-                </ol>
-              </section>
-            )}
-          </>
+          <Journeys dashboard={dashboard} editor={editor} />
         ) : (
           dashboard.boards.map((board) => <Board board={board} key={board.segment.id} />)
         )}

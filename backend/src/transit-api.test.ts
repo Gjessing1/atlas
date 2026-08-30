@@ -518,6 +518,78 @@ describe('POST /api/transit/commute', () => {
     ]);
   });
 
+  /**
+   * §6.4 §7. The board carries the same commitment the home-screen widget does,
+   * and needs the same one extra call for the same reason: a board asked "from
+   * now" cannot contain the journey a traveller is *on*.
+   */
+  describe('the tracked journey', () => {
+    const railStartMs = Date.parse('2026-07-21T07:33:00+02:00');
+    const commit = { direction: 'outbound', departureMs: railStartMs, line: 'R14' };
+
+    it('costs nothing on a board nobody is tracking', async () => {
+      let calls = 0;
+      respond = () => {
+        calls += 1;
+        return new Response(JSON.stringify(enturReply), { status: 200 });
+      };
+      const res = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
+      expect(calls).toBe(2);
+      expect(res.json().committed).toBeUndefined();
+    });
+
+    it('re-reads the tracked journey around its own departure', async () => {
+      const times: unknown[] = [];
+      respond = () => {
+        times.push(captured!.body.variables.dateTime);
+        return new Response(JSON.stringify(enturReply), { status: 200 });
+      };
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/commute',
+        payload: { ...payload, commit },
+      });
+      expect(times).toHaveLength(3);
+      // Asked five minutes before the departure it names, so a journey brought
+      // forward by a live update is still inside the window.
+      expect(Date.parse(String(times[0]))).toBe(railStartMs - 5 * 60_000);
+      expect(res.json().committed.trip.legs.length).toBeGreaterThan(0);
+      expect(res.json().committed.replaced).toBeNull();
+    });
+
+    it('leaves the tracked journey’s geometry behind too', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/commute',
+        payload: { ...payload, commit },
+      });
+      const legs = res.json().committed.trip.legs as { points: unknown[] }[];
+      expect(legs.every((leg) => leg.points.length === 0)).toBe(true);
+    });
+
+    it('releases a commitment the upstream no longer offers', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/commute',
+        payload: { ...payload, commit: { ...commit, departureMs: railStartMs + 3_600_000 } },
+      });
+      // Absent rather than an error: a withdrawn departure is a real outcome,
+      // and the timetable underneath it is still worth showing.
+      expect(res.statusCode).toBe(200);
+      expect(res.json().committed).toBeUndefined();
+    });
+
+    it('ignores a commitment that is not one', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/transit/commute',
+        payload: { ...payload, commit: { direction: 'outbound', line: 'R14' } },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().committed).toBeUndefined();
+    });
+  });
+
   it('leaves the leg geometry behind — the commute board has no map', async () => {
     // Measured on the live board: 614 KB of the 704 KB answer was polyline that
     // no client draws.

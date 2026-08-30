@@ -4,20 +4,25 @@ import {
   type CommuteController,
   type CommuteDashboard,
   type CommuteDashboardBoard,
+  type CommuteDashboardRow,
   type StopGeocodeFn,
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
-  commuteEstimateLabel,
+  commuteCountdown,
   liveTimetableLabel,
   transitModeGlyph,
   type CommuteBoardRow,
   type CommuteDisruption,
+  type CommuteHere,
   type CommuteJourney,
+  type CommuteLineBadge,
+  type CommuteRibbonPart,
   type CommuteServiceState,
+  type TransitMode,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -139,108 +144,218 @@ function Disruptions({
 }
 
 /**
- * The vehicles of a journey with their own times, and the changes between them.
+ * The journey as one proportional bar — every vehicle as wide as it is long,
+ * in the operator's own colours, with the changes as literal gaps between them.
  *
- * The collapsed row's second line, and the gap this closed: it used to read
- * "🚌 270 🚆 L1", which tells a reader that a train is involved and nothing
- * about when it leaves Asker or when it reaches town. On a two-leg commute that
- * is the whole question, and answering it meant expanding a row (§1, §2).
+ * What this replaced was a wrapping strip of bordered chips, one per vehicle
+ * and one per change. On a phone that became two or three lines of
+ * near-identical text per journey, so five journeys was ten boxes and thirty
+ * clock times — and the two things a commuter reads first (which vehicles, and
+ * how the time splits between them) had to be assembled out of all of it.
+ *
+ * Two colour channels run through this and they never trade places: the *fill*
+ * is the line's identity (the 280 is Ruter red whether or not it is late) and
+ * the edge is its state. The proportions come from `commuteRibbon`, so the
+ * browser panel draws the identical bar.
  */
-function LegStrip({ journey }: { journey: CommuteJourney }) {
+function Ribbon({
+  parts,
+  progress = null,
+  tall = false,
+}: {
+  parts: readonly CommuteRibbonPart[];
+  /** Where "now" sits along it, 0–100, when this is the journey being tracked. */
+  progress?: number | null;
+  tall?: boolean;
+}) {
+  if (parts.length === 0) return null;
   return (
-    <View style={styles.journeyLines}>
-      {journey.rides.map((ride, index) => {
-        const change = journey.connections[index - 1];
-        return (
-          <Fragment key={ride.key}>
-            {change ? (
-              <Text style={[styles.change, change.tight && styles.changeTight]}>
-                ⇄ {change.chip}
-              </Text>
+    <View style={[styles.ribbon, tall && styles.ribbonTall]}>
+      {parts.map((part) =>
+        part.kind === 'ride' ? (
+          <View
+            key={part.key}
+            style={[
+              styles.seg,
+              // `flexBasis: 0` is what makes the widths *proportional*: without
+              // it every segment starts at its content width and flexGrow only
+              // shares out what is left over, so a two-minute leg with a long
+              // line code comes out as wide as a twenty-minute one.
+              { flexGrow: part.weight, flexBasis: 0, backgroundColor: part.badge.fill },
+              part.state === 'cancelled' && styles.segCancelled,
+              part.state === 'scheduled' && styles.segScheduled,
+              (part.state === 'delayed' || part.state === 'early') && styles.segLate,
+              part.state === 'replacement' && styles.segReplacement,
+            ]}
+          >
+            <Text
+              style={[
+                styles.segText,
+                { color: part.state === 'cancelled' ? theme.danger : part.badge.text },
+                part.state === 'cancelled' && styles.strike,
+              ]}
+              numberOfLines={1}
+            >
+              {glyph(part.mode)} {part.line}
+            </Text>
+            {/* The correction on the leg carrying it: on a bus→train commute,
+                "the bus is nine late" and "the train is nine late" are different
+                mornings, and one number on the row cannot tell them apart. */}
+            {part.delay ? (
+              <Text style={[styles.segDelay, { color: part.badge.text }]}>{part.delay}</Text>
             ) : null}
-            <View style={[styles.lineChip, { borderColor: STATE_COLOUR[ride.state] }]}>
-              <Text
-                style={[
-                  styles.lineChipText,
-                  ride.state === 'cancelled' && styles.lineChipCancelled,
-                ]}
-              >
-                {glyph(ride.mode)} {ride.line}
-              </Text>
-              <Text
-                style={[
-                  styles.lineChipWindow,
-                  ride.state === 'cancelled' && styles.lineChipCancelled,
-                ]}
-              >
-                {ride.window}
-              </Text>
-            </View>
-          </Fragment>
-        );
-      })}
+          </View>
+        ) : (
+          <View
+            key={part.key}
+            style={[
+              styles.gap,
+              { flexGrow: part.weight, flexBasis: 0 },
+              part.tight && styles.gapTight,
+              part.broken && styles.gapBroken,
+            ]}
+          >
+            <Text
+              style={[
+                styles.gapText,
+                part.tight && styles.gapTextTight,
+                part.broken && styles.gapTextBroken,
+              ]}
+              numberOfLines={1}
+            >
+              {part.broken ? '×' : part.label}
+            </Text>
+          </View>
+        ),
+      )}
+      {progress !== null ? (
+        <View style={[styles.ribbonNow, { left: `${progress}%` }]} pointerEvents="none" />
+      ) : null}
+    </View>
+  );
+}
+
+/** The line badge where it appears outside a ribbon — a leg, a board row. */
+function Badge({
+  badge,
+  mode,
+  line,
+}: {
+  badge: CommuteLineBadge;
+  mode: TransitMode;
+  line: string;
+}) {
+  return (
+    <View style={[styles.badge, { backgroundColor: badge.fill }]}>
+      <Text style={[styles.badgeText, { color: badge.text }]} numberOfLines={1}>
+        {glyph(mode)} {line}
+      </Text>
     </View>
   );
 }
 
 /**
- * One journey, collapsed to its scan line and expandable to its legs.
+ * The scan line: departure, arrival and total, all on the timetable's own
+ * numbers, in one line comparable against the row above it without reading
+ * either (§12).
  *
- * The times are the *scheduled* ones — the numbers printed at the stop — with
- * the live estimate beside them as a labelled secondary. Replacing 08:41 with
- * 08:43 destroys the reference point the traveller is comparing against.
+ * The live correction that used to sit under the departure has moved onto the
+ * ribbon segment it is about — a journey-level `+3 min` cannot name which of
+ * two vehicles is late.
  */
-function JourneyRow({
+function ScanLine({
   journey,
-  open,
-  onToggle,
+  big = false,
+  countdown = null,
 }: {
   journey: CommuteJourney;
-  open: boolean;
-  onToggle: () => void;
+  big?: boolean;
+  countdown?: string | null;
 }) {
   return (
-    <View style={[styles.journey, { borderLeftColor: STATE_COLOUR[journey.state] }]}>
-      <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
-        <View style={styles.journeyHead}>
-          {/* §3's shape, the same one the per-leg boards use: the scheduled time
-              is the number, and what the live feed says about it sits *under*
-              it rather than at the far end of the card. It used to share a line
-              with the leg strip, where a long strip squeezed it to nothing and
-              a short one left it stranded a card's width from the time it was
-              about. */}
-          <View style={styles.journeyEnd}>
-            <Text style={styles.journeyTime}>{journey.departure.aimed}</Text>
-            <Text style={styles.journeyEndNote}>
-              {commuteEstimateLabel(journey.departure, false)}
+    <View style={styles.scan}>
+      <Text style={[styles.scanTime, big && styles.scanTimeBig]}>{journey.departure.aimed}</Text>
+      {countdown ? <Text style={styles.scanIn}>{countdown}</Text> : null}
+      <View style={styles.scanRule} />
+      <Text style={[styles.scanTime, big && styles.scanTimeBig]}>{journey.arrival.aimed}</Text>
+      <Text style={styles.scanDuration}>{journey.duration}</Text>
+      {journey.dayNote ? <Text style={styles.scanDay}>{journey.dayNote}</Text> : null}
+    </View>
+  );
+}
+
+/** The change, in the two numbers the traveller would otherwise subtract (§2). */
+function Changes({ row }: { row: CommuteDashboardRow }) {
+  return (
+    <>
+      {row.journey.connections.map((change, index) => {
+        const broken = row.broken?.index === index + 1;
+        return (
+          <View key={change.key} style={styles.changeRow}>
+            <Text
+              style={[
+                styles.changeText,
+                change.tight && styles.changeTight,
+                broken && styles.changeBroken,
+              ]}
+              numberOfLines={1}
+            >
+              ⇄ {change.at}
+            </Text>
+            <Text
+              style={[
+                styles.changeTimes,
+                change.tight && styles.changeTight,
+                broken && styles.changeBroken,
+              ]}
+              numberOfLines={1}
+            >
+              {broken ? row.broken?.detail : `${change.arrive} → ${change.depart}`}
             </Text>
           </View>
-          <View style={styles.journeyRule} />
-          <View style={styles.journeyEndRight}>
-            <Text style={styles.journeyTime}>{journey.arrival.aimed}</Text>
-            {journey.dayNote ? <Text style={styles.journeyEndNote}>{journey.dayNote}</Text> : null}
-          </View>
-          <View style={styles.journeyEndRight}>
-            <Text style={styles.journeyDuration}>{journey.duration}</Text>
-            {/* The strip below names every change; "1 change" beside it is the
-                same fact, worse said. "direct" is not — nothing else says it. */}
-            {journey.connections.length === 0 ? (
-              <Text style={styles.journeyEndNote}>{journey.transfers}</Text>
-            ) : null}
-          </View>
-          {/* The row *is* expandable, so it has to look it: without a caret the
-              legs below were a feature nobody found. */}
-          <Text style={styles.journeyCaret}>{open ? '▴' : '▾'}</Text>
-        </View>
-        {/* The strip gets the card's full width now that nothing shares its
-            line: two vehicles and a change is more than fits beside a status. */}
-        <View style={styles.journeyMeta}>
-          <LegStrip journey={journey} />
-        </View>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * One journey, collapsed to its scan line and ribbon, expandable to its legs.
+ *
+ * Tracking lives inside the expansion rather than on the collapsed row: a
+ * button per row was four more bordered boxes on a list whose whole job is to
+ * be scanned, and the journey people track is almost always the one stated in
+ * full above the list, which has its own control.
+ */
+function JourneyRow({
+  row,
+  open,
+  onToggle,
+  onTrack,
+}: {
+  row: CommuteDashboardRow;
+  open: boolean;
+  onToggle: () => void;
+  onTrack: () => void;
+}) {
+  const { journey } = row;
+  // No state edge on the card: the ribbon paints state per vehicle, which is
+  // strictly more than a row-level tint could say. `cancelled` keeps one,
+  // because it is the state that invalidates the whole row.
+  return (
+    <View
+      style={[
+        styles.journey,
+        journey.state === 'cancelled' && styles.journeyCancelled,
+        row.tracked && styles.journeyTracked,
+      ]}
+    >
+      <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
+        <ScanLine journey={journey} />
+        <Ribbon parts={row.parts} />
       </Pressable>
-      {/* Collapsed: the headline only. The full notice waits inside, under the
-          leg it belongs to. */}
-      {!open ? <Disruptions items={journey.disruptions} brief /> : null}
+      <Changes row={row} />
+      {!open ? <Disruptions items={row.disruptions} brief /> : null}
       {open ? (
         <View style={styles.legs}>
           {journey.rides.map((ride, index) => {
@@ -260,10 +375,14 @@ function JourneyRow({
                     ) : null}
                   </View>
                   <View style={styles.legBody}>
-                    <Text style={styles.legLine}>
-                      {glyph(ride.mode)} {ride.line}
-                      {ride.towards ? ` → ${ride.towards}` : ''}
-                    </Text>
+                    <View style={styles.legLineRow}>
+                      <Badge badge={ride.badge} mode={ride.mode} line={ride.line} />
+                      {ride.towards ? (
+                        <Text style={styles.legLine} numberOfLines={1}>
+                          → {ride.towards}
+                        </Text>
+                      ) : null}
+                    </View>
                     <Text style={styles.legPlace}>
                       {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
                     </Text>
@@ -291,8 +410,64 @@ function JourneyRow({
             Total {journey.duration}
             {journey.walk ? ` · ${journey.walk}` : ''}
           </Text>
+          <Pressable style={styles.track} onPress={onTrack} testID="commute-track-row">
+            <Text style={styles.trackText}>
+              {row.tracked ? 'Stop tracking' : 'Track this journey'}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * §6.4 §7 — where you are in the journey you are tracking.
+ *
+ * Every part of this already existed and none of it reached this screen: the
+ * phase ladder, the connection break and the commitment all shipped for the
+ * home-screen widget, so the widget knew which leg you were on and the board —
+ * the surface you actually open once you are moving — did not.
+ */
+function HereCard({ here, onStop }: { here: CommuteHere; onStop: () => void }) {
+  return (
+    <View style={[styles.card, styles.cardAccent]} testID="commute-here">
+      <View style={styles.eyebrowRow}>
+        <Text style={styles.eyebrow}>{here.heading.toUpperCase()}</Text>
+        <Text style={styles.phaseChip}>{here.phaseLabel.toUpperCase()}</Text>
+      </View>
+      <View style={styles.hereLead}>
+        <Badge badge={here.ride.badge} mode={here.ride.mode} line={here.ride.line} />
+        <Text style={styles.hereLeadText} numberOfLines={2}>
+          {here.lead}
+        </Text>
+      </View>
+      <Ribbon parts={here.parts} progress={here.progress} tall />
+      {here.connections.length > 0 ? (
+        <>
+          <Text style={[styles.eyebrow, styles.eyebrowNext]}>NEXT CONNECTION</Text>
+          {here.connections.map((connection) => (
+            <View key={connection.key} style={styles.conn}>
+              <Text style={[styles.connTime, connection.missed && styles.connMissed]}>
+                {connection.aimed}
+              </Text>
+              <Badge badge={connection.badge} mode={connection.mode} line={connection.line} />
+              <Text
+                style={[styles.connTowards, connection.missed && styles.connMissed]}
+                numberOfLines={1}
+              >
+                {connection.towards ?? ''}
+              </Text>
+              <Text style={[styles.connNote, connection.missed && styles.connNoteMissed]}>
+                {connection.note}
+              </Text>
+            </View>
+          ))}
+        </>
+      ) : null}
+      <Pressable style={styles.track} onPress={onStop} testID="commute-stop-tracking">
+        <Text style={styles.trackText}>Stop tracking</Text>
+      </Pressable>
     </View>
   );
 }
@@ -306,27 +481,52 @@ function JourneyRow({
  * one answer completely and the comparison happens where comparisons are
  * scannable.
  */
-function LeaveNow({ dashboard }: { dashboard: CommuteDashboard }) {
-  const { next } = dashboard.leaveNow;
-  if (!next) return null;
+function LeaveNow({
+  row,
+  nowMs,
+  primary,
+  showTrack,
+  onTrack,
+}: {
+  row: CommuteDashboardRow;
+  nowMs: number;
+  /** Nothing is being tracked, so this card is the board's answer. */
+  primary: boolean;
+  /**
+   * False once the card above is already tracking this same journey — two
+   * "Stop tracking" buttons for one commitment is two controls for one state.
+   */
+  showTrack: boolean;
+  onTrack: () => void;
+}) {
   return (
-    <View style={styles.leaveNow} testID="commute-leave-now">
-      <Text style={styles.leaveNowHead}>IF I LEAVE NOW</Text>
-      <View style={styles.leaveNowMain}>
-        <Text style={styles.leaveNowTime}>{next.departure.aimed}</Text>
-        <Text style={styles.leaveNowArrive}>→ {next.arrival.aimed}</Text>
-        <Text style={styles.leaveNowDuration}>{next.duration}</Text>
-      </View>
-      <Text style={styles.leaveNowStatus}>
-        {[commuteEstimateLabel(next.departure, false), next.dayNote].filter(Boolean).join(' · ')}
-      </Text>
-      {/* The same strip the journey rows carry: the top of the dashboard is the
-          one place that must not answer "a bus and a train, at some point". */}
-      <LegStrip journey={next} />
+    <View style={[styles.card, primary && styles.cardAccent]} testID="commute-leave-now">
+      <Text style={styles.eyebrow}>IF I LEAVE NOW</Text>
+      {/* Counted to the *expected* departure, not the timetabled one: a bus
+          four minutes late is four minutes more to walk to the stop, and that
+          is the number a person deciding whether to run is asking for. */}
+      <ScanLine
+        journey={row.journey}
+        big
+        countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
+      />
+      <Ribbon parts={row.parts} tall />
+      <Changes row={row} />
       {/* In full, not clamped: this is the journey the reader is being told to
           leave for, and "Buss for tog Asker–…" is the half of the sentence that
           decides whether they should. */}
-      <Disruptions items={next.disruptions} />
+      <Disruptions items={row.disruptions} />
+      {showTrack ? (
+        <Pressable
+          style={[styles.track, styles.trackWide]}
+          onPress={onTrack}
+          testID="commute-track"
+        >
+          <Text style={styles.trackText}>
+            {row.tracked ? 'Stop tracking' : 'Track this journey'}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -343,9 +543,9 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
           <Text style={styles.boardEstimate}>{row.estimate}</Text>
         </View>
         <View style={styles.boardLine}>
-          <Text style={styles.boardLineText} numberOfLines={1}>
-            {glyph(row.mode)} {row.line}
-          </Text>
+          <View style={styles.legLineRow}>
+            <Badge badge={row.badge} mode={row.mode} line={row.line} />
+          </View>
           <Text style={styles.boardArrival}>arrives {row.arrival}</Text>
         </View>
         <View style={styles.boardWhen}>
@@ -567,7 +767,26 @@ export function CommuteSheet({
         {commute.error ? <Text style={[styles.state, styles.error]}>{commute.error}</Text> : null}
         {dashboard.view === 'overview' ? (
           <>
-            <LeaveNow dashboard={dashboard} />
+            {dashboard.here ? (
+              <HereCard here={dashboard.here} onStop={() => dashboard.track(null)} />
+            ) : null}
+            {/* One notice on every journey in the list is the corridor's, not
+                any journey's — said once, above them, rather than five times
+                inside them. */}
+            <Disruptions items={dashboard.sharedDisruptions} />
+            {dashboard.leadRow ? (
+              <LeaveNow
+                row={dashboard.leadRow}
+                nowMs={dashboard.nowMs}
+                primary={!dashboard.here}
+                showTrack={!dashboard.leadRow.tracked || !dashboard.here}
+                onTrack={() =>
+                  dashboard.track(
+                    dashboard.leadRow?.tracked ? null : (dashboard.leadRow?.journey ?? null),
+                  )
+                }
+              />
+            ) : null}
             {dashboard.emptyNote ? (
               <View>
                 <Text style={styles.state}>{dashboard.emptyNote}</Text>
@@ -581,15 +800,16 @@ export function CommuteSheet({
             {/* Not `journeys`: the one above is already answered in full, and a
                 list that repeats it as its own first row costs the reader the
                 departure they were actually looking for. */}
-            {dashboard.laterJourneys.length > 0 ? (
+            {dashboard.rows.length > 0 ? (
               <>
                 <Text style={styles.sectionHead}>NEXT JOURNEYS</Text>
-                {dashboard.laterJourneys.map((journey) => (
+                {dashboard.rows.map((row) => (
                   <JourneyRow
-                    journey={journey}
-                    key={journey.key}
-                    open={dashboard.expanded === journey.key}
-                    onToggle={() => dashboard.toggle(journey.key)}
+                    row={row}
+                    key={row.journey.key}
+                    open={dashboard.expanded === row.journey.key}
+                    onToggle={() => dashboard.toggle(row.journey.key)}
+                    onTrack={() => dashboard.track(row.tracked ? null : row.journey)}
                   />
                 ))}
               </>
@@ -669,68 +889,167 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  leaveNow: {
+  // --- The ribbon: one journey drawn as a shape (§1, §2) ---
+
+  ribbon: { position: 'relative', flexDirection: 'row', gap: 3, height: 19, marginTop: 7 },
+  ribbonTall: { height: 25 },
+  seg: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 0,
+    paddingHorizontal: 6,
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  segText: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
+  segDelay: { marginLeft: 'auto', fontSize: 10, fontWeight: '700' },
+  // State paints the edge, never the fill: the fill is the operator's own
+  // colour, and a reader who learned "red means trouble" here would misread
+  // every Ruter bus in Oslo.
+  segLate: { borderBottomWidth: 3, borderBottomColor: theme.warning },
+  segReplacement: { borderBottomWidth: 3, borderBottomColor: theme.info },
+  // A service with no live feed at all is a weaker promise and reads as one.
+  segScheduled: { opacity: 0.72 },
+  // Identity yields for the one state that means "you cannot board this".
+  segCancelled: { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.danger },
+  strike: { textDecorationLine: 'line-through' },
+  // A change is drawn as the space it is. Dashed rather than hatched because
+  // the browser panel draws the same gap and React Native has no gradients.
+  gap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 17,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(128,138,148,0.55)',
+    borderRadius: 4,
+  },
+  gapTight: { borderStyle: 'solid', borderColor: theme.warning },
+  gapBroken: { borderStyle: 'solid', borderColor: theme.danger },
+  gapText: { color: theme.textMuted, fontSize: 9, fontWeight: '700', opacity: 0.7 },
+  gapTextTight: { color: theme.warning, opacity: 1 },
+  gapTextBroken: { color: theme.danger, fontSize: 12, fontWeight: '800', opacity: 1 },
+  // Where "now" is on the journey being tracked. One mark, and no dimming of
+  // what is behind it: a washed-out segment reads as a cancelled one, which is
+  // a word this board already spends on something else.
+  ribbonNow: {
+    position: 'absolute',
+    top: -4,
+    bottom: -4,
+    width: 3,
+    marginLeft: -1.5,
+    borderRadius: 2,
+    backgroundColor: theme.accent,
+  },
+
+  // The line badge where it appears outside a ribbon — a leg, a board row.
+  badge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, flexShrink: 1 },
+  badgeText: { fontSize: 11, fontWeight: '800' },
+
+  // --- The scan line (§12) ---
+
+  scan: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  scanTime: { color: theme.text, fontSize: 17, fontWeight: '800' },
+  scanTimeBig: { fontSize: 24 },
+  scanRule: {
+    flex: 1,
+    minWidth: 14,
+    height: 1,
+    backgroundColor: theme.border,
+    opacity: 0.3,
+  },
+  scanDuration: { color: theme.textMuted, fontSize: 12, fontWeight: '800', opacity: 0.75 },
+  scanDay: { color: theme.textMuted, fontSize: 10, opacity: 0.75 },
+  // Counted to the expected departure — the number someone deciding whether to
+  // run is actually asking for.
+  scanIn: {
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+    color: theme.onAccent,
+    fontSize: 11,
+    fontWeight: '800',
+    overflow: 'hidden',
+  },
+
+  // The change, in the two numbers the traveller would otherwise subtract (§2).
+  changeRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 7 },
+  changeText: { flexShrink: 1, color: theme.textMuted, fontSize: 11, opacity: 0.8 },
+  changeTimes: { marginLeft: 'auto', color: theme.text, fontSize: 11, fontWeight: '700' },
+  changeTight: { color: theme.warning, opacity: 1 },
+  changeBroken: { color: theme.danger, fontWeight: '700', opacity: 1 },
+
+  // --- The two cards: "you are here" (§7) and "if I leave now" (§11) ---
+
+  card: {
     padding: 11,
+    marginBottom: 10,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: theme.accent,
-    backgroundColor: theme.accentFaint,
+    borderColor: 'rgba(128,138,148,0.4)',
+    backgroundColor: theme.surfaceMuted,
   },
-  leaveNowHead: { color: theme.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  leaveNowMain: { flexDirection: 'row', alignItems: 'baseline', gap: 7, marginTop: 4 },
-  leaveNowTime: { color: theme.text, fontSize: 26, fontWeight: '800' },
-  leaveNowArrive: { color: theme.text, fontSize: 15, fontWeight: '600' },
-  leaveNowDuration: {
-    marginLeft: 'auto',
+  // The accent marks the board's *answer*, so it follows the tracked journey
+  // when there is one and falls back to "if I leave now" when there is not.
+  // Two accented cards would be two answers.
+  cardAccent: { borderColor: theme.accent, backgroundColor: theme.accentFaint },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  eyebrow: {
     color: theme.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    opacity: 0.8,
   },
-  // What the live feed says about the headline departure, under the time it is
-  // about — the same place the journey cards and the per-leg boards put it.
-  leaveNowStatus: { color: theme.textMuted, fontSize: 11, marginTop: 1 },
+  eyebrowNext: { marginTop: 11, marginBottom: 4 },
+  phaseChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+    color: theme.onAccent,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    overflow: 'hidden',
+  },
+  hereLead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  hereLeadText: { flexShrink: 1, color: theme.text, fontSize: 13, fontWeight: '600' },
+  conn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
+  connTime: { color: theme.text, fontSize: 12, fontWeight: '800' },
+  connTowards: { flexShrink: 1, color: theme.textMuted, fontSize: 12, opacity: 0.8 },
+  connNote: { marginLeft: 'auto', color: theme.textMuted, fontSize: 11, opacity: 0.8 },
+  // The booked connection stays on the list once the numbers have broken it,
+  // struck through rather than dropped: someone standing at the change is
+  // looking for the train they planned to take.
+  connMissed: { color: theme.danger, textDecorationLine: 'line-through' },
+  connNoteMissed: { color: theme.danger, opacity: 1 },
+
+  track: {
+    alignSelf: 'flex-start',
+    marginTop: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  trackWide: { alignSelf: 'stretch', alignItems: 'center' },
+  trackText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
 
   journey: {
     marginBottom: 7,
     padding: 10,
     borderRadius: 10,
-    borderLeftWidth: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(128,138,148,0.4)',
     backgroundColor: theme.surfaceMuted,
   },
-  journeyHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  // Each end of the journey is a stack: the timetable's number, and beneath it
-  // what the live feed says about that number (§3).
-  journeyEnd: { alignItems: 'flex-start' },
-  journeyEndRight: { alignItems: 'flex-end' },
-  journeyEndNote: { color: theme.textMuted, fontSize: 10 },
-  journeyTime: { color: theme.text, fontSize: 17, fontWeight: '800' },
-  journeyRule: { flex: 1, height: 1, minWidth: 12, backgroundColor: theme.border, opacity: 0.3 },
-  journeyDuration: { color: theme.text, fontSize: 13, fontWeight: '800' },
-  journeyMeta: { marginTop: 6 },
-  journeyCaret: { color: theme.textMuted, fontSize: 10 },
-  journeyLines: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-    flexShrink: 1,
-  },
-  lineChip: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-    borderWidth: 1,
-  },
-  lineChipText: { color: theme.text, fontSize: 11, fontWeight: '800' },
-  // The window is the point of the chip; the line code is what identifies it.
-  // Same size, one weight and one tone down.
-  lineChipWindow: { color: theme.textMuted, fontSize: 11 },
-  lineChipCancelled: { textDecorationLine: 'line-through' },
-  change: { color: theme.textMuted, fontSize: 10 },
-  changeTight: { color: theme.warning, fontWeight: '700' },
+  journeyTracked: { borderColor: theme.accent },
+  journeyCancelled: { borderColor: theme.danger },
+  legLineRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 
   legs: { marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border },
   leg: { flexDirection: 'row', gap: 9, paddingTop: 6 },
@@ -782,7 +1101,6 @@ const styles = StyleSheet.create({
   boardRowMain: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   boardTime: { minWidth: 50 },
   boardTimeText: { color: theme.text, fontSize: 16, fontWeight: '800' },
-  strike: { textDecorationLine: 'line-through' },
   boardEstimate: { color: theme.textMuted, fontSize: 10 },
   boardLine: { flex: 1 },
   boardLineText: { color: theme.text, fontSize: 12, fontWeight: '700' },

@@ -94,9 +94,35 @@ function controller(over: Partial<CommuteController> = {}): CommuteController {
     updatedMs: NOW,
     refresh: () => {},
     emptyReason: () => 'none',
+    commit: null,
+    setCommit: () => {},
     ...over,
   };
 }
+
+/** A journey with a change, which is what §6.4 §7's block is about. */
+const twoLeg = (departMs: number) =>
+  trip(ride('270', 'Engelsrud Terrasse', 'Asker stasjon', departMs, departMs + 26 * 60_000), {
+    ...ride(
+      'L1',
+      'Asker stasjon',
+      'Nationaltheatret',
+      departMs + 35 * 60_000,
+      departMs + 48 * 60_000,
+    ),
+    mode: 'rail',
+  });
+
+const trackedResult: TransitCommuteResult = {
+  ...result,
+  outbound: { trips: [twoLeg(hm(8, 36)), twoLeg(hm(8, 48))], problems: [] },
+};
+
+const commitFor = (departMs: number) => ({
+  direction: 'outbound' as const,
+  departureMs: departMs,
+  line: '270',
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -229,6 +255,121 @@ describe('useCommuteDashboard', () => {
       useCommuteDashboard(controller({ query: { ...query, days: [3, 4, 5] } })),
     );
     expect(hook.current.offDayNote).toContain('not saved for today');
+    unmount();
+  });
+});
+
+/**
+ * §6.4 §7 — the board's own commitment.
+ *
+ * Nothing here infers that anyone boarded: the block exists only for a journey
+ * the user explicitly tracked, which is the rule §6.5 §3 wrote for the widget
+ * and this surface inherits.
+ */
+describe('tracking a journey', () => {
+  it('says nothing until a journey is tracked', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(controller({ result: trackedResult })),
+    );
+    expect(hook.current.here).toBeNull();
+    expect(hook.current.rows.every((row) => !row.tracked)).toBe(true);
+    unmount();
+  });
+
+  it('commits to the departure and the first vehicle, not to a row number', () => {
+    const commits: unknown[] = [];
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({ result: trackedResult, setCommit: (next) => commits.push(next) }),
+      ),
+    );
+    act(() => hook.current.track(hook.current.leaveNow.next!));
+    expect(commits[0]).toMatchObject({
+      direction: 'outbound',
+      departureMs: hm(8, 36),
+      line: '270',
+    });
+    unmount();
+  });
+
+  it('places the traveller in the journey it is tracking', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(controller({ result: trackedResult, commit: commitFor(hm(8, 36)) })),
+    );
+    // Four minutes before it leaves: close enough that the next thing to do is
+    // stand at the stop, which is a "you are here" and not a "tracking".
+    expect(hook.current.here?.phase).toBe('boarding');
+    expect(hook.current.here?.heading).toBe('You are here');
+    expect(hook.current.here?.ride.line).toBe('270');
+    expect(hook.current.leadRow?.tracked).toBe(true);
+    unmount();
+  });
+
+  it('prefers the backend’s own re-read of the tracked journey', () => {
+    // A board asked "from now" cannot hold a journey that has already left, so
+    // once it has, this is the only source that still has it.
+    const departed = twoLeg(hm(8, 10));
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({
+          result: { ...trackedResult, committed: { trip: departed, replaced: null } },
+          commit: commitFor(hm(8, 10)),
+        }),
+      ),
+    );
+    expect(hook.current.here?.phase).toBe('riding');
+    expect(hook.current.here?.heading).toBe('You are here');
+    unmount();
+  });
+
+  it('offers the next departure of the hop the change lands on', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(controller({ result: trackedResult, commit: commitFor(hm(8, 36)) })),
+    );
+    // The booked 09:11, then the hop board's own next train.
+    expect(hook.current.here?.connections[0]).toMatchObject({ booked: true, aimed: '09:11' });
+    unmount();
+  });
+
+  it('lets a commitment go once the journey it names has finished', () => {
+    const cleared: unknown[] = [];
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({
+          result: trackedResult,
+          commit: commitFor(hm(8, 36)),
+          setCommit: (next) => cleared.push(next),
+        }),
+      ),
+    );
+    expect(hook.current.here).not.toBeNull();
+    // Past the scheduled arrival plus the widget's own slack. Nobody stops
+    // tracking a bus they got off.
+    act(() => {
+      vi.advanceTimersByTime(90 * 60_000);
+    });
+    expect(cleared).toContain(null);
+    unmount();
+  });
+
+  it('computes the break for every listed journey, tracked or not', () => {
+    const late = twoLeg(hm(8, 48));
+    // The bus now gets in after the train it was booked onto has gone.
+    late.legs[0] = { ...late.legs[0]!, expectedEndMs: hm(9, 24), realtime: true };
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({
+          result: {
+            ...trackedResult,
+            outbound: { trips: [twoLeg(hm(8, 36)), late], problems: [] },
+          },
+        }),
+      ),
+    );
+    // Arithmetic on the timetable, not a claim about the traveller — so it is
+    // stated with nothing committed at all.
+    expect(hook.current.rows[0]?.broken?.index).toBe(1);
+    expect(hook.current.leadRow?.broken).toBeNull();
     unmount();
   });
 });

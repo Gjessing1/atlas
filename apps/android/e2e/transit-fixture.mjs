@@ -252,15 +252,38 @@ function substitute(query, direction, trip, nowMs) {
   return spliced ? { trip: spliced, replaced: { at: broken.at, index: broken.index } } : null;
 }
 
-/** `POST /api/transit/commute` — both directions, and the hops when asked for. */
+/** `POST /api/transit/commute` — both directions, the hops, and the commitment. */
 export function commuteFixtureResponse(body, nowMs) {
   const query = body;
   const wantSegments = body?.segments === true;
   const rows = 5;
+  // §6.4 §7, mirroring the backend's own two steps: the tracked journey is read
+  // around *its own* departure, because a board asked "from now" cannot contain
+  // one that has already left — which is exactly when the block is worth
+  // having. Then the same §6.5 §4 re-plan the widget gets.
+  const commit =
+    body?.commit && typeof body.commit.departureMs === 'number'
+      ? {
+          direction: body.commit.direction === 'inbound' ? 'inbound' : 'outbound',
+          departureMs: body.commit.departureMs,
+          line: String(body.commit.line ?? ''),
+        }
+      : null;
+  const committedTrip = commit
+    ? findCommittedTrip(
+        corridorResult(query, commit.direction, commit.departureMs - 5 * MINUTE, 4),
+        commit,
+        nowMs,
+      )
+    : null;
+  const replanned =
+    commit && committedTrip ? substitute(query, commit.direction, committedTrip, nowMs) : null;
+  const committed = replanned?.trip ?? committedTrip;
   return {
     outbound: corridorResult(query, 'outbound', nowMs, rows),
     inbound: corridorResult(query, 'inbound', nowMs, rows),
     emptyReason: { outbound: 'none', inbound: 'none' },
+    ...(committed ? { committed: { trip: committed, replaced: replanned?.replaced ?? null } } : {}),
     ...(wantSegments
       ? {
           segments: commuteSegments(query).map((segment) => ({

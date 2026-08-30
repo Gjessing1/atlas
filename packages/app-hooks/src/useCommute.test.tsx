@@ -1,11 +1,13 @@
 import type { PlaceRecord } from '@atlas/storage';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  COMMUTE_COMMIT_SETTING_KEY,
   COMMUTE_SETTING_KEY,
   commuteQueryFrom,
   EMPTY_COMMUTE_CONFIG,
   isLegacyCommuteSetting,
+  parseCommuteCommit,
   parseCommuteConfig,
   serializeCommuteConfig,
   useCommute,
@@ -291,6 +293,89 @@ describe('useCommute', () => {
     await waitFor(() => expect(result.current.result).not.toBeNull());
     expect(result.current.emptyReason('outbound')).toBe('filtered');
     expect(result.current.emptyReason('inbound')).toBe('upstream');
+  });
+
+  /**
+   * §6.4 §7. The board's commitment lives under `local.`, which never syncs:
+   * "the journey I am on right now" is the least portable fact this app holds,
+   * and syncing it would put a laptop's board on a bus it is not on.
+   */
+  describe('the tracked journey', () => {
+    const configured = () =>
+      settings(() =>
+        Promise.resolve(
+          serializeCommuteConfig({
+            ...EMPTY_COMMUTE_CONFIG,
+            from: ENGELSRUD,
+            to: NATIONALTHEATRET,
+          }),
+        ),
+      );
+    const commit = { direction: 'outbound' as const, departureMs: 1_756_276_200_000, line: '280' };
+
+    it('reads a saved commitment and hands it to the board', async () => {
+      const fetchCommute = vi.fn().mockResolvedValue({
+        outbound: { trips: [], problems: [] },
+        inbound: { trips: [], problems: [] },
+      });
+      const getSetting = vi.fn((key: string) =>
+        Promise.resolve(
+          key === COMMUTE_COMMIT_SETTING_KEY
+            ? JSON.stringify(commit)
+            : serializeCommuteConfig({
+                ...EMPTY_COMMUTE_CONFIG,
+                from: ENGELSRUD,
+                to: NATIONALTHEATRET,
+              }),
+        ),
+      );
+      const { result } = renderHook(() =>
+        useCommute({ status: 'ready', getSetting, setSetting: vi.fn() }, [], fetchCommute, true),
+      );
+      await waitFor(() => expect(result.current.commit).toMatchObject(commit));
+      // The upstream question carries it, which is what lets the answer contain
+      // a journey that has already left.
+      await waitFor(() => expect(fetchCommute).toHaveBeenCalled());
+      expect(fetchCommute.mock.calls.at(-1)?.[2]).toMatchObject(commit);
+    });
+
+    it('writes the commitment where it cannot sync', async () => {
+      const setSetting = vi.fn();
+      const fetchCommute = vi.fn().mockResolvedValue({
+        outbound: { trips: [], problems: [] },
+        inbound: { trips: [], problems: [] },
+      });
+      const { result } = renderHook(() =>
+        useCommute(
+          settings(
+            () =>
+              Promise.resolve(
+                serializeCommuteConfig({
+                  ...EMPTY_COMMUTE_CONFIG,
+                  from: ENGELSRUD,
+                  to: NATIONALTHEATRET,
+                }),
+              ),
+            setSetting,
+          ),
+          [],
+          fetchCommute,
+          true,
+        ),
+      );
+      await waitFor(() => expect(result.current.ready).toBe(true));
+      act(() => result.current.setCommit(commit));
+      expect(setSetting).toHaveBeenCalledWith(COMMUTE_COMMIT_SETTING_KEY, JSON.stringify(commit));
+      expect(COMMUTE_COMMIT_SETTING_KEY.startsWith('local.')).toBe(true);
+    });
+
+    it('ignores a stored value that is not a commitment', () => {
+      expect(parseCommuteCommit(null)).toBeNull();
+      expect(parseCommuteCommit('')).toBeNull();
+      expect(parseCommuteCommit('not json')).toBeNull();
+      expect(parseCommuteCommit('{"direction":"outbound","line":"280"}')).toBeNull();
+      expect(parseCommuteCommit(JSON.stringify(commit))).toMatchObject(commit);
+    });
   });
 
   it('falls back to blaming the timetable when an older backend says nothing', async () => {

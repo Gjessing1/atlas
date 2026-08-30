@@ -134,19 +134,30 @@ export {
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
+  commuteLineBadge,
   commuteNowLabel,
   commuteOffDayNote,
+  commuteRibbon,
+  commuteRibbonProgress,
   commuteSegments,
+  commuteSharedDisruptions,
   type CommuteBoardRow,
   type CommuteConnection,
   type CommuteDisruption,
   type CommuteDisruptionKind,
   type CommuteJourney,
   type CommuteLeaveNow,
+  type CommuteLineBadge,
+  type CommuteRibbonPart,
   type CommuteRide,
   type CommuteSegment,
   type CommuteServiceState,
 } from './dashboard.js';
+/**
+ * §6.4 §7's "you are here" — the committed journey stated on the board, built
+ * on the same ladder the home-screen widget runs (`widget-v2.ts`).
+ */
+export { commuteHere, type CommuteHere, type CommuteHereConnection } from './here.js';
 export {
   MINUTES_PER_DAY,
   nextCommuteInstant,

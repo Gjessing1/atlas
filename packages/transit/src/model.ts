@@ -573,6 +573,22 @@ export interface TransitCommuteResult {
    * predates them, so a client can tell "not supported" from "nothing runs".
    */
   segments?: TransitCommuteSegmentResult[];
+  /**
+   * The journey the board is committed to, asked for around its own departure
+   * — §6.4 §7.
+   *
+   * Separate from `outbound`/`inbound` because it cannot be in either: those
+   * are asked "from now", and a commitment is worth having exactly while the
+   * journey it names is *under way*. Absent when nothing was committed, when
+   * the upstream no longer offers that journey, or from a backend that predates
+   * this — all three release the commitment rather than freezing the board on a
+   * plan nothing will run.
+   */
+  committed?: {
+    trip: TransitTrip;
+    /** Set when a broken change was re-planned into it (§6.5 §4). */
+    replaced: { at: string; index: number } | null;
+  };
 }
 
 /**

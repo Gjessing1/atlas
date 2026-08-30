@@ -15,20 +15,32 @@
 
 import {
   commuteBoardRows,
+  commuteCommitHolds,
+  commuteCommitId,
+  commuteCommitKey,
+  commuteConnectionBreak,
+  commuteHere,
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
   commuteNowLabel,
   commuteOffDayNote,
+  commuteRibbon,
   commuteSegments,
+  commuteSharedDisruptions,
   defaultCommuteDirection,
   emptyDirectionNote,
   norwayTime,
   type CommuteBoardRow,
+  type CommuteConnectionBreak,
+  type CommuteDisruption,
+  type CommuteHere,
   type CommuteJourney,
   type CommuteLeaveNow,
+  type CommuteRibbonPart,
   type CommuteSegment,
   type TransitCommuteDirection,
+  type TransitWidgetV2Commit,
 } from '@atlas/transit';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -36,6 +48,27 @@ import type { CommuteController } from './useCommute.js';
 
 /** Which half of the dashboard is in front; both live on the same scroll (§9). */
 export type CommuteDashboardView = 'overview' | 'departures';
+
+/**
+ * One journey as the board draws it — §6.4 §1 and §7.
+ *
+ * The ribbon and the break live here rather than in each client because both
+ * are derivations, and a derivation done twice is a derivation that disagrees.
+ * The break in particular: it is arithmetic on the timetable, so it is computed
+ * for *every* listed journey and not only for the tracked one — §6.5 §3 forbids
+ * inferring that someone boarded, not stating that a change no longer holds.
+ */
+export interface CommuteDashboardRow {
+  journey: CommuteJourney;
+  /** The journey drawn as one proportional bar. */
+  parts: CommuteRibbonPart[];
+  /** The first change the numbers have broken, or null. */
+  broken: CommuteConnectionBreak | null;
+  /** This journey's own notices — the corridor-wide ones are hoisted out. */
+  disruptions: CommuteDisruption[];
+  /** This is the journey being tracked (§6.4 §7). */
+  tracked: boolean;
+}
 
 /** One directed hop with its rows — §5's independent departure boards. */
 export interface CommuteDashboardBoard {
@@ -76,6 +109,24 @@ export interface CommuteDashboard {
   laterJourneys: CommuteJourney[];
   /** §11 — what leaving now actually gets you. */
   leaveNow: CommuteLeaveNow;
+  /** {@link leaveNow}`.next` as a drawable row, or null. */
+  leadRow: CommuteDashboardRow | null;
+  /** {@link laterJourneys} as drawable rows. */
+  rows: CommuteDashboardRow[];
+  /**
+   * Notices every listed journey carries, said once above them.
+   *
+   * A corridor-wide disruption is attached by the operator to every service on
+   * the corridor, so a board that paints it per row prints one amber paragraph
+   * five times and pushes two journeys off the screen with it.
+   */
+  sharedDisruptions: CommuteDisruption[];
+  /** §6.4 §7 — where the traveller is in the journey they are tracking. */
+  here: CommuteHere | null;
+  /** Start tracking a journey, or stop (null). */
+  track: (journey: CommuteJourney | null) => void;
+  /** Whether `journey` is the one being tracked. */
+  isTracked: (journey: CommuteJourney) => boolean;
   /** §5 — the per-leg boards, current direction's hops first. */
   boards: CommuteDashboardBoard[];
   /** The journey whose legs are open, or null. */
@@ -181,6 +232,124 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     );
   }, [result, segments, nowMs, direction]);
 
+  // ------------------------------------------------------------ tracking ---
+
+  const commit = commute.commit;
+  const setCommit = commute.setCommit;
+  const commitKey = commit ? commuteCommitKey(commit) : null;
+
+  /**
+   * The journey being tracked, preferring the backend's own re-read of it.
+   *
+   * The order matters and is not a fallback chain for tidiness: `committed`
+   * comes from a call asked *around the commitment's own departure*, so it is
+   * the only source that still contains the journey once it has left — which is
+   * exactly when this block is worth having. The board's own list answers
+   * before it departs, and answers with the same journey.
+   */
+  const trackedJourney = useMemo<CommuteJourney | null>(() => {
+    if (!commit || !commitKey) return null;
+    const committed = result?.committed?.trip;
+    if (committed) return commuteJourney(committed, nowMs);
+    return (
+      commuteJourneyList(
+        (result?.[commit.direction].trips ?? []).map((trip, index) =>
+          commuteJourney(trip, nowMs, index),
+        ),
+      ).find((journey) => commuteCommitId(commit.direction, journey) === commitKey) ?? null
+    );
+  }, [commit, commitKey, result, nowMs]);
+
+  // A commitment releases itself once the journey it names has finished, rather
+  // than waiting to be dismissed: nobody stops tracking a bus they got off, and
+  // a board still saying "On board" at lunchtime is the one failure that would
+  // teach a reader to stop believing this card.
+  useEffect(() => {
+    if (!commit) return;
+    if (trackedJourney && commuteCommitHolds(trackedJourney, nowMs)) return;
+    // Only when the answer is loaded: an unresolved commitment during the
+    // moment before the first result arrives is unknown, not finished.
+    if (!result) return;
+    setCommit(null);
+  }, [commit, nowMs, result, setCommit, trackedJourney]);
+
+  const here = useMemo<CommuteHere | null>(() => {
+    if (!trackedJourney || !commit) return null;
+    // Asked twice on purpose, and cheaply: the first call says which ride the
+    // ladder landed on, and only then is it knowable *which* hop's departure
+    // board holds the alternatives. Passing them in is what makes "and if I
+    // miss it?" cost no upstream call — the per-leg boards are already here.
+    const placed = commuteHere(trackedJourney, nowMs);
+    if (!placed) return null;
+    const hop =
+      placed.connectionRideIndex === null
+        ? undefined
+        : boards.find(
+            (board) =>
+              board.segment.direction === commit.direction &&
+              board.segment.index === placed.connectionRideIndex,
+          );
+    return commuteHere(trackedJourney, nowMs, hop?.rows ?? []);
+  }, [boards, commit, nowMs, trackedJourney]);
+
+  const track = useCallback(
+    (journey: CommuteJourney | null) => {
+      if (!journey) {
+        setCommit(null);
+        return;
+      }
+      // The same three fields `commuteCommitId` reads back, in the same order:
+      // a commitment is the *scheduled* departure and the first vehicle, so it
+      // survives the delay that is usually the reason anyone is looking.
+      setCommit({
+        direction,
+        departureMs: journey.startMs,
+        line: journey.rides[0]?.line ?? 'walk',
+        committedAtMs: Date.now(),
+      } satisfies TransitWidgetV2Commit);
+    },
+    [direction, setCommit],
+  );
+
+  // Through `commuteCommitId`, never by comparing three fields here: what "the
+  // same journey" means is a fact about commitments, and the widget already
+  // owns the one definition of it.
+  const isTracked = useCallback(
+    (journey: CommuteJourney) =>
+      commitKey !== null &&
+      commit !== null &&
+      commuteCommitId(commit.direction, journey) === commitKey,
+    [commit, commitKey],
+  );
+
+  // ---------------------------------------------------------------- rows ---
+
+  const sharedDisruptions = useMemo(
+    () => commuteSharedDisruptions(leaveNow.next ? [leaveNow.next, ...leaveNow.later] : journeys),
+    [journeys, leaveNow],
+  );
+
+  const toRow = useCallback(
+    (journey: CommuteJourney): CommuteDashboardRow => {
+      const broken = commuteConnectionBreak(journey, nowMs);
+      const hoisted = new Set(sharedDisruptions.map((disruption) => disruption.key));
+      return {
+        journey,
+        parts: commuteRibbon(journey, { brokenIndex: broken?.index ?? null }),
+        broken,
+        disruptions: journey.disruptions.filter((disruption) => !hoisted.has(disruption.key)),
+        tracked: isTracked(journey),
+      };
+    },
+    [isTracked, nowMs, sharedDisruptions],
+  );
+
+  const leadRow = useMemo(
+    () => (leaveNow.next ? toRow(leaveNow.next) : null),
+    [leaveNow.next, toRow],
+  );
+  const rows = useMemo(() => laterJourneys.map(toRow), [laterJourneys, toRow]);
+
   const reason = commute.emptyReason(direction);
   const emptyFromFilter = reason === 'filtered';
   const emptyNote =
@@ -210,6 +379,12 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     journeys,
     laterJourneys,
     leaveNow,
+    leadRow,
+    rows,
+    sharedDisruptions,
+    here,
+    track,
+    isTracked,
     boards,
     expanded,
     toggle,

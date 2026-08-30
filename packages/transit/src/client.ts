@@ -1,6 +1,7 @@
 import { TransitError, parseEnturDeparturesResponse, parseEnturResponse } from './entur.js';
 import type { LatLng, SearchResult } from '@atlas/core';
 import { transitCoverage, transitCoversPoint } from './model.js';
+import type { TransitWidgetV2Commit } from './widget-v2.js';
 import type {
   TransitDeparturesQuery,
   TransitDeparturesResult,
@@ -177,6 +178,12 @@ export interface FetchTransitCommuteOptions extends FetchTransitOptions {
    * surface that will not draw them is upstream work spent on nothing.
    */
   segments?: boolean;
+  /**
+   * The journey the board is tracking, so the answer carries it even once it
+   * has left (§6.4 §7). Costs one upstream call, and only while something is
+   * being tracked.
+   */
+  commit?: TransitWidgetV2Commit | null;
 }
 
 /** Fetch the saved commute's upcoming journeys in both directions. */
@@ -192,7 +199,11 @@ export async function fetchTransitCommute(
   const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/commute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opts.segments ? { ...query, segments: true } : query),
+    body: JSON.stringify({
+      ...query,
+      ...(opts.segments ? { segments: true } : {}),
+      ...(opts.commit ? { commit: opts.commit } : {}),
+    }),
     signal: opts.signal,
   });
   const json: unknown = await res.json().catch(() => null);

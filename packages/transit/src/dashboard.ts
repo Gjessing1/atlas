@@ -47,6 +47,7 @@ import type {
   TransitCommutePlace,
   TransitCommuteQuery,
   TransitLeg,
+  TransitLine,
   TransitMode,
   TransitResult,
   TransitSeverity,
@@ -76,6 +77,64 @@ export const COMMUTE_STATE_LABEL: Record<CommuteServiceState, string> = {
   live: 'On time',
   scheduled: 'Timetable',
 };
+
+/**
+ * The two colours a line badge is painted in — the operator's own, when they
+ * publish them.
+ *
+ * **This is identity, not status, and the distinction is the whole reason it is
+ * a separate channel.** §10's rule — a colour may only come from what a service
+ * *is* — was written about state, and a reader who learns that "red means
+ * trouble" on this board would misread every Ruter bus in Oslo. So the two are
+ * given different surfaces and never trade places: the badge's *fill* is the
+ * line (the 280 is red because Ruter paints it red, delayed or not), and state
+ * paints the badge's edge and the text beside it. A cancelled service is the one
+ * case where identity yields, because a line you cannot board has no identity
+ * worth advertising.
+ *
+ * Entur publishes `presentation.colour` for most Norwegian operators and a
+ * `textColour` with it more often than not. Where the fill is published without
+ * a legible foreground, one is chosen by luminance rather than defaulted to
+ * white — Ruter's own yellow-on-white would otherwise be unreadable at 11 px.
+ */
+export interface CommuteLineBadge {
+  /** `#RRGGBB` background. */
+  fill: string;
+  /** `#RRGGBB` foreground that is legible on {@link fill}. */
+  text: string;
+}
+
+/**
+ * The badge for a line with no published colours.
+ *
+ * Deliberately one neutral rather than a per-mode palette: a mode already has a
+ * glyph, and inventing "bus red / train green" would put made-up branding next
+ * to the real branding of every operator that does publish theirs — on the one
+ * board whose job is to be trusted at 07:40.
+ */
+const NEUTRAL_LINE_BADGE: CommuteLineBadge = { fill: '#5a636c', text: '#ffffff' };
+
+/**
+ * Relative luminance, sRGB, as WCAG defines it — enough to choose between black
+ * and white text on a colour an operator chose for a printed timetable.
+ */
+function luminance(hex: string): number {
+  const channel = (offset: number) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export function commuteLineBadge(line: TransitLine | undefined): CommuteLineBadge {
+  const fill = line?.colour;
+  if (!fill || !HEX.test(fill)) return NEUTRAL_LINE_BADGE;
+  const text = line.textColour;
+  if (text && HEX.test(text)) return { fill, text };
+  return { fill, text: luminance(fill) > 0.45 ? '#101418' : '#ffffff' };
+}
 
 /**
  * How a disruption reads — §4's "distinct statuses", limited to what the wire
@@ -220,6 +279,27 @@ export interface CommuteRide {
   window: string;
   /** `"3 stops · 12 min"` — what the ride costs, without expanding further. */
   ride: string;
+  /**
+   * How long this vehicle is ridden, in ms — the ribbon's weight for this leg.
+   *
+   * A formatted `ride` string cannot be laid out proportionally, and a client
+   * that parsed "12 min" back out of one would be a second implementation of
+   * this number in a language that never sees the wire.
+   */
+  durationMs: number;
+  /**
+   * Scheduled departure and arrival as instants, beside the clock faces.
+   *
+   * Everything that has to *place* a ride in time — where "now" falls on the
+   * ribbon, whether a board row is the one this journey already names — was
+   * otherwise re-deriving them by filtering `trip.legs` for ride modes and
+   * hoping the two lists stayed in step. They are the same legs in the same
+   * order, so the instants belong on the ride.
+   */
+  startMs: number;
+  endMs: number;
+  /** {@link commuteLineBadge} — the operator's colours, or the neutral pair. */
+  badge: CommuteLineBadge;
   state: CommuteServiceState;
   disruptions: CommuteDisruption[];
 }
@@ -373,6 +453,10 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
       arrival,
       window: `${departure.aimed} → ${arrival.aimed}`,
       ride: `${stops} ${stops === 1 ? 'stop' : 'stops'} · ${commuteDurationLabel(leg.durationMs)}`,
+      durationMs: leg.durationMs,
+      startMs: leg.aimedStartMs,
+      endMs: leg.aimedEndMs,
+      badge: commuteLineBadge(leg.line),
       state: serviceState(leg, departure),
       disruptions: notices,
     };
@@ -537,6 +621,8 @@ export interface CommuteBoardRow {
   mode: TransitMode;
   line: string;
   towards: string | null;
+  /** {@link commuteLineBadge} — the same colours the journey ribbon paints. */
+  badge: CommuteLineBadge;
   quay: string | null;
   /** `"in 6 min"`. */
   countdown: string;
@@ -608,6 +694,7 @@ export function commuteBoardRows(
           mode: ride.mode,
           line: ride.line?.publicCode || TRANSIT_MODE_LABEL[ride.mode],
           towards: ride.line?.headsign ?? null,
+          badge: commuteLineBadge(ride.line),
           quay: ride.from.quay?.publicCode ?? null,
           countdown: cancelled
             ? COMMUTE_STATE_LABEL.cancelled
@@ -715,4 +802,169 @@ export function commuteOffDayNote(
 ): string | null {
   if (days.length === 0 || days.includes(weekday)) return null;
   return 'This commute is not saved for today — showing the next departures anyway.';
+}
+
+// ---------------------------------------------------------------- ribbon ---
+
+/**
+ * The journey drawn as one bar — the board's answer to "what am I actually
+ * taking", before a single digit is read.
+ *
+ * **Why this replaced a strip of chips.** The collapsed row used to carry
+ * `[🚌 280 08:36 → 09:02] [⇄ 9 min at Asker] [🚆 L1 09:11 → 09:24]`: three
+ * bordered pills of near-identical text that wrapped onto two or three lines in
+ * a 360 px panel. Every journey in the list then looked like every other one,
+ * and the two facts a commuter reads first — *which vehicles, and how the time
+ * splits between them* — had to be assembled out of six clock times. Five such
+ * rows is thirty numbers to answer "the one after next".
+ *
+ * A ribbon states the same journey as a shape: each part is as wide as it is
+ * long, the vehicles carry the operator's own colours, and the change is a
+ * literal gap between them. Proportion is the information the chips could not
+ * hold, and it is free — the durations were already on the model.
+ *
+ * The parts are generated here rather than in either client for the usual
+ * reason this package exists: two hand-laid-out ribbons are two ribbons that
+ * disagree about a nine-minute change on the morning it matters.
+ */
+export type CommuteRibbonPart = CommuteRibbonSpan &
+  (
+    | {
+        kind: 'ride';
+        mode: TransitMode;
+        /** `"280"`, `"R14"` — what is on the front of the vehicle. */
+        line: string;
+        /** `"+3"` on the leg actually running late, or null. */
+        delay: string | null;
+        state: CommuteServiceState;
+        badge: CommuteLineBadge;
+      }
+    | {
+        kind: 'change';
+        /** `"6m"` — the wait, short enough to sit inside the gap. */
+        label: string;
+        /** Planned, but with little enough slack to be worth flagging. */
+        tight: boolean;
+        /**
+         * The numbers say this change no longer holds
+         * (`commuteConnectionBreak`). Passed in rather than computed, because
+         * the break lives one layer up with the commitment it is judged
+         * against.
+         */
+        broken: boolean;
+      }
+  );
+
+/** What every part of the ribbon carries: how wide it is, and what it spans. */
+interface CommuteRibbonSpan {
+  key: string;
+  /** Minutes — the flex weight this part is laid out with. */
+  weight: number;
+  /** The scheduled instants this part covers, so "now" can be placed inside it. */
+  fromMs: number;
+  toMs: number;
+}
+
+/**
+ * The smallest weight a part may claim.
+ *
+ * A two-minute platform change between two twenty-minute rides is 4% of the
+ * bar, which rounds to nothing and leaves two vehicles apparently touching. The
+ * floor costs the rides a little proportionality and buys the reader the one
+ * thing the gap exists to show — that there *is* a change.
+ */
+const MIN_RIBBON_WEIGHT = 4;
+
+const ribbonWeight = (ms: number) => Math.max(MIN_RIBBON_WEIGHT, Math.round(ms / 60_000));
+
+export function commuteRibbon(
+  journey: CommuteJourney,
+  options: { brokenIndex?: number | null } = {},
+): CommuteRibbonPart[] {
+  const parts: CommuteRibbonPart[] = [];
+  journey.rides.forEach((ride, index) => {
+    const change = journey.connections[index - 1];
+    const previous = journey.rides[index - 1];
+    if (change && previous) {
+      parts.push({
+        kind: 'change',
+        key: change.key,
+        weight: ribbonWeight(change.waitMs),
+        fromMs: previous.endMs,
+        toMs: ride.startMs,
+        // Minutes without the unit: this label sits inside a gap that is often
+        // 20 px wide, and "6 min" does not fit where "6m" does.
+        label: `${Math.round(change.waitMs / 60_000)}m`,
+        tight: change.tight,
+        broken: options.brokenIndex === index,
+      });
+    }
+    parts.push({
+      kind: 'ride',
+      key: ride.key,
+      weight: ribbonWeight(ride.durationMs),
+      fromMs: ride.startMs,
+      toMs: ride.endMs,
+      mode: ride.mode,
+      line: ride.line,
+      // The correction belongs on the vehicle carrying it: on a bus→train
+      // commute, "the bus is nine late" and "the train is nine late" are
+      // different mornings, and a row-level `+9 min` cannot tell them apart.
+      delay: ride.departure.delay ? ride.departure.delay.replace(' min', '') : null,
+      state: ride.state,
+      badge: ride.badge,
+    });
+  });
+  return parts;
+}
+
+/**
+ * How far through a journey a moment is, as a percentage of the ribbon.
+ *
+ * Measured on the ribbon's own weights rather than on elapsed minutes, because
+ * the two disagree: `MIN_RIBBON_WEIGHT` widens short changes, so a marker
+ * placed by clock time drifts off the part it is meant to be inside — and a
+ * "you are here" mark standing in the wrong leg is worse than no mark.
+ */
+export function commuteRibbonProgress(
+  parts: readonly CommuteRibbonPart[],
+  nowMs: number,
+): number | null {
+  const total = parts.reduce((sum, part) => sum + part.weight, 0);
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  if (total === 0 || !first || !last) return null;
+  if (nowMs <= first.fromMs) return null;
+  if (nowMs >= last.toMs) return 100;
+  let before = 0;
+  for (const part of parts) {
+    if (nowMs < part.toMs) {
+      const span = part.toMs - part.fromMs;
+      const through = span > 0 ? (nowMs - part.fromMs) / span : 1;
+      return ((before + part.weight * Math.max(0, Math.min(1, through))) / total) * 100;
+    }
+    before += part.weight;
+  }
+  return 100;
+}
+
+/**
+ * The notices every listed journey carries, lifted out of the rows.
+ *
+ * A corridor-wide notice — "signal problems between Asker and Sandvika" — is
+ * attached by the operator to every service on the corridor, so a board that
+ * paints it per row prints the same amber sentence five times and pushes two
+ * journeys off the screen with it. Said once, above the list, it is context;
+ * said five times it is noise that hides the row-specific notice underneath.
+ *
+ * Only notices on *every* listed journey are lifted. One that affects three
+ * departures out of five is a fact about those three, and moving it would tell
+ * the reader the other two are affected too.
+ */
+export function commuteSharedDisruptions(journeys: readonly CommuteJourney[]): CommuteDisruption[] {
+  if (journeys.length < 2) return [];
+  const [first, ...rest] = journeys;
+  return (first?.disruptions ?? []).filter((disruption) =>
+    rest.every((journey) => journey.disruptions.some((other) => other.key === disruption.key)),
+  );
 }

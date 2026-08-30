@@ -811,6 +811,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'ROADMAP §6.4. The marker is the shared controller, not a phrase: the two surfaces used to be hand-written result lists that already disagreed about which time to print (the delayed one on both, which is the wrong one). Every clock time, status, connection and countdown now comes from @atlas/transit, so the panel, the sheet and the home-screen widget cannot quote three different departures for one bus.',
   },
   {
+    id: 'planner-commute-tracking',
+    surface: 'planner',
+    capability: 'Track the journey you are on, and see where in it you are',
+    hook: 'useCommuteDashboard',
+    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'HereCard' },
+    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'HereCard' },
+    route: { file: 'backend/src/transit-api.ts', contains: 'committedAnswer' },
+    note: 'ROADMAP §6.4 §7. The phase ladder, the connection break and the commitment all shipped in v0.182.0 for the *home-screen widget*, whose only consumer is the backend widget route — so the widget knew which leg you were on and the board, the surface you open once you are moving, did not. The commitment is one `local.` setting (never syncs: "the journey I am on" is the least portable fact this app holds) and the board asks for that journey by name, because a board asked "from now" cannot contain one that has already left.',
+  },
+  {
     id: 'planner-commute-lines',
     surface: 'planner',
     capability: 'Pick the commute’s lines from what actually calls at your stops',

@@ -759,10 +759,27 @@ async function saveCommuteAndReadBoard() {
     (xml) => Boolean(nodeForId(xml, 'commute-leave-now')),
     60_000,
   );
-  // The leg strip, with the mode glyphs and the change the widget was missing
+  // The ribbon, with the mode glyphs and the change the widget was missing
   // until v0.181.0. Both vehicles, because a row that names only the first is
-  // exactly the bug that shipped.
-  expectStrings(board, ['🚌 280', '🚆 R14', 'at Asker E2E'], 'the commute board');
+  // exactly the bug that shipped — and the interchange the change is at, which
+  // now sits on its own line under the bar rather than inside a chip.
+  expectStrings(board, ['🚌 280', '🚆 R14', 'Asker E2E'], 'the commute board');
+
+  // §6.4 §7. Tracking a journey is what turns the board into "where am I": the
+  // block only exists for a journey the user committed to, so tapping the
+  // control is the only way to see it at all.
+  await tapAfterScroll('commute-track', 'commute-sheet', 'down');
+  const tracked = await waitFor(
+    'the board to say where the journey is',
+    hierarchy,
+    (xml) => Boolean(nodeForId(xml, 'commute-here')),
+    20_000,
+  );
+  // "Tracking" before the first vehicle leaves, never "you are here": the
+  // traveller is following a journey, not standing in it.
+  expectStrings(tracked, ['TRACKING', 'UPCOMING', 'NEXT CONNECTION'], 'the tracked journey');
+  await tapAfterScroll('commute-stop-tracking', 'commute-sheet', 'down');
+  await waitForId('commute-here', false, 20_000);
 
   // One journey opened to its legs: every leg states its *own* platform, which
   // is the fault v0.181.0 fixed — a row knows only the first ride's, and on a
