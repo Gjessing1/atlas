@@ -23,6 +23,7 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
 
+import { CheckIcon, PencilIcon } from '../icons.js';
 import { useGeocode } from '../routing/useGeocode.js';
 import { CommuteEditorForm } from './CommuteEditor.js';
 
@@ -702,13 +703,18 @@ export function CommutePanel({
               Return
             </button>
           </div>
+          {/* The commute is edited once and read every weekday, so the way in
+              is a glyph beside the tabs rather than a labelled button wide
+              enough to crowd them. */}
           <button
             type="button"
             className={`commute-edit${editing ? ' on' : ''}`}
             aria-expanded={editing}
+            aria-label={editing ? 'Done editing commute' : 'Edit commute'}
+            title={editing ? 'Done' : 'Edit commute'}
             onClick={() => setEditing((open) => !open)}
           >
-            {editing ? 'Done' : 'Edit commute'}
+            {editing ? <CheckIcon size={18} /> : <PencilIcon size={18} />}
           </button>
         </div>
         {/* §13's middle ground. A commute is saved door to door, but half a
@@ -731,6 +737,24 @@ export function CommutePanel({
               </button>
             ))}
           </div>
+        )}
+        {/* …and the offer to have one at all. A commute is saved door to door,
+            so the corridor that changes at Asker on every single journey had no
+            interchange saved, no per-leg boards and no middle ground — and no
+            way to find out that a Via stop was what all three were waiting on.
+            The journeys know the stop; this is the one tap that saves it. */}
+        {editor.suggestedVia && (
+          <p className="commute-suggest">
+            <span>
+              Every journey changes at <strong>{editor.suggestedVia.name}</strong>.
+            </span>
+            <button type="button" onClick={editor.addSuggestedVia} disabled={editor.addingVia}>
+              {editor.addingVia ? 'Adding…' : 'Add as interchange'}
+            </button>
+          </p>
+        )}
+        {editor.suggestedViaError && (
+          <p className="commute-state commute-error">{editor.suggestedViaError}</p>
         )}
         {editing && <CommuteEditorForm editor={editor} places={places} />}
         {dashboard.offDayNote && <p className="commute-state">{dashboard.offDayNote}</p>}

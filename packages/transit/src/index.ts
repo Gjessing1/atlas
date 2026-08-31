@@ -131,6 +131,7 @@ export {
   commuteCountdown,
   commuteDurationLabel,
   commuteEstimateLabel,
+  commuteInterchange,
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,

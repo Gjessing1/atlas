@@ -1,5 +1,5 @@
 import type { PlaceRecord } from '@atlas/storage';
-import type { TransitCommuteResult, TransitStopLines } from '@atlas/transit';
+import type { TransitCommuteResult, TransitLeg, TransitStopLines } from '@atlas/transit';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { EMPTY_COMMUTE_CONFIG, type CommuteConfig, type CommuteController } from './useCommute.js';
@@ -55,11 +55,13 @@ function harness({
   result = null,
   places = [],
   fetchStopLines = vi.fn().mockResolvedValue(stopLines),
+  geocode = vi.fn().mockResolvedValue({ results: [], offline: false }),
 }: {
   config?: CommuteConfig;
   result?: TransitCommuteResult | null;
   places?: PlaceRecord[];
   fetchStopLines?: (stopId: string, signal: AbortSignal) => Promise<TransitStopLines>;
+  geocode?: ReturnType<typeof vi.fn>;
 } = {}) {
   const saved: CommuteConfig[] = [];
   const commute: CommuteController = {
@@ -78,11 +80,11 @@ function harness({
     useCommuteEditor({
       commute,
       places,
-      geocode: vi.fn().mockResolvedValue([]),
+      geocode,
       fetchStopLines,
     }),
   );
-  return { view, saved, fetchStopLines };
+  return { view, saved, fetchStopLines, geocode };
 }
 
 describe('endpoints', () => {
@@ -287,5 +289,117 @@ describe('when', () => {
     expect(view.result.current.days.every((day) => day.on)).toBe(true);
     act(() => view.result.current.toggleDay(7));
     expect(saved[0]!.days).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+});
+
+/**
+ * §6.4 §13's offer. Everything the middle ground and the per-leg boards do
+ * hangs off a saved `via`, and a commute is saved door to door — so the corridor
+ * that changes at Asker every single time had no way to say so.
+ */
+describe('the suggested interchange', () => {
+  const leg = (from: string, to: string, mode: TransitLeg['mode'] = 'bus'): TransitLeg => ({
+    mode,
+    distanceM: 4_000,
+    durationMs: 600_000,
+    aimedStartMs: 1,
+    expectedStartMs: 1,
+    aimedEndMs: 600_001,
+    expectedEndMs: 600_001,
+    realtime: false,
+    from: { name: from, position: { lat: 59.83, lng: 10.43 } },
+    to: { name: to, position: { lat: 59.833, lng: 10.434 } },
+    intermediateStops: [],
+    points: [],
+    situations: [],
+  });
+
+  const changing = (): TransitCommuteResult => ({
+    outbound: {
+      trips: [
+        {
+          startMs: 1,
+          endMs: 2,
+          durationMs: 1,
+          walkDistanceM: 0,
+          legs: [
+            leg('Engelsrud', 'Asker stasjon'),
+            leg('Asker stasjon', 'Nationaltheatret', 'rail'),
+          ],
+        },
+      ],
+      problems: [],
+    },
+    inbound: { trips: [], problems: [] },
+  });
+
+  const ASKER_HIT = {
+    name: 'Asker stasjon',
+    label: 'Bus · Train · Asker',
+    position: { lat: 59.833128, lng: 10.434169 },
+    transitStopId: 'NSR:StopPlace:59616',
+  };
+
+  // Ends without NSR ids: the suggestion never asks a stop for its lines, and a
+  // line fetch resolving mid-test is a state update nothing here is waiting for.
+  const configured = {
+    ...EMPTY_COMMUTE_CONFIG,
+    from: { name: ENGELSRUD.name, position: ENGELSRUD.position },
+    to: { name: NATIONALTHEATRET.name, position: NATIONALTHEATRET.position },
+  };
+
+  it('offers the stop the journeys all change at', () => {
+    const { view } = harness({ config: configured, result: changing() });
+    expect(view.result.current.suggestedVia?.name).toBe('Asker stasjon');
+  });
+
+  it('offers nothing once an interchange is saved', () => {
+    const { view } = harness({
+      config: { ...configured, via: { name: 'Asker stasjon' } },
+      result: changing(),
+    });
+    expect(view.result.current.suggestedVia).toBeNull();
+  });
+
+  it('saves it as a stop, not as a coordinate', async () => {
+    const geocode = vi.fn().mockResolvedValue({ results: [ASKER_HIT], offline: false });
+    const { view, saved } = harness({ config: configured, result: changing(), geocode });
+    act(() => view.result.current.addSuggestedVia());
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]!.via).toEqual({
+      name: 'Asker stasjon',
+      position: { lat: 59.833128, lng: 10.434169 },
+      stopId: 'NSR:StopPlace:59616',
+    });
+    expect(geocode).toHaveBeenCalledWith(expect.objectContaining({ text: 'Asker stasjon' }));
+  });
+
+  /**
+   * A national geocoder will happily return a same-named stop in another county,
+   * and a via 200 km away is worse than none: the board would answer nothing at
+   * all and blame the timetable for it.
+   */
+  it('refuses a same-named stop that is nowhere near the change', async () => {
+    const geocode = vi.fn().mockResolvedValue({
+      results: [{ ...ASKER_HIT, position: { lat: 63.43, lng: 10.39 } }],
+      offline: false,
+    });
+    const { view, saved } = harness({ config: configured, result: changing(), geocode });
+    act(() => view.result.current.addSuggestedVia());
+    await waitFor(() => expect(view.result.current.suggestedViaError).toBeTruthy());
+    expect(saved).toHaveLength(0);
+  });
+
+  /**
+   * A coordinate would answer the journey question and silently break the other
+   * two — the line picker can only ask a stop for its lines — so an unresolvable
+   * name is said out loud rather than saved as a point.
+   */
+  it('saves nothing when the search finds no stop at all', async () => {
+    const { view, saved } = harness({ config: configured, result: changing() });
+    act(() => view.result.current.addSuggestedVia());
+    await waitFor(() => expect(view.result.current.suggestedViaError).toContain('Asker stasjon'));
+    expect(saved).toHaveLength(0);
+    expect(view.result.current.addingVia).toBe(false);
   });
 });

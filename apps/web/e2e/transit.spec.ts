@@ -260,3 +260,152 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   // The route line is the panel's header now, not a field halfway down a form.
   await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');
 });
+
+/**
+ * §13 offered rather than waited for. A commute is saved door to door, so the
+ * corridor that changes at Asker on every single journey had no `via` — and
+ * without one there is no "start from" control, no per-leg board, and nothing
+ * on screen to say that a Via stop was what both were waiting on.
+ */
+test('offers the interchange every journey changes at, and saves it as a stop', async ({
+  page,
+}) => {
+  // No backup import here: the ends are picked through the stop search, which
+  // is also the mock the suggestion's own lookup goes through.
+  test.setTimeout(240_000);
+  const now = Date.now();
+  const bodies: Record<string, unknown>[] = [];
+
+  const STOPS: Record<string, { name: string; lat: number; lng: number; id: string }> = {
+    engelsrud: { name: 'Engelsrud', lat: 59.8198, lng: 10.3659, id: 'NSR:StopPlace:3369' },
+    asker: { name: 'Asker stasjon', lat: 59.8331, lng: 10.4341, id: 'NSR:StopPlace:59616' },
+    nationaltheatret: {
+      name: 'Nationaltheatret',
+      lat: 59.9149,
+      lng: 10.7322,
+      id: 'NSR:StopPlace:58404',
+    },
+  };
+  await page.route('**/api/transit/stops**', (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q')?.toLowerCase() ?? '';
+    const stop = Object.entries(STOPS).find(([key]) => key.startsWith(q.split(' ')[0] ?? ''))?.[1];
+    route.fulfill({
+      json: {
+        results: stop
+          ? [
+              {
+                name: stop.name,
+                label: 'Bus · Train',
+                position: { lat: stop.lat, lng: stop.lng },
+                kind: 'public_transport/busStation',
+                transitStopId: stop.id,
+              },
+            ]
+          : [],
+      },
+    });
+  });
+  await page.route('**/api/search**', (route) => route.fulfill({ json: { results: [] } }));
+  await page.route('**/api/transit/stop-lines**', (route) =>
+    route.fulfill({ json: { stop: null, lines: [] } }),
+  );
+
+  const leg = (
+    mode: string,
+    publicCode: string,
+    startMs: number,
+    endMs: number,
+    from: string,
+    to: string,
+  ): Record<string, unknown> => ({
+    mode,
+    distanceM: 8_000,
+    durationMs: endMs - startMs,
+    aimedStartMs: startMs,
+    expectedStartMs: startMs,
+    aimedEndMs: endMs,
+    expectedEndMs: endMs,
+    realtime: false,
+    from: { name: from, position: { lat: 59.82, lng: 10.42 } },
+    to: { name: to, position: { lat: 59.8331, lng: 10.4341 } },
+    line: { id: `X:Line:${publicCode}`, publicCode },
+    intermediateStops: [],
+    points: [],
+    situations: [],
+  });
+  /** Bus to the change, train onwards — the shape the suggestion reads. */
+  const changing = (startMs: number) => ({
+    startMs,
+    endMs: startMs + 1_800_000,
+    durationMs: 1_800_000,
+    walkDistanceM: 200,
+    legs: [
+      leg('bus', '280', startMs, startMs + 900_000, 'Engelsrud', 'Asker stasjon'),
+      leg('rail', 'R14', startMs + 1_200_000, startMs + 1_800_000, 'Asker stasjon', 'Oslo S'),
+    ],
+  });
+  const fromAsker = (startMs: number) => ({
+    startMs,
+    endMs: startMs + 600_000,
+    durationMs: 600_000,
+    walkDistanceM: 0,
+    legs: [leg('rail', 'R11', startMs, startMs + 600_000, 'Asker stasjon', 'Oslo S')],
+  });
+  await page.route('**/api/transit/commute', (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    bodies.push(body);
+    const hasVia = Array.isArray(body['via']) && body['via'].length > 0;
+    route.fulfill({
+      json: {
+        outbound: { trips: [changing(now + 300_000), changing(now + 1_500_000)], problems: [] },
+        inbound: { trips: [changing(now + 3_600_000)], problems: [] },
+        ...(hasVia
+          ? {
+              segments: [
+                { id: 'outbound-1', result: { trips: [fromAsker(now + 1_200_000)], problems: [] } },
+                { id: 'inbound-1', result: { trips: [], problems: [] } },
+              ],
+            }
+          : {}),
+      },
+    });
+  });
+
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Commute', exact: true }).click();
+
+  const panel = page.locator('.commute-panel');
+  const pick = async (field: string, query: string) => {
+    await expect(panel.getByRole('button', { name: field })).toBeEnabled({ timeout: 90_000 });
+    await panel.getByRole('button', { name: field }).click();
+    await panel.getByRole('searchbox').fill(query);
+    await panel.locator('.commute-hits button').first().click();
+  };
+  // Door to door, exactly as a commute is normally saved: no interchange.
+  await pick('Choose a From stop…', 'engelsrud');
+  await pick('Choose a To stop…', 'nationaltheatret');
+
+  // Nothing to choose between yet — which is the state that used to be silent.
+  await expect(panel.locator('.commute-origins')).toHaveCount(0);
+  await expect(panel).toContainText('If I leave now', { timeout: 60_000 });
+  const suggest = panel.locator('.commute-suggest');
+  await expect(suggest).toContainText('Every journey changes at');
+  await expect(suggest).toContainText('Asker stasjon');
+
+  await suggest.getByRole('button', { name: 'Add as interchange' }).click();
+
+  // Saved as a *stop*: a coordinate would answer the journey question and
+  // silently break the line picker, which can only ask a stop for its lines.
+  await expect
+    .poll(() => bodies[bodies.length - 1])
+    .toMatchObject({ via: [{ name: 'Asker stasjon', stopId: 'NSR:StopPlace:59616' }] });
+
+  // …and the offer becomes the control it was offering.
+  await expect(suggest).toHaveCount(0);
+  const origins = panel.locator('.commute-origins');
+  await expect(origins.getByRole('tab')).toHaveCount(2);
+  await origins.getByRole('tab', { name: 'Asker stasjon', exact: true }).click();
+  await expect(panel.locator('.commute-header')).toContainText('Asker stasjon → Nationaltheatret');
+  await expect(panel.locator('.commute-card.primary')).toContainText('R11');
+});

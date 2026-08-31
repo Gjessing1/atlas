@@ -1,6 +1,13 @@
-import { TRANSIT_MODE_LABEL, RIDE_MODES, minutesOfDayLabel, filterModeOf } from '@atlas/transit';
+import {
+  TRANSIT_MODE_LABEL,
+  RIDE_MODES,
+  commuteInterchange,
+  minutesOfDayLabel,
+  filterModeOf,
+} from '@atlas/transit';
 import type {
   TransitCommuteDirection,
+  TransitCommutePlace,
   TransitLineRef,
   TransitMode,
   TransitStopLines,
@@ -10,7 +17,7 @@ import type {
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { StopHit } from '@atlas/core';
+import { haversineM, type SearchResult, type StopHit } from '@atlas/core';
 
 import { useStopSearch, type StopGeocodeFn } from './useStopSearch.js';
 import type { CommuteConfig, CommuteController, CommuteEnd } from './useCommute.js';
@@ -73,6 +80,24 @@ export interface CommuteEditor {
   /** True when this end names an actual stop rather than a coordinate. */
   isStop: (field: CommuteEndKey) => boolean;
 
+  /**
+   * The interchange the answered journeys all change at, when none is saved —
+   * §6.4 §13's middle ground, offered rather than waited for.
+   *
+   * A commute saved end to end has no `via`, and without one there are no
+   * per-leg boards and no "start from" choice: the board can only ever answer
+   * the door-to-door question, and nothing on it explains why. This is the
+   * corridor telling the app what its own change is, so the app can offer to
+   * save it. Null once one is saved, and null whenever the journeys disagree.
+   */
+  suggestedVia: TransitCommutePlace | null;
+  /** Save {@link suggestedVia} as the Via stop, resolving its NSR id first. */
+  addSuggestedVia: () => void;
+  /** That lookup is in flight. */
+  addingVia: boolean;
+  /** It could not be resolved to a stop, said where the offer was. */
+  suggestedViaError: string | null;
+
   // ---- services --------------------------------------------------------
   lineGroups: CommuteLineGroup[];
   linesLoading: boolean;
@@ -130,6 +155,30 @@ function tripLineRefs(trips: readonly TransitTrip[]): TransitLineRef[] {
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * The searched stop that is really the one the journeys named: same name, and
+ * near enough that a national geocoder's other "Asker stasjon" cannot win.
+ *
+ * Name-first rather than distance-first because a trip answer and the stop
+ * search are both Entur naming the same NSR stop place, so an exact match is
+ * the strong signal; distance is the tie-break and the sanity check. Hits with
+ * no NSR id are not candidates at all — resolving the id is the whole errand.
+ */
+const SUGGESTED_VIA_RADIUS_M = 800;
+
+function nearestStopHit(hits: SearchResult[], place: TransitCommutePlace): SearchResult | null {
+  const near = (hit: SearchResult) => haversineM(hit.position, place) <= SUGGESTED_VIA_RADIUS_M;
+  const stops = hits.filter((hit) => hit.transitStopId && near(hit));
+  const named = stops.filter(
+    (hit) => hit.name.localeCompare(place.name, 'nb-NO', { sensitivity: 'base' }) === 0,
+  );
+  const pool = named.length > 0 ? named : stops;
+  return (
+    pool.slice().sort((a, b) => haversineM(a.position, place) - haversineM(b.position, place))[0] ??
+    null
+  );
 }
 
 export function useCommuteEditor({
@@ -216,6 +265,60 @@ export function useCommuteEditor({
   );
 
   const isStop = useCallback((field: CommuteEndKey) => Boolean(config[field]?.stopId), [config]);
+
+  // ---- the interchange the journeys already agree on -------------------
+  //
+  // §6.4 §13. Everything the middle ground and the per-leg boards do hangs off
+  // a saved `via`, and a commute is saved door to door — so the corridor that
+  // changes at Asker twelve times out of twelve was offering no way to be read
+  // from Asker. The answer already on screen knows the stop; this is the offer
+  // to save it.
+  const suggestedVia = useMemo(
+    () => (config.via ? null : commuteInterchange(commute.result)),
+    [config.via, commute.result],
+  );
+  const suggestedViaRef = useRef(suggestedVia);
+  suggestedViaRef.current = suggestedVia;
+  const geocodeRef = useRef(geocode);
+  geocodeRef.current = geocode;
+  const [addingVia, setAddingVia] = useState(false);
+  const [suggestedViaError, setSuggestedViaError] = useState<string | null>(null);
+
+  const addSuggestedVia = useCallback(() => {
+    const hint = suggestedViaRef.current;
+    if (!hint) return;
+    setAddingVia(true);
+    setSuggestedViaError(null);
+    void (async () => {
+      const controller = new AbortController();
+      try {
+        const found = await geocodeRef.current({
+          text: hint.name,
+          transit: true,
+          limit: 8,
+          signal: controller.signal,
+        });
+        const hit = nearestStopHit(found.results, hint);
+        // A coordinate would answer the journey question and silently break the
+        // other two: the line picker can only ask a *stop* for its lines, and a
+        // via the planner reaches by walking to a point is not the interchange
+        // anyone stands at. Better to say so and let the picker do it.
+        if (!hit) {
+          setSuggestedViaError(`Could not find ${hint.name} in the stop search. Set Via by hand.`);
+          return;
+        }
+        setEnd('via', {
+          name: hit.name,
+          position: { lat: hit.position.lat, lng: hit.position.lng },
+          stopId: hit.transitStopId!,
+        });
+      } catch {
+        setSuggestedViaError('Could not look that stop up just now.');
+      } finally {
+        setAddingVia(false);
+      }
+    })();
+  }, [setEnd]);
 
   // ---- services --------------------------------------------------------
   // The stops whose lines the picker offers. Only ends that named a stop can
@@ -441,6 +544,10 @@ export function useCommuteEditor({
     clear,
     endLabel,
     isStop,
+    suggestedVia,
+    addSuggestedVia,
+    addingVia,
+    suggestedViaError,
     lineGroups,
     linesLoading,
     linesError,

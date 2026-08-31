@@ -549,6 +549,36 @@ export function ShareIcon(props: IconProps) {
   );
 }
 
+/** Edit — the nib and its stroke, so a settings button need not spell itself out. */
+export function PencilIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M4.5 19.5l4.2-1 9.4-9.4a1.8 1.8 0 0 0 0-2.6l-.6-.6a1.8 1.8 0 0 0-2.6 0L5.5 15.3l-1 4.2z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M14.2 7.3l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </IconFrame>
+  );
+}
+
+/** Done — the same button, once it has been opened. */
+export function CheckIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M5.5 12.5l4.2 4.2 8.8-9.4"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 /**
  * One glyph per secondary action, keyed by the shared descriptor so the two
  * clients cannot end up drawing different pictures for the same button.

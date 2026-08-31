@@ -33,6 +33,7 @@ import {
 } from '../commuteWidget';
 import { BottomSheet } from './BottomSheet';
 import { CommuteEditorForm } from './CommuteEditor';
+import { CheckIcon, PencilIcon } from './icons';
 import { theme } from './theme';
 
 /**
@@ -802,14 +803,17 @@ export function CommuteSheet({
               );
             })}
           </View>
+          {/* The commute is edited once and read every weekday, so the way in
+              is a glyph beside the tabs rather than a labelled button wide
+              enough to crowd them. */}
           <Pressable
             style={[styles.editButton, editing && styles.editButtonOn]}
             onPress={() => setEditing((open) => !open)}
             testID="commute-edit"
+            accessibilityRole="button"
+            accessibilityLabel={editing ? 'Done editing commute' : 'Edit commute'}
           >
-            <Text style={[styles.editText, editing && styles.editTextOn]}>
-              {editing ? 'Done' : 'Edit commute'}
-            </Text>
+            {editing ? <CheckIcon color={theme.accent} /> : <PencilIcon />}
           </Pressable>
         </View>
         {/* §13's middle ground. A commute is saved door to door, but half a
@@ -839,6 +843,31 @@ export function CommuteSheet({
               );
             })}
           </View>
+        ) : null}
+        {/* …and the offer to have one at all. A commute is saved door to door,
+            so a corridor that changes at Asker on every single journey had no
+            interchange saved, no per-leg boards and no middle ground — and no
+            way to find out a Via stop was what all three were waiting on. */}
+        {editor.suggestedVia ? (
+          <View style={styles.suggest}>
+            <Text style={styles.suggestText}>
+              Every journey changes at{' '}
+              <Text style={styles.suggestStop}>{editor.suggestedVia.name}</Text>.
+            </Text>
+            <Pressable
+              style={styles.suggestButton}
+              onPress={editor.addSuggestedVia}
+              disabled={editor.addingVia}
+              testID="commute-add-via"
+            >
+              <Text style={styles.suggestButtonText}>
+                {editor.addingVia ? 'Adding…' : 'Add as interchange'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {editor.suggestedViaError ? (
+          <Text style={[styles.state, styles.error]}>{editor.suggestedViaError}</Text>
         ) : null}
         {editing ? <CommuteEditorForm editor={editor} places={places} /> : null}
         {dashboard.offDayNote ? <Text style={styles.state}>{dashboard.offDayNote}</Text> : null}
@@ -963,14 +992,34 @@ const styles = StyleSheet.create({
   directionText: { color: theme.textMuted, fontSize: 13, fontWeight: '700' },
   directionTextOn: { color: theme.accent },
   editButton: {
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    width: 40,
     borderRadius: 9,
     backgroundColor: theme.surfaceMuted,
   },
   editButtonOn: { backgroundColor: theme.accentFaint },
-  editText: { color: theme.textMuted, fontSize: 12, fontWeight: '700' },
-  editTextOn: { color: theme.accent },
+
+  // The offer to save the interchange the journeys already agree on. Sits where
+  // the "from" chips would be, because it is the offer to have them.
+  suggest: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+    marginBottom: 10,
+    borderRadius: 9,
+    backgroundColor: theme.surfaceMuted,
+  },
+  suggestText: { flexGrow: 1, flexBasis: 0, color: theme.textMuted, fontSize: 12, lineHeight: 17 },
+  suggestStop: { color: theme.text, fontWeight: '700' },
+  suggestButton: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.accentFaint,
+  },
+  suggestButtonText: { color: theme.accent, fontSize: 12, fontWeight: '800' },
 
   // Where the journey starts (§13). Quieter than the direction buttons above:
   // the direction is the question, this qualifies it, and two equally loud

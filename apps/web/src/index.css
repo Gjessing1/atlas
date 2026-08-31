@@ -6164,21 +6164,75 @@ button.transit-notice-summary {
   flex: 1;
 }
 
+/* A glyph, not a sentence: the commute is configured once and read every
+   weekday, and "Edit commute" was taking a third of the toolbar from the two
+   controls the panel is actually for. */
 .commute-edit {
-  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-muted);
   color: var(--text-muted);
   font: inherit;
-  font-size: 12px;
-  white-space: nowrap;
   cursor: pointer;
+}
+
+.commute-edit:hover {
+  color: var(--text);
 }
 
 .commute-edit.on {
   border-color: var(--accent);
+  background: var(--surface-selected);
   color: var(--accent);
+}
+
+/* The offer to save the interchange the journeys already agree on. Sits where
+   the "start from" tabs would be, because it is the offer to have them. */
+.commute-suggest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 9px;
+  margin: 0 0 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.commute-suggest span {
+  flex: 1;
+  min-width: 140px;
+}
+
+.commute-suggest strong {
+  color: var(--text);
+}
+
+.commute-suggest button {
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.commute-suggest button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .commute-editor {

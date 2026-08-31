@@ -46,6 +46,7 @@ import { isRideMode, type TransitCommuteDirection } from './model.js';
 import type {
   TransitCommutePlace,
   TransitCommuteQuery,
+  TransitCommuteResult,
   TransitLeg,
   TransitLine,
   TransitMode,
@@ -774,6 +775,48 @@ export function commuteOrigins(
       segmentId: `${direction}-${stops.length - 2}`,
     },
   ];
+}
+
+/**
+ * The stop every answered journey changes at, or null when they do not agree.
+ *
+ * §13's middle ground and §5's per-leg boards both hang off the saved `via`, so
+ * a commute saved end to end has neither — and a corridor that changes at Asker
+ * on every single journey offers no way to be read *from* Asker, with nothing
+ * on screen to say why. This reads the interchange back off the answer the
+ * board already holds, so the app can offer to save what the journeys have been
+ * saying all along instead of waiting to be told.
+ *
+ * Unanimous or nothing, because a `via` is a *constraint* on the planner and
+ * not an annotation: offering one that only most journeys use would quietly
+ * delete the rest. A direct journey, or one that changes somewhere else, is
+ * proof that this corridor's change is not a fact about the corridor. Two
+ * changes in one journey are refused for the reason `commuteOrigins` stops at
+ * one interchange — the saved commute holds a single `via`.
+ *
+ * No `stopId`: a trip answer names its places, it does not identify them. The
+ * caller resolves the name against the stop search before saving it, which is
+ * also what keeps the line picker working (it can only ask a stop for its
+ * lines, never a coordinate).
+ */
+export function commuteInterchange(
+  result: Pick<TransitCommuteResult, 'outbound' | 'inbound'> | null | undefined,
+): TransitCommutePlace | null {
+  const trips = [...(result?.outbound.trips ?? []), ...(result?.inbound.trips ?? [])];
+  if (trips.length === 0) return null;
+  let found: TransitCommutePlace | null = null;
+  for (const trip of trips) {
+    const rides = trip.legs.filter((leg) => isRideMode(leg.mode));
+    if (rides.length !== 2) return null;
+    const change = rides[0]!.to;
+    // Both halves must name the same stop. A "change" whose arrival and
+    // departure are at different places is a walk between two stops, and there
+    // is no single one of them to stand at or to save.
+    if (change.name !== rides[1]!.from.name) return null;
+    if (found && found.name !== change.name) return null;
+    found ??= { name: change.name, lat: change.position.lat, lng: change.position.lng };
+  }
+  return found;
 }
 
 /** One row of a per-leg departure board. */

@@ -5,6 +5,7 @@ import {
   commuteBoardRows,
   commuteDurationLabel,
   commuteEstimateLabel,
+  commuteInterchange,
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
@@ -433,6 +434,122 @@ describe('commuteOrigins', () => {
     const [door, interchange] = commuteOrigins(commuteQuery(), 'outbound');
     expect(door!.via.map((place) => place.name)).toEqual(['Asker stasjon']);
     expect(interchange!.via).toEqual([]);
+  });
+});
+
+describe('commuteInterchange', () => {
+  const answer = (...trips: TransitTrip[]): TransitResult => ({ trips, problems: [] });
+  const both = (...trips: TransitTrip[]) => ({ outbound: answer(...trips), inbound: answer() });
+
+  /** The corridor's own change, read off the answer rather than off the config. */
+  it('names the stop every journey changes at', () => {
+    expect(commuteInterchange(both(specJourney(), specJourney()))).toEqual({
+      name: 'Asker stasjon',
+      lat: 59.9,
+      lng: 10.6,
+    });
+  });
+
+  it('reads both directions, so an evening board suggests the same stop', () => {
+    expect(commuteInterchange({ outbound: answer(), inbound: answer(specJourney()) })?.name).toBe(
+      'Asker stasjon',
+    );
+  });
+
+  /**
+   * The whole reason this is unanimous-or-nothing: saving a `via` *constrains*
+   * the planner, so a suggestion drawn from a majority would delete the journeys
+   * that disagreed with it — the direct one first.
+   */
+  it('refuses when one journey runs direct', () => {
+    const direct = trip(
+      ride({
+        line: 'R11',
+        mode: 'rail',
+        from: 'Engelsrud Terrasse',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(8, 40),
+        aimedEndMs: hm(9, 20),
+      }),
+    );
+    expect(commuteInterchange(both(specJourney(), direct))).toBeNull();
+  });
+
+  it('refuses when the journeys change at different stops', () => {
+    const elsewhere = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Sandvika',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+      }),
+      ride({
+        line: 'L1',
+        mode: 'rail',
+        from: 'Sandvika',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(9, 11),
+        aimedEndMs: hm(9, 24),
+      }),
+    );
+    expect(commuteInterchange(both(specJourney(), elsewhere))).toBeNull();
+  });
+
+  it('refuses a journey with two changes — a commute saves one via', () => {
+    const twice = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Asker stasjon',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+      }),
+      ride({
+        line: 'L1',
+        mode: 'rail',
+        from: 'Asker stasjon',
+        to: 'Sandvika',
+        aimedStartMs: hm(9, 11),
+        aimedEndMs: hm(9, 18),
+      }),
+      ride({
+        line: '160',
+        from: 'Sandvika',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(9, 22),
+        aimedEndMs: hm(9, 40),
+      }),
+    );
+    expect(commuteInterchange(both(twice))).toBeNull();
+  });
+
+  /** A change whose halves are at different stops is a walk, not a place to stand. */
+  it('refuses a change that walks between two stops', () => {
+    const walkBetween = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Asker bussterminal',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+      }),
+      walk(hm(9, 2), hm(9, 8)),
+      ride({
+        line: 'L1',
+        mode: 'rail',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+        aimedStartMs: hm(9, 11),
+        aimedEndMs: hm(9, 24),
+      }),
+    );
+    expect(commuteInterchange(both(walkBetween))).toBeNull();
+  });
+
+  it('has nothing to say about an answer with no journeys', () => {
+    expect(commuteInterchange(both())).toBeNull();
+    expect(commuteInterchange(null)).toBeNull();
   });
 });
 
