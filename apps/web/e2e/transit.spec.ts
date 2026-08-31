@@ -234,14 +234,23 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await expect(live).toContainText(`${clock(180_000)} → ${clock(1_800_000)} est.`);
   await expect(live).toContainText('27 min');
 
-  // §13 — the same commute picked up at the interchange, off the hop the
-  // dashboard already asked for.
-  const origins = panel.locator('.commute-origins');
-  await expect(origins.getByRole('tab')).toHaveCount(2);
-  await origins.getByRole('tab', { name: 'Asker', exact: true }).click();
-  await expect(panel.locator('.commute-header')).toContainText('Asker → Nationaltheatret');
-  await expect(panel.locator('.commute-card.primary')).toContainText('R11');
-  await origins.getByRole('tab', { name: 'Engelsrud', exact: true }).click();
+  // §13 — the third mode: the corridor picked up at the change, both
+  // directions at once, off the hops the dashboard already asked for.
+  const modes = panel.locator('.commute-modes');
+  await expect(modes.getByRole('tab')).toHaveCount(3);
+  await modes.getByRole('tab', { name: 'Interchange' }).click();
+  await expect(panel.locator('.commute-header')).toContainText('From Asker');
+  // Two lists, headed by where their vehicles are going — never one list with
+  // the train in and the bus home sorted together by departure time.
+  const lists = panel.locator('.commute-list-head span');
+  await expect(lists).toHaveText(['Towards Nationaltheatret', 'Towards Engelsrud']);
+  // The headline is not "if I leave now" at a stop you are standing on.
+  await expect(panel.locator('.commute-list').first()).toContainText('Next from here');
+  await expect(panel.locator('.commute-list').first()).toContainText('R11');
+  // The way home is answered and empty, which the list says as the timetable's
+  // own nothing rather than as a failure.
+  await expect(panel.locator('.commute-list').last()).toContainText('Nothing runs in this window');
+  await modes.getByRole('tab', { name: 'Outbound' }).click();
   await expect(panel.locator('.commute-header')).toContainText('Engelsrud → Nationaltheatret');
 
   // §7 — tracking, and the order the card states it in: the ribbon, then what
@@ -387,7 +396,7 @@ test('offers the interchange every journey changes at, and saves it as a stop', 
   await pick('Choose a To stop…', 'nationaltheatret');
 
   // Nothing to choose between yet — which is the state that used to be silent.
-  await expect(panel.locator('.commute-origins')).toHaveCount(0);
+  await expect(panel.locator('.commute-modes').getByRole('tab')).toHaveCount(2);
   await expect(panel).toContainText('If I leave now', { timeout: 60_000 });
   const suggest = panel.locator('.commute-suggest');
   await expect(suggest).toContainText('Every journey changes at');
@@ -401,11 +410,11 @@ test('offers the interchange every journey changes at, and saves it as a stop', 
     .poll(() => bodies[bodies.length - 1])
     .toMatchObject({ via: [{ name: 'Asker stasjon', stopId: 'NSR:StopPlace:59616' }] });
 
-  // …and the offer becomes the control it was offering.
+  // …and the offer becomes the mode it was offering.
   await expect(suggest).toHaveCount(0);
-  const origins = panel.locator('.commute-origins');
-  await expect(origins.getByRole('tab')).toHaveCount(2);
-  await origins.getByRole('tab', { name: 'Asker stasjon', exact: true }).click();
-  await expect(panel.locator('.commute-header')).toContainText('Asker stasjon → Nationaltheatret');
-  await expect(panel.locator('.commute-card.primary')).toContainText('R11');
+  const modes = panel.locator('.commute-modes');
+  await expect(modes.getByRole('tab')).toHaveCount(3);
+  await modes.getByRole('tab', { name: 'Interchange' }).click();
+  await expect(panel.locator('.commute-header')).toContainText('From Asker stasjon');
+  await expect(panel.locator('.commute-list').first()).toContainText('R11');
 });

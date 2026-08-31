@@ -10,6 +10,10 @@ import {
   commuteJourneyList,
   commuteLeaveNow,
   commuteLineBadge,
+  commuteListings,
+  commuteModeChip,
+  commuteModes,
+  commuteModeTitle,
   commuteNowLabel,
   commuteOffDayNote,
   commuteOrigins,
@@ -434,6 +438,68 @@ describe('commuteOrigins', () => {
     const [door, interchange] = commuteOrigins(commuteQuery(), 'outbound');
     expect(door!.via.map((place) => place.name)).toEqual(['Asker stasjon']);
     expect(interchange!.via).toEqual([]);
+  });
+});
+
+describe('commuteListings', () => {
+  it('offers three modes with an interchange and two without (§13)', () => {
+    expect(commuteModes(commuteQuery())).toEqual(['outbound', 'interchange', 'inbound']);
+    expect(commuteModes(commuteQuery(false))).toEqual(['outbound', 'inbound']);
+    expect(commuteModes(commuteQuery()).map(commuteModeChip)).toEqual([
+      'Outbound',
+      'Interchange',
+      'Return',
+    ]);
+  });
+
+  it('draws a door mode as the one list it has always been', () => {
+    expect(
+      commuteListings(commuteQuery(), 'outbound', 'outbound').map((listing) => [
+        listing.key,
+        listing.label,
+        listing.segmentId,
+      ]),
+    ).toEqual([['outbound:door', 'Engelsrud Terrasse → Nationaltheatret', null]]);
+    expect(commuteModeTitle(commuteQuery(), 'inbound', 'outbound')).toBe(
+      'Nationaltheatret → Engelsrud Terrasse',
+    );
+  });
+
+  /**
+   * The middle mode is not a third direction: it is *both* of them, read from
+   * the change, which is the question actually asked while standing at Asker.
+   */
+  it('draws the interchange as both directions, apart, off the hops in hand', () => {
+    expect(
+      commuteListings(commuteQuery(), 'interchange', 'outbound').map((listing) => [
+        listing.direction,
+        listing.heading,
+        listing.segmentId,
+      ]),
+    ).toEqual([
+      ['outbound', 'Towards Nationaltheatret', 'outbound-1'],
+      ['inbound', 'Towards Engelsrud Terrasse', 'inbound-1'],
+    ]);
+    // The header is the stop you are standing at — two lists cannot be summed
+    // into a route, and each carries its own destination anyway.
+    expect(commuteModeTitle(commuteQuery(), 'interchange', 'outbound')).toBe('From Asker stasjon');
+  });
+
+  it('reads the way home first once the clock says so', () => {
+    expect(
+      commuteListings(commuteQuery(), 'interchange', 'inbound').map((listing) => listing.direction),
+    ).toEqual(['inbound', 'outbound']);
+  });
+
+  it('is not on the platform at the door, and is on it at the change', () => {
+    const [door] = commuteListings(commuteQuery(), 'outbound', 'outbound');
+    const [change] = commuteListings(commuteQuery(), 'interchange', 'outbound');
+    expect(door!.leadLabel).toBe('If I leave now');
+    expect(change!.leadLabel).toBe('Next from here');
+  });
+
+  it('has no interchange to list without one saved', () => {
+    expect(commuteListings(commuteQuery(false), 'interchange', 'outbound')).toEqual([]);
   });
 });
 

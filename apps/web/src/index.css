@@ -6077,64 +6077,33 @@ button.transit-notice-summary {
   line-height: 1.35;
 }
 
-.commute-directions {
+/* The board's one control (§13): out, back, or the change. It replaced two
+   stacked segmented controls — a direction, and under it where the list starts
+   — whose four combinations included two nobody asks for, and which together
+   made the top of a commute board read as a form. Three tabs must survive a
+   360 px panel beside the pencil, so the label ellipsises rather than wraps. */
+.commute-modes {
   display: flex;
   gap: 6px;
 }
 
-.commute-directions button {
+.commute-modes button {
   flex: 1;
-  padding: 7px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 4px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-muted);
   color: inherit;
   font: inherit;
-  cursor: pointer;
-}
-
-.commute-directions button[aria-selected='true'] {
-  border-color: var(--accent);
-  background: var(--surface-selected);
-  color: var(--accent);
-  font-weight: 700;
-}
-
-/* Where the journey starts (§13). Deliberately quieter than the direction tabs
-   above it: the direction is the question, this is a qualification of it, and
-   two equally loud segmented controls stacked on one panel read as a form. */
-.commute-origins {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.commute-origins span {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.commute-origins button {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.commute-origins button[aria-selected='true'] {
+.commute-modes button[aria-selected='true'] {
   border-color: var(--accent);
   background: var(--surface-selected);
   color: var(--accent);
@@ -6160,7 +6129,7 @@ button.transit-notice-summary {
   margin-bottom: 10px;
 }
 
-.commute-toolbar .commute-directions {
+.commute-toolbar .commute-modes {
   flex: 1;
 }
 
@@ -6268,6 +6237,35 @@ button.transit-notice-summary {
   background: var(--surface);
   color: var(--text);
   font-weight: 700;
+}
+
+/* Which list this is (§13). The interchange mode puts the train in and the bus
+   home on one screen, and the two must be told apart before a departure time is
+   read — so the heading is the destination, in the panel's own voice, with the
+   whole route under it in the muted one. A rule above it does the separating
+   that a blank line cannot at this density. */
+.commute-list + .commute-list .commute-list-head {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.commute-list-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 14px 0 8px;
+}
+
+.commute-list-head span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.commute-list-head em {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .commute-section-head,

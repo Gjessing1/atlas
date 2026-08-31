@@ -120,6 +120,7 @@ export {
   type CommuteDashboard,
   type CommuteDashboardBoard,
   type CommuteDashboardRow,
+  type CommuteDashboardSection,
   type CommuteDashboardView,
 } from './useCommuteDashboard.js';
 export {

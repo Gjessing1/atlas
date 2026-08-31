@@ -5,10 +5,12 @@ import {
   type CommuteDashboard,
   type CommuteDashboardBoard,
   type CommuteDashboardRow,
+  type CommuteDashboardSection,
 } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import {
   commuteCountdown,
+  commuteModeChip,
   fetchTransitStopLines,
   liveTimetableLabel,
   transitModeGlyph,
@@ -483,12 +485,18 @@ function HereCard({
  */
 function LeaveNow({
   row,
+  label,
   nowMs,
   primary,
   showTrack,
   onTrack,
 }: {
   row: CommuteDashboardRow;
+  /**
+   * `"If I leave now"` — or `"Next from here"` at the interchange, where you
+   * are not leaving the house but already standing on the platform.
+   */
+  label: string;
   nowMs: number;
   /** Nothing is being tracked, so this card is the board's answer. */
   primary: boolean;
@@ -500,8 +508,8 @@ function LeaveNow({
   onTrack: () => void;
 }) {
   return (
-    <section className={`commute-card${primary ? ' primary' : ''}`} aria-label="If I leave now">
-      <p className="commute-eyebrow">If I leave now</p>
+    <section className={`commute-card${primary ? ' primary' : ''}`} aria-label={label}>
+      <p className="commute-eyebrow">{label}</p>
       {/* Counted to the *expected* departure, not the timetabled one: a bus
           four minutes late is four minutes more to walk to the stop, and that
           is the number a person deciding whether to run is actually asking
@@ -573,44 +581,56 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
   );
 }
 
-/** The journey list, or the reason there is none. */
+/**
+ * One journey list, whole: its shared notices, its headline, its rows and the
+ * reason there is none — §6.4 §13.
+ *
+ * A section rather than a run of fields on the panel because the interchange
+ * mode draws *two* of them, and a reader has to be able to tell which list a
+ * departure belongs to without reading the line number and reasoning about
+ * geography. The heading is the destination ("Towards Nationaltheatret"), which
+ * is what the platform signs at Asker say.
+ */
 function Journeys({
+  section,
   dashboard,
   editor,
+  alone,
 }: {
+  section: CommuteDashboardSection;
   dashboard: CommuteDashboard;
   editor: { clearLines: () => void };
+  /** The only list this mode shows — nothing to be told apart from. */
+  alone: boolean;
 }) {
+  const lead = section.leadRow;
   return (
-    <>
-      {dashboard.here && (
-        <HereCard
-          here={dashboard.here}
-          journey={dashboard.hereJourney}
-          onStop={() => dashboard.track(null)}
-        />
+    <section className="commute-list" aria-label={section.label}>
+      {!alone && (
+        <h3 className="commute-list-head">
+          <span>{section.heading}</span>
+          <em>{section.label}</em>
+        </h3>
       )}
       {/* One notice on every journey in the list is the corridor's, not any
           journey's — said once, above them, rather than five times inside
-          them. */}
-      <Disruptions items={dashboard.sharedDisruptions} />
-      {dashboard.leadRow && (
+          them. Per list: a signal fault on the way in is not news to someone
+          reading the way home. */}
+      <Disruptions items={section.sharedDisruptions} />
+      {lead && (
         <LeaveNow
-          row={dashboard.leadRow}
+          row={lead}
+          label={section.leadLabel}
           nowMs={dashboard.nowMs}
           primary={!dashboard.here}
-          showTrack={!dashboard.leadRow.tracked || !dashboard.here}
-          onTrack={() =>
-            dashboard.track(
-              dashboard.leadRow?.tracked ? null : (dashboard.leadRow?.journey ?? null),
-            )
-          }
+          showTrack={!lead.tracked || !dashboard.here}
+          onTrack={() => section.track(lead.tracked ? null : lead.journey)}
         />
       )}
-      {dashboard.emptyNote && (
+      {section.emptyNote && (
         <p className="commute-state">
-          {dashboard.emptyNote}
-          {dashboard.emptyFromFilter && (
+          {section.emptyNote}
+          {section.emptyFromFilter && (
             <>
               {' '}
               <button type="button" className="link-button" onClick={editor.clearLines}>
@@ -620,26 +640,28 @@ function Journeys({
           )}
         </p>
       )}
-      {dashboard.rows.length > 0 && (
-        <section aria-label="Next journeys">
+      {section.rows.length > 0 && (
+        <>
           {/* Not `journeys`: the one above is already answered in full, and a
               list that repeats it as its own first row costs the reader the
-              departure they were actually looking for. */}
-          <h3 className="commute-section-head">Next journeys</h3>
+              departure they were actually looking for. The head is dropped
+              when the list already carries one — two uppercase eyebrows six
+              lines apart say less than one does. */}
+          {alone && <h3 className="commute-section-head">Next journeys</h3>}
           <ol className="commute-journeys">
-            {dashboard.rows.map((row) => (
+            {section.rows.map((row) => (
               <JourneyRow
                 row={row}
-                key={row.journey.key}
-                open={dashboard.expanded === row.journey.key}
-                onToggle={() => dashboard.toggle(row.journey.key)}
-                onTrack={() => dashboard.track(row.tracked ? null : row.journey)}
+                key={row.key}
+                open={dashboard.expanded === row.key}
+                onToggle={() => dashboard.toggle(row.key)}
+                onTrack={() => section.track(row.tracked ? null : row.journey)}
               />
             ))}
           </ol>
-        </section>
+        </>
       )}
-    </>
+    </section>
   );
 }
 
@@ -684,24 +706,24 @@ export function CommutePanel({
       </div>
       <div className="commute-body">
         {!commute.ready && <p className="commute-state">Loading saved commute…</p>}
+        {/* §6.4 §13's three modes. Out, back, and the middle ground: one
+            control, because "which direction" and "read from which end" were
+            two stacked segmented controls whose four combinations included two
+            nobody asks for. The third mode is not a direction at all — it is
+            the change, and it lists *both* directions from it. */}
         <div className="commute-toolbar">
-          <div className="commute-directions" role="tablist" aria-label="Commute direction">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={dashboard.direction === 'outbound'}
-              onClick={() => dashboard.setDirection('outbound')}
-            >
-              Outbound
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={dashboard.direction === 'inbound'}
-              onClick={() => dashboard.setDirection('inbound')}
-            >
-              Return
-            </button>
+          <div className="commute-modes" role="tablist" aria-label="Commute mode">
+            {dashboard.modes.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={dashboard.mode === mode}
+                onClick={() => dashboard.setMode(mode)}
+              >
+                {commuteModeChip(mode)}
+              </button>
+            ))}
           </div>
           {/* The commute is edited once and read every weekday, so the way in
               is a glyph beside the tabs rather than a labelled button wide
@@ -717,27 +739,6 @@ export function CommutePanel({
             {editing ? <CheckIcon size={18} /> : <PencilIcon size={18} />}
           </button>
         </div>
-        {/* §13's middle ground. A commute is saved door to door, but half a
-            commuting day starts at the change — the train in from Asker, the
-            bus home from it — and before this the board could only answer that
-            as a stop board under the Departures tab. The journeys come from the
-            hop the dashboard already asks for, so the choice costs no call. */}
-        {dashboard.origins.length > 1 && (
-          <div className="commute-origins" role="tablist" aria-label="Start the journey from">
-            <span>Start from</span>
-            {dashboard.origins.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                role="tab"
-                aria-selected={dashboard.origin === option.id}
-                onClick={() => dashboard.setOrigin(option.id)}
-              >
-                {option.chip}
-              </button>
-            ))}
-          </div>
-        )}
         {/* …and the offer to have one at all. A commute is saved door to door,
             so the corridor that changes at Asker on every single journey had no
             interchange saved, no per-leg boards and no middle ground — and no
@@ -758,7 +759,7 @@ export function CommutePanel({
         )}
         {editing && <CommuteEditorForm editor={editor} places={places} />}
         {dashboard.offDayNote && <p className="commute-state">{dashboard.offDayNote}</p>}
-        {/* §9's mode switch. It filters rather than scrolls: five journeys and
+        {/* §9's view switch. It filters rather than scrolls: five journeys and
             four five-row boards is more than one glance holds, and the whole
             dashboard exists to be glanced at. Journeys stay the default and the
             landing view, which is the part §9 is firm about. */}
@@ -785,7 +786,27 @@ export function CommutePanel({
         {commute.loading && <p className="commute-state">Checking upcoming journeys…</p>}
         {commute.error && <p className="commute-state commute-error">{commute.error}</p>}
         {dashboard.view === 'overview' ? (
-          <Journeys dashboard={dashboard} editor={editor} />
+          <>
+            {/* Above the lists rather than inside one: a commitment outlives
+                the list its journey came from, and at the interchange it is
+                just as likely to be about the other one. */}
+            {dashboard.here && (
+              <HereCard
+                here={dashboard.here}
+                journey={dashboard.hereJourney}
+                onStop={dashboard.stopTracking}
+              />
+            )}
+            {dashboard.sections.map((section) => (
+              <Journeys
+                key={section.key}
+                section={section}
+                dashboard={dashboard}
+                editor={editor}
+                alone={dashboard.sections.length === 1}
+              />
+            ))}
+          </>
         ) : (
           dashboard.boards.map((board) => <Board board={board} key={board.segment.id} />)
         )}

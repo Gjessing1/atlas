@@ -778,6 +778,131 @@ export function commuteOrigins(
 }
 
 /**
+ * The three ways to read one commute — ROADMAP §6.4 §13.
+ *
+ * This started as two controls: a direction (`Outbound` / `Return`) and, under
+ * it, where the list starts (`Engelsrud Terrasse` / `Asker stasjon`). Two axes
+ * is four states, and the two that matter are not opposite ends of either one.
+ * Standing on the platform at Asker the question is not "which direction, read
+ * from which end" — it is *what leaves from here*, in both directions at once:
+ * the train in, and the bus home, which are the same glance.
+ *
+ * So the axes collapse into three modes. `outbound` and `inbound` are the
+ * commute door to door as they always were; `interchange` is one mode that
+ * lists **both** directions from the change, apart from each other, because a
+ * list mixing a train towards Oslo with a bus towards home is a list nobody can
+ * read. Two lists, one view — {@link commuteListings} is what draws them.
+ */
+export type CommuteMode = 'outbound' | 'interchange' | 'inbound';
+
+/** `Outbound` / `Interchange` / `Return` — what the mode tab says. */
+export function commuteModeChip(mode: CommuteMode): string {
+  return mode === 'outbound' ? 'Outbound' : mode === 'inbound' ? 'Return' : 'Interchange';
+}
+
+/**
+ * The modes a commute offers. The middle one needs an interchange to be *at*,
+ * so a two-stop commute offers the two it always had — and both clients draw
+ * exactly what comes back, rather than deciding for themselves.
+ */
+export function commuteModes(query: TransitCommuteQuery): CommuteMode[] {
+  return query.via.length > 0 ? ['outbound', 'interchange', 'inbound'] : ['outbound', 'inbound'];
+}
+
+/**
+ * One journey list the board draws: a direction, read from one of its ends.
+ *
+ * A door mode has exactly one; the interchange has two. Everything downstream
+ * — the header, "if I leave now", the ribbon, the connections, the tracking —
+ * follows the listing rather than a direction, which is what lets two of them
+ * sit on one screen without either lying about what it contains.
+ */
+export interface CommuteListing {
+  /** `"outbound:interchange"` — stable, and unique across the listings shown. */
+  key: string;
+  direction: TransitCommuteDirection;
+  origin: CommuteOriginId;
+  from: TransitCommutePlace;
+  to: TransitCommutePlace;
+  /** `"Asker stasjon → Nationaltheatret"` — the whole route this list answers. */
+  label: string;
+  /**
+   * `"Towards Nationaltheatret"` — the heading a reader separates two lists by.
+   *
+   * Named by its destination and not by its direction word: at the interchange
+   * "outbound" and "return" are the app's words for the commute, while the two
+   * platforms are labelled with the places the vehicles are going to.
+   */
+  heading: string;
+  /**
+   * The eyebrow above the §11 card. You are not leaving the house from the
+   * interchange — you are already standing on it, and a card that says "if I
+   * leave now" over the next train from Asker is answering the wrong question.
+   */
+  leadLabel: string;
+  /** The per-leg board its journeys are read from, or null for the whole commute. */
+  segmentId: string | null;
+}
+
+/**
+ * The lists a mode shows, in the order they are read.
+ *
+ * The interchange's pair is ordered by the clock, exactly as the board's own
+ * direction is (`defaultCommuteDirection`): before the outbound departure the
+ * way in comes first, after it the way home does. `primary` is that direction,
+ * passed in rather than re-derived so the whole board agrees about what time
+ * of day it is.
+ */
+export function commuteListings(
+  query: TransitCommuteQuery,
+  mode: CommuteMode,
+  primary: TransitCommuteDirection,
+): CommuteListing[] {
+  const directions: TransitCommuteDirection[] =
+    mode !== 'interchange'
+      ? [mode]
+      : primary === 'inbound'
+        ? ['inbound', 'outbound']
+        : ['outbound', 'inbound'];
+  const wanted: CommuteOriginId = mode === 'interchange' ? 'interchange' : 'door';
+  return directions.flatMap((direction) => {
+    // Through `commuteOrigins`, never by re-deriving the stops: which hop the
+    // interchange list reads from is one fact, and two ways of computing it is
+    // one too many.
+    const origin = commuteOrigins(query, direction).find((option) => option.id === wanted);
+    if (!origin) return [];
+    return [
+      {
+        key: `${direction}:${origin.id}`,
+        direction,
+        origin: origin.id,
+        from: origin.from,
+        to: origin.to,
+        label: origin.label,
+        heading: `Towards ${origin.to.name}`,
+        leadLabel: origin.id === 'door' ? 'If I leave now' : 'Next from here',
+        segmentId: origin.segmentId,
+      },
+    ];
+  });
+}
+
+/**
+ * The panel header for a mode: the route for a door mode, the stop you are
+ * standing at for the interchange — whose two lists carry their own headings
+ * and would otherwise have to be summarised into a route that is not one.
+ */
+export function commuteModeTitle(
+  query: TransitCommuteQuery,
+  mode: CommuteMode,
+  primary: TransitCommuteDirection,
+): string {
+  const listings = commuteListings(query, mode, primary);
+  if (listings.length === 0) return 'Commute';
+  return mode === 'interchange' ? `From ${listings[0]!.from.name}` : listings[0]!.label;
+}
+
+/**
  * The stop every answered journey changes at, or null when they do not agree.
  *
  * §13's middle ground and §5's per-leg boards both hang off the saved `via`, so

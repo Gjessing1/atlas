@@ -4,11 +4,13 @@ import {
   type CommuteController,
   type CommuteDashboardBoard,
   type CommuteDashboardRow,
+  type CommuteDashboardSection,
   type StopGeocodeFn,
   type StopLinesFn,
 } from '@atlas/app-hooks';
 import {
   commuteCountdown,
+  commuteModeChip,
   liveTimetableLabel,
   transitModeGlyph,
   type CommuteBoardRow,
@@ -455,7 +457,7 @@ function JourneyRow({
         row.tracked && styles.journeyTracked,
       ]}
     >
-      <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
+      <Pressable onPress={onToggle} testID={`commute-journey-${row.key}`}>
         <ScanLine journey={journey} />
         <Live journey={journey} />
         <Ribbon parts={row.parts} />
@@ -556,12 +558,18 @@ function HereCard({
  */
 function LeaveNow({
   row,
+  label,
   nowMs,
   primary,
   showTrack,
   onTrack,
 }: {
   row: CommuteDashboardRow;
+  /**
+   * `"If I leave now"` — or `"Next from here"` at the interchange, where you
+   * are not leaving the house but already standing on the platform.
+   */
+  label: string;
   nowMs: number;
   /** Nothing is being tracked, so this card is the board's answer. */
   primary: boolean;
@@ -574,7 +582,7 @@ function LeaveNow({
 }) {
   return (
     <View style={[styles.card, primary && styles.cardAccent]} testID="commute-leave-now">
-      <Text style={styles.eyebrow}>IF I LEAVE NOW</Text>
+      <Text style={styles.eyebrow}>{label.toUpperCase()}</Text>
       {/* Counted to the *expected* departure, not the timetabled one: a bus
           four minutes late is four minutes more to walk to the stop, and that
           is the number a person deciding whether to run is asking for. */}
@@ -671,6 +679,95 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
  * real commuting (§7), and hiding a fallback is how you find out too late that
  * it was the one people wanted.
  */
+/**
+ * One journey list, whole: its shared notices, its headline, its rows and the
+ * reason there is none — §6.4 §13.
+ *
+ * A section rather than a run of views on the sheet because the interchange
+ * mode draws *two* of them, and a reader has to be able to tell which list a
+ * departure belongs to without reading the line number and reasoning about
+ * geography. The heading is the destination ("Towards Nationaltheatret"), which
+ * is what the platform signs at Asker say.
+ */
+function Journeys({
+  section,
+  nowMs,
+  tracking,
+  expanded,
+  onToggle,
+  onClearLines,
+  alone,
+  divided,
+}: {
+  section: CommuteDashboardSection;
+  nowMs: number;
+  /** Something is being tracked, so this list is not the sheet's only answer. */
+  tracking: boolean;
+  expanded: string | null;
+  onToggle: (key: string) => void;
+  onClearLines: () => void;
+  /** The only list this mode shows — nothing to be told apart from. */
+  alone: boolean;
+  /** A list under another one: the rule that separates them is this one's. */
+  divided: boolean;
+}) {
+  const lead = section.leadRow;
+  return (
+    <View testID={`commute-list-${section.key}`}>
+      {alone ? null : (
+        <View style={[styles.listHead, divided && styles.listHeadDivided]}>
+          <Text style={styles.listHeading}>{section.heading}</Text>
+          <Text style={styles.listRoute}>{section.label}</Text>
+        </View>
+      )}
+      {/* One notice on every journey in the list is the corridor's, not any
+          journey's — said once, above them, rather than five times inside them.
+          Per list: a signal fault on the way in is not news to someone reading
+          the way home. */}
+      <Disruptions items={section.sharedDisruptions} />
+      {lead ? (
+        <LeaveNow
+          row={lead}
+          label={section.leadLabel}
+          nowMs={nowMs}
+          primary={!tracking}
+          showTrack={!lead.tracked || !tracking}
+          onTrack={() => section.track(lead.tracked ? null : lead.journey)}
+        />
+      ) : null}
+      {section.emptyNote ? (
+        <View>
+          <Text style={styles.state}>{section.emptyNote}</Text>
+          {section.emptyFromFilter ? (
+            <Pressable style={styles.escape} onPress={onClearLines}>
+              <Text style={styles.escapeText}>Allow any line</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      {/* Not `journeys`: the one above is already answered in full, and a list
+          that repeats it as its own first row costs the reader the departure
+          they were actually looking for. The head is dropped when the list
+          already carries one — two uppercase eyebrows six lines apart say less
+          than one does. */}
+      {section.rows.length > 0 ? (
+        <>
+          {alone ? <Text style={styles.sectionHead}>NEXT JOURNEYS</Text> : null}
+          {section.rows.map((row) => (
+            <JourneyRow
+              row={row}
+              key={row.key}
+              open={expanded === row.key}
+              onToggle={() => onToggle(row.key)}
+              onTrack={() => section.track(row.tracked ? null : row.journey)}
+            />
+          ))}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 function WidgetOffer() {
   const [support, setSupport] = useState<CommuteWidgetSupport | null>(null);
   const [supportV2, setSupportV2] = useState<CommuteWidgetSupport | null>(null);
@@ -785,19 +882,24 @@ export function CommuteSheet({
         keyboardShouldPersistTaps="handled"
       >
         {!commute.ready ? <Text style={styles.state}>Loading saved commute…</Text> : null}
+        {/* §6.4 §13's three modes. Out, back, and the middle ground: one
+            control, because "which direction" and "read from which end" were
+            two stacked segmented controls whose four combinations included two
+            nobody asks for. The third mode is not a direction at all — it is
+            the change, and it lists *both* directions from it. */}
         <View style={styles.toolbar}>
-          <View style={styles.direction}>
-            {(['outbound', 'inbound'] as const).map((item) => {
-              const selected = item === dashboard.direction;
+          <View style={styles.modes}>
+            {dashboard.modes.map((item) => {
+              const selected = item === dashboard.mode;
               return (
                 <Pressable
                   key={item}
-                  style={[styles.directionButton, selected && styles.directionButtonOn]}
-                  onPress={() => dashboard.setDirection(item)}
-                  testID={`commute-direction-${item}`}
+                  style={[styles.modeButton, selected && styles.modeButtonOn]}
+                  onPress={() => dashboard.setMode(item)}
+                  testID={`commute-mode-${item}`}
                 >
-                  <Text style={[styles.directionText, selected && styles.directionTextOn]}>
-                    {item === 'outbound' ? 'Outbound' : 'Return'}
+                  <Text style={[styles.modeText, selected && styles.modeTextOn]} numberOfLines={1}>
+                    {commuteModeChip(item)}
                   </Text>
                 </Pressable>
               );
@@ -816,34 +918,6 @@ export function CommuteSheet({
             {editing ? <CheckIcon color={theme.accent} /> : <PencilIcon />}
           </Pressable>
         </View>
-        {/* §13's middle ground. A commute is saved door to door, but half a
-            commuting day starts at the change — the train in from Asker, the
-            bus home from it — and before this the board could only answer that
-            as a stop board under the Departures tab. The journeys come from the
-            hop the dashboard already asks for, so the choice costs no call. */}
-        {dashboard.origins.length > 1 ? (
-          <View style={styles.origins}>
-            <Text style={styles.originsLabel}>FROM</Text>
-            {dashboard.origins.map((option) => {
-              const selected = option.id === dashboard.origin;
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.originButton, selected && styles.originButtonOn]}
-                  onPress={() => dashboard.setOrigin(option.id)}
-                  testID={`commute-origin-${option.id}`}
-                >
-                  <Text
-                    style={[styles.originText, selected && styles.originTextOn]}
-                    numberOfLines={1}
-                  >
-                    {option.chip}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
         {/* …and the offer to have one at all. A commute is saved door to door,
             so a corridor that changes at Asker on every single journey had no
             interchange saved, no per-leg boards and no middle ground — and no
@@ -871,7 +945,7 @@ export function CommuteSheet({
         ) : null}
         {editing ? <CommuteEditorForm editor={editor} places={places} /> : null}
         {dashboard.offDayNote ? <Text style={styles.state}>{dashboard.offDayNote}</Text> : null}
-        {/* §9's mode switch. It filters rather than scrolls: five journeys plus
+        {/* §9's view switch. It filters rather than scrolls: five journeys plus
             four five-row boards is more than one glance holds, and the whole
             dashboard exists to be glanced at. Journeys stay the landing view. */}
         {dashboard.hasBoards ? (
@@ -897,57 +971,29 @@ export function CommuteSheet({
         {commute.error ? <Text style={[styles.state, styles.error]}>{commute.error}</Text> : null}
         {dashboard.view === 'overview' ? (
           <>
+            {/* Above the lists rather than inside one: a commitment outlives
+                the list its journey came from, and at the interchange it is
+                just as likely to be about the other one. */}
             {dashboard.here ? (
               <HereCard
                 here={dashboard.here}
                 journey={dashboard.hereJourney}
-                onStop={() => dashboard.track(null)}
+                onStop={dashboard.stopTracking}
               />
             ) : null}
-            {/* One notice on every journey in the list is the corridor's, not
-                any journey's — said once, above them, rather than five times
-                inside them. */}
-            <Disruptions items={dashboard.sharedDisruptions} />
-            {dashboard.leadRow ? (
-              <LeaveNow
-                row={dashboard.leadRow}
+            {dashboard.sections.map((section, index) => (
+              <Journeys
+                key={section.key}
+                section={section}
                 nowMs={dashboard.nowMs}
-                primary={!dashboard.here}
-                showTrack={!dashboard.leadRow.tracked || !dashboard.here}
-                onTrack={() =>
-                  dashboard.track(
-                    dashboard.leadRow?.tracked ? null : (dashboard.leadRow?.journey ?? null),
-                  )
-                }
+                tracking={Boolean(dashboard.here)}
+                expanded={dashboard.expanded}
+                onToggle={dashboard.toggle}
+                onClearLines={editor.clearLines}
+                alone={dashboard.sections.length === 1}
+                divided={index > 0}
               />
-            ) : null}
-            {dashboard.emptyNote ? (
-              <View>
-                <Text style={styles.state}>{dashboard.emptyNote}</Text>
-                {dashboard.emptyFromFilter ? (
-                  <Pressable style={styles.escape} onPress={editor.clearLines}>
-                    <Text style={styles.escapeText}>Allow any line</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : null}
-            {/* Not `journeys`: the one above is already answered in full, and a
-                list that repeats it as its own first row costs the reader the
-                departure they were actually looking for. */}
-            {dashboard.rows.length > 0 ? (
-              <>
-                <Text style={styles.sectionHead}>NEXT JOURNEYS</Text>
-                {dashboard.rows.map((row) => (
-                  <JourneyRow
-                    row={row}
-                    key={row.journey.key}
-                    open={dashboard.expanded === row.journey.key}
-                    onToggle={() => dashboard.toggle(row.journey.key)}
-                    onTrack={() => dashboard.track(row.tracked ? null : row.journey)}
-                  />
-                ))}
-              </>
-            ) : null}
+            ))}
           </>
         ) : (
           dashboard.boards.map((board) => <Board board={board} key={board.segment.id} />)
@@ -979,18 +1025,23 @@ const styles = StyleSheet.create({
   bodyContent: { paddingHorizontal: 16, paddingBottom: 24 },
 
   toolbar: { flexDirection: 'row', alignItems: 'stretch', gap: 6, marginBottom: 10 },
-  direction: { flex: 1, flexDirection: 'row', gap: 6 },
-  directionButton: {
-    flex: 1,
+  modes: { flex: 1, flexDirection: 'row', gap: 6 },
+  modeButton: {
+    // `flexBasis: 0` with `flexGrow`, never bare `flex: 1`: on React Native the
+    // longest label would otherwise set its own tab's basis, and "Interchange"
+    // would push "Return" off a 360 px sheet.
+    flexGrow: 1,
+    flexBasis: 0,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 9,
+    paddingHorizontal: 2,
     borderRadius: 9,
     backgroundColor: theme.surfaceMuted,
   },
-  directionButtonOn: { backgroundColor: theme.accentFaint },
-  directionText: { color: theme.textMuted, fontSize: 13, fontWeight: '700' },
-  directionTextOn: { color: theme.accent },
+  modeButtonOn: { backgroundColor: theme.accentFaint },
+  modeText: { color: theme.textMuted, fontSize: 12, fontWeight: '700' },
+  modeTextOn: { color: theme.accent },
   editButton: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1021,27 +1072,14 @@ const styles = StyleSheet.create({
   },
   suggestButtonText: { color: theme.accent, fontSize: 12, fontWeight: '800' },
 
-  // Where the journey starts (§13). Quieter than the direction buttons above:
-  // the direction is the question, this qualifies it, and two equally loud
-  // segmented controls stacked on one sheet read as a form.
-  origins: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  originsLabel: { color: theme.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  originButton: {
-    // `flexBasis: 0` with `flexGrow`, never bare `flex: 1`: on React Native a
-    // long stop name would otherwise set the chip's basis and push its neighbour
-    // off the row.
-    flexGrow: 1,
-    flexBasis: 0,
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: theme.surfaceMuted,
-  },
-  originButtonOn: { backgroundColor: theme.accentFaint },
-  originText: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
-  originTextOn: { color: theme.accent, fontWeight: '800' },
-
+  // Which list this is (§13). The interchange mode puts the train in and the
+  // bus home on one screen, and the two must be told apart before a departure
+  // time is read — so the heading is the destination, in the sheet's own voice,
+  // with the whole route under it in the muted one.
+  listHead: { marginTop: 16, marginBottom: 8 },
+  listHeadDivided: { paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.border },
+  listHeading: { color: theme.text, fontSize: 14, fontWeight: '800' },
+  listRoute: { color: theme.textMuted, fontSize: 11, marginTop: 1 },
   views: {
     flexDirection: 'row',
     gap: 3,
