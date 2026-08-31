@@ -38,6 +38,16 @@ const onLine = (index: number, extra: Partial<Position> = {}): Position => ({
   ...extra,
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 interface Harness {
   platform: NavPlatform;
   spoken: string[];
@@ -112,6 +122,70 @@ afterEach(() => {
   cleanup();
 });
 
+describe('useNavigationController — public command contract', () => {
+  it('keeps trip-only commands inert while idle', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(async () => {
+      result.current.selectPreview(1);
+      result.current.setProfile('hike');
+      await result.current.go();
+      result.current.pause();
+      await result.current.continueTrip();
+      result.current.arriveNow();
+      result.current.rerouteNow();
+      result.current.addStop(points[10]!);
+      result.current.continuePastIntermediateStop();
+      result.current.acceptFasterRoute();
+      result.current.dismissFasterRoute();
+    });
+
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.activity).toBeNull();
+    expect(result.current.previewIndex).toBe(0);
+    expect(result.current.destination).toBeNull();
+    expect(result.current.activePath).toBeNull();
+    expect(h.currentFix).not.toHaveBeenCalled();
+    expect(h.route).not.toHaveBeenCalled();
+    expect(h.watchActivities).toEqual([]);
+  });
+
+  it('lets End consistently release preview, Explorer, guidance, arrival and error', async () => {
+    const h = harness();
+    const hook = renderHook(() => useNavigationController(h.platform));
+
+    await act(() => hook.result.current.start(destination));
+    expect(hook.result.current.phase).toBe('preview');
+    act(() => hook.result.current.stop());
+    expect(hook.result.current.phase).toBe('idle');
+
+    await act(() => hook.result.current.explore('hike'));
+    expect(hook.result.current.phase).toBe('exploring');
+    act(() => hook.result.current.stop());
+    expect(hook.result.current.phase).toBe('idle');
+
+    await act(() => hook.result.current.start(destination));
+    await act(() => hook.result.current.go());
+    expect(hook.result.current.phase).toBe('navigating');
+    act(() => hook.result.current.arriveNow());
+    expect(hook.result.current.phase).toBe('arrived');
+    act(() => hook.result.current.stop());
+    expect(hook.result.current.phase).toBe('idle');
+
+    h.currentFix.mockRejectedValueOnce(new Error('location denied'));
+    await act(() => hook.result.current.start(destination));
+    expect(hook.result.current.phase).toBe('error');
+    act(() => hook.result.current.stop());
+
+    expect(hook.result.current.phase).toBe('idle');
+    expect(hook.result.current.activity).toBeNull();
+    expect(hook.result.current.destination).toBeNull();
+    expect(hook.result.current.position).toBeNull();
+    expect(hook.result.current.activePath).toBeNull();
+  });
+});
+
 describe('useNavigationController — preview', () => {
   it('requests route detail for hike elevation guidance only', async () => {
     const hike = harness();
@@ -136,6 +210,23 @@ describe('useNavigationController — preview', () => {
     expect(result.current.previewPaths?.map((p) => p.timeMs)).toEqual([600_000, 900_000]);
     expect(result.current.previewIndex).toBe(0);
     expect(result.current.destination).toEqual(destination);
+  });
+
+  it('follows the selected preview choice and ignores invalid selections', async () => {
+    const h = harness(() => Promise.resolve({ paths: [path(900_000), path(600_000, 0.0001)] }));
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.start(destination));
+
+    act(() => {
+      result.current.selectPreview(-1);
+      result.current.selectPreview(20);
+      result.current.selectPreview(1);
+    });
+    expect(result.current.previewIndex).toBe(1);
+
+    await act(() => result.current.go());
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+    expect(result.current.activePath?.timeMs).toBe(900_000);
   });
 
   it('surfaces a fix failure as the error phase, keeping its message', async () => {
@@ -180,6 +271,58 @@ describe('useNavigationController — preview', () => {
     expect(result.current.previewPaths).toBe(offered);
     expect(result.current.previewLoading).toBe(false);
   });
+
+  it('keeps the latest profile when an older switch resolves last', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.start(destination));
+    const bike = deferred<RouteResult>();
+    const hike = deferred<RouteResult>();
+    h.route.mockReturnValueOnce(bike.promise).mockReturnValueOnce(hike.promise);
+
+    act(() => {
+      result.current.setProfile('bike');
+      result.current.setProfile('hike');
+    });
+    expect(h.route).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      hike.resolve({ paths: [path(400_000, 0.004)] });
+      await hike.promise;
+    });
+    await waitFor(() => expect(result.current.profile).toBe('hike'));
+    expect(result.current.previewPaths?.[0]?.timeMs).toBe(400_000);
+
+    await act(async () => {
+      bike.resolve({ paths: [path(200_000, 0.002)] });
+      await bike.promise;
+    });
+    expect(result.current.profile).toBe('hike');
+    expect(result.current.previewPaths?.[0]?.timeMs).toBe(400_000);
+  });
+
+  it('lets End invalidate a route response that has not landed yet', async () => {
+    const route = deferred<RouteResult>();
+    const h = harness(() => route.promise);
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    let starting!: Promise<void>;
+
+    act(() => {
+      starting = result.current.start(destination);
+    });
+    await waitFor(() => expect(h.route).toHaveBeenCalledTimes(1));
+    act(() => result.current.stop());
+    expect(result.current.phase).toBe('idle');
+
+    await act(async () => {
+      route.resolve({ paths: [path(600_000)] });
+      await starting;
+    });
+
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.previewPaths).toBeNull();
+    expect(result.current.destination).toBeNull();
+  });
 });
 
 describe('useNavigationController — guidance', () => {
@@ -192,6 +335,76 @@ describe('useNavigationController — guidance', () => {
     expect(h.spoken.length).toBeGreaterThan(0);
     // Seeded from the origin fix rather than waiting for the watch's first one.
     expect(result.current.state).not.toBeNull();
+  });
+
+  it('starts only one owned watch when Go is tapped twice', async () => {
+    const watchFixes = vi.fn<NavPlatform['watchFixes']>(() => Promise.resolve(() => undefined));
+    const h = harness(undefined, { watchFixes });
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.start(destination));
+
+    await act(async () => {
+      const first = result.current.go();
+      const second = result.current.go();
+      await Promise.all([first, second]);
+    });
+
+    expect(result.current.phase).toBe('navigating');
+    expect(watchFixes).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a watch that finishes starting after End', async () => {
+    const watch = deferred<() => void>();
+    const release = vi.fn();
+    const watchFixes = vi.fn<NavPlatform['watchFixes']>(() => watch.promise);
+    const h = harness(undefined, { watchFixes });
+    const { result } = renderHook(() => useNavigationController(h.platform));
+    await act(() => result.current.start(destination));
+    let going!: Promise<void>;
+
+    act(() => {
+      going = result.current.go();
+    });
+    await waitFor(() => expect(watchFixes).toHaveBeenCalledTimes(1));
+    act(() => result.current.stop());
+    expect(result.current.phase).toBe('idle');
+
+    await act(async () => {
+      watch.resolve(release);
+      await going;
+    });
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe('idle');
+    expect(result.current.activePath).toBeNull();
+  });
+
+  it('rejects a queued fix from a watch owned by the previous trip', async () => {
+    const sinks: Array<(fix: Position, measuredAtMs?: number) => void> = [];
+    const releases = [vi.fn(), vi.fn()];
+    const watchFixes = vi.fn<NavPlatform['watchFixes']>((onFix) => {
+      const index = sinks.push(onFix) - 1;
+      return Promise.resolve(releases[index]!);
+    });
+    const h = harness(undefined, { watchFixes });
+    const { result } = await drive(h);
+    expect(sinks).toHaveLength(1);
+
+    // A new preview takes ownership immediately, then its own watch becomes
+    // the only stream allowed to feed the new NavigationSession.
+    await act(() => result.current.start(destination));
+    expect(releases[0]).toHaveBeenCalledTimes(1);
+    await act(() => result.current.go());
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+    expect(sinks).toHaveLength(2);
+    const ownedPosition = result.current.position;
+    const ownedState = result.current.state;
+
+    act(() => sinks[0]!(onLine(15, { speedMps: 15 }), Date.now() + 10_000));
+
+    expect(result.current.position).toEqual(ownedPosition);
+    expect(result.current.state).toEqual(ownedState);
+    expect(result.current.activePath?.timeMs).toBe(600_000);
   });
 
   it('shows signal loss at the measured origin when a started watch emits no fixes', async () => {
@@ -269,6 +482,21 @@ describe('useNavigationController — guidance', () => {
     expect(h.platform.stopSpeaking).toHaveBeenCalled();
   });
 
+  it('toggles mute without changing trip ownership or phase', async () => {
+    const h = harness();
+    const { result } = await drive(h);
+
+    act(() => result.current.toggleMute());
+    expect(result.current.muted).toBe(true);
+    expect(result.current.phase).toBe('navigating');
+    expect(h.watchStopped()).toBe(0);
+
+    act(() => result.current.toggleMute());
+    expect(result.current.muted).toBe(false);
+    expect(result.current.phase).toBe('navigating');
+    expect(h.watchStopped()).toBe(0);
+  });
+
   it('pauses fixes, guidance and elapsed time, then resumes the same route', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
@@ -325,6 +553,23 @@ describe('useNavigationController — guidance', () => {
       vi.clearAllTimers();
       vi.useRealTimers();
     }
+  });
+
+  it('starts only one replacement watch when Continue is tapped twice', async () => {
+    const h = harness();
+    const hook = await drive(h);
+    act(() => hook.result.current.pause());
+    expect(hook.result.current.phase).toBe('paused');
+
+    await act(async () => {
+      const first = hook.result.current.continueTrip();
+      const second = hook.result.current.continueTrip();
+      await Promise.all([first, second]);
+    });
+
+    expect(hook.result.current.phase).toBe('navigating');
+    expect(h.currentFix).toHaveBeenCalledTimes(3);
+    expect(h.watchActivities).toEqual(['guidance', 'guidance']);
   });
 
   it('ends as arrived with a distance/time summary, keeping the watch until Done', async () => {
@@ -1094,6 +1339,22 @@ describe('useNavigationController — resume an interrupted trip', () => {
     expect(query.points).toEqual([expect.objectContaining(points[0]!), via, destination]);
     expect(query.preferences).toEqual({ avoidTolls: true });
     expect(query.alternatives).toBeUndefined();
+  });
+
+  it('owns only one route request and watch when Resume is tapped twice', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useNavigationController(h.platform));
+
+    await act(async () => {
+      const first = result.current.resume(destination, 'car');
+      const second = result.current.resume(destination, 'car');
+      await Promise.all([first, second]);
+    });
+
+    expect(result.current.phase).toBe('navigating');
+    expect(h.currentFix).toHaveBeenCalledTimes(1);
+    expect(h.route).toHaveBeenCalledTimes(1);
+    expect(h.watchActivities).toEqual(['guidance']);
   });
 
   it('keeps the resumed trip reroutable — the guard does not stay latched', async () => {

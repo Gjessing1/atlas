@@ -441,6 +441,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const enrichAbort = useRef<AbortController | null>(null);
   /** Teardown for the active fix watch, if any. */
   const watchStopRef = useRef<(() => void) | null>(null);
+  /**
+   * Ownership token for the native fix stream. Stopping a native watch cannot
+   * retract a callback already queued across the bridge, so the callback must
+   * prove it still belongs to the watch that owns the current trip.
+   */
+  const watchSeq = useRef(0);
   /** Synchronous guard for a final queued fix after a pause tears its watch down. */
   const pausedRef = useRef(false);
   /** Prevent two quick Resume taps from starting competing location watches. */
@@ -485,6 +491,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const toggleMute = useCallback(() => setMuted(!mutedRef.current), [setMuted]);
 
   const stopWatch = useCallback(() => {
+    watchSeq.current++;
     watchStopRef.current?.();
     watchStopRef.current = null;
   }, []);
@@ -908,13 +915,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   /** Accept an offered reroute: recalculate from the last known fix. */
   const rerouteNow = useCallback(() => {
+    if (phase !== 'navigating' && phase !== 'rerouting') return;
     const fix = lastFixRef.current;
     if (!fix || !sessionRef.current) return;
     // The tap is explicit consent — don't let a backoff from an earlier
     // failed automatic attempt swallow it.
     rerouteBackoffUntil.current = 0;
     void reroute(fix);
-  }, [reroute]);
+  }, [phase, reroute]);
 
   /**
    * Insert a stop into the running trip and recalculate through it. The stop
@@ -924,6 +932,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
    */
   const addStop = useCallback(
     (stop: LatLng) => {
+      if (phase !== 'navigating' && phase !== 'rerouting') return;
       const fix = lastFixRef.current;
       const path = activePathRef.current;
       if (!fix || !path || !sessionRef.current || !destRef.current) return;
@@ -940,7 +949,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       rerouteBackoffUntil.current = 0;
       void reroute(fix, vias);
     },
-    [reroute, activePathRef],
+    [phase, reroute, activePathRef],
   );
 
   /**
@@ -1222,8 +1231,16 @@ export function useNavigationController(platform: NavPlatform): NavController {
       const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
       await facingReady?.catch(() => undefined);
       if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) return;
-      const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
-      if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) {
+      const watch = ++watchSeq.current;
+      const stopFixes = await platformRef.current.watchFixes((fix, measuredAtMs) => {
+        if (watch === watchSeq.current) onFix(fix, measuredAtMs);
+      }, 'guidance');
+      if (
+        watch !== watchSeq.current ||
+        trip !== tripSeq.current ||
+        sessionRef.current !== session ||
+        !pausedRef.current
+      ) {
         stopFixes();
         return;
       }
@@ -1354,8 +1371,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
         await facingReady?.catch(() => undefined);
         if (seq !== previewSeq.current) return;
         onFix(origin.fix, origin.atMs);
-        const stopFixes = await platformRef.current.watchFixes(onFix, 'explorer');
-        if (seq !== previewSeq.current) {
+        const watch = ++watchSeq.current;
+        const stopFixes = await platformRef.current.watchFixes((fix, measuredAtMs) => {
+          if (watch === watchSeq.current) onFix(fix, measuredAtMs);
+        }, 'explorer');
+        if (watch !== watchSeq.current || seq !== previewSeq.current) {
           stopFixes();
           return;
         }
@@ -1375,6 +1395,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   // end here (no bike route, brief offline) must not kill the whole preview.
   const setProfile = useCallback(
     (prof: RoutingProfile) => {
+      if (phase !== 'preview') return;
       const origin = originRef.current;
       const dest = destRef.current;
       if (!origin || !dest || prof === profileRef.current) return;
@@ -1400,7 +1421,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         }
       })();
     },
-    [fetchChoices],
+    [phase, fetchChoices],
   );
 
   /**
@@ -1439,9 +1460,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
       lastFixMeasuredAtRef.current = null;
 
       stopWatch();
-      const stopFixes = await platformRef.current.watchFixes(onFix, 'guidance');
+      const watch = ++watchSeq.current;
+      const stopFixes = await platformRef.current.watchFixes((fix, measuredAtMs) => {
+        if (watch === watchSeq.current) onFix(fix, measuredAtMs);
+      }, 'guidance');
       // End (or another trip) while the watch was starting: don't leave one live.
-      if (sessionRef.current !== session) {
+      if (watch !== watchSeq.current || sessionRef.current !== session) {
         stopFixes();
         return;
       }
@@ -1460,6 +1484,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
 
   const go = useCallback(async () => {
+    if (phase !== 'preview') return;
     // Invoke this before the first await: iOS Safari accepts its orientation
     // prompt only while the Start button's user gesture is still on the stack.
     const facingReady =
@@ -1509,7 +1534,16 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // this only rescues the early returns above from a stuck spinner.
       if (seq === previewSeq.current) setPreviewLoading(false);
     }
-  }, [platformRef, previewPathsRef, previewIndexRef, fetchChoices, beginGuidance, fail]);
+  }, [phase, platformRef, previewPathsRef, previewIndexRef, fetchChoices, beginGuidance, fail]);
+
+  const selectPreview = useCallback(
+    (index: number) => {
+      if (phase !== 'preview' || !Number.isInteger(index)) return;
+      if (index < 0 || index >= (previewPathsRef.current?.length ?? 0)) return;
+      setPreviewIndex(index);
+    },
+    [phase, previewPathsRef],
+  );
 
   /**
    * Restart an interrupted trip: same destination, same stops still ahead, same
@@ -1782,7 +1816,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     error,
     start,
     explore,
-    selectPreview: setPreviewIndex,
+    selectPreview,
     setProfile,
     go,
     resume,
