@@ -76,13 +76,19 @@ function spoke(angleDeg: number, outerR: number): string {
  * angle taken from real geometry is ours, which is the one that has to be
  * right — the exit *number* says nothing about direction.
  *
- * Right-hand traffic (Norway and the rest of Atlas's data) circulates
- * anticlockwise, so exits arrive in decreasing order of turn angle: right
- * first, then straight on, then left.
+ * `drivingSide` decides which way round the count runs, because circulation
+ * mirrors with it: right-hand traffic goes anticlockwise, so exits arrive in
+ * decreasing order of turn angle (right, then straight on, then left), while
+ * left-hand traffic goes clockwise and they arrive in increasing order. Get
+ * this wrong in the UK and the ring counts off exits that are on the far side
+ * of the road from the ones the driver can see. It defaults to right-hand
+ * traffic, which is both Atlas's home data and the way to be wrong in the
+ * fewest places when the router gave nothing to measure.
  */
 export function roundaboutGlyph(
   exitAngleDeg?: number | null,
   exitNumber?: number | null,
+  drivingSide?: 'left' | 'right' | null,
 ): RoundaboutGlyph {
   const { cx, cy, r } = ROUNDABOUT_RING;
   const raw = exitAngleDeg ?? 0;
@@ -100,10 +106,15 @@ export function roundaboutGlyph(
   const takes = exitNumber != null && exitNumber >= 2 ? Math.floor(exitNumber) : 0;
   const passed: string[] = [];
   if (takes >= 2 && takes - 1 <= MAX_PASSED_EXITS) {
-    // The approach enters the ring at 180° (the bottom of the icon); the
-    // sweep runs from there round to our exit, and the passed exits divide it.
-    const step = (180 - drawn) / takes;
-    for (let i = 1; i < takes; i++) passed.push(spoke(180 - i * step, PASSED_RADIUS));
+    // The approach enters the ring at the bottom of the icon; the sweep runs
+    // from there round to our exit, and the passed exits divide it. Which way
+    // round is the driving side: circulating anticlockwise (drive on the
+    // right) the arm behind us sits at +180 and the sweep falls towards our
+    // exit; clockwise (drive on the left) it sits at −180 and the whole fan
+    // mirrors, putting the passed exits on the driver's left where they are.
+    const behind = drivingSide === 'left' ? -180 : 180;
+    const step = (behind - drawn) / takes;
+    for (let i = 1; i < takes; i++) passed.push(spoke(behind - i * step, PASSED_RADIUS));
   }
 
   return {

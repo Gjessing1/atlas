@@ -97,13 +97,16 @@ export function TurnIcon({
   size = 34,
   color = theme.icon,
 }: {
-  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg'>;
+  instruction: Pick<
+    RouteInstruction,
+    'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg' | 'drivingSide'
+  >;
   size?: number;
   color?: string;
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
-    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber);
+    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber, instruction.drivingSide);
     return (
       <View style={styles.box}>
         <Svg width={size} height={size} viewBox="0 0 24 24">

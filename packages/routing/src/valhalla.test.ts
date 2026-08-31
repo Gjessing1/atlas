@@ -720,6 +720,74 @@ describe('formatExitSign', () => {
     expect(instructions[1]!.exitAngleDeg).toBe(instructions[0]!.exitAngleDeg);
   });
 
+  it('reads the driving side off the way the ring is circulated', () => {
+    // One 20 m ring at 60°N, entered from the south and driven three quarters
+    // of the way round. Traversed anticlockwise it is a Norwegian roundabout,
+    // clockwise a British one: the geometry is the only thing that differs,
+    // which is exactly what makes this measurable without knowing the country.
+    const R = 20;
+    const perLat = 111_320;
+    const perLng = perLat * Math.cos((60 * Math.PI) / 180);
+    const ring = (clockwise: boolean) => {
+      // Approach due north into the south side of the ring.
+      const pts: [number, number][] = [[60 - (R + 20) / perLat, 10]];
+      for (let i = 0; i <= 9; i++) {
+        // Start at the ring's south point and sweep 270°, either way round.
+        const phi = (-90 + (clockwise ? -1 : 1) * (i / 9) * 270) * (Math.PI / 180);
+        pts.push([60 + (R * Math.sin(phi)) / perLat, 10 + (R * Math.cos(phi)) / perLng]);
+      }
+      pts.push([60 + (R * 3) / perLat, 10]); // out of the ring to the north
+      return pts;
+    };
+    const trip = (clockwise: boolean) => ({
+      trip: {
+        units: 'kilometers',
+        summary: { length: 1, time: 10 },
+        legs: [
+          {
+            shape: encodeShape(ring(clockwise)),
+            maneuvers: [
+              { type: 26, roundabout_exit_count: 3, begin_shape_index: 1, end_shape_index: 10 },
+              { type: 27, begin_shape_index: 10, end_shape_index: 11 },
+            ],
+          },
+        ],
+      },
+    });
+    const sideOf = (clockwise: boolean) =>
+      parseValhallaResponse(trip(clockwise)).paths[0]!.instructions!.map((i) => i.drivingSide);
+    // Both maneuvers of the pair carry it — either can be the one on screen.
+    expect(sideOf(false)).toEqual(['right', 'right']);
+    expect(sideOf(true)).toEqual(['left', 'left']);
+  });
+
+  it('leaves the driving side unmeasured when the ring arc is too short', () => {
+    // A single straight segment through a "roundabout" bends nowhere, so
+    // there is no side to read. Rather than guess, say nothing: the icon then
+    // falls back to right-hand traffic instead of flipping on noise.
+    const stub = {
+      trip: {
+        units: 'kilometers',
+        summary: { length: 1, time: 10 },
+        legs: [
+          {
+            shape: encodeShape([
+              [59.999, 10],
+              [60.0, 10],
+              [60.0005, 10],
+            ]),
+            maneuvers: [
+              { type: 26, roundabout_exit_count: 1, begin_shape_index: 1, end_shape_index: 2 },
+              { type: 27, begin_shape_index: 2, end_shape_index: 2 },
+            ],
+          },
+        ],
+      },
+    };
+    const instructions = parseValhallaResponse(stub).paths[0]!.instructions!;
+    expect(instructions[0]!.drivingSide).toBeUndefined();
+  });
+
   it('keeps ramp/exit/keep/merge maneuvers distinct via kind', () => {
     const shape = encodeShape([
       [60, 10],

@@ -237,6 +237,20 @@ export interface RouteInstruction {
    */
   exitAngleDeg?: number;
   /**
+   * Which side of the road the traveller drives on here, measured from the
+   * roundabout itself rather than looked up per country: traffic circulates
+   * anticlockwise where you drive on the right and clockwise where you drive
+   * on the left, so the way the ring bends *is* the answer.
+   *
+   * Icons need it because the exit *number* counts arms in circulation order,
+   * which mirrors with the driving side: the exits passed before yours lie to
+   * the right in Norway and to the left in the UK. Being measured per
+   * roundabout, it stays right across a border and needs no admin data.
+   * Roundabout maneuvers only, and absent when the traversed arc is too short
+   * or too straight to give a confident sign.
+   */
+  drivingSide?: 'left' | 'right';
+  /**
    * Refines the coarse `sign` for maneuvers it flattens: a highway on-ramp,
    * a highway exit, a keep-at-fork, a merge (all otherwise just ±7/0), or
    * boarding a `ferry` (sign 0 — a leg to ride, not a turn). UIs may render

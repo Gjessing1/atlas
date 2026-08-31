@@ -58,23 +58,65 @@ describe('repository-root compose example', () => {
 });
 
 describe('regional Valhalla builds', () => {
-  it('keep Norway and Sweden on Valhalla’s right-driving fallback', () => {
-    const entrypoint = readFileSync(
-      path.join(repoRoot, 'infrastructure/valhalla/entrypoint.sh'),
-      'utf8',
-    );
-    const packBuilder = readFileSync(
-      path.join(repoRoot, 'infrastructure/packs/build-pack.sh'),
-      'utf8',
-    );
+  const entrypoint = readFileSync(
+    path.join(repoRoot, 'infrastructure/valhalla/entrypoint.sh'),
+    'utf8',
+  );
+  const packBuilder = readFileSync(
+    path.join(repoRoot, 'infrastructure/packs/build-pack.sh'),
+    'utf8',
+  );
+  const adminBuilder = readFileSync(
+    path.join(repoRoot, 'infrastructure/valhalla/build-admins.sh'),
+    'utf8',
+  );
 
-    // Geofabrik's regional extracts do not contain complete country-boundary
-    // relations. An admin DB built from them silently assigned the dummy
-    // left-driving admin, making Valhalla count the wrong side of roundabouts.
-    for (const script of [entrypoint, packBuilder]) {
-      expect(script).toContain('--mjolnir-data-processing-use-admin-db false');
-      expect(script).not.toContain('--mjolnir-admin');
-    }
+  // Roundabout exits are counted on the driving side, so the admin DB decides
+  // whether "take the 2nd exit" is the 2nd exit. Measured on the Isle of Man,
+  // two of three roundabouts on one route came out wrong without it — one of
+  // them "1st exit" for what is really the 3rd. These tests pin the two ways
+  // that has gone wrong, in both directions.
+  it('never derive admins from the routing extracts', () => {
+    // The original bug (384d847): country boundary relations are clipped in a
+    // regional extract, so countries whose ring never closes get no polygon
+    // and their roads inherit the default admin — which drives on the left.
+    // That took out every road in Norway.
     expect(entrypoint).not.toContain('valhalla_build_admins');
+    expect(packBuilder).not.toContain('valhalla_build_admins');
+    // The admin builder is the only place that command belongs, and it reads
+    // a continent-wide source rather than the tile extracts.
+    expect(adminBuilder).toContain('valhalla_build_admins');
+    expect(adminBuilder).toContain('boundary=administrative');
+  });
+
+  it('refuse to graph a left-driving country with no admin DB', () => {
+    // The opposite bug, and the one that matters now that coverage includes
+    // the British Isles: falling back to the right-driving default there is a
+    // wrong-by-default deploy that still looks healthy.
+    expect(entrypoint).toContain('admins.sqlite');
+    for (const iso of ['great-britain', 'ireland', 'isle-of-man', 'guernsey-jersey']) {
+      expect(entrypoint).toContain(iso);
+    }
+    // A pack is what the phone routes from abroad, so it gets no fallback at
+    // all: no admin DB, no pack.
+    expect(packBuilder).toContain('--mjolnir-admin /master/admins.sqlite');
+    expect(packBuilder).not.toContain('--mjolnir-data-processing-use-admin-db false');
+  });
+
+  it('verify the admin DB before installing it, against every left-driving country', () => {
+    // A present-but-wrong DB is the failure mode neither guard above catches,
+    // and it stays invisible until someone drives a roundabout in the wrong
+    // country. Europe's left-driving countries are a closed list — the UK and
+    // its Crown Dependencies, Ireland, Malta, Cyprus — so the builder asserts
+    // the whole list rather than trusting the build.
+    for (const iso of ['GB', 'IE', 'IM', 'JE', 'GG', 'MT', 'CY']) {
+      expect(adminBuilder).toContain(`'${iso}'`);
+    }
+    // ...and a sample that must come out right-driving, so a DB that simply
+    // said "left" everywhere could not pass either.
+    for (const iso of ['NO', 'SE', 'DK', 'DE', 'NL', 'BE']) {
+      expect(adminBuilder).toContain(`'${iso}'`);
+    }
+    expect(adminBuilder).toContain('REJECTED');
   });
 });

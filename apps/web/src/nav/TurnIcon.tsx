@@ -91,12 +91,15 @@ export function TurnIcon({
   instruction,
   size = 34,
 }: {
-  instruction: Pick<RouteInstruction, 'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg'>;
+  instruction: Pick<
+    RouteInstruction,
+    'sign' | 'kind' | 'exitNumber' | 'exitAngleDeg' | 'drivingSide'
+  >;
   size?: number;
 }) {
   const { sign, exitNumber } = instruction;
   if (sign === 6) {
-    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber);
+    const ring = roundaboutGlyph(instruction.exitAngleDeg, exitNumber, instruction.drivingSide);
     return (
       <span className="nav-turn">
         <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

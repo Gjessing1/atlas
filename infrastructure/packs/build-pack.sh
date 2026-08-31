@@ -20,7 +20,7 @@
 # CLAUDE.md data dir layout). Building the routing tiles runs the same
 # Valhalla image the server uses (infrastructure/valhalla) and reuses the
 # server's admins/timezones databases from DATA_DIR/valhalla (bring the
-# server service up once before building packs).
+# server service up once, and run build-admins.sh, before building packs).
 set -euo pipefail
 
 # This host runs ~30 other containers in 15 GiB of RAM. Every docker step gets
@@ -95,11 +95,16 @@ rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
 
 echo "==> [$ID] building Valhalla routing tiles"
 # Reuse the server's timezones (built by infrastructure/valhalla on first
-# start), which skips a shapefile download per pack.
+# start), which skips a shapefile download per pack, and its admin database
+# (built by infrastructure/valhalla/build-admins.sh) so an offline pack counts
+# roundabout exits on the same side as the server. Both are required: a pack
+# is what the phone routes from abroad, which is exactly where a wrong driving
+# side would be a surprise rather than a nuisance.
 VALHALLA_MASTER="$DATA_DIR/valhalla"
-for f in timezones.sqlite; do
+for f in timezones.sqlite admins.sqlite; do
   [[ -f "$VALHALLA_MASTER/$f" ]] || {
-    echo "missing $VALHALLA_MASTER/$f — start infrastructure/valhalla once first." >&2
+    echo "missing $VALHALLA_MASTER/$f — start infrastructure/valhalla once first" >&2
+    echo "(admins.sqlite comes from infrastructure/valhalla/build-admins.sh)." >&2
     exit 1
   }
 done
@@ -115,7 +120,7 @@ docker run --rm "${LIMITS[@]}" \
         --mjolnir-tile-dir /work/valhalla-tiles \
         --mjolnir-tile-extract /work/valhalla.tar \
         --mjolnir-timezone /master/timezones.sqlite \
-        --mjolnir-data-processing-use-admin-db false \
+        --mjolnir-admin /master/admins.sqlite \
         --mjolnir-concurrency 2 > /work/valhalla.json
       valhalla_build_tiles -c /work/valhalla.json /work/$ID.osm.pbf
       valhalla_build_extract -c /work/valhalla.json -v --overwrite"

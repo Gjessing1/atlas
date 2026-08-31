@@ -123,6 +123,54 @@ function roundaboutExitAngle(
   return Math.round(angleDelta(approach, departure));
 }
 
+/**
+ * Ignore ring vertices closer together than this. A roundabout is small enough
+ * that `HEADING_SPAN_M` would swallow it whole; this only drops the duplicate
+ * and near-duplicate points whose bearing would be noise.
+ */
+const RING_SPAN_M = 1.5;
+
+/** Below this much accumulated turn, the arc is too straight to call a side. */
+const MIN_RING_TURN_DEG = 30;
+
+/**
+ * Which side of the road the traveller drives on, read off the roundabout
+ * itself: traffic circulates anticlockwise where you drive on the right and
+ * clockwise where you drive on the left, so the direction the route bends
+ * while it is on the ring *is* the answer.
+ *
+ * Measuring it beats looking the country up. It needs no admin database (the
+ * one Valhalla builds from regional extracts drops whole countries, which is
+ * why Atlas builds tiles with it disabled), it is per roundabout rather than
+ * per route, so a border crossing gets each one right, and it cannot disagree
+ * with the geometry the icon is drawn from.
+ *
+ * Undefined when the traversed arc is too short or too straight to be sure —
+ * a 1st-exit ring is often a single segment. That costs nothing: the side only
+ * changes what is drawn once there are passed exits to place, which means a
+ * 2nd exit or later, and that arc is never that short.
+ */
+function roundaboutDrivingSide(
+  points: LatLng[],
+  enterIndex: number,
+  exitIndex: number,
+): 'left' | 'right' | undefined {
+  let anchor = points[enterIndex];
+  if (!anchor) return undefined;
+  let previous: number | null = null;
+  let total = 0;
+  for (let i = enterIndex + 1; i <= exitIndex && i < points.length; i++) {
+    const here = points[i]!;
+    if (haversineM(anchor, here) < RING_SPAN_M) continue;
+    const bearing = bearingBetween(anchor, here);
+    if (previous !== null) total += angleDelta(previous, bearing);
+    previous = bearing;
+    anchor = here;
+  }
+  if (Math.abs(total) < MIN_RING_TURN_DEG) return undefined;
+  return total > 0 ? 'left' : 'right';
+}
+
 /** A point on a synthesized loop, and whether the traveller asked for it. */
 export interface RoundTripStop {
   pos: LatLng;
@@ -647,6 +695,11 @@ function parseTrip(trip: ValhallaTrip): RoutePath | null {
         if (angle !== undefined) {
           ring.instruction.exitAngleDeg = angle;
           instruction.exitAngleDeg = angle;
+        }
+        const side = roundaboutDrivingSide(points, ring.index, offset + begin);
+        if (side !== undefined) {
+          ring.instruction.drivingSide = side;
+          instruction.drivingSide = side;
         }
         ring = null;
       }
