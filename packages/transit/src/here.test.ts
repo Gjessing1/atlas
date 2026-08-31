@@ -98,6 +98,45 @@ describe('commuteHere', () => {
     expect(here.lead).toBe('Leaves Engelsrud terrasse 08:36');
   });
 
+  /**
+   * §3 on the one card that lacked it. The card is read standing at the stop it
+   * names, which is exactly where "and is it running to that?" is the next
+   * question — and the lead line quotes a scheduled time, as it should.
+   */
+  it('puts the live estimate under the time the lead quotes', () => {
+    const late = commuteHere(
+      commuteJourney(
+        corridor({
+          bus: { expectedStartMs: hm(8, 39), expectedEndMs: hm(9, 5), realtime: true },
+        }),
+        hm(8, 10),
+      ),
+      hm(8, 10),
+    )!;
+    expect(late.lead).toBe('Leaves Engelsrud terrasse 08:36');
+    expect(late.leadEstimate).toBe('08:39 est.');
+    // Aboard, the lead names the arrival — so the estimate has to be that one.
+    const riding = commuteHere(
+      commuteJourney(
+        corridor({
+          bus: { expectedStartMs: hm(8, 36), expectedEndMs: hm(9, 5), realtime: true },
+        }),
+        hm(8, 50),
+      ),
+      hm(8, 50),
+    )!;
+    expect(riding.lead).toBe('Arrives Asker stasjon 09:02');
+    expect(riding.leadEstimate).toBe('09:05 est.');
+  });
+
+  it('says a service is running to time rather than saying nothing', () => {
+    // Always present: the absence of live data has to read as a fact, not as
+    // something nobody checked.
+    expect(commuteHere(commuteJourney(corridor(), hm(8, 10)), hm(8, 10))!.leadEstimate).toBe(
+      'On time',
+    );
+  });
+
   it('says where you are once you are on the vehicle', () => {
     const here = commuteHere(commuteJourney(corridor(), hm(8, 50)), hm(8, 50))!;
     expect(here.phase).toBe('riding');

@@ -579,6 +579,33 @@ describe('POST /api/transit/commute', () => {
       expect(res.json().committed).toBeUndefined();
     });
 
+    /**
+     * §6.4 §13. A journey tracked from the interchange is not in an answer
+     * asked from the door, so the re-read has to be asked from where the
+     * commitment was made — otherwise it releases itself on the next refresh,
+     * mid-journey, which is exactly when the card is worth having.
+     */
+    it('re-reads a journey committed to at the interchange from the interchange', async () => {
+      const asked: { from: unknown; to: unknown }[] = [];
+      respond = () => {
+        asked.push({
+          from: captured!.body.variables.from,
+          to: captured!.body.variables.to,
+        });
+        return new Response(JSON.stringify(enturReply), { status: 200 });
+      };
+      await app.inject({
+        method: 'POST',
+        url: '/api/transit/commute',
+        payload: { ...payload, commit: { ...commit, origin: 'interchange' } },
+      });
+      // The commitment's own call is the first of the three.
+      expect(asked[0]).toMatchObject({
+        from: { place: 'NSR:StopPlace:59616' },
+        to: { place: 'NSR:StopPlace:58404' },
+      });
+    });
+
     it('ignores a commitment that is not one', async () => {
       const res = await app.inject({
         method: 'POST',

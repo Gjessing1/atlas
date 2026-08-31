@@ -383,6 +383,10 @@ function parseV2Commit(raw: unknown): TransitWidgetV2Commit | null {
     ...(typeof entry.committedAtMs === 'number' && Number.isFinite(entry.committedAtMs)
       ? { committedAtMs: entry.committedAtMs }
       : {}),
+    // Where the committed journey starts (§6.4 §13). Absent — and anything not
+    // this exact word — means the commute's own end, which is what every
+    // commitment made before the board could start at the interchange was.
+    ...(entry.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
   };
 }
 

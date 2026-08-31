@@ -5,6 +5,8 @@ import type { TransitCommuteQuery, TransitLeg, TransitResult, TransitTrip } from
 import {
   commuteCommitHolds,
   commuteCommitId,
+  commuteCommitKey,
+  commuteCommitQuery,
   findCommittedTrip,
   commutePlaceAt,
   commuteSpliceTrip,
@@ -856,6 +858,74 @@ describe('commutePlaceAt — ROADMAP §6.5 §2, presentation only', () => {
     // home stop is inside the station forecourt would otherwise read as "home".
     const tight = commute({ via: [{ name: 'Engelsrud', lat: 59.82, lng: 10.37 }] });
     expect(commutePlaceAt(tight, { lat: 59.82, lng: 10.37 })).toBe('interchange');
+  });
+});
+
+// --------------------------------------------------------- the commitment ---
+
+describe('a commitment made from the interchange — §6.4 §13', () => {
+  const journey = () => commuteJourney(twoLegTrip(), hm(7, 0));
+
+  it('keeps the door form of the id exactly as it was', () => {
+    // A key written before the board could start anywhere else still has to
+    // match the journey it named, in this process and in a widget's store.
+    expect(commuteCommitId('outbound', journey())).toBe(`outbound:${hm(7, 10)}:280`);
+    expect(commuteCommitKey({ direction: 'outbound', departureMs: hm(7, 10), line: '280' })).toBe(
+      `outbound:${hm(7, 10)}:280`,
+    );
+  });
+
+  it('tells the two starting points apart', () => {
+    expect(commuteCommitId('outbound', journey(), 'interchange')).toBe(
+      `outbound@interchange:${hm(7, 10)}:280`,
+    );
+    expect(
+      commuteCommitKey({
+        direction: 'outbound',
+        departureMs: hm(7, 10),
+        line: '280',
+        origin: 'interchange',
+      }),
+    ).toBe(`outbound@interchange:${hm(7, 10)}:280`);
+  });
+
+  /**
+   * The reason the origin is part of a commitment at all: the question that
+   * re-reads the journey. A train home tracked from Asker is not in an answer
+   * asked from Engelsrud, so without this the commitment would release itself
+   * on the next refresh.
+   */
+  it('re-reads the journey from where it was committed to', () => {
+    const query = commute();
+    const asked = commuteCommitQuery(query, {
+      direction: 'outbound',
+      departureMs: hm(7, 10),
+      line: '280',
+      origin: 'interchange',
+    });
+    expect(asked.from.name).toBe('Asker stasjon');
+    expect(asked.to.name).toBe('Nationaltheatret');
+    expect(asked.via).toEqual([]);
+    // And the door commitment is asked exactly as it always was.
+    const door = commuteCommitQuery(query, {
+      direction: 'inbound',
+      departureMs: hm(16, 10),
+      line: 'R14',
+    });
+    expect(door.from.name).toBe('Nationaltheatret');
+    expect(door.via?.map((place) => place.name)).toEqual(['Asker stasjon']);
+    expect(door.to.name).toBe('Engelsrud');
+  });
+
+  it('falls back to the door when the commute has no interchange to start from', () => {
+    const asked = commuteCommitQuery(commute({ via: [] }), {
+      direction: 'outbound',
+      departureMs: hm(7, 10),
+      line: '280',
+      origin: 'interchange',
+    });
+    expect(asked.from.name).toBe('Engelsrud');
+    expect(asked.to.name).toBe('Nationaltheatret');
   });
 });
 

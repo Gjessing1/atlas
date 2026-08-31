@@ -353,6 +353,40 @@ function changeWalkLabel(walkM: number): string | null {
   return `${(walkM / 1000).toFixed(1)} km walk`;
 }
 
+/**
+ * The same journey on live times — what will actually happen, said as its own
+ * labelled line rather than folded into the timetable's.
+ *
+ * §3 puts the scheduled time first and keeps the estimate beside it, and the
+ * board honoured that for every clock *face* and for nothing else: a row's
+ * travel time is scheduled arrival minus scheduled departure, so a delayed
+ * journey printed `08:36 → 09:24 · 48 min` above a `+3` on its bus and left the
+ * reader to work out whether the 48 already had the three minutes in it. It did
+ * not, and could not — both its ends are timetable numbers — and there was
+ * nothing on the row that said so either way.
+ *
+ * Stating the live window separately answers it without touching the primary
+ * line: `48 min` is what the timetable promises, `08:39 → 09:27 est. · 48 min`
+ * is what the feed says the same journey now is. Null when no feed corrects
+ * either end, which is most journeys and exactly where a second line would be
+ * noise.
+ */
+export interface CommuteJourneyLive {
+  /** `"08:39"` — the expected departure of the first vehicle. */
+  departure: string;
+  /** `"09:27"` — the expected arrival of the last one. */
+  arrival: string;
+  /**
+   * `"48 min"` — expected arrival minus expected departure: the travel time
+   * **with the delay in it**, which is the number the scheduled one cannot be.
+   */
+  duration: string;
+  /** `"08:39 → 09:27 est. · 48 min"` — the whole secondary line, composed once. */
+  scan: string;
+  /** The journey now takes longer than the timetable says it does. */
+  slower: boolean;
+}
+
 /** One complete door-to-door option, with nothing left for the reader to compute. */
 export interface CommuteJourney {
   key: string;
@@ -362,6 +396,17 @@ export interface CommuteJourney {
   startMs: number;
   /** Epoch ms of the scheduled arrival, so two options leaving together can be ranked. */
   endMs: number;
+  /**
+   * The same two instants on live times — what {@link commuteJourneyList}
+   * orders by, and what {@link live} is phrased from.
+   *
+   * Deliberately not `trip.startMs`, which is the *door*: that instant belongs
+   * to the walk leg, and a walk does not move when the bus it feeds is nine
+   * minutes late. A list ordered by it puts a delayed departure above one that
+   * will physically leave first — the reordering that made this necessary.
+   */
+  expectedStartMs: number;
+  expectedEndMs: number;
   /** Scheduled departure of the first vehicle (or of the walk, for an all-walk trip). */
   departure: LegTimeParts;
   /** Scheduled arrival at the far end. */
@@ -372,6 +417,8 @@ export interface CommuteJourney {
   transfers: string;
   /** `"08:36 → 09:24 · 48 min"` — the one line §12 says must be scannable. */
   scan: string;
+  /** {@link CommuteJourneyLive} — the same three numbers live, or null. */
+  live: CommuteJourneyLive | null;
   rides: CommuteRide[];
   connections: CommuteConnection[];
   /** `"6 min walk"` across the whole journey, or null when there is none worth saying. */
@@ -390,6 +437,35 @@ function walkLabel(trip: TransitTrip): string | null {
     .reduce((total, leg) => total + leg.durationMs, 0);
   const minutes = Math.round(ms / 60_000);
   return minutes >= 1 ? `${minutes} min walk` : null;
+}
+
+/**
+ * The live window, or null when nothing is known to have moved.
+ *
+ * Both ends are checked, not just the departure: a bus that leaves three
+ * minutes late and still makes its connection arrives on time, and the reader
+ * asking "is the 48 minutes with or without the delay" is asking about exactly
+ * that case.
+ */
+function journeyLive(
+  departure: LegTimeParts,
+  arrival: LegTimeParts,
+  expectedStartMs: number,
+  expectedEndMs: number,
+  scheduledMs: number,
+): CommuteJourneyLive | null {
+  if (!departure.delay && !arrival.delay) return null;
+  const liveMs = Math.max(0, expectedEndMs - expectedStartMs);
+  const duration = commuteDurationLabel(liveMs);
+  return {
+    departure: departure.expected,
+    arrival: arrival.expected,
+    duration,
+    // The "est." marks the pair of times, once — it is the same claim about
+    // both, and repeating it on each would say there are two estimates here.
+    scan: `${departure.expected} → ${expectedTimeLabel(arrival.expected)} · ${duration}`,
+    slower: liveMs > scheduledMs,
+  };
 }
 
 /** `"48 min"` / `"1 h 12 min"` — durations as a timetable prints them. */
@@ -513,6 +589,8 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
       });
   const startMs = first?.aimedStartMs ?? trip.startMs;
   const endMs = last?.aimedEndMs ?? trip.endMs;
+  const expectedStartMs = first?.expectedStartMs ?? trip.startMs;
+  const expectedEndMs = last?.expectedEndMs ?? trip.endMs;
   // Duration between the *scheduled* ends, for the same reason the ends are
   // scheduled: "48 min" has to be the sum of the times printed beside it, or the
   // three numbers on the scan line contradict each other.
@@ -534,11 +612,14 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
     trip,
     startMs,
     endMs,
+    expectedStartMs,
+    expectedEndMs,
     departure,
     arrival,
     duration,
     transfers: transfersLabel(Math.max(0, rides.length - 1)),
     scan: `${departure.aimed} → ${arrival.aimed} · ${duration}`,
+    live: journeyLive(departure, arrival, expectedStartMs, expectedEndMs, endMs - startMs),
     rides,
     connections,
     walk: walkLabel(trip),
@@ -603,11 +684,110 @@ export function commuteSegments(query: TransitCommuteQuery): CommuteSegment[] {
   return [...outbound, ...inbound];
 }
 
+/**
+ * Where a direction's journey list starts — ROADMAP §6.4 §13, the middle
+ * ground between the two ends of a saved commute.
+ *
+ * A commute is stored door to door, so the board could answer two questions:
+ * Engelsrud → Nationaltheatret and back. But the day is full of the third one —
+ * standing at Asker at 16:20, wanting the train in or the bus home, having not
+ * started from either door. The Departures view already showed *that* hop as a
+ * stop board; what it could not do is answer it the way the board answers
+ * everything else, with a journey, a ribbon, a connection and something to
+ * track.
+ *
+ * **It costs no upstream call.** The journeys from the interchange are the
+ * corridor's last hop in that direction, which the dashboard already asks for
+ * (`commuteSegmentQueries`) — so `segmentId` names the answer already in hand
+ * rather than a question to go and ask.
+ *
+ * That is also the honest limit of it: the *last* hop is the only partial the
+ * corridor's own boards contain. A commute through two interchanges would need
+ * its own question to be asked from the first of them, and none is asked here.
+ * Today's saved commute holds one `via`, so the last interchange is the only
+ * one there is.
+ */
+export type CommuteOriginId = 'door' | 'interchange';
+
+/** One choice of where the board starts, and the question that answers it. */
+export interface CommuteOrigin {
+  id: CommuteOriginId;
+  /** Where the journeys start, where they must call, and where they end. */
+  from: TransitCommutePlace;
+  via: readonly TransitCommutePlace[];
+  to: TransitCommutePlace;
+  /** `"Asker stasjon → Nationaltheatret"` — the header for this board. */
+  label: string;
+  /** `"Asker stasjon"` — what the chip says, which is the stop it starts from. */
+  chip: string;
+  /**
+   * The per-leg board its journeys are read from, or null for the whole
+   * commute, which has an answer of its own.
+   */
+  segmentId: string | null;
+}
+
+/** The direction's stops in travel order: outbound as saved, inbound reversed. */
+function directionStops(
+  query: TransitCommuteQuery,
+  direction: TransitCommuteDirection,
+): TransitCommutePlace[] {
+  const stops = [query.from, ...query.via, query.to];
+  return direction === 'outbound' ? stops : [...stops].reverse();
+}
+
+/**
+ * The starting points a direction offers: the commute's own end, and its last
+ * interchange when it has one. A commute with no interchange offers a single
+ * origin — the control is then a choice of one, and both clients hide it.
+ */
+export function commuteOrigins(
+  query: TransitCommuteQuery,
+  direction: TransitCommuteDirection,
+): CommuteOrigin[] {
+  const stops = directionStops(query, direction);
+  const to = stops[stops.length - 1]!;
+  const door: CommuteOrigin = {
+    id: 'door',
+    from: stops[0]!,
+    via: stops.slice(1, -1),
+    to,
+    label: `${stops[0]!.name} → ${to.name}`,
+    chip: stops[0]!.name,
+    segmentId: null,
+  };
+  if (stops.length < 3) return [door];
+  const from = stops[stops.length - 2]!;
+  return [
+    door,
+    {
+      id: 'interchange',
+      from,
+      via: [],
+      to,
+      label: `${from.name} → ${to.name}`,
+      chip: from.name,
+      // The corridor's last hop in this direction — `commuteSegments` numbers
+      // its hops by the stop they leave, so the last one leaves the last
+      // interchange. Derived from the same list rather than asserted, because
+      // two definitions of a hop id is one definition too many.
+      segmentId: `${direction}-${stops.length - 2}`,
+    },
+  ];
+}
+
 /** One row of a per-leg departure board. */
 export interface CommuteBoardRow {
   key: string;
   /** Epoch ms of the scheduled departure. */
   whenMs: number;
+  /**
+   * Epoch ms of the *expected* departure — what the board is ordered by and
+   * what its countdown counts to, for the same reason the journey list is
+   * (`commuteJourneyList`): the clock face is the timetable's, the order is the
+   * vehicles'.
+   */
+  expectedMs: number;
   /** **The** time — as the timetable prints it. Never replaced by an estimate. */
   aimed: string;
   /** Scheduled arrival at the far end of this hop. */
@@ -624,7 +804,7 @@ export interface CommuteBoardRow {
   /** {@link commuteLineBadge} — the same colours the journey ribbon paints. */
   badge: CommuteLineBadge;
   quay: string | null;
-  /** `"in 6 min"`. */
+  /** `"in 6 min"` — to the *expected* departure, which is when it will be here. */
   countdown: string;
   state: CommuteServiceState;
   disruptions: CommuteDisruption[];
@@ -688,6 +868,7 @@ export function commuteBoardRows(
         return {
           key: `${ride.aimedStartMs}:${ride.line?.id ?? ride.mode}:${index}`,
           whenMs: ride.aimedStartMs,
+          expectedMs: ride.expectedStartMs,
           aimed: departure.aimed,
           arrival: norwayClock(lastRide.aimedEndMs),
           estimate: commuteEstimateLabel(departure, cancelled),
@@ -696,9 +877,15 @@ export function commuteBoardRows(
           towards: ride.line?.headsign ?? null,
           badge: commuteLineBadge(ride.line),
           quay: ride.from.quay?.publicCode ?? null,
+          // A countdown is not a clock face: "in 6 min" is a claim about when
+          // the vehicle will be here, so it follows the live prediction while
+          // `aimed` above keeps §3's printed reference point. A row reading
+          // "08:41 · 08:44 est. · in 2 min" says one coherent thing; the same
+          // row counting to 08:41 sends someone out of the door for a bus that
+          // is three minutes away from arriving.
           countdown: cancelled
             ? COMMUTE_STATE_LABEL.cancelled
-            : commuteCountdown(ride.aimedStartMs, nowMs),
+            : commuteCountdown(ride.expectedStartMs, nowMs),
           state: serviceState(ride, departure),
           disruptions: notices,
           dayNote: norwayDayNote(nowMs, ride.aimedStartMs),
@@ -707,8 +894,10 @@ export function commuteBoardRows(
       })
       // Entur returns journey options ranked, not chronologically — a B→C answer
       // measured on 2026-08-25 listed 08:49, 08:59, 09:09, **09:04**, 09:19. A
-      // timetable out of time order is not a timetable.
-      .sort((a, b) => a.whenMs - b.whenMs)
+      // timetable out of time order is not a timetable. Ordered on the live
+      // departure, like the journey list above it, so the top row is the next
+      // vehicle rather than the next timetabled one.
+      .sort((a, b) => a.expectedMs - b.expectedMs || a.whenMs - b.whenMs)
       .slice(0, limit)
       .map(({ trip: _trip, ...row }) => row)
   );
@@ -717,28 +906,47 @@ export function commuteBoardRows(
 // ------------------------------------------------------------------ list ---
 
 /**
- * The journeys as a board lists them: in time order, one row per departure.
+ * The journeys as a board lists them: in the order the vehicles actually leave,
+ * one row per departure.
  *
- * Both halves were measured against the live Engelsrud ↔ Nationaltheatret
- * corridor on 2026-08-25, and both are Entur answering a slightly different
- * question than a timetable asks.
+ * Three decisions, each measured against the live Engelsrud ↔ Nationaltheatret
+ * corridor, and each one Entur answering a slightly different question than a
+ * timetable asks.
  *
  *  - **In time order.** The planner returns options *ranked*, not chronological:
- *    that run listed 20:42, 20:29, 20:42, 20:59, 21:22. A list whose second row
- *    leaves before its first is not a timetable, and the reader who scans down
- *    it for "the one after that" is reading noise. (`commuteBoardRows` learned
- *    the same thing one level down.)
+ *    a run on 2026-08-25 listed 20:42, 20:29, 20:42, 20:59, 21:22. A list whose
+ *    second row leaves before its first is not a timetable, and the reader who
+ *    scans down it for "the one after that" is reading noise. (`commuteBoardRows`
+ *    learned the same thing one level down.)
+ *  - **On live times, not timetabled ones.** The order is the one the vehicles
+ *    leave in — `expectedStartMs` — while every printed clock face stays
+ *    scheduled, which is §3 and is not in tension with this: §3 is about what a
+ *    row *says*, and a row that says 08:36 is not thereby a claim about what
+ *    leaves first. The board sorted by the timetable and then picked its
+ *    headline off the *expected* departure (`commuteLeaveNow`), so a nine-minute
+ *    delay put a bus that had not left below one that had, and the headline
+ *    announced a departure listed second. Two answers to "what leaves next" on
+ *    one screen is the confusion this closes; the delayed row explains its own
+ *    position through {@link CommuteJourneyLive}.
  *  - **One row per departure.** Two of those five were the same 20:42 bus,
  *    differing only in which train they caught at Asker — so the board printed
  *    "20:42" twice, once arriving 21:17 and once 21:35. That is not a choice
  *    anyone makes at Engelsrud: you board the same vehicle either way, and the
  *    later arrival is strictly worse. The earliest arrival stands for the
- *    departure, and the row's own legs say which train it means. A *different*
- *    first vehicle at the same minute is a real alternative and is kept, which
- *    is why the key is the vehicle and not just the clock.
+ *    departure — earliest *live* arrival, so the survivor cannot change
+ *    identity between two refreshes that agree about the timetable — and the
+ *    row's own legs say which train it means. A *different* first vehicle at
+ *    the same minute is a real alternative and is kept, which is why the key is
+ *    the vehicle and not just the clock.
  */
 export function commuteJourneyList(journeys: readonly CommuteJourney[]): CommuteJourney[] {
-  const ordered = [...journeys].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  const ordered = [...journeys].sort(
+    (a, b) =>
+      a.expectedStartMs - b.expectedStartMs ||
+      a.startMs - b.startMs ||
+      a.expectedEndMs - b.expectedEndMs ||
+      a.endMs - b.endMs,
+  );
   const seen = new Set<string>();
   return ordered.filter((journey) => {
     const first = journey.rides[0];
@@ -778,6 +986,11 @@ export function commuteLeaveNow(
   // Compared against the *expected* departure, not the scheduled one: a bus
   // running four minutes late at 08:36 is still catchable at 08:38, and telling
   // someone otherwise sends them to a stop the vehicle has not reached.
+  //
+  // `next` is simply the first survivor, which is only the right headline
+  // because the list is already in live order (`commuteJourneyList`). Filtering
+  // on the live clock while ordering on the timetabled one is what used to make
+  // the headline a departure the list showed second.
   const upcoming = journeys.filter((journey) => journey.trip.startMs >= nowMs - DELAY_THRESHOLD_MS);
   return { next: upcoming[0] ?? null, later: upcoming.slice(1) };
 }

@@ -237,6 +237,84 @@ describe('useCommuteDashboard', () => {
     unmount();
   });
 
+  /**
+   * §6.4 §13 — the day that does not start at either door. The journeys come
+   * from the hop the dashboard already asked for, so switching origin costs no
+   * upstream call and the whole board (headline, ribbon, tracking) follows.
+   */
+  it('picks the commute up at the interchange, without asking anything new', () => {
+    const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
+    expect(hook.current.origins.map((origin) => origin.chip)).toEqual([
+      'Engelsrud Terrasse',
+      'Asker stasjon',
+    ]);
+    act(() => hook.current.setOrigin('interchange'));
+    expect(hook.current.routeLabel).toBe('Asker stasjon → Nationaltheatret');
+    expect(hook.current.journeys.map((journey) => journey.scan)).toEqual([
+      '09:11 → 09:24 · 13 min',
+    ]);
+    expect(hook.current.leaveNow.next?.rides[0]?.line).toBe('L1');
+    unmount();
+  });
+
+  it('offers no starting point to choose from without an interchange', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(controller({ query: { ...query, via: [] } })),
+    );
+    expect(hook.current.origins).toEqual([]);
+    unmount();
+  });
+
+  it('falls back to the door when the chosen origin has no hop in this direction', () => {
+    // Nothing answered `inbound-1`, so the interchange board cannot be shown —
+    // and a board with no answer is not a board with no departures.
+    const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
+    act(() => hook.current.setOrigin('interchange'));
+    act(() => hook.current.setDirection('inbound'));
+    expect(hook.current.origin).toBe('interchange');
+    expect(hook.current.journeys).toEqual([]);
+    expect(hook.current.emptyNote).toBe('Could not be checked just now.');
+    unmount();
+  });
+
+  it('tracks a journey started at the interchange as one, not as a door journey', () => {
+    const commits: { origin?: string }[] = [];
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({ setCommit: (next) => commits.push(next as { origin?: string }) }),
+      ),
+    );
+    act(() => hook.current.setOrigin('interchange'));
+    act(() => hook.current.track(hook.current.leaveNow.next!));
+    // Without the origin the backend would re-read this train from Engelsrud,
+    // not find it, and release a commitment that is perfectly alive.
+    expect(commits[0]).toMatchObject({
+      direction: 'outbound',
+      departureMs: hm(9, 11),
+      line: 'L1',
+      origin: 'interchange',
+    });
+    unmount();
+  });
+
+  it('reads a commitment made at the interchange back out of its own hop', () => {
+    const { result: hook, unmount } = renderHook(() =>
+      useCommuteDashboard(
+        controller({
+          commit: {
+            direction: 'outbound',
+            departureMs: hm(9, 11),
+            line: 'L1',
+            origin: 'interchange',
+          },
+        }),
+      ),
+    );
+    expect(hook.current.here?.ride.line).toBe('L1');
+    expect(hook.current.hereJourney?.scan).toBe('09:11 → 09:24 · 13 min');
+    unmount();
+  });
+
   it('expands one journey at a time', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
     const [first, second] = hook.current.journeys;

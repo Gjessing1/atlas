@@ -6100,6 +6100,47 @@ button.transit-notice-summary {
   font-weight: 700;
 }
 
+/* Where the journey starts (§13). Deliberately quieter than the direction tabs
+   above it: the direction is the question, this is a qualification of it, and
+   two equally loud segmented controls stacked on one panel read as a form. */
+.commute-origins {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.commute-origins span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.commute-origins button {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.commute-origins button[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .commute-route {
   margin-top: 12px;
   align-items: flex-start;
@@ -6365,6 +6406,29 @@ button.transit-notice-summary {
   font-variant-numeric: tabular-nums;
 }
 
+/* The same journey on live times, under the scheduled line it corrects. Muted
+   and small: §3's rule is that the estimate supplements the timetable, and this
+   is the estimate of the whole journey rather than of one clock face. */
+.commute-live {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commute-live b {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* --- Journey options (§1) --- */
 
 .commute-journeys {
@@ -6500,11 +6564,23 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
-.commute-here-lead span:last-child {
+.commute-here-lead span:nth-child(2) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The live line for the time the lead quotes — "08:39 est.", or "On time" when
+   a feed says so. Same weight as every other estimate on the panel. */
+.commute-here-lead em {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .commute-conns {

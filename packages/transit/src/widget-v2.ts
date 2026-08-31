@@ -74,8 +74,10 @@ import {
   commuteDurationLabel,
   commuteJourney,
   commuteJourneyList,
+  commuteOrigins,
   commuteSegments,
   type CommuteJourney,
+  type CommuteOriginId,
   type CommuteServiceState,
 } from './dashboard.js';
 import { transitModeGlyph } from './labels.js';
@@ -499,6 +501,18 @@ export interface TransitWidgetV2Commit {
   line: string;
   /** Epoch ms the tap happened, for the audit the store keeps. */
   committedAtMs?: number;
+  /**
+   * Where the committed journey starts — `door` (the commute's own end) or the
+   * corridor's last `interchange`, §6.4 §13's middle ground.
+   *
+   * Optional, and absent means `door`: every commitment made before the board
+   * could start anywhere else was one, including those already sitting in a
+   * widget's `SharedPreferences`. It is part of the identity because it decides
+   * which question re-reads the journey — the train home from Asker is not in
+   * an answer asked from Engelsrud — and {@link commuteCommitKey} therefore
+   * keeps the door form byte-identical to what it always was.
+   */
+  origin?: CommuteOriginId;
 }
 
 /**
@@ -511,13 +525,27 @@ export interface TransitWidgetV2Commit {
 export function commuteCommitId(
   direction: TransitCommuteDirection,
   journey: CommuteJourney,
+  origin: CommuteOriginId = 'door',
 ): string {
-  return `${direction}:${journey.startMs}:${journey.rides[0]?.line ?? 'walk'}`;
+  return `${commitScope(direction, origin)}:${journey.startMs}:${journey.rides[0]?.line ?? 'walk'}`;
+}
+
+/**
+ * What the id's first field names: the direction, and — only when the journey
+ * starts somewhere other than the commute's own end — where from.
+ *
+ * A door commitment keeps the bare `"outbound"` it has always had, so a key
+ * written by an older build still matches the journey it named.
+ */
+function commitScope(direction: TransitCommuteDirection, origin: CommuteOriginId): string {
+  return origin === 'door' ? direction : `${direction}@${origin}`;
 }
 
 /** The same id from a stored commitment, so the two can be compared as strings. */
 export function commuteCommitKey(commit: TransitWidgetV2Commit): string {
-  return `${commit.direction}:${commit.departureMs}:${commit.line}`;
+  return `${commitScope(commit.direction, commit.origin ?? 'door')}:${commit.departureMs}:${
+    commit.line
+  }`;
 }
 
 /**
@@ -548,11 +576,16 @@ export function commuteCommitQuery(
   commit: TransitWidgetV2Commit,
   limit = 4,
 ): TransitQuery {
-  const outbound = commit.direction === 'outbound';
+  // Through `commuteOrigins`, so "which question is this board asking" has one
+  // answer: a journey committed to from the interchange is re-read from the
+  // interchange, and one committed to from the door is re-read exactly as it
+  // always was.
+  const origins = commuteOrigins(query, commit.direction);
+  const origin = origins.find((option) => option.id === (commit.origin ?? 'door')) ?? origins[0]!;
   return {
-    from: outbound ? query.from : query.to,
-    via: outbound ? query.via : [...query.via].reverse(),
-    to: outbound ? query.to : query.from,
+    from: origin.from,
+    via: origin.via,
+    to: origin.to,
     limit,
     dateTimeMs: commit.departureMs - COMMIT_LOOKBACK_MS,
     ...(query.filter.modes.length > 0 ? { modes: query.filter.modes } : {}),
@@ -623,7 +656,9 @@ export function findCommittedTrip(
   for (const journey of commuteJourneyList(
     result.trips.map((trip, index) => commuteJourney(trip, nowMs, index)),
   )) {
-    if (commuteCommitId(commit.direction, journey) === key) return journey.trip;
+    if (commuteCommitId(commit.direction, journey, commit.origin ?? 'door') === key) {
+      return journey.trip;
+    }
   }
   return null;
 }

@@ -230,6 +230,26 @@ function ScanLine({
   );
 }
 
+/**
+ * The same journey on live times, under the scheduled one it corrects.
+ *
+ * Absent whenever nothing has moved, which is most rows: this line exists to
+ * answer "is the 48 minutes with the delay in it or not", and printing it on a
+ * journey running to time would answer a question nobody asked while pushing
+ * the next departure down the panel.
+ */
+function Live({ journey }: { journey: CommuteJourney }) {
+  if (!journey.live) return null;
+  return (
+    // A span, not a paragraph: the collapsed row's whole head is a button, and
+    // a button may only contain phrasing content.
+    <span className="commute-live">
+      <b>Live</b>
+      <span>{journey.live.scan}</span>
+    </span>
+  );
+}
+
 /** The change, in the two numbers the traveller would otherwise subtract (§2). */
 function Changes({ row }: { row: CommuteDashboardRow }) {
   return (
@@ -371,6 +391,7 @@ function JourneyRow({
         onClick={onToggle}
       >
         <ScanLine journey={journey} />
+        <Live journey={journey} />
         <Ribbon parts={row.parts} />
       </button>
       <Changes row={row} />
@@ -410,13 +431,18 @@ function HereCard({
       <p className="commute-eyebrow">
         {here.heading} <b>{here.phaseLabel}</b>
       </p>
+      <Ribbon parts={here.parts} progress={here.progress} tall />
+      {/* Under the ribbon and directly above the connection block, because the
+          two are one instruction: which vehicle to be on, and what it puts you
+          on next. Above the ribbon it was separated from the change it leads to
+          by the whole width of the journey. */}
       <p className="commute-here-lead">
         <span className="commute-badge" style={badgeStyle(here.ride.badge)}>
           {glyph(here.ride.mode)} {here.ride.line}
         </span>
         <span>{here.lead}</span>
+        <em>{here.leadEstimate}</em>
       </p>
-      <Ribbon parts={here.parts} progress={here.progress} tall />
       {here.connections.length > 0 && (
         <>
           <p className="commute-eyebrow next">Next connection</p>
@@ -484,6 +510,7 @@ function LeaveNow({
         big
         countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
       />
+      <Live journey={row.journey} />
       <Ribbon parts={row.parts} tall />
       <Changes row={row} />
       <Disruptions items={row.disruptions} />
@@ -684,6 +711,27 @@ export function CommutePanel({
             {editing ? 'Done' : 'Edit commute'}
           </button>
         </div>
+        {/* §13's middle ground. A commute is saved door to door, but half a
+            commuting day starts at the change — the train in from Asker, the
+            bus home from it — and before this the board could only answer that
+            as a stop board under the Departures tab. The journeys come from the
+            hop the dashboard already asks for, so the choice costs no call. */}
+        {dashboard.origins.length > 1 && (
+          <div className="commute-origins" role="tablist" aria-label="Start the journey from">
+            <span>Start from</span>
+            {dashboard.origins.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={dashboard.origin === option.id}
+                onClick={() => dashboard.setOrigin(option.id)}
+              >
+                {option.chip}
+              </button>
+            ))}
+          </div>
+        )}
         {editing && <CommuteEditorForm editor={editor} places={places} />}
         {dashboard.offDayNote && <p className="commute-state">{dashboard.offDayNote}</p>}
         {/* §9's mode switch. It filters rather than scrolls: five journeys and

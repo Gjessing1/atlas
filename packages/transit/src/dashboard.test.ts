@@ -11,6 +11,7 @@ import {
   commuteLineBadge,
   commuteNowLabel,
   commuteOffDayNote,
+  commuteOrigins,
   commuteRibbon,
   commuteRibbonProgress,
   commuteSegments,
@@ -299,6 +300,64 @@ describe('commuteJourney', () => {
     expect(commuteJourney(twice, NOW).disruptions).toHaveLength(1);
   });
 
+  /**
+   * The question this answers, asked of a real board: "is the 48 minutes with
+   * the delay in it or not?" It is not — both ends of the scheduled window are
+   * timetable numbers — and until the live line existed nothing on the row said
+   * so either way.
+   */
+  it('states the live window separately, so the travel time says which it is', () => {
+    const delayed = trip(
+      ride({
+        line: '270',
+        from: 'Engelsrud Terrasse',
+        to: 'Asker stasjon',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+        expectedStartMs: hm(8, 39),
+        expectedEndMs: hm(9, 5),
+        realtime: true,
+      }),
+    );
+    const journey = commuteJourney(delayed, NOW);
+    // §3 holds: the printed line is still the timetable's.
+    expect(journey.scan).toBe('08:36 → 09:02 · 26 min');
+    expect(journey.live).toMatchObject({
+      departure: '08:39',
+      arrival: '09:05',
+      duration: '26 min',
+      scan: '08:39 → 09:05 est. · 26 min',
+      slower: false,
+    });
+  });
+
+  it('says so when the delay makes the journey longer, not just later', () => {
+    // Three minutes late off the stop and eight minutes late in: the vehicle
+    // lost five minutes on the way, and the timetable's 26 is now 31.
+    const journey = commuteJourney(
+      trip(
+        ride({
+          line: '270',
+          from: 'A',
+          to: 'B',
+          aimedStartMs: hm(8, 36),
+          aimedEndMs: hm(9, 2),
+          expectedStartMs: hm(8, 39),
+          expectedEndMs: hm(9, 10),
+          realtime: true,
+        }),
+      ),
+      NOW,
+    );
+    expect(journey.live).toMatchObject({ duration: '31 min', slower: true });
+  });
+
+  it('says nothing about live times when nothing has moved', () => {
+    // The commonest row on the board. A "live" line here would print an
+    // estimate identical to the timetable and push the next departure down.
+    expect(commuteJourney(specJourney(), NOW).live).toBeNull();
+  });
+
   it('names the day only when the departure is not today', () => {
     expect(commuteJourney(specJourney(), NOW).dayNote).toBeNull();
     const tomorrow = trip(
@@ -326,6 +385,54 @@ describe('commuteSegments', () => {
 
   it('generates none without an interchange — the journey list is already that board', () => {
     expect(commuteSegments(commuteQuery(false))).toEqual([]);
+  });
+});
+
+describe('commuteOrigins', () => {
+  it('offers the interchange as a starting point, in both directions (§13)', () => {
+    expect(
+      commuteOrigins(commuteQuery(), 'outbound').map((origin) => [
+        origin.id,
+        origin.label,
+        origin.segmentId,
+      ]),
+    ).toEqual([
+      ['door', 'Engelsrud Terrasse → Nationaltheatret', null],
+      ['interchange', 'Asker stasjon → Nationaltheatret', 'outbound-1'],
+    ]);
+    expect(
+      commuteOrigins(commuteQuery(), 'inbound').map((origin) => [
+        origin.id,
+        origin.label,
+        origin.segmentId,
+      ]),
+    ).toEqual([
+      ['door', 'Nationaltheatret → Engelsrud Terrasse', null],
+      ['interchange', 'Asker stasjon → Engelsrud Terrasse', 'inbound-1'],
+    ]);
+  });
+
+  /**
+   * The segment id is the whole point of the middle ground costing nothing: it
+   * names an answer the dashboard has already asked for, so it must be one
+   * `commuteSegments` actually produces.
+   */
+  it('names a hop the corridor really has', () => {
+    const hops = new Set(commuteSegments(commuteQuery()).map((segment) => segment.id));
+    for (const direction of ['outbound', 'inbound'] as const) {
+      const interchange = commuteOrigins(commuteQuery(), direction)[1]!;
+      expect(hops.has(interchange.segmentId!)).toBe(true);
+    }
+  });
+
+  it('offers one origin without an interchange — a choice of one is no choice', () => {
+    expect(commuteOrigins(commuteQuery(false), 'outbound')).toHaveLength(1);
+  });
+
+  it('carries the door’s vias, so the whole-commute question is unchanged', () => {
+    const [door, interchange] = commuteOrigins(commuteQuery(), 'outbound');
+    expect(door!.via.map((place) => place.name)).toEqual(['Asker stasjon']);
+    expect(interchange!.via).toEqual([]);
   });
 });
 
@@ -376,6 +483,33 @@ describe('commuteBoardRows', () => {
       NOW,
     );
     expect(row).toMatchObject({ aimed: '08:36', arrival: '09:02', countdown: 'in 4 min' });
+  });
+
+  /**
+   * The same reordering the journey list had, one level down — and the reason a
+   * countdown is not a clock face. "08:41 · 08:44 est. · in 2 min" is one
+   * coherent row; the same row counting to 08:41 sends someone out of the door
+   * for a bus that is three minutes from arriving.
+   */
+  it('orders and counts down on the live departure, printing the timetabled one', () => {
+    const departure = (h: number, m: number, delayMinutes: number) =>
+      trip(
+        ride({
+          line: 'R13',
+          from: 'Asker stasjon',
+          to: 'Nationaltheatret',
+          aimedStartMs: hm(h, m),
+          aimedEndMs: hm(h, m) + 18 * 60_000,
+          expectedStartMs: hm(h, m) + delayMinutes * 60_000,
+          expectedEndMs: hm(h, m) + (18 + delayMinutes) * 60_000,
+          realtime: true,
+        }),
+      );
+    const rows = commuteBoardRows(result(departure(8, 36, 9), departure(8, 40, 0)), NOW);
+    expect(rows.map((row) => [row.aimed, row.estimate, row.countdown])).toEqual([
+      ['08:40', 'On time', 'in 8 min'],
+      ['08:36', '08:45 est.', 'in 13 min'],
+    ]);
   });
 
   it('drops an all-walk answer: a true journey, but not a departure', () => {
@@ -448,6 +582,37 @@ describe('commuteJourneyList', () => {
       '20:42 → 21:17 · 35 min',
       '20:59 → 21:37 · 38 min',
     ]);
+  });
+
+  /**
+   * The reordering a reader met as "the next departure changed and I cannot see
+   * why". The board sorted by the timetable and picked its headline off the
+   * expected departure, so a delayed bus kept a slot it had physically lost and
+   * the headline named a journey listed second.
+   */
+  it('orders by the departure that actually happens, not the one printed', () => {
+    const late = (depart: [number, number], delayMinutes: number) =>
+      commuteJourney(
+        trip(
+          ride({
+            line: '270',
+            from: 'Engelsrud terrasse',
+            to: 'Asker stasjon',
+            aimedStartMs: hm(...depart),
+            aimedEndMs: hm(...depart) + 11 * 60_000,
+            expectedStartMs: hm(...depart) + delayMinutes * 60_000,
+            expectedEndMs: hm(...depart) + (11 + delayMinutes) * 60_000,
+            realtime: true,
+          }),
+        ),
+        NOW,
+      );
+    // The 08:36 is nine minutes down and will leave at 08:45; the 08:40 is on
+    // time. The list is what leaves first, and the delayed row explains its own
+    // position through its live line.
+    const list = commuteJourneyList([late([8, 36], 9), late([8, 40], 0)]);
+    expect(list.map((journey) => journey.departure.aimed)).toEqual(['08:40', '08:36']);
+    expect(list[1]!.live?.scan).toBe('08:45 → 08:56 est. · 11 min');
   });
 
   it('keeps a different vehicle leaving the same minute — that one is a real choice', () => {

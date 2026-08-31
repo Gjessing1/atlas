@@ -283,6 +283,26 @@ function ScanLine({
   );
 }
 
+/**
+ * The same journey on live times, under the scheduled one it corrects.
+ *
+ * Absent whenever nothing has moved, which is most rows: this line exists to
+ * answer "is the 48 minutes with the delay in it or not", and printing it on a
+ * journey running to time would answer a question nobody asked while pushing
+ * the next departure down the sheet.
+ */
+function Live({ journey }: { journey: CommuteJourney }) {
+  if (!journey.live) return null;
+  return (
+    <View style={styles.journeyLive}>
+      <Text style={styles.journeyLiveTag}>LIVE</Text>
+      <Text style={styles.journeyLiveText} numberOfLines={1}>
+        {journey.live.scan}
+      </Text>
+    </View>
+  );
+}
+
 /** The change, in the two numbers the traveller would otherwise subtract (§2). */
 function Changes({ row }: { row: CommuteDashboardRow }) {
   return (
@@ -436,6 +456,7 @@ function JourneyRow({
     >
       <Pressable onPress={onToggle} testID={`commute-journey-${journey.key}`}>
         <ScanLine journey={journey} />
+        <Live journey={journey} />
         <Ribbon parts={row.parts} />
       </Pressable>
       <Changes row={row} />
@@ -478,13 +499,18 @@ function HereCard({
         <Text style={styles.eyebrow}>{here.heading.toUpperCase()}</Text>
         <Text style={styles.phaseChip}>{here.phaseLabel.toUpperCase()}</Text>
       </View>
+      <Ribbon parts={here.parts} progress={here.progress} tall />
+      {/* Under the ribbon and directly above the connection block, because the
+          two are one instruction: which vehicle to be on, and what it puts you
+          on next. Above the ribbon it was separated from the change it leads to
+          by the whole width of the journey. */}
       <View style={styles.hereLead}>
         <Badge badge={here.ride.badge} mode={here.ride.mode} line={here.ride.line} />
         <Text style={styles.hereLeadText} numberOfLines={2}>
           {here.lead}
         </Text>
+        <Text style={styles.hereLeadEstimate}>{here.leadEstimate}</Text>
       </View>
-      <Ribbon parts={here.parts} progress={here.progress} tall />
       {here.connections.length > 0 ? (
         <>
           <Text style={[styles.eyebrow, styles.eyebrowNext]}>NEXT CONNECTION</Text>
@@ -556,6 +582,7 @@ function LeaveNow({
         big
         countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
       />
+      <Live journey={row.journey} />
       <Ribbon parts={row.parts} tall />
       <Changes row={row} />
       {/* In full, not clamped: this is the journey the reader is being told to
@@ -785,6 +812,34 @@ export function CommuteSheet({
             </Text>
           </Pressable>
         </View>
+        {/* §13's middle ground. A commute is saved door to door, but half a
+            commuting day starts at the change — the train in from Asker, the
+            bus home from it — and before this the board could only answer that
+            as a stop board under the Departures tab. The journeys come from the
+            hop the dashboard already asks for, so the choice costs no call. */}
+        {dashboard.origins.length > 1 ? (
+          <View style={styles.origins}>
+            <Text style={styles.originsLabel}>FROM</Text>
+            {dashboard.origins.map((option) => {
+              const selected = option.id === dashboard.origin;
+              return (
+                <Pressable
+                  key={option.id}
+                  style={[styles.originButton, selected && styles.originButtonOn]}
+                  onPress={() => dashboard.setOrigin(option.id)}
+                  testID={`commute-origin-${option.id}`}
+                >
+                  <Text
+                    style={[styles.originText, selected && styles.originTextOn]}
+                    numberOfLines={1}
+                  >
+                    {option.chip}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         {editing ? <CommuteEditorForm editor={editor} places={places} /> : null}
         {dashboard.offDayNote ? <Text style={styles.state}>{dashboard.offDayNote}</Text> : null}
         {/* §9's mode switch. It filters rather than scrolls: five journeys plus
@@ -917,6 +972,27 @@ const styles = StyleSheet.create({
   editText: { color: theme.textMuted, fontSize: 12, fontWeight: '700' },
   editTextOn: { color: theme.accent },
 
+  // Where the journey starts (§13). Quieter than the direction buttons above:
+  // the direction is the question, this qualifies it, and two equally loud
+  // segmented controls stacked on one sheet read as a form.
+  origins: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  originsLabel: { color: theme.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  originButton: {
+    // `flexBasis: 0` with `flexGrow`, never bare `flex: 1`: on React Native a
+    // long stop name would otherwise set the chip's basis and push its neighbour
+    // off the row.
+    flexGrow: 1,
+    flexBasis: 0,
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+  },
+  originButtonOn: { backgroundColor: theme.accentFaint },
+  originText: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
+  originTextOn: { color: theme.accent, fontWeight: '800' },
+
   views: {
     flexDirection: 'row',
     gap: 3,
@@ -1010,6 +1086,21 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   scanDuration: { color: theme.textMuted, fontSize: 12, fontWeight: '800', opacity: 0.75 },
+  // The same journey on live times, under the scheduled line it corrects: muted
+  // and small, because §3's estimate supplements the timetable rather than
+  // competing with it.
+  journeyLive: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  journeyLiveTag: {
+    paddingHorizontal: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.border,
+    color: theme.textMuted,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  journeyLiveText: { flexShrink: 1, color: theme.textMuted, fontSize: 12, fontWeight: '600' },
   scanDay: { color: theme.textMuted, fontSize: 10, opacity: 0.75 },
   // Counted to the expected departure — the number someone deciding whether to
   // run is actually asking for.
@@ -1067,6 +1158,14 @@ const styles = StyleSheet.create({
   },
   hereLead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   hereLeadText: { flexShrink: 1, color: theme.text, fontSize: 13, fontWeight: '600' },
+  // The live line for the time the lead quotes — "08:39 est.", or "On time"
+  // when a feed says so. Pushed to the far edge so the two read as a pair.
+  hereLeadEstimate: {
+    marginLeft: 'auto',
+    color: theme.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   conn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   connTime: { color: theme.text, fontSize: 12, fontWeight: '800' },
   connTowards: { flexShrink: 1, color: theme.textMuted, fontSize: 12, opacity: 0.8 },

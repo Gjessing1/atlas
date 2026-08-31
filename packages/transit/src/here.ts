@@ -26,7 +26,12 @@
  * the operator's record before the clock.
  */
 
-import { commuteDurationLabel, commuteRibbon, commuteRibbonProgress } from './dashboard.js';
+import {
+  commuteDurationLabel,
+  commuteEstimateLabel,
+  commuteRibbon,
+  commuteRibbonProgress,
+} from './dashboard.js';
 import type {
   CommuteBoardRow,
   CommuteJourney,
@@ -98,6 +103,17 @@ export interface CommuteHere {
   title: string;
   /** `"Arrives Asker stasjon 11:18"` — what happens next, and when. */
   lead: string;
+  /**
+   * The live line under {@link lead}: `"11:21 est."`, `"On time"`, or
+   * `"Timetable"` for a vehicle with no live feed at all.
+   *
+   * §3 on the one card that lacked it. `lead` quotes a scheduled time — the
+   * right primary number — and the tracked card is read while standing at the
+   * stop it names, which is precisely where "and is it running to that?" is the
+   * next question. It is always present, so a service with no live data says so
+   * rather than looking like one nobody has checked.
+   */
+  leadEstimate: string;
   /** The change ahead and the alternative after it; empty past the last change. */
   connections: CommuteHereConnection[];
   /** The connection the numbers have broken, or null. */
@@ -147,6 +163,16 @@ function leadLine(phase: CommuteJourneyPhase, ride: CommuteRide): string {
       // upcoming, boarding and interchange are all "get on this one, there".
       return `Leaves ${ride.from} ${ride.departure.aimed}${quay}`;
   }
+}
+
+/**
+ * The estimate for whichever of the ride's two times {@link leadLine} quoted —
+ * the arrival while aboard, the departure everywhere else. Reading it off the
+ * same phase is what keeps the two lines about one number.
+ */
+function leadEstimateLabel(phase: CommuteJourneyPhase, ride: CommuteRide): string {
+  const parts = phase === 'riding' || phase === 'arrived' ? ride.arrival : ride.departure;
+  return commuteEstimateLabel(parts, ride.state === 'cancelled');
 }
 
 /**
@@ -238,6 +264,7 @@ export function commuteHere(
     connectionRideIndex: nextConnectionIndex(journey, progress.phase, progress.rideIndex),
     title: ride.towards ? `${ride.line} to ${ride.towards}` : `${ride.line} to ${ride.to}`,
     lead: leadLine(progress.phase, ride),
+    leadEstimate: leadEstimateLabel(progress.phase, ride),
     // Past the last alighting there is no connection to make, and a card that
     // goes on offering one is describing a journey that ended.
     connections: connectionsAhead(

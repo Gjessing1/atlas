@@ -66,6 +66,11 @@ export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit 
       departureMs,
       line,
       ...(typeof raw.committedAtMs === 'number' ? { committedAtMs: raw.committedAtMs } : {}),
+      // Absent means the commute's own end, which is what every commitment
+      // written before the board could start at the interchange was. Kept
+      // through the widget's round trip for the same reason it is stored: the
+      // question that re-reads the journey depends on it.
+      ...(raw.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
     };
   } catch {
     return null;
