@@ -10,7 +10,11 @@ set -euo pipefail
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 MASTER_OUTDOOR="$DATA_DIR/tiles/outdoor.pmtiles"
 PACKS_DIR="$DATA_DIR/packs"
-PMTILES_IMAGE="protomaps/go-pmtiles:latest"
+# Pinned by digest in tools.json, like every other tool the producer runs
+# (ROADMAP §7.5 DR7) — the archive this cuts is recorded in each pack's
+# provenance, and a `:latest` that moved would make that record a guess.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PMTILES_IMAGE="$(jq -er '.pmtiles.image' "$SCRIPT_DIR/../tools.json")"
 
 [[ -f "$MASTER_OUTDOOR" ]] || {
   echo "missing $MASTER_OUTDOOR — run infrastructure/tiles/build-outdoor.sh first" >&2
@@ -41,7 +45,7 @@ for manifest in "${MANIFESTS[@]}"; do
     extract "/tiles/$(basename "$MASTER_OUTDOOR")" /out/outdoor.pmtiles.next --bbox="$bbox"
   mv -f "$next" "$pack_dir/outdoor.pmtiles"
 
-  node - "$manifest" <<'NODE'
+  node - "$manifest" "$MASTER_OUTDOOR" "${MASTER_OUTDOOR#"$DATA_DIR/"}" <<'NODE'
 const { createHash } = require('node:crypto');
 const { readFileSync, renameSync, statSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
@@ -59,6 +63,25 @@ manifest.files.outdoor = {
 };
 manifest.version = Math.max(Number(manifest.version) + 1, builtAt);
 manifest.builtAt = builtAt;
+// Keep the provenance honest about the archive this pack was actually cut
+// from: a refreshed overlay with the old input record is exactly the
+// wrong-but-readable pack DR7 exists to prevent.
+const master = process.argv[3];
+if (manifest.provenance && master) {
+  const stat = statSync(master);
+  const record = {
+    id: 'outdoor',
+    path: process.argv[4],
+    bytes: stat.size,
+    modifiedAt: Math.round(stat.mtimeMs),
+    sha256: createHash('sha256').update(readFileSync(master)).digest('hex'),
+  };
+  const inputs = manifest.provenance.inputs ?? [];
+  const at = inputs.findIndex((input) => input.id === 'outdoor');
+  if (at >= 0) inputs[at] = record;
+  else inputs.push(record);
+  manifest.provenance.inputs = inputs;
+}
 const nextManifest = `${manifestPath}.next`;
 writeFileSync(nextManifest, `${JSON.stringify(manifest, null, 2)}\n`);
 renameSync(nextManifest, manifestPath);

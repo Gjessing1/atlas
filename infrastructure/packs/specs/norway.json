@@ -1,0 +1,94 @@
+{
+  "id": "norway",
+  "name": "Norway",
+  "_bounds": "The Geofabrik norway extract, and so tiles/norway.pmtiles built from it: mainland plus Svalbard and Jan Mayen. Read from the archive headers, not guessed — a region outside this cuts an empty archive rather than failing.",
+  "bounds": {
+    "sw": { "lat": 57.56, "lng": -11.36 },
+    "ne": { "lat": 81.05, "lng": 35.52 }
+  },
+  "_countries": "Checked against valhalla/admins.sqlite before the build starts: a country with no polygon there gets Valhalla's default admin, which drives on the left.",
+  "countries": ["NO"],
+  "inputs": {
+    "basemap": { "path": "tiles/norway.pmtiles", "required": true },
+    "osm": { "path": "valhalla/norway-latest.osm.pbf", "required": true },
+    "outdoor": { "path": "tiles/outdoor.pmtiles", "required": false },
+    "nvdb": { "path": "nvdb/nvdb.sqlite", "required": false },
+    "admins": { "path": "valhalla/admins.sqlite", "required": true },
+    "timezones": { "path": "valhalla/timezones.sqlite", "required": true },
+    "assets": { "path": "assets", "required": true }
+  },
+  "regions": [
+    {
+      "id": "oslo",
+      "name": "Oslo",
+      "bbox": { "sw": { "lat": 59.7, "lng": 10.4 }, "ne": { "lat": 60.1, "lng": 11 } },
+      "smoke": {
+        "search": ["Karl Johans gate"],
+        "route": {
+          "from": { "lat": 59.911, "lng": 10.7503 },
+          "to": { "lat": 59.9297, "lng": 10.7145 }
+        }
+      }
+    },
+    {
+      "id": "ostlandet",
+      "name": "Østlandet",
+      "bbox": { "sw": { "lat": 58.5, "lng": 7 }, "ne": { "lat": 62.75, "lng": 13 } },
+      "smoke": {
+        "search": ["Lillehammer"],
+        "route": {
+          "from": { "lat": 61.1153, "lng": 10.4662 },
+          "to": { "lat": 60.7945, "lng": 11.0679 }
+        }
+      }
+    },
+    {
+      "id": "sorlandet",
+      "name": "Sørlandet",
+      "bbox": { "sw": { "lat": 57.9, "lng": 6 }, "ne": { "lat": 59.6, "lng": 9.8 } },
+      "smoke": {
+        "search": ["Kristiansand"],
+        "route": {
+          "from": { "lat": 58.1467, "lng": 7.9956 },
+          "to": { "lat": 58.4612, "lng": 8.7724 }
+        }
+      }
+    },
+    {
+      "id": "vestlandet",
+      "name": "Vestlandet",
+      "bbox": { "sw": { "lat": 58.2, "lng": 4.3 }, "ne": { "lat": 63.9, "lng": 9.7 } },
+      "smoke": {
+        "search": ["Bergen stasjon"],
+        "route": {
+          "from": { "lat": 60.3894, "lng": 5.3327 },
+          "to": { "lat": 60.6298, "lng": 6.4157 }
+        }
+      }
+    },
+    {
+      "id": "trondelag",
+      "name": "Trøndelag",
+      "bbox": { "sw": { "lat": 62.2, "lng": 8 }, "ne": { "lat": 65.3, "lng": 14.5 } },
+      "smoke": {
+        "search": ["Trondheim"],
+        "route": {
+          "from": { "lat": 63.4362, "lng": 10.3979 },
+          "to": { "lat": 63.4703, "lng": 10.9189 }
+        }
+      }
+    },
+    {
+      "id": "nord-norge",
+      "name": "Nord-Norge",
+      "bbox": { "sw": { "lat": 64.8, "lng": 10.5 }, "ne": { "lat": 71.5, "lng": 31.5 } },
+      "smoke": {
+        "search": ["Tromsø"],
+        "route": {
+          "from": { "lat": 69.6496, "lng": 18.956 },
+          "to": { "lat": 69.6797, "lng": 18.9189 }
+        }
+      }
+    }
+  ]
+}

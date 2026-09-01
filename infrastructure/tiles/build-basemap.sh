@@ -19,7 +19,11 @@ AREA="${1:-norway}"
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 CACHE_DIR="$DATA_DIR/planetiler"
 TILES_DIR="$DATA_DIR/tiles"
-PLANETILER_IMAGE="ghcr.io/onthegomap/planetiler:latest"
+# Pinned by digest in infrastructure/tools.json (ROADMAP §7.5 DR7): this
+# archive becomes a pack input, recorded there by size, mtime and digest, and a
+# tag that moved would make "which tiler cut this" unanswerable.
+PLANETILER_IMAGE="$(jq -er '.planetiler.image' \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools.json")"
 
 mkdir -p "$CACHE_DIR" "$TILES_DIR"
 

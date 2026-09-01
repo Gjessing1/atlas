@@ -410,6 +410,19 @@ export class RegionJobManager {
         bbox: job.bbox,
         version: Math.floor(builtAt / 1000),
         builtAt,
+        // A custom pack is the enclosing pack's artifacts re-cut to a smaller
+        // box — the same tiles, from the same masters, by the same tools — so
+        // it inherits that pack's compatibility contract and provenance rather
+        // than claiming a build of its own (ROADMAP §7.5 DR7).
+        ...(enclosing.manifest.compat ? { compat: enclosing.manifest.compat } : {}),
+        ...(enclosing.manifest.provenance
+          ? {
+              provenance: {
+                ...enclosing.manifest.provenance,
+                derivedFrom: enclosing.manifest.id,
+              },
+            }
+          : {}),
         downloadBase: `/region-jobs/files/${job.id}`,
         custom: true,
         expiresAt: builtAt + ARTIFACT_TTL_MS,

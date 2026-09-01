@@ -93,6 +93,17 @@ export function bboxContains(bbox: BBox, point: LatLng): boolean {
   );
 }
 
+/**
+ * Whether `outer` fully contains `inner` (inclusive). Used by the offline pack
+ * producer to refuse a region its master datasets do not cover: cutting a bbox
+ * that reaches past the source yields a valid, empty archive rather than an
+ * error, so nothing downstream would notice. Does not handle
+ * antimeridian-crossing boxes.
+ */
+export function bboxCovers(outer: BBox, inner: BBox): boolean {
+  return bboxContains(outer, inner.sw) && bboxContains(outer, inner.ne);
+}
+
 // ---- Map GeoJSON helpers (line sources shared by the app map scenes) ----
 
 /** A route/track line as a GeoJSON Feature, from [lng, lat] coordinate pairs. */

@@ -21,6 +21,7 @@ export * from './maphash.js';
 export * from './measure.js';
 export * from './nav-widgets.js';
 export * from './packs.js';
+export * from './pack-spec.js';
 export * from './places.js';
 export * from './place-content.js';
 export * from './profiles.js';

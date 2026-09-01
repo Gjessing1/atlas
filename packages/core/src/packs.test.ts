@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   packFileEntries,
+  packIncompatibleReason,
   packLayerFile,
   packUnzipDir,
+  PACK_RUNTIME_VERSION,
   type RegionPackLayerFile,
   type RegionPackManifest,
 } from './packs.js';
@@ -88,5 +90,42 @@ describe('packLayerFile', () => {
   it('does not confuse one target for another, or a pack that has none', () => {
     expect(packLayerFile(manifest({ layers: [layerFile()] }), 'hunt', 'radyr')).toBeUndefined();
     expect(packLayerFile(manifest({}), 'hunt', 'elg')).toBeUndefined();
+  });
+});
+
+describe('packIncompatibleReason', () => {
+  const pack = (compat?: RegionPackManifest['compat']): RegionPackManifest => ({
+    ...manifest({ basemap: { path: 'basemap.pmtiles', bytes: 10 } }),
+    ...(compat ? { compat } : {}),
+  });
+
+  it('accepts a pack built for this runtime', () => {
+    expect(
+      packIncompatibleReason(pack({ schema: 1, minRuntime: PACK_RUNTIME_VERSION })),
+    ).toBeNull();
+  });
+
+  it('accepts a pre-DR7 pack that declares nothing', () => {
+    // Every pack already installed on a phone is one of these; treating a
+    // missing contract as unusable would uninstall working offline maps.
+    expect(packIncompatibleReason(pack())).toBeNull();
+  });
+
+  it('accepts a newer document shape it can still read', () => {
+    // Added manifest fields are optional by construction, and the artifacts are
+    // what the app actually opens.
+    expect(packIncompatibleReason(pack({ schema: 99, minRuntime: 1 }), 1)).toBeNull();
+  });
+
+  it('rejects a pack whose artifacts need a newer app', () => {
+    expect(packIncompatibleReason(pack({ schema: 2, minRuntime: 2 }), 1)).toMatch(
+      /needs a newer version of Atlas/,
+    );
+  });
+
+  it('rejects a nonsense contract rather than trusting it', () => {
+    expect(
+      packIncompatibleReason(pack({ schema: 1, minRuntime: 0 } as RegionPackManifest['compat']), 1),
+    ).toMatch(/invalid minimum runtime/);
   });
 });

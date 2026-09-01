@@ -1,5 +1,6 @@
 import {
   packFileEntries,
+  packIncompatibleReason,
   packUnzipDir,
   type RegionPackFile,
   type RegionPackManifest,
@@ -130,13 +131,21 @@ function isSafeRelPath(relPath: string): boolean {
 }
 
 /**
- * Reject a manifest whose id or file paths could escape the packs directory or
- * are otherwise malformed, before any of it is used to build filesystem paths.
+ * Reject a manifest whose id or file paths could escape the packs directory,
+ * are otherwise malformed, or whose artifacts this build cannot read
+ * (ROADMAP §7.5 DR7), before any of it is used to build filesystem paths.
+ *
+ * Called first thing in `downloadPack`, which is what makes an incompatible
+ * pack cost nothing: no staging directory, no bytes, and — the point — the
+ * region already installed is never parked or replaced on the way to finding
+ * out. An app that is simply too old keeps the offline map it has.
  */
 export function validatePackManifest(manifest: RegionPackManifest): void {
   if (!isSafeSegment(manifest.id)) {
     throw new Error(`unsafe pack id: ${JSON.stringify(manifest.id)}`);
   }
+  const incompatible = packIncompatibleReason(manifest);
+  if (incompatible) throw new Error(incompatible);
   for (const { kind, file } of packFileEntries(manifest)) {
     if (!isSafeRelPath(file.path)) {
       throw new Error(`unsafe path for ${kind}: ${JSON.stringify(file.path)}`);

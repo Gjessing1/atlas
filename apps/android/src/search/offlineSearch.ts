@@ -1,4 +1,4 @@
-import type { SearchResult } from '@atlas/core';
+import { ftsMatchQuery, type SearchResult } from '@atlas/core';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import type { LocalPack } from '../regions/packs';
@@ -27,22 +27,12 @@ async function placeColumns(db: SQLiteDatabase): Promise<Set<string>> {
   return new Set(rows.map((row) => row.name));
 }
 
-/** Turn free text into an FTS5 prefix query, quoting out any operator syntax. */
-function ftsQuery(text: string): string | null {
-  const tokens = text
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean)
-    .map((t) => `"${t}"`);
-  if (tokens.length === 0) return null;
-  return `${tokens.join(' ')}*`;
-}
-
 export async function searchOffline(
   packs: LocalPack[],
   query: string,
   limit = 8,
 ): Promise<SearchResult[]> {
-  const match = ftsQuery(query.trim());
+  const match = ftsMatchQuery(query.trim());
   if (!match) return [];
   const results: SearchResult[] = [];
   for (const pack of packs.filter((p) => p.manifest.files.search)) {

@@ -1,26 +1,35 @@
 #!/usr/bin/env bash
 # Build an offline region pack for the Android app (Phase 6).
 #
-#   ./build-pack.sh <id> "<Name>" <minLng,minLat,maxLng,maxLat>
-#   ./build-pack.sh oslo "Oslo" 10.4,59.7,11.0,60.1
+#   ./build-pack.sh <source> <region>
+#   ./build-pack.sh norway oslo
+#   ./build-pack.sh great-britain scotland
 #
-# Produces <DATA_DIR>/packs/<id>/ containing:
-#   basemap.pmtiles   extracted from the master basemap (tiles/norway.pmtiles)
-#   outdoor.pmtiles   extracted from the outdoor overlay (tiles/outdoor.pmtiles) —
-#                     cabins, gates, ramps and shelters the basemap drops or
-#                     hides until z14; absent if that archive hasn't been built
+# Both arguments name entries in a committed spec: specs/<source>.json says
+# which master datasets the source is cut from, which of them a pack may ship
+# without, what the masters cover, and — per region — the bbox plus the search
+# and routing points that prove the result works (ROADMAP §7.5 DR7). Nothing
+# here is derived from the region id any more: the producer used to know that
+# `oslo` meant `tiles/norway.pmtiles` and that Great Britain would want
+# `tiles/outdoor-great-britain.pmtiles`, and none of those rules were visible in
+# the pack they produced.
+#
+# Produces <DATA_DIR>/packs/<region>/ containing:
+#   basemap.pmtiles   cut from the source's master basemap
+#   outdoor.pmtiles   cut from the outdoor overlay — cabins, gates, ramps and
+#                     shelters the basemap drops or hides until z14; absent
+#                     where the source declares no overlay
 #   search.sqlite     FTS5 index of named OSM features (build-search-db.mjs)
-#   valhalla.tar      Valhalla tile extract for the region (offline routing —
-#                     the same engine version the server runs, so offline and
-#                     online routes agree)
+#   nvdb.sqlite       speed limits, turn lanes and cameras (build-pack-nvdb.mjs)
+#   valhalla.tar      routing tiles, same engine version the server runs, so
+#                     offline and online routes agree
 #   assets.zip        map glyphs + sprites (offline labels/icons)
-#   pack.json         manifest served by /api/regions
+#   pack.json         manifest served by /api/regions — written LAST, after the
+#                     smoke checks, because writing it is publication
 #
-# Sources: the master .pmtiles and the Norway .osm.pbf under DATA_DIR (see
-# CLAUDE.md data dir layout). Building the routing tiles runs the same
-# Valhalla image the server uses (infrastructure/valhalla) and reuses the
-# server's admins/timezones databases from DATA_DIR/valhalla (bring the
-# server service up once, and run build-admins.sh, before building packs).
+# The build runs in a staging directory and is swapped into place only once
+# smoke-pack.mjs has opened every artifact and asked it a real question. A
+# failure anywhere leaves the previously published pack exactly as it was.
 set -euo pipefail
 
 # This host runs ~30 other containers in 15 GiB of RAM. Every docker step gets
@@ -40,93 +49,100 @@ if ((AVAIL_KB < 6 * 1024 * 1024)); then
 fi
 
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
-MASTER_PMTILES="$DATA_DIR/tiles/norway.pmtiles"
-MASTER_OUTDOOR="$DATA_DIR/tiles/outdoor.pmtiles"
-MASTER_PBF="$DATA_DIR/valhalla/norway.osm.pbf"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-ID="${1:?region id, e.g. oslo}"
-NAME="${2:?region name, e.g. Oslo}"
-BBOX="${3:?bbox as minLng,minLat,maxLng,maxLat}"
+SOURCE="${1:?source id, e.g. norway (see specs/)}"
+REGION="${2:?region id, e.g. oslo}"
 
-OUT="$DATA_DIR/packs/$ID"
-WORK="$DATA_DIR/packs-build/$ID"
-mkdir -p "$OUT" "$WORK"
+OUT="$DATA_DIR/packs/$REGION"
+WORK="$DATA_DIR/packs-build/$REGION"
+STAGE="$WORK/stage"
+PLAN="$WORK/plan.json"
+mkdir -p "$WORK"
 
-echo "==> [$ID] extracting basemap from $(basename "$MASTER_PMTILES")"
-docker run --rm "${LIMITS[@]}" -v "$DATA_DIR/tiles:/tiles" -v "$OUT:/out" protomaps/go-pmtiles:latest \
-  extract "/tiles/$(basename "$MASTER_PMTILES")" /out/basemap.pmtiles --bbox="$BBOX"
+# Everything that can be known before the expensive work: the spec parses, the
+# region is inside what the masters cover, every required input exists, the
+# admin DB has the countries (a missing polygon means Valhalla's default admin,
+# which drives on the LEFT), and which pinned tool images to run. Nothing below
+# resolves a path of its own.
+echo "==> [$REGION] planning from specs/$SOURCE.json"
+# Captured first, evaluated second: `eval "$(...)"` takes the exit status of
+# eval, so a planner that refused would otherwise be an empty eval and a build
+# that carried on into an unset-variable error further down.
+PLAN_ENV="$(node "$SCRIPT_DIR/plan-pack.mjs" "$SOURCE" "$REGION" --plan "$PLAN")"
+eval "$PLAN_ENV"
 
-# Optional, and deliberately so: a host that has never run build-outdoor.sh
-# still produces a complete, working pack — the app falls back to the
-# basemap-only outdoor layers exactly as it does online (ROADMAP §4.1).
-rm -f "$OUT/outdoor.pmtiles"
-if [[ -f "$MASTER_OUTDOOR" ]]; then
-  echo "==> [$ID] extracting outdoor overlay"
-  docker run --rm "${LIMITS[@]}" -v "$DATA_DIR/tiles:/tiles" -v "$OUT:/out" protomaps/go-pmtiles:latest \
-    extract "/tiles/$(basename "$MASTER_OUTDOOR")" /out/outdoor.pmtiles --bbox="$BBOX"
+# A stale stage can only be an interrupted build of this same region, and its
+# files are of unknown vintage. The Valhalla step writes root-owned dirs through
+# the mount, so the cleanup runs in a container.
+docker run --rm "${LIMITS[@]}" -v "$WORK:/work" "$TOOL_CLEANUP" rm -rf /work/stage
+mkdir -p "$STAGE"
+
+echo "==> [$REGION] extracting basemap from $(basename "$IN_BASEMAP")"
+docker run --rm "${LIMITS[@]}" -v "$(dirname "$IN_BASEMAP"):/tiles:ro" -v "$STAGE:/out" "$TOOL_PMTILES" \
+  extract "/tiles/$(basename "$IN_BASEMAP")" /out/basemap.pmtiles --bbox="$PACK_BBOX"
+
+# Optional, and deliberately so: a source that declares no outdoor overlay (or
+# a host that has never run build-outdoor.sh) still produces a complete,
+# working pack — the app falls back to the basemap-only outdoor layers exactly
+# as it does online (ROADMAP §4.1).
+if [[ -n "$IN_OUTDOOR" ]]; then
+  echo "==> [$REGION] extracting outdoor overlay"
+  docker run --rm "${LIMITS[@]}" -v "$(dirname "$IN_OUTDOOR"):/tiles:ro" -v "$STAGE:/out" "$TOOL_PMTILES" \
+    extract "/tiles/$(basename "$IN_OUTDOOR")" /out/outdoor.pmtiles --bbox="$PACK_BBOX"
 else
-  echo "==> [$ID] no $MASTER_OUTDOOR — skipping outdoor overlay"
+  echo "==> [$REGION] $PACK_SOURCE declares no outdoor overlay — skipping"
 fi
 
-echo "==> [$ID] extracting region .osm.pbf"
-docker run --rm "${LIMITS[@]}" -v "$(dirname "$MASTER_PBF"):/in" -v "$WORK:/work" iboates/osmium:latest \
-  extract --bbox "$BBOX" --overwrite -o "/work/$ID.osm.pbf" "/in/$(basename "$MASTER_PBF")"
+echo "==> [$REGION] extracting region .osm.pbf"
+docker run --rm "${LIMITS[@]}" -v "$(dirname "$IN_OSM"):/in:ro" -v "$WORK:/work" "$TOOL_OSMIUM" \
+  extract --bbox "$PACK_BBOX" --overwrite -o "/work/$REGION.osm.pbf" "/in/$(basename "$IN_OSM")"
 
-echo "==> [$ID] building search.sqlite"
+echo "==> [$REGION] building search.sqlite"
 # Disk-backed node index: export memory stays flat no matter the region size
 # (the in-memory default scales with node count and would hit the cap).
-docker run --rm "${LIMITS[@]}" -v "$WORK:/work" iboates/osmium:latest \
-  export --overwrite -f geojsonseq -i "sparse_file_array,/work/$ID.nodeidx" \
-  -o "/work/$ID.geojsonseq" "/work/$ID.osm.pbf"
-node "$SCRIPT_DIR/build-search-db.mjs" "$OUT/search.sqlite" "$NAME" < "$WORK/$ID.geojsonseq"
-node "$SCRIPT_DIR/enrich-place-content.mjs" "$OUT/search.sqlite"
+docker run --rm "${LIMITS[@]}" -v "$WORK:/work" "$TOOL_OSMIUM" \
+  export --overwrite -f geojsonseq -i "sparse_file_array,/work/$REGION.nodeidx" \
+  -o "/work/$REGION.geojsonseq" "/work/$REGION.osm.pbf"
+node "$SCRIPT_DIR/build-search-db.mjs" "$STAGE/search.sqlite" "$PACK_NAME" < "$WORK/$REGION.geojsonseq"
+node "$SCRIPT_DIR/enrich-place-content.mjs" "$STAGE/search.sqlite"
 
-echo "==> [$ID] building nvdb.sqlite (speed limits + turn lanes + cameras)"
-# Offline road data (ROADMAP §2.1): NVDB speed limits + turn lanes + ATK cameras clipped from
-# the national master, plus OSM speed cameras read from the same region extract
-# for coverage outside Norway. Reuses the search stream, so it must run before
-# the geojsonseq is removed. The script deletes its output when the region has
-# no road data, so a missing file below simply means "nothing to ship".
-rm -f "$OUT/nvdb.sqlite"
-node "$SCRIPT_DIR/build-pack-nvdb.mjs" "$OUT/nvdb.sqlite" "$BBOX" "$DATA_DIR/nvdb/nvdb.sqlite" \
-  < "$WORK/$ID.geojsonseq"
-rm -f "$WORK/$ID.geojsonseq" "$WORK/$ID.nodeidx"
+echo "==> [$REGION] building nvdb.sqlite (speed limits + turn lanes + cameras)"
+# Offline road data (ROADMAP §2.1): NVDB speed limits + turn lanes + ATK cameras
+# clipped from the national master where the source has one, plus OSM speed
+# cameras read from the same region extract — the only camera data available
+# outside Norway. Reuses the search stream, so it must run before the
+# geojsonseq is removed. The script deletes its output when the region has no
+# road data, so a missing file below simply means "nothing to ship".
+node "$SCRIPT_DIR/build-pack-nvdb.mjs" "$STAGE/nvdb.sqlite" "$PACK_BBOX" ${IN_NVDB:+"$IN_NVDB"} \
+  < "$WORK/$REGION.geojsonseq"
+rm -f "$WORK/$REGION.geojsonseq" "$WORK/$REGION.nodeidx"
 
-echo "==> [$ID] building Valhalla routing tiles"
-# Reuse the server's timezones (built by infrastructure/valhalla on first
-# start), which skips a shapefile download per pack, and its admin database
-# (built by infrastructure/valhalla/build-admins.sh) so an offline pack counts
-# roundabout exits on the same side as the server. Both are required: a pack
-# is what the phone routes from abroad, which is exactly where a wrong driving
-# side would be a surprise rather than a nuisance.
-VALHALLA_MASTER="$DATA_DIR/valhalla"
-for f in timezones.sqlite admins.sqlite; do
-  [[ -f "$VALHALLA_MASTER/$f" ]] || {
-    echo "missing $VALHALLA_MASTER/$f — start infrastructure/valhalla once first" >&2
-    echo "(admins.sqlite comes from infrastructure/valhalla/build-admins.sh)." >&2
-    exit 1
-  }
-done
-# Tile builds run as root in the container; clean any stale root-owned dir.
-docker run --rm -v "$WORK:/work" alpine:latest rm -rf /work/valhalla-tiles /work/valhalla.tar
+echo "==> [$REGION] building Valhalla routing tiles"
+# Reuse the server's timezones and its admin database, so an offline pack counts
+# roundabout exits on the same side as the server. Both are required by every
+# spec: a pack is what the phone routes from abroad, which is exactly where a
+# wrong driving side would be a surprise rather than a nuisance.
+docker run --rm "${LIMITS[@]}" -v "$WORK:/work" "$TOOL_CLEANUP" rm -rf /work/valhalla-tiles /work/valhalla.tar
+# The data dir is mounted whole and read-only rather than one input's parent:
+# a spec may keep the admin and timezone databases in different directories.
 docker run --rm "${LIMITS[@]}" \
   -v "$WORK:/work" \
-  -v "$VALHALLA_MASTER:/master:ro" \
+  -v "$DATA_DIR:/data:ro" \
   --entrypoint bash \
-  ghcr.io/valhalla/valhalla:3.8.2 \
+  "$TOOL_VALHALLA" \
   -c "set -euo pipefail
       valhalla_build_config \
         --mjolnir-tile-dir /work/valhalla-tiles \
         --mjolnir-tile-extract /work/valhalla.tar \
-        --mjolnir-timezone /master/timezones.sqlite \
-        --mjolnir-admin /master/admins.sqlite \
+        --mjolnir-timezone /data/$REL_TIMEZONES \
+        --mjolnir-admin /data/$REL_ADMINS \
         --mjolnir-concurrency 2 > /work/valhalla.json
-      valhalla_build_tiles -c /work/valhalla.json /work/$ID.osm.pbf
+      valhalla_build_tiles -c /work/valhalla.json /work/$REGION.osm.pbf
       valhalla_build_extract -c /work/valhalla.json -v --overwrite"
-cp "$WORK/valhalla.tar" "$OUT/valhalla.tar"
+cp "$WORK/valhalla.tar" "$STAGE/valhalla.tar"
 
-echo "==> [$ID] zipping assets"
+echo "==> [$REGION] zipping assets"
 # No zip binary on the host; python3 stdlib makes an equivalent deflated zip.
 zipdir() { # zipdir <srcdir> <out.zip> [entries…, default all of srcdir]
   python3 - "$@" <<'PY'
@@ -145,64 +161,32 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
                 z.write(full, os.path.relpath(full, src))
 PY
 }
-zipdir "$DATA_DIR/assets" "$OUT/assets.zip" fonts sprites
+zipdir "$IN_ASSETS" "$STAGE/assets.zip" fonts sprites
 
-echo "==> [$ID] writing pack.json"
-IFS=',' read -r MINLNG MINLAT MAXLNG MAXLAT <<< "$BBOX"
-node -e "
-const { statSync, writeFileSync, createReadStream, existsSync } = require('node:fs');
-const { createHash } = require('node:crypto');
-const out = process.argv[1];
-const builtAt = Date.now();
-// Streamed SHA-256 so the multi-hundred-MB tiles/routing files never load
-// wholesale; the device verifies each file against these digests before it
-// replaces a good pack.
-const sha256 = (p) =>
-  new Promise((res, rej) => {
-    const h = createHash('sha256');
-    createReadStream(out + '/' + p)
-      .on('data', (c) => h.update(c))
-      .on('end', () => res(h.digest('hex')))
-      .on('error', rej);
-  });
-const file = async (p) => ({ path: p, bytes: statSync(out + '/' + p).size, sha256: await sha256(p) });
-(async () => {
-  const files = {
-    basemap: await file('basemap.pmtiles'),
-    search: await file('search.sqlite'),
-    routing: await file('valhalla.tar'),
-    assets: await file('assets.zip'),
-  };
-  // Optional: build-pack-nvdb.mjs writes this only when the region has road data.
-  if (existsSync(out + '/nvdb.sqlite')) files.nvdb = await file('nvdb.sqlite');
-  // Optional: only present once tiles/outdoor.pmtiles has been built.
-  if (existsSync(out + '/outdoor.pmtiles')) files.outdoor = await file('outdoor.pmtiles');
-  writeFileSync(out + '/pack.json', JSON.stringify({
-    id: process.argv[2],
-    name: process.argv[3],
-    bbox: { sw: { lat: $MINLAT, lng: $MINLNG }, ne: { lat: $MAXLAT, lng: $MAXLNG } },
-    // Milliseconds keep published versions monotonic with partial pack refreshes
-    // (refresh-outdoor.sh) while still remaining an opaque comparable number to
-    // clients. A seconds value after one of those refreshes would look older.
-    version: builtAt,
-    builtAt,
-    files,
-  }, null, 2));
-})();
-" "$OUT" "$ID" "$NAME"
+echo "==> [$REGION] smoke checks"
+# Opens every artifact and asks it the question a phone will ask: draw this
+# tile, find this place, route between these two points. Checksums cannot tell
+# an intact archive of the wrong place from the right one.
+node "$SCRIPT_DIR/smoke-pack.mjs" "$PLAN" "$STAGE"
 
-echo "==> [$ID] removing stale files"
-# Drop leftovers from earlier builds (e.g. graph.zip from the GraphHopper era)
-# so the pack dir only ever holds what pack.json references.
-for f in "$OUT"/*; do
-  case "$(basename "$f")" in
-    basemap.pmtiles | outdoor.pmtiles | search.sqlite | valhalla.tar | assets.zip | nvdb.sqlite | pack.json) ;;
-    *)
-      echo "    removing stale $(basename "$f")"
-      rm -rf "$f"
-      ;;
-  esac
-done
+echo "==> [$REGION] writing pack.json"
+node "$SCRIPT_DIR/write-manifest.mjs" "$PLAN" "$STAGE"
 
-echo "==> [$ID] done:"
+echo "==> [$REGION] publishing"
+# The swap, mirroring what the device does with a downloaded pack: the previous
+# pack is parked, the new one moved in, the parked copy dropped only once the
+# new one is in place. Same filesystem, so each move is a rename.
+if [[ -d "$OUT" ]]; then
+  rm -rf "$OUT.old"
+  mv "$OUT" "$OUT.old"
+fi
+mkdir -p "$(dirname "$OUT")"
+if ! mv "$STAGE" "$OUT"; then
+  [[ -d "$OUT.old" ]] && mv "$OUT.old" "$OUT"
+  echo "publish failed — the previous pack is back in place" >&2
+  exit 1
+fi
+rm -rf "$OUT.old"
+
+echo "==> [$REGION] done:"
 ls -la "$OUT"

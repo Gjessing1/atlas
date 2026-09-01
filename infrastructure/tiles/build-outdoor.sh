@@ -22,7 +22,10 @@ DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 CACHE_DIR="$DATA_DIR/planetiler"
 TILES_DIR="$DATA_DIR/tiles"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLANETILER_IMAGE="ghcr.io/onthegomap/planetiler:latest"
+# Pinned by digest in infrastructure/tools.json (ROADMAP §7.5 DR7), the same
+# tiler that cuts the basemap beside it.
+PLANETILER_IMAGE="$(jq -er '.planetiler.image' \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools.json")"
 
 mkdir -p "$CACHE_DIR/sources" "$TILES_DIR"
 

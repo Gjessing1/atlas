@@ -151,7 +151,25 @@ export class PackDownloadManager {
    * downloaded it goes straight to installing.
    */
   async start(manifest: RegionPackManifest, wifiOnly = false): Promise<void> {
-    validatePackManifest(manifest);
+    try {
+      validatePackManifest(manifest);
+    } catch (err) {
+      // Every caller starts a download without awaiting it, so throwing here
+      // would be an unhandled rejection and a button that did nothing. The
+      // reachable case is a pack built for a newer app (ROADMAP §7.5 DR7):
+      // report it where the download's own errors already show.
+      this.put({
+        id: manifest.id,
+        name: manifest.name,
+        phase: 'failed',
+        fraction: 0,
+        bytesDone: 0,
+        bytesTotal: 0,
+        error: message(err),
+        wifiOnly,
+      });
+      return;
+    }
     // Already in flight: re-enqueueing would replace a worker that is mid-file
     // and could leave two of them appending to it.
     const running = this.jobs.get(manifest.id)?.phase;

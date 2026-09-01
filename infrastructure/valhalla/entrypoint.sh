@@ -18,27 +18,26 @@
 # consciously dropped in the GraphHopper -> Valhalla switch (see ROADMAP).
 set -euo pipefail
 
-# Coverage: Norway + Sweden (home), the land corridor down to the North Sea
-# ferries (Denmark, Germany, Netherlands, Belgium), and the British Isles —
-# Great Britain, Ireland + Northern Ireland, and the Crown Dependencies, whose
-# extracts are a few MB each and complete "the whole UK".
-#
-# Every left-driving country in Europe is in that last group; Malta and Cyprus
-# are the only others on the continent and are left out only because no road
-# reaches them from here. The admin DB covers them anyway, so adding them later
-# is a one-line change with the driving side already correct.
+# Coverage is a committed list of Geofabrik areas (coverage.list, copied into
+# the image beside this script) rather than a URL list written out here, so the
+# out-of-band host rebuild in build-tiles.sh graphs exactly what the service
+# would build for itself. Widen coverage by editing that file — and note that a
+# new left-driving country also needs its ISO row in the admin DB's
+# verification list; the build below refuses to graph one without it.
 GEOFABRIK=https://download.geofabrik.de/europe
-PBF_URLS="${VALHALLA_PBF_URLS:-\
-$GEOFABRIK/norway-latest.osm.pbf \
-$GEOFABRIK/sweden-latest.osm.pbf \
-$GEOFABRIK/denmark-latest.osm.pbf \
-$GEOFABRIK/germany-latest.osm.pbf \
-$GEOFABRIK/netherlands-latest.osm.pbf \
-$GEOFABRIK/belgium-latest.osm.pbf \
-$GEOFABRIK/great-britain-latest.osm.pbf \
-$GEOFABRIK/ireland-and-northern-ireland-latest.osm.pbf \
-$GEOFABRIK/isle-of-man-latest.osm.pbf \
-$GEOFABRIK/guernsey-jersey-latest.osm.pbf}"
+COVERAGE_LIST="${VALHALLA_COVERAGE_LIST:-/coverage.list}"
+if [ -n "${VALHALLA_PBF_URLS:-}" ]; then
+  PBF_URLS="$VALHALLA_PBF_URLS"
+else
+  [ -f "$COVERAGE_LIST" ] || {
+    echo "ERROR: no coverage list at $COVERAGE_LIST — the image copies it in from" >&2
+    echo "infrastructure/valhalla/coverage.list. Set VALHALLA_PBF_URLS to override." >&2
+    exit 1
+  }
+  PBF_URLS="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$COVERAGE_LIST" \
+    | while read -r area; do printf '%s/%s-latest.osm.pbf ' "$GEOFABRIK" "$area"; done)"
+fi
+
 DATA_DIR=/data
 CONFIG="$DATA_DIR/valhalla.json"
 CONCURRENCY="${VALHALLA_CONCURRENCY:-2}"
@@ -111,7 +110,20 @@ if [ ! -f "$DATA_DIR/tiles.tar" ]; then
   fi
   echo ">> No tile extract at $DATA_DIR/tiles.tar - building tiles from: ${PBFS[*]}"
   valhalla_build_timezones > "$DATA_DIR/timezones.sqlite"
-  valhalla_build_tiles -c "$CONFIG" "${PBFS[@]}"
+  # Merge first when there is more than one extract. Valhalla warns that
+  # building from several .osm.pbf at once is discouraged (valhalla#3925), and
+  # with this coverage it does not merely warn: neighbouring Geofabrik extracts
+  # overlap at every border, and ten of them aborted the build with a core dump
+  # while writing tiles on the German/French border. The same area built
+  # cleanly from one merged file, so the overlap is the fault, not the data.
+  SOURCE="$DATA_DIR/graph-source.osm.pbf"
+  if [ "${#PBFS[@]}" -gt 1 ]; then
+    echo ">> Merging ${#PBFS[@]} extracts into $(basename "$SOURCE")"
+    osmium merge "${PBFS[@]}" -o "$SOURCE" --overwrite
+  else
+    SOURCE="${PBFS[0]}"
+  fi
+  valhalla_build_tiles -c "$CONFIG" "$SOURCE"
   # Single-file tar of all tiles: faster startup (one mmap) and the marker
   # that the build finished — a crashed build leaves no tiles.tar and reruns.
   valhalla_build_extract -c "$CONFIG" -v --overwrite

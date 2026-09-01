@@ -279,6 +279,19 @@ describe('validatePackManifest', () => {
     bad.files.routing!.bytes = -1;
     expect(() => validatePackManifest(bad)).toThrow(/invalid byte count/);
   });
+
+  it('rejects a pack built for a newer app', () => {
+    const future = makeManifest();
+    future.compat = { schema: 9, minRuntime: 99 };
+    expect(() => validatePackManifest(future)).toThrow(/needs a newer version of Atlas/);
+  });
+
+  it('accepts a pack that predates the compatibility contract', () => {
+    // Every pack already on a phone is one of these.
+    const legacy = makeManifest();
+    delete legacy.compat;
+    expect(() => validatePackManifest(legacy)).not.toThrow();
+  });
 });
 
 /**
@@ -400,6 +413,21 @@ describe('downloadPack', () => {
     expect(await readJson(`${packDir('oslo')}/pack.json`)).toEqual({ version: 1 });
     // The corrupt artifact was discarded from staging.
     expect(h.memfs.has(`${packDir('oslo')}.staging/valhalla.tar`)).toBe(false);
+  });
+
+  it('refuses an incompatible pack without touching the installed one', async () => {
+    // The pack the app cannot read is not a failed download to retry: it is a
+    // pack this build must decline, and declining costs no bytes and leaves the
+    // region already installed exactly where it was (ROADMAP §7.5 DR7).
+    seedLivePack();
+    const future = makeManifest();
+    future.compat = { schema: 9, minRuntime: 99 };
+
+    await expect(downloadPack(future, () => {})).rejects.toThrow(/needs a newer version of Atlas/);
+
+    expect(await readJson(`${packDir('oslo')}/pack.json`)).toEqual({ version: 1 });
+    expect(h.memfs.has(`${packDir('oslo')}.staging`)).toBe(false);
+    expect(h.memfs.has(`${packDir('oslo')}.old`)).toBe(false);
   });
 
   it('survives an interrupted download and resumes to completion', async () => {

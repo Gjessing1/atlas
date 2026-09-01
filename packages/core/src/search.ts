@@ -347,3 +347,24 @@ export function savedPlaceResults<T extends SearchablePlace>(
     position: { lat: p.lat, lng: p.lng },
   }));
 }
+
+/**
+ * Free text as an FTS5 prefix query against a pack's `places` index, or null
+ * when there is nothing searchable in it.
+ *
+ * Every token is quoted, which is what keeps a place name that happens to
+ * contain FTS5 syntax (`AND`, `NEAR`, a bare `*`) from being read as an
+ * operator, and the trailing `*` is what makes typing "Bergs" find "Bergsvegen".
+ *
+ * Lives here rather than in the Android search module because the offline pack
+ * producer runs the same query as its smoke check (ROADMAP §7.5 DR7): a pack is
+ * only published once the index answers the way the phone will ask.
+ */
+export function ftsMatchQuery(text: string): string | null {
+  const tokens = text
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((token) => `"${token}"`);
+  if (tokens.length === 0) return null;
+  return `${tokens.join(' ')}*`;
+}

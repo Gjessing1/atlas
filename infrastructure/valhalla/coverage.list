@@ -1,0 +1,26 @@
+# Routing coverage — one Geofabrik area per line, resolved against
+# https://download.geofabrik.de/europe/<area>-latest.osm.pbf
+#
+# Read by entrypoint.sh (inside the image, copied to /coverage.list) and by
+# build-tiles.sh (on the host), so widening coverage is one edit rather than
+# two that can disagree. VALHALLA_PBF_URLS still overrides it entirely.
+#
+# What is here and why: Norway + Sweden (home), the land corridor down to the
+# North Sea ferries (Denmark, Germany, Netherlands, Belgium), and the British
+# Isles — Great Britain, Ireland + Northern Ireland, and the Crown
+# Dependencies, whose extracts are a few MB each and complete "the whole UK".
+#
+# Every left-driving country in Europe is in that last group; Malta and Cyprus
+# are the only others on the continent and are left out only because no road
+# reaches them from here. The admin DB covers them anyway, so adding them
+# later is a one-line change with the driving side already correct.
+norway
+sweden
+denmark
+germany
+netherlands
+belgium
+great-britain
+ireland-and-northern-ireland
+isle-of-man
+guernsey-jersey

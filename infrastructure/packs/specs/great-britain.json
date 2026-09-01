@@ -1,0 +1,36 @@
+{
+  "id": "great-britain",
+  "name": "Great Britain",
+  "_bounds": "Header bbox of the Geofabrik great-britain extract (2026-08-30), which reaches well out to sea; the basemap built from the same extract shares it. Ireland is a separate extract and so a separate source.",
+  "bounds": {
+    "sw": { "lat": 49.53, "lng": -15.33 },
+    "ne": { "lat": 61.92, "lng": 2.51 }
+  },
+  "_countries": "Checked against valhalla/admins.sqlite before the build starts: a country with no polygon there gets Valhalla's default admin, which drives on the left.",
+  "countries": ["GB"],
+  "_inputs": "Britain drives on the left, which is entirely a property of admins.sqlite: without it every roundabout here is numbered off the wrong side of the road. It is the same continent-wide database the server routes from (infrastructure/valhalla/build-admins.sh), which is why it is required rather than merely nice.",
+  "inputs": {
+    "basemap": { "path": "tiles/great-britain.pmtiles", "required": true },
+    "osm": { "path": "valhalla/great-britain-latest.osm.pbf", "required": true },
+    "outdoor": { "path": null, "required": false },
+    "nvdb": { "path": null, "required": false },
+    "admins": { "path": "valhalla/admins.sqlite", "required": true },
+    "timezones": { "path": "valhalla/timezones.sqlite", "required": true },
+    "assets": { "path": "assets", "required": true }
+  },
+  "_regions": "Scotland is the first pack cut outside Norway. The box takes the Hebrides, Orkney and Shetland with the mainland, and stops short of the English border cities.",
+  "regions": [
+    {
+      "id": "scotland",
+      "name": "Scotland",
+      "bbox": { "sw": { "lat": 54.5, "lng": -8.7 }, "ne": { "lat": 61, "lng": -0.7 } },
+      "smoke": {
+        "search": ["Edinburgh", "Inverness"],
+        "route": {
+          "from": { "lat": 55.9533, "lng": -3.1883 },
+          "to": { "lat": 55.8642, "lng": -4.2518 }
+        }
+      }
+    }
+  ]
+}
