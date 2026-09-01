@@ -45,9 +45,10 @@ import { theme } from './theme';
  * What it replaced was a configuration form with a result list stapled under
  * it: three stop pickers, two time fields, seven day chips and a wall of line
  * chips before the first departure time. The sheet now opens on the answer —
- * what leaving now gets you, the complete journey options as one scannable line
- * each, and the per-leg boards for someone already on the bus — with the form
- * behind "Edit commute".
+ * what leaving now gets you, then the complete journey options as one scannable
+ * line each — with the form behind "Edit commute". The middle mode reads
+ * differently on purpose (§13): standing at the change you are not planning a
+ * journey, so it draws the departure boards leaving that stop instead.
  *
  * Nothing here formats a time or decides a status; `@atlas/transit` does both,
  * so this sheet and the browser panel and the home-screen widget cannot
@@ -613,7 +614,7 @@ function LeaveNow({
   );
 }
 
-/** One row of a per-leg board: scheduled time first, estimate labelled beneath. */
+/** One row of a departure board: scheduled time first, estimate labelled beneath. */
 function BoardRow({ row }: { row: CommuteBoardRow }) {
   return (
     <View style={[styles.boardRow, { borderLeftColor: STATE_COLOUR[row.state] }]}>
@@ -643,9 +644,16 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
   );
 }
 
-function Board({ board }: { board: CommuteDashboardBoard }) {
+function Board({
+  board,
+  divided = false,
+}: {
+  board: CommuteDashboardBoard;
+  /** A board under another one: the rule that separates them is this one's. */
+  divided?: boolean;
+}) {
   return (
-    <View style={styles.board}>
+    <View style={[styles.board, divided && styles.boardDivided]}>
       <Text style={styles.boardHead} numberOfLines={2}>
         {board.segment.from.name.toUpperCase()} ↓ {board.segment.to.name.toUpperCase()}
       </Text>
@@ -680,14 +688,13 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
  * it was the one people wanted.
  */
 /**
- * One journey list, whole: its shared notices, its headline, its rows and the
+ * The journey list, whole: its shared notices, its headline, its rows and the
  * reason there is none — §6.4 §13.
  *
- * A section rather than a run of views on the sheet because the interchange
- * mode draws *two* of them, and a reader has to be able to tell which list a
- * departure belongs to without reading the line number and reasoning about
- * geography. The heading is the destination ("Towards Nationaltheatret"), which
- * is what the platform signs at Asker say.
+ * A component rather than a run of views on the sheet because it is one
+ * question's answer: everything in it describes the same direction, door to
+ * door, and the mode that asks about a *stop* draws boards instead of a
+ * hollowed-out one of these.
  */
 function Journeys({
   section,
@@ -696,8 +703,6 @@ function Journeys({
   expanded,
   onToggle,
   onClearLines,
-  alone,
-  divided,
 }: {
   section: CommuteDashboardSection;
   nowMs: number;
@@ -706,24 +711,13 @@ function Journeys({
   expanded: string | null;
   onToggle: (key: string) => void;
   onClearLines: () => void;
-  /** The only list this mode shows — nothing to be told apart from. */
-  alone: boolean;
-  /** A list under another one: the rule that separates them is this one's. */
-  divided: boolean;
 }) {
   const lead = section.leadRow;
   return (
     <View testID={`commute-list-${section.key}`}>
-      {alone ? null : (
-        <View style={[styles.listHead, divided && styles.listHeadDivided]}>
-          <Text style={styles.listHeading}>{section.heading}</Text>
-          <Text style={styles.listRoute}>{section.label}</Text>
-        </View>
-      )}
       {/* One notice on every journey in the list is the corridor's, not any
-          journey's — said once, above them, rather than five times inside them.
-          Per list: a signal fault on the way in is not news to someone reading
-          the way home. */}
+          journey's — said once, above them, rather than five times inside
+          them. */}
       <Disruptions items={section.sharedDisruptions} />
       {lead ? (
         <LeaveNow
@@ -747,12 +741,10 @@ function Journeys({
       ) : null}
       {/* Not `journeys`: the one above is already answered in full, and a list
           that repeats it as its own first row costs the reader the departure
-          they were actually looking for. The head is dropped when the list
-          already carries one — two uppercase eyebrows six lines apart say less
-          than one does. */}
+          they were actually looking for. */}
       {section.rows.length > 0 ? (
         <>
-          {alone ? <Text style={styles.sectionHead}>NEXT JOURNEYS</Text> : null}
+          <Text style={styles.sectionHead}>NEXT JOURNEYS</Text>
           {section.rows.map((row) => (
             <JourneyRow
               row={row}
@@ -882,11 +874,11 @@ export function CommuteSheet({
         keyboardShouldPersistTaps="handled"
       >
         {!commute.ready ? <Text style={styles.state}>Loading saved commute…</Text> : null}
-        {/* §6.4 §13's three modes. Out, back, and the middle ground: one
-            control, because "which direction" and "read from which end" were
-            two stacked segmented controls whose four combinations included two
-            nobody asks for. The third mode is not a direction at all — it is
-            the change, and it lists *both* directions from it. */}
+        {/* §6.4 §13's three modes, and the only control over what is shown.
+            Out, back, and the middle ground — the third is not a direction at
+            all but the change, drawn as the departures leaving it in both
+            directions. A Journeys/Departures switch under this made nine
+            states out of three; six of them answered nothing anyone asked. */}
         <View style={styles.toolbar}>
           <View style={styles.modes}>
             {dashboard.modes.map((item) => {
@@ -920,8 +912,8 @@ export function CommuteSheet({
         </View>
         {/* …and the offer to have one at all. A commute is saved door to door,
             so a corridor that changes at Asker on every single journey had no
-            interchange saved, no per-leg boards and no middle ground — and no
-            way to find out a Via stop was what all three were waiting on. */}
+            interchange saved and no middle ground — and no way to find out a
+            Via stop was what both were waiting on. */}
         {editor.suggestedVia ? (
           <View style={styles.suggest}>
             <Text style={styles.suggestText}>
@@ -945,59 +937,35 @@ export function CommuteSheet({
         ) : null}
         {editing ? <CommuteEditorForm editor={editor} places={places} /> : null}
         {dashboard.offDayNote ? <Text style={styles.state}>{dashboard.offDayNote}</Text> : null}
-        {/* §9's view switch. It filters rather than scrolls: five journeys plus
-            four five-row boards is more than one glance holds, and the whole
-            dashboard exists to be glanced at. Journeys stay the landing view. */}
-        {dashboard.hasBoards ? (
-          <View style={styles.views}>
-            {(['overview', 'departures'] as const).map((item) => {
-              const selected = item === dashboard.view;
-              return (
-                <Pressable
-                  key={item}
-                  style={[styles.viewButton, selected && styles.viewButtonOn]}
-                  onPress={() => dashboard.setView(item)}
-                  testID={`commute-view-${item}`}
-                >
-                  <Text style={[styles.viewText, selected && styles.viewTextOn]}>
-                    {item === 'overview' ? 'Journeys' : 'Departures'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
         {commute.loading ? <Text style={styles.state}>Checking upcoming journeys…</Text> : null}
         {commute.error ? <Text style={[styles.state, styles.error]}>{commute.error}</Text> : null}
-        {dashboard.view === 'overview' ? (
-          <>
-            {/* Above the lists rather than inside one: a commitment outlives
-                the list its journey came from, and at the interchange it is
-                just as likely to be about the other one. */}
-            {dashboard.here ? (
-              <HereCard
-                here={dashboard.here}
-                journey={dashboard.hereJourney}
-                onStop={dashboard.stopTracking}
-              />
-            ) : null}
-            {dashboard.sections.map((section, index) => (
-              <Journeys
-                key={section.key}
-                section={section}
-                nowMs={dashboard.nowMs}
-                tracking={Boolean(dashboard.here)}
-                expanded={dashboard.expanded}
-                onToggle={dashboard.toggle}
-                onClearLines={editor.clearLines}
-                alone={dashboard.sections.length === 1}
-                divided={index > 0}
-              />
-            ))}
-          </>
-        ) : (
-          dashboard.boards.map((board) => <Board board={board} key={board.segment.id} />)
-        )}
+        {/* Above the list rather than inside it: a commitment outlives the list
+            its journey came from — a mode switch included — and the card is
+            what the traveller stops it on. */}
+        {dashboard.here ? (
+          <HereCard
+            here={dashboard.here}
+            journey={dashboard.hereJourney}
+            onStop={dashboard.stopTracking}
+          />
+        ) : null}
+        {/* One mode, one kind of content: a door mode has the journey list and
+            no boards, the interchange has the two boards leaving it and no
+            list. Both are drawn rather than switched on here, because which
+            mode answers with what is the model's fact, not the sheet's. */}
+        {dashboard.section ? (
+          <Journeys
+            section={dashboard.section}
+            nowMs={dashboard.nowMs}
+            tracking={Boolean(dashboard.here)}
+            expanded={dashboard.expanded}
+            onToggle={dashboard.toggle}
+            onClearLines={editor.clearLines}
+          />
+        ) : null}
+        {dashboard.boards.map((board, index) => (
+          <Board board={board} divided={index > 0} key={board.segment.id} />
+        ))}
         <View style={styles.live}>
           <Text style={styles.liveText}>Entur · {liveTimetableLabel(commute.updatedMs)}</Text>
           <Pressable
@@ -1071,27 +1039,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accentFaint,
   },
   suggestButtonText: { color: theme.accent, fontSize: 12, fontWeight: '800' },
-
-  // Which list this is (§13). The interchange mode puts the train in and the
-  // bus home on one screen, and the two must be told apart before a departure
-  // time is read — so the heading is the destination, in the sheet's own voice,
-  // with the whole route under it in the muted one.
-  listHead: { marginTop: 16, marginBottom: 8 },
-  listHeadDivided: { paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.border },
-  listHeading: { color: theme.text, fontSize: 14, fontWeight: '800' },
-  listRoute: { color: theme.textMuted, fontSize: 11, marginTop: 1 },
-  views: {
-    flexDirection: 'row',
-    gap: 3,
-    padding: 3,
-    marginBottom: 10,
-    borderRadius: 10,
-    backgroundColor: theme.surfaceMuted,
-  },
-  viewButton: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 8 },
-  viewButtonOn: { backgroundColor: theme.surface },
-  viewText: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
-  viewTextOn: { color: theme.text, fontWeight: '800' },
 
   sectionHead: {
     color: theme.textMuted,
@@ -1323,6 +1270,10 @@ const styles = StyleSheet.create({
   },
 
   board: { marginBottom: 6 },
+  // Two boards on one screen (§13): the train in over the bus home, told apart
+  // by their own from ↓ to headings, with a rule doing the separating that a
+  // blank line cannot at this density.
+  boardDivided: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.border },
   boardHead: {
     color: theme.textMuted,
     fontSize: 10,

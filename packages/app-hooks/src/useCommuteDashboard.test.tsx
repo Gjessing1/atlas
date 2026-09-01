@@ -124,8 +124,8 @@ const commitFor = (departMs: number) => ({
   line: '270',
 });
 
-/** The list a door mode shows, which is what most of these assert against. */
-const only = (hook: { current: CommuteDashboard }) => hook.current.sections[0]!;
+/** The journey list a door mode shows, which is what most of these assert against. */
+const only = (hook: { current: CommuteDashboard }) => hook.current.section!;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -141,8 +141,9 @@ describe('useCommuteDashboard', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
     expect(hook.current.routeLabel).toBe('Engelsrud Terrasse → Nationaltheatret');
     expect(hook.current.nowLabel).toBe('Tuesday 25 August · 08:32');
-    // A door mode shows one list, so there is nothing to head it with.
-    expect(hook.current.sections).toHaveLength(1);
+    // A door mode is journeys and nothing else: the departure boards belong to
+    // the mode that is about a stop.
+    expect(hook.current.boards).toEqual([]);
     expect(only(hook).journeys.map((journey) => journey.scan)).toEqual([
       '08:36 → 09:02 · 26 min',
       '08:48 → 09:14 · 26 min',
@@ -158,43 +159,33 @@ describe('useCommuteDashboard', () => {
 
   it('keeps the countdowns alive', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
-    expect(hook.current.boards[1]?.rows[0]?.countdown).toBe('in 39 min');
+    act(() => hook.current.setMode('interchange'));
+    expect(hook.current.boards[0]?.rows[0]?.countdown).toBe('in 39 min');
     act(() => {
       vi.advanceTimersByTime(10 * 60_000);
     });
     expect(hook.current.nowLabel).toBe('Tuesday 25 August · 08:42');
-    expect(hook.current.boards[1]?.rows[0]?.countdown).toBe('in 29 min');
+    expect(hook.current.boards[0]?.rows[0]?.countdown).toBe('in 29 min');
     unmount();
   });
 
-  it('orders the per-leg boards with the direction being travelled first', () => {
+  it('draws only the hops that leave the change, and only there', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
-    expect(hook.current.boards.map((board) => board.segment.id)).toEqual([
-      'outbound-0',
-      'outbound-1',
-      'inbound-0',
-      'inbound-1',
-    ]);
+    // A door mode answers with journeys; the boards are the middle mode's.
+    expect(hook.current.boards).toEqual([]);
     act(() => hook.current.setMode('inbound'));
-    expect(hook.current.boards.map((board) => board.segment.id)).toEqual([
-      'inbound-0',
-      'inbound-1',
-      'outbound-0',
-      'outbound-1',
-    ]);
-    unmount();
-  });
-
-  it('puts the hops you are standing at first at the interchange', () => {
-    const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
+    expect(hook.current.boards).toEqual([]);
     act(() => hook.current.setMode('interchange'));
-    // The two the mode is already listing journeys for — the train in and the
-    // bus home — then the rest of the corridor, in the morning's order.
+    // The train in and the bus home. Never `outbound-0` or `inbound-0` — those
+    // leave the doors, and a board of departures from your own front door has
+    // no business under a mode about the station.
     expect(hook.current.boards.map((board) => board.segment.id)).toEqual([
       'outbound-1',
       'inbound-1',
-      'outbound-0',
-      'inbound-0',
+    ]);
+    expect(hook.current.boards.map((board) => board.segment.from.name)).toEqual([
+      'Asker stasjon',
+      'Asker stasjon',
     ]);
     unmount();
   });
@@ -205,41 +196,42 @@ describe('useCommuteDashboard', () => {
         controller({
           result: {
             ...result,
-            segments: [
-              ...result.segments!,
-              // Answered, and genuinely empty.
-              { id: 'outbound-0', result: { trips: [], problems: [] } },
-            ],
+            // Answered, and genuinely empty.
+            segments: [{ id: 'outbound-1', result: { trips: [], problems: [] } }],
           },
         }),
       ),
     );
+    act(() => hook.current.setMode('interchange'));
     const note = (id: string) => hook.current.boards.find((board) => board.segment.id === id)?.note;
-    expect(note('outbound-0')).toBe('Nothing runs in this window');
-    // `inbound-0` never came back at all — the backend dropped a failed hop.
+    expect(note('outbound-1')).toBe('Nothing runs in this window');
+    // `inbound-1` never came back at all — the backend dropped a failed hop.
     // Calling that "nothing runs" would report a healthy corridor as dead.
-    expect(note('inbound-0')).toBe('Could not be checked just now.');
+    expect(note('inbound-1')).toBe('Could not be checked just now.');
     unmount();
   });
 
-  it('offers no per-leg boards for a commute with no interchange', () => {
+  it('offers no boards for a commute with no interchange', () => {
     const { result: hook, unmount } = renderHook(() =>
       useCommuteDashboard(controller({ query: { ...query, via: [] } })),
     );
-    expect(hook.current.hasBoards).toBe(false);
     expect(hook.current.boards).toEqual([]);
     unmount();
   });
 
-  it('offers none against a backend that does not answer them', () => {
-    // An older server omits `segments` entirely. A Departures tab over four
-    // boards it cannot fill is worse than no tab.
+  it('says a backend that answers no hops could not be checked', () => {
+    // An older server omits `segments` entirely — which is not the same as a
+    // corridor where nothing runs, and must not read like one.
     const { result: hook, unmount } = renderHook(() =>
       useCommuteDashboard(
         controller({ result: { outbound: result.outbound, inbound: result.inbound } }),
       ),
     );
-    expect(hook.current.hasBoards).toBe(false);
+    act(() => hook.current.setMode('interchange'));
+    expect(hook.current.boards.map((board) => board.note)).toEqual([
+      'Could not be checked just now.',
+      'Could not be checked just now.',
+    ]);
     unmount();
   });
 
@@ -258,34 +250,31 @@ describe('useCommuteDashboard', () => {
   });
 
   /**
-   * §6.4 §13 — the day that does not start at either door. The journeys come
-   * from the hop the dashboard already asked for, so the middle mode costs no
-   * upstream call and the whole board (headline, ribbon, tracking) follows.
+   * §6.4 §13 — the day that does not start at either door. The departures come
+   * from the hops the dashboard already asked for, so the middle mode costs no
+   * upstream call.
    */
-  it('reads both directions from the interchange, as two lists', () => {
+  it('reads both directions from the interchange, as two boards', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
     expect(hook.current.modes).toEqual(['outbound', 'interchange', 'inbound']);
     act(() => hook.current.setMode('interchange'));
-    // The stop you are standing at is the header; the destinations tell the two
-    // lists apart, which is what the platform signs at Asker do.
+    // The stop you are standing at is the header; each board names where its
+    // vehicles are going, which is what the platform signs at Asker do.
     expect(hook.current.routeLabel).toBe('From Asker stasjon');
-    expect(hook.current.sections.map((section) => section.heading)).toEqual([
-      'Towards Nationaltheatret',
-      'Towards Engelsrud Terrasse',
+    expect(hook.current.boards.map((board) => board.segment.label)).toEqual([
+      'Asker stasjon → Nationaltheatret',
+      'Asker stasjon → Engelsrud Terrasse',
     ]);
-    // Never mixed into one list: a train towards Oslo and a bus towards home
-    // sorted together by departure time is a list nobody can read.
-    const [inwards, home] = hook.current.sections;
-    expect(inwards?.journeys.map((journey) => journey.scan)).toEqual(['09:11 → 09:24 · 13 min']);
-    expect(inwards?.leaveNow.next?.rides[0]?.line).toBe('L1');
-    // You are already standing on the platform, so the headline is not about
-    // leaving the house.
-    expect(inwards?.leadLabel).toBe('Next from here');
+    // Departures, not journeys: standing on the platform the question is what
+    // leaves and when, and there is no journey list to answer instead.
+    expect(hook.current.section).toBeNull();
+    const [inwards, home] = hook.current.boards;
+    expect(inwards?.rows.map((row) => [row.aimed, row.line])).toEqual([['09:11', 'L1']]);
     // Nothing answered `inbound-1`, and a hop with no answer is not a hop with
-    // no departures — the list says so rather than claiming the bus home is
+    // no departures — the board says so rather than claiming the bus home is
     // gone for the day.
-    expect(home?.journeys).toEqual([]);
-    expect(home?.emptyNote).toBe('Could not be checked just now.');
+    expect(home?.rows).toEqual([]);
+    expect(home?.note).toBe('Could not be checked just now.');
     unmount();
   });
 
@@ -304,7 +293,7 @@ describe('useCommuteDashboard', () => {
       ),
     );
     act(() => hook.current.setMode('interchange'));
-    expect(hook.current.sections.map((section) => section.direction)).toEqual([
+    expect(hook.current.boards.map((board) => board.segment.direction)).toEqual([
       'inbound',
       'outbound',
     ]);
@@ -321,30 +310,17 @@ describe('useCommuteDashboard', () => {
     // has ceased to exist.
     act(() => hook.current.setMode('interchange'));
     expect(hook.current.mode).toBe('outbound');
-    expect(hook.current.sections).toHaveLength(1);
+    expect(hook.current.section).not.toBeNull();
     unmount();
   });
 
-  it('tracks a journey started at the interchange as one, not as a door journey', () => {
-    const commits: { origin?: string }[] = [];
-    const { result: hook, unmount } = renderHook(() =>
-      useCommuteDashboard(
-        controller({ setCommit: (next) => commits.push(next as { origin?: string }) }),
-      ),
-    );
-    act(() => hook.current.setMode('interchange'));
-    act(() => only(hook).track(only(hook).leaveNow.next!));
-    // Without the origin the backend would re-read this train from Engelsrud,
-    // not find it, and release a commitment that is perfectly alive.
-    expect(commits[0]).toMatchObject({
-      direction: 'outbound',
-      departureMs: hm(9, 11),
-      line: 'L1',
-      origin: 'interchange',
-    });
-    unmount();
-  });
-
+  /**
+   * A board row is not committed to, so nothing new is tracked from the change
+   * — but a commitment made there by a bundle old enough to have offered it
+   * (§13 before v0.191.0) still names a journey that is still running, and the
+   * card must re-read it from the hop it was made from rather than release it
+   * mid-ride.
+   */
   it('reads a commitment made at the interchange back out of its own hop', () => {
     const { result: hook, unmount } = renderHook(() =>
       useCommuteDashboard(
@@ -366,9 +342,9 @@ describe('useCommuteDashboard', () => {
   it('expands one journey at a time, by a key its own list owns', () => {
     const { result: hook, unmount } = renderHook(() => useCommuteDashboard(controller()));
     const [first, second] = [only(hook).leadRow!, only(hook).rows[0]!];
-    // Qualified by the list: at the interchange two vehicles leaving Asker in
-    // opposite directions would otherwise share one expansion.
-    expect(first.key).toBe(`outbound:door:${first.journey.key}`);
+    // Qualified by the list it belongs to: an expansion outlives a mode switch,
+    // and a journey key is only unique within the answer it came from.
+    expect(first.key).toBe(`outbound:${first.journey.key}`);
     act(() => hook.current.toggle(first.key));
     expect(hook.current.expanded).toBe(first.key);
     act(() => hook.current.toggle(second.key));

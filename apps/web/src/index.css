@@ -6212,62 +6212,6 @@ button.transit-notice-summary {
   background: var(--surface-muted);
 }
 
-.commute-views {
-  display: flex;
-  gap: 3px;
-  padding: 3px;
-  margin-bottom: 10px;
-  border-radius: 8px;
-  background: var(--surface-muted);
-}
-
-.commute-views button {
-  flex: 1;
-  padding: 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.commute-views button[aria-selected='true'] {
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 700;
-}
-
-/* Which list this is (§13). The interchange mode puts the train in and the bus
-   home on one screen, and the two must be told apart before a departure time is
-   read — so the heading is the destination, in the panel's own voice, with the
-   whole route under it in the muted one. A rule above it does the separating
-   that a blank line cannot at this density. */
-.commute-list + .commute-list .commute-list-head {
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.commute-list-head {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 14px 0 8px;
-}
-
-.commute-list-head span {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.commute-list-head em {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-style: normal;
-}
-
 .commute-section-head,
 .commute-eyebrow,
 .commute-board h3 {
@@ -6799,12 +6743,20 @@ button.transit-notice-summary {
   opacity: 0.5;
 }
 
-/* --- Per-leg departure boards (§5) --- */
+/* --- The change's own departure boards (§13) --- */
 
 .commute-board h3 {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+/* Two of them on one screen: the train in over the bus home, told apart by
+   their own from → to headings. A rule above the second does the separating
+   that a blank line cannot at this density. */
+.commute-board + .commute-board h3 {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .commute-board h3 i {

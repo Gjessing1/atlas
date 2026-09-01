@@ -121,7 +121,6 @@ export {
   type CommuteDashboardBoard,
   type CommuteDashboardRow,
   type CommuteDashboardSection,
-  type CommuteDashboardView,
 } from './useCommuteDashboard.js';
 export {
   mergeSearchResults,

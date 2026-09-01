@@ -234,24 +234,28 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await expect(live).toContainText(`${clock(180_000)} → ${clock(1_800_000)} est.`);
   await expect(live).toContainText('27 min');
 
-  // §13 — the third mode: the corridor picked up at the change, both
-  // directions at once, off the hops the dashboard already asked for.
+  // §13 — the third mode: the change picked up as a stop, both directions at
+  // once, off the hops the dashboard already asked for.
   const modes = panel.locator('.commute-modes');
   await expect(modes.getByRole('tab')).toHaveCount(3);
   await modes.getByRole('tab', { name: 'Interchange' }).click();
   await expect(panel.locator('.commute-header')).toContainText('From Asker');
-  // Two lists, headed by where their vehicles are going — never one list with
-  // the train in and the bus home sorted together by departure time.
-  const lists = panel.locator('.commute-list-head span');
-  await expect(lists).toHaveText(['Towards Nationaltheatret', 'Towards Engelsrud']);
-  // The headline is not "if I leave now" at a stop you are standing on.
-  await expect(panel.locator('.commute-list').first()).toContainText('Next from here');
-  await expect(panel.locator('.commute-list').first()).toContainText('R11');
-  // The way home is answered and empty, which the list says as the timetable's
+  // Departures, both of them *leaving* Asker — never the hops into it, and
+  // never a journey list: standing on the platform the question is what leaves.
+  const boards = panel.locator('.commute-board h3');
+  await expect(boards).toHaveCount(2);
+  await expect(boards.first()).toContainText('Asker');
+  await expect(boards.first()).toContainText('Nationaltheatret');
+  await expect(boards.last()).toContainText('Engelsrud');
+  await expect(panel.locator('.commute-list')).toHaveCount(0);
+  await expect(panel.locator('.commute-board').first()).toContainText('R11');
+  // The way home is answered and empty, which the board says as the timetable's
   // own nothing rather than as a failure.
-  await expect(panel.locator('.commute-list').last()).toContainText('Nothing runs in this window');
+  await expect(panel.locator('.commute-board').last()).toContainText('Nothing runs in this window');
   await modes.getByRole('tab', { name: 'Outbound' }).click();
   await expect(panel.locator('.commute-header')).toContainText('Engelsrud → Nationaltheatret');
+  // …and a door mode is journeys and nothing else.
+  await expect(panel.locator('.commute-board')).toHaveCount(0);
 
   // §7 — tracking, and the order the card states it in: the ribbon, then what
   // to do, then the connection that instruction leads to.
@@ -416,5 +420,5 @@ test('offers the interchange every journey changes at, and saves it as a stop', 
   await expect(modes.getByRole('tab')).toHaveCount(3);
   await modes.getByRole('tab', { name: 'Interchange' }).click();
   await expect(panel.locator('.commute-header')).toContainText('From Asker stasjon');
-  await expect(panel.locator('.commute-list').first()).toContainText('R11');
+  await expect(panel.locator('.commute-board').first()).toContainText('R11');
 });

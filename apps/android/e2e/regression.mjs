@@ -827,16 +827,24 @@ async function saveCommuteAndReadBoard() {
   );
   expectStrings(opened, ['plat. B4', 'plat. 3', 'Total '], 'the opened journey');
 
-  // §6.4 §5's per-leg boards, the tab a reader already on the bus opens.
-  await tapAfterScroll('commute-view-departures', 'commute-sheet', 'down');
-  const boards = await waitFor(
-    'the per-leg departure boards',
-    hierarchy,
-    (xml) => windowStrings(xml).some((value) => value.includes('ENGELSRUD E2E ↓ ASKER E2E')),
-    30_000,
+  // §6.4 §13's middle mode: the change as a stop, drawn as the departures
+  // *leaving* it in both directions — the train in and the bus home, which is
+  // the one glance someone standing at Asker is taking.
+  await tapAfterScroll('commute-mode-interchange', 'commute-sheet', 'up');
+  await scrollToString('ASKER E2E ↓ OSLO E2E', 'the train in from the change', 'commute-sheet');
+  const boards = await scrollToString(
+    'ASKER E2E ↓ ENGELSRUD E2E',
+    'the way home from the change',
+    'commute-sheet',
+    'down',
   );
-  expectStrings(boards, ['ASKER E2E ↓ OSLO E2E'], 'the per-leg boards');
-  await tapAfterScroll('commute-view-overview', 'commute-sheet', 'down');
+  // Never a hop *into* the change: a board of departures from your own front
+  // door has no business under a mode about the station.
+  const inbound = windowStrings(boards).filter((value) => value.includes('↓ ASKER E2E'));
+  if (inbound.length > 0) {
+    throw new Error(`the interchange mode drew a hop into the change: ${inbound[0]}`);
+  }
+  await tapAfterScroll('commute-mode-outbound', 'commute-sheet', 'up');
 }
 
 /**

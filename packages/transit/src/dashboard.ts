@@ -649,15 +649,18 @@ export interface CommuteSegment {
 }
 
 /**
- * The per-leg boards a commute generates, from its stops rather than from
- * hard-coded routes.
+ * The directed hops a commute is made of, from its stops rather than from
+ * hard-coded routes — the one definition of what a corridor's legs are.
  *
  * A commute with **no interchange generates none**, and that is the point
  * rather than a gap: its only leg is the journey itself, so a "A→B" board
  * beneath a "next journeys" list of the same departures would be the same
- * timetable printed twice. The boards earn their place exactly when there is a
- * change — which is also when the traveller is mid-journey and wants only the
- * next leg.
+ * timetable printed twice.
+ *
+ * All four are generated, and the dashboard draws two of them
+ * ({@link commuteInterchangeHops}). The other two are not waste: a home-screen
+ * widget can be pinned to any hop, and `commuteSubstituteQuery` walks this list
+ * to re-plan a journey from the stop a change broke at.
  */
 export function commuteSegments(query: TransitCommuteQuery): CommuteSegment[] {
   const stops = [query.from, ...query.via, query.to];
@@ -686,41 +689,37 @@ export function commuteSegments(query: TransitCommuteQuery): CommuteSegment[] {
 }
 
 /**
- * Where a direction's journey list starts — ROADMAP §6.4 §13, the middle
- * ground between the two ends of a saved commute.
+ * Where a journey the board is tracking *starts* — ROADMAP §6.4 §13.
  *
- * A commute is stored door to door, so the board could answer two questions:
- * Engelsrud → Nationaltheatret and back. But the day is full of the third one —
- * standing at Asker at 16:20, wanting the train in or the bus home, having not
- * started from either door. The Departures view already showed *that* hop as a
- * stop board; what it could not do is answer it the way the board answers
- * everything else, with a journey, a ribbon, a connection and something to
- * track.
+ * A commute is stored door to door, so a commitment used to be re-read from the
+ * door and nowhere else. The middle mode broke that: a train home committed to
+ * at Asker is not in an answer asked from Nationaltheatret, so the commitment
+ * would have released itself on the next refresh, mid-journey, which is
+ * precisely when the card matters. The origin travels with the commitment
+ * (`TransitWidgetV2Commit.origin`, absent meaning `door`) and this is what turns
+ * it back into a question.
  *
- * **It costs no upstream call.** The journeys from the interchange are the
- * corridor's last hop in that direction, which the dashboard already asks for
- * (`commuteSegmentQueries`) — so `segmentId` names the answer already in hand
- * rather than a question to go and ask.
+ * It outlives the journey lists that introduced it. The interchange draws
+ * departure boards now and a board row is not committed to, so nothing new is
+ * tracked from here — but a commitment made from the interchange by an older
+ * bundle is still sitting in a widget's store, still naming a journey that is
+ * still running, and it is re-read correctly rather than dropped.
  *
- * That is also the honest limit of it: the *last* hop is the only partial the
- * corridor's own boards contain. A commute through two interchanges would need
- * its own question to be asked from the first of them, and none is asked here.
- * Today's saved commute holds one `via`, so the last interchange is the only
- * one there is.
+ * The last hop is the only partial the corridor's own boards contain, so it is
+ * the only interchange offered. A commute through *two* interchanges would need
+ * a question asked from the first of them, and none is asked here; today's
+ * saved commute holds one `via`, so the last interchange is the only one there
+ * is.
  */
 export type CommuteOriginId = 'door' | 'interchange';
 
-/** One choice of where the board starts, and the question that answers it. */
+/** One choice of where a journey starts, and the question that answers it. */
 export interface CommuteOrigin {
   id: CommuteOriginId;
   /** Where the journeys start, where they must call, and where they end. */
   from: TransitCommutePlace;
   via: readonly TransitCommutePlace[];
   to: TransitCommutePlace;
-  /** `"Asker stasjon → Nationaltheatret"` — the header for this board. */
-  label: string;
-  /** `"Asker stasjon"` — what the chip says, which is the stop it starts from. */
-  chip: string;
   /**
    * The per-leg board its journeys are read from, or null for the whole
    * commute, which has an answer of its own.
@@ -740,7 +739,7 @@ function directionStops(
 /**
  * The starting points a direction offers: the commute's own end, and its last
  * interchange when it has one. A commute with no interchange offers a single
- * origin — the control is then a choice of one, and both clients hide it.
+ * origin, which is why a commitment's `origin` may be absent and mean `door`.
  */
 export function commuteOrigins(
   query: TransitCommuteQuery,
@@ -753,8 +752,6 @@ export function commuteOrigins(
     from: stops[0]!,
     via: stops.slice(1, -1),
     to,
-    label: `${stops[0]!.name} → ${to.name}`,
-    chip: stops[0]!.name,
     segmentId: null,
   };
   if (stops.length < 3) return [door];
@@ -766,8 +763,6 @@ export function commuteOrigins(
       from,
       via: [],
       to,
-      label: `${from.name} → ${to.name}`,
-      chip: from.name,
       // The corridor's last hop in this direction — `commuteSegments` numbers
       // its hops by the stop they leave, so the last one leaves the last
       // interchange. Derived from the same list rather than asserted, because
@@ -787,11 +782,23 @@ export function commuteOrigins(
  * from which end" — it is *what leaves from here*, in both directions at once:
  * the train in, and the bus home, which are the same glance.
  *
- * So the axes collapse into three modes. `outbound` and `inbound` are the
- * commute door to door as they always were; `interchange` is one mode that
- * lists **both** directions from the change, apart from each other, because a
- * list mixing a train towards Oslo with a bus towards home is a list nobody can
- * read. Two lists, one view — {@link commuteListings} is what draws them.
+ * So the axes collapse into three modes, and each one answers its question with
+ * the kind of answer that question has:
+ *
+ *  - `outbound` and `inbound` are the commute **door to door**, as journeys —
+ *    departure, arrival, connections, total time, something to track. That is
+ *    what "when do I leave the house" needs and a row of times is not.
+ *  - `interchange` is not a third direction but the **stop**, and what a stop
+ *    has is departures. Both directions from it, as two boards
+ *    ({@link commuteInterchangeHops}) rather than one merged run of times: a
+ *    train towards Oslo and a bus towards home in one column is a column nobody
+ *    can read.
+ *
+ * One mode, one kind of content, which is why there is no second control over
+ * it. A `Journeys` / `Departures` switch under the modes made nine states out
+ * of three, and six of them answered a question no mode was asking — the way
+ * home read as a stop board from the door you are not standing at, the corridor
+ * you are riding listed as hops into the change you already made.
  */
 export type CommuteMode = 'outbound' | 'interchange' | 'inbound';
 
@@ -810,96 +817,97 @@ export function commuteModes(query: TransitCommuteQuery): CommuteMode[] {
 }
 
 /**
- * One journey list the board draws: a direction, read from one of its ends.
+ * The journey list a door mode draws: one direction, door to door.
  *
- * A door mode has exactly one; the interchange has two. Everything downstream
- * — the header, "if I leave now", the ribbon, the connections, the tracking —
- * follows the listing rather than a direction, which is what lets two of them
- * sit on one screen without either lying about what it contains.
+ * Everything downstream — the header, "if I leave now", the ribbon, the
+ * connections, the tracking — follows this rather than reading the direction
+ * out of the query a second time.
  */
 export interface CommuteListing {
-  /** `"outbound:interchange"` — stable, and unique across the listings shown. */
+  /** `"outbound"` — stable across refreshes, so a board keeps its identity. */
   key: string;
   direction: TransitCommuteDirection;
-  origin: CommuteOriginId;
-  from: TransitCommutePlace;
-  to: TransitCommutePlace;
-  /** `"Asker stasjon → Nationaltheatret"` — the whole route this list answers. */
+  /** `"Engelsrud Terrasse → Nationaltheatret"` — the route this list answers. */
   label: string;
   /**
-   * `"Towards Nationaltheatret"` — the heading a reader separates two lists by.
-   *
-   * Named by its destination and not by its direction word: at the interchange
-   * "outbound" and "return" are the app's words for the commute, while the two
-   * platforms are labelled with the places the vehicles are going to.
-   */
-  heading: string;
-  /**
-   * The eyebrow above the §11 card. You are not leaving the house from the
-   * interchange — you are already standing on it, and a card that says "if I
-   * leave now" over the next train from Asker is answering the wrong question.
+   * The eyebrow above the §11 card, and the reason it is a field rather than a
+   * string in two clients: every word this board prints comes from here, so the
+   * panel and the sheet cannot come to differ over one.
    */
   leadLabel: string;
-  /** The per-leg board its journeys are read from, or null for the whole commute. */
-  segmentId: string | null;
 }
 
 /**
- * The lists a mode shows, in the order they are read.
+ * The list a mode shows, or null for the interchange — which shows boards.
  *
- * The interchange's pair is ordered by the clock, exactly as the board's own
- * direction is (`defaultCommuteDirection`): before the outbound departure the
- * way in comes first, after it the way home does. `primary` is that direction,
- * passed in rather than re-derived so the whole board agrees about what time
- * of day it is.
+ * Never a *list of* lists any more. The middle mode's two lists were journeys
+ * from the change, and journeys from the change are what a stop board says
+ * better: standing at Asker nobody is asking for the arrival at Nationaltheatret
+ * of a train that has not left, they are asking what leaves and when.
  */
-export function commuteListings(
+export function commuteListing(
   query: TransitCommuteQuery,
   mode: CommuteMode,
+): CommuteListing | null {
+  if (mode === 'interchange') return null;
+  const stops = directionStops(query, mode);
+  return {
+    key: mode,
+    direction: mode,
+    label: `${stops[0]!.name} → ${stops[stops.length - 1]!.name}`,
+    leadLabel: 'If I leave now',
+  };
+}
+
+/**
+ * The hops that *leave* the last interchange, one per direction — what the
+ * middle mode draws.
+ *
+ * **It costs no upstream call.** These are the corridor's own last hops, which
+ * the dashboard already asks for (`commuteSegmentQueries`), so the middle mode
+ * names answers already in hand rather than questions to go and ask.
+ *
+ * Ordered by the clock, exactly as the board's own direction is
+ * (`defaultCommuteDirection`): before the outbound departure the way in comes
+ * first, after it the way home does. `primary` is that direction, passed in
+ * rather than re-derived so the whole board agrees about what time of day it
+ * is.
+ *
+ * The hops *into* the change are deliberately not here. They are the half of
+ * the corridor you are standing at the far end of — a board of departures from
+ * your own front door, listed under a mode about the station, answering
+ * nothing the journeys above it do not answer better.
+ *
+ * Through `commuteOrigins`, never by re-deriving the stops: which hop leaves
+ * the interchange is one fact, and two ways of computing it is one too many.
+ */
+export function commuteInterchangeHops(
+  query: TransitCommuteQuery,
   primary: TransitCommuteDirection,
-): CommuteListing[] {
+): CommuteSegment[] {
   const directions: TransitCommuteDirection[] =
-    mode !== 'interchange'
-      ? [mode]
-      : primary === 'inbound'
-        ? ['inbound', 'outbound']
-        : ['outbound', 'inbound'];
-  const wanted: CommuteOriginId = mode === 'interchange' ? 'interchange' : 'door';
+    primary === 'inbound' ? ['inbound', 'outbound'] : ['outbound', 'inbound'];
+  const segments = commuteSegments(query);
   return directions.flatMap((direction) => {
-    // Through `commuteOrigins`, never by re-deriving the stops: which hop the
-    // interchange list reads from is one fact, and two ways of computing it is
-    // one too many.
-    const origin = commuteOrigins(query, direction).find((option) => option.id === wanted);
-    if (!origin) return [];
-    return [
-      {
-        key: `${direction}:${origin.id}`,
-        direction,
-        origin: origin.id,
-        from: origin.from,
-        to: origin.to,
-        label: origin.label,
-        heading: `Towards ${origin.to.name}`,
-        leadLabel: origin.id === 'door' ? 'If I leave now' : 'Next from here',
-        segmentId: origin.segmentId,
-      },
-    ];
+    const id = commuteOrigins(query, direction).find(
+      (option) => option.id === 'interchange',
+    )?.segmentId;
+    const hop = id ? segments.find((segment) => segment.id === id) : undefined;
+    return hop ? [hop] : [];
   });
 }
 
 /**
  * The panel header for a mode: the route for a door mode, the stop you are
- * standing at for the interchange — whose two lists carry their own headings
- * and would otherwise have to be summarised into a route that is not one.
+ * standing at for the interchange — whose two boards carry their own from → to
+ * headings and would otherwise have to be summarised into a route that is not
+ * one.
  */
-export function commuteModeTitle(
-  query: TransitCommuteQuery,
-  mode: CommuteMode,
-  primary: TransitCommuteDirection,
-): string {
-  const listings = commuteListings(query, mode, primary);
-  if (listings.length === 0) return 'Commute';
-  return mode === 'interchange' ? `From ${listings[0]!.from.name}` : listings[0]!.label;
+export function commuteModeTitle(query: TransitCommuteQuery, mode: CommuteMode): string {
+  const listing = commuteListing(query, mode);
+  if (listing) return listing.label;
+  const hop = commuteInterchangeHops(query, 'outbound')[0];
+  return hop ? `From ${hop.from.name}` : 'Commute';
 }
 
 /**

@@ -6,11 +6,12 @@ import {
   commuteDurationLabel,
   commuteEstimateLabel,
   commuteInterchange,
+  commuteInterchangeHops,
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
   commuteLineBadge,
-  commuteListings,
+  commuteListing,
   commuteModeChip,
   commuteModes,
   commuteModeTitle,
@@ -398,27 +399,27 @@ describe('commuteOrigins', () => {
     expect(
       commuteOrigins(commuteQuery(), 'outbound').map((origin) => [
         origin.id,
-        origin.label,
+        origin.from.name,
         origin.segmentId,
       ]),
     ).toEqual([
-      ['door', 'Engelsrud Terrasse → Nationaltheatret', null],
-      ['interchange', 'Asker stasjon → Nationaltheatret', 'outbound-1'],
+      ['door', 'Engelsrud Terrasse', null],
+      ['interchange', 'Asker stasjon', 'outbound-1'],
     ]);
     expect(
       commuteOrigins(commuteQuery(), 'inbound').map((origin) => [
         origin.id,
-        origin.label,
+        origin.from.name,
         origin.segmentId,
       ]),
     ).toEqual([
-      ['door', 'Nationaltheatret → Engelsrud Terrasse', null],
-      ['interchange', 'Asker stasjon → Engelsrud Terrasse', 'inbound-1'],
+      ['door', 'Nationaltheatret', null],
+      ['interchange', 'Asker stasjon', 'inbound-1'],
     ]);
   });
 
   /**
-   * The segment id is the whole point of the middle ground costing nothing: it
+   * The segment id is the whole point of the middle mode costing nothing: it
    * names an answer the dashboard has already asked for, so it must be one
    * `commuteSegments` actually produces.
    */
@@ -441,7 +442,7 @@ describe('commuteOrigins', () => {
   });
 });
 
-describe('commuteListings', () => {
+describe('commuteListing', () => {
   it('offers three modes with an interchange and two without (§13)', () => {
     expect(commuteModes(commuteQuery())).toEqual(['outbound', 'interchange', 'inbound']);
     expect(commuteModes(commuteQuery(false))).toEqual(['outbound', 'inbound']);
@@ -452,54 +453,64 @@ describe('commuteListings', () => {
     ]);
   });
 
-  it('draws a door mode as the one list it has always been', () => {
-    expect(
-      commuteListings(commuteQuery(), 'outbound', 'outbound').map((listing) => [
-        listing.key,
-        listing.label,
-        listing.segmentId,
-      ]),
-    ).toEqual([['outbound:door', 'Engelsrud Terrasse → Nationaltheatret', null]]);
-    expect(commuteModeTitle(commuteQuery(), 'inbound', 'outbound')).toBe(
+  it('draws a door mode as the one journey list it has always been', () => {
+    const listing = commuteListing(commuteQuery(), 'outbound')!;
+    expect([listing.key, listing.direction, listing.label, listing.leadLabel]).toEqual([
+      'outbound',
+      'outbound',
+      'Engelsrud Terrasse → Nationaltheatret',
+      'If I leave now',
+    ]);
+    expect(commuteModeTitle(commuteQuery(), 'inbound')).toBe(
       'Nationaltheatret → Engelsrud Terrasse',
     );
   });
 
   /**
-   * The middle mode is not a third direction: it is *both* of them, read from
-   * the change, which is the question actually asked while standing at Asker.
+   * The middle mode is not a third direction and not a third journey list: it
+   * is the *stop*, and what a stop has is departures.
    */
-  it('draws the interchange as both directions, apart, off the hops in hand', () => {
+  it('has no journey list at the change — that mode draws boards', () => {
+    expect(commuteListing(commuteQuery(), 'interchange')).toBeNull();
+  });
+});
+
+describe('commuteInterchangeHops', () => {
+  it('draws both directions *out of* the change, off the hops in hand (§13)', () => {
     expect(
-      commuteListings(commuteQuery(), 'interchange', 'outbound').map((listing) => [
-        listing.direction,
-        listing.heading,
-        listing.segmentId,
-      ]),
+      commuteInterchangeHops(commuteQuery(), 'outbound').map((hop) => [hop.id, hop.label]),
     ).toEqual([
-      ['outbound', 'Towards Nationaltheatret', 'outbound-1'],
-      ['inbound', 'Towards Engelsrud Terrasse', 'inbound-1'],
+      ['outbound-1', 'Asker stasjon → Nationaltheatret'],
+      ['inbound-1', 'Asker stasjon → Engelsrud Terrasse'],
     ]);
-    // The header is the stop you are standing at — two lists cannot be summed
-    // into a route, and each carries its own destination anyway.
-    expect(commuteModeTitle(commuteQuery(), 'interchange', 'outbound')).toBe('From Asker stasjon');
+    // The header is the stop you are standing at — two boards cannot be summed
+    // into a route, and each carries its own from → to anyway.
+    expect(commuteModeTitle(commuteQuery(), 'interchange')).toBe('From Asker stasjon');
+  });
+
+  /**
+   * Every hop leaves the change. The two *into* it are the half of the corridor
+   * you are standing at the far end of — a board of departures from your own
+   * front door has no business under a mode about the station.
+   */
+  it('never lists a hop arriving at the change', () => {
+    for (const primary of ['outbound', 'inbound'] as const) {
+      for (const hop of commuteInterchangeHops(commuteQuery(), primary)) {
+        expect(hop.from.name).toBe('Asker stasjon');
+      }
+    }
   });
 
   it('reads the way home first once the clock says so', () => {
-    expect(
-      commuteListings(commuteQuery(), 'interchange', 'inbound').map((listing) => listing.direction),
-    ).toEqual(['inbound', 'outbound']);
+    expect(commuteInterchangeHops(commuteQuery(), 'inbound').map((hop) => hop.id)).toEqual([
+      'inbound-1',
+      'outbound-1',
+    ]);
   });
 
-  it('is not on the platform at the door, and is on it at the change', () => {
-    const [door] = commuteListings(commuteQuery(), 'outbound', 'outbound');
-    const [change] = commuteListings(commuteQuery(), 'interchange', 'outbound');
-    expect(door!.leadLabel).toBe('If I leave now');
-    expect(change!.leadLabel).toBe('Next from here');
-  });
-
-  it('has no interchange to list without one saved', () => {
-    expect(commuteListings(commuteQuery(false), 'interchange', 'outbound')).toEqual([]);
+  it('has no interchange to draw without one saved', () => {
+    expect(commuteInterchangeHops(commuteQuery(false), 'outbound')).toEqual([]);
+    expect(commuteModeTitle(commuteQuery(false), 'interchange')).toBe('Commute');
   });
 });
 

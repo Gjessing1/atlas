@@ -4,8 +4,7 @@
  * `useCommute` owns the saved configuration and the upstream answer;
  * `@atlas/transit`'s `dashboard.ts` owns every label and number. This is the
  * thin layer between them — which mode is being read, which journey is
- * expanded, which of the two views is showing, and the clock that makes a
- * countdown a countdown.
+ * expanded, and the clock that makes a countdown a countdown.
  *
  * The clock is the reason this is a hook at all. Everything else here could be
  * a pure function of the result, but "in 6 min" is only true for a minute, and
@@ -20,17 +19,17 @@ import {
   commuteCommitKey,
   commuteConnectionBreak,
   commuteHere,
+  commuteInterchangeHops,
   commuteJourney,
   commuteJourneyList,
   commuteLeaveNow,
-  commuteListings,
+  commuteListing,
   commuteModes,
   commuteModeTitle,
   commuteNowLabel,
   commuteOffDayNote,
   commuteOrigins,
   commuteRibbon,
-  commuteSegments,
   commuteSharedDisruptions,
   defaultCommuteDirection,
   emptyDirectionNote,
@@ -45,16 +44,12 @@ import {
   type CommuteMode,
   type CommuteRibbonPart,
   type CommuteSegment,
-  type TransitCommuteDirection,
   type TransitCommuteResult,
   type TransitWidgetV2Commit,
 } from '@atlas/transit';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { CommuteController } from './useCommute.js';
-
-/** Which half of the dashboard is in front; both live on the same scroll (§9). */
-export type CommuteDashboardView = 'overview' | 'departures';
 
 /**
  * One journey as the board draws it — §6.4 §1 and §7.
@@ -70,10 +65,9 @@ export interface CommuteDashboardRow {
    * The row's identity on this board — the journey's key, qualified by the list
    * it belongs to.
    *
-   * Not `journey.key`: the interchange mode puts two lists on one screen, and a
-   * journey key is only unique within the answer it came from. Two vehicles
-   * leaving Asker at 16:41 in opposite directions would otherwise share an
-   * expansion, and tapping one would open the other.
+   * Qualified even though a mode now draws exactly one list: the key is what an
+   * expansion is remembered by, and switching Outbound → Return must not open a
+   * row in the new list because the old one had a journey with the same key.
    */
   key: string;
   journey: CommuteJourney;
@@ -87,7 +81,7 @@ export interface CommuteDashboardRow {
   tracked: boolean;
 }
 
-/** One directed hop with its rows — §5's independent departure boards. */
+/** One directed hop with its rows — the departure board §13's middle mode draws. */
 export interface CommuteDashboardBoard {
   segment: CommuteSegment;
   rows: CommuteBoardRow[];
@@ -96,14 +90,13 @@ export interface CommuteDashboardBoard {
 }
 
 /**
- * One journey list, whole — §6.4 §13.
+ * The journey list a door mode draws, whole — §6.4 §13.
  *
- * A door mode shows one of these and the interchange shows two, which is the
- * entire reason the board's answer is a list of sections rather than a set of
- * fields. Everything a reader needs to judge *one* direction hangs off the
- * section: its headline, its rows, its notices, its emptiness and its own
- * Track, so two of them can sit on one screen without either quoting the
- * other's departure.
+ * Everything a reader needs to judge the direction hangs off it: its headline,
+ * its rows, its notices, its emptiness and its own Track. One object rather
+ * than a set of fields on the dashboard because the answer it carries is one
+ * question's — and the mode that asks a different question (the interchange,
+ * which asks a *stop*) has no section at all rather than a hollowed-out one.
  */
 export interface CommuteDashboardSection extends CommuteListing {
   /** Complete journey options for this list, most imminent first. */
@@ -142,11 +135,10 @@ export interface CommuteDashboardSection extends CommuteListing {
   /** That emptiness is the commute's own line filter — offer the way out. */
   emptyFromFilter: boolean;
   /**
-   * Start tracking one of *this list's* journeys, or stop (null).
+   * Start tracking one of this list's journeys, or stop (null).
    *
-   * Per section rather than per board: a commitment records where the journey
-   * starts (§13), and the train home from Asker committed to as a door journey
-   * would be re-read from Nationaltheatret, not found, and released mid-ride.
+   * On the section rather than on the dashboard because a commitment records
+   * the direction the journey belongs to, and the list is what knows it.
    */
   track: (journey: CommuteJourney | null) => void;
 }
@@ -154,29 +146,21 @@ export interface CommuteDashboardSection extends CommuteListing {
 export interface CommuteDashboard {
   /**
    * Which of the three the board is reading — §6.4 §13. `outbound` and
-   * `inbound` are the commute door to door; `interchange` is both directions
-   * from the change, listed apart.
+   * `inbound` are the commute door to door, as journeys; `interchange` is the
+   * change itself, as the departure boards leaving it in both directions.
    */
   mode: CommuteMode;
   setMode: (mode: CommuteMode) => void;
   /** The modes this commute offers: three with an interchange, two without. */
   modes: CommuteMode[];
-  /**
-   * The direction the *rest* of the board follows — the per-leg board order and
-   * the day note. In a door mode it is the mode; at the interchange it is the
-   * one the clock puts first, which is also the order the two lists come in.
-   */
-  direction: TransitCommuteDirection;
-  /** The journey lists this mode shows: one for a door mode, two at the change. */
-  sections: CommuteDashboardSection[];
+  /** The journey list this mode draws, or null at the interchange (§13). */
+  section: CommuteDashboardSection | null;
   /** `"Engelsrud Terrasse → Nationaltheatret"`, or `"From Asker stasjon"`. */
   routeLabel: string;
   /** `"Tuesday 25 August · 08:32"`, ticking. */
   nowLabel: string;
   /** The clock the countdowns and day notes are measured from. */
   nowMs: number;
-  view: CommuteDashboardView;
-  setView: (view: CommuteDashboardView) => void;
   /** §6.4 §7 — where the traveller is in the journey they are tracking. */
   here: CommuteHere | null;
   /**
@@ -194,25 +178,25 @@ export interface CommuteDashboard {
   /**
    * Release the commitment, whichever list it was made from.
    *
-   * Starting is a section's business (it must record where the journey begins);
-   * stopping is the board's, because the tracked card outlives the list its
-   * journey came from and is the surface the traveller stops it on.
+   * Starting is a section's business (it must record which direction the
+   * journey belongs to); stopping is the board's, because the tracked card
+   * outlives the list its journey came from — a mode switch included — and is
+   * the surface the traveller stops it on.
    */
   stopTracking: () => void;
-  /** §5 — the per-leg boards, the ones you are standing at first. */
+  /**
+   * §13 — the two boards leaving the change, or empty in a door mode.
+   *
+   * Empty rather than hidden by the client: which mode draws boards is a fact
+   * about the model, and a client deciding it for itself is how the panel and
+   * the sheet come to show different things.
+   */
   boards: CommuteDashboardBoard[];
   /** The row whose legs are open, by {@link CommuteDashboardRow.key}, or null. */
   expanded: string | null;
   toggle: (key: string) => void;
   /** A weekday this commute is not saved for, said plainly rather than as "nothing runs". */
   offDayNote: string | null;
-  /**
-   * Whether per-leg boards can be offered at all: the corridor needs an
-   * interchange to have legs, *and* the server has to be one that answers them.
-   * A backend older than §6.4 omits `segments` entirely, and a Departures tab
-   * over four boards it cannot fill would report a healthy corridor as dead.
-   */
-  hasBoards: boolean;
 }
 
 /**
@@ -226,7 +210,6 @@ const CLOCK_TICK_MS = 30_000;
 export function useCommuteDashboard(commute: CommuteController): CommuteDashboard {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pinnedMode, setPinnedMode] = useState<CommuteMode | null>(null);
-  const [view, setView] = useState<CommuteDashboardView>('overview');
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
@@ -248,60 +231,49 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
   // interchange from a saved commute must not leave the board reading a middle
   // ground that has ceased to exist.
   const mode = pinnedMode && modes.includes(pinnedMode) ? pinnedMode : clockDirection;
-  // At the interchange the clock still decides which of the two lists is read
-  // first, and with it the per-leg board order and the day note.
-  const direction = mode === 'interchange' ? clockDirection : mode;
 
   const result = commute.result;
 
-  const listings = useMemo(
-    () => (commute.query ? commuteListings(commute.query, mode, clockDirection) : []),
-    [commute.query, mode, clockDirection],
+  const listing = useMemo(
+    () => (commute.query ? commuteListing(commute.query, mode) : null),
+    [commute.query, mode],
   );
 
-  const segments = useMemo(
-    () => (commute.query ? commuteSegments(commute.query) : []),
-    [commute.query],
+  /**
+   * The hops that leave the change, in whichever mode is being read.
+   *
+   * Computed outside the mode on purpose: the middle mode *draws* them, and the
+   * tracked card reads its "and if I miss it" alternatives off the same rows
+   * from inside a door mode (`here` below). Two derivations of the same two
+   * hops is how the alternatives and the boards would come to disagree.
+   */
+  const hops = useMemo(
+    () => (commute.query ? commuteInterchangeHops(commute.query, clockDirection) : []),
+    [commute.query, clockDirection],
   );
 
-  const boards = useMemo<CommuteDashboardBoard[]>(() => {
+  const hopBoards = useMemo<CommuteDashboardBoard[]>(() => {
     const byId = new Map((result?.segments ?? []).map((entry) => [entry.id, entry.result]));
-    const listed = new Set(
-      listings.map((listing) => listing.segmentId).filter((id): id is string => id !== null),
-    );
-    return (
-      segments
-        .map((segment) => {
-          const answer = byId.get(segment.id);
-          const rows = answer ? commuteBoardRows(answer, nowMs) : [];
-          return {
-            segment,
-            rows,
-            // Three different nothings, and only one of them is the timetable's.
-            // A hop the backend dropped (its upstream call failed) has *not*
-            // been shown to be empty, and saying "nothing runs" about it would
-            // send someone looking for another way home from a service that is
-            // running fine.
-            note:
-              rows.length > 0
-                ? null
-                : answer
-                  ? emptyDirectionNote('upstream')
-                  : 'Could not be checked just now.',
-          };
-        })
-        // The hops you are standing at come first — the two the mode is already
-        // listing journeys for, then the direction being travelled. The rest
-        // stay (someone checking the way home at lunchtime needs them) but they
-        // are not what a glance mid-commute is for. In a door mode no hop is
-        // listed, so this is the direction rule the boards always had.
-        .sort((a, b) => {
-          const rank = (board: CommuteDashboardBoard) =>
-            listed.has(board.segment.id) ? 0 : board.segment.direction === direction ? 1 : 2;
-          return rank(a) - rank(b) || a.segment.index - b.segment.index;
-        })
-    );
-  }, [result, segments, listings, nowMs, direction]);
+    return hops.map((segment) => {
+      const answer = byId.get(segment.id);
+      const rows = answer ? commuteBoardRows(answer, nowMs) : [];
+      return {
+        segment,
+        rows,
+        // Three different nothings, and only one of them is the timetable's. A
+        // hop the backend dropped (its upstream call failed) has *not* been
+        // shown to be empty, and saying "nothing runs" about it would send
+        // someone looking for another way home from a service that is running
+        // fine.
+        note:
+          rows.length > 0
+            ? null
+            : answer
+              ? emptyDirectionNote('upstream')
+              : 'Could not be checked just now.',
+      };
+    });
+  }, [result, hops, nowMs]);
 
   // ------------------------------------------------------------ tracking ---
 
@@ -323,9 +295,10 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     const committed = result?.committed?.trip;
     if (committed) return commuteJourney(committed, nowMs);
     // The fallback searches the list the commitment was *made* from, which is
-    // not always one on screen: a journey tracked from the interchange lives in
-    // that hop's own board, and looking for it in the door-to-door answer would
-    // release a commitment that is perfectly alive.
+    // not always one on screen: a commitment made from the interchange by a
+    // bundle old enough to have offered that (§13 before v0.191.0) names a
+    // journey in that hop's own answer, and looking for it in the door-to-door
+    // one would release a commitment that is perfectly alive.
     const committedOrigin = commute.query
       ? (commuteOrigins(commute.query, commit.direction).find(
           (option) => option.id === (commit.origin ?? 'door'),
@@ -362,41 +335,40 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     // Asked twice on purpose, and cheaply: the first call says which ride the
     // ladder landed on, and only then is it knowable *which* hop's departure
     // board holds the alternatives. Passing them in is what makes "and if I
-    // miss it?" cost no upstream call — the per-leg boards are already here.
+    // miss it?" cost no upstream call — the hop's board is already here, in
+    // every mode, which is why `hopBoards` is not the mode's own `boards`.
     const placed = commuteHere(trackedJourney, nowMs);
     if (!placed) return null;
     const hop =
       placed.connectionRideIndex === null
         ? undefined
-        : boards.find(
+        : hopBoards.find(
             (board) =>
               board.segment.direction === commit.direction &&
               board.segment.index === placed.connectionRideIndex,
           );
     return commuteHere(trackedJourney, nowMs, hop?.rows ?? []);
-  }, [boards, commit, nowMs, trackedJourney]);
+  }, [hopBoards, commit, nowMs, trackedJourney]);
 
   const stopTracking = useCallback(() => setCommit(null), [setCommit]);
 
-  // ------------------------------------------------------------ sections ---
+  // ------------------------------------------------------------- section ---
 
-  const sections = useMemo<CommuteDashboardSection[]>(
+  const section = useMemo<CommuteDashboardSection | null>(
     () =>
-      listings.map((listing) =>
-        buildSection(listing, {
-          result,
-          nowMs,
-          commitKey,
-          emptyReason: commute.emptyReason,
-          setCommit,
-        }),
-      ),
-    [listings, result, nowMs, commitKey, commute.emptyReason, setCommit],
+      listing
+        ? buildSection(listing, {
+            result,
+            nowMs,
+            commitKey,
+            emptyReason: commute.emptyReason,
+            setCommit,
+          })
+        : null,
+    [listing, result, nowMs, commitKey, commute.emptyReason, setCommit],
   );
 
-  const routeLabel = commute.query
-    ? commuteModeTitle(commute.query, mode, clockDirection)
-    : 'Commute';
+  const routeLabel = commute.query ? commuteModeTitle(commute.query, mode) : 'Commute';
 
   const toggle = useCallback(
     (key: string) => setExpanded((current) => (current === key ? null : key)),
@@ -407,34 +379,30 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     mode,
     setMode: setPinnedMode,
     modes,
-    direction,
-    sections,
+    section,
     routeLabel,
     nowLabel: commuteNowLabel(nowMs),
     nowMs,
-    view,
-    setView,
     here,
     // Only alongside `here`: without a placed traveller there is nothing for a
     // leg list to be *about*, and the journey is already in the list below.
     hereJourney: here ? trackedJourney : null,
     stopTracking,
-    boards,
+    boards: mode === 'interchange' ? hopBoards : [],
     expanded,
     toggle,
     offDayNote: commute.query
       ? commuteOffDayNote(commute.query.days, norwayTime(nowMs).weekday)
       : null,
-    hasBoards: segments.length > 0 && Boolean(result?.segments),
   };
 }
 
 /**
- * Everything one journey list needs, from the answer already in hand.
+ * Everything the journey list needs, from the answer already in hand.
  *
- * A plain function rather than a hook so the interchange can build two of them
- * in one pass: the lists are a *list*, and there is no such thing as calling
- * `useMemo` a variable number of times.
+ * A plain function rather than a hook because it is a pure derivation of the
+ * result and the clock, and the mode it belongs to may have no list at all —
+ * there is no such thing as calling `useMemo` conditionally.
  */
 function buildSection(
   listing: CommuteListing,
@@ -449,17 +417,11 @@ function buildSection(
   const { result, nowMs, commitKey, emptyReason, setCommit } = ctx;
 
   /**
-   * The answer this list is built from.
-   *
-   * For a door it is the direction the backend was asked for. For the
-   * interchange it is the corridor's last hop — a board the dashboard already
-   * asked for (§5), which is why the middle mode costs no upstream call.
-   * `undefined` means that hop was not answered at all, which is a different
-   * nothing from an empty one and is reported as such below.
+   * The answer this list is built from — the direction the backend was asked
+   * for, door to door. `undefined` means it was not answered at all, which is a
+   * different nothing from an empty one and is reported as such below.
    */
-  const source = listing.segmentId
-    ? (result?.segments ?? []).find((entry) => entry.id === listing.segmentId)?.result
-    : result?.[listing.direction];
+  const source = result?.[listing.direction];
 
   // `commuteJourneyList` is what turns the planner's *ranked* answer into a
   // timetable: in the order the vehicles leave, one row per departure. Without
@@ -491,18 +453,18 @@ function buildSection(
       parts: commuteRibbon(journey, { brokenIndex: broken?.index ?? null }),
       broken,
       disruptions: journey.disruptions.filter((disruption) => !hoisted.has(disruption.key)),
-      tracked:
-        commitKey !== null &&
-        commuteCommitId(listing.direction, journey, listing.origin) === commitKey,
+      // No origin: a journey listed here is the commute door to door, and
+      // `commuteCommitId` defaults to exactly that. A commitment made from the
+      // interchange by an older bundle therefore matches no row in this list,
+      // which is right — its journey is not in this list.
+      tracked: commitKey !== null && commuteCommitId(listing.direction, journey) === commitKey,
     };
   };
 
-  // The direction's own reason only describes the direction's own answer. A
-  // list read off a hop has none — the backend reports emptiness per direction
-  // — so it says the weaker true thing rather than blaming a filter it cannot
-  // know about, and a hop that failed outright is not called empty at all.
-  const emptyFromFilter =
-    listing.origin === 'door' && emptyReason(listing.direction) === 'filtered';
+  // Told apart by the backend, per direction: "the last bus has gone" and "your
+  // own line filter removed every option" are different sentences, and only the
+  // second one has a way out to offer.
+  const emptyFromFilter = emptyReason(listing.direction) === 'filtered';
 
   return {
     ...listing,
@@ -526,15 +488,14 @@ function buildSection(
       }
       // The same fields `commuteCommitId` reads back, in the same order: a
       // commitment is the *scheduled* departure and the first vehicle, so it
-      // survives the delay that is usually the reason anyone is looking — plus
-      // where the journey starts, without which the re-read would ask about a
-      // journey from the wrong end of the corridor.
+      // survives the delay that is usually the reason anyone is looking. No
+      // `origin` — the door is the default, and it is the only place a journey
+      // is committed to from now that the change draws departures.
       setCommit({
         direction: listing.direction,
         departureMs: journey.startMs,
         line: journey.rides[0]?.line ?? 'walk',
         committedAtMs: Date.now(),
-        ...(listing.origin === 'door' ? {} : { origin: listing.origin }),
       } satisfies TransitWidgetV2Commit);
     },
   };
