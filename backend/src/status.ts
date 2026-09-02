@@ -54,7 +54,16 @@ const BATCH_GRACE_MS = 20_000;
 const FAILURE_TTL_MS = 30 * 60_000;
 
 function health(p: Probe, now: number): UpstreamHealth {
-  if (p.lastSuccess === null && p.lastFailure === null) return 'unknown';
+  if (p.lastSuccess === null && p.lastFailure === null) {
+    // A warning is a finding, not an absence of one. Traffic-fed sources cannot
+    // reach here with a warning set — the prober always records an outcome
+    // alongside it — but a local check can: routing-revision.ts compares two
+    // stamped files and knows the deployed router is stale before anyone has
+    // asked it for a route. Reporting that as "not checked yet" would keep it
+    // out of the rollup's attention count for the whole window between a
+    // backend restart and the first route of the day.
+    return p.warning === null ? 'unknown' : 'degraded';
+  }
   if (p.lastFailure === null) return p.warning === null ? 'ok' : 'degraded';
   if (p.lastSuccess !== null && p.lastSuccess >= p.lastFailure - BATCH_GRACE_MS) {
     // Reachable — but a warning means the answer itself is not to be trusted

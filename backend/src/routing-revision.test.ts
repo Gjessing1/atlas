@@ -99,6 +99,20 @@ describe('routing revision', () => {
     expect(routingDriftWarning(revisions)).toBeNull();
   });
 
+  it('counts as degraded before anyone has routed', async () => {
+    // The state every deploy passes through: the backend has just restarted, no
+    // route has been asked for yet, and the drift is knowable anyway because it
+    // is read from two files. Reported as `unknown` it would be left out of the
+    // status page's own "needs attention" count.
+    const status = new StatusRegistry();
+    status.register(ROUTING_STATUS_ID, 'Valhalla (routing)', 'Routing');
+    await writeExpected('9f9f9f9f9f9f');
+    await writeDeployed('{"revision":"0a0a0a0a0a0a"}');
+    await createRoutingRevisionReporter(dataDir, { expectedFile })(status);
+    expect(status.toStatus().find((s) => s.id === ROUTING_STATUS_ID)!.health).toBe('degraded');
+    expect(status.overall()).toBe('degraded');
+  });
+
   it('raises the warning on the routing row, and clears it on rebuild', async () => {
     const status = new StatusRegistry();
     status.register(ROUTING_STATUS_ID, 'Valhalla (routing)', 'Routing');
