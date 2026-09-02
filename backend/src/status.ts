@@ -156,9 +156,12 @@ export class StatusRegistry {
   /**
    * Flag (or clear) the silent kind of failure: the upstream answers, but its
    * answer is wrong — zero features where there were thousands, a successor
-   * year-service that has appeared. Only the active prober calls this, and it
-   * always calls it with the outcome, so a warning clears itself once the
-   * upstream recovers.
+   * year-service that has appeared, a routing container still serving off an
+   * image the repo has moved past. Callers always pass the current verdict
+   * rather than only the bad one, so a warning clears itself once the upstream
+   * recovers; the corollary is that a row's warning has exactly one owner (the
+   * active prober, or a local check like routing-revision.ts), because two
+   * would spend their time clearing each other's findings.
    */
   warn(id: string, warning: string | null): void {
     const p = this.probes.get(id);

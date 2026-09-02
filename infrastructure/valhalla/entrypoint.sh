@@ -44,6 +44,20 @@ CONCURRENCY="${VALHALLA_CONCURRENCY:-2}"
 
 mkdir -p "$DATA_DIR"
 
+# Publish which build of this image is actually running, into the volume the
+# backend also mounts (/mnt/data/atlas — here /data, there /data/valhalla).
+# Nothing else can see it: this container is started by hand and then keeps
+# serving off the image it started from, so a change to this script or to
+# coverage.list can sit in the repo, deployed nowhere, looking healthy — three
+# weeks of exactly that went unnoticed. The backend compares this against the
+# revision the repo had when *it* was built and warns on the status page.
+# Absent stamp (an image built before this existed) means no claim, not drift.
+if [ -f /image-revision ]; then
+  printf '{"revision":"%s","startedAt":"%s"}\n' \
+    "$(cat /image-revision)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > "$DATA_DIR/deployed.json"
+fi
+
 # Which side of the road each country drives on comes from the admin database,
 # and roundabout exit counting depends on it: Valhalla counts the arms on the
 # driving side, so a left-driving country graphed as right-driving numbers the

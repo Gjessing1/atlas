@@ -35,6 +35,7 @@ import {
 import { derivedLayerMetas } from './potential/catalog.js';
 import { allProbes, ProbeRunner, type ProbeRunnerOptions } from './probes.js';
 import type { RegionJobOptions } from './region-jobs.js';
+import { createRoutingRevisionReporter, ROUTING_STATUS_ID } from './routing-revision.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
 import { registerUpdatesApi } from './updates-api.js';
@@ -164,7 +165,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // catalog sources register themselves inside registerOverlayApi/Weather.
   const status = new StatusRegistry();
   status.register('photon', 'Photon (search)', 'Search');
-  status.register('valhalla', 'Valhalla (routing)', 'Routing');
+  status.register(ROUTING_STATUS_ID, 'Valhalla (routing)', 'Routing');
 
   // Rate limiting, registered before any route so per-route `config.rateLimit`
   // (see sync-api.ts) is honoured. The global ceiling is deliberately loose —
@@ -241,6 +242,13 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // see: a cell built during an outage keeps that gap for good (ROADMAP N7).
   const reportCells = createCensusReporter(opts.dataDir);
 
+  // ...and the same blind spot one level up: the routing container is deployed
+  // by hand, so a change to infrastructure/valhalla can be live in this repo and
+  // in this backend while the router still answers off the image it started
+  // from. Nothing else reports that — every route succeeds — so it is read from
+  // the revision the two images stamp (see routing-revision.ts).
+  const reportRoutingRevision = createRoutingRevisionReporter(opts.dataDir);
+
   /** Local, free checks: basemap freshness, the derived cells, a Postgres ping. */
   const refreshLocalStatus = async (): Promise<void> => {
     const detail = await basemapDetail(path.join(opts.dataDir, 'tiles'));
@@ -249,6 +257,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     // (the world-tile upstream covers everything), so leave that unknown.
     if (detail) status.record('basemap', true);
     await reportCells(status);
+    await reportRoutingRevision(status);
     if (syncStores) {
       try {
         await syncStores.ping();

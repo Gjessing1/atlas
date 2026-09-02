@@ -24,5 +24,18 @@ COPY coverage.list /coverage.list
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Stamp this image with its own revision — a digest of the three files above
+# (see revision.sh) — which the entrypoint publishes into the shared data volume
+# on every start. Nothing else can report which build of the routing service is
+# answering: this container is brought up by hand while CI redeploys the backend
+# on every push, and a running container keeps serving off the image it started
+# from, so an entrypoint change here can sit undeployed indefinitely. It did,
+# for three weeks. The backend bakes the same digest from the repo at its own
+# build time and warns on the status page when the two disagree.
+COPY Dockerfile revision.sh /image-src/
+RUN cp /coverage.list /entrypoint.sh /image-src/ \
+  && sh /image-src/revision.sh /image-src > /image-revision \
+  && rm -rf /image-src
+
 EXPOSE 8002
 ENTRYPOINT ["/entrypoint.sh"]

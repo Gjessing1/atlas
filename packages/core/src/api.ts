@@ -49,8 +49,10 @@ export interface UpstreamStatus {
    * The *silent* failure: the upstream answered, but the answer is wrong in a
    * way no HTTP status reports — a feature count that fell to zero, a scale
    * range that stopped drawing, a year-named service whose successor has
-   * appeared and left us serving last year's data. Non-null counts as
-   * `degraded`, because the layer works and is nonetheless not to be trusted.
+   * appeared and left us serving last year's data, a hand-deployed routing
+   * container answering off a build this release has moved past. Non-null
+   * counts as `degraded`, because the layer works and is nonetheless not to be
+   * trusted.
    */
   warning: string | null;
 }

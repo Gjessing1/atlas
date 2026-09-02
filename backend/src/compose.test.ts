@@ -218,3 +218,57 @@ describe('regional Valhalla builds', () => {
     expect(adminBuilder).toContain('REJECTED');
   });
 });
+
+/**
+ * Everything above compares files to files, and passes just as happily when
+ * none of them has been deployed: the routing container is brought up by hand,
+ * and a running container keeps serving off whatever image it started from. An
+ * entrypoint change once sat live-in-the-repo and undeployed for three weeks
+ * with nothing to show it. These pin the one mechanism that can see that — the
+ * revision both images stamp — against the ways it would silently disarm.
+ */
+describe('the deployed routing service', () => {
+  const at = (rel: string) => readFileSync(path.join(repoRoot, rel), 'utf8');
+  const revisionScript = at('infrastructure/valhalla/revision.sh');
+  const serviceDockerfile = at('infrastructure/valhalla/Dockerfile');
+  const backendDockerfile = at('backend/Dockerfile');
+  const entrypoint = at('infrastructure/valhalla/entrypoint.sh');
+  const reader = at('backend/src/routing-revision.ts');
+
+  it('computes the revision in exactly one place', () => {
+    // Two Dockerfiles need the same number out of the same files. A formula
+    // copied into both is one that gets edited in one of them and then reports
+    // agreement forever, which is worse than having no check at all.
+    expect(revisionScript).toContain('sha256sum');
+    for (const [name, dockerfile] of Object.entries({ serviceDockerfile, backendDockerfile })) {
+      expect(dockerfile, `${name} must call revision.sh`).toContain('revision.sh');
+      expect(dockerfile, `${name} must not hash the files itself`).not.toContain('sha256sum');
+    }
+    // And over the files that decide what the service does — coverage above all,
+    // since that is what the graph is built from.
+    for (const file of ['Dockerfile', 'coverage.list', 'entrypoint.sh']) {
+      expect(revisionScript).toContain(file);
+    }
+  });
+
+  it('ships the expectation into the runtime image, not just the build stage', () => {
+    // The quiet way to disarm this: compute the revision in the build stage and
+    // never copy it out. The backend would then find no expectation, report
+    // nothing, and look exactly like a healthy deployment forever.
+    expect(backendDockerfile).toMatch(
+      /COPY --from=build \/valhalla-revision \.\/backend\/valhalla-revision/,
+    );
+    // Read relative to dist/, so the path in the image and the path the code
+    // opens are the same one.
+    expect(reader).toContain("'../valhalla-revision'");
+  });
+
+  it('publishes the running build where the backend looks for it', () => {
+    // The two containers meet only on the shared /mnt/data/atlas mount: the
+    // router writes /data/deployed.json, the backend reads /data/valhalla/.
+    expect(serviceDockerfile).toContain('/image-revision');
+    expect(entrypoint).toContain('/image-revision');
+    expect(entrypoint).toMatch(/> "\$DATA_DIR\/deployed\.json"/);
+    expect(reader).toContain("path.join('valhalla', 'deployed.json')");
+  });
+});

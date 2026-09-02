@@ -26,6 +26,15 @@ RUN npm run format:check && npm run lint && npm run build && npm run typecheck &
 # by /api/health so the deployed version is identifiable.
 ARG GIT_SHA=
 ENV GIT_SHA=$GIT_SHA
+# The routing service's revision *as this repo describes it* (the digest over
+# infrastructure/valhalla — see revision.sh there). The Valhalla container
+# publishes its own into the shared data volume on every start, and nothing else
+# on the host can tell the two apart: CI redeploys this backend on every push
+# while that container is rebuilt by hand, so it goes on serving off whatever
+# image it started from. Baking the expectation here is what lets the status page
+# report the drift instead of it lasting three weeks, as it once did. Written
+# outside /app so no gate stage ever sees a generated file in the source tree.
+RUN sh infrastructure/valhalla/revision.sh infrastructure/valhalla > /valhalla-revision
 RUN npm prune --omit=dev --workspaces --include-workspace-root
 
 FROM node:24-bookworm-slim AS runtime
@@ -53,6 +62,9 @@ COPY --from=build /app/backend/dist ./backend/dist
 # for why this is safe and what the N7 status probe watches for.
 COPY --from=build /app/backend/certs ./backend/certs
 ENV NODE_EXTRA_CA_CERTS=/app/backend/certs/upstream-cas.pem
+# Read by backend/src/routing-revision.ts, relative to dist/ — absent in dev and
+# in tests, where the honest answer is that we know of no expectation to compare.
+COPY --from=build /valhalla-revision ./backend/valhalla-revision
 # Built web app → backend/public, served same-origin by backend/src/index.ts.
 COPY --from=build /app/apps/web/dist ./backend/public
 WORKDIR /app/backend
