@@ -26,6 +26,30 @@ export {
   type Snap,
   type SnapHint,
 } from './geometry.js';
+export {
+  NAV_LIFECYCLE_INITIAL,
+  navActivity,
+  navDestination,
+  navLifecycleReducer,
+  navMayReroute,
+  navPath,
+  navPhase,
+  navPlan,
+  navTripProgress,
+  type NavAccounting,
+  type NavActivity,
+  type NavEvent,
+  type NavFasterOffer,
+  type NavFasterRoute,
+  type NavLifecycle,
+  type NavOriginFix,
+  type NavPhase,
+  type NavPlan,
+  type NavRerouteState,
+  type NavStage,
+  type NavTripProgress,
+  type NavTripSummary,
+} from './lifecycle.js';
 export { navOptionsForProfile } from './profiles.js';
 export { headingRateDegPerSec, type Vec3 } from './sensors.js';
 export { CourseFuser, DEFAULT_COURSE_FUSION, type CourseFusionOptions } from './course.js';

@@ -17,10 +17,27 @@ import type { LatLng } from '@atlas/core';
 import {
   DEFAULT_FACING_BLEND,
   FacingBlender,
+  NAV_LIFECYCLE_INITIAL,
+  navActivity,
+  navDestination,
+  navLifecycleReducer,
+  navMayReroute,
   navOptionsForProfile,
+  navPath,
+  navPhase,
+  navPlan,
+  navTripProgress,
   NavigationSession,
   type HeadingSource,
+  type NavActivity,
+  type NavEvent,
+  type NavFasterRoute,
+  type NavLifecycle,
+  type NavOriginFix,
+  type NavPhase,
   type NavState,
+  type NavTripProgress,
+  type NavTripSummary,
   type Position,
 } from '@atlas/navigation';
 import {
@@ -42,48 +59,22 @@ import {
   type TrafficClosureTransport,
   type TrafficDelayTransport,
 } from '@atlas/traffic';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-export type NavPhase =
-  | 'idle'
-  | 'starting'
-  | 'preview'
-  | 'exploring'
-  | 'navigating'
-  | 'rerouting'
-  | 'paused'
-  | 'arrived'
-  | 'error';
-
-/** Whether the location watch is following a route or simply following the traveller. */
-export type NavActivity = 'guidance' | 'explorer' | null;
-
-/** What the arrival card shows once the trip is over. */
-export interface NavTripSummary {
-  distanceM: number;
-  durationMs: number;
-  /** The route engine's estimate when Start was pressed, before any reroutes. */
-  originalEstimateMs: number;
-}
-
-/** Session totals persisted with an interrupted trip so its final summary remains whole. */
-export interface NavTripProgress {
-  distanceM: number;
-  elapsedMs: number;
-  originalEstimateMs: number;
-}
-
-/** A one-off fix, with the wall-clock time it was *measured* (not received). */
-export interface NavOriginFix {
-  fix: Position;
-  atMs: number;
-}
-
-/** A better route the periodic watch found, offered rather than imposed. */
-export interface NavFasterRoute {
-  /** Time it saves over the engine's own estimate for the current route. */
-  savesMs: number;
-}
+/**
+ * The lifecycle types belong to the navigation domain, not to this hook: the
+ * state machine that owns them lives in `@atlas/navigation`, beside the
+ * session it drives and testable without React. They are re-exported here
+ * because both apps have always imported them from the controller.
+ */
+export type {
+  NavActivity,
+  NavFasterRoute,
+  NavOriginFix,
+  NavPhase,
+  NavTripProgress,
+  NavTripSummary,
+} from '@atlas/navigation';
 
 /** Everything a navigation controller needs from the device it runs on. */
 export interface NavPlatform {
@@ -349,70 +340,63 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 /** Profiles where facing the device and direction of travel can diverge. */
 const usesFacingHeading = (profile: RoutingProfile): boolean => profile !== 'car';
 
+/** Stops that outlive a render: a plan with no vias always hands back this one. */
+const NO_VIAS: LatLng[] = [];
+
+/**
+ * The lifecycle machine, readable synchronously.
+ *
+ * Commands and asynchronous results both have to see the transition they have
+ * just made — the fix handler asks "is this trip still mine?" microseconds
+ * after Pause dispatched, and a fix already queued across the native bridge
+ * must not be applied to a paused trip — while React state only becomes
+ * visible at the next render. So the ref is the authority and the state exists
+ * to schedule that render: exactly the discipline the two dozen refs it
+ * replaces already followed, now in one place and behind one pure reducer.
+ */
+function useNavLifecycle(): {
+  lifecycle: NavLifecycle;
+  lifecycleRef: { current: NavLifecycle };
+  dispatch: (event: NavEvent) => NavLifecycle;
+} {
+  const lifecycleRef = useRef<NavLifecycle>(NAV_LIFECYCLE_INITIAL);
+  const [lifecycle, setLifecycle] = useState<NavLifecycle>(NAV_LIFECYCLE_INITIAL);
+  const dispatch = useCallback((event: NavEvent): NavLifecycle => {
+    const next = navLifecycleReducer(lifecycleRef.current, event);
+    // An event that is not legal where it lands changes nothing, and must not
+    // cost a render — several of those arrive on every fix.
+    if (next !== lifecycleRef.current) {
+      lifecycleRef.current = next;
+      setLifecycle(next);
+    }
+    return next;
+  }, []);
+  return { lifecycle, lifecycleRef, dispatch };
+}
+
 export function useNavigationController(platform: NavPlatform): NavController {
   const platformRef = useLatest(platform);
 
-  const [phase, setPhase] = useState<NavPhase>('idle');
-  const [activity, setActivity] = useState<NavActivity>(null);
+  // The trip: which one is running, what it was planned as, which asynchronous
+  // request may still land, what has been banked. One reducer, one ref.
+  const { lifecycle, lifecycleRef, dispatch } = useNavLifecycle();
+  const { stage } = lifecycle;
+  const phase = navPhase(lifecycle);
+
+  // Telemetry, deliberately outside the machine: it changes at sensor rate,
+  // and folding it in would make every fix a lifecycle transition.
   const [state, setState] = useState<NavState | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
-  const [routeCoords, setRouteCoords] = useState<number[][]>([]);
-  const [activePath, setActivePath] = useState<RoutePath | null>(null);
-  const [profile, setProfileState] = useState<RoutingProfile>('car');
-  const [preferences, setPreferencesState] = useState<Partial<RoutePreferences> | null>(null);
-  const [destination, setDestination] = useState<LatLng | null>(null);
-  const [viaPoints, setViaPoints] = useState<LatLng[]>([]);
-  const [previewPaths, setPreviewPaths] = useState<RoutePath[] | null>(null);
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [speedMps, setSpeedMps] = useState<number | null>(null);
   const [altitudeM, setAltitudeM] = useState<number | null>(null);
   const [facing, setFacing] = useState<{ deg: number; accuracyDeg: number | null } | null>(null);
   const [headingSource, setHeadingSourceState] = useState<HeadingSource>('auto');
   const [headingCalibrationNeeded, setHeadingCalibrationNeeded] = useState(false);
   const [muted, setMutedState] = useState(false);
-  const [fasterRoute, setFasterRoute] = useState<NavFasterRoute | null>(null);
-  const [tripSummary, setTripSummary] = useState<NavTripSummary | null>(null);
-  const [rerouteFailed, setRerouteFailed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
-  const destRef = useRef<LatLng | null>(null);
-  /** Via stops the *current* route still visits; passed ones are dropped on reroute. */
-  const viasRef = useRef<LatLng[]>([]);
-  /** The fix the preview was built from: refetch origin, and the seed for Start. */
-  const originRef = useRef<NavOriginFix | null>(null);
-  /** Guards preview fetches: a late response for an abandoned one is dropped. */
-  const previewSeq = useRef(0);
-  /**
-   * Bumped whenever the trip identity changes (Start, End, arrival). An async
-   * reroute captures it and touches nothing once it no longer matches — the
-   * one race a merged controller lets us fix in a single place, since either
-   * app could otherwise have an old reroute flip a fresh preview into
-   * `navigating` as it lands.
-   */
-  const tripSeq = useRef(0);
-  /** Prevents a quick double tap from starting two location/route requests. */
-  const startInFlight = useRef(false);
-  const profileRef = useRef<RoutingProfile>('car');
-  /** Planner preferences survive preview refreshes and every mid-trip reroute. */
-  const preferencesRef = useRef<Partial<RoutePreferences> | undefined>(undefined);
-  const rerouteInFlight = useRef(false);
-  /** Earliest time (epoch ms) a failed reroute may be retried (backoff). */
-  const rerouteBackoffUntil = useRef(0);
-  /** Consecutive reroute failures, driving the backoff exponent. */
-  const rerouteFailCount = useRef(0);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
   const mutedRef = useRef(false);
-  /** Original engine estimate, deliberately unchanged by reroutes or live traffic. */
-  const originalEstimateMsRef = useRef(0);
-  /** Active (not paused) elapsed time banked before the current running segment. */
-  const activeElapsedMsRef = useRef(0);
-  /** Start of the current active segment; null while paused/outside guidance. */
-  const activeStartedAtRef = useRef<number | null>(null);
-  /** Distance driven across reroutes (each reroute starts a fresh session). */
-  const traveledBaseRef = useRef(0);
   /** Latest NavState, readable from callbacks without a stale closure. */
   const lastStateRef = useRef<NavState | null>(null);
   /** Latest raw fix — the origin an accepted reroute offer recalculates from. */
@@ -421,19 +405,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const lastFixMeasuredAtRef = useRef<number | null>(null);
   /** One spoken "off route" per episode in offer mode, not one per fix. */
   const offRouteSpokenRef = useRef(false);
-  /** The faster-route offer's payload; the state above only carries the saving. */
-  const fasterOfferRef = useRef<{
-    path: RoutePath;
-    vias: LatLng[];
-    savesMs: number;
-    atMs: number;
-  } | null>(null);
-  /** Saving the driver last dismissed — the bar a new offer must clear. */
-  const fasterDismissedMsRef = useRef<number | null>(null);
-  /** One faster-route probe at a time; a slow answer must not stack more. */
-  const fasterCheckInFlight = useRef(false);
-  /** The followed path, readable from callbacks (addStop's insert ordering). */
-  const activePathRef = useLatest(activePath);
   /** Compass-vs-course blending for the walking puck (speed hysteresis). */
   const facingBlender = useRef(new FacingBlender());
   const headingSourceRef = useRef<HeadingSource>('auto');
@@ -447,24 +418,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * prove it still belongs to the watch that owns the current trip.
    */
   const watchSeq = useRef(0);
-  /** Synchronous guard for a final queued fix after a pause tears its watch down. */
-  const pausedRef = useRef(false);
-  /** Prevent two quick Resume taps from starting competing location watches. */
-  const continueInFlightRef = useRef(false);
-  /** Along-route progress at Pause; the first resumed fix must not count the gap as travel. */
-  const resumeFromTraveledRef = useRef<number | null>(null);
-  /** The re-anchor fix updates state but does not replay a cue crossed during the pause. */
-  const suppressPromptsOnceRef = useRef(false);
-  /**
-   * True from the moment the trip is declared arrived until it is released.
-   * Fixes keep arriving through the arrival card (see `stop`), and every one
-   * of them still reports `arrived` — this is what keeps that from being
-   * announced, summarised and re-summarised once a second.
-   */
-  const arrivedRef = useRef(false);
-  // The preview selection is read inside `go`, which must stay identity-stable.
-  const previewPathsRef = useLatest(previewPaths);
-  const previewIndexRef = useLatest(previewIndex);
 
   /** Speak a voice prompt, unless muted; never let a TTS error interrupt nav. */
   const speak = useCallback(
@@ -494,13 +447,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
     watchSeq.current++;
     watchStopRef.current?.();
     watchStopRef.current = null;
-  }, []);
-
-  /** Bank the current active segment exactly once (Pause, arrival or End). */
-  const bankActiveTime = useCallback((now = Date.now()) => {
-    if (activeStartedAtRef.current === null) return;
-    activeElapsedMsRef.current += Math.max(0, now - activeStartedAtRef.current);
-    activeStartedAtRef.current = null;
   }, []);
 
   const fetchPath = useCallback(
@@ -566,13 +512,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
       enrichAbort.current = null;
       const { trace, nvdbCameras, nvdbLanes } = platformRef.current;
       if (!trace && !nvdbCameras && !nvdbLanes) return;
+      // The mode this route was built for. It cannot change under a running
+      // trip — only a preview switches profile — so capturing it here is the
+      // same value every continuation below would have read later.
+      const profile = lifecycleRef.current.profile;
       const controller = new AbortController();
       enrichAbort.current = controller;
       // Speed cameras ride the same fire-and-forget contract, but not the
       // trace pipeline — they are their own dataset, useful even where the
       // tiles carry no attributes. Car only, like the NVDB limits: ATK
       // enforcement is about driving.
-      if (nvdbCameras && profileRef.current === 'car') {
+      if (nvdbCameras && profile === 'car') {
         void nvdbCameras(
           path.points.map((p) => ({ lat: p.lat, lng: p.lng })),
           controller.signal,
@@ -590,7 +540,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
             // Optional by design: offline, or no dataset on the server.
           });
       }
-      if (nvdbLanes && profileRef.current === 'car') {
+      if (nvdbLanes && profile === 'car') {
         void nvdbLanes(path, controller.signal)
           .then((overrides) => {
             if (sessionRef.current !== session || overrides.length === 0) return;
@@ -606,13 +556,13 @@ export function useNavigationController(platform: NavPlatform): NavController {
       }
       if (!trace) return;
       const nvdb = platformRef.current.nvdbLimits;
-      void enrichRoute(path, profileRef.current, trace, { signal: controller.signal })
+      void enrichRoute(path, profile, trace, { signal: controller.signal })
         .then(async (base) => {
           // Layer NVDB's authoritative Norwegian limits over the tile limits
           // for a car route. Its own best-effort: a failure (offline, no
           // dataset, outside Norway) falls back to exactly `base`, so the
           // roundel never disappears because NVDB was unreachable.
-          if (!nvdb || profileRef.current !== 'car') return base;
+          if (!nvdb || profile !== 'car') return base;
           try {
             const overrides = await nvdb(
               path.points.map((p) => ({ lat: p.lat, lng: p.lng })),
@@ -639,129 +589,75 @@ export function useNavigationController(platform: NavPlatform): NavController {
           // Optional by design: offline, or the server is unreachable.
         });
     },
-    [platformRef],
+    [platformRef, lifecycleRef],
   );
 
-  /** Withdraw a pending faster-route offer (route changed, expired, ended). */
-  const clearFasterOffer = useCallback(() => {
-    fasterOfferRef.current = null;
-    setFasterRoute((current) => (current === null ? current : null));
+  /**
+   * What both endings release: the enrichment fetch, the puck, and the sensor
+   * readings behind it. What separates them is the session and its fix watch —
+   * an arrival deliberately keeps both alive (see `finishArrived`).
+   */
+  const releaseTelemetry = useCallback(() => {
+    enrichAbort.current?.abort();
+    enrichAbort.current = null;
+    setPosition(null);
+    setSpeedMps(null);
+    setAltitudeM(null);
+    setFacing(null);
+    setHeadingCalibrationNeeded(false);
+    facingBlender.current.reset();
+    lastFixRef.current = null;
+    offRouteSpokenRef.current = false;
   }, []);
 
-  /** Drop every trace of an offered-but-unstarted preview. */
-  const clearPreview = useCallback(() => {
-    previewSeq.current++;
-    setPreviewPaths(null);
-    setPreviewIndex(0);
-    setPreviewLoading(false);
-    setPreviewError(null);
-  }, []);
+  /**
+   * Done: release the session, the watch and every trace of the trip. The
+   * machine's `end` clears the lifecycle in one transition — there is no
+   * longer a list of fields to remember to reset.
+   */
+  const stop = useCallback(() => {
+    stopWatch();
+    sessionRef.current = null;
+    releaseTelemetry();
+    setState(null);
+    dispatch({ type: 'end' });
+  }, [stopWatch, releaseTelemetry, dispatch]);
 
-  const stop = useCallback(
-    (arrived = false) => {
-      tripSeq.current++;
-      bankActiveTime();
+  /** Abandon a trip that could not be set up, keeping the reason on screen. */
+  const fail = useCallback(
+    (err: unknown) => {
+      stopWatch();
+      sessionRef.current = null;
+      releaseTelemetry();
+      dispatch({ type: 'failed', message: message(err) });
+    },
+    [stopWatch, releaseTelemetry, dispatch],
+  );
+
+  /**
+   * End the trip with an arrival: summary, spoken confirmation, `arrived`.
+   * Fires once — fixes keep flowing through the arrival card, and each one
+   * still reports `arrived`, which must not re-announce it every second. That
+   * is the machine's doing rather than a flag's: only a trip still being
+   * guided (or paused) can arrive, so the second report transitions nothing.
+   */
+  const finishArrived = useCallback(
+    (session: NavigationSession, traveledM: number) => {
+      const before = lifecycleRef.current;
+      const arrived = dispatch({ type: 'arrived', atMs: Date.now(), traveledM });
+      if (arrived === before) return;
+      speak(session.arrivalText());
       // Arrival is not the end of needing a position. The last hundred metres
       // are on foot — across a car park, round a courtyard, looking for the
       // door — and that is exactly where an accurate, live puck earns its
       // keep, so the fix watch and the session stay up while the arrival card
       // is on screen. The session is already `arrived`: it keeps producing
       // positions and stops producing guidance, prompts and reroutes. Done
-      // (`stop(false)`) is what releases both, which is what the traveller
-      // means by pressing it.
-      if (!arrived) {
-        stopWatch();
-        sessionRef.current = null;
-        arrivedRef.current = false;
-      }
-      clearPreview();
-      enrichAbort.current?.abort();
-      enrichAbort.current = null;
-      destRef.current = null;
-      viasRef.current = [];
-      setViaPoints([]);
-      originRef.current = null;
-      preferencesRef.current = undefined;
-      setPreferencesState(null);
-      startInFlight.current = false;
-      rerouteInFlight.current = false;
-      rerouteBackoffUntil.current = 0;
-      rerouteFailCount.current = 0;
-      setRerouteFailed(false);
-      clearFasterOffer();
-      fasterDismissedMsRef.current = null;
-      fasterCheckInFlight.current = false;
-      setRouteCoords([]);
-      setActivePath(null);
-      setPosition(null);
-      setSpeedMps(null);
-      setAltitudeM(null);
-      setFacing(null);
-      setHeadingCalibrationNeeded(false);
-      facingBlender.current.reset();
-      lastFixRef.current = null;
-      offRouteSpokenRef.current = false;
-      pausedRef.current = false;
-      continueInFlightRef.current = false;
-      resumeFromTraveledRef.current = null;
-      suppressPromptsOnceRef.current = false;
-      if (!arrived) {
-        setState(null);
-        setDestination(null);
-        setTripSummary(null);
-        setActivity(null);
-      }
-      originalEstimateMsRef.current = 0;
-      activeElapsedMsRef.current = 0;
-      activeStartedAtRef.current = null;
-      traveledBaseRef.current = 0;
-      setPhase(arrived ? 'arrived' : 'idle');
+      // (`stop`) is what releases both, which is what the traveller means by
+      // pressing it.
+      releaseTelemetry();
     },
-    [stopWatch, clearPreview, clearFasterOffer, bankActiveTime],
-  );
-
-  /** Abandon a trip that could not be set up, keeping the reason on screen. */
-  const fail = useCallback(
-    (err: unknown) => {
-      stopWatch();
-      clearPreview();
-      sessionRef.current = null;
-      arrivedRef.current = false;
-      destRef.current = null;
-      viasRef.current = [];
-      setViaPoints([]);
-      originRef.current = null;
-      preferencesRef.current = undefined;
-      setPreferencesState(null);
-      clearFasterOffer();
-      setDestination(null);
-      setPosition(null);
-      startInFlight.current = false;
-      setError(message(err));
-      setPhase('error');
-    },
-    [stopWatch, clearPreview, clearFasterOffer],
-  );
-
-  /**
-   * End the trip with an arrival: summary, spoken confirmation, `arrived`.
-   * Fires once — fixes keep flowing through the arrival card, and each one
-   * still reports `arrived`, which must not re-announce it every second.
-   */
-  const finishArrived = useCallback(
-    (session: NavigationSession, traveledM: number) => {
-      if (arrivedRef.current) return;
-      arrivedRef.current = true;
-      bankActiveTime();
-      speak(session.arrivalText());
-      setTripSummary({
-        distanceM: traveledBaseRef.current + traveledM,
-        durationMs: activeElapsedMsRef.current,
-        originalEstimateMs: originalEstimateMsRef.current,
-      });
-      stop(true);
-    },
-    [speak, stop, bankActiveTime],
+    [lifecycleRef, dispatch, speak, releaseTelemetry],
   );
 
   /**
@@ -783,36 +679,33 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   /**
    * Deliberately stop the trip clock and every active delivery surface while
-   * retaining the route/session in memory. `pausedRef` is set before native
-   * watch teardown so a queued final fix cannot sneak progress into the pause.
+   * retaining the route and session in memory. The transition is dispatched
+   * before the native watch is torn down, because tearing one down cannot
+   * retract a fix already queued across the bridge — and `onFix` refuses to
+   * apply one to a trip that is no longer being guided.
    */
   const pause = useCallback(() => {
-    if (!sessionRef.current || (phase !== 'navigating' && phase !== 'rerouting')) return;
-    pausedRef.current = true;
-    resumeFromTraveledRef.current = lastStateRef.current?.traveledM ?? null;
-    tripSeq.current++;
-    bankActiveTime();
+    if (!sessionRef.current || lifecycleRef.current.stage.kind !== 'guiding') return;
+    dispatch({
+      type: 'pause',
+      atMs: Date.now(),
+      traveledM: lastStateRef.current?.traveledM ?? null,
+    });
     stopWatch();
     platformRef.current.stopSpeaking();
-    rerouteInFlight.current = false;
-    rerouteBackoffUntil.current = 0;
-    setRerouteFailed(false);
-    clearFasterOffer();
-    fasterCheckInFlight.current = false;
     setSpeedMps(null);
-    setError(null);
-    setPhase('paused');
-  }, [phase, bankActiveTime, stopWatch, platformRef, clearFasterOffer]);
+  }, [lifecycleRef, dispatch, stopWatch, platformRef]);
 
   const reroute = useCallback(
     async (from: Position, viasOverride?: LatLng[]) => {
-      if (rerouteInFlight.current || !destRef.current) return;
+      const before = lifecycleRef.current;
+      if (before.stage.kind !== 'guiding') return;
       // A failed reroute must not retry on every 1 Hz off-route fix — back off
       // exponentially so an unreachable routing server isn't hammered.
-      if (Date.now() < rerouteBackoffUntil.current) return;
-      const trip = tripSeq.current;
-      rerouteInFlight.current = true;
-      setPhase('rerouting');
+      if (!navMayReroute(before, Date.now())) return;
+      const { trip, profile: prof } = before;
+      const { plan } = before.stage;
+      dispatch({ type: 'reroute-started' });
       try {
         // Pass the travel direction (only meaningful when moving) so the new
         // route continues the way the traveller points, not via a U-turn.
@@ -826,39 +719,37 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // passed-count belonging to the outgoing route.
         const passedVias = lastStateRef.current?.viasPassed ?? 0;
         const remainingVias =
-          viasOverride ?? (passedVias > 0 ? viasRef.current.slice(passedVias) : viasRef.current);
+          viasOverride ?? (passedVias > 0 ? plan.vias.slice(passedVias) : plan.vias);
         const path = await fetchPath(
           from,
-          destRef.current,
-          profileRef.current,
-          preferencesRef.current,
+          plan.destination,
+          prof,
+          plan.preferences,
           heading,
           remainingVias,
         );
         // End, arrival or a whole new trip may have happened during the fetch;
         // applying now would resurrect a dead nav UI with a fresh session.
-        if (trip !== tripSeq.current || !destRef.current) return;
-        // The old session dies here — bank its driven distance for the summary.
-        traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
+        const live = lifecycleRef.current;
+        if (live.trip !== trip || live.stage.kind !== 'guiding') return;
         // Rerouting happens mid-drive: never regress to the pre-departure
         // framing (calm camera / no snap-lock) the fresh session starts in.
         const nextSession = new NavigationSession(
           path,
-          navOptionsForProfile(profileRef.current, {
+          navOptionsForProfile(prof, {
             startDeparted: lastStateRef.current?.departed ?? true,
           }),
         );
         sessionRef.current = nextSession;
-        viasRef.current = remainingVias;
-        setViaPoints(remainingVias);
-        setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-        setActivePath(path);
-        rerouteFailCount.current = 0;
-        rerouteBackoffUntil.current = 0;
-        setRerouteFailed(false);
-        // Any faster-route offer was measured against the route that just
-        // died; it cannot be accepted on top of this one.
-        clearFasterOffer();
+        // The old session dies here — its driven distance is banked onto the
+        // trip's total, the trimmed stops become the plan, and any faster-route
+        // offer, measured against the route that just died, lapses with it.
+        dispatch({
+          type: 'route-replaced',
+          path,
+          vias: remainingVias,
+          bankedM: lastStateRef.current?.traveledM ?? 0,
+        });
         enrich(nextSession, path);
         // Seed the new session with the fix that triggered the reroute, so
         // the shown state (and an off-route offer banner) flips to the new
@@ -875,24 +766,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
         const depart = nextSession.departurePrompt();
         if (depart) speak(depart.text);
       } catch {
-        if (trip !== tripSeq.current) return;
+        if (lifecycleRef.current.trip !== trip) return;
         // Keep the old session (the traveller continues on the drawn line) and
         // back off before the next attempt: 5 s, 10 s, 20 s … capped at 60 s.
-        rerouteFailCount.current++;
-        rerouteBackoffUntil.current =
-          Date.now() + Math.min(60_000, 5_000 * 2 ** (rerouteFailCount.current - 1));
-        setRerouteFailed(true);
+        dispatch({ type: 'reroute-failed', atMs: Date.now() });
       } finally {
-        // Only the reroute that still belongs to the live trip may clear the
-        // flag or restore the phase: a superseded one would otherwise let a
-        // second reroute in, or flip a fresh preview to `navigating`.
-        if (trip === tripSeq.current) {
-          rerouteInFlight.current = false;
-          if (sessionRef.current) setPhase('navigating');
-        }
+        // Only the reroute that still belongs to the live trip may release the
+        // guard: a superseded one would otherwise let a second reroute in.
+        if (lifecycleRef.current.trip === trip) dispatch({ type: 'reroute-settled' });
       }
     },
-    [fetchPath, speak, enrich, clearFasterOffer],
+    [lifecycleRef, dispatch, fetchPath, speak, enrich],
   );
 
   /**
@@ -904,25 +788,25 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * calculation fails, just like every other reroute.
    */
   const continuePastIntermediateStop = useCallback(() => {
-    if (phase !== 'navigating' && phase !== 'rerouting') return;
+    const { stage: current } = lifecycleRef.current;
+    if (current.kind !== 'guiding') return;
     const fix = lastFixRef.current;
     if (!fix) return;
     const passed = lastStateRef.current?.viasPassed ?? 0;
-    if (passed >= viasRef.current.length) return;
-    const remaining = viasRef.current.slice(passed + 1);
-    void reroute(fix, remaining);
-  }, [phase, reroute]);
+    if (passed >= current.plan.vias.length) return;
+    void reroute(fix, current.plan.vias.slice(passed + 1));
+  }, [lifecycleRef, reroute]);
 
   /** Accept an offered reroute: recalculate from the last known fix. */
   const rerouteNow = useCallback(() => {
-    if (phase !== 'navigating' && phase !== 'rerouting') return;
+    if (lifecycleRef.current.stage.kind !== 'guiding') return;
     const fix = lastFixRef.current;
     if (!fix || !sessionRef.current) return;
     // The tap is explicit consent — don't let a backoff from an earlier
     // failed automatic attempt swallow it.
-    rerouteBackoffUntil.current = 0;
+    dispatch({ type: 'reroute-forced' });
     void reroute(fix);
-  }, [phase, reroute]);
+  }, [lifecycleRef, dispatch, reroute]);
 
   /**
    * Insert a stop into the running trip and recalculate through it. The stop
@@ -932,24 +816,25 @@ export function useNavigationController(platform: NavPlatform): NavController {
    */
   const addStop = useCallback(
     (stop: LatLng) => {
-      if (phase !== 'navigating' && phase !== 'rerouting') return;
+      const { stage: current } = lifecycleRef.current;
+      if (current.kind !== 'guiding') return;
       const fix = lastFixRef.current;
-      const path = activePathRef.current;
-      if (!fix || !path || !sessionRef.current || !destRef.current) return;
+      if (!fix || !sessionRef.current) return;
+      const { plan, path } = current;
       const passed = lastStateRef.current?.viasPassed ?? 0;
-      const remaining = passed > 0 ? viasRef.current.slice(passed) : viasRef.current;
+      const remaining = passed > 0 ? plan.vias.slice(passed) : plan.vias;
       // Order along the followed line: the same leg-picking rule the planner
       // uses for a tap on the drawn route.
-      const waypoints = [{ lat: fix.lat, lng: fix.lng }, ...remaining, destRef.current];
+      const waypoints = [{ lat: fix.lat, lng: fix.lng }, ...remaining, plan.destination];
       const insertAt = viaInsertIndex(path.points, waypoints, stop);
       const vias = [...remaining];
       vias.splice(insertAt - 1, 0, stop);
       // The tap is explicit intent — a backoff from an earlier automatic
       // failure must not swallow it.
-      rerouteBackoffUntil.current = 0;
+      dispatch({ type: 'reroute-forced' });
       void reroute(fix, vias);
     },
-    [phase, reroute, activePathRef],
+    [lifecycleRef, dispatch, reroute],
   );
 
   /**
@@ -969,13 +854,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * reading the path's own total.
    */
   const repriceTraffic = useCallback(async (): Promise<void> => {
+    const before = lifecycleRef.current;
     const session = sessionRef.current;
-    const path = activePathRef.current;
     const delays = platformRef.current.trafficDelay;
     // Car only: the corridors measure motor traffic, and it is the only
     // profile whose provider prices a route in the first place.
-    if (!session || !path || !delays || profileRef.current !== 'car') return;
-    const trip = tripSeq.current;
+    if (!session || before.stage.kind !== 'guiding' || !delays || before.profile !== 'car') return;
+    const { trip } = before;
+    const { path } = before.stage;
     let priced: RoutePath;
     try {
       priced = applyTrafficDelay(path, await delays(path.points));
@@ -985,16 +871,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
     }
     // A reroute (or End) during the request leaves this measurement describing
     // a line nobody is driving any more.
-    if (trip !== tripSeq.current) return;
-    if (sessionRef.current !== session || activePathRef.current !== path) return;
+    const live = lifecycleRef.current;
+    if (live.trip !== trip || sessionRef.current !== session) return;
+    if (live.stage.kind !== 'guiding' || live.stage.path !== path) return;
     if (priced.timeMs === path.timeMs) return;
     const refreshed = session.setSchedule(priced, Date.now());
-    setActivePath(priced);
+    dispatch({ type: 'path-repriced', path: priced });
     if (refreshed) {
       setState(refreshed);
       lastStateRef.current = refreshed;
     }
-  }, [platformRef, activePathRef]);
+  }, [lifecycleRef, dispatch, platformRef]);
 
   /**
    * The faster-route watch: ask the engine for today's best route from where
@@ -1004,32 +891,33 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * either when the traveller chose the line deliberately.
    */
   const checkFasterRoute = useCallback(async () => {
+    const before = lifecycleRef.current;
     const session = sessionRef.current;
     const fix = lastFixRef.current;
     const state = lastStateRef.current;
-    if (!session || !fix || !state || !destRef.current) return;
-    if (fasterCheckInFlight.current || rerouteInFlight.current) return;
+    if (!session || !fix || !state || before.stage.kind !== 'guiding') return;
+    if (before.stage.probing || before.stage.reroute.inFlight) return;
     // Only a settled, on-route, live-fix drive is worth second-guessing; and a
     // trip nearly over cannot save enough to matter.
     if (state.status !== 'navigating' || state.fix !== 'live' || !state.departed) return;
-    const trip = tripSeq.current;
-    fasterCheckInFlight.current = true;
+    const { trip, profile: prof } = before;
+    const { plan, path: currentPath } = before.stage;
+    dispatch({ type: 'faster-probe-started' });
     try {
       // A closure appearing on the line already being followed is not an
       // optional faster-route offer: the old route has become invalid, so
       // recalculate proactively. The provider adds the same closure to
       // Valhalla's exclude_locations when it builds the replacement.
       const closureTransport = platformRef.current.trafficClosures;
-      const currentPath = activePathRef.current;
-      if (closureTransport && currentPath) {
+      if (closureTransport) {
         const fromIndex = Math.max(
           0,
           Math.floor(state.routeProgress * Math.max(0, currentPath.points.length - 1)) - 2,
         );
         const closures = await closureTransport(currentPath.points.slice(fromIndex));
         if (closures.length > 0) {
-          clearFasterOffer();
-          rerouteBackoffUntil.current = 0;
+          dispatch({ type: 'faster-withdrawn' });
+          dispatch({ type: 'reroute-forced' });
           speak('Road closure ahead. Rerouting.');
           await reroute(fix);
           return;
@@ -1043,67 +931,67 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // departure. Judging one against the other was measuring a jam that has
       // since cleared against one that has not.
       await repriceTraffic();
-      if (trip !== tripSeq.current || !sessionRef.current) return;
+      if (lifecycleRef.current.trip !== trip || !sessionRef.current) return;
       const plannedMs = session.plannedRemainingMs();
       if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) return;
       const heading =
         typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
       const passed = state.viasPassed;
-      const vias = passed > 0 ? viasRef.current.slice(passed) : viasRef.current;
+      const vias = passed > 0 ? plan.vias.slice(passed) : plan.vias;
       const candidate = await fetchPath(
         fix,
-        destRef.current,
-        profileRef.current,
-        preferencesRef.current,
+        plan.destination,
+        prof,
+        plan.preferences,
         heading,
         vias,
       );
-      if (trip !== tripSeq.current || !sessionRef.current) return;
+      const live = lifecycleRef.current;
+      if (live.trip !== trip || !sessionRef.current || live.stage.kind !== 'guiding') return;
       const savesMs = plannedMs - candidate.timeMs;
-      const dismissedFloor =
-        fasterDismissedMsRef.current === null
-          ? 0
-          : fasterDismissedMsRef.current + FASTER_REOFFER_STEP_MS;
+      const dismissed = live.stage.dismissedSavingMs;
+      const dismissedFloor = dismissed === null ? 0 : dismissed + FASTER_REOFFER_STEP_MS;
       if (savesMs >= Math.max(FASTER_MIN_SAVING_MS, dismissedFloor)) {
-        fasterOfferRef.current = { path: candidate, vias, savesMs, atMs: Date.now() };
-        setFasterRoute({ savesMs });
+        dispatch({
+          type: 'faster-offered',
+          offer: { path: candidate, vias, savesMs, atMs: Date.now() },
+        });
         const minutes = Math.max(1, Math.round(savesMs / 60_000));
         speak(
           `A faster route is available — it saves ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
         );
-      } else if (fasterOfferRef.current) {
+      } else {
         // The advantage evaporated before the driver acted on it.
-        clearFasterOffer();
+        dispatch({ type: 'faster-withdrawn' });
       }
     } catch {
       // Offline, or no route right now — the next interval asks again.
     } finally {
-      if (trip === tripSeq.current) fasterCheckInFlight.current = false;
+      if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
     }
-  }, [platformRef, activePathRef, fetchPath, speak, clearFasterOffer, reroute, repriceTraffic]);
+  }, [lifecycleRef, dispatch, platformRef, fetchPath, speak, reroute, repriceTraffic]);
 
   /** Take the offered faster route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {
-    const offer = fasterOfferRef.current;
-    if (!offer || !sessionRef.current || !destRef.current) return;
-    clearFasterOffer();
+    const current = lifecycleRef.current;
+    if (current.stage.kind !== 'guiding') return;
+    const { offer } = current.stage;
+    if (!offer || !sessionRef.current) return;
     const { path, vias } = offer;
-    // The old session dies here — bank its driven distance for the summary.
-    traveledBaseRef.current += lastStateRef.current?.traveledM ?? 0;
     const nextSession = new NavigationSession(
       path,
-      navOptionsForProfile(profileRef.current, {
+      navOptionsForProfile(current.profile, {
         startDeparted: lastStateRef.current?.departed ?? true,
       }),
     );
     sessionRef.current = nextSession;
-    viasRef.current = vias;
-    setViaPoints(vias);
-    setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-    setActivePath(path);
-    rerouteFailCount.current = 0;
-    rerouteBackoffUntil.current = 0;
-    setRerouteFailed(false);
+    // The old session dies here — bank its driven distance for the summary.
+    dispatch({
+      type: 'route-replaced',
+      path,
+      vias,
+      bankedM: lastStateRef.current?.traveledM ?? 0,
+    });
     enrich(nextSession, path);
     const fix = lastFixRef.current;
     if (fix) {
@@ -1117,21 +1005,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
     }
     const depart = nextSession.departurePrompt();
     if (depart) speak(depart.text);
-  }, [clearFasterOffer, enrich, speak]);
+  }, [lifecycleRef, dispatch, enrich, speak]);
 
   /** Decline the offer; only a meaningfully better one may interrupt again. */
   const dismissFasterRoute = useCallback(() => {
-    const offer = fasterOfferRef.current;
-    if (offer) fasterDismissedMsRef.current = offer.savesMs;
-    clearFasterOffer();
-  }, [clearFasterOffer]);
+    dispatch({ type: 'faster-dismissed' });
+  }, [dispatch]);
 
   const onFix = useCallback(
     (fix: Position, measuredAtMs?: number) => {
       // Stopping an Android foreground watch is asynchronous at the native
       // boundary. A final queued sample belongs to the paused interval and
       // must not move progress, fire a prompt or start a reroute.
-      if (pausedRef.current) return;
+      if (lifecycleRef.current.stage.kind === 'paused') return;
       const explicitlyMeasured = typeof measuredAtMs === 'number' && Number.isFinite(measuredAtMs);
       let fixAtMs = explicitlyMeasured ? measuredAtMs : Date.now();
       const previousAtMs = lastFixMeasuredAtRef.current;
@@ -1146,16 +1032,19 @@ export function useNavigationController(platform: NavPlatform): NavController {
       lastFixMeasuredAtRef.current = fixAtMs;
       const session = sessionRef.current;
       lastFixRef.current = fix;
+      const current = lifecycleRef.current;
       // A faster-route offer describes a branch from where the car *was*; once
       // stale it may already be behind, so it quietly lapses.
-      const offer = fasterOfferRef.current;
-      if (offer && Date.now() - offer.atMs > FASTER_OFFER_TTL_MS) clearFasterOffer();
+      const offer = current.stage.kind === 'guiding' ? current.stage.offer : null;
+      if (offer && Date.now() - offer.atMs > FASTER_OFFER_TTL_MS) {
+        dispatch({ type: 'faster-withdrawn' });
+      }
       setSpeedMps(typeof fix.speedMps === 'number' && fix.speedMps >= 0 ? fix.speedMps : null);
       setAltitudeM(
         typeof fix.altitudeM === 'number' && Number.isFinite(fix.altitudeM) ? fix.altitudeM : null,
       );
       setPosition(fix);
-      if (usesFacingHeading(profileRef.current) && headingSourceRef.current === 'gps') {
+      if (usesFacingHeading(current.profile) && headingSourceRef.current === 'gps') {
         const speed = typeof fix.speedMps === 'number' ? fix.speedMps : 0;
         const deg = typeof fix.headingDeg === 'number' ? fix.headingDeg : null;
         setFacing(
@@ -1172,19 +1061,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // uncaught throw here would take the whole app down in a release build.
       try {
         const { state: next, prompts } = session.update(fix, fixAtMs);
-        const pausedAtM = resumeFromTraveledRef.current;
-        if (pausedAtM !== null) {
-          // Re-anchor the visible route at the traveller's current position,
-          // but exclude any forward movement made while Atlas was paused from
-          // the completed-trip distance. From here onward new progress counts.
-          traveledBaseRef.current -= Math.max(0, next.traveledM - pausedAtM);
-          resumeFromTraveledRef.current = null;
-        }
-        const suppressPrompts = suppressPromptsOnceRef.current;
-        suppressPromptsOnceRef.current = false;
+        const live = lifecycleRef.current;
+        // The first fix after a resume re-anchors the visible route at the
+        // traveller's current position, but excludes forward movement made
+        // while Atlas was paused from the completed-trip distance, and does
+        // not replay a cue that was crossed during the pause. From here on
+        // new progress counts again.
+        const anchor = live.stage.kind === 'guiding' ? live.stage.resumeAnchor : null;
+        if (anchor) dispatch({ type: 'resume-anchored', traveledM: next.traveledM });
         setState(next);
         lastStateRef.current = next;
-        if (!suppressPrompts) for (const prompt of prompts) speak(prompt.text);
+        if (!anchor) for (const prompt of prompts) speak(prompt.text);
         if (next.status === 'arrived') {
           finishArrived(session, next.traveledM);
         } else if (next.status === 'off-route') {
@@ -1195,7 +1082,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           // and on a mountain the honest answer may be "back to the trail",
           // not a new line. One spoken notice per episode, so eyes can stay
           // off the screen without the banner going unnoticed.
-          if (navOptionsForProfile(profileRef.current).autoReroute ?? true) {
+          if (navOptionsForProfile(live.profile).autoReroute ?? true) {
             void reroute(fix);
           } else if (!offRouteSpokenRef.current) {
             offRouteSpokenRef.current = true;
@@ -1203,69 +1090,70 @@ export function useNavigationController(platform: NavPlatform): NavController {
           }
         } else {
           // Back on the line: any lingering "can't reroute" notice is stale.
-          setRerouteFailed(false);
+          dispatch({ type: 'reroute-recovered' });
           offRouteSpokenRef.current = false;
         }
       } catch (err) {
         console.warn('navigation fix failed', err);
       }
     },
-    [reroute, speak, finishArrived, clearFasterOffer],
+    [lifecycleRef, dispatch, reroute, speak, finishArrived],
   );
 
   /** Resume a deliberately paused in-memory session without replacing its route. */
   const continueTrip = useCallback(async (): Promise<void> => {
+    const before = lifecycleRef.current;
     const session = sessionRef.current;
-    if (!session || !pausedRef.current || continueInFlightRef.current) return;
-    continueInFlightRef.current = true;
+    if (!session || before.stage.kind !== 'paused') return;
+    const claimed = dispatch({ type: 'continue-requested' });
+    // Refused: a second Resume tap, while the first still owns the machine.
+    if (claimed === before) return;
+    const { trip, pending: op } = claimed;
     const facingReady =
-      usesFacingHeading(profileRef.current) && headingSourceRef.current !== 'gps'
+      usesFacingHeading(claimed.profile) && headingSourceRef.current !== 'gps'
         ? platformRef.current.prepareFacing?.()
         : undefined;
-    const trip = tripSeq.current;
-    setError(null);
     try {
       // Obtain a measured anchor before accepting streaming fixes. It puts the
       // puck where the traveller is now without treating the paused interval
       // as dead reckoning or replaying guidance that belonged inside it.
       const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
       await facingReady?.catch(() => undefined);
-      if (trip !== tripSeq.current || sessionRef.current !== session || !pausedRef.current) return;
+      const fixed = lifecycleRef.current;
+      if (fixed.trip !== trip || sessionRef.current !== session || fixed.stage.kind !== 'paused') {
+        return;
+      }
       const watch = ++watchSeq.current;
       const stopFixes = await platformRef.current.watchFixes((fix, measuredAtMs) => {
         if (watch === watchSeq.current) onFix(fix, measuredAtMs);
       }, 'guidance');
+      const watching = lifecycleRef.current;
       if (
         watch !== watchSeq.current ||
-        trip !== tripSeq.current ||
+        watching.trip !== trip ||
         sessionRef.current !== session ||
-        !pausedRef.current
+        watching.stage.kind !== 'paused'
       ) {
         stopFixes();
         return;
       }
       watchStopRef.current = stopFixes;
       lastFixMeasuredAtRef.current = null;
-      activeStartedAtRef.current = Date.now();
-      pausedRef.current = false;
-      setPhase('navigating');
-      suppressPromptsOnceRef.current = true;
+      dispatch({ type: 'continue-began', atMs: Date.now() });
       onFix(origin.fix, origin.atMs);
-      if (!arrivedRef.current) speak('Navigation resumed');
+      if (lifecycleRef.current.stage.kind !== 'arrived') speak('Navigation resumed');
     } catch (err) {
       // A failed restart leaves the route safely paused and retryable. It does
       // not become the terminal error phase, which would discard the only
       // useful route state the traveller still has.
-      if (trip === tripSeq.current && sessionRef.current === session) {
-        pausedRef.current = true;
-        activeStartedAtRef.current = null;
-        setError(message(err));
-        setPhase('paused');
+      const live = lifecycleRef.current;
+      if (live.trip === trip && sessionRef.current === session) {
+        dispatch({ type: 'continue-failed', message: message(err) });
       }
     } finally {
-      continueInFlightRef.current = false;
+      if (op !== null) dispatch({ type: 'setup-settled', op });
     }
-  }, [platformRef, onFix, speak]);
+  }, [lifecycleRef, dispatch, platformRef, onFix, speak]);
 
   const start = useCallback(
     async (
@@ -1274,8 +1162,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       preferences?: Partial<RoutePreferences>,
       vias: LatLng[] = [],
     ) => {
-      if (startInFlight.current) return;
-      startInFlight.current = true;
+      if (lifecycleRef.current.pending !== null) return;
       // A route preview supersedes destination-free Explorer (or any previous
       // live trip) immediately. Leaving its watch alive until Go meant Android
       // had to hand the same foreground location task from the old activity to
@@ -1283,49 +1170,33 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // driving the outgoing session behind the preview meanwhile.
       stopWatch();
       sessionRef.current = null;
-      tripSeq.current++;
-      const seq = ++previewSeq.current;
-      setError(null);
-      setActivity('guidance');
-      setPhase('starting');
+      const { op } = dispatch({
+        type: 'start',
+        plan: { destination: dest, vias, preferences },
+        profile: prof,
+      });
+      // Nothing of the outgoing trip may show through the new one's setup.
+      setState(null);
+      lastStateRef.current = null;
+      setSpeedMps(null);
+      setAltitudeM(null);
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
-        if (seq !== previewSeq.current) return;
-
-        destRef.current = dest;
-        viasRef.current = vias;
-        setViaPoints(vias);
-        originRef.current = origin;
-        profileRef.current = prof;
-        preferencesRef.current = preferences;
-        setPreferencesState(preferences ?? null);
-        setProfileState(prof);
-        setDestination(dest);
-        setSpeedMps(null);
-        setAltitudeM(null);
-        setState(null);
-        setTripSummary(null);
-        setRouteCoords([]);
-        setActivePath(null);
-        setPreviewError(null);
-        lastStateRef.current = null;
-        traveledBaseRef.current = 0;
-
+        if (lifecycleRef.current.op !== op) return;
+        dispatch({ type: 'origin-fixed', origin });
         // Route choices: the fastest plus up to two alternatives, offered
         // before guidance starts. Selecting nothing keeps the fastest.
         const paths = await fetchChoices(origin.fix, dest, prof, preferences, vias);
-        if (seq !== previewSeq.current) return;
-        setPreviewPaths(paths);
-        setPreviewIndex(0);
-        setPhase('preview');
+        if (lifecycleRef.current.op !== op) return;
+        dispatch({ type: 'choices-loaded', choices: paths });
       } catch (err) {
-        if (seq !== previewSeq.current) return;
+        if (lifecycleRef.current.op !== op) return;
         fail(err);
       } finally {
-        if (seq === previewSeq.current) startInFlight.current = false;
+        dispatch({ type: 'setup-settled', op });
       }
     },
-    [platformRef, stopWatch, fetchChoices, fail],
+    [lifecycleRef, dispatch, platformRef, stopWatch, fetchChoices, fail],
   );
 
   /**
@@ -1336,32 +1207,16 @@ export function useNavigationController(platform: NavPlatform): NavController {
    */
   const explore = useCallback(
     async (prof: RoutingProfile = 'car') => {
-      if (startInFlight.current) return;
-      startInFlight.current = true;
+      if (lifecycleRef.current.pending !== null) return;
       const facingReady =
         usesFacingHeading(prof) && headingSourceRef.current !== 'gps'
           ? platformRef.current.prepareFacing?.()
           : undefined;
       stopWatch();
       sessionRef.current = null;
-      clearPreview();
-      const seq = ++previewSeq.current;
-      setError(null);
-      setActivity('explorer');
-      setPhase('exploring');
-      profileRef.current = prof;
-      setProfileState(prof);
-      setPreferencesState(null);
-      preferencesRef.current = undefined;
-      destRef.current = null;
-      setDestination(null);
-      viasRef.current = [];
-      setViaPoints([]);
+      const { op } = dispatch({ type: 'explore', profile: prof });
       setState(null);
       lastStateRef.current = null;
-      setRouteCoords([]);
-      setActivePath(null);
-      setTripSummary(null);
       setSpeedMps(null);
       setAltitudeM(null);
       setPosition(null);
@@ -1369,25 +1224,25 @@ export function useNavigationController(platform: NavPlatform): NavController {
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
         await facingReady?.catch(() => undefined);
-        if (seq !== previewSeq.current) return;
+        if (lifecycleRef.current.op !== op) return;
         onFix(origin.fix, origin.atMs);
         const watch = ++watchSeq.current;
         const stopFixes = await platformRef.current.watchFixes((fix, measuredAtMs) => {
           if (watch === watchSeq.current) onFix(fix, measuredAtMs);
         }, 'explorer');
-        if (watch !== watchSeq.current || seq !== previewSeq.current) {
+        if (watch !== watchSeq.current || lifecycleRef.current.op !== op) {
           stopFixes();
           return;
         }
         watchStopRef.current = stopFixes;
       } catch (err) {
-        if (seq !== previewSeq.current) return;
+        if (lifecycleRef.current.op !== op) return;
         fail(err);
       } finally {
-        if (seq === previewSeq.current) startInFlight.current = false;
+        dispatch({ type: 'setup-settled', op });
       }
     },
-    [platformRef, stopWatch, clearPreview, onFix, fail],
+    [lifecycleRef, dispatch, platformRef, stopWatch, onFix, fail],
   );
 
   // Profile switch on the preview card: refetch the choices for the same trip.
@@ -1395,63 +1250,55 @@ export function useNavigationController(platform: NavPlatform): NavController {
   // end here (no bike route, brief offline) must not kill the whole preview.
   const setProfile = useCallback(
     (prof: RoutingProfile) => {
-      if (phase !== 'preview') return;
-      const origin = originRef.current;
-      const dest = destRef.current;
-      if (!origin || !dest || prof === profileRef.current) return;
-      const seq = ++previewSeq.current;
-      setPreviewLoading(true);
-      setPreviewError(null);
+      const current = lifecycleRef.current;
+      if (current.stage.kind !== 'preview' || prof === current.profile) return;
+      const { origin, plan } = current.stage;
+      const { op } = dispatch({ type: 'profile-requested' });
       void (async () => {
         try {
           // The stops are the plan; only the costing changes with the profile.
-          const paths = await fetchChoices(origin.fix, dest, prof, undefined, viasRef.current);
-          if (seq !== previewSeq.current) return;
-          profileRef.current = prof;
-          preferencesRef.current = undefined;
-          setPreferencesState(null);
-          setProfileState(prof);
-          setPreviewPaths(paths);
-          setPreviewIndex(0);
+          const paths = await fetchChoices(
+            origin.fix,
+            plan.destination,
+            prof,
+            undefined,
+            plan.vias,
+          );
+          if (lifecycleRef.current.op !== op) return;
+          dispatch({ type: 'profile-loaded', profile: prof, choices: paths });
         } catch (err) {
-          if (seq !== previewSeq.current) return;
-          setPreviewError(message(err));
-        } finally {
-          if (seq === previewSeq.current) setPreviewLoading(false);
+          if (lifecycleRef.current.op !== op) return;
+          dispatch({ type: 'profile-failed', message: message(err) });
         }
       })();
     },
-    [phase, fetchChoices],
+    [lifecycleRef, dispatch, fetchChoices],
   );
 
   /**
    * Hand a chosen path to a fresh session and start guiding along it — the
    * moment a *plan* becomes a *trip*, shared by Start and by resuming an
    * interrupted one. Everything here is about the trip beginning: a session
-   * that has not departed yet, a zeroed distance bank, the fix watch, and the
-   * departure prompt that answers "which way now?".
+   * that has not departed yet, a zeroed distance bank (or the interrupted
+   * trip's own banks, restored), the fix watch, and the departure prompt that
+   * answers "which way now?".
    */
   const beginGuidance = useCallback(
     async (path: RoutePath, origin: NavOriginFix | null, restoredProgress?: NavTripProgress) => {
-      tripSeq.current++;
-      setActivity('guidance');
-      const session = new NavigationSession(path, navOptionsForProfile(profileRef.current));
+      const begun = dispatch({
+        type: 'guidance-began',
+        path,
+        atMs: Date.now(),
+        progress: restoredProgress,
+      });
+      // Only a stage that still holds a plan can become a trip.
+      if (begun.stage.kind !== 'guiding') return;
+      const session = new NavigationSession(path, navOptionsForProfile(begun.profile));
       sessionRef.current = session;
       offRouteSpokenRef.current = false;
-      arrivedRef.current = false;
-      pausedRef.current = false;
-      resumeFromTraveledRef.current = null;
       enrich(session, path);
-      originalEstimateMsRef.current = restoredProgress?.originalEstimateMs ?? path.timeMs;
-      activeElapsedMsRef.current = restoredProgress?.elapsedMs ?? 0;
-      activeStartedAtRef.current = Date.now();
-      traveledBaseRef.current = restoredProgress?.distanceM ?? 0;
       lastStateRef.current = null;
-      setTripSummary(null);
       setState(null);
-      setRouteCoords(path.points.map((p) => [p.lng, p.lat]));
-      setActivePath(path);
-      clearPreview();
 
       // A fresh trip owns a fresh ordering window. Set this before starting
       // the streams: if watchPositionAsync immediately emits a newer sample,
@@ -1470,7 +1317,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
         return;
       }
       watchStopRef.current = stopFixes;
-      setPhase('navigating');
       // Guidance used to be silent until the first approach threshold —
       // exactly when the traveller wonders "which way?".
       const depart = session.departurePrompt();
@@ -1480,69 +1326,66 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // choices for a minute has moved, and a stale fix misplaces the puck.
       if (origin && Date.now() - origin.atMs < ORIGIN_FRESH_MS) onFix(origin.fix, origin.atMs);
     },
-    [platformRef, enrich, clearPreview, stopWatch, onFix, speak],
+    [dispatch, platformRef, enrich, stopWatch, onFix, speak],
   );
 
   const go = useCallback(async () => {
-    if (phase !== 'preview') return;
+    const before = lifecycleRef.current;
+    if (before.stage.kind !== 'preview') return;
     // Invoke this before the first await: iOS Safari accepts its orientation
     // prompt only while the Start button's user gesture is still on the stack.
     const facingReady =
-      usesFacingHeading(profileRef.current) && headingSourceRef.current !== 'gps'
+      usesFacingHeading(before.profile) && headingSourceRef.current !== 'gps'
         ? platformRef.current.prepareFacing?.()
         : undefined;
-    const index = previewIndexRef.current;
-    const previewPath = previewPathsRef.current?.[index];
+    const { plan, choices, index } = before.stage;
+    const previewPath = choices[index];
     if (!previewPath) return;
-    const seq = ++previewSeq.current;
-    setPreviewLoading(true);
+    const { op } = dispatch({ type: 'go' });
     try {
       let path = previewPath;
-      let origin = originRef.current;
-      const dest = destRef.current;
-      if (dest) {
-        // The traveller may have moved while studying the choices, so refresh
-        // both the fix and the routes from it. Best-effort: starting on the
-        // previewed path beats refusing to navigate because a Start-time
-        // refresh was briefly unavailable.
-        try {
-          const fresh = await platformRef.current.currentFix(GO_FIX_TIMEOUT_MS);
-          const choices = await fetchChoices(
-            fresh.fix,
-            dest,
-            profileRef.current,
-            preferencesRef.current,
-            viasRef.current,
-          );
-          if (seq !== previewSeq.current) return;
-          path = choices[index] ?? choices[0] ?? previewPath;
-          origin = fresh;
-          originRef.current = fresh;
-        } catch {
-          // Keep the previewed path and its origin fix.
-        }
+      let origin = before.stage.origin;
+      // The traveller may have moved while studying the choices, so refresh
+      // both the fix and the routes from it. Best-effort: starting on the
+      // previewed path beats refusing to navigate because a Start-time
+      // refresh was briefly unavailable.
+      try {
+        const fresh = await platformRef.current.currentFix(GO_FIX_TIMEOUT_MS);
+        const refreshed = await fetchChoices(
+          fresh.fix,
+          plan.destination,
+          before.profile,
+          plan.preferences,
+          plan.vias,
+        );
+        if (lifecycleRef.current.op !== op) return;
+        path = refreshed[index] ?? refreshed[0] ?? previewPath;
+        origin = fresh;
+        dispatch({ type: 'origin-refreshed', origin: fresh });
+      } catch {
+        // Keep the previewed path and its origin fix.
       }
 
       // Cancel or profile switch while the refresh was in flight invalidates it.
-      if (seq !== previewSeq.current || !destRef.current) return;
+      if (lifecycleRef.current.op !== op) return;
       await facingReady?.catch(() => undefined);
       await beginGuidance(path, origin);
     } catch (err) {
       fail(err);
     } finally {
-      // A no-op on the happy path (clearPreview already bumped the sequence);
-      // this only rescues the early returns above from a stuck spinner.
-      if (seq === previewSeq.current) setPreviewLoading(false);
+      // A no-op wherever this Start no longer owns the preview — which is
+      // every path but a failure that left one standing.
+      dispatch({ type: 'go-settled', op });
     }
-  }, [phase, platformRef, previewPathsRef, previewIndexRef, fetchChoices, beginGuidance, fail]);
+  }, [lifecycleRef, dispatch, platformRef, fetchChoices, beginGuidance, fail]);
 
   const selectPreview = useCallback(
     (index: number) => {
-      if (phase !== 'preview' || !Number.isInteger(index)) return;
-      if (index < 0 || index >= (previewPathsRef.current?.length ?? 0)) return;
-      setPreviewIndex(index);
+      // Out of range, fractional, or not in the preview at all: the machine
+      // refuses every one of them, so there is nothing to check here.
+      dispatch({ type: 'preview-selected', index });
     },
-    [phase, previewPathsRef],
+    [dispatch],
   );
 
   /**
@@ -1562,64 +1405,56 @@ export function useNavigationController(platform: NavPlatform): NavController {
       vias: LatLng[] = [],
       progress?: NavTripProgress,
     ) => {
-      if (startInFlight.current) return;
-      startInFlight.current = true;
+      if (lifecycleRef.current.pending !== null) return;
       const facingReady =
         usesFacingHeading(prof) && headingSourceRef.current !== 'gps'
           ? platformRef.current.prepareFacing?.()
           : undefined;
-      const seq = ++previewSeq.current;
-      setError(null);
-      setPhase('starting');
+      const { op } = dispatch({
+        type: 'resume',
+        plan: { destination: dest, vias, preferences: preferencesOverride },
+        profile: prof,
+      });
+      setSpeedMps(null);
+      setAltitudeM(null);
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
-        if (seq !== previewSeq.current) return;
-
-        destRef.current = dest;
-        viasRef.current = vias;
-        setViaPoints(vias);
-        originRef.current = origin;
-        profileRef.current = prof;
-        preferencesRef.current = preferencesOverride;
-        setPreferencesState(preferencesOverride ?? null);
-        setProfileState(prof);
-        setDestination(dest);
-        setSpeedMps(null);
-        setAltitudeM(null);
-
+        if (lifecycleRef.current.op !== op) return;
+        dispatch({ type: 'origin-fixed', origin });
         const path = await fetchPath(origin.fix, dest, prof, preferencesOverride, undefined, vias);
-        if (seq !== previewSeq.current) return;
+        if (lifecycleRef.current.op !== op) return;
         await facingReady?.catch(() => undefined);
-        // Cleared here rather than in `finally`: `beginGuidance` bumps the
-        // preview sequence itself (it clears any preview), so by the time the
-        // finally runs this resume no longer looks like the current one and
-        // would leave the double-tap guard latched on for good.
-        startInFlight.current = false;
         await beginGuidance(path, origin, progress);
       } catch (err) {
-        if (seq !== previewSeq.current) return;
+        if (lifecycleRef.current.op !== op) return;
         fail(err);
       } finally {
-        if (seq === previewSeq.current) startInFlight.current = false;
+        // Guidance has long since taken the machine past this operation, so
+        // this releases nothing it does not still own. The double-tap guard
+        // that had to be hand-cleared before `beginGuidance` — or it stayed
+        // latched for good — went with the counter it used to live beside.
+        dispatch({ type: 'setup-settled', op });
       }
     },
-    [platformRef, fetchPath, beginGuidance, fail],
+    [lifecycleRef, dispatch, platformRef, fetchPath, beginGuidance, fail],
   );
 
-  const guiding = phase === 'navigating' || phase === 'rerouting';
-  const liveFollowing = guiding || phase === 'exploring';
-  const activeTrip = guiding || phase === 'paused';
-  const tripProgress: NavTripProgress | null = activeTrip
-    ? {
-        distanceM: Math.max(0, traveledBaseRef.current + (state?.traveledM ?? 0)),
-        elapsedMs:
-          activeElapsedMsRef.current +
-          (activeStartedAtRef.current === null
-            ? 0
-            : Math.max(0, Date.now() - activeStartedAtRef.current)),
-        originalEstimateMs: originalEstimateMsRef.current,
-      }
-    : null;
+  const guiding = stage.kind === 'guiding';
+  const liveFollowing = guiding || stage.kind === 'exploring';
+  const profile = lifecycle.profile;
+  const activePath = navPath(lifecycle);
+  const viaPoints = navPlan(lifecycle)?.vias ?? NO_VIAS;
+  // The drawn line is the followed path, not a second copy of it kept in step.
+  const routeCoords = useMemo(
+    () => activePath?.points.map((p) => [p.lng, p.lat]) ?? [],
+    [activePath],
+  );
+  const offer = guiding ? stage.offer : null;
+  const fasterRoute = useMemo<NavFasterRoute | null>(
+    () => (offer ? { savesMs: offer.savesMs } : null),
+    [offer],
+  );
+  const tripProgress = navTripProgress(lifecycle, Date.now(), state?.traveledM ?? 0);
 
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.
@@ -1750,15 +1585,14 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // Changing this setting is itself a user gesture. If Safari was
         // started in GPS-only mode, this is the only valid moment to ask for
         // orientation access without forcing the traveller to restart.
-        if (
-          usesFacingHeading(profileRef.current) &&
-          (phase === 'navigating' || phase === 'rerouting' || phase === 'exploring')
-        ) {
+        const live = lifecycleRef.current;
+        const following = live.stage.kind === 'guiding' || live.stage.kind === 'exploring';
+        if (usesFacingHeading(live.profile) && following) {
           void platformRef.current.prepareFacing?.().catch(() => undefined);
         }
       }
     },
-    [phase, platformRef],
+    [lifecycleRef, platformRef],
   );
 
   const headingArrowVisible = !facingProfile
@@ -1778,20 +1612,20 @@ export function useNavigationController(platform: NavPlatform): NavController {
 
   return {
     phase,
-    activity,
+    activity: navActivity(lifecycle),
     state,
     position,
     routeCoords,
     activePath,
     profile,
-    preferences,
-    destination,
+    preferences: navPlan(lifecycle)?.preferences ?? null,
+    destination: navDestination(lifecycle),
     viaPoints,
     nextIntermediateStop: viaPoints[state?.viasPassed ?? 0] ?? null,
-    previewPaths,
-    previewIndex,
-    previewLoading,
-    previewError,
+    previewPaths: stage.kind === 'preview' ? stage.choices : null,
+    previewIndex: stage.kind === 'preview' ? stage.index : 0,
+    previewLoading: stage.kind === 'preview' ? stage.loading : false,
+    previewError: stage.kind === 'preview' ? stage.error : null,
     speedMps,
     altitudeM,
     facingDeg: facing?.deg ?? null,
@@ -1810,10 +1644,10 @@ export function useNavigationController(platform: NavPlatform): NavController {
     dismissFasterRoute,
     addStop,
     continuePastIntermediateStop,
-    tripSummary,
+    tripSummary: stage.kind === 'arrived' ? stage.summary : null,
     tripProgress,
-    rerouteFailed,
-    error,
+    rerouteFailed: guiding && stage.reroute.failed,
+    error: stage.kind === 'failed' ? stage.message : stage.kind === 'paused' ? stage.error : null,
     start,
     explore,
     selectPreview,
@@ -1826,6 +1660,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
     setMuted,
     arriveNow,
     rerouteNow,
-    stop: useCallback(() => stop(false), [stop]),
+    stop,
   };
 }
