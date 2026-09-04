@@ -290,6 +290,29 @@ describe('nav lifecycle — pause, resume and arrival', () => {
     expect(navTripProgress(anchored, 200_000, 900)?.distanceM).toBe(600);
   });
 
+  it('lets a Resume waiting on a fix be abandoned for a different trip', () => {
+    const resuming = run(
+      ...guiding,
+      { type: 'pause', atMs: 70_000, traveledM: 500 },
+      { type: 'continue-requested' },
+    );
+    expect(resuming.stage).toMatchObject({ resuming: true });
+    // A second tap is refused while the first is still waiting …
+    expect(step(resuming, { type: 'continue-requested' })).toBe(resuming);
+    // … but the guard is this trip's, not the machine's: starting somewhere
+    // else entirely is exactly what the traveller may do instead of waiting.
+    expect(resuming.pending).toBeNull();
+    const elsewhere = step(resuming, {
+      type: 'start',
+      plan: { destination: via, vias: [] },
+      profile: 'car',
+    });
+    expect(navPhase(elsewhere)).toBe('starting');
+    // The abandoned Resume settling late cannot open a later trip's guard.
+    const paused = run(...guiding, { type: 'pause', atMs: 70_000, traveledM: 500 });
+    expect(step(paused, { type: 'continue-settled', trip: resuming.trip - 1 })).toBe(paused);
+  });
+
   it('keeps a failed Continue on the paused trip rather than losing it', () => {
     const failed = run(
       ...guiding,
@@ -298,7 +321,7 @@ describe('nav lifecycle — pause, resume and arrival', () => {
       { type: 'continue-failed', message: 'Location request timed out' },
     );
     expect(navPhase(failed)).toBe('paused');
-    expect(failed.pending).toBeNull();
+    expect(failed.stage).toMatchObject({ resuming: false });
     expect(navPath(failed)).toEqual(path());
     expect(failed.stage).toMatchObject({ error: 'Location request timed out' });
   });

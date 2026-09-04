@@ -1106,9 +1106,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
     const session = sessionRef.current;
     if (!session || before.stage.kind !== 'paused') return;
     const claimed = dispatch({ type: 'continue-requested' });
-    // Refused: a second Resume tap, while the first still owns the machine.
+    // Refused: a second Resume tap, while the first still owns this trip.
     if (claimed === before) return;
-    const { trip, pending: op } = claimed;
+    const { trip } = claimed;
     const facingReady =
       usesFacingHeading(claimed.profile) && headingSourceRef.current !== 'gps'
         ? platformRef.current.prepareFacing?.()
@@ -1151,7 +1151,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         dispatch({ type: 'continue-failed', message: message(err) });
       }
     } finally {
-      if (op !== null) dispatch({ type: 'setup-settled', op });
+      dispatch({ type: 'continue-settled', trip });
     }
   }, [lifecycleRef, dispatch, platformRef, onFix, speak]);
 

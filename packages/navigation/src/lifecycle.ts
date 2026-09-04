@@ -176,6 +176,13 @@ export type NavStage =
       accounting: NavAccounting;
       /** Along-route progress at Pause, so the gap is not counted as travel. */
       pausedAtTraveledM: number | null;
+      /**
+       * A Continue is in flight. It lives on the stage rather than on the
+       * machine's `pending` because it guards *this paused trip*, not a new
+       * one: a Resume waiting on a slow fix must not stop the traveller
+       * abandoning the trip and starting a different one.
+       */
+      resuming: boolean;
       /** Why the last Continue failed; the trip stays safely paused. */
       error: string | null;
     }
@@ -200,8 +207,8 @@ export interface NavLifecycle {
    */
   readonly op: number;
   /**
-   * The `op` of the setup command in flight (Start, Explore, Resume,
-   * Continue), or null when none is. It is the double-tap guard *and* its own
+   * The `op` of the setup command in flight (Start, Explore or Resume — the
+   * commands that claim a new trip), or null when none is. It is the double-tap guard *and* its own
    * release token: a command settles the machine only while it still owns the
    * operation, so a superseded one can no longer unlatch the guard a newer
    * command is holding.
@@ -275,6 +282,8 @@ export type NavEvent =
   | { type: 'continue-requested' }
   | { type: 'continue-began'; atMs: number }
   | { type: 'continue-failed'; message: string }
+  /** That Continue is over, however it went; only its own trip's guard opens. */
+  | { type: 'continue-settled'; trip: number }
   | { type: 'arrived'; atMs: number; traveledM: number }
   /** Done: release everything and go back to idle. */
   | { type: 'end' }
@@ -633,19 +642,25 @@ export function navLifecycleReducer(state: NavLifecycle, event: NavEvent): NavLi
           path: stage.path,
           accounting: bank(stage.accounting, event.atMs),
           pausedAtTraveledM: event.traveledM,
+          resuming: false,
           error: null,
         },
       };
 
     case 'continue-requested':
-      if (stage.kind !== 'paused' || state.pending !== null) return state;
-      return { ...state, pending: state.op, stage: { ...stage, error: null } };
+      if (stage.kind !== 'paused' || stage.resuming) return state;
+      return { ...state, stage: { ...stage, resuming: true, error: null } };
+
+    case 'continue-settled':
+      // Only for the paused trip that asked: `pause` claims a new trip id, so
+      // a Continue that lost its trip cannot open a later one's guard.
+      if (stage.kind !== 'paused' || state.trip !== event.trip || !stage.resuming) return state;
+      return { ...state, stage: { ...stage, resuming: false } };
 
     case 'continue-began':
       if (stage.kind !== 'paused') return state;
       return {
         ...state,
-        pending: null,
         stage: {
           kind: 'guiding',
           plan: stage.plan,
@@ -663,10 +678,10 @@ export function navLifecycleReducer(state: NavLifecycle, event: NavEvent): NavLi
       if (stage.kind !== 'paused') return state;
       return {
         ...state,
-        pending: null,
         stage: {
           ...stage,
           accounting: { ...stage.accounting, segmentStartedAtMs: null },
+          resuming: false,
           error: event.message,
         },
       };
