@@ -68,6 +68,8 @@ export interface MapPressOptions {
   pickDestination: (target: DestinationTarget) => void;
   /** Report what the overlays say is under the tap (web parity, §Android queue). */
   showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[], sameSpotM: number) => void;
+  /** A moving orbit owns its tap and opens the pass predictor, not a ground pin. */
+  pickSatellite?: (hit: { layerId: string; noradId: number }) => void;
   /**
    * The numbered "best spots" markers, when the shortlist is open, and what to
    * do with a tap on one. Hit-tested by distance like the saved pins rather
@@ -114,6 +116,7 @@ export function useMapPress({
   closeMenu,
   pickDestination,
   showIdentify,
+  pickSatellite,
   spots,
   pickSpot,
   exploreResults,
@@ -237,11 +240,32 @@ export function useMapPress({
         // rows would only delay that card while burning a network round trip.
         const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
         const tap = ++tapSeq.current;
+        const vectorOn = (id: string) =>
+          overlays.some((overlay) => overlay.meta.id === id && overlay.meta.vector);
+        if (!guiding && pickSatellite && (vectorOn('satellites') || vectorOn('starlink'))) {
+          const satelliteHits = await mapRef.current
+            // No layer filter: one enabled catalog row may not have loaded its
+            // source yet, and native MapLibre rejects a query naming even one
+            // absent layer. The Atlas-only properties make the hit unambiguous.
+            ?.queryRenderedFeatures(pixelBounds)
+            .catch(() => undefined);
+          const props = satelliteHits
+            ?.map((hit) => hit.properties)
+            .find(
+              (properties) =>
+                properties?.['layerId'] === 'satellites' || properties?.['layerId'] === 'starlink',
+            );
+          const layerId = props?.['layerId'];
+          const noradId = Number(props?.['noradId']);
+          if ((layerId === 'satellites' || layerId === 'starlink') && Number.isInteger(noradId)) {
+            pickSatellite({ layerId, noradId });
+            return;
+          }
+        }
         if (!guiding) {
           // The vector overlays answer locally (their features are drawn on the
           // client), everything else via the backend identify. Asked together so
           // a single tap that lands on several shows them all, in one card.
-          const vectorOn = (id: string) => overlays.some((o) => o.meta.id === id && o.meta.vector);
           const query = (active: boolean, layers: string[]) =>
             active
               ? mapRef.current
@@ -351,6 +375,7 @@ export function useMapPress({
       origin,
       pickDestination,
       showIdentify,
+      pickSatellite,
       spots,
       pickSpot,
       exploreResults,

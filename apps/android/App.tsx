@@ -33,7 +33,9 @@ import {
   mapProfileForRouting,
   placeIsVisible,
   resolveInaturOffer,
+  SATELLITES_ID,
   savedPlaceAt,
+  STARLINK_ID,
   type BBox,
   type LatLng,
   type MapAppearance,
@@ -43,6 +45,7 @@ import {
   type SettingsSectionId,
 } from '@atlas/core';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
+import type { SatelliteOmm } from '@atlas/satellites';
 import type { TrackRecord } from '@atlas/storage';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
@@ -87,6 +90,7 @@ import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useIceObservations } from './src/layers/useIceObservations';
+import { useSatellites } from './src/layers/useSatellites';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
 import { useTrafficFlow } from './src/layers/useTrafficFlow';
@@ -157,6 +161,7 @@ import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
 import { TransitGuidance } from './src/ui/TransitGuidance';
 import { ShareSheet, type ShareTarget } from './src/ui/ShareSheet';
+import { SatellitePassSheet } from './src/ui/SatellitePassSheet';
 import { TrackProfileSheet } from './src/ui/TrackProfileSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
@@ -281,6 +286,14 @@ function AppInner() {
     track: TrackRecord;
     data: TrackData | null;
   } | null>(null);
+  const [satelliteSelection, setSatelliteSelection] = useState<{
+    layerId: typeof SATELLITES_ID | typeof STARLINK_ID;
+    noradId: number;
+    observer: LatLng;
+    observerSource: 'map' | 'location';
+  } | null>(null);
+  const [satelliteLocating, setSatelliteLocating] = useState(false);
+  const [satelliteLocationError, setSatelliteLocationError] = useState(false);
   const commuteFetch = useMemo<CommuteFn>(
     () => (query, signal, commit) =>
       // `segments: true` brings the per-leg boards back in the same request
@@ -575,6 +588,32 @@ function AppInner() {
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
+  const satellites = useSatellites(
+    overlays,
+    serverOrigin,
+    SATELLITES_ID,
+    satelliteSelection?.layerId === SATELLITES_ID ? satelliteSelection.noradId : null,
+  );
+  const starlink = useSatellites(
+    overlays,
+    serverOrigin,
+    STARLINK_ID,
+    satelliteSelection?.layerId === STARLINK_ID ? satelliteSelection.noradId : null,
+  );
+  const selectedSatellite = useMemo<SatelliteOmm | null>(() => {
+    if (!satelliteSelection) return null;
+    const source = satelliteSelection.layerId === SATELLITES_ID ? satellites : starlink;
+    return (
+      source.elements.find((element) => element.NORAD_CAT_ID === satelliteSelection.noradId) ?? null
+    );
+  }, [satelliteSelection, satellites.elements, starlink.elements]);
+  useEffect(() => {
+    if (!satelliteSelection) return;
+    const source = satelliteSelection.layerId === SATELLITES_ID ? satellites : starlink;
+    if (!source.active || (source.status === 'ready' && !selectedSatellite)) {
+      setSatelliteSelection(null);
+    }
+  }, [satelliteSelection, satellites, starlink, selectedSatellite]);
   // The ATK speed cameras as a map layer (the Drive signature overlay). The
   // *guidance* warnings are a separate, offline-first path (offlineNvdb) — this
   // is only the drawn layer.
@@ -693,6 +732,7 @@ function AppInner() {
     measure.open ||
     commuteOpen ||
     dest.destination !== null ||
+    satelliteSelection !== null ||
     offlineRegion !== null;
   // Landscape is short, so several pieces of chrome move into the leading
   // guidance rail and route fits get a narrower bottom pad.
@@ -702,6 +742,7 @@ function AppInner() {
   // the card at the zoom the user is already on (pickOnMap).
   const pickPressTarget = useCallback(
     (target: DestinationTarget) => {
+      setSatelliteSelection(null);
       if (guiding) dest.pickQuiet(target);
       else if (nav.phase !== 'exploring') dest.pickOnMap(target);
     },
@@ -773,6 +814,23 @@ function AppInner() {
     },
     [data, potentialTargetLabel],
   );
+  const onPickSatellite = useCallback(
+    (hit: { layerId: string; noradId: number }) => {
+      const layerId = hit.layerId === STARLINK_ID ? STARLINK_ID : SATELLITES_ID;
+      const source = layerId === SATELLITES_ID ? satellites : starlink;
+      if (!source.elements.some((element) => element.NORAD_CAT_ID === hit.noradId)) return;
+      const center = viewRef.current?.center ?? DEFAULT_VIEW.center;
+      dest.clear();
+      setSatelliteLocationError(false);
+      setSatelliteSelection({
+        layerId,
+        noradId: hit.noradId,
+        observer: center,
+        observerSource: 'map',
+      });
+    },
+    [dest, satellites, starlink, viewRef],
+  );
   const { onMapPress: onRegularMapPress, onPickPoint: onRegularPickPoint } = useMapPress({
     mapRef,
     nav,
@@ -784,6 +842,7 @@ function AppInner() {
     closeMenu: () => setMenuOpen(false),
     pickDestination: pickPressTarget,
     showIdentify: dest.showIdentify,
+    pickSatellite: onPickSatellite,
     spots: spotsOpen ? bestSpots.spots : undefined,
     pickSpot: onPickSpotById,
     exploreResults,
@@ -1154,6 +1213,34 @@ function AppInner() {
     }
   }, [commute.query, following, resumeFollow]);
 
+  const useMapCenterForSatellite = useCallback(() => {
+    const center = viewRef.current?.center ?? DEFAULT_VIEW.center;
+    setSatelliteLocationError(false);
+    setSatelliteSelection((current) =>
+      current ? { ...current, observer: center, observerSource: 'map' } : null,
+    );
+  }, [viewRef]);
+
+  const useMyLocationForSatellite = useCallback(async () => {
+    if (satelliteLocating) return;
+    setSatelliteLocating(true);
+    setSatelliteLocationError(false);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) throw new Error('location permission denied');
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const observer = { lat: current.coords.latitude, lng: current.coords.longitude };
+      setShowPuck(true);
+      setSatelliteSelection((selection) =>
+        selection ? { ...selection, observer, observerSource: 'location' } : null,
+      );
+    } catch {
+      setSatelliteLocationError(true);
+    } finally {
+      setSatelliteLocating(false);
+    }
+  }, [satelliteLocating, viewRef]);
+
   const refreshPacks = useCallback(() => {
     void listLocalPacks().then(setPacks);
   }, []);
@@ -1218,6 +1305,8 @@ function AppInner() {
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
         iceObservations={iceObservations}
+        satellites={satellites}
+        starlink={starlink}
         speedCameras={speedCameras}
         traffic={traffic}
         trafficFlow={trafficFlow}
@@ -1524,6 +1613,21 @@ function AppInner() {
             onClose={() => setSpotsOpen(false)}
             bottomInset={bottomInset}
           />
+
+          {satelliteSelection ? (
+            <SatellitePassSheet
+              element={selectedSatellite}
+              layerId={satelliteSelection.layerId}
+              observer={satelliteSelection.observer}
+              observerSource={satelliteSelection.observerSource}
+              locating={satelliteLocating}
+              locationError={satelliteLocationError}
+              onUseMapCenter={useMapCenterForSatellite}
+              onUseMyLocation={() => void useMyLocationForSatellite()}
+              onClose={() => setSatelliteSelection(null)}
+              bottomInset={bottomInset}
+            />
+          ) : null}
 
           {/* A track row's other half: the climb, under the shape the camera
           has just framed. Stands down while planning or navigating, like every

@@ -15,6 +15,7 @@
   "dependencies": {
     "@atlas/conditions": "*",
     "@atlas/core": "*",
+    "@atlas/satellites": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
     "@atlas/traffic": "*",

@@ -18,6 +18,7 @@
     "@atlas/navigation": "*",
     "@atlas/potential": "*",
     "@atlas/routing": "*",
+    "@atlas/satellites": "*",
     "@atlas/storage": "*",
     "@atlas/sync": "*",
     "@atlas/traffic": "*",

@@ -1,0 +1,24 @@
+{
+  "name": "@atlas/satellites",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas satellite tracking — CelesTrak OMM element sets, SGP4 propagation, ground tracks and visible-pass prediction.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@atlas/core": "*",
+    "satellite.js": "^6.0.1"
+  }
+}

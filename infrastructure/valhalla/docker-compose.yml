@@ -28,7 +28,11 @@ services:
     ports:
       - '127.0.0.1:8002:8002'
     volumes:
-      - /mnt/data/atlas/valhalla:/data
+      - type: bind
+        source: /mnt/data/atlas/valhalla
+        target: /data
+        bind:
+          create_host_path: false
     mem_limit: 6g
     memswap_limit: 6g
     cpus: 2

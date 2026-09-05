@@ -74,6 +74,8 @@ export const PARITY_SURFACE_HOMES: Readonly<Record<string, string>> = {
   'apps/android/src/ui/RoutePanel.tsx': 'Route planner',
   'apps/web/src/potential/StandBoardPanel.tsx': 'Stand board',
   'apps/android/src/ui/StandBoardSheet.tsx': 'Stand board',
+  'apps/web/src/satellites/SatellitePassCard.tsx': 'Satellite pass predictor',
+  'apps/android/src/ui/SatellitePassSheet.tsx': 'Satellite pass predictor',
   'apps/android/src/ui/TrackProfileSheet.tsx': 'Track profile',
   'apps/android/src/ui/ShareSheet.tsx': 'Share',
   'apps/android/src/nav/AddStopSheet.tsx': 'Add a stop',

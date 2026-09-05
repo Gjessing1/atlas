@@ -11,6 +11,8 @@ import {
   placeTargetTitle,
   resolveInaturOffer,
   savedPlaceAt,
+  SATELLITES_ID,
+  STARLINK_ID,
   type ColorScheme,
   type LatLng,
   type MapViewState,
@@ -51,6 +53,7 @@ import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
+import type { SatelliteOmm } from '@atlas/satellites';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -81,6 +84,7 @@ import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
+import { useSatellitesLayer } from './map/useSatellitesLayer.js';
 import { useExploreLayer } from './map/useExploreLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
@@ -105,6 +109,7 @@ import { useTransitPlan } from './routing/useTransit.js';
 import { prepareWebTransitAlarms, TransitGuidance } from './transit/TransitGuidance.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { PlaceEditDialog } from './place/PlaceEditDialog.js';
+import { SatellitePassCard } from './satellites/SatellitePassCard.js';
 import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
 import { type ImportOptions, type ImportResult, useUserData } from './storage/useUserData.js';
@@ -169,6 +174,13 @@ const linkedPanel = decodePanelLink(window.location.hash);
  */
 type PanelId = 'collections' | 'explore' | 'commute' | 'settings';
 
+interface SatelliteSelection {
+  layerId: typeof SATELLITES_ID | typeof STARLINK_ID;
+  noradId: number;
+  observer: LatLng;
+  observerSource: 'map' | 'location';
+}
+
 function useSystemColorScheme(): ColorScheme {
   const query = '(prefers-color-scheme: dark)';
   const [scheme, setScheme] = useState<ColorScheme>(() =>
@@ -191,6 +203,9 @@ export function App() {
   const [target, setTarget] = useState<PlaceTarget | null>(
     initialView.pin ? { source: 'pin', position: initialView.pin } : null,
   );
+  const [satelliteSelection, setSatelliteSelection] = useState<SatelliteSelection | null>(null);
+  const [satelliteLocating, setSatelliteLocating] = useState(false);
+  const [satelliteLocationError, setSatelliteLocationError] = useState(false);
   // Only set once the user asks to be located; the card shows distances from it.
   const [userAt, setUserAt] = useState<LatLng | null>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
@@ -411,6 +426,38 @@ export function App() {
   useTransitVehicleLayer(map, overlays, mapViewport);
   useHuntingFieldsLayer(map, overlays);
   useIceObservationsLayer(map, overlays);
+  // Curiosities' two sky layers. Separate rows so the Starlink constellation's
+  // eleven thousand objects stay opt-in beside the couple of hundred that make
+  // up the stations and the naked-eye set.
+  const satelliteLayer = useSatellitesLayer(
+    map,
+    overlays,
+    SATELLITES_ID,
+    satelliteSelection?.layerId === SATELLITES_ID ? satelliteSelection.noradId : null,
+  );
+  const starlinkLayer = useSatellitesLayer(
+    map,
+    overlays,
+    STARLINK_ID,
+    satelliteSelection?.layerId === STARLINK_ID ? satelliteSelection.noradId : null,
+  );
+  const selectedSatellite = useMemo<SatelliteOmm | null>(() => {
+    if (!satelliteSelection) return null;
+    const source = satelliteSelection.layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer;
+    return (
+      source.elements.find((element) => element.NORAD_CAT_ID === satelliteSelection.noradId) ?? null
+    );
+  }, [satelliteSelection, satelliteLayer.elements, starlinkLayer.elements]);
+
+  // A card cannot outlive the row that supplied its elements. A refreshed set
+  // may also retire a decayed object; the same derived lookup closes that case.
+  useEffect(() => {
+    if (!satelliteSelection) return;
+    const source = satelliteSelection.layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer;
+    if (!source.active || (source.status === 'ready' && !selectedSatellite)) {
+      setSatelliteSelection(null);
+    }
+  }, [satelliteSelection, satelliteLayer, starlinkLayer, selectedSatellite]);
 
   // ---- turn-by-turn navigation ----
 
@@ -675,7 +722,63 @@ export function App() {
     },
     [target, followPin],
   );
-  useOverlayIdentify(map, overlays, blockPassiveClicksRef, onIdentify);
+  const onSatellitePick = useCallback(
+    (hit: { layerId: string; noradId: number }) => {
+      const layerId = hit.layerId === STARLINK_ID ? STARLINK_ID : SATELLITES_ID;
+      const source = layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer;
+      if (!source.elements.some((element) => element.NORAD_CAT_ID === hit.noradId)) return;
+      const center = mapRef.current?.getCenter();
+      if (!center) return;
+      setTarget(null);
+      setSatelliteLocationError(false);
+      setSatelliteSelection({
+        layerId,
+        noradId: hit.noradId,
+        observer: { lat: center.lat, lng: center.lng },
+        observerSource: 'map',
+      });
+    },
+    [satelliteLayer, starlinkLayer],
+  );
+  useOverlayIdentify(map, overlays, blockPassiveClicksRef, onIdentify, onSatellitePick);
+
+  const useMapCenterForSatellite = useCallback(() => {
+    const center = mapRef.current?.getCenter();
+    if (!center) return;
+    setSatelliteLocationError(false);
+    setSatelliteSelection((current) =>
+      current
+        ? {
+            ...current,
+            observer: { lat: center.lat, lng: center.lng },
+            observerSource: 'map',
+          }
+        : null,
+    );
+  }, []);
+
+  const useMyLocationForSatellite = useCallback(() => {
+    if (satelliteLocating) return;
+    setSatelliteLocating(true);
+    setSatelliteLocationError(false);
+    void getMyLocation().then((at) => {
+      setSatelliteLocating(false);
+      if (!at) {
+        setSatelliteLocationError(true);
+        return;
+      }
+      setUserAt(at);
+      setSatelliteSelection((current) =>
+        current ? { ...current, observer: at, observerSource: 'location' } : null,
+      );
+    });
+  }, [satelliteLocating]);
+
+  // A place selection supersedes an orbit selection; this also covers POIs
+  // whose own layer-specific click handler runs before the shared map handler.
+  useEffect(() => {
+    if (target) setSatelliteSelection(null);
+  }, [target]);
 
   // ---- user data on the map ----
 
@@ -1226,6 +1329,20 @@ export function App() {
       )}
       {map && measure.open && nav.phase === 'idle' && (
         <MeasureTool map={map} measure={measure} onClose={() => measure.setOpen(false)} />
+      )}
+      {satelliteSelection && selectedSatellite && nav.phase === 'idle' && (
+        <SatellitePassCard
+          element={selectedSatellite}
+          layerId={satelliteSelection.layerId}
+          observer={satelliteSelection.observer}
+          observerSource={satelliteSelection.observerSource}
+          locating={satelliteLocating}
+          locationError={satelliteLocationError}
+          shifted={leftPanelOpen || spotsOpen || standBoardOpen}
+          onUseMapCenter={useMapCenterForSatellite}
+          onUseMyLocation={useMyLocationForSatellite}
+          onClose={() => setSatelliteSelection(null)}
+        />
       )}
       {/* One card for pins, saved places, POIs and search hits. Hidden mid-trip
           along with the rest of the map chrome. */}

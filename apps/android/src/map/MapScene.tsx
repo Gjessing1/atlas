@@ -30,6 +30,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
 import type { ActiveOverlay } from '../layers/useOverlays';
+import type { SatelliteLayerData } from '../layers/useSatellites';
 import type { SpeedCameras } from '../layers/useSpeedCameras';
 import type { VectorOverlayData } from '../layers/useVectorOverlay';
 import { spotsFeatureCollection, type PotentialSpot } from '@atlas/potential';
@@ -111,6 +112,14 @@ export const TRANSIT_VEHICLE_LAYER_IDS = [
 export const ICE_OBSERVATION_LAYER_IDS = [
   'atlas-ice-observations-symbol',
   'atlas-ice-observations-dot',
+];
+
+/** Moving satellite dots hit-tested by useMapPress. */
+export const SATELLITE_LAYER_IDS = [
+  'atlas-satellites-label',
+  'atlas-satellites-dot',
+  'atlas-starlink-label',
+  'atlas-starlink-dot',
 ];
 
 /**
@@ -210,6 +219,10 @@ interface MapSceneProps {
   huntingFields: HuntingFields | null;
   /** Rolling Regobs markers for the current viewport. */
   iceObservations: VectorOverlayData | null;
+  /** Stations + naked-eye catalog, propagated on the device. */
+  satellites: SatelliteLayerData;
+  /** Starlink constellation, kept behind its own catalog switch. */
+  starlink: SatelliteLayerData;
   /** ATK speed-camera coverage to draw (null = overlay off / not loaded). */
   speedCameras: SpeedCameras | null;
   /** Live DATEX traffic markers (null when the layer is off/offline). */
@@ -291,6 +304,8 @@ export function MapScene({
   overlayLabels,
   huntingFields,
   iceObservations,
+  satellites,
+  starlink,
   speedCameras,
   traffic,
   trafficFlow,
@@ -608,6 +623,98 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
+        {/* Orbital elements arrive only on refresh; every position between
+          them is propagated here on the device. Yellow is sunlit, slate is in
+          shadow, and the selected object's cyan track is the one the pass
+          sheet is describing. */}
+        {!inPip
+          ? [satellites, starlink].map((satelliteLayer) =>
+              satelliteLayer.active && satelliteLayer.data ? (
+                <GeoJSONSource
+                  key={satelliteLayer.layerId}
+                  id={`atlas-${satelliteLayer.layerId}`}
+                  data={satelliteLayer.data}
+                >
+                  <Layer
+                    type="line"
+                    id={`atlas-${satelliteLayer.layerId}-track`}
+                    filter={['==', ['get', 'track'], true]}
+                    layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                    paint={{
+                      'line-color': ['case', ['get', 'selected'], '#38bdf8', '#fbbf24'],
+                      'line-width': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        2,
+                        ['case', ['get', 'selected'], 2, 1],
+                        8,
+                        ['case', ['get', 'selected'], 3, 2],
+                      ],
+                      'line-opacity': [
+                        'case',
+                        ['get', 'selected'],
+                        0.85 * satelliteLayer.opacity,
+                        0.45 * satelliteLayer.opacity,
+                      ],
+                      'line-dasharray': [2, 2],
+                    }}
+                  />
+                  <Layer
+                    type="circle"
+                    id={`atlas-${satelliteLayer.layerId}-dot`}
+                    filter={['!=', ['get', 'track'], true]}
+                    paint={{
+                      'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        2,
+                        ['case', ['get', 'selected'], 7, ['get', 'station'], 5, 2],
+                        8,
+                        ['case', ['get', 'selected'], 11, ['get', 'station'], 9, 4],
+                      ],
+                      'circle-color': ['get', 'color'],
+                      'circle-stroke-width': [
+                        'case',
+                        ['get', 'selected'],
+                        3,
+                        ['get', 'station'],
+                        2,
+                        0,
+                      ],
+                      'circle-stroke-color': ['case', ['get', 'selected'], '#38bdf8', '#ffffff'],
+                      'circle-opacity': satelliteLayer.opacity,
+                      'circle-stroke-opacity': satelliteLayer.opacity,
+                    }}
+                  />
+                  <Layer
+                    type="symbol"
+                    id={`atlas-${satelliteLayer.layerId}-label`}
+                    filter={[
+                      'all',
+                      ['!=', ['get', 'track'], true],
+                      ['==', ['get', 'station'], true],
+                    ]}
+                    layout={{
+                      'text-field': ['get', 'name'],
+                      'text-font': ['Noto Sans Bold'],
+                      'text-size': 12,
+                      'text-offset': [0, 1.2],
+                      'text-anchor': 'top',
+                      'text-allow-overlap': false,
+                    }}
+                    paint={{
+                      'text-color': '#f8fafc',
+                      'text-halo-color': 'rgba(15,23,42,0.85)',
+                      'text-halo-width': 1.2,
+                      'text-opacity': satelliteLayer.opacity,
+                    }}
+                  />
+                </GeoJSONSource>
+              ) : null,
+            )
+          : null}
         {/* ATK speed cameras (web useSpeedCameraLayer's twin, same enforcement
           amber): fixed point cameras as dots, average-speed sections as lines
           with a white casing so they read over any road colour, names once

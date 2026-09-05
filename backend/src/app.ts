@@ -46,6 +46,12 @@ import {
   type IceObservationsApiOptions,
 } from './ice-observations-api.js';
 import {
+  registerSatellitesApi,
+  satellitesLayerMeta,
+  starlinkLayerMeta,
+  type SatellitesApiOptions,
+} from './satellites-api.js';
+import {
   registerTransitApi,
   transitVehicleLayerMeta,
   type TransitApiOptions,
@@ -113,6 +119,7 @@ export interface AppOptions {
   inaturApi?: InaturApiOptions;
   /** Test seams for the public NVE Regobs ice-observation feed. */
   iceObservationsApi?: IceObservationsApiOptions;
+  satellitesApi?: SatellitesApiOptions;
   /** Test seams for the Høydedata elevation proxy. */
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam for Wikimedia place summaries. */
@@ -672,6 +679,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       ...traffic.metas,
       transitVehicleLayerMeta(),
       iceObservationLayerMeta(),
+      satellitesLayerMeta(),
+      starlinkLayerMeta(),
       ...derivedLayerMetas(),
     ],
     ...opts.overlayApi,
@@ -681,6 +690,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // the static weakened-ice WMS so a mapped hazard can never masquerade as a
   // current field observation.
   registerIceObservationsApi(app, { status, ...opts.iceObservationsApi });
+
+  // Orbital elements, cached on this instance's behalf. The only layer whose
+  // positions the *client* computes: the backend is a compliant proxy in front
+  // of CelesTrak and nothing more, which is also what keeps the layer working
+  // on a device that has been offline for days.
+  registerSatellitesApi(app, { status, dataDir: opts.dataDir, ...opts.satellitesApi });
 
   // Derived potential surfaces (ROADMAP § N5 → E2): the fixed-z11-cell derive
   // service — input adapters, the persisted job queue, and the revalidating tile

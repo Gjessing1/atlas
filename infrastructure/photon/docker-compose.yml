@@ -20,7 +20,11 @@ services:
     ports:
       - '127.0.0.1:2322:2322'
     volumes:
-      - /mnt/data/atlas/photon:/photon/data
+      - type: bind
+        source: /mnt/data/atlas/photon
+        target: /photon/data
+        bind:
+          create_host_path: false
     networks:
       - atlas
 

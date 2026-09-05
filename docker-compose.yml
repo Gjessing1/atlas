@@ -20,7 +20,11 @@ services:
       # The app defaults to 3100 (3000 is taken by Forgejo on this host).
       - '3100:3100'
     volumes:
-      - /mnt/data/atlas:/data
+      - type: bind
+        source: /mnt/data/atlas
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - default
       - atlas

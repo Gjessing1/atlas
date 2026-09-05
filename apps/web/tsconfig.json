@@ -32,6 +32,9 @@
       "path": "../../packages/routing"
     },
     {
+      "path": "../../packages/satellites"
+    },
+    {
       "path": "../../packages/storage"
     },
     {

@@ -7,6 +7,26 @@ import type { LngLatBbox } from './geoproject.js';
 /** Live Regobs ice observations, drawn as viewport-fetched point markers. */
 export const ICE_OBSERVATIONS_ID = 'ice-observations';
 
+/**
+ * Tracked satellites: the space stations plus the naked-eye-brightness set.
+ *
+ * Unlike every other live layer, this one is not *fetched* per viewport — the
+ * client downloads orbital elements (a few tens of kilobytes, refreshed every
+ * couple of hours) and propagates positions locally with SGP4. So it keeps
+ * working with no connection at all, degrading by the age of its elements
+ * rather than going blank, which is why the clients surface that age.
+ */
+export const SATELLITES_ID = 'satellites';
+
+/**
+ * Starlink, kept as its own row rather than folded into `satellites`.
+ *
+ * It is thousands of objects against the other layer's couple of hundred, and
+ * a freshly launched batch still in its train is the single most striking thing
+ * in the sky — so it earns a toggle, and the clutter stays opt-in.
+ */
+export const STARLINK_ID = 'starlink';
+
 export type IceObservationKind = 'open-water' | 'danger' | 'ice' | 'observation';
 export type IceObservationAge = 'fresh' | 'recent' | 'older' | 'stale';
 
@@ -300,6 +320,22 @@ export function iceObservationsUrl(
   return (
     `${origin}/api/overlay/${encodeURIComponent(meta.id)}/features` +
     `?bbox=${bbox.join(',')}&v=${encodeURIComponent(String(rev))}`
+  );
+}
+
+/**
+ * Cache-revisioned URL for a satellite layer's orbital elements.
+ *
+ * No bbox, unlike the observation feeds: elements describe a whole orbit, not a
+ * place, and the client works out what is overhead itself. The response is
+ * small and changes on the upstream's two-hour cycle, so it is cached hard and
+ * revalidated rather than re-fetched per pan.
+ */
+export function satelliteElementsUrl(origin: string, meta: Pick<LayerMeta, 'id' | 'rev'>): string {
+  const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/elements` +
+    `?v=${encodeURIComponent(String(rev))}`
   );
 }
 

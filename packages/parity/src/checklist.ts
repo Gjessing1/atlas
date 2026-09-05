@@ -75,6 +75,25 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Both clients ask only for the settled viewport every 20 seconds, draw the same mode colours and line labels, and build the tap card from `@atlas/transit`. The row is a standing, off-by-default layer because watching a corridor does not require a planned journey.',
   },
   {
+    id: 'map-satellite-passes',
+    surface: 'map',
+    capability:
+      'Track satellites and Starlink live, then predict when a selected object will be visible',
+    web: {
+      file: 'apps/web/src/satellites/SatellitePassCard.tsx',
+      contains: 'Visible passes',
+    },
+    android: {
+      file: 'apps/android/src/ui/SatellitePassSheet.tsx',
+      contains: 'Visible passes',
+    },
+    route: {
+      file: 'backend/src/satellites-api.ts',
+      contains: "'/api/overlay/:id/elements'",
+    },
+    note: 'Both clients propagate the same CelesTrak OMM elements through `@atlas/satellites`, colour sunlit and eclipsed objects alike, and calculate the same 72-hour local pass list without sending the observer’s position to the server. Web uses a map card and Android a map-mode sheet; both keep the map interactive so its centre can become the observer.',
+  },
+  {
     id: 'map-potential-target',
     surface: 'map',
     capability: 'Pick what you are after — the Fish & Hunt sub-profile — in one tap',

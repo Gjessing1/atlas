@@ -256,6 +256,151 @@ button {
   min-width: 0;
 }
 
+/* --- Satellite pass card -------------------------------------------------
+   It occupies the established place-card surface because only one thing can be
+   the map's subject at a time, but its rows describe an orbit and an observer
+   rather than pretending the moving dot is a place on the ground. */
+.satellite-card {
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(82vh, 700px);
+}
+
+.satellite-facts dt {
+  flex-basis: 58px;
+}
+
+.satellite-stale {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.satellite-observer {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.satellite-observer > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.satellite-observer strong {
+  font-size: 12px;
+}
+
+.satellite-observer code,
+.satellite-observer p {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.satellite-observer p {
+  margin: 0;
+}
+
+.satellite-observer-actions,
+.satellite-pass-controls,
+.satellite-pass-controls > div {
+  display: flex;
+  gap: 6px;
+}
+
+.satellite-observer-actions button,
+.satellite-pass-controls button {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.satellite-observer-actions button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.satellite-pass-controls {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.satellite-pass-controls button.on {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.satellite-pass-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.satellite-pass-heading strong {
+  font-size: 13px;
+}
+
+.satellite-pass-heading span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.satellite-pass-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.satellite-pass-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.satellite-pass-list time {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.satellite-pass-list span {
+  font-size: 12px;
+}
+
+.satellite-pass-list small,
+.satellite-pass-note,
+.satellite-pass-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.satellite-pass-note,
+.satellite-pass-empty {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.satellite-pass-empty {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
 /* The saved hunting stand's plan (ROADMAP § E12). Sits above the surface's
    explain block: the ground is context, the direction to face is the answer.
    The rose is a fixed square beside the rows, so the block's height does not

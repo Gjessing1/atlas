@@ -266,6 +266,103 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   expect((await identify.boundingBox())!.height).toBeGreaterThan(clipped);
 });
 
+test('a satellite tap opens the on-device pass predictor', async ({ page }) => {
+  const epoch = new Date().toISOString().replace(/Z$/, '');
+  await page.route('**/api/layers**', (route) =>
+    route.fulfill({
+      json: {
+        layers: [
+          {
+            id: 'satellites',
+            rev: 1,
+            title: 'Satellites & ISS',
+            description: 'Live orbital positions',
+            group: 'Sky',
+            attribution: 'CelesTrak',
+            maxzoom: 22,
+            defaultOpacity: 1,
+            identify: false,
+            profiles: ['curiosities'],
+            vector: true,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/overlay/satellites/elements**', (route) =>
+    route.fulfill({
+      json: {
+        fetchedAt: new Date().toISOString(),
+        groups: ['visual'],
+        satellites: [
+          {
+            OBJECT_NAME: 'ATLAS TEST SATELLITE',
+            OBJECT_ID: '2026-001A',
+            EPOCH: epoch,
+            MEAN_MOTION: 15.48996812,
+            ECCENTRICITY: 0.00050573,
+            INCLINATION: 51.631,
+            RA_OF_ASC_NODE: 262.6049,
+            ARG_OF_PERICENTER: 109.4187,
+            MEAN_ANOMALY: 250.7348,
+            EPHEMERIS_TYPE: 0,
+            CLASSIFICATION_TYPE: 'U',
+            NORAD_CAT_ID: 99005,
+            ELEMENT_SET_NO: 1,
+            REV_AT_EPOCH: 1,
+            BSTAR: 0.000081465205,
+            MEAN_MOTION_DOT: 0.0000404,
+            MEAN_MOTION_DDOT: 0,
+            ATLAS_GROUP: 'visual',
+          },
+        ],
+      },
+    }),
+  );
+
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await page.getByRole('button', { name: /^Map layers/ }).click();
+  await page.getByRole('button', { name: 'Satellites & ISS' }).click();
+  await page.keyboard.press('Escape');
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const data = window.__atlasMap!.getSource('atlas-satellites')?.serialize().data;
+        return typeof data === 'object' && 'features' in data ? data.features.length : 0;
+      }),
+    )
+    .toBeGreaterThan(0);
+  const position = await page.evaluate(() => {
+    const data = window.__atlasMap!.getSource('atlas-satellites')?.serialize().data;
+    if (!data || typeof data === 'string' || data.features.length === 0) {
+      throw new Error('Satellite source is empty');
+    }
+    const feature = data.features.find((candidate) => candidate.geometry.type === 'Point')!;
+    const [lng, lat] = (feature.geometry as GeoJSON.Point).coordinates;
+    window.__atlasMap!.jumpTo({ center: [lng!, lat!], zoom: 5 });
+    return { lat: lat!, lng: lng! };
+  });
+  const [x, y] = await project(page, position.lat, position.lng);
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(canvas.x + x, canvas.y + y);
+
+  const card = page.getByTestId('satellite-pass-card');
+  await expect(card).toContainText('ATLAS TEST SATELLITE');
+  await expect(card).toContainText('Passes over map centre');
+  await expect(card.getByRole('button', { name: 'Visible' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await card.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(card).toContainText('All passes');
+  await card.getByRole('button', { name: '30°+' }).click();
+  await expect(card).toContainText('next 3 days');
+  await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
+});
+
 test('Fish & Hunt shows live ice times and saves a permit as a filled area', async ({ page }) => {
   await page.route('**/api/layers**', (route) =>
     route.fulfill({

@@ -6,6 +6,8 @@ import {
   layersForProfile,
   normalizeLayerOptions,
   overlayTileUrl,
+  SATELLITES_ID,
+  STARLINK_ID,
   type LayerMeta,
   type LayersResponse,
   type OverlayStateMap,
@@ -27,6 +29,8 @@ const RENDERABLE_VECTOR_IDS = new Set([
   'traffic',
   'traffic-flow',
   'transit-vehicles',
+  SATELLITES_ID,
+  STARLINK_ID,
 ]);
 
 // Visibility/opacity are device-local preferences (`local.` keys never sync).

@@ -1,7 +1,7 @@
 import { AtlasStorage } from '@atlas/storage';
 import type { SyncChange } from '@atlas/storage';
 import { createNodeSqlDriver as createNodeDriver } from '@atlas/storage/node';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SYNC_CURSOR_KEY, SyncEngine, SyncError } from './engine.js';
 import type { SyncPullResponse, SyncPushRequest } from './protocol.js';
 import { MAX_CLOCK_SKEW_MS, clampFutureStamps, lwwWins } from './protocol.js';
@@ -308,6 +308,7 @@ describe('SyncEngine', () => {
   });
 
   it('resolves concurrent edits by last write wins across devices', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     const server = new FakeServer();
     const a = await createDevice(server);
     const b = await createDevice(server);
@@ -316,9 +317,11 @@ describe('SyncEngine', () => {
     await a.engine.sync();
     await b.engine.sync();
 
-    // b edits after a — b's write is newer and must win everywhere.
+    // b edits after a — b's write is newer and must win everywhere. Use an
+    // explicit wall clock so host clock adjustments cannot reverse the order.
+    clock.mockReturnValue(1_000_100);
     await a.storage.updatePlace(place.id, { name: 'From A' });
-    await new Promise((r) => setTimeout(r, 3));
+    clock.mockReturnValue(1_000_200);
     await b.storage.updatePlace(place.id, { name: 'From B' });
 
     await a.engine.sync();
@@ -327,6 +330,7 @@ describe('SyncEngine', () => {
 
     expect((await a.storage.listPlaces())[0]!.name).toBe('From B');
     expect((await b.storage.listPlaces())[0]!.name).toBe('From B');
+    clock.mockRestore();
   });
 
   it('propagates deletes as tombstones', async () => {

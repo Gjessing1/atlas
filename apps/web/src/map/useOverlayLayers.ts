@@ -16,6 +16,7 @@ import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
 import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
+import { satelliteIdentifyLayers } from './useSatellitesLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
 import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
@@ -305,11 +306,14 @@ export function useOverlayIdentify(
   overlays: ActiveOverlay[],
   suppress: { readonly current: boolean } | undefined,
   onIdentify: (at: { lat: number; lng: number }, groups: OverlayIdentifyGroup[]) => void,
+  onSatellite?: (hit: { layerId: string; noradId: number }) => void,
 ): void {
   const overlaysRef = useRef(overlays);
   overlaysRef.current = overlays;
   const onIdentifyRef = useRef(onIdentify);
   onIdentifyRef.current = onIdentify;
+  const onSatelliteRef = useRef(onSatellite);
+  onSatelliteRef.current = onSatellite;
   // Identify is a network round trip, so a second click can land before the
   // first answers. Only the newest click's answer may reach the card —
   // otherwise the rows would describe a point the user has left behind.
@@ -335,6 +339,23 @@ export function useOverlayIdentify(
       };
       const drawn = (layers: string[]): Record<string, unknown> | null =>
         hits(layers)[0]?.properties ?? null;
+      // An orbit is not a place under the cursor. It owns the click before the
+      // ordinary overlay-identify request and opens the pass predictor instead
+      // of a ground pin carrying a misleading latitude/longitude.
+      const satellite = drawn([
+        ...satelliteIdentifyLayers('satellites'),
+        ...satelliteIdentifyLayers('starlink'),
+      ]);
+      const noradId = Number(satellite?.['noradId']);
+      const layerId = satellite?.['layerId'];
+      if (
+        onSatelliteRef.current &&
+        (layerId === 'satellites' || layerId === 'starlink') &&
+        Number.isInteger(noradId)
+      ) {
+        onSatelliteRef.current({ layerId, noradId });
+        return;
+      }
       const local = [
         iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
