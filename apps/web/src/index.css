@@ -18,6 +18,13 @@
   --success: #1e6b34;
   --info: #1a4d8f;
   --route: #7048c9;
+  /* The two colours the map paints a fresh launch train in. Light mode reads
+     the dim one and dark mode the bright one, so the card's chip is legible
+     against its surface while still being, literally, one of the dots'
+     colours. */
+  --train: #7e22ce;
+  --train-tint: rgba(126, 34, 206, 0.1);
+  --train-edge: rgba(126, 34, 206, 0.35);
 }
 
 :root[data-theme='dark'] {
@@ -38,6 +45,9 @@
   --success: #7fd49a;
   --info: #83b8ff;
   --route: #b69aff;
+  --train: #c084fc;
+  --train-tint: rgba(192, 132, 252, 0.14);
+  --train-edge: rgba(192, 132, 252, 0.4);
 }
 
 * {
@@ -271,6 +281,21 @@ button {
 
 .satellite-stale {
   color: var(--warning);
+  font-weight: 600;
+}
+
+/*
+ * A freshly launched batch, in the purple the dots take on the map — the card
+ * is where that second colour gets explained, so the two have to match.
+ */
+.satellite-train {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--train-edge);
+  background: var(--train-tint);
+  color: var(--train);
+  font-size: 11px;
   font-weight: 600;
 }
 

@@ -2,10 +2,14 @@ import { satelliteElementsUrl, type LayerMeta } from '@atlas/core';
 import {
   coversGround,
   footprintRing,
+  freshTrains,
   groundTrackSegments,
+  sameTrains,
   subpointAt,
+  trainMembers,
   type SatelliteElementSet,
   type SatelliteOmm,
+  type SatelliteTrain,
 } from '@atlas/satellites';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useRef, useState } from 'react';
@@ -14,6 +18,10 @@ import type { ActiveOverlay } from './useOverlays';
 
 const SUNLIT_COLOR = '#fbbf24';
 const ECLIPSED_COLOR = '#64748b';
+/** A fresh launch train — see web's twin for why hue and not brightness. */
+const TRAIN_SUNLIT_COLOR = '#c084fc';
+const TRAIN_ECLIPSED_COLOR = '#7e22ce';
+/** Tracks and train membership share the slow lane; both are days-scale. */
 const TRACK_REFRESH_MS = 30_000;
 
 /** What the selected object's horizon circle is drawn against — web's twin. */
@@ -32,6 +40,8 @@ export interface SatelliteLayerData {
   status: 'idle' | 'loading' | 'ready' | 'error';
   /** Selected object above the observer's horizon now; null when none is. */
   overhead: boolean | null;
+  /** Batches currently flying as a train, tightest first. */
+  trains: readonly SatelliteTrain[];
 }
 
 /** The selected object's horizon circle. See web's `footprintFeatures`. */
@@ -69,6 +79,7 @@ function featuresAt(
   previousTracks: GeoJSON.Feature[],
   refreshTracks: boolean,
   footprint: SatelliteFootprint | null,
+  trainIds: ReadonlySet<number>,
 ): { collection: GeoJSON.FeatureCollection; tracks: GeoJSON.Feature[]; overhead: boolean | null } {
   const tracks = refreshTracks
     ? elements.flatMap((element): GeoJSON.Feature[] => {
@@ -92,6 +103,7 @@ function featuresAt(
   for (const element of elements) {
     const fix = subpointAt(element, at);
     if (!fix) continue;
+    const train = trainIds.has(fix.noradId);
     points.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [fix.lng, fix.lat] },
@@ -100,8 +112,15 @@ function featuresAt(
         noradId: fix.noradId,
         name: fix.name,
         station: fix.group === 'stations',
+        train,
         selected: fix.noradId === selectedNoradId,
-        color: fix.sunlit ? SUNLIT_COLOR : ECLIPSED_COLOR,
+        color: train
+          ? fix.sunlit
+            ? TRAIN_SUNLIT_COLOR
+            : TRAIN_ECLIPSED_COLOR
+          : fix.sunlit
+            ? SUNLIT_COLOR
+            : ECLIPSED_COLOR,
       },
     });
   }
@@ -134,6 +153,8 @@ export function useSatellites(
   const fetchedRevRef = useRef<number | null>(null);
   const tracksRef = useRef<GeoJSON.Feature[]>([]);
   const trackAtRef = useRef(0);
+  const trainsRef = useRef<readonly SatelliteTrain[]>([]);
+  const trainIdsRef = useRef<ReadonlySet<number>>(new Set());
   // Read inside the tick, so moving the observer or the elevation floor does
   // not restart the propagation effect.
   const footprintRef = useRef(footprint);
@@ -147,6 +168,7 @@ export function useSatellites(
     status: 'idle',
   });
   const [overhead, setOverhead] = useState<boolean | null>(null);
+  const [trains, setTrains] = useState<readonly SatelliteTrain[]>([]);
 
   useEffect(() => {
     if (!present) return;
@@ -156,14 +178,27 @@ export function useSatellites(
     const draw = () => {
       if (cancelled || elementsRef.current.length === 0) return;
       const now = Date.now();
+      const at = new Date(now);
+      const slowLane = now - trackAtRef.current >= TRACK_REFRESH_MS;
+      if (slowLane) {
+        const found = freshTrains(elementsRef.current, { at });
+        // The ids feed every tick's colours; the array only reaches React when
+        // the batches themselves changed, which is a matter of days.
+        trainIdsRef.current = trainMembers(found);
+        if (!sameTrains(found, trainsRef.current)) {
+          trainsRef.current = found;
+          setTrains(found);
+        }
+      }
       const next = featuresAt(
         elementsRef.current,
         layerId,
-        new Date(now),
+        at,
         selectedNoradId,
         tracksRef.current,
-        now - trackAtRef.current >= TRACK_REFRESH_MS,
+        slowLane,
         footprintRef.current,
+        trainIdsRef.current,
       );
       if (next.tracks !== tracksRef.current) {
         tracksRef.current = next.tracks;
@@ -247,5 +282,12 @@ export function useSatellites(
 
   // No circle asked for, no answer — rather than the last one, which would
   // outlive the layer being switched off.
-  return { layerId, active: present, opacity, ...state, overhead: footprint ? overhead : null };
+  return {
+    layerId,
+    active: present,
+    opacity,
+    ...state,
+    overhead: footprint ? overhead : null,
+    trains,
+  };
 }

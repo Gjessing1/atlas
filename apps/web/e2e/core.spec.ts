@@ -385,6 +385,102 @@ test('a satellite tap opens the on-device pass predictor', async ({ page }) => {
   await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
 });
 
+test('a freshly launched batch is drawn as a purple train', async ({ page }) => {
+  const epoch = new Date().toISOString().replace(/Z$/, '');
+  await page.route('**/api/layers**', (route) =>
+    route.fulfill({
+      json: {
+        layers: [
+          {
+            id: 'satellites',
+            rev: 1,
+            title: 'Satellites & ISS',
+            description: 'Live orbital positions',
+            group: 'Sky',
+            attribution: 'CelesTrak',
+            maxzoom: 22,
+            defaultOpacity: 1,
+            identify: false,
+            profiles: ['curiosities'],
+            vector: true,
+          },
+        ],
+      },
+    }),
+  );
+  // Ten objects from one launch, at the ~324 km a batch is inserted at and
+  // 2.2 degrees of orbit apart — about 245 km, or half a minute of sky.
+  await page.route('**/api/overlay/satellites/elements**', (route) =>
+    route.fulfill({
+      json: {
+        fetchedAt: new Date().toISOString(),
+        groups: ['starlink'],
+        satellites: Array.from({ length: 10 }, (_, index) => ({
+          OBJECT_NAME: `ATLAS TRAIN ${index + 1}`,
+          OBJECT_ID: `2026-201${String.fromCharCode(65 + index)}`,
+          EPOCH: epoch,
+          MEAN_MOTION: 15.85,
+          ECCENTRICITY: 0.0001,
+          INCLINATION: 53.16,
+          RA_OF_ASC_NODE: 262.6,
+          ARG_OF_PERICENTER: 90,
+          MEAN_ANOMALY: 40 + index * 2.2,
+          EPHEMERIS_TYPE: 0,
+          CLASSIFICATION_TYPE: 'U',
+          NORAD_CAT_ID: 99100 + index,
+          ELEMENT_SET_NO: 1,
+          REV_AT_EPOCH: 1,
+          BSTAR: 0.0008,
+          MEAN_MOTION_DOT: 0.0001,
+          MEAN_MOTION_DDOT: 0,
+          ATLAS_GROUP: 'starlink',
+        })),
+      },
+    }),
+  );
+
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await page.getByRole('button', { name: /^Map layers/ }).click();
+  await page.getByRole('button', { name: 'Satellites & ISS' }).click();
+  await page.keyboard.press('Escape');
+
+  // Every member purple, in one of the two shades: hue says "train", value
+  // still says whether the sun is on it.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const data = window.__atlasMap!.getSource('atlas-satellites')?.serialize().data;
+        if (!data || typeof data === 'string') return [];
+        return data.features
+          .filter((feature) => feature.geometry.type === 'Point')
+          .map((feature) => `${feature.properties?.train}/${feature.properties?.color}`);
+      }),
+    )
+    .toEqual(Array.from({ length: 10 }, () => expect.stringMatching(/^true\/#(c084fc|7e22ce)$/)));
+
+  const position = await page.evaluate(() => {
+    const data = window.__atlasMap!.getSource('atlas-satellites')?.serialize().data;
+    if (!data || typeof data === 'string' || data.features.length === 0) {
+      throw new Error('Satellite source is empty');
+    }
+    const feature = data.features.find((candidate) => candidate.geometry.type === 'Point')!;
+    const [lng, lat] = (feature.geometry as GeoJSON.Point).coordinates;
+    window.__atlasMap!.jumpTo({ center: [lng!, lat!], zoom: 5 });
+    return { lat: lat!, lng: lng! };
+  });
+  const [x, y] = await project(page, position.lat, position.lng);
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(canvas.x + x, canvas.y + y);
+
+  // And the card names the batch the dot belongs to, so the second colour on
+  // the map is explained somewhere rather than left as a riddle.
+  const card = page.getByTestId('satellite-pass-card');
+  await expect(card).toContainText('Flying as a train — 10 objects from launch 2026-201');
+  await expect(card).toContainText(/one every \d+ s/);
+});
+
 test('Fish & Hunt shows live ice times and saves a permit as a filled area', async ({ page }) => {
   await page.route('**/api/layers**', (route) =>
     route.fulfill({

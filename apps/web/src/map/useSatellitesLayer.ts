@@ -2,10 +2,14 @@ import { satelliteElementsUrl, type LayerMeta } from '@atlas/core';
 import {
   coversGround,
   footprintRing,
+  freshTrains,
   groundTrackSegments,
+  sameTrains,
   subpointAt,
+  trainMembers,
   type SatelliteElementSet,
   type SatelliteOmm,
+  type SatelliteTrain,
 } from '@atlas/satellites';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef, useState } from 'react';
@@ -39,6 +43,19 @@ const ECLIPSED_COLOR = '#64748b';
  */
 const SELECTED_COLOR = '#38bdf8';
 
+/**
+ * A batch launched days ago, still flying nose to tail.
+ *
+ * The one thing on this layer allowed a second colour, and it takes it as a
+ * *hue* while illumination keeps the brightness: bright purple is a sunlit
+ * train, dim purple one in shadow. So the batch reads as a single striking
+ * object from across the map without costing the layer the fact its colour
+ * already carries — which matters most here, because a train you can actually
+ * go outside and watch is exactly a sunlit one.
+ */
+const TRAIN_SUNLIT_COLOR = '#c084fc';
+const TRAIN_ECLIPSED_COLOR = '#7e22ce';
+
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
@@ -54,7 +71,11 @@ const LARGE_SET = 500;
 const TICK_SMALL_MS = 1000;
 const TICK_LARGE_MS = 2000;
 
-/** Ground tracks change slowly; recomputing them every tick would be waste. */
+/**
+ * Ground tracks change slowly; recomputing them every tick would be waste.
+ * Train membership shares the cadence — it walks all 11 086 Starlink objects
+ * (18 ms warm), and a batch's spacing evolves over days, not seconds.
+ */
 const TRACK_REFRESH_MS = 30_000;
 
 interface LayerIds {
@@ -104,6 +125,8 @@ export interface SatelliteLayerState {
    * flips at the same moment the user's position crosses the drawn rim.
    */
   overhead: boolean | null;
+  /** Batches currently flying as a train, tightest first. */
+  trains: readonly SatelliteTrain[];
 }
 
 /** One point per object: the cheap half, rebuilt every tick. */
@@ -112,6 +135,7 @@ function pointFeatures(
   at: Date,
   layerId: string,
   selectedNoradId: number | null,
+  trainIds: ReadonlySet<number>,
 ): GeoJSON.Feature[] {
   const features: GeoJSON.Feature[] = [];
   for (const omm of elements) {
@@ -119,6 +143,7 @@ function pointFeatures(
     // A decayed object, or elements SGP4 will not take: it drops off the map
     // rather than being drawn somewhere meaningless.
     if (!fix) continue;
+    const train = trainIds.has(fix.noradId);
     features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [fix.lng, fix.lat] },
@@ -127,8 +152,15 @@ function pointFeatures(
         layerId,
         name: fix.name,
         station: fix.group === 'stations',
+        train,
         sunlit: fix.sunlit,
-        color: fix.sunlit ? SUNLIT_COLOR : ECLIPSED_COLOR,
+        color: train
+          ? fix.sunlit
+            ? TRAIN_SUNLIT_COLOR
+            : TRAIN_ECLIPSED_COLOR
+          : fix.sunlit
+            ? SUNLIT_COLOR
+            : ECLIPSED_COLOR,
         altitudeKm: Math.round(fix.altitudeKm),
         speedKmH: Math.round(fix.speedKmS * 3600),
         ageDays: Number(fix.ageDays.toFixed(2)),
@@ -218,7 +250,10 @@ export function useSatellitesLayer(
   const fetchedRevRef = useRef<number | null>(null);
   const trackAtRef = useRef(0);
   const tracksRef = useRef<GeoJSON.Feature[]>([]);
-  const [state, setState] = useState<Omit<SatelliteLayerState, 'active' | 'overhead'>>({
+  const trainsRef = useRef<readonly SatelliteTrain[]>([]);
+  const trainIdsRef = useRef<ReadonlySet<number>>(new Set());
+  const [trains, setTrains] = useState<readonly SatelliteTrain[]>([]);
+  const [state, setState] = useState<Omit<SatelliteLayerState, 'active' | 'overhead' | 'trains'>>({
     elements: [],
     fetchedAt: null,
     status: 'idle',
@@ -328,14 +363,17 @@ export function useSatellitesLayer(
           paint: {
             // Size carries the group, colour carries illumination — one meaning
             // per channel, so a dim station still reads as a station.
+            // Size still carries the group — and a fresh train is one, sitting
+            // between a station and an anonymous object. Two dozen 2 px dots
+            // would be a colour nobody ever sees.
             'circle-radius': [
               'interpolate',
               ['linear'],
               ['zoom'],
               2,
-              ['case', ['get', 'selected'], 7, ['get', 'station'], 5, 2],
+              ['case', ['get', 'selected'], 7, ['get', 'station'], 5, ['get', 'train'], 3, 2],
               8,
-              ['case', ['get', 'selected'], 11, ['get', 'station'], 9, 4],
+              ['case', ['get', 'selected'], 11, ['get', 'station'], 9, ['get', 'train'], 6, 4],
             ],
             'circle-color': ['get', 'color'],
             'circle-stroke-width': ['case', ['get', 'selected'], 3, ['get', 'station'], 2, 0],
@@ -399,6 +437,14 @@ export function useSatellitesLayer(
       if (now - trackAtRef.current >= TRACK_REFRESH_MS) {
         trackAtRef.current = now;
         tracksRef.current = trackFeatures(elements, at, selectedNoradId);
+        const found = freshTrains(elements, { at });
+        // The ids are what every tick below reads; the array is what the card
+        // names the batch from, and only reaches React when it really changed.
+        trainIdsRef.current = trainMembers(found);
+        if (!sameTrains(found, trainsRef.current)) {
+          trainsRef.current = found;
+          setTrains(found);
+        }
       }
       // Rebuilt every tick, unlike the tracks: this is one object's ring, and
       // it is the feature whose whole point is that it moves over you.
@@ -408,7 +454,7 @@ export function useSatellitesLayer(
         features: [
           ...disc.features,
           ...tracksRef.current,
-          ...pointFeatures(elements, at, layerId, selectedNoradId),
+          ...pointFeatures(elements, at, layerId, selectedNoradId, trainIdsRef.current),
         ],
       });
       // Only on a change: this runs once a second, and a setState per tick
@@ -485,5 +531,5 @@ export function useSatellitesLayer(
 
   // No circle asked for, no answer — rather than the last one, which would
   // outlive the layer being switched off.
-  return { active: Boolean(active), ...state, overhead: footprint ? overhead : null };
+  return { active: Boolean(active), ...state, overhead: footprint ? overhead : null, trains };
 }

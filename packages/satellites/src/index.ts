@@ -22,6 +22,18 @@ export {
   type SatelliteFix,
 } from './propagate.js';
 export {
+  freshTrains,
+  launchIdOf,
+  sameTrains,
+  trainMembers,
+  trainOf,
+  TRAIN_MAX_ALTITUDE_KM,
+  TRAIN_MAX_SPACING_KM,
+  TRAIN_MIN_MEMBERS,
+  type SatelliteTrain,
+  type TrainOptions,
+} from './trains.js';
+export {
   observerSunElevationDeg,
   predictPasses,
   predictPassesForSet,

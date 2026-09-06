@@ -53,7 +53,7 @@ import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
-import type { SatelliteOmm } from '@atlas/satellites';
+import { trainOf, type SatelliteOmm } from '@atlas/satellites';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1356,6 +1356,10 @@ export function App() {
           overhead={
             (satelliteSelection.layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer).overhead
           }
+          train={trainOf(
+            (satelliteSelection.layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer).trains,
+            satelliteSelection.noradId,
+          )}
           locating={satelliteLocating}
           locationError={satelliteLocationError}
           shifted={leftPanelOpen || spotsOpen || standBoardOpen}

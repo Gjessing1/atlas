@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   elementAgeDays,
   elementEpochMs,
+  freshTrains,
+  launchIdOf,
+  trainMembers,
+  trainOf,
+  TRAIN_MAX_ALTITUDE_KM,
   coversGround,
   footprintRing,
   groundTrackSegments,
@@ -392,5 +397,333 @@ describe('visible passes', () => {
     expect(subpointAt(broken, AT)).toBeNull();
     expect(groundTrackSegments(broken)).toEqual([]);
     expect(predictPasses(broken, OSLO, { from: AT, hours: 24 })).toEqual([]);
+  });
+});
+
+/**
+ * A synthetic Starlink batch, built so that the *propagated* geometry is the
+ * thing under test.
+ *
+ * Members are given staggered epochs on purpose. CelesTrak publishes one
+ * launch's elements up to 40 hours apart, and at 15.9 revolutions a day that
+ * is 26 revolutions of phase between the first record and the last — so each
+ * member's `MEAN_ANOMALY` is wound *backwards* from the phase it should hold
+ * at `TRAIN_AT`, exactly as a real feed does. Any implementation that compares
+ * stored mean anomalies across the batch sees a spread of hundreds of degrees
+ * where the sky holds a neat chain.
+ */
+const TRAIN_AT = new Date('2026-09-06T12:00:00.000Z');
+
+function batchMember(options: {
+  index: number;
+  launchId: string;
+  altitudeKm: number;
+  /** Along-track separation between neighbours, degrees of orbit. */
+  phaseStepDeg: number;
+  noradId: number;
+}): SatelliteOmm {
+  const { index, launchId, altitudeKm, phaseStepDeg, noradId } = options;
+  const semiMajorAxis = 6371 + altitudeKm;
+  const meanMotion = (86_400 / (2 * Math.PI)) * Math.sqrt(398_600.4418 / semiMajorAxis ** 3);
+  // Up to 39 hours of stagger across a batch, oldest last.
+  const epochOffsetHours = index * 3;
+  const epoch = new Date(TRAIN_AT.getTime() - epochOffsetHours * 3_600_000);
+  const phaseAtEpoch = 40 + index * phaseStepDeg - meanMotion * 360 * (epochOffsetHours / 24);
+  return {
+    OBJECT_NAME: `STARLINK-${38_000 + index}`,
+    OBJECT_ID: `${launchId}${String.fromCharCode(65 + index)}`,
+    EPOCH: epoch.toISOString().replace('Z', ''),
+    MEAN_MOTION: meanMotion,
+    ECCENTRICITY: 0.0001,
+    INCLINATION: 53.16,
+    RA_OF_ASC_NODE: 120.4,
+    ARG_OF_PERICENTER: 90,
+    MEAN_ANOMALY: ((phaseAtEpoch % 360) + 360) % 360,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: noradId,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 120,
+    BSTAR: 0.0008,
+    MEAN_MOTION_DOT: 0.0001,
+    MEAN_MOTION_DDOT: 0,
+  };
+}
+
+/** `count` objects from one launch, evenly spaced along a shared orbit. */
+function batch(options: {
+  launchId: string;
+  count: number;
+  altitudeKm: number;
+  phaseStepDeg: number;
+  firstNoradId: number;
+}): SatelliteOmm[] {
+  return Array.from({ length: options.count }, (_, index) =>
+    batchMember({
+      index,
+      launchId: options.launchId,
+      altitudeKm: options.altitudeKm,
+      phaseStepDeg: options.phaseStepDeg,
+      noradId: options.firstNoradId + index,
+    }),
+  );
+}
+
+// 2.2 degrees of a 324 km orbit is about 250 km of ground — the spacing a
+// batch a few days old actually flies at.
+const FRESH = batch({
+  launchId: '2026-197',
+  count: 24,
+  altitudeKm: 324,
+  phaseStepDeg: 2.2,
+  firstNoradId: 100_502,
+});
+
+const ISS_LAUNCH_GROUP: SatelliteOmm[] = [
+  {
+    OBJECT_NAME: 'ISS (ZARYA)',
+    OBJECT_ID: '1998-067A',
+    EPOCH: '2026-09-06T03:26:51.861984',
+    MEAN_MOTION: 15.49001728,
+    ECCENTRICITY: 0.00050232,
+    INCLINATION: 51.6309,
+    RA_OF_ASC_NODE: 259.4125,
+    ARG_OF_PERICENTER: 112.3189,
+    MEAN_ANOMALY: 247.8332,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 25544,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 58430,
+    BSTAR: 0.00007453319,
+    MEAN_MOTION_DOT: 0.00003658,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'HRC MONOBLOCK CAMERA',
+    OBJECT_ID: '1998-067XR',
+    EPOCH: '2026-09-05T15:47:54.136608',
+    MEAN_MOTION: 15.90687243,
+    ECCENTRICITY: 0.00055505,
+    INCLINATION: 51.6158,
+    RA_OF_ASC_NODE: 221.3922,
+    ARG_OF_PERICENTER: 80.5194,
+    MEAN_ANOMALY: 279.6439,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 66052,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 5073,
+    BSTAR: 0.00049580233,
+    MEAN_MOTION_DOT: 0.00154624,
+    MEAN_MOTION_DDOT: 0.000019895955,
+  },
+  {
+    OBJECT_NAME: 'DUPLEX',
+    OBJECT_ID: '1998-067XS',
+    EPOCH: '2026-09-05T05:26:33.130176',
+    MEAN_MOTION: 15.68691024,
+    ECCENTRICITY: 0.0004406,
+    INCLINATION: 51.624,
+    RA_OF_ASC_NODE: 243.485,
+    ARG_OF_PERICENTER: 95.4748,
+    MEAN_ANOMALY: 264.6751,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 66906,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 4319,
+    BSTAR: 0.00030872,
+    MEAN_MOTION_DOT: 0.00035501,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'KNACKSAT-2',
+    OBJECT_ID: '1998-067XZ',
+    EPOCH: '2026-09-06T00:03:59.009184',
+    MEAN_MOTION: 15.67719918,
+    ECCENTRICITY: 0.00076116,
+    INCLINATION: 51.6247,
+    RA_OF_ASC_NODE: 245.6941,
+    ARG_OF_PERICENTER: 125.4424,
+    MEAN_ANOMALY: 234.7283,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 67683,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 3292,
+    BSTAR: 0.00040719387,
+    MEAN_MOTION_DOT: 0.0004526,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'GXIBA-1',
+    OBJECT_ID: '1998-067YB',
+    EPOCH: '2026-09-05T05:50:02.948352',
+    MEAN_MOTION: 15.7116314,
+    ECCENTRICITY: 0.00083253,
+    INCLINATION: 51.6226,
+    RA_OF_ASC_NODE: 247.3432,
+    ARG_OF_PERICENTER: 117.8806,
+    MEAN_ANOMALY: 242.3036,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 67685,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 3283,
+    BSTAR: 0.0004513517,
+    MEAN_MOTION_DOT: 0.00058101,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'UITMSAT-2',
+    OBJECT_ID: '1998-067YC',
+    EPOCH: '2026-09-05T23:32:31.888896',
+    MEAN_MOTION: 15.80734587,
+    ECCENTRICITY: 0.00079682,
+    INCLINATION: 51.6208,
+    RA_OF_ASC_NODE: 238.7244,
+    ARG_OF_PERICENTER: 88.6188,
+    MEAN_ANOMALY: 271.5726,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 67686,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 3301,
+    BSTAR: 0.00065468561,
+    MEAN_MOTION_DOT: 0.00130125,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'LEOPARD',
+    OBJECT_ID: '1998-067YD',
+    EPOCH: '2026-09-05T05:30:41.498208',
+    MEAN_MOTION: 15.714129,
+    ECCENTRICITY: 0.00079961,
+    INCLINATION: 51.6242,
+    RA_OF_ASC_NODE: 248.0402,
+    ARG_OF_PERICENTER: 88.1908,
+    MEAN_ANOMALY: 272.0006,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 67687,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 3274,
+    BSTAR: 0.0006141878,
+    MEAN_MOTION_DOT: 0.00080326,
+    MEAN_MOTION_DDOT: 0,
+  },
+  {
+    OBJECT_NAME: 'HMU-SAT2',
+    OBJECT_ID: '1998-067YE',
+    EPOCH: '2026-09-05T05:27:24.106176',
+    MEAN_MOTION: 15.75655416,
+    ECCENTRICITY: 0.00077768,
+    INCLINATION: 51.6242,
+    RA_OF_ASC_NODE: 244.9889,
+    ARG_OF_PERICENTER: 87.1593,
+    MEAN_ANOMALY: 273.0297,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: 67688,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 3278,
+    BSTAR: 0.00056816358,
+    MEAN_MOTION_DOT: 0.00089286,
+    MEAN_MOTION_DDOT: 0,
+  },
+];
+
+describe('launch trains', () => {
+  it('reads the launch a batch shares out of its designators', () => {
+    expect(launchIdOf({ OBJECT_ID: '2026-197A' })).toBe('2026-197');
+    expect(launchIdOf({ OBJECT_ID: '2026-197BK' })).toBe('2026-197');
+    expect(launchIdOf({ OBJECT_ID: '1998-067A' })).toBe('1998-067');
+    expect(launchIdOf({ OBJECT_ID: 'TBA - TO BE ASSIGNED' })).toBeNull();
+    expect(launchIdOf({ OBJECT_ID: '' })).toBeNull();
+  });
+
+  it('finds a batch that is still low and still nose to tail', () => {
+    const trains = freshTrains(FRESH, { at: TRAIN_AT });
+    expect(trains).toHaveLength(1);
+    const [train] = trains;
+    expect(train!.launchId).toBe('2026-197');
+    expect(train!.noradIds).toHaveLength(24);
+    expect(train!.noradIds[0]).toBe(100_502);
+    expect(train!.altitudeKm).toBeGreaterThan(300);
+    expect(train!.altitudeKm).toBeLessThan(350);
+    // ~250 km at a ground speed near 7.3 km/s: half a minute between beads.
+    expect(train!.spacingKm).toBeGreaterThan(200);
+    expect(train!.spacingKm).toBeLessThan(300);
+    expect(train!.spacingSeconds).toBeGreaterThan(25);
+    expect(train!.spacingSeconds).toBeLessThan(45);
+  });
+
+  it('judges the chain on propagated positions, not on stored mean anomalies', () => {
+    // The guard for the trap the fixture is built around: these elements are
+    // published across 69 hours, so their stored phases are scattered right
+    // round the orbit while the objects themselves fly in formation.
+    const anomalies = FRESH.map((omm) => omm.MEAN_ANOMALY);
+    // Scattered over more than half the orbit, where the chain itself spans
+    // 24 x 2.2 = 51 degrees.
+    expect(Math.max(...anomalies) - Math.min(...anomalies)).toBeGreaterThan(180);
+    expect(freshTrains(FRESH, { at: TRAIN_AT })).toHaveLength(1);
+  });
+
+  it('lets go of a batch once it has spread out along the orbit', () => {
+    // Same launch, same altitude, 15 degrees apart instead of 2.2 — about
+    // 1750 km, three and a half minutes of sky between neighbours.
+    const spread = batch({
+      launchId: '2026-197',
+      count: 24,
+      altitudeKm: 324,
+      phaseStepDeg: 15,
+      firstNoradId: 100_502,
+    });
+    expect(freshTrains(spread, { at: TRAIN_AT })).toEqual([]);
+  });
+
+  it('lets go of a batch once it has raised to the operational shell', () => {
+    const raised = batch({
+      launchId: '2026-197',
+      count: 24,
+      altitudeKm: 470,
+      phaseStepDeg: 2.2,
+      firstNoradId: 100_502,
+    });
+    expect(freshTrains(raised, { at: TRAIN_AT })).toEqual([]);
+  });
+
+  it('does not call a handful of rideshare leftovers a train', () => {
+    expect(freshTrains(FRESH.slice(0, 6), { at: TRAIN_AT })).toEqual([]);
+  });
+
+  it('keeps two launches apart even when they fly at the same height', () => {
+    const other = batch({
+      launchId: '2026-198',
+      count: 20,
+      altitudeKm: 330,
+      phaseStepDeg: 2.2,
+      firstNoradId: 100_600,
+    });
+    const trains = freshTrains([...FRESH, ...other], { at: TRAIN_AT });
+    expect(trains.map((train) => train.launchId).sort()).toEqual(['2026-197', '2026-198']);
+    expect(trainMembers(trains).size).toBe(44);
+    expect(trainOf(trains, 100_605)?.launchId).toBe('2026-198');
+    expect(trainOf(trains, 25_544)).toBeNull();
+    expect(trainOf(trains, null)).toBeNull();
+  });
+
+  it('leaves the ISS and its deployed cubesats alone', () => {
+    // The real 1998-067 group, fetched 2026-09-06: one designator, eight
+    // objects, median altitude 356 km. It clears the count gate and the
+    // altitude gate, so the spacing test is the only thing standing between a
+    // purple ISS and the user — these cubesats were deployed years apart and
+    // are strung right round the orbit.
+    expect(ISS_LAUNCH_GROUP).toHaveLength(8);
+    expect(freshTrains(ISS_LAUNCH_GROUP, { at: TRAIN_AT })).toEqual([]);
+    // And it is not the altitude gate doing the work by accident.
+    const altitudes = ISS_LAUNCH_GROUP.map(meanAltitudeKm).sort((a, b) => a - b);
+    expect(altitudes[3]).toBeLessThan(TRAIN_MAX_ALTITUDE_KM);
   });
 });

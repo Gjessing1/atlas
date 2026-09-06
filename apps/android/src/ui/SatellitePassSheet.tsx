@@ -8,9 +8,10 @@ import {
   type Observer,
   type SatelliteOmm,
   type SatellitePass,
+  type SatelliteTrain,
 } from '@atlas/satellites';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { BottomSheet } from './BottomSheet';
 import { theme } from './theme';
@@ -51,6 +52,7 @@ export function SatellitePassSheet({
   minElevationDeg,
   onMinElevationChange,
   overhead,
+  train,
   locating,
   locationError,
   onUseMapCenter,
@@ -70,6 +72,8 @@ export function SatellitePassSheet({
   onMinElevationChange: (deg: number) => void;
   /** Above the observer's horizon this second; null when nothing is selected. */
   overhead: boolean | null;
+  /** The batch this object is still flying in formation with, if any. */
+  train: SatelliteTrain | null;
   locating: boolean;
   locationError: boolean;
   onUseMapCenter: () => void;
@@ -79,6 +83,11 @@ export function SatellitePassSheet({
 }) {
   const [visibleOnly, setVisibleOnly] = useState(true);
   const [nowMs, setNowMs] = useState(Date.now);
+  // The two colours the map paints a train in, picked so the chip is legible
+  // on the sheet it sits on: the dim one on a light surface, the bright one on
+  // a dark one. Either way it is one of the dots' own colours, which is the
+  // point — this chip is where that second colour gets explained.
+  const dark = useColorScheme() === 'dark';
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -144,6 +153,18 @@ export function SatellitePassSheet({
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </View>
+
+      {/* Said before the altitude and the speed, because it is the thing worth
+        going outside for: the spacing tells you how long to keep watching
+        after the first one crosses. */}
+      {train ? (
+        <View style={[styles.train, dark ? styles.trainDark : styles.trainLight]}>
+          <Text style={[styles.trainText, dark ? styles.trainTextDark : styles.trainTextLight]}>
+            Flying as a train — {train.noradIds.length} objects from launch {train.launchId}, one
+            every {Math.round(train.spacingSeconds)} s
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.facts}>
         <Text style={styles.fact}>
@@ -280,6 +301,24 @@ const styles = StyleSheet.create({
   // circle it describes. Muted rather than red when false: being outside a
   // footprint is the ordinary state of affairs, not a fault.
   overheadOn: { color: '#38bdf8', fontSize: 12, fontWeight: '700' },
+  train: {
+    marginTop: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  trainLight: {
+    borderColor: 'rgba(126, 34, 206, 0.35)',
+    backgroundColor: 'rgba(126, 34, 206, 0.1)',
+  },
+  trainDark: {
+    borderColor: 'rgba(192, 132, 252, 0.4)',
+    backgroundColor: 'rgba(192, 132, 252, 0.14)',
+  },
+  trainText: { fontSize: 12, fontWeight: '700' },
+  trainTextLight: { color: '#7e22ce' },
+  trainTextDark: { color: '#c084fc' },
   controls: {
     marginTop: 10,
     flexDirection: 'row',

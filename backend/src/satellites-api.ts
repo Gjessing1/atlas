@@ -102,7 +102,7 @@ export function starlinkLayerMeta(): LayerMeta {
     title: 'Starlink',
     description:
       'The Starlink constellation — thousands of objects. A batch launched within the last few ' +
-      'days still flies as a train.',
+      'days still flies as a train, and is drawn in purple while it does.',
     group: 'Sky',
     attribution: 'Orbital elements © CelesTrak',
     metadataUrl: 'https://celestrak.org/NORAD/elements/',

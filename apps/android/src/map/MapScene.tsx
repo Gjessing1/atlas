@@ -625,8 +625,10 @@ export function MapScene({
         ) : null}
         {/* Orbital elements arrive only on refresh; every position between
           them is propagated here on the device. Yellow is sunlit, slate is in
-          shadow, and the selected object's cyan track is the one the pass
-          sheet is describing. */}
+          shadow, purple is a batch launched days ago and still flying nose to
+          tail (bright sunlit, dim in shadow — hue carries the train so
+          brightness can keep carrying the light), and the selected object's
+          cyan track is the one the pass sheet is describing. */}
         {!inPip
           ? [satellites, starlink].map((satelliteLayer) =>
               satelliteLayer.active && satelliteLayer.data ? (
@@ -696,14 +698,35 @@ export function MapScene({
                       ['!=', ['get', 'footprint'], true],
                     ]}
                     paint={{
+                      // A fresh train is a group like the stations are, and
+                      // sizes between them and an anonymous object: two dozen
+                      // 2 px dots would be a colour nobody ever sees.
                       'circle-radius': [
                         'interpolate',
                         ['linear'],
                         ['zoom'],
                         2,
-                        ['case', ['get', 'selected'], 7, ['get', 'station'], 5, 2],
+                        [
+                          'case',
+                          ['get', 'selected'],
+                          7,
+                          ['get', 'station'],
+                          5,
+                          ['get', 'train'],
+                          3,
+                          2,
+                        ],
                         8,
-                        ['case', ['get', 'selected'], 11, ['get', 'station'], 9, 4],
+                        [
+                          'case',
+                          ['get', 'selected'],
+                          11,
+                          ['get', 'station'],
+                          9,
+                          ['get', 'train'],
+                          6,
+                          4,
+                        ],
                       ],
                       'circle-color': ['get', 'color'],
                       'circle-stroke-width': [

@@ -61,7 +61,10 @@ export function horizonHalfAngleDeg(altitudeKm: number, minElevationDeg = 0): nu
 }
 
 /** Great-circle separation of two points on the ground, degrees. */
-function groundAngleDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+export function groundAngleDeg(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
   const rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad;
   const dLng = (b.lng - a.lng) * rad;

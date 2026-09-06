@@ -8,6 +8,7 @@ import {
   type Observer,
   type SatelliteOmm,
   type SatellitePass,
+  type SatelliteTrain,
 } from '@atlas/satellites';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -85,6 +86,8 @@ export interface SatellitePassCardProps {
   onMinElevationChange: (deg: number) => void;
   /** Whether the object is above the observer's horizon this second. */
   overhead: boolean | null;
+  /** The batch this object is still flying in formation with, if any. */
+  train: SatelliteTrain | null;
   locating: boolean;
   locationError: boolean;
   shifted?: boolean;
@@ -109,6 +112,7 @@ export function SatellitePassCard({
   minElevationDeg,
   onMinElevationChange,
   overhead,
+  train,
   locating,
   locationError,
   shifted,
@@ -183,6 +187,17 @@ export function SatellitePassCard({
           ✕
         </button>
       </div>
+
+      {/* The one thing about a freshly launched object worth saying before its
+        altitude and speed: it is not alone up there. The spacing is the part a
+        person can act on — it says how long to keep watching after the first
+        one crosses. Always under a minute, by the definition of a train. */}
+      {train && (
+        <p className="satellite-train">
+          Flying as a train — {train.noradIds.length} objects from launch {train.launchId}, one
+          every {Math.round(train.spacingSeconds)} s
+        </p>
+      )}
 
       <dl className="place-card-facts satellite-facts">
         <div>

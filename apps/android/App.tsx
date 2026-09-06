@@ -45,7 +45,7 @@ import {
   type SettingsSectionId,
 } from '@atlas/core';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
-import type { SatelliteOmm } from '@atlas/satellites';
+import { trainOf, type SatelliteOmm } from '@atlas/satellites';
 import type { TrackRecord } from '@atlas/storage';
 import type { CameraRef, MapRef } from '@maplibre/maplibre-react-native';
 import {
@@ -1639,6 +1639,10 @@ function AppInner() {
               overhead={
                 (satelliteSelection.layerId === SATELLITES_ID ? satellites : starlink).overhead
               }
+              train={trainOf(
+                (satelliteSelection.layerId === SATELLITES_ID ? satellites : starlink).trains,
+                satelliteSelection.noradId,
+              )}
               locating={satelliteLocating}
               locationError={satelliteLocationError}
               onUseMapCenter={useMapCenterForSatellite}
