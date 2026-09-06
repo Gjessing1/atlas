@@ -91,7 +91,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
       file: 'backend/src/satellites-api.ts',
       contains: "'/api/overlay/:id/elements'",
     },
-    note: 'Both clients propagate the same CelesTrak OMM elements through `@atlas/satellites`, colour sunlit and eclipsed objects alike, and calculate the same 72-hour local pass list without sending the observer’s position to the server. Web uses a map card and Android a map-mode sheet; both keep the map interactive so its centre can become the observer.',
+    note: 'Both clients propagate the same CelesTrak OMM elements through `@atlas/satellites`, colour sunlit and eclipsed objects alike, and calculate the same 72-hour local pass list without sending the observer’s position to the server. Selecting an object also draws its horizon circle — the ground it can currently be seen from — at the same elevation floor the pass list is filtered by, so the map and the list can never disagree about a sighting; the card/sheet says in words whether the observer is inside it. Web uses a map card and Android a map-mode sheet; both keep the map interactive so its centre can become the observer.',
   },
   {
     id: 'map-potential-target',

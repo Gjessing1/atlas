@@ -358,8 +358,30 @@ test('a satellite tap opens the on-device pass predictor', async ({ page }) => {
   );
   await card.getByRole('button', { name: 'All', exact: true }).click();
   await expect(card).toContainText('All passes');
+
+  // The horizon circle: the ground this object can be seen from right now.
+  // The map was jumped onto its sub-point, so the observer is directly under
+  // it and the card must say so.
+  await expect(card).toContainText('Above your horizon now');
+  const footprintSpan = () =>
+    page.evaluate(() => {
+      const data = window.__atlasMap!.getSource('atlas-satellites')?.serialize().data;
+      if (!data || typeof data === 'string') return 0;
+      const disc = data.features.find((feature) => feature.properties?.footprint === true);
+      if (!disc) return 0;
+      const ring = (disc.geometry as GeoJSON.Polygon).coordinates[0]!;
+      const latitudes = ring.map(([, lat]) => lat!);
+      return Math.max(...latitudes) - Math.min(...latitudes);
+    });
+  await expect.poll(footprintSpan).toBeGreaterThan(0);
+  const atTenDegrees = await footprintSpan();
+
+  // Raising the floor must visibly shrink the circle. This is the assertion
+  // that the map and the list read one elevation value and not two copies of
+  // it: a 30° circle is less than half the radius of a 10° one.
   await card.getByRole('button', { name: '30°+' }).click();
   await expect(card).toContainText('next 3 days');
+  await expect.poll(footprintSpan).toBeLessThan(atTenDegrees);
   await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
 });
 

@@ -1,5 +1,7 @@
 import { satelliteElementsUrl, type LayerMeta } from '@atlas/core';
 import {
+  coversGround,
+  footprintRing,
   groundTrackSegments,
   subpointAt,
   type SatelliteElementSet,
@@ -25,6 +27,18 @@ import type { ActiveOverlay } from './useOverlayLayers.js';
 const SUNLIT_COLOR = '#fbbf24';
 const ECLIPSED_COLOR = '#64748b';
 
+/**
+ * The selection colour, shared by the selected track, its dot's ring and its
+ * footprint.
+ *
+ * The footprint deliberately does *not* recolour itself when the observer is
+ * inside it. Colour on this layer already means illumination, and a third
+ * meaning on the same channel would make a lit satellite and a reachable one
+ * indistinguishable at a glance. Whether you personally can see it is said in
+ * words on the card instead.
+ */
+const SELECTED_COLOR = '#38bdf8';
+
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
@@ -45,6 +59,8 @@ const TRACK_REFRESH_MS = 30_000;
 
 interface LayerIds {
   source: string;
+  footprint: string;
+  footprintEdge: string;
   track: string;
   dot: string;
   label: string;
@@ -52,10 +68,24 @@ interface LayerIds {
 
 const idsFor = (layerId: string): LayerIds => ({
   source: `atlas-${layerId}`,
+  footprint: `atlas-${layerId}-footprint`,
+  footprintEdge: `atlas-${layerId}-footprint-edge`,
   track: `atlas-${layerId}-track`,
   dot: `atlas-${layerId}-dot`,
   label: `atlas-${layerId}-label`,
 });
+
+/** What the footprint of the selected object should be drawn against. */
+export interface SatelliteFootprint {
+  /**
+   * Horizon floor, degrees — the same value the pass list is filtered by, so
+   * the circle on the map and the list beside it can never disagree about
+   * what counts as visible.
+   */
+  minElevationDeg: number;
+  /** Where the user is standing, for the overhead test. */
+  observer: { lat: number; lng: number };
+}
 
 /** Hit-test layers shared with the single map identify pass. */
 export const satelliteIdentifyLayers = (layerId: string): string[] => {
@@ -68,6 +98,12 @@ export interface SatelliteLayerState {
   elements: readonly SatelliteOmm[];
   fetchedAt: string | null;
   status: 'idle' | 'loading' | 'ready' | 'error';
+  /**
+   * Whether the selected object is above the observer's horizon right now —
+   * null when nothing is selected. Ticks with the map, so a card reading it
+   * flips at the same moment the user's position crosses the drawn rim.
+   */
+  overhead: boolean | null;
 }
 
 /** One point per object: the cheap half, rebuilt every tick. */
@@ -136,21 +172,66 @@ function trackFeatures(
   return features;
 }
 
+/**
+ * The selected object's horizon circle: the ground it can currently be seen
+ * from, and the answer to "is that us".
+ *
+ * Only ever the selected object. Two permanent 2000 km discs for the stations
+ * would cover a good part of the map at the zoom anyone reads a constellation
+ * at, and the station tracks already say where they are; the disc is the thing
+ * you ask for about one object at a time.
+ */
+function footprintFeatures(
+  elements: readonly SatelliteOmm[],
+  at: Date,
+  selectedNoradId: number | null,
+  footprint: SatelliteFootprint | null,
+): { features: GeoJSON.Feature[]; overhead: boolean | null } {
+  if (selectedNoradId === null || !footprint) return { features: [], overhead: null };
+  const omm = elements.find((element) => element.NORAD_CAT_ID === selectedNoradId);
+  if (!omm) return { features: [], overhead: null };
+  const fix = subpointAt(omm, at);
+  if (!fix) return { features: [], overhead: null };
+  const ring = footprintRing(fix, { minElevationDeg: footprint.minElevationDeg });
+  if (ring.length === 0) return { features: [], overhead: null };
+  const overhead = coversGround(fix, footprint.observer, footprint.minElevationDeg);
+  return {
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [ring] },
+        properties: { footprint: true, noradId: fix.noradId, overhead },
+      },
+    ],
+    overhead,
+  };
+}
+
 export function useSatellitesLayer(
   map: maplibregl.Map | null,
   overlays: ActiveOverlay[],
   layerId: string,
   selectedNoradId: number | null = null,
+  footprint: SatelliteFootprint | null = null,
 ): SatelliteLayerState {
   const elementsRef = useRef<SatelliteOmm[]>([]);
   const fetchedRevRef = useRef<number | null>(null);
   const trackAtRef = useRef(0);
   const tracksRef = useRef<GeoJSON.Feature[]>([]);
-  const [state, setState] = useState<Omit<SatelliteLayerState, 'active'>>({
+  const [state, setState] = useState<Omit<SatelliteLayerState, 'active' | 'overhead'>>({
     elements: [],
     fetchedAt: null,
     status: 'idle',
   });
+  // Read inside the tick rather than closed over, so moving the observer or
+  // the elevation slider does not tear down and rebuild the map layers.
+  const footprintRef = useRef(footprint);
+  footprintRef.current = footprint;
+  const [overhead, setOverhead] = useState<boolean | null>(null);
+  // Lets the elevation control repaint the disc at once. Without it the change
+  // would wait for the next propagation tick, up to two seconds of a button
+  // that looks like it did nothing.
+  const drawRef = useRef<(() => void) | null>(null);
 
   const active = overlays.find((o) => o.meta.id === layerId && o.meta.vector);
   const rev = active?.meta.rev ?? 0;
@@ -168,7 +249,7 @@ export function useSatellitesLayer(
 
     const removeAll = () => {
       if (!map.getStyle()) return;
-      for (const id of [ids.label, ids.dot, ids.track]) {
+      for (const id of [ids.label, ids.dot, ids.track, ids.footprintEdge, ids.footprint]) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
       if (map.getSource(ids.source)) map.removeSource(ids.source);
@@ -183,6 +264,34 @@ export function useSatellitesLayer(
       if (cancelled || !map.getStyle()) return;
       if (!map.getSource(ids.source)) {
         map.addSource(ids.source, { type: 'geojson', data: EMPTY });
+      }
+      // Added first so it sits under the tracks and dots: it is context for
+      // them, not a thing to be read over the top of them.
+      if (!map.getLayer(ids.footprint)) {
+        map.addLayer({
+          id: ids.footprint,
+          type: 'fill',
+          source: ids.source,
+          filter: ['==', ['get', 'footprint'], true],
+          paint: {
+            'fill-color': SELECTED_COLOR,
+            'fill-opacity': 0.12 * opacity,
+          },
+        });
+      }
+      if (!map.getLayer(ids.footprintEdge)) {
+        map.addLayer({
+          id: ids.footprintEdge,
+          type: 'line',
+          source: ids.source,
+          filter: ['==', ['get', 'footprint'], true],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': SELECTED_COLOR,
+            'line-width': 1.5,
+            'line-opacity': 0.7 * opacity,
+          },
+        });
       }
       if (!map.getLayer(ids.track)) {
         map.addLayer({
@@ -212,7 +321,10 @@ export function useSatellitesLayer(
           id: ids.dot,
           type: 'circle',
           source: ids.source,
-          filter: ['!=', ['get', 'track'], true],
+          // Both exclusions matter: a circle layer draws one circle per
+          // *vertex*, so without the footprint clause the polygon's rim would
+          // come out as 128 stray dots — and hit-test as them too.
+          filter: ['all', ['!=', ['get', 'track'], true], ['!=', ['get', 'footprint'], true]],
           paint: {
             // Size carries the group, colour carries illumination — one meaning
             // per channel, so a dim station still reads as a station.
@@ -240,7 +352,12 @@ export function useSatellitesLayer(
           source: ids.source,
           // Only the stations are named. The same treatment across 157 rocket
           // bodies — let alone 11 000 Starlink — is an unreadable map.
-          filter: ['all', ['!=', ['get', 'track'], true], ['==', ['get', 'station'], true]],
+          filter: [
+            'all',
+            ['!=', ['get', 'track'], true],
+            ['!=', ['get', 'footprint'], true],
+            ['==', ['get', 'station'], true],
+          ],
           layout: {
             'text-field': ['get', 'name'],
             'text-font': ['Noto Sans Bold'],
@@ -257,6 +374,8 @@ export function useSatellitesLayer(
           },
         });
       } else {
+        map.setPaintProperty(ids.footprint, 'fill-opacity', 0.12 * opacity);
+        map.setPaintProperty(ids.footprintEdge, 'line-opacity', 0.7 * opacity);
         map.setPaintProperty(ids.dot, 'circle-opacity', opacity);
         map.setPaintProperty(ids.dot, 'circle-stroke-opacity', opacity);
         map.setPaintProperty(ids.label, 'text-opacity', opacity);
@@ -281,10 +400,20 @@ export function useSatellitesLayer(
         trackAtRef.current = now;
         tracksRef.current = trackFeatures(elements, at, selectedNoradId);
       }
+      // Rebuilt every tick, unlike the tracks: this is one object's ring, and
+      // it is the feature whose whole point is that it moves over you.
+      const disc = footprintFeatures(elements, at, selectedNoradId, footprintRef.current);
       source.setData({
         type: 'FeatureCollection',
-        features: [...tracksRef.current, ...pointFeatures(elements, at, layerId, selectedNoradId)],
+        features: [
+          ...disc.features,
+          ...tracksRef.current,
+          ...pointFeatures(elements, at, layerId, selectedNoradId),
+        ],
       });
+      // Only on a change: this runs once a second, and a setState per tick
+      // would re-render the card's whole pass list for nothing.
+      setOverhead((current) => (current === disc.overhead ? current : disc.overhead));
     };
 
     const startTicking = () => {
@@ -332,6 +461,7 @@ export function useSatellitesLayer(
       })();
     };
 
+    drawRef.current = draw;
     const sync = () => {
       ensure();
       draw();
@@ -342,10 +472,18 @@ export function useSatellitesLayer(
     map.on('style.load', sync);
     return () => {
       cancelled = true;
+      drawRef.current = null;
       if (timer) clearInterval(timer);
       map.off('style.load', sync);
     };
   }, [map, layerId, Boolean(active), rev, opacity, selectedNoradId]);
 
-  return { active: Boolean(active), ...state };
+  // Primitives, not the object: the caller rebuilds it every render.
+  useEffect(() => {
+    drawRef.current?.();
+  }, [footprint?.minElevationDeg, footprint?.observer.lat, footprint?.observer.lng]);
+
+  // No circle asked for, no answer — rather than the last one, which would
+  // outlive the layer being switched off.
+  return { active: Boolean(active), ...state, overhead: footprint ? overhead : null };
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   elementAgeDays,
   elementEpochMs,
+  coversGround,
   footprintRing,
   groundTrackSegments,
   horizonHalfAngleDeg,
@@ -212,27 +213,73 @@ describe('antimeridian splitting', () => {
 });
 
 describe('footprint', () => {
+  const km = (a: [number, number], b: [number, number]) => {
+    const r = Math.PI / 180;
+    const x =
+      Math.sin(((b[1] - a[1]) * r) / 2) ** 2 +
+      Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(((b[0] - a[0]) * r) / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(x));
+  };
+
   it('is a closed ring about 2250 km across the ground for the ISS', () => {
     const fix = subpointAt(ISS, AT)!;
-    const ring = footprintRing(fix)!;
-    expect(ring).not.toBeNull();
+    const ring = footprintRing(fix);
     expect(ring[0]).toEqual(ring[ring.length - 1]);
-    const km = (a: [number, number], b: [number, number]) => {
-      const r = Math.PI / 180;
-      const x =
-        Math.sin(((b[1] - a[1]) * r) / 2) ** 2 +
-        Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(((b[0] - a[0]) * r) / 2) ** 2;
-      return 2 * 6371 * Math.asin(Math.sqrt(x));
-    };
     // Independently reported as a 4500 km diameter by api.wheretheiss.at.
     for (const point of ring) expect(km([fix.lng, fix.lat], point)).toBeCloseTo(2250, -2);
   });
 
-  it('declines to draw a ring that would swallow a pole', () => {
-    // Not a ring in lon/lat at all: every meridian is inside it, so any closed
-    // polygon here would carve a hole exactly where coverage is total.
+  it('shrinks to the elevation floor the pass list actually uses', () => {
+    // The whole reason the mask is plumbed through: a 10° circle is not a
+    // detail smaller than the 0° one, it is little more than half the radius,
+    // and it is the one that matches the list drawn beside it.
+    const fix = subpointAt(ISS, AT)!;
+    for (const point of footprintRing(fix, { minElevationDeg: 10 })) {
+      expect(km([fix.lng, fix.lat], point)).toBeCloseTo(1390, -2);
+    }
+  });
+
+  it('collapses only at a floor no point but the sub-point can clear', () => {
+    // 89.999 deg still leaves a real (tiny) circle — the honest boundary is 90.
+    const fix = subpointAt(ISS, AT)!;
+    expect(footprintRing(fix, { minElevationDeg: 89.999 }).length).toBeGreaterThan(8);
+    expect(footprintRing(fix, { minElevationDeg: 90 })).toEqual([]);
+  });
+
+  it('closes over the pole instead of refusing to draw there', () => {
+    // The Arctic case, which for a polar orbit is most revolutions — and so
+    // the case Norway sees. Every meridian is inside the circle, so the ring
+    // sweeps a full turn of longitude and the polygon is closed across the cap.
     const polar = { ...subpointAt(ISS, AT)!, lat: 88, lng: 0 };
-    expect(footprintRing(polar)).toBeNull();
+    const ring = footprintRing(polar);
+    expect(ring.length).toBeGreaterThan(8);
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    expect(ring.some(([, lat]) => lat === 90)).toBe(true);
+    const longitudes = ring.map(([lng]) => lng);
+    expect(Math.max(...longitudes) - Math.min(...longitudes)).toBeGreaterThanOrEqual(360);
+  });
+
+  it('keeps longitudes continuous across the antimeridian', () => {
+    // Normalising each vertex into [-180, 180) here is what turns the ring
+    // inside out and fills the other 358° of the planet.
+    const fix = { ...subpointAt(ISS, AT)!, lat: 0, lng: 179 };
+    const ring = footprintRing(fix);
+    for (let i = 1; i < ring.length; i++) {
+      expect(Math.abs(ring[i]![0] - ring[i - 1]![0])).toBeLessThan(10);
+    }
+    expect(Math.max(...ring.map(([lng]) => lng))).toBeGreaterThan(180);
+  });
+
+  it('agrees with the overhead test the badge reads from', () => {
+    const fix = subpointAt(ISS, AT)!;
+    // On the rim by construction, so both sides of it must answer correctly.
+    expect(coversGround(fix, { lat: fix.lat, lng: fix.lng })).toBe(true);
+    // Vertex 0 sits due north of the sub-point, so nudging past its latitude
+    // steps straight out of the circle.
+    const north = footprintRing(fix)[0]!;
+    expect(coversGround(fix, { lat: north[1] - 0.01, lng: north[0] })).toBe(true);
+    expect(coversGround(fix, { lat: north[1] + 0.01, lng: north[0] })).toBe(false);
+    expect(coversGround(fix, { lat: fix.lat, lng: fix.lng }, 90)).toBe(false);
   });
 });
 

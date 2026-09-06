@@ -304,6 +304,22 @@ button {
   margin: 0;
 }
 
+/*
+ * The one-line answer to "can I see it right now". It is the same fact the
+ * circle on the map carries, so it takes the same selection blue when true —
+ * and stays muted rather than turning red when false, because being outside a
+ * footprint is the ordinary state of affairs, not a fault.
+ */
+.satellite-overhead {
+  margin: 3px 0 0;
+  font-size: 11px;
+}
+
+.satellite-overhead.on {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
 .satellite-observer-actions,
 .satellite-pass-controls,
 .satellite-pass-controls > div {

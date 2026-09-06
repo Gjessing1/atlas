@@ -292,6 +292,9 @@ function AppInner() {
     observer: LatLng;
     observerSource: 'map' | 'location';
   } | null>(null);
+  // Shared by the pass sheet and the footprint drawn on the map — see
+  // SatellitePassSheet's minElevationDeg.
+  const [satelliteMinElevation, setSatelliteMinElevation] = useState(10);
   const [satelliteLocating, setSatelliteLocating] = useState(false);
   const [satelliteLocationError, setSatelliteLocationError] = useState(false);
   const commuteFetch = useMemo<CommuteFn>(
@@ -588,17 +591,28 @@ function AppInner() {
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
+  // The horizon circle is drawn against whatever point the sheet is predicting
+  // for, so switching to "map centre" moves the disc with it.
+  const satelliteFootprint = useMemo(
+    () =>
+      satelliteSelection
+        ? { minElevationDeg: satelliteMinElevation, observer: satelliteSelection.observer }
+        : null,
+    [satelliteSelection, satelliteMinElevation],
+  );
   const satellites = useSatellites(
     overlays,
     serverOrigin,
     SATELLITES_ID,
     satelliteSelection?.layerId === SATELLITES_ID ? satelliteSelection.noradId : null,
+    satelliteSelection?.layerId === SATELLITES_ID ? satelliteFootprint : null,
   );
   const starlink = useSatellites(
     overlays,
     serverOrigin,
     STARLINK_ID,
     satelliteSelection?.layerId === STARLINK_ID ? satelliteSelection.noradId : null,
+    satelliteSelection?.layerId === STARLINK_ID ? satelliteFootprint : null,
   );
   const selectedSatellite = useMemo<SatelliteOmm | null>(() => {
     if (!satelliteSelection) return null;
@@ -1620,6 +1634,11 @@ function AppInner() {
               layerId={satelliteSelection.layerId}
               observer={satelliteSelection.observer}
               observerSource={satelliteSelection.observerSource}
+              minElevationDeg={satelliteMinElevation}
+              onMinElevationChange={setSatelliteMinElevation}
+              overhead={
+                (satelliteSelection.layerId === SATELLITES_ID ? satellites : starlink).overhead
+              }
               locating={satelliteLocating}
               locationError={satelliteLocationError}
               onUseMapCenter={useMapCenterForSatellite}

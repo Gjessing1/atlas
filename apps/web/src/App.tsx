@@ -204,6 +204,9 @@ export function App() {
     initialView.pin ? { source: 'pin', position: initialView.pin } : null,
   );
   const [satelliteSelection, setSatelliteSelection] = useState<SatelliteSelection | null>(null);
+  // Shared by the pass list and the footprint drawn on the map — see
+  // SatellitePassCardProps.minElevationDeg.
+  const [satelliteMinElevation, setSatelliteMinElevation] = useState(10);
   const [satelliteLocating, setSatelliteLocating] = useState(false);
   const [satelliteLocationError, setSatelliteLocationError] = useState(false);
   // Only set once the user asks to be located; the card shows distances from it.
@@ -429,17 +432,29 @@ export function App() {
   // Curiosities' two sky layers. Separate rows so the Starlink constellation's
   // eleven thousand objects stay opt-in beside the couple of hundred that make
   // up the stations and the naked-eye set.
+  // The horizon circle is drawn against whichever point the card is predicting
+  // for, so panning to "map centre" moves the disc with it and the two views
+  // always answer the same question.
+  const satelliteFootprint = useMemo(
+    () =>
+      satelliteSelection
+        ? { minElevationDeg: satelliteMinElevation, observer: satelliteSelection.observer }
+        : null,
+    [satelliteSelection, satelliteMinElevation],
+  );
   const satelliteLayer = useSatellitesLayer(
     map,
     overlays,
     SATELLITES_ID,
     satelliteSelection?.layerId === SATELLITES_ID ? satelliteSelection.noradId : null,
+    satelliteSelection?.layerId === SATELLITES_ID ? satelliteFootprint : null,
   );
   const starlinkLayer = useSatellitesLayer(
     map,
     overlays,
     STARLINK_ID,
     satelliteSelection?.layerId === STARLINK_ID ? satelliteSelection.noradId : null,
+    satelliteSelection?.layerId === STARLINK_ID ? satelliteFootprint : null,
   );
   const selectedSatellite = useMemo<SatelliteOmm | null>(() => {
     if (!satelliteSelection) return null;
@@ -1336,6 +1351,11 @@ export function App() {
           layerId={satelliteSelection.layerId}
           observer={satelliteSelection.observer}
           observerSource={satelliteSelection.observerSource}
+          minElevationDeg={satelliteMinElevation}
+          onMinElevationChange={setSatelliteMinElevation}
+          overhead={
+            (satelliteSelection.layerId === SATELLITES_ID ? satelliteLayer : starlinkLayer).overhead
+          }
           locating={satelliteLocating}
           locationError={satelliteLocationError}
           shifted={leftPanelOpen || spotsOpen || standBoardOpen}

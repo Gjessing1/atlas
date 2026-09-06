@@ -76,6 +76,15 @@ export interface SatellitePassCardProps {
   layerId: string;
   observer: Observer;
   observerSource: 'map' | 'location';
+  /**
+   * Lifted out of this card because the map draws the same floor as a circle:
+   * two copies of it would let the ring and the list disagree about what
+   * counts as a sighting.
+   */
+  minElevationDeg: number;
+  onMinElevationChange: (deg: number) => void;
+  /** Whether the object is above the observer's horizon this second. */
+  overhead: boolean | null;
   locating: boolean;
   locationError: boolean;
   shifted?: boolean;
@@ -97,6 +106,9 @@ export function SatellitePassCard({
   layerId,
   observer,
   observerSource,
+  minElevationDeg,
+  onMinElevationChange,
+  overhead,
   locating,
   locationError,
   shifted,
@@ -105,7 +117,6 @@ export function SatellitePassCard({
   onClose,
 }: SatellitePassCardProps) {
   const [visibleOnly, setVisibleOnly] = useState(true);
-  const [minElevationDeg, setMinElevationDeg] = useState(10);
   const [nowMs, setNowMs] = useState(Date.now);
 
   // The live facts move with the dot. Passes are deliberately not keyed on
@@ -206,6 +217,13 @@ export function SatellitePassCard({
           <code>
             {observer.lat.toFixed(4)}, {observer.lng.toFixed(4)}
           </code>
+          {overhead !== null && (
+            <p className={overhead ? 'satellite-overhead on' : 'satellite-overhead'} role="status">
+              {overhead
+                ? `Above your horizon now — over ${minElevationDeg}° up`
+                : `Below your horizon — outside the circle on the map`}
+            </p>
+          )}
         </div>
         <div className="satellite-observer-actions">
           <button type="button" onClick={onUseMapCenter}>
@@ -246,7 +264,7 @@ export function SatellitePassCard({
               key={elevation}
               className={minElevationDeg === elevation ? 'on' : ''}
               aria-pressed={minElevationDeg === elevation}
-              onClick={() => setMinElevationDeg(elevation)}
+              onClick={() => onMinElevationChange(elevation)}
             >
               {elevation}°+
             </button>

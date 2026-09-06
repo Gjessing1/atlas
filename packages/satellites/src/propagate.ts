@@ -42,10 +42,52 @@ export function meanAltitudeKm(omm: Pick<SatelliteOmm, 'MEAN_MOTION'>): number {
  * Angular radius of the ground area an object at this altitude can see,
  * degrees — half the width of its footprint, and the margin by which it can
  * appear beyond the latitude its inclination reaches.
+ *
+ * `minElevationDeg` raises the floor from the geometric horizon to the angle a
+ * pass must actually reach to be worth walking outside for, and it is not a
+ * small correction: the ISS clears a 2250 km radius at 0°, but only ~1390 km
+ * at the 10° the pass list defaults to. A 0° circle drawn beside a 10° list
+ * would promise sightings from a ring nearly twice too wide.
  */
-export function horizonHalfAngleDeg(altitudeKm: number): number {
+export function horizonHalfAngleDeg(altitudeKm: number, minElevationDeg = 0): number {
   if (altitudeKm <= 0) return 0;
-  return (Math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitudeKm)) * 180) / Math.PI;
+  const epsilon = (minElevationDeg * Math.PI) / 180;
+  // Law of sines on the observer/centre/object triangle: the elevation floor
+  // eats into the central angle from both ends, once by tilting the sight line
+  // and once by the range that tilt costs.
+  const ratio = (EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitudeKm)) * Math.cos(epsilon);
+  if (ratio >= 1) return 0;
+  return Math.max(0, ((Math.acos(ratio) - epsilon) * 180) / Math.PI);
+}
+
+/** Great-circle separation of two points on the ground, degrees. */
+function groundAngleDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return (2 * Math.asin(Math.min(1, Math.sqrt(h))) * 180) / Math.PI;
+}
+
+/**
+ * Whether an object is above the horizon as seen from a point on the ground.
+ *
+ * Deliberately the *same* spherical test the drawn footprint is built from,
+ * rather than the ellipsoidal look angles `predictPasses` uses. The two differ
+ * by a few km at the rim, and here agreement matters more than accuracy: this
+ * answers "am I inside that circle", and a badge that said "not up" while the
+ * user's own dot sat plainly inside the ring would read as a broken map.
+ */
+export function coversGround(
+  fix: Pick<SatelliteFix, 'lat' | 'lng' | 'altitudeKm'>,
+  point: { lat: number; lng: number },
+  minElevationDeg = 0,
+): boolean {
+  const halfAngle = horizonHalfAngleDeg(fix.altitudeKm, minElevationDeg);
+  if (halfAngle <= 0) return false;
+  return groundAngleDeg(fix, point) <= halfAngle;
 }
 
 /** Where an object is at one instant, in map terms. */
@@ -219,38 +261,93 @@ export function splitAtAntimeridian(points: [number, number][]): [number, number
   return segments;
 }
 
+/** Latitude a footprint's polar cap is closed at. */
+const POLE_LAT = 90;
+
+export interface FootprintOptions {
+  /** Samples around the ring. Default 128. */
+  points?: number;
+  /** Horizon floor in degrees — see `horizonHalfAngleDeg`. Default 0. */
+  minElevationDeg?: number;
+}
+
 /**
  * The horizon circle: the ground area from which this object is above the
- * horizon right now, as a closed ring.
+ * horizon right now, as a closed polygon ring.
  *
- * Returns null when the circle swallows a pole. A ring drawn round a pole is
- * not a ring in longitude/latitude — every meridian is inside it — so there is
- * no honest closed polygon to hand a renderer, and the alternative (a ring that
- * silently omits the cap) would draw a hole exactly where the coverage is
- * total. Polar-orbiting objects hit this over the Arctic regularly, which is
- * to say: over Norway's sky.
+ * Two things make this more than a loop round a circle, and for Atlas both are
+ * the ordinary case rather than the exotic one:
+ *
+ * - **Longitudes stay continuous.** A footprint straddling the antimeridian
+ *   holds points near +179 and −179 that are 200 km apart. Wrapping each into
+ *   [−180, 180) turns the ring inside out, and the renderer fills the other
+ *   358° of the planet. MapLibre's GeoJSON source wraps features itself, so an
+ *   unwrapped ring is both the honest input and the one that draws correctly.
+ * - **A ring around a pole is not a ring.** Once the circle reaches over the
+ *   pole, every meridian is inside it and the sampled curve sweeps a full turn
+ *   of longitude instead of closing on itself; the polygon is that curve plus
+ *   the cap above it, spliced in below. A polar orbit does this over the
+ *   Arctic on most revolutions — which is to say over Norway's sky, so a
+ *   footprint that gave up here would blank out exactly where it is watched.
+ *
+ * Empty only for a floor of 90 degrees, where the sole point that clears it is
+ * the sub-satellite point itself.
  */
-export function footprintRing(fix: SatelliteFix, points = 96): [number, number][] | null {
-  const centralAngle = Math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + fix.altitudeKm));
+export function footprintRing(
+  fix: SatelliteFix,
+  options: FootprintOptions = {},
+): [number, number][] {
+  const samples = Math.max(8, Math.round(options.points ?? 128));
+  const halfAngle = horizonHalfAngleDeg(fix.altitudeKm, options.minElevationDeg ?? 0);
+  if (halfAngle <= 0) return [];
+
+  const centralAngle = (halfAngle * Math.PI) / 180;
   const latRad = (fix.lat * Math.PI) / 180;
-  if (Math.abs(latRad) + centralAngle >= Math.PI / 2) return null;
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const sinCentral = Math.sin(centralAngle);
+  const cosCentral = Math.cos(centralAngle);
 
   const ring: [number, number][] = [];
-  for (let i = 0; i <= points; i++) {
-    const bearing = (2 * Math.PI * i) / points;
-    const lat = Math.asin(
-      Math.sin(latRad) * Math.cos(centralAngle) +
-        Math.cos(latRad) * Math.sin(centralAngle) * Math.cos(bearing),
-    );
-    const lng =
-      (fix.lng * Math.PI) / 180 +
-      Math.atan2(
-        Math.sin(bearing) * Math.sin(centralAngle) * Math.cos(latRad),
-        Math.cos(centralAngle) - Math.sin(latRad) * Math.sin(lat),
-      );
-    ring.push([normalizeLng((lng * 180) / Math.PI), (lat * 180) / Math.PI]);
+  let previousLng = fix.lng;
+  for (let i = 0; i <= samples; i++) {
+    const bearing = (2 * Math.PI * i) / samples;
+    const lat = Math.asin(sinLat * cosCentral + cosLat * sinCentral * Math.cos(bearing));
+    let lng =
+      fix.lng +
+      (Math.atan2(Math.sin(bearing) * sinCentral * cosLat, cosCentral - sinLat * Math.sin(lat)) *
+        180) /
+        Math.PI;
+    // Unwrap against the previous sample. Neighbours are a few hundred km
+    // apart, so a step of more than half the planet is atan2's branch cut and
+    // not travel — the one place the pole case and the antimeridian case are
+    // the same bug.
+    while (lng - previousLng > 180) lng -= 360;
+    while (lng - previousLng < -180) lng += 360;
+    previousLng = lng;
+    ring.push([lng, (lat * 180) / Math.PI]);
   }
-  return ring;
+
+  const first = ring[0]!;
+  const sweep = ring[ring.length - 1]![0] - first[0];
+  // A closed ring returns to the longitude it started from; a curve that has
+  // moved a whole turn instead has gone over the pole.
+  if (Math.abs(sweep) < 180) {
+    // Land the closing vertex *on* the opening one. The bearing-2pi sample
+    // comes back an ulp away from the bearing-0 sample, and a polygon ring
+    // whose ends only nearly meet is not a closed ring.
+    ring[ring.length - 1] = [first[0], first[1]];
+    return ring;
+  }
+
+  const turn = sweep > 0 ? 360 : -360;
+  ring[ring.length - 1] = [first[0] + turn, first[1]];
+  const capLat = fix.lat + halfAngle >= 90 ? POLE_LAT : -POLE_LAT;
+  // Up to the pole at the far end, back along it, and down to the near end.
+  // Exactly +/-90 is safe to emit: the GeoJSON source clamps latitude into the
+  // Mercator square when it tiles, so the cap lands on the top edge of the map
+  // rather than at an infinite y.
+  return [...ring, [first[0] + turn, capLat], [first[0], capLat], [first[0], first[1]]];
 }
 
 export { EARTH_RADIUS_KM, normalizeLng };

@@ -635,6 +635,30 @@ export function MapScene({
                   id={`atlas-${satelliteLayer.layerId}`}
                   data={satelliteLayer.data}
                 >
+                  {/* Under the track and dots: the ground this object can
+                    currently be seen from. Selection blue, never recoloured by
+                    whether the user is inside it — colour on this layer means
+                    sunlight, and the sheet says the personal half in words. */}
+                  <Layer
+                    type="fill"
+                    id={`atlas-${satelliteLayer.layerId}-footprint`}
+                    filter={['==', ['get', 'footprint'], true]}
+                    paint={{
+                      'fill-color': '#38bdf8',
+                      'fill-opacity': 0.12 * satelliteLayer.opacity,
+                    }}
+                  />
+                  <Layer
+                    type="line"
+                    id={`atlas-${satelliteLayer.layerId}-footprint-edge`}
+                    filter={['==', ['get', 'footprint'], true]}
+                    layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                    paint={{
+                      'line-color': '#38bdf8',
+                      'line-width': 1.5,
+                      'line-opacity': 0.7 * satelliteLayer.opacity,
+                    }}
+                  />
                   <Layer
                     type="line"
                     id={`atlas-${satelliteLayer.layerId}-track`}
@@ -663,7 +687,14 @@ export function MapScene({
                   <Layer
                     type="circle"
                     id={`atlas-${satelliteLayer.layerId}-dot`}
-                    filter={['!=', ['get', 'track'], true]}
+                    // Both clauses matter: a circle layer draws one circle per
+                    // *vertex*, so without the footprint exclusion the ring
+                    // would come out as a necklace of stray dots.
+                    filter={[
+                      'all',
+                      ['!=', ['get', 'track'], true],
+                      ['!=', ['get', 'footprint'], true],
+                    ]}
                     paint={{
                       'circle-radius': [
                         'interpolate',
@@ -694,6 +725,7 @@ export function MapScene({
                     filter={[
                       'all',
                       ['!=', ['get', 'track'], true],
+                      ['!=', ['get', 'footprint'], true],
                       ['==', ['get', 'station'], true],
                     ]}
                     layout={{

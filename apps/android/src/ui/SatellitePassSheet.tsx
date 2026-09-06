@@ -48,6 +48,9 @@ export function SatellitePassSheet({
   layerId,
   observer,
   observerSource,
+  minElevationDeg,
+  onMinElevationChange,
+  overhead,
   locating,
   locationError,
   onUseMapCenter,
@@ -59,6 +62,14 @@ export function SatellitePassSheet({
   layerId: string;
   observer: Observer;
   observerSource: 'map' | 'location';
+  /**
+   * Lifted out of the sheet because the map draws the same floor as a circle:
+   * two copies would let the ring and the list disagree about a sighting.
+   */
+  minElevationDeg: number;
+  onMinElevationChange: (deg: number) => void;
+  /** Above the observer's horizon this second; null when nothing is selected. */
+  overhead: boolean | null;
   locating: boolean;
   locationError: boolean;
   onUseMapCenter: () => void;
@@ -67,7 +78,6 @@ export function SatellitePassSheet({
   bottomInset: number;
 }) {
   const [visibleOnly, setVisibleOnly] = useState(true);
-  const [minElevationDeg, setMinElevationDeg] = useState(10);
   const [nowMs, setNowMs] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -154,6 +164,13 @@ export function SatellitePassSheet({
         <Text style={styles.muted}>
           {observer.lat.toFixed(4)}, {observer.lng.toFixed(4)}
         </Text>
+        {overhead !== null ? (
+          <Text style={overhead ? styles.overheadOn : styles.muted}>
+            {overhead
+              ? `Above your horizon now — over ${minElevationDeg}° up`
+              : 'Below your horizon — outside the circle on the map'}
+          </Text>
+        ) : null}
         <View style={styles.chips}>
           <Chip label="Map centre" on={observerSource === 'map'} onPress={onUseMapCenter} />
           <Chip
@@ -179,7 +196,7 @@ export function SatellitePassSheet({
               key={value}
               label={`${value}°+`}
               on={minElevationDeg === value}
-              onPress={() => setMinElevationDeg(value)}
+              onPress={() => onMinElevationChange(value)}
             />
           ))}
         </View>
@@ -257,6 +274,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surfaceMuted,
   },
   observerTitle: { color: theme.text, fontSize: 13, fontWeight: '700' },
+  // The map's selection blue, not `theme.accent` — accent is reserved for the
+  // one control a screen wants tapped, and this is a reading, not a button.
+  // Matching the footprint's own colour is also what ties the sentence to the
+  // circle it describes. Muted rather than red when false: being outside a
+  // footprint is the ordinary state of affairs, not a fault.
+  overheadOn: { color: '#38bdf8', fontSize: 12, fontWeight: '700' },
   controls: {
     marginTop: 10,
     flexDirection: 'row',

@@ -9,6 +9,7 @@ export {
   type SatelliteOmm,
 } from './elements.js';
 export {
+  coversGround,
   footprintRing,
   groundTrackSegments,
   horizonHalfAngleDeg,
@@ -16,6 +17,7 @@ export {
   satrecFor,
   splitAtAntimeridian,
   subpointAt,
+  type FootprintOptions,
   type GroundTrackOptions,
   type SatelliteFix,
 } from './propagate.js';
