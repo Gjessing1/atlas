@@ -4,27 +4,35 @@
 #   docker network create atlas        # once; shared with the backend container
 #   docker compose up -d --build       # from this directory
 #
-# First start downloads the Norway dump (~0.5 GB) and imports it (takes a
-# while on the N150); the index persists in /mnt/data/atlas/photon.
+# First start downloads the PHOTON_AREA dump and imports it; the index persists
+# in the mounted data dir. Europe is ~13 GB of dump and lands at roughly 50 GB
+# of index, so budget hours, not minutes — search is down for the duration.
 # The backend reaches it as http://atlas-photon:2322 over the shared network;
 # 127.0.0.1:2322 is published for local dev (npm run dev) and debugging only.
+#
+# Why the index is NOT under /mnt/data/atlas like every other Atlas dataset:
+# the Atlas data NVMe started returning critical medium errors on 2026-08-05
+# and corrupted the Lucene index that lived there. The index moved to the
+# healthy system NVMe and stays there. It is also the one Atlas dataset that
+# genuinely wants flash — Lucene serves a search from scattered small reads,
+# and once the index outgrows the page cache the HDD mirror that now backs
+# /mnt/data would show up directly in query latency.
 services:
   photon:
     build: .
     container_name: atlas-photon
     restart: unless-stopped
     environment:
-      PHOTON_REGION: europe
-      PHOTON_COUNTRY: norway
-      JAVA_OPTS: -Xmx2g
+      # A country ("europe/norway"), a continent ("europe") or "planet" —
+      # see entrypoint.sh for how the dump URL is derived.
+      PHOTON_AREA: europe
+      # 2g served the Norway index (measured 366 MB RSS). Europe is ~45x the
+      # dump, and the import is the memory-hungry half of the job.
+      JAVA_OPTS: -Xmx4g
     ports:
       - '127.0.0.1:2322:2322'
     volumes:
-      - type: bind
-        source: /mnt/data/atlas/photon
-        target: /photon/data
-        bind:
-          create_host_path: false
+      - /home/gjessing/docker/atlas/photon-data:/photon/data
     networks:
       - atlas
 
