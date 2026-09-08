@@ -2120,3 +2120,139 @@ describe('walking voice prompts', () => {
     expect(walkToTurn({ minPromptSpacingM: 0 })).toEqual(['approach', 'approach', 'now']);
   });
 });
+
+/**
+ * Four defects found in the navigation diagnostic uploaded after a drive
+ * through Bragernestunnelen in Drammen on 2026-09-05 — a 3 km tunnel run with
+ * a roundabout in the middle of it. The driver's report was that the map
+ * "jumped to another position" and that the expected position was never shown.
+ * Each test below replays the shape of one measured failure.
+ */
+describe('NavigationSession Bragernestunnelen regressions', () => {
+  /** ~33 km straight route with a 3 km tunnel 1 km in, as the route data saw it. */
+  function tunnelRoute() {
+    const points: LatLng[] = Array.from({ length: 41 }, (_, i) => ({
+      lat: 60,
+      lng: 10 + i * 0.015,
+    }));
+    const totalM = cumulativeDistances(points).at(-1)!;
+    const path = {
+      points,
+      distanceM: totalM,
+      timeMs: (totalM / 20) * 1000,
+      ascentM: 0,
+      descentM: 0,
+    };
+    const session = new NavigationSession(path);
+    session.setEnrichment({
+      segments: [
+        { startM: 0, endM: 1000 },
+        { startM: 1000, endM: 4000, tunnel: true, name: 'Bragernestunnelen' },
+        { startM: 4000, endM: totalM },
+      ],
+    });
+    return { session, path, totalM };
+  }
+
+  const at = (path: { points: LatLng[] }, alongM: number) => pointAtAlongOf(path.points, alongM);
+
+  it('does not rewind reckoned progress when a fix arrives stamped in the past', () => {
+    // Underground the fused provider keeps delivering samples, but stamps them
+    // with the moment they were *measured*: ~90 ms of lag in the open, and
+    // 2.3-5.1 s inside the tunnel. Those samples are too coarse to accept, and
+    // rejecting one ticks the session — with the stale timestamp, which used to
+    // shrink the gap being extrapolated and march the puck backwards. Measured:
+    // 35 rewinds, up to 122 m, in one three-minute transit.
+    const { session, path } = tunnelRoute();
+    session.update({ ...at(path, 1000), speedMps: 20, accuracyM: 5 }, 100_000);
+
+    const ahead = session.tick(130_000)!.state.traveledM;
+    // A 5 s-stale coarse sample, delivered at 131 s but stamped 126 s.
+    const stale = session.update({ ...at(path, 1500), accuracyM: 300, speedMps: 0 }, 126_000).state;
+    expect(stale.traveledM).toBeGreaterThanOrEqual(ahead);
+    // And the tick that follows it still moves forward, not back to the stamp.
+    expect(session.tick(132_000)!.state.traveledM).toBeGreaterThanOrEqual(stale.traveledM);
+  });
+
+  it('keeps reckoning armed when the portal degrades a fix without discarding it', () => {
+    // The failure that froze guidance for 2 min 28 s. Approaching the portal the
+    // provider's accuracy ramps smoothly (3 -> 98 m) while cross-track stays
+    // small, so every fix is still accepted; arming reckoning off the 30 m
+    // display gate meant the last fix before the blackout disarmed it, and the
+    // banner sat on "take the 2nd exit, 46 m" through the entire roundabout.
+    const { session, path } = tunnelRoute();
+    session.update({ ...at(path, 800), speedMps: 20, accuracyM: 5 }, 0);
+    // The ramp: on route, moving, but no longer inside the display corridor's
+    // accuracy bound. Still well under discardAccuracyM, so it is accepted.
+    session.update({ ...at(path, 980), speedMps: 20, accuracyM: 98 }, 9000);
+
+    const inside = session.tick(60_000)!;
+    expect(inside.state.fix).toBe('estimated');
+    expect(inside.state.tunnel?.name).toBe('Bragernestunnelen');
+    expect(inside.state.traveledM).toBeGreaterThan(1500);
+  });
+
+  it('does not let a portal-degraded fix invent a deceleration to reckon at', () => {
+    // The same ramp also reported the car slowing 79 -> 12 km/h, which was the
+    // provider giving up rather than the driver braking. Anchoring on it made
+    // the extrapolation crawl through a tunnel being crossed at speed.
+    const { session, path } = tunnelRoute();
+    session.update({ ...at(path, 800), speedMps: 20, accuracyM: 5 }, 0);
+    session.update({ ...at(path, 980), speedMps: 3.3, accuracyM: 98 }, 9000);
+
+    // 30 s of reckoning should cover something like 20 m/s of road, not 3.3.
+    const inside = session.tick(39_000)!.state;
+    expect(inside.fix).toBe('estimated');
+    expect(inside.traveledM).toBeGreaterThan(1400);
+  });
+
+  it('holds the reckoned position when a mapped tunnel outlives its reckoning bound', () => {
+    // Reckoning stops at the far portal plus its margin. Rewinding to the last
+    // measured fix at that moment threw progress 3.28 km backwards and put the
+    // already-driven roundabout back on the banner as "2.6 km ahead".
+    const { session, path } = tunnelRoute();
+    session.update({ ...at(path, 1000), speedMps: 20, accuracyM: 5 }, 0);
+    const coasted = session.tick(160_000)!.state;
+    expect(coasted.fix).toBe('estimated');
+
+    const lost = session.tick(400_000)!.state;
+    expect(lost.fix).toBe('lost');
+    expect(lost.traveledM).toBeCloseTo(coasted.traveledM, 0);
+    // And still says it is in the tunnel, so the chip and the map dimming do
+    // not drop out for the last stretch of a bore longer than the bound.
+    expect(lost.tunnel?.name).toBe('Bragernestunnelen');
+    // Still held one tick later, when `fix: 'estimated'` is no longer behind it.
+    expect(session.tick(401_000)!.state.traveledM).toBeCloseTo(coasted.traveledM, 0);
+  });
+
+  it('ignores coarse in-tunnel fixes rather than re-anchoring on each one', () => {
+    // 100-300 m samples that put the car in the hillside standing still. Taken
+    // as re-locks they re-anchored guidance somewhere new and dropped back to
+    // `lost` a second later — the puck flashing and jumping up and down the
+    // route. The tunnel is the better evidence until daylight.
+    const { session, path } = tunnelRoute();
+    session.update({ ...at(path, 1000), speedMps: 20, accuracyM: 5 }, 0);
+    expect(session.tick(160_000)!.state.fix).toBe('estimated');
+    const held = session.tick(400_000)!.state;
+    expect(held.fix).toBe('lost');
+
+    for (const [t, alongM] of [
+      [401_000, 2400],
+      [403_000, 3600],
+      [405_000, 2900],
+    ] as const) {
+      const junk = session.update({ ...at(path, alongM), accuracyM: 300, speedMps: 0 }, t).state;
+      expect(junk.fix).toBe('lost');
+      expect(junk.traveledM).toBeCloseTo(held.traveledM, 0);
+    }
+
+    // Daylight: a fix good enough not to need the recovery escape re-anchors
+    // normally, in one correction rather than a dozen.
+    const daylight = session.update(
+      { ...at(path, 4100), speedMps: 20, accuracyM: 5 },
+      407_000,
+    ).state;
+    expect(daylight.fix).toBe('live');
+    expect(daylight.traveledM).toBeCloseTo(4100, -1);
+  });
+});

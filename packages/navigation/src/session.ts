@@ -156,11 +156,31 @@ export class NavigationSession {
   private lastFixMs: number | null = null;
   private alongAtFixM: number | null = null;
   private lastSpeedMps: number | null = null;
+  /**
+   * High-water mark of every timestamp handed to `update`/`tick`. A platform
+   * fix carries the time it was *measured*, and a phone losing sky keeps
+   * delivering fallback samples stamped seconds in the past — measured through
+   * Bragernestunnelen on Android: ~90 ms of delivery lag in the open, 2.3-5.1 s
+   * inside. Reckoning from one of those shrinks the gap it extrapolates over
+   * and marches the puck *backwards* (35 rewinds, up to 122 m, in a single
+   * three-minute transit, one of which put an already-passed roundabout back on
+   * the banner). Session time therefore only ever moves forward, whatever the
+   * sample claims; ordering and de-duplication of fixes stay with the caller,
+   * which still sees the honest measurement times.
+   */
+  private clockMs = 0;
   private lastState: NavState | null = null;
   /** Last state backed by an accepted measured fix, never by projection. */
   private lastMeasuredState: NavState | null = null;
   /** Whether the last measured fix was honestly inside the display corridor. */
   private deadReckonArmed = false;
+  /**
+   * Whether the current `lost` stretch was entered from extrapolation rather
+   * than from a standing start. Sticky, because only the *first* lost tick can
+   * still see `fix: 'estimated'` behind it — without this the second tick would
+   * rewind to the last measured fix after all, one second later.
+   */
+  private coastedIntoLoss = false;
   /** Sensor-measured heading change (deg) accumulated over the current GPS gap. */
   private yawActualDeg = 0;
   /** Route-tangent heading change (deg) over the same reckoned stretch. */
@@ -546,11 +566,21 @@ export class NavigationSession {
     return { name: tunnel.name, remainingM: Math.max(0, tunnel.endM - alongM) };
   }
 
+  /** Session time, clamped so a stale platform timestamp cannot rewind it. */
+  private monotonicMs(nowMs: number): number {
+    if (!Number.isFinite(nowMs)) return this.clockMs;
+    if (nowMs > this.clockMs) this.clockMs = nowMs;
+    return this.clockMs;
+  }
+
   /** Feed one position fix; returns the new state and any voice prompts it triggered. */
   update(position: Position, nowMs: number = Date.now()): NavUpdate {
+    nowMs = this.monotonicMs(nowMs);
     const accuracyM =
       typeof position.accuracyM === 'number' && position.accuracyM >= 0 ? position.accuracyM : null;
-    if (accuracyM !== null && accuracyM > this.opts.discardAccuracyM) {
+    const coarse = accuracyM !== null && accuracyM > this.opts.discardAccuracyM;
+    const recovering = coarse && this.lastState !== null && this.lastState.fix === 'lost';
+    if (coarse) {
       // A hopeless fix (urban-canyon multipath) would teleport the puck and
       // corrupt the matcher's continuity hint; coast on the last state instead.
       // Exception: once the signal is already `lost`, there is no good position
@@ -560,8 +590,17 @@ export class NavigationSession {
       // when lost, fall through and let the coarse fix re-anchor guidance;
       // off-route/arrival stay gated on accuracy below, so it still can't fire
       // a spurious reroute or a false arrival.
-      const recovering = this.lastState !== null && this.lastState.fix === 'lost';
-      if (this.lastState !== null && !recovering)
+      //
+      // Not while a mapped tunnel still explains the silence, though. Under
+      // rock the receiver does not go quiet, it emits 100-300 m samples that
+      // put the car in the hillside standing still, and each one taken as a
+      // re-lock re-anchored guidance somewhere new and then dropped back to
+      // `lost` a second later — the puck flashing and jumping hundreds of
+      // metres up and down the route while the driver simply drove through
+      // Bragernestunnelen. The tunnel is better evidence than the fix: keep
+      // coasting on it and wait for daylight, which arrives as a fix accurate
+      // enough not to need this escape at all.
+      if (this.lastState !== null && (!recovering || this.coastedIntoLoss))
         return this.tick(nowMs) ?? { state: this.lastState, prompts: [] };
       // With no state yet a cold-start garbage fix must not become the origin
       // of guidance either — show a provisional (greyed) puck and wait.
@@ -581,9 +620,16 @@ export class NavigationSession {
     // and time caps still bound it. A real stop (traffic, a queue) comes with an
     // accurate fix and is honoured normally; once the signal is genuinely lost
     // there is nothing left to protect, so any fix may re-anchor.
+    //
+    // That last exemption is the same "nothing left to protect" argument
+    // the discard gate makes above, and it fails for the same reason: while a
+    // mapped tunnel still explains the gap there *is* something to protect —
+    // the reckoned position the tunnel corroborates. A 100 m fix claiming a
+    // standstill was landing in that window and dragging guidance 190 m past
+    // the car, which the real fix at the portal then had to undo by 347 m.
     if (
       this.lastState !== null &&
-      this.lastState.fix !== 'lost' &&
+      (this.lastState.fix !== 'lost' || this.coastedIntoLoss) &&
       this.lastSpeedMps !== null &&
       this.lastSpeedMps >= this.opts.deadReckonMinSpeedMps &&
       (speedMps === null || speedMps < this.opts.deadReckonMinSpeedMps) &&
@@ -687,7 +733,17 @@ export class NavigationSession {
 
     this.lastFixMs = nowMs;
     this.alongAtFixM = alongM;
-    this.lastSpeedMps = speedMps;
+    // A real fix ends the coast, whatever it says.
+    this.coastedIntoLoss = false;
+    // A coarse fix is not evidence about speed, in either direction. At a
+    // tunnel portal the fused provider's reported speed decays smoothly to
+    // nothing while its accuracy inflates — entering Bragernestunnelen it read
+    // 79 -> 12 km/h over 22 s as accuracy climbed 3 -> 98 m, none of it braking
+    // the driver did. Anchoring extrapolation on that invented deceleration
+    // makes the puck crawl through the tunnel the driver is crossing at 70.
+    // The existing coarse-*stop* guard below only catches a claimed halt; this
+    // catches the ramp that stops just short of one.
+    if (accurate) this.lastSpeedMps = speedMps;
     // A live fix settles where the vehicle really is — the gyro comparison
     // starts over at the next gap, and off-route logic owns the truth now.
     this.yawActualDeg = 0;
@@ -721,6 +777,20 @@ export class NavigationSession {
     let shownCourse: number | null;
     let displayRouteProgress = this.arrived ? 1 : this.renderedProgress(alongM);
     const displayOnRoute = snap.crossTrackM <= snapDisplayM && accurate;
+    // Arming extrapolation asks a different question from snapping the display:
+    // not "is this fix good enough to draw on the road" but "is the car
+    // credibly on the route right now". A tunnel portal answers the second yes
+    // and the first no — entering Bragernestunnelen, accuracy ramped 3 -> 98 m
+    // over 22 s while cross-track stayed under 8 m, every fix accepted, and the
+    // last of them disarmed reckoning at exactly the moment it was needed:
+    // guidance froze for 2 min 28 s on "take the 2nd exit, 46 m" across the
+    // whole in-tunnel roundabout, then jumped 1.4 km. Cross-track inside the
+    // display corridor is the evidence that matters here; the accuracy bound
+    // stays only because the `recovering` escape can admit a fix hundreds of
+    // metres coarse, where cross-track means nothing.
+    const reckonOnRoute =
+      snap.crossTrackM <= snapDisplayM &&
+      (accuracyM === null || accuracyM <= this.opts.discardAccuracyM);
     if (this.opts.snapDisplayPosition && displayOnRoute) {
       let displayAlongM = alongM;
       if (!this.arrived && moving && speedMps !== null && this.opts.predictAheadMs > 0) {
@@ -786,7 +856,7 @@ export class NavigationSession {
       fix: 'live',
       wrongBranch: false,
     };
-    this.deadReckonArmed = !this.arrived && !offRoute && displayOnRoute;
+    this.deadReckonArmed = !this.arrived && !offRoute && reckonOnRoute;
     this.lastMeasuredState = state;
     this.lastState = state;
     return { state, prompts };
@@ -801,6 +871,7 @@ export class NavigationSession {
    * while fixes are flowing normally — nothing to re-render.
    */
   tick(nowMs: number = Date.now()): NavUpdate | null {
+    nowMs = this.monotonicMs(nowMs);
     const last = this.lastState;
     if (this.arrived || last === null || this.lastFixMs === null) return null;
     const gapMs = nowMs - this.lastFixMs;
@@ -848,24 +919,54 @@ export class NavigationSession {
     }
     if (reckonedM === null) {
       if (gapMs < this.opts.signalLostMs) return null;
-      // Signal loss returns to the last *measured* position. Leaving the puck
-      // at the final extrapolated point would preserve the very fiction the
-      // lost state is meant to disclose, and copying an estimated state would
-      // also erase a real off-route distance/status.
+      // Two different situations are both called "signal lost", and they
+      // deserve opposite answers.
+      //
+      // Reckoning that has just run out of road — a tunnel longer than the
+      // bound allows — has already carried the puck kilometres past the last
+      // measured point. Rewinding to that point is not honesty, it is a
+      // teleport: on the Bragernestunnelen transit it threw progress 3.28 km
+      // backwards and put the roundabout the car had already driven back on the
+      // banner as "2.6 km ahead". Hold the reckoned position and guidance and
+      // let `fix: 'lost'` grey the puck — disclosing the doubt is what that
+      // state is for. The estimated state already carries the last *measured*
+      // `raw`/`offRouteM`, so no real cross-track evidence is erased.
+      //
+      // Loss with nothing reckoned (cold start, off-route, a stationary
+      // receiver) has no such estimate behind it, so the last measured
+      // coordinate really is the best evidence there is — and so does a gap
+      // the road data cannot explain. Extrapolating a bare receiver failure
+      // across the short generic bridge is already a guess; holding that guess
+      // after giving up on it would strand the puck where nothing supports it.
+      // A mapped tunnel is the difference: it says there is exactly one way
+      // through, and where it comes out.
+      const coasted = (last.fix === 'estimated' || this.coastedIntoLoss) && tunnel !== null;
+      this.coastedIntoLoss = coasted;
       const measured = this.lastMeasuredState ?? last;
-      this.lastAlongM = this.alongAtFixM;
+      const base = coasted ? last : measured;
+      // Rewinding the matcher's continuity hint to the fix anchor would also
+      // undo the reckoned progress on the next fix, which is how a recovering
+      // coarse fix ended up snapping 400 m past the car at the far portal.
+      if (!coasted) this.lastAlongM = this.alongAtFixM;
       const state: NavState = {
-        ...measured,
+        ...base,
         // Even a live state's displayed point may carry the normal one-second
-        // render-latency projection. Once signal is lost, show the measured
-        // coordinate itself rather than preserving any point manufactured on
-        // the route.
-        snapped: measured.raw,
-        displayRouteProgress: this.renderedProgress(
-          snapToRoute(measured.raw, this.points, this.cum).alongM,
-        ),
+        // render-latency projection. Once signal is lost with nothing to
+        // extrapolate, show the measured coordinate itself rather than
+        // preserving any point manufactured on the route.
+        snapped: coasted ? base.snapped : measured.raw,
+        displayRouteProgress: coasted
+          ? base.displayRouteProgress
+          : this.renderedProgress(snapToRoute(measured.raw, this.points, this.cum).alongM),
+        // Missing fixes are themselves evidence of still being underground.
+        // Reckoning ran out of confidence about *where* in the bore the car is,
+        // not about whether it is in one — and it stops at the mapped portal
+        // plus a margin, so the last stretch of a slightly-long tunnel would
+        // otherwise drop the chip and undim the map while still inside. Hold
+        // both until daylight, which arrives as a fix.
+        tunnel: coasted ? { name: tunnel!.name, remainingM: 0 } : base.tunnel,
         fix: 'lost',
-        etaEpochMs: nowMs + measured.timeRemainingMs,
+        etaEpochMs: nowMs + base.timeRemainingMs,
         wrongBranch: false,
       };
       this.lastState = state;
