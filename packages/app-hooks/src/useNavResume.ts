@@ -16,14 +16,12 @@
  * them would be wrong in the one way that matters.
  */
 
-import type { LatLng } from '@atlas/core';
+import { jsonSetting, readSetting, type LatLng } from '@atlas/core';
 import type { RoutePreferences, RoutingProfile } from '@atlas/routing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { NavTripProgress } from './useNavigationController.js';
-
-/** Device-local, like every navigation preference: `local.` keys never sync. */
-const TRIP_SETTING = 'local.nav.trip';
+import type { SettingsAccess } from './usePersistedSetting.js';
 
 /**
  * How stale a record may be and still be worth offering.
@@ -59,11 +57,12 @@ export interface ResumableTrip {
   atMs: number;
 }
 
-export interface NavResumeSettings {
-  status: string;
-  getSetting: (key: string) => Promise<string | null>;
-  setSetting: (key: string, value: string) => void;
-}
+/**
+ * The settings seam, which is the shared one — every persisted value in the app
+ * reaches storage through the same three members, and a hook-shaped copy of
+ * them per feature was one of the things DR3 removed.
+ */
+export type NavResumeSettings = SettingsAccess;
 
 /** The slice of a navigation controller this hook records and restarts. */
 export interface NavResumeTarget {
@@ -110,32 +109,39 @@ const isLatLng = (value: unknown): value is LatLng =>
   Number.isFinite((value as LatLng).lng);
 
 /**
- * Parse a stored record, rejecting anything that is not a usable trip.
+ * The record itself: device-local, like every navigation preference.
  *
- * Defensive on purpose: this is the one setting whose value is acted on
- * automatically at launch, and a half-written or hand-edited row must degrade
- * to "nothing to resume" rather than to a trip toward `NaN`.
+ * `local.` is not a naming habit here — it is the storage layer's actual rule
+ * (`LOCAL_SETTING_PREFIX`), and the definition states the scope in words so a
+ * dropped prefix fails at import instead of publishing one phone's live trip to
+ * every other device on the account. The decoder is deliberately the strictest
+ * in the app: this is the one setting acted on *automatically* at launch, so a
+ * half-written or hand-edited row has to degrade to "nothing to resume" rather
+ * than to a trip toward `NaN`.
+ *
+ * Age is not decoded here. Whether a record is *readable* is a property of the
+ * row; whether it is still worth offering is a question about the clock, asked
+ * fresh every time it is read — see {@link parseResumableTrip}.
  */
-export function parseResumableTrip(raw: string | null, now: number): ResumableTrip | null {
-  if (!raw) return null;
-  try {
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const destination = value['destination'];
-    const atMs = value['atMs'];
+export const NAV_TRIP_SETTING = jsonSetting<ResumableTrip | null>({
+  key: 'local.nav.trip',
+  scope: 'local',
+  defaultValue: null,
+  parse: (value) => {
+    if (typeof value !== 'object' || value === null) return null;
+    const raw = value as Record<string, unknown>;
+    const destination = raw['destination'];
+    const atMs = raw['atMs'];
     if (!isLatLng(destination)) return null;
     if (typeof atMs !== 'number' || !Number.isFinite(atMs)) return null;
-    // A record from the future is a clock that moved (travel, NTP); treat it as
-    // fresh rather than as unreadable — the trip in it is still real.
-    if (atMs < now - MAX_AGE_MS) return null;
-    const vias = Array.isArray(value['vias']) ? value['vias'].filter(isLatLng) : [];
-    const profile =
-      typeof value['profile'] === 'string' ? (value['profile'] as RoutingProfile) : 'car';
+    const vias = Array.isArray(raw['vias']) ? raw['vias'].filter(isLatLng) : [];
+    const profile = typeof raw['profile'] === 'string' ? (raw['profile'] as RoutingProfile) : 'car';
     const preferences =
-      typeof value['preferences'] === 'object' && value['preferences'] !== null
-        ? (value['preferences'] as Partial<RoutePreferences>)
+      typeof raw['preferences'] === 'object' && raw['preferences'] !== null
+        ? (raw['preferences'] as Partial<RoutePreferences>)
         : null;
-    const remainingM = value['remainingM'];
-    const rawProgress = value['progress'];
+    const remainingM = raw['remainingM'];
+    const rawProgress = raw['progress'];
     const progress =
       typeof rawProgress === 'object' &&
       rawProgress !== null &&
@@ -156,9 +162,23 @@ export function parseResumableTrip(raw: string | null, now: number): ResumableTr
       progress,
       atMs,
     };
-  } catch {
-    return null;
-  }
+  },
+});
+
+/**
+ * A stored record that is still worth offering, or null.
+ *
+ * Shape comes from {@link NAV_TRIP_SETTING}; the age check is here because it
+ * is not a property of the value. A record from the *future* is a clock that
+ * moved (travel, NTP) and stays offerable — the trip in it is still real.
+ */
+export function parseResumableTrip(
+  raw: string | null | undefined,
+  now: number,
+): ResumableTrip | null {
+  const trip = readSetting(NAV_TRIP_SETTING, raw);
+  if (!trip) return null;
+  return trip.atMs < now - MAX_AGE_MS ? null : trip;
 }
 
 export function useNavResume(
@@ -180,7 +200,7 @@ export function useNavResume(
   useEffect(() => {
     if (status !== 'ready' || loaded.current) return;
     let cancelled = false;
-    void getSetting(TRIP_SETTING).then((raw) => {
+    void getSetting(NAV_TRIP_SETTING.key).then((raw) => {
       if (cancelled) return;
       loaded.current = true;
       // A trip already running (storage went ready mid-drive) is not an offer.
@@ -198,7 +218,7 @@ export function useNavResume(
     // Written rather than deleted: `removeSetting` is not part of every
     // platform's storage seam, and an empty value parses to "nothing to
     // resume" through exactly the same path a missing row does.
-    if (loaded.current) setSetting(TRIP_SETTING, '');
+    if (loaded.current) void setSetting(NAV_TRIP_SETTING.key, '');
   }, [setSetting]);
 
   /** Write the live trip's identity, unless it is already the stored one. */
@@ -207,7 +227,7 @@ export function useNavResume(
     if (!current.destination) return;
     const ahead =
       current.viasPassed > 0 ? current.viaPoints.slice(current.viasPassed) : current.viaPoints;
-    const snapshot = {
+    const snapshot: ResumableTrip = {
       destination: current.destination,
       vias: ahead,
       profile: current.profile,
@@ -218,13 +238,15 @@ export function useNavResume(
       progress: current.tripProgress,
       atMs: Date.now(),
     };
-    const text = JSON.stringify(snapshot);
+    // Written through the definition, so the shape read back at launch and the
+    // shape written here are one decision rather than two.
+    const text = NAV_TRIP_SETTING.encode(snapshot);
     // Compare without the timestamp: the beat exists to re-date the record, but
     // an unchanged trip should not churn the row between beats.
-    const identity = JSON.stringify({ ...snapshot, atMs: 0 });
+    const identity = NAV_TRIP_SETTING.encode({ ...snapshot, atMs: 0 });
     if (identity === written.current) return;
     written.current = identity;
-    setSetting(TRIP_SETTING, text);
+    void setSetting(NAV_TRIP_SETTING.key, text);
   }, [setSetting]);
 
   // Keep the record current while guiding, and drop it the moment the trip ends

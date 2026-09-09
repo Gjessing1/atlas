@@ -313,6 +313,31 @@ describe('useUserData', () => {
     expect(result.current.writeError).toBeNull();
   });
 
+  /**
+   * DR3. `setSetting` returned `void` and dropped the storage promise, so a
+   * preference could change in memory, fail to persist, and look saved until
+   * the next restart — the one write in the app that could fail in silence,
+   * on the channel that now carries commute configuration, route plans and
+   * vehicle dimensions. It goes through the same error path as a record write.
+   */
+  it('surfaces a failed setting write instead of dropping it', async () => {
+    const { storage, platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      expect(await result.current.setSetting('transit.commute', '{}')).toBe(true);
+    });
+    expect(result.current.writeError).toBeNull();
+    expect(await storage.getSetting('transit.commute')).toBe('{}');
+
+    vi.spyOn(storage, 'setSetting').mockRejectedValueOnce(new Error('disk full'));
+    await act(async () => {
+      expect(await result.current.setSetting('transit.commute', '{"from":null}')).toBe(false);
+    });
+    expect(result.current.writeError).toBe('Saving setting failed — disk full');
+  });
+
   it('saves a generated route as a named, foldered, syncable GPX track', async () => {
     const { storage, platform } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

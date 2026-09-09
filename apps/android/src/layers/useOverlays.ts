@@ -3,9 +3,12 @@ import {
   basemapVisible,
   layerDefaultsOn,
   layerOptionSignature,
+  jsonSetting,
   layersForProfile,
   normalizeLayerOptions,
   overlayTileUrl,
+  OVERLAY_STATE_SETTING,
+  readSetting,
   SATELLITES_ID,
   STARLINK_ID,
   type LayerMeta,
@@ -33,10 +36,34 @@ const RENDERABLE_VECTOR_IDS = new Set([
   STARLINK_ID,
 ]);
 
-// Visibility/opacity are device-local preferences (`local.` keys never sync).
-const STATE_SETTING = 'local.layers.state';
-// Last-seen catalog, so the panel works offline with known layers.
-const CATALOG_SETTING = 'local.layers.catalog';
+/**
+ * Last-seen catalog, so the panel works offline with known layers.
+ *
+ * Android-only and staying that way — a browser refetches `/api/layers` on
+ * every load and has nothing to cache it for. What it shares with the web is
+ * the *state* map ({@link OVERLAY_STATE_SETTING}, in @atlas/core), which is the
+ * value both clients read and write.
+ *
+ * Decoded rather than cast: this is a cache of someone else's JSON, replayed
+ * into the layer panel days later and possibly written by a backend two
+ * versions older. An entry with no `id` used to reach the panel as a row that
+ * could be switched on and would then request `/api/overlay/undefined/…`.
+ */
+const CATALOG_SETTING = jsonSetting<LayerMeta[]>({
+  key: 'local.layers.catalog',
+  scope: 'local',
+  defaultValue: [],
+  parse: (value) =>
+    Array.isArray(value)
+      ? value.filter(
+          (entry): entry is LayerMeta =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            typeof (entry as LayerMeta).id === 'string' &&
+            typeof (entry as LayerMeta).title === 'string',
+        )
+      : undefined,
+});
 
 /** An overlay the user has switched on, ready for MapScene's RasterSource. */
 export interface ActiveOverlay {
@@ -108,22 +135,16 @@ export function useOverlays(
   useEffect(() => {
     if (status !== 'ready') return;
     let cancelled = false;
-    void getSetting(STATE_SETTING).then((raw) => {
-      if (cancelled || !raw) return;
-      try {
-        setState(JSON.parse(raw) as OverlayStateMap);
-      } catch {
-        // Corrupt setting: everything stays off.
-      }
+    void getSetting(OVERLAY_STATE_SETTING.key).then((raw) => {
+      if (cancelled) return;
+      setState(readSetting(OVERLAY_STATE_SETTING, raw));
     });
-    void getSetting(CATALOG_SETTING).then((raw) => {
-      if (cancelled || !raw) return;
-      try {
-        // Only seed from the cache while the live fetch hasn't answered yet.
-        setAllLayers((cur) => (cur.length > 0 ? cur : (JSON.parse(raw) as LayerMeta[])));
-      } catch {
-        // Corrupt cache: wait for the live fetch.
-      }
+    void getSetting(CATALOG_SETTING.key).then((raw) => {
+      if (cancelled) return;
+      const cached = readSetting(CATALOG_SETTING, raw);
+      if (cached.length === 0) return;
+      // Only seed from the cache while the live fetch hasn't answered yet.
+      setAllLayers((cur) => (cur.length > 0 ? cur : cached));
     });
     return () => {
       cancelled = true;
@@ -139,7 +160,7 @@ export function useOverlays(
         const body = (await res.json()) as LayersResponse;
         if (cancelled || !Array.isArray(body.layers)) return;
         setAllLayers(body.layers);
-        setSetting(CATALOG_SETTING, JSON.stringify(body.layers));
+        void setSetting(CATALOG_SETTING.key, CATALOG_SETTING.encode(body.layers));
       } catch {
         // Offline: the cached catalog (if any) carries the sheet.
       }
@@ -153,7 +174,7 @@ export function useOverlays(
     (mutate: (cur: OverlayStateMap) => OverlayStateMap) => {
       setState((cur) => {
         const next = mutate(cur);
-        setSetting(STATE_SETTING, JSON.stringify(next));
+        void setSetting(OVERLAY_STATE_SETTING.key, OVERLAY_STATE_SETTING.encode(next));
         return next;
       });
     },

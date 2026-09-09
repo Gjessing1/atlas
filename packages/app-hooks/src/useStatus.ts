@@ -35,6 +35,41 @@ export const UPSTREAM_HEALTH_LABEL: Record<UpstreamHealth, string> = {
   unknown: 'Not checked yet',
 };
 
+/**
+ * The headline above the source list — and the one line on this screen that
+ * has to be read correctly by someone who is worried.
+ *
+ * It used to be `UPSTREAM_HEALTH_LABEL[overall]` on its own, so a single dead
+ * national WMS put the word **“Down”** under a heading that said
+ * *Server status*, and the honest reading of that is “Atlas is down”. It
+ * never was: the page you are reading came *from* the backend, which is the
+ * proof it is up. What `overall` actually rolls up is the health of the data
+ * sources behind it — Kartverket, NVE, met.no, Entur and the self-hosted
+ * routing/search containers — any one of which can die without Atlas noticing
+ * anything except a blank overlay.
+ *
+ * So the sentence leads with the fact the reader came for (the backend
+ * answered) and then counts what is wrong, rather than collapsing both into one
+ * adjective that belongs to neither.
+ */
+export function overallSummary(data: SystemStatus): string {
+  const total = data.sources.length;
+  const count = (h: UpstreamHealth) => data.sources.filter((s) => s.health === h).length;
+  const down = count('down');
+  const degraded = count('degraded');
+  const plural = (n: number) => (n === 1 ? 'source' : 'sources');
+  if (down > 0 && degraded > 0) {
+    return `Atlas is up · ${down} data ${plural(down)} down, ${degraded} degraded`;
+  }
+  if (down > 0) return `Atlas is up · ${down} data ${plural(down)} down`;
+  if (degraded > 0) return `Atlas is up · ${degraded} data ${plural(degraded)} degraded`;
+  // No failures, so the only distinction left is whether anything has been
+  // asked yet — "all sources operational" would be a claim about services
+  // nobody has spoken to since this backend started.
+  if (count('ok') === 0) return 'Atlas is up · data sources not checked yet';
+  return `Atlas is up · all ${total} data sources operational`;
+}
+
 /** "45s ago", "3m ago", "2h ago", "4d ago" — coarse on purpose. */
 export function statusAge(ts: number, now: number = Date.now()): string {
   const secs = Math.round((now - ts) / 1000);

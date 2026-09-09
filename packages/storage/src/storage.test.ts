@@ -1,3 +1,4 @@
+import { jsonSetting } from '@atlas/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SqlDriver, SqlStatement } from './driver.js';
 import { migrate } from './migrations.js';
@@ -450,6 +451,70 @@ describe('AtlasStorage', () => {
       await storage.setSetting('theme', 'dark');
       const outbox = await storage.listOutbox();
       expect(outbox).toMatchObject([{ entity: 'setting', id: 'theme', op: 'upsert' }]);
+    });
+
+    /**
+     * DR3: the sync decision comes from the definition, not from reading the
+     * key. Same outcome as `setSetting` for a correctly named key — the point
+     * is that the *stated* scope is what acts, so a value's intent is written
+     * down somewhere a reviewer can see it.
+     */
+    it('takes the sync decision from a definition, not the key shape', async () => {
+      const local = jsonSetting<number>({
+        key: 'local.test.cursor',
+        scope: 'local',
+        defaultValue: 0,
+        parse: (value) => (typeof value === 'number' ? value : undefined),
+      });
+      const synced = jsonSetting<string>({
+        key: 'test.theme',
+        scope: 'synced',
+        defaultValue: 'light',
+        parse: (value) => (typeof value === 'string' ? value : undefined),
+      });
+      await storage.writeSetting(local, 42);
+      await storage.writeSetting(synced, 'dark');
+      expect(await storage.listOutbox()).toMatchObject([
+        { entity: 'setting', id: 'test.theme', op: 'upsert' },
+      ]);
+      expect(await storage.readSetting(local)).toBe(42);
+      expect(await storage.readSetting(synced)).toBe('dark');
+    });
+
+    it('reads an absent or unusable row as the definition default', async () => {
+      const def = jsonSetting<{ n: number }>({
+        key: 'local.test.absent',
+        scope: 'local',
+        defaultValue: { n: -1 },
+        parse: (value) =>
+          typeof value === 'object' && value !== null && 'n' in value
+            ? (value as { n: number })
+            : undefined,
+      });
+      expect(await storage.readSetting(def)).toEqual({ n: -1 });
+      await storage.setSetting(def.key, 'not json at all');
+      expect(await storage.readSetting(def)).toEqual({ n: -1 });
+    });
+
+    /**
+     * `defineSetting` refuses a contradictory definition at construction, so
+     * this can only arrive as a hand-built object — and this is the layer that
+     * would publish a device's private row to every device on the account.
+     */
+    it('refuses to write a definition whose scope its key contradicts', async () => {
+      await expect(
+        storage.writeSetting(
+          {
+            key: 'local.test.smuggled',
+            scope: 'synced',
+            defaultValue: '',
+            decode: (raw: string) => raw,
+            encode: (value: string) => value,
+          },
+          'x',
+        ),
+      ).rejects.toThrow(/declares scope "synced"/);
+      expect(await storage.listOutbox()).toHaveLength(0);
     });
 
     it('enqueues records moved when their folder is deleted', async () => {

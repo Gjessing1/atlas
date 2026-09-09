@@ -3,6 +3,7 @@
 import { fmtClock, fmtDistanceM, fmtDuration } from './format.js';
 import type { LatLng } from './geo.js';
 import type { LngLatBbox } from './geoproject.js';
+import { jsonSetting } from './persisted.js';
 
 /** Live Regobs ice observations, drawn as viewport-fetched point markers. */
 export const ICE_OBSERVATIONS_ID = 'ice-observations';
@@ -813,3 +814,57 @@ export const BASEMAP_STATE_ID = 'basemap';
 export function basemapVisible(state: OverlayStateMap, profileId: string): boolean {
   return state[`${profileId}:${BASEMAP_STATE_ID}`]?.on ?? true;
 }
+
+/**
+ * Where a device keeps its overlay choices — visibility, opacity and each
+ * layer's chosen variant, per profile.
+ *
+ * Device-local by nature: which overlays are switched on is about the screen in
+ * your hand, not about the account (the phone in the woods and the laptop
+ * planning the trip want different things drawn), and the profile *presets*
+ * that do sync are a separate, synced setting.
+ *
+ * Defined here, in core, rather than in either client — both read and write
+ * this exact row, and the two hooks that do it call each other "twins" in their
+ * own comments (DR4 shares the controller between them; this is the value it
+ * will share). One decoder means a preference written on the phone cannot be
+ * read differently by the browser.
+ *
+ * The decoder matters more than it looks. Both clients did
+ * `JSON.parse(raw) as OverlayStateMap` — a cast, not a check — so any JSON at
+ * all became the state map: `"[]"`, `"7"`, or an entry whose `opacity` is the
+ * string `"0.5"`, which reaches MapLibre as a paint property and throws inside
+ * the render loop. Entries are filtered rather than rejected wholesale: one bad
+ * row must not cost the user every other layer choice they have made.
+ */
+export const OVERLAY_STATE_SETTING = jsonSetting<OverlayStateMap>({
+  key: 'local.layers.state',
+  scope: 'local',
+  defaultValue: {},
+  parse: (value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const state: OverlayStateMap = {};
+    for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof raw !== 'object' || raw === null) continue;
+      const entry = raw as Record<string, unknown>;
+      const next: OverlayStateMap[string] = {};
+      if (typeof entry['on'] === 'boolean') next.on = entry['on'];
+      // Clamped, not just type-checked: opacity is handed straight to a paint
+      // property, and 1.5 renders as silently as it corrupts.
+      if (typeof entry['opacity'] === 'number' && Number.isFinite(entry['opacity'])) {
+        next.opacity = Math.min(1, Math.max(0, entry['opacity']));
+      }
+      if (typeof entry['options'] === 'object' && entry['options'] !== null) {
+        const options: Record<string, string> = {};
+        for (const [key, choice] of Object.entries(entry['options'] as Record<string, unknown>)) {
+          if (typeof choice === 'string') options[key] = choice;
+        }
+        if (Object.keys(options).length > 0) next.options = options;
+      }
+      // An entry that carried nothing usable is not an entry. Keeping it would
+      // write `{}` back and make "not asked" indistinguishable from "asked".
+      if (Object.keys(next).length > 0) state[id] = next;
+    }
+    return state;
+  },
+});

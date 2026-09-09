@@ -16,6 +16,7 @@ export {
 export {
   planFromHash,
   useRoutePlanPersistence,
+  ROUTE_PLAN_SETTING,
   type RoutePlanSettings,
 } from './useRoutePlanPersistence.js';
 export { useDirections, type Directions, type GetLocationFn } from './useDirections.js';
@@ -66,6 +67,7 @@ export {
 export {
   parseResumableTrip,
   useNavResume,
+  NAV_TRIP_SETTING,
   type NavResumeController,
   type NavResumeSettings,
   type NavResumeTarget,
@@ -92,7 +94,9 @@ export {
   type TransitDeparturesFn,
 } from './useTransitDepartures.js';
 export {
+  COMMUTE_COMMIT_SETTING,
   COMMUTE_COMMIT_SETTING_KEY,
+  COMMUTE_SETTING,
   COMMUTE_SETTING_KEY,
   EMPTY_COMMUTE_CONFIG,
   commuteQueryFrom,
@@ -230,8 +234,14 @@ export {
   type UserDataPlatform,
 } from './useUserData.js';
 export {
+  usePersistedSetting,
+  type PersistedSetting,
+  type SettingsAccess,
+} from './usePersistedSetting.js';
+export {
   useStatus,
   groupUpstreams,
+  overallSummary,
   statusAge,
   sweepSummary,
   upstreamDetail,

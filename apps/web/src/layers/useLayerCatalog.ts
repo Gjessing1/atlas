@@ -4,15 +4,14 @@ import {
   layerDefaultsOn,
   layersForProfile,
   normalizeLayerOptions,
+  OVERLAY_STATE_SETTING,
+  readSetting,
   type LayerMeta,
   type LayersResponse,
   type OverlayStateMap,
 } from '@atlas/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ActiveOverlay } from '../map/useOverlayLayers.js';
-
-// Visibility/opacity are device-local preferences (`local.` keys never sync).
-const STATE_SETTING = 'local.layers.state';
 
 export interface LayerCatalog {
   /** The active map profile, so panels can show its standing caveat. */
@@ -69,7 +68,7 @@ export interface LayerCatalog {
 interface SettingsAccess {
   status: string;
   getSetting: (key: string) => Promise<string | null>;
-  setSetting: (key: string, value: string) => void;
+  setSetting: (key: string, value: string) => Promise<boolean> | void;
 }
 
 /**
@@ -104,13 +103,11 @@ export function useLayerCatalog(
 
   useEffect(() => {
     if (status !== 'ready') return;
-    void getSetting(STATE_SETTING).then((raw) => {
-      if (!raw) return;
-      try {
-        setState(JSON.parse(raw) as OverlayStateMap);
-      } catch {
-        // Corrupt setting: fall back to everything off.
-      }
+    // The definition owns what a usable stored value is (`OVERLAY_STATE_SETTING`
+    // in @atlas/core), so a corrupt or half-written row degrades to "nothing
+    // chosen yet" and a single bad entry costs only itself.
+    void getSetting(OVERLAY_STATE_SETTING.key).then((raw) => {
+      setState(readSetting(OVERLAY_STATE_SETTING, raw));
     });
   }, [status, getSetting]);
 
@@ -118,7 +115,7 @@ export function useLayerCatalog(
     (mutate: (cur: OverlayStateMap) => OverlayStateMap) => {
       setState((cur) => {
         const next = mutate(cur);
-        setSetting(STATE_SETTING, JSON.stringify(next));
+        void setSetting(OVERLAY_STATE_SETTING.key, OVERLAY_STATE_SETTING.encode(next));
         return next;
       });
     },

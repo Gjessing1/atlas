@@ -218,17 +218,26 @@ export function registerTileRoute(ctx: OverlayContext): void {
         return reply.code(502).send({ error: 'overlay unavailable' });
       }
       const contentType = res.headers.get('content-type') ?? '';
-      // The upstream answered either way — a non-image ServiceException means
-      // "no data here", not "service down", so both count as reachable.
-      ctx.record(layer.meta.id, true);
       if (!contentType.startsWith('image/')) {
         // A 200 with XML is a ServiceException (out of coverage, bad layer,
         // …): serve a transparent tile so the map shows blank, not broken —
         // short-lived so recovery isn't cached away.
+        //
+        // Deliberately records *nothing*. From here the two readings are
+        // indistinguishable: panning past the edge of a healthy layer's
+        // coverage looks exactly like a layer that has been withdrawn, because
+        // the same ServiceException carries both. The probe can tell them
+        // apart — it asks at a point the layer is known to draw
+        // (`probes.ts`) — so this path must not overwrite its verdict.
+        // It used to record `true` here, which meant one map pan over a dead
+        // layer silently repainted the status row green and kept it there:
+        // last writer wins, and ordinary traffic always writes last.
         const body = (await res.text()).slice(0, 300);
         request.log.warn({ layer: layer.meta.id, contentType, body }, 'overlay non-image reply');
         return serveImage(TRANSPARENT_PNG, 'image/png', 'public, max-age=60');
       }
+      // A real image is unambiguous: the upstream is serving this layer.
+      ctx.record(layer.meta.id, true);
       const data = Buffer.from(await res.arrayBuffer());
       if (diskCache) {
         await writeCache(file, data);

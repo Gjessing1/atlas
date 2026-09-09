@@ -12,7 +12,10 @@ import type {
   TransitWeekday,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
+import { defineSetting, jsonSetting, readSetting } from '@atlas/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import type { SettingsAccess } from './usePersistedSetting.js';
 
 /**
  * The saved commute: one synced setting, read by the web board, the Android
@@ -48,33 +51,37 @@ export const COMMUTE_SETTING_KEY = 'transit.commute';
  * widget mean one thing. Two stores with no shared shape between them is how
  * "the journey I'm on" grows a second definition.
  */
-export const COMMUTE_COMMIT_SETTING_KEY = 'local.transit.commit';
-
-/** Read a stored commitment, ignoring anything that is not one. */
-export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit | null {
-  if (!value) return null;
-  try {
-    const raw: unknown = JSON.parse(value);
-    if (!isRecord(raw)) return null;
-    const direction = raw.direction === 'inbound' ? 'inbound' : 'outbound';
-    const departureMs = raw.departureMs;
-    const line = raw.line;
+export const COMMUTE_COMMIT_SETTING = jsonSetting<TransitWidgetV2Commit | null>({
+  key: 'local.transit.commit',
+  scope: 'local',
+  defaultValue: null,
+  parse: (value) => {
+    if (!isRecord(value)) return null;
+    const direction = value.direction === 'inbound' ? 'inbound' : 'outbound';
+    const departureMs = value.departureMs;
+    const line = value.line;
     if (typeof departureMs !== 'number' || !Number.isFinite(departureMs)) return null;
     if (typeof line !== 'string') return null;
     return {
       direction,
       departureMs,
       line,
-      ...(typeof raw.committedAtMs === 'number' ? { committedAtMs: raw.committedAtMs } : {}),
+      ...(typeof value.committedAtMs === 'number' ? { committedAtMs: value.committedAtMs } : {}),
       // Absent means the commute's own end, which is what every commitment
       // written before the board could start at the interchange was. Kept
       // through the widget's round trip for the same reason it is stored: the
       // question that re-reads the journey depends on it.
-      ...(raw.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
+      ...(value.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
     };
-  } catch {
-    return null;
-  }
+  },
+});
+
+/** The key, for the callers (and the widget) that hold only a string. */
+export const COMMUTE_COMMIT_SETTING_KEY = COMMUTE_COMMIT_SETTING.key;
+
+/** Read a stored commitment, ignoring anything that is not one. */
+export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit | null {
+  return readSetting(COMMUTE_COMMIT_SETTING, value);
 }
 
 /** The shape written today. Bumped when a migration has to tell versions apart. */
@@ -121,11 +128,8 @@ export const EMPTY_COMMUTE_CONFIG: CommuteConfig = {
   days: [],
 };
 
-export interface CommuteSettings {
-  status: 'loading' | 'ready' | 'error';
-  getSetting: (key: string) => Promise<string | null>;
-  setSetting: (key: string, value: string) => void;
-}
+/** The shared settings seam (see `usePersistedSetting`). */
+export type CommuteSettings = SettingsAccess;
 
 export type CommuteFn = (
   query: TransitCommuteQuery,
@@ -226,12 +230,15 @@ function parseTime(value: unknown): TransitCommuteTime {
  */
 export function parseCommuteConfig(value: string | null): CommuteConfig | null {
   if (!value) return null;
-  let raw: unknown;
   try {
-    raw = JSON.parse(value);
+    return parseCommuteValue(JSON.parse(value));
   } catch {
     return null;
   }
+}
+
+/** The migration itself, over already-parsed JSON — see {@link parseCommuteConfig}. */
+function parseCommuteValue(raw: unknown): CommuteConfig | null {
   if (!isRecord(raw)) return null;
   if (raw.version === CONFIG_VERSION || raw.from !== undefined || raw.to !== undefined) {
     return {
@@ -284,6 +291,26 @@ export function isLegacyCommuteSetting(value: string | null): boolean {
 export function serializeCommuteConfig(config: CommuteConfig): string {
   return JSON.stringify({ version: CONFIG_VERSION, ...config });
 }
+
+/**
+ * The saved commute as a definition: **synced**, unlike everything else the
+ * board keeps. That is the whole point of it — the commute is configuration a
+ * person owns, and the web board, the Android board and the home-screen widget
+ * all have to see the same one. The scope is stated here rather than inferred
+ * from the absence of a prefix, so the day someone renames the key the
+ * definition refuses it instead of silently making every user's commute
+ * device-local.
+ *
+ * `parse` is the v1 → v2 migration (see {@link parseCommuteConfig}) — the one
+ * feature-owned path a stored value takes, whichever shape it was written in.
+ */
+export const COMMUTE_SETTING = defineSetting<CommuteConfig>({
+  key: COMMUTE_SETTING_KEY,
+  scope: 'synced',
+  defaultValue: EMPTY_COMMUTE_CONFIG,
+  decode: (raw) => parseCommuteConfig(raw) ?? undefined,
+  encode: serializeCommuteConfig,
+});
 
 /** Resolve one end against the current favorites, preferring live place data. */
 function resolveEnd(
@@ -363,17 +390,17 @@ export function useCommute(
     if (status !== 'ready' || loaded) return;
     let current = true;
     void Promise.all([
-      getSetting(COMMUTE_SETTING_KEY),
-      getSetting(COMMUTE_COMMIT_SETTING_KEY),
+      getSetting(COMMUTE_SETTING.key),
+      getSetting(COMMUTE_COMMIT_SETTING.key),
     ]).then(([saved, savedCommit]) => {
       if (!current) return;
-      const next = parseCommuteConfig(saved) ?? EMPTY_COMMUTE_CONFIG;
+      const next = readSetting(COMMUTE_SETTING, saved);
       setConfigState(next);
-      setCommitState(parseCommuteCommit(savedCommit));
+      setCommitState(readSetting(COMMUTE_COMMIT_SETTING, savedCommit));
       // Write back only to finish a migration. A first run writes nothing: an
       // empty commute is not worth a synced row on every device.
       if (saved && isLegacyCommuteSetting(saved)) {
-        saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
+        void saveSetting(COMMUTE_SETTING.key, COMMUTE_SETTING.encode(next));
       }
       setLoaded(true);
     });
@@ -430,7 +457,7 @@ export function useCommute(
   const setConfig = useCallback(
     (next: CommuteConfig) => {
       setConfigState(next);
-      saveSetting(COMMUTE_SETTING_KEY, serializeCommuteConfig(next));
+      void saveSetting(COMMUTE_SETTING.key, COMMUTE_SETTING.encode(next));
     },
     [saveSetting],
   );
@@ -439,7 +466,7 @@ export function useCommute(
       setCommitState(next);
       // Written even when clearing, so a board reopened later starts untracked
       // rather than re-reading a commitment the user let go of.
-      saveSetting(COMMUTE_COMMIT_SETTING_KEY, next ? JSON.stringify(next) : '');
+      void saveSetting(COMMUTE_COMMIT_SETTING.key, next ? COMMUTE_COMMIT_SETTING.encode(next) : '');
     },
     [saveSetting],
   );

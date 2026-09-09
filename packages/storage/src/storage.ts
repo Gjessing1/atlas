@@ -1,8 +1,12 @@
 import {
   DEFAULT_PLACE_COLOR,
   DEFAULT_PLACE_ICON,
+  LOCAL_SETTING_PREFIX,
   parsePlaceStand,
+  readSetting,
+  settingScopeOf,
   type PlaceStand,
+  type SettingDefinition,
 } from '@atlas/core';
 
 import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from './driver.js';
@@ -29,8 +33,13 @@ import type {
 /**
  * Settings whose keys start with this prefix stay on this device — they are
  * never enqueued for sync (used e.g. for the sync cursor itself).
+ *
+ * Defined in `@atlas/core` and re-exported here, where every existing importer
+ * already looks for it. One constant rather than two: a typed
+ * `SettingDefinition` checks its key against the same string this file tests
+ * `startsWith` on, so "declared local" and "treated as local" cannot drift.
  */
-export const LOCAL_SETTING_PREFIX = 'local.';
+export { LOCAL_SETTING_PREFIX };
 
 /**
  * The LWW timestamp to import a dumped record under. Hand-edited or
@@ -622,6 +631,42 @@ export class AtlasStorage {
     const statements: SqlStatement[] = [this.settingUpsertStmt(key, value, now)];
     if (!key.startsWith(LOCAL_SETTING_PREFIX))
       statements.push(this.enqueueStmt('setting', key, 'upsert', now));
+    await this.driver.batch(statements);
+  }
+
+  /**
+   * Read a setting through its definition — decoded, defaulted, never throwing.
+   *
+   * The typed pair to {@link AtlasStorage.getSetting}, for callers that hold a
+   * storage handle rather than a React seam (the widget bridge, sync, a script).
+   */
+  async readSetting<T>(definition: SettingDefinition<T>): Promise<T> {
+    return readSetting(definition, await this.getSetting(definition.key));
+  }
+
+  /**
+   * Write a setting through its definition, taking the sync decision **from the
+   * definition** rather than from the shape of its key.
+   *
+   * That is the difference worth having. `setSetting` reads the key and decides
+   * by `startsWith`, which is correct but silent: nothing anywhere states what
+   * a given value was *meant* to do, so a key typed without its prefix simply
+   * starts syncing and no layer is in a position to notice. A definition says
+   * `local` or `synced` in words, and the two are checked against each other
+   * here — belt and braces with `defineSetting`, which already refuses to build
+   * a contradictory one, because this is the layer that would actually publish
+   * a device's private row to every other device on the account.
+   */
+  async writeSetting<T>(definition: SettingDefinition<T>, value: T): Promise<void> {
+    const { key, scope } = definition;
+    if (scope !== settingScopeOf(key)) {
+      throw new Error(
+        `setting "${key}" declares scope "${scope}" but its key says "${settingScopeOf(key)}"`,
+      );
+    }
+    const now = this.tick();
+    const statements: SqlStatement[] = [this.settingUpsertStmt(key, definition.encode(value), now)];
+    if (scope === 'synced') statements.push(this.enqueueStmt('setting', key, 'upsert', now));
     await this.driver.batch(statements);
   }
 

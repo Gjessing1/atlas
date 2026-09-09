@@ -2,7 +2,14 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { SystemStatus, UpstreamStatus } from '@atlas/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { groupUpstreams, statusAge, sweepSummary, upstreamDetail, useStatus } from './useStatus.js';
+import {
+  groupUpstreams,
+  overallSummary,
+  statusAge,
+  sweepSummary,
+  upstreamDetail,
+  useStatus,
+} from './useStatus.js';
 
 const NOW = Date.UTC(2026, 6, 22, 12, 0, 0);
 
@@ -118,6 +125,43 @@ describe('sweepSummary', () => {
 
   it('says a sweep is running', () => {
     expect(sweepSummary({ ...status, probing: true }, NOW)).toContain('Checking upstreams…');
+  });
+});
+
+describe('overallSummary', () => {
+  /**
+   * The regression this exists for: one dead national WMS rolled `overall` up
+   * to 'down', the headline printed that single word under a heading that said
+   * "Server status", and it was read as "Atlas is down" — by someone who was
+   * looking at a page the backend had just served them.
+   */
+  it('never lets a failing data source read as a failing Atlas', () => {
+    expect(overallSummary({ ...status, overall: 'down' })).toBe('Atlas is up · 1 data source down');
+    expect(overallSummary({ ...status, overall: 'down' })).toContain('Atlas is up');
+  });
+
+  it('counts down and degraded sources separately, and pluralises both', () => {
+    const sources = [
+      source({ id: 'a', health: 'down' }),
+      source({ id: 'b', health: 'down' }),
+      source({ id: 'c', health: 'degraded' }),
+      source({ id: 'd', health: 'ok' }),
+    ];
+    expect(overallSummary({ ...status, sources })).toBe(
+      'Atlas is up · 2 data sources down, 1 degraded',
+    );
+    expect(overallSummary({ ...status, sources: sources.slice(2) })).toBe(
+      'Atlas is up · 1 data source degraded',
+    );
+  });
+
+  it('distinguishes "all healthy" from "nobody has asked yet"', () => {
+    expect(overallSummary({ ...status, sources: [source(), source({ id: 'b' })] })).toBe(
+      'Atlas is up · all 2 data sources operational',
+    );
+    expect(overallSummary({ ...status, sources: [source({ health: 'unknown' })] })).toBe(
+      'Atlas is up · data sources not checked yet',
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import {
   groupUpstreams,
+  overallSummary,
   sweepSummary,
   UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
@@ -235,7 +236,7 @@ function StatusSection({ data, status }: { data: SystemStatus; status: StatusSta
     <>
       <div className="status-overall">
         <span className={`status-dot status-${data.overall}`} aria-hidden="true" />
-        <span>{UPSTREAM_HEALTH_LABEL[data.overall]}</span>
+        <span>{overallSummary(data)}</span>
         <span className="status-sha" title="Backend build">
           {data.gitSha === 'dev' ? 'dev build' : data.gitSha.slice(0, 8)}
         </span>
@@ -528,7 +529,7 @@ export function SettingsPanel({
         {tab === 'system' && (
           <div className="settings-section">
             <div className="settings-section-head">
-              <h3>Server status</h3>
+              <h3>Data sources</h3>
               <button
                 type="button"
                 className="link-button"

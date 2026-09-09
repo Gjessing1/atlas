@@ -6,6 +6,7 @@ import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
+import { StatusRegistry } from '../status.js';
 import {
   norwegianLayers,
   registerOverlayApi,
@@ -250,7 +251,7 @@ type StubReply = {
 /** Builds the API on a temp cache dir with a recording fetch stub. */
 async function build(
   replies: (url: URL) => StubReply,
-  opts?: { env?: Record<string, string>; layers?: OverlayLayer[] },
+  opts?: { env?: Record<string, string>; layers?: OverlayLayer[]; status?: StatusRegistry },
 ) {
   const cacheDir = await mkdtemp(path.join(tmpdir(), 'atlas-tilecache-'));
   const requests: URL[] = [];
@@ -276,6 +277,7 @@ async function build(
     layers: opts?.layers ?? testLayers(),
     fetchImpl,
     env: opts?.env ?? {},
+    ...(opts?.status ? { status: opts.status } : {}),
   });
   return { app, cacheDir, requests, requestHeaders };
 }
@@ -839,6 +841,40 @@ describe('overlay tile proxy', () => {
     // Not cached for a week — the upstream may recover.
     expect(res.headers['cache-control']).toContain('max-age=60');
     expect(res.rawPayload.subarray(0, 4).equals(Buffer.from([137, 80, 78, 71]))).toBe(true);
+  });
+
+  /**
+   * A ServiceException is the *one* upstream reply the proxy cannot read: it is
+   * what a healthy layer says outside its coverage and equally what a withdrawn
+   * layer says everywhere. The probe asks at a point the layer is known to
+   * draw, so its verdict is the informed one — and this path used to overwrite
+   * it with `ok` on the next pan, which is how a dead Fiskeridirektoratet layer
+   * showed green on the status page while every tile of it came back as XML.
+   */
+  it('leaves the status verdict alone when the upstream answers with XML', async () => {
+    const status = new StatusRegistry();
+    const { app, cacheDir } = await build(
+      () => ({
+        contentType: 'text/xml',
+        body: '<ServiceExceptionReport><ServiceException code="LayerNotDefined"/></ServiceExceptionReport>',
+      }),
+      { status },
+    );
+    track(app, cacheDir);
+    status.record('overlay:depth', false, 'not an image (text/xml)');
+    await app.inject({ url: '/api/overlay/depth/1/1/0.png' });
+    const row = status.toStatus().find((s) => s.id === 'overlay:depth');
+    expect(row?.health).toBe('down');
+    expect(row?.lastSuccess).toBeNull();
+  });
+
+  it('records a healthy verdict once the upstream serves a real image again', async () => {
+    const status = new StatusRegistry();
+    const { app, cacheDir } = await build(() => ({ body: PNG_BYTES }), { status });
+    track(app, cacheDir);
+    status.record('overlay:depth', false, 'not an image (text/xml)');
+    await app.inject({ url: '/api/overlay/depth/1/1/0.png' });
+    expect(status.toStatus().find((s) => s.id === 'overlay:depth')?.health).toBe('ok');
   });
 
   it('502s on upstream errors and unknown layers / bad coordinates', async () => {

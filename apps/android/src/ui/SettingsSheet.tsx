@@ -13,8 +13,8 @@ import type { AtlasStorage } from '@atlas/storage';
 import { describeStorageUnavailable } from '@atlas/storage';
 import {
   groupUpstreams,
+  overallSummary,
   sweepSummary,
-  UPSTREAM_HEALTH_LABEL,
   upstreamDetail,
   useStatus,
   type MapStyleEditorController,
@@ -688,7 +688,7 @@ function StatusSection({ visible }: { visible: boolean }) {
             <View
               style={[styles.statusDot, { backgroundColor: HEALTH_COLOR[status.data.overall] }]}
             />
-            <Text style={styles.rowText}>{UPSTREAM_HEALTH_LABEL[status.data.overall]}</Text>
+            <Text style={styles.rowText}>{overallSummary(status.data)}</Text>
           </View>
         ) : null}
       </View>
@@ -1548,7 +1548,7 @@ export function SettingsSheet({
           <>
             <Text style={styles.heading}>Server</Text>
             <ServerSection storage={storage} />
-            <Text style={styles.heading}>Server status</Text>
+            <Text style={styles.heading}>Data sources</Text>
             <StatusSection visible={visible && section === 'system'} />
             <Text style={styles.heading}>App</Text>
             <UpdateSection />

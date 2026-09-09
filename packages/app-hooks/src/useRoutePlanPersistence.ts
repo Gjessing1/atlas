@@ -1,26 +1,75 @@
-import type { LatLng, RoutePlanState } from '@atlas/core';
+import { jsonSetting, readSetting, type LatLng, type RoutePlanState } from '@atlas/core';
 import { isRoutingProfile } from '@atlas/routing';
 import { useEffect, useRef } from 'react';
 
 import type { RoutePlanner, StoredRoutePlan } from './useRoute.js';
+import type { SettingsAccess } from './usePersistedSetting.js';
 
 /**
  * The plan lives on this device only: it is scratch state, not user data, so
- * `local.` keeps it out of sync (a half-finished plan should not appear on the
+ * `local` keeps it out of sync (a half-finished plan should not appear on the
  * phone).
+ *
+ * The decoder is the part that used to be a bare cast. `JSON.parse(raw) as
+ * StoredRoutePlan` accepted any object at all, and the two properties it went
+ * on to check — the profile and that `waypoints` is an array — were checked at
+ * the call site, in a `try` that also stood in for "no plan saved". An array of
+ * anything got through: a waypoint without a `pos` reached the map as a marker
+ * at `undefined`. Here the profile is validated (it is handed to the routing
+ * API, and a share link is user-editable text) and every waypoint must actually
+ * carry coordinates, with the rest of the plan kept only when it is the right
+ * shape.
  */
-const PLAN_SETTING = 'local.route.plan';
+export const ROUTE_PLAN_SETTING = jsonSetting<StoredRoutePlan | null>({
+  key: 'local.route.plan',
+  scope: 'local',
+  defaultValue: null,
+  parse: (value) => {
+    if (typeof value !== 'object' || value === null) return null;
+    const raw = value as Record<string, unknown>;
+    if (!isRoutingProfile(raw['profile'])) return null;
+    if (!Array.isArray(raw['waypoints'])) return null;
+    const waypoints = raw['waypoints'].flatMap((item: unknown) => {
+      if (typeof item !== 'object' || item === null) return [];
+      const wp = item as Record<string, unknown>;
+      const pos = wp['pos'];
+      if (typeof pos !== 'object' || pos === null) return [];
+      const { lat, lng } = pos as Record<string, unknown>;
+      if (typeof lat !== 'number' || !Number.isFinite(lat)) return [];
+      if (typeof lng !== 'number' || !Number.isFinite(lng)) return [];
+      return [
+        {
+          pos: { lat, lng },
+          ...(typeof wp['name'] === 'string' ? { name: wp['name'] } : {}),
+          ...(typeof wp['transitStopId'] === 'string'
+            ? { transitStopId: wp['transitStopId'] }
+            : {}),
+        },
+      ];
+    });
+    const roundTripKm = raw['roundTripKm'];
+    const preferences = raw['preferences'];
+    return {
+      profile: raw['profile'],
+      waypoints,
+      ...(typeof roundTripKm === 'number' && Number.isFinite(roundTripKm) ? { roundTripKm } : {}),
+      ...(raw['roundTripDirection'] === 'clockwise' ||
+      raw['roundTripDirection'] === 'counterclockwise'
+        ? { roundTripDirection: raw['roundTripDirection'] }
+        : {}),
+      ...(typeof preferences === 'object' && preferences !== null
+        ? { preferences: preferences as StoredRoutePlan['preferences'] }
+        : {}),
+    };
+  },
+});
 
 /**
  * The settings seam this needs, which every client already has through
  * `useUserData`. Narrow on purpose: a plan-restoring hook has no business with
  * places, tracks or the storage handle.
  */
-export interface RoutePlanSettings {
-  status: string;
-  getSetting: (key: string) => Promise<string | null | undefined>;
-  setSetting: (key: string, value: string) => void;
-}
+export type RoutePlanSettings = SettingsAccess;
 
 /** A plan decoded from a share link, converted to the planner's shape. */
 export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
@@ -86,16 +135,13 @@ export function useRoutePlanPersistence(
   useEffect(() => {
     if (restoredRef.current || status !== 'ready' || fromLink === undefined) return;
     let cancelled = false;
-    void getSetting(PLAN_SETTING).then((raw) => {
+    void getSetting(ROUTE_PLAN_SETTING.key).then((raw) => {
       if (cancelled) return;
       restoredRef.current = true;
-      if (!raw) return;
-      try {
-        const saved = JSON.parse(raw) as StoredRoutePlan;
-        if (isRoutingProfile(saved.profile) && Array.isArray(saved.waypoints)) restore(saved);
-      } catch {
-        // A corrupt setting just means no plan to restore.
-      }
+      // A corrupt or half-written row decodes to null, i.e. no plan to restore
+      // — the definition owns that judgement now, not a `catch` here.
+      const saved = readSetting(ROUTE_PLAN_SETTING, raw);
+      if (saved) restore(saved);
     });
     return () => {
       cancelled = true;
@@ -107,6 +153,6 @@ export function useRoutePlanPersistence(
   useEffect(() => {
     if (!restoredRef.current || status !== 'ready') return;
     // Closing route mode clears the plan, and '' reads back as "nothing saved".
-    setSetting(PLAN_SETTING, plan ? JSON.stringify(plan) : '');
+    void setSetting(ROUTE_PLAN_SETTING.key, plan ? ROUTE_PLAN_SETTING.encode(plan) : '');
   }, [plan, status, setSetting]);
 }

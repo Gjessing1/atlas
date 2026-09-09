@@ -280,8 +280,21 @@ export interface UserData<TFile> extends StorageAvailability {
   /** Everything exportable (rule 5): zip when the platform can, else JSON. */
   exportAll: () => Promise<void>;
   getSetting: (key: string) => Promise<string | null>;
-  /** Fire-and-forget setting write (auto-save). */
-  setSetting: (key: string, value: string) => void;
+  /**
+   * Save a setting, answering whether it actually landed.
+   *
+   * Auto-save, so nothing awaits this in the common case — but it no longer
+   * *discards* the storage promise either. A record write that fails goes
+   * through `reportWriteFailure` and the user sees it (rule: never silently
+   * lose user data); this used to be the one write that could fail in silence,
+   * leaving a preference changed in memory, gone after restart, and looking
+   * saved the whole time. Settings carry commute configuration, route plans and
+   * vehicle dimensions now — the same promise, and the same channel.
+   *
+   * Never rejects: a caller that wants to know reads the boolean, and one that
+   * doesn't cannot leave an unhandled rejection behind.
+   */
+  setSetting: (key: string, value: string) => Promise<boolean>;
 }
 
 export const sanitizeFileName = (name: string): string =>
@@ -956,9 +969,24 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [],
   );
 
-  const setSetting = useCallback((key: string, value: string) => {
-    void storageRef.current?.setSetting(key, value);
-  }, []);
+  const setSetting = useCallback(
+    async (key: string, value: string) => {
+      const storage = storageRef.current;
+      // No storage at all is the known, already-visible state (the OPFS
+      // single-tab lock, a browser with no persistence): the UI says so through
+      // `status`, and reporting every preference write against it would bury
+      // that one message under a hundred. Still `false` — it did not save.
+      if (!storage) return false;
+      try {
+        await storage.setSetting(key, value);
+        return true;
+      } catch (err) {
+        reportWriteFailure('Saving setting', err);
+        return false;
+      }
+    },
+    [reportWriteFailure],
+  );
 
   return {
     status,
