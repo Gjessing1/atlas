@@ -252,3 +252,70 @@ describe('NodeFileSource', () => {
     await source.dispose();
   });
 });
+
+describe('/api/tiles coverage polygon', () => {
+  /** Southern-Norway-ish square: lng 5..12, lat 58..64. */
+  const POLY = [
+    'norway',
+    '1',
+    '   5 58',
+    '   12 58',
+    '   12 64',
+    '   5 64',
+    '   5 58',
+    'END',
+    'END',
+  ].join('\n');
+
+  /** The tile containing a point, so cases read as places rather than indices. */
+  function tileOf(lat: number, lng: number, z: number): string {
+    const n = 2 ** z;
+    const rad = (lat * Math.PI) / 180;
+    const x = Math.floor(((lng + 180) / 360) * n);
+    const y = Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n);
+    return `${z}/${x}/${y}`;
+  }
+
+  // Both sit inside the archive's bounding box, and the fake archive holds
+  // bytes for both — only the polygon tells them apart.
+  const BERGEN = tileOf(60.39, 5.32, 12);
+  const STOCKHOLM = tileOf(59.31, 18.19, 12);
+
+  async function buildWithPoly(opts: Partial<TilesApiOptions>): Promise<FastifyInstance> {
+    const dir = await mkdtemp(path.join(tmpdir(), 'atlas-coverage-'));
+    await writeFile(path.join(dir, 'norway.poly'), POLY);
+    return build({ tilesDir: dir, ...opts });
+  }
+
+  it('serves the archive inside its coverage', async () => {
+    const fetchImpl = fakeUpstream();
+    await buildWithPoly({ fetchImpl });
+    const res = await get(`/api/tiles/norway/${BERGEN}.pbf`);
+    expect(gunzipSync(res.rawPayload)).toEqual(LOCAL_TILE);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('proxies upstream outside the coverage even though the archive has bytes', async () => {
+    // The Stockholm bug: Planetiler fills the whole bounding box from global
+    // sources, so these bytes are water-only filler, not coverage.
+    const fetchImpl = fakeUpstream();
+    await buildWithPoly({ fetchImpl });
+    const res = await get(`/api/tiles/norway/${STOCKHOLM}.pbf`);
+    expect(res.statusCode).toBe(200);
+    expect(gunzipSync(res.rawPayload)).toEqual(WORLD_TILE);
+  });
+
+  it('reports upstream failure outside the coverage rather than serving filler', async () => {
+    const fetchImpl = fakeUpstream({ tile: () => new Response(null, { status: 500 }) });
+    await buildWithPoly({ fetchImpl });
+    const res = await get(`/api/tiles/norway/${STOCKHOLM}.pbf`);
+    expect(res.statusCode).toBe(502);
+  });
+
+  it('keeps serving an archive that publishes no polygon', async () => {
+    const fetchImpl = fakeUpstream();
+    await build({ fetchImpl, tilesDir: await mkdtemp(path.join(tmpdir(), 'atlas-nopoly-')) });
+    const res = await get(`/api/tiles/norway/${STOCKHOLM}.pbf`);
+    expect(gunzipSync(res.rawPayload)).toEqual(LOCAL_TILE);
+  });
+});

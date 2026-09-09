@@ -12,6 +12,7 @@
 export const APP_NAME = 'Atlas';
 
 export * from './api.js';
+export * from './coverage.js';
 export * from './format.js';
 export * from './explore.js';
 export * from './geo.js';

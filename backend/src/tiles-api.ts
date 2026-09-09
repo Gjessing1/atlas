@@ -1,8 +1,9 @@
-import { open, stat, type FileHandle } from 'node:fs/promises';
+import { open, readFile, stat, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { PMTiles, type RangeResponse, type Source } from 'pmtiles';
+import { coverageIntersectsTile, parsePolyFile, type CoveragePolygon } from '@atlas/core';
 
 /**
  * Merged z/x/y tile endpoint: `/api/tiles/<area>/{z}/{x}/{y}.pbf`.
@@ -22,6 +23,16 @@ import { PMTiles, type RangeResponse, type Source } from 'pmtiles';
  * Overlay archives (`OVERLAY_AREAS`) are the exception to both rules: they are
  * our own schema, so an upstream basemap tile is not a substitute for a missing
  * one — it is a different map. They are served local-only, at every zoom.
+ *
+ * **Bytes are not coverage.** Planetiler fills every tile in the *bounding box*
+ * of its extract from global sources (water polygons, Natural Earth), so
+ * norway.pmtiles answered for Stockholm and Helsinki with tiles holding nothing
+ * but `water`. Treating that as coverage put a grey hole over every coastal
+ * area Norway's box overhangs, because the world upstream was never consulted.
+ * So an archive answers only where `<area>.poly` (published beside it by
+ * infrastructure/tiles/build-basemap.sh) says the region actually is. An
+ * archive with no polygon keeps the old presence-is-coverage behaviour — the
+ * clip is a promotion of coverage information, never a way to lose an archive.
  */
 
 const DEFAULT_WORLD_TILES_URL = 'https://tiles.openfreemap.org/planet';
@@ -53,7 +64,7 @@ export type LocalTileReader = (
 ) => Promise<Uint8Array | null>;
 
 export interface TilesApiOptions {
-  /** Directory holding `<area>.pmtiles` archives. */
+  /** Directory holding `<area>.pmtiles` archives and their `<area>.poly` coverage. */
   tilesDir: string;
   /** Upstream world source: `{z}/{x}/{y}` template or TileJSON URL. */
   worldTilesUrl?: string;
@@ -178,6 +189,36 @@ export function registerTilesApi(app: FastifyInstance, opts: TilesApiOptions): v
   const worldTilesUrl = opts.worldTilesUrl ?? DEFAULT_WORLD_TILES_URL;
   const cache = new TileCache();
 
+  // Coverage polygons, read once per area. A missing or unparseable file is a
+  // permanent "unknown", which reads as covered — see the header.
+  const coverageByArea = new Map<string, Promise<CoveragePolygon | null>>();
+  function coverageFor(area: string): Promise<CoveragePolygon | null> {
+    let entry = coverageByArea.get(area);
+    if (!entry) {
+      entry = readFile(path.join(opts.tilesDir, `${area}.poly`), 'utf8')
+        .then((text) => parsePolyFile(text))
+        .catch(() => null);
+      coverageByArea.set(area, entry);
+    }
+    return entry;
+  }
+
+  // Point-in-polygon over a coastline as long as Norway's is far too much work
+  // to repeat per request, and a map pans over the same tiles constantly.
+  const coveredTiles = new Map<string, boolean>();
+  const COVERED_TILES_MAX = 50_000;
+  async function archiveCovers(area: string, z: number, x: number, y: number): Promise<boolean> {
+    const coverage = await coverageFor(area);
+    if (!coverage) return true;
+    const key = `${area}/${z}/${x}/${y}`;
+    const cached = coveredTiles.get(key);
+    if (cached !== undefined) return cached;
+    const covered = coverageIntersectsTile(coverage, z, x, y);
+    if (coveredTiles.size >= COVERED_TILES_MAX) coveredTiles.clear();
+    coveredTiles.set(key, covered);
+    return covered;
+  }
+
   // Resolved {z}/{x}/{y} template, re-resolved hourly (upstream tile URLs are
   // versioned). On failure the stale value is kept and retried after a minute.
   let template: { value: string | null; at: number } | null = null;
@@ -261,7 +302,10 @@ export function registerTilesApi(app: FastifyInstance, opts: TilesApiOptions): v
       // An overlay archive has no upstream equivalent, so it is read locally at
       // every zoom and never proxied.
       const overlay = OVERLAY_AREAS.has(area.toLowerCase());
-      const localFirst = overlay || z >= LOCAL_PREFERRED_MIN_ZOOM;
+      // Outside its own region the archive holds only global-source filler, so
+      // it must not stand in for the world upstream at any zoom.
+      const covers = overlay || (await archiveCovers(area, z, x, y));
+      const localFirst = overlay || (z >= LOCAL_PREFERRED_MIN_ZOOM && covers);
       let plain: Uint8Array | null = null; // uncompressed MVT (local path)
       let gzipped: Buffer | null = null; // gzipped MVT (upstream path)
       let upstreamFailed = false;
@@ -274,7 +318,7 @@ export function registerTilesApi(app: FastifyInstance, opts: TilesApiOptions): v
           if (upstream.kind === 'error') upstreamFailed = true;
           // Upstream miss/failure: the local archive may still cover this
           // tile (low-zoom tiles inside the region, or an offline upstream).
-          if (!localFirst) plain = await readLocal();
+          if (!localFirst && covers) plain = await readLocal();
         }
       }
 
