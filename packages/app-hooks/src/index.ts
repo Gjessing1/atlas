@@ -239,6 +239,12 @@ export {
   type SettingsAccess,
 } from './usePersistedSetting.js';
 export {
+  useOverlayPreferences,
+  type OverlayEntry,
+  type OverlayPreferences,
+  type OverlayPreferencesInput,
+} from './useOverlayPreferences.js';
+export {
   useStatus,
   groupUpstreams,
   overallSummary,

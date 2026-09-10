@@ -9,6 +9,7 @@ import {
   trafficFlowIdentify,
   trafficIdentify,
 } from '@atlas/core';
+import type { OverlayEntry } from '@atlas/app-hooks';
 import { transitVehicleIdentify } from '@atlas/transit';
 import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
 import { tappedFlowProperties } from '@atlas/traffic';
@@ -25,12 +26,11 @@ import { TRANSIT_VEHICLE_IDENTIFY_LAYERS } from './useTransitVehicleLayer.js';
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-/** An overlay the user has switched on, with their chosen opacity. */
-export interface ActiveOverlay {
-  meta: LayerMeta;
-  opacity: number;
-  /** The layer's resolved options, for the layers that declare any. */
-  options?: Record<string, string>;
+/**
+ * An overlay the user has switched on (`OverlayEntry`, the shared decision),
+ * plus what only this renderer needs.
+ */
+export interface ActiveOverlay extends OverlayEntry {
   /**
    * An extra generation marker folded into the source id (see `sourceId`).
    *

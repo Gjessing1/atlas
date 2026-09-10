@@ -1,21 +1,19 @@
 import {
-  BASEMAP_STATE_ID,
-  basemapVisible,
-  layerDefaultsOn,
-  layerOptionSignature,
+  useOverlayPreferences,
+  type OverlayEntry,
+  type OverlayPreferences,
+} from '@atlas/app-hooks';
+import {
   jsonSetting,
-  layersForProfile,
-  normalizeLayerOptions,
+  layerOptionSignature,
   overlayTileUrl,
-  OVERLAY_STATE_SETTING,
   readSetting,
   SATELLITES_ID,
   STARLINK_ID,
   type LayerMeta,
   type LayersResponse,
-  type OverlayStateMap,
 } from '@atlas/core';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useServerOrigin } from '../serverOrigin';
 import type { UserData } from '../useUserData';
@@ -41,8 +39,8 @@ const RENDERABLE_VECTOR_IDS = new Set([
  *
  * Android-only and staying that way — a browser refetches `/api/layers` on
  * every load and has nothing to cache it for. What it shares with the web is
- * the *state* map ({@link OVERLAY_STATE_SETTING}, in @atlas/core), which is the
- * value both clients read and write.
+ * the *state* map ({@link useOverlayPreferences}, over `OVERLAY_STATE_SETTING`
+ * in @atlas/core), which is the value both clients read and write.
  *
  * Decoded rather than cast: this is a cache of someone else's JSON, replayed
  * into the layer panel days later and possibly written by a backend two
@@ -65,14 +63,13 @@ const CATALOG_SETTING = jsonSetting<LayerMeta[]>({
       : undefined,
 });
 
-/** An overlay the user has switched on, ready for MapScene's RasterSource. */
-export interface ActiveOverlay {
-  meta: LayerMeta;
-  opacity: number;
+/**
+ * An overlay the user has switched on (`OverlayEntry`, the shared decision),
+ * ready for MapScene's RasterSource.
+ */
+export interface ActiveOverlay extends OverlayEntry {
   /** Absolute {z}/{x}/{y} template on the current server origin. */
   tileUrlTemplate: string;
-  /** The layer's resolved options, for the layers that declare any. */
-  options: Record<string, string>;
   /**
    * Source id, carrying the option variant so that picking a different species
    * remounts the source instead of leaving the old tiles in place.
@@ -80,46 +77,24 @@ export interface ActiveOverlay {
   sourceId: string;
 }
 
-export interface OverlaysController {
-  /** The active map profile, so the sheet can show its standing caveat. */
-  profileId: string;
-  /**
-   * The derived potential surface currently switched on, with its resolved
-   * target — what the preparation pill prepares and what a map tap asks to have
-   * explained. At most one; see the web twin in useLayerCatalog.
-   */
-  derived: { meta: LayerMeta; layer: string; target: string } | null;
+export interface OverlaysController extends OverlayPreferences {
   /** Full cached/live catalog; profile settings configure inactive profiles from it. */
   allCatalog: LayerMeta[];
-  /** The catalog narrowed to the active map profile. */
-  catalog: LayerMeta[];
-  state: OverlayStateMap;
   overlays: ActiveOverlay[];
-  /** Resolve an explicit choice against the active profile's default. */
-  isOn: (id: string) => boolean;
-  /**
-   * Whether the vector basemap draws under the overlays in this profile — on
-   * until the user says otherwise, and per profile for the same reason
-   * visibility is: reading an 1826 amtskart with nothing under it is a
-   * Curiosities decision, not a global one. Web twin in useLayerCatalog.
-   */
-  basemapOn: boolean;
-  setBasemapOn: (on: boolean) => void;
-  opacityFor: (id: string) => number;
-  /** The layer's resolved variant (see `LayerMeta.options`), defaults filled in. */
-  optionsFor: (meta: LayerMeta) => Record<string, string>;
-  setOption: (meta: LayerMeta, key: string, value: string) => void;
-  setOn: (id: string, on: boolean) => void;
-  setProfileOn: (profileId: string, id: string, on: boolean) => void;
-  toggle: (id: string) => void;
-  setOpacity: (id: string, opacity: number) => void;
 }
 
 /**
- * The overlay catalog + per-device panel state (Android twin of the web's
- * useLayerCatalog). The catalog comes from GET /api/layers and is cached in a
- * local setting — offline-first: the last-seen catalog keeps the sheet and any
- * cached tiles usable without connectivity.
+ * The overlay catalog + per-device panel state (Android half of the shared
+ * overlay controller). The preferences themselves — defaults, per-profile keys,
+ * opacity, variants, the basemap switch and the active derived surface — are
+ * `useOverlayPreferences` in @atlas/app-hooks, so the phone and the browser
+ * cannot disagree about what is on (DR4).
+ *
+ * What is Android's own is offline-first catalog handling: GET /api/layers is
+ * cached in a local setting, and the last-seen catalog keeps the sheet and any
+ * cached tiles usable without connectivity. So is the renderability filter and
+ * the tile URL / MapLibre source identity below, which are about drawing rather
+ * than about choosing.
  */
 export function useOverlays(
   data: UserData,
@@ -129,16 +104,11 @@ export function useOverlays(
 ): OverlaysController {
   const origin = useServerOrigin();
   const [allLayers, setAllLayers] = useState<LayerMeta[]>([]);
-  const [state, setState] = useState<OverlayStateMap>({});
   const { status, getSetting, setSetting } = data;
 
   useEffect(() => {
     if (status !== 'ready') return;
     let cancelled = false;
-    void getSetting(OVERLAY_STATE_SETTING.key).then((raw) => {
-      if (cancelled) return;
-      setState(readSetting(OVERLAY_STATE_SETTING, raw));
-    });
     void getSetting(CATALOG_SETTING.key).then((raw) => {
       if (cancelled) return;
       const cached = readSetting(CATALOG_SETTING, raw);
@@ -170,109 +140,6 @@ export function useOverlays(
     };
   }, [origin, setSetting]);
 
-  const update = useCallback(
-    (mutate: (cur: OverlayStateMap) => OverlayStateMap) => {
-      setState((cur) => {
-        const next = mutate(cur);
-        void setSetting(OVERLAY_STATE_SETTING.key, OVERLAY_STATE_SETTING.encode(next));
-        return next;
-      });
-    },
-    [setSetting],
-  );
-
-  const stateKey = useCallback((forProfile: string, id: string) => `${forProfile}:${id}`, []);
-
-  const setOn = useCallback(
-    (id: string, on: boolean) =>
-      update((cur) => ({
-        ...cur,
-        [stateKey(profileId, id)]: { ...cur[stateKey(profileId, id)], on },
-      })),
-    [update, stateKey, profileId],
-  );
-
-  const setProfileOn = useCallback(
-    (forProfile: string, id: string, on: boolean) =>
-      update((cur) => ({
-        ...cur,
-        [stateKey(forProfile, id)]: { ...cur[stateKey(forProfile, id)], on },
-      })),
-    [update, stateKey],
-  );
-
-  const isOn = useCallback(
-    (id: string) =>
-      state[stateKey(profileId, id)]?.on ??
-      (customizedLayers
-        ? preferredLayers.includes(id)
-        : (state[id]?.on ?? layerDefaultsOn(id, profileId))),
-    [state, stateKey, profileId, customizedLayers, preferredLayers],
-  );
-
-  const toggle = useCallback((id: string) => setOn(id, !isOn(id)), [setOn, isOn]);
-
-  // The basemap is not a catalog row, so it borrows `setOn`'s key shape but not
-  // `isOn`: that resolves a missing entry against the profile's `defaultLayers`
-  // and would answer *off*, while the basemap's default is on. `basemapVisible`
-  // owns that rule for both clients.
-  const basemapOn = basemapVisible(state, profileId);
-  const setBasemapOn = useCallback(
-    (on: boolean) =>
-      update((cur) => ({
-        ...cur,
-        [stateKey(profileId, BASEMAP_STATE_ID)]: {
-          ...cur[stateKey(profileId, BASEMAP_STATE_ID)],
-          on,
-        },
-      })),
-    [update, stateKey, profileId],
-  );
-
-  const setOpacity = useCallback(
-    (id: string, opacity: number) =>
-      update((cur) => ({
-        ...cur,
-        [stateKey(profileId, id)]: {
-          on: cur[stateKey(profileId, id)]?.on ?? isOn(id),
-          opacity,
-        },
-      })),
-    [update, stateKey, profileId, isOn],
-  );
-
-  const opacityFor = useCallback(
-    (id: string) =>
-      state[stateKey(profileId, id)]?.opacity ??
-      state[id]?.opacity ??
-      allLayers.find((meta) => meta.id === id)?.defaultOpacity ??
-      1,
-    [state, stateKey, profileId, allLayers],
-  );
-
-  // A variant belongs to the layer, not to the profile it is viewed in — the
-  // species you hunt does not change because you switched to Hike — so it is
-  // stored under the plain layer id, unlike on/off and opacity.
-  const optionsFor = useCallback(
-    (meta: LayerMeta) => normalizeLayerOptions(meta.options, state[meta.id]?.options),
-    [state],
-  );
-
-  const setOption = useCallback(
-    (meta: LayerMeta, key: string, value: string) =>
-      update((cur) => ({
-        ...cur,
-        [meta.id]: {
-          ...cur[meta.id],
-          options: normalizeLayerOptions(meta.options, {
-            ...cur[meta.id]?.options,
-            [key]: value,
-          }),
-        },
-      })),
-    [update],
-  );
-
   // Vector overlays are only offered once MapScene can draw them — a toggle
   // that draws nothing is worse than not offering it. Both current ones do:
   // the Statskog jaktfelt polygons (useHuntingFields) and the ATK cameras
@@ -283,53 +150,25 @@ export function useOverlays(
     [allLayers],
   );
 
-  // A contextual layer must stop drawing outside its profile; its explicit
-  // state stays stored, so switching back restores the user's choice.
-  const catalog = useMemo(
-    () => layersForProfile(renderableLayers, profileId),
-    [renderableLayers, profileId],
-  );
+  const preferences = useOverlayPreferences(data, {
+    catalog: renderableLayers,
+    profileId,
+    preferredLayers,
+    customizedLayers,
+  });
 
   const overlays = useMemo(
     () =>
-      catalog
-        .filter((meta) => isOn(meta.id))
-        .map((meta) => {
-          const options = optionsFor(meta);
-          const signature = layerOptionSignature(options);
-          return {
-            meta,
-            opacity: opacityFor(meta.id),
-            tileUrlTemplate: overlayTileUrl(origin, meta, options),
-            options,
-            sourceId: `atlas-overlay-${meta.id}${signature ? `--${signature}` : ''}`,
-          };
-        }),
-    [catalog, origin, isOn, opacityFor, optionsFor],
+      preferences.overlays.map((overlay) => {
+        const signature = layerOptionSignature(overlay.options);
+        return {
+          ...overlay,
+          tileUrlTemplate: overlayTileUrl(origin, overlay.meta, overlay.options),
+          sourceId: `atlas-overlay-${overlay.meta.id}${signature ? `--${signature}` : ''}`,
+        };
+      }),
+    [preferences.overlays, origin],
   );
 
-  const derived = useMemo(() => {
-    const active = overlays.find((overlay) => overlay.meta.derived);
-    if (!active) return null;
-    return { meta: active.meta, layer: active.meta.id, target: active.options['target'] ?? '' };
-  }, [overlays]);
-
-  return {
-    profileId,
-    derived,
-    allCatalog: renderableLayers,
-    catalog,
-    state,
-    overlays,
-    isOn,
-    basemapOn,
-    setBasemapOn,
-    opacityFor,
-    optionsFor,
-    setOption,
-    setOn,
-    setProfileOn,
-    toggle,
-    setOpacity,
-  };
+  return { ...preferences, allCatalog: renderableLayers, overlays };
 }

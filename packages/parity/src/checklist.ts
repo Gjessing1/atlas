@@ -33,6 +33,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'map-layer-quick-switch',
     surface: 'map',
     capability: 'Turn an overlay on or off from the map corner',
+    hook: 'useOverlayPreferences',
     web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'layer-switch-menu' },
     android: {
       file: 'apps/android/src/ui/MapActivityControls.tsx',
@@ -121,6 +122,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'map-basemap-off',
     surface: 'map',
     capability: 'Turn the basemap off and read the overlays on their own, per profile',
+    hook: 'useOverlayPreferences',
     web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'layer-switch-base' },
     android: {
       file: 'apps/android/src/ui/MapActivityControls.tsx',

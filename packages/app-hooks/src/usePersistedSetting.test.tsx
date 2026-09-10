@@ -159,6 +159,71 @@ describe('usePersistedSetting', () => {
     await waitFor(() => expect(getSetting).toHaveBeenCalledWith(def.key));
   });
 
+  /**
+   * The window between "the UI is live" and "storage is open" is real — OPFS on
+   * the web, SQLite on the phone — and a user can act inside it. This is the
+   * regression that found it: a layer switched on in the first second used to
+   * flip itself back off a moment later, when the stored row landed and won.
+   */
+  it('replays an edit made before the read onto the stored value', async () => {
+    const def = jsonSetting<Record<string, boolean>>({
+      key: uniq(),
+      scope: 'local',
+      defaultValue: {},
+      parse: (value) =>
+        typeof value === 'object' && value ? (value as Record<string, boolean>) : undefined,
+    });
+    const rows: Record<string, string> = { [def.key]: JSON.stringify({ hillshade: true }) };
+    let release: ((value: string | null) => void) | undefined;
+    const seam: SettingsAccess = {
+      status: 'ready',
+      getSetting: () =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+      setSetting: (key: string, value: string) => {
+        rows[key] = value;
+        return Promise.resolve(true);
+      },
+    };
+    const { result } = renderHook(() => usePersistedSetting(seam, def));
+    // The user switches a layer on while the read is still in flight.
+    await act(async () => {
+      await result.current.setValue((current) => ({ ...current, satellites: true }));
+    });
+    expect(result.current.value).toEqual({ satellites: true });
+    await act(async () => {
+      release?.(rows[def.key]!);
+    });
+    // The edit survives, and so does everything else the row already held —
+    // writing the pre-read value wholesale would have erased `hillshade`.
+    expect(result.current.value).toEqual({ hillshade: true, satellites: true });
+    expect(result.current.loaded).toBe(true);
+    // And it is saved now that it can be: the edit is not merely in-session.
+    expect(JSON.parse(rows[def.key]!)).toEqual({ hillshade: true, satellites: true });
+  });
+
+  it('keeps an absolute pre-read value, replacing what was stored', async () => {
+    const def = stringSetting({ key: uniq(), scope: 'local', defaultValue: '' });
+    let release: ((value: string | null) => void) | undefined;
+    const seam: SettingsAccess = {
+      status: 'ready',
+      getSetting: () =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+      setSetting: () => Promise.resolve(true),
+    };
+    const { result } = renderHook(() => usePersistedSetting(seam, def));
+    await act(async () => {
+      await result.current.setValue('chosen');
+    });
+    await act(async () => {
+      release?.('stored');
+    });
+    expect(result.current.value).toBe('chosen');
+  });
+
   it('ignores a read that lands after the hook moved on', async () => {
     const def = stringSetting({ key: uniq(), scope: 'local', defaultValue: '' });
     let release: ((value: string | null) => void) | undefined;

@@ -63,9 +63,12 @@ export interface PersistedSetting<T> {
  * Storage that is not ready yet is not an error: the value reads as the
  * default, writes are accepted in memory so the UI stays live (a toggle in a
  * second tab still toggles), and `loaded` stays false so nothing derived
- * overwrites a row it has not seen. If storage never arrives, that is exactly
- * the "works this session, gone on reload" behaviour the panels already
- * describe.
+ * overwrites a row it has not seen. An edit made in that window is not lost
+ * either — it is kept as a mutation and replayed onto the stored row when the
+ * read lands (see `pending`), which is what stops a layer switched on in the
+ * first second from switching itself back off. If storage never arrives, that
+ * is exactly the "works this session, gone on reload" behaviour the panels
+ * already describe.
  */
 export function usePersistedSetting<T>(
   access: SettingsAccess,
@@ -81,8 +84,6 @@ export function usePersistedSetting<T>(
   valueRef.current = value;
   const definitionRef = useRef(definition);
   definitionRef.current = definition;
-  const statusRef = useRef(status);
-  statusRef.current = status;
 
   /**
    * The key whose stored value has been read, so it is read *once*.
@@ -96,6 +97,23 @@ export function usePersistedSetting<T>(
    */
   const loadedKey = useRef<string | null>(null);
 
+  /**
+   * Edits made before the stored row was read, kept as the *mutations* they
+   * were so they can be replayed onto that row when it arrives.
+   *
+   * Storage takes a moment to open (OPFS on the web, SQLite on the phone) and
+   * the UI is live before it does, so a user can act inside that window. Two
+   * obvious answers are both wrong: letting the read win reverts the edit a
+   * second after it was made (a layer switched on flips itself back off), and
+   * letting the edit win means writing a value derived from the *default* over
+   * a row nobody has looked at — for a map-shaped setting like the overlay
+   * state that is every other preference in it, gone. Replaying the mutation
+   * onto what was stored is the only answer that keeps both.
+   */
+  const pending = useRef<((current: T) => T)[]>([]);
+  const setSettingRef = useRef(setSetting);
+  setSettingRef.current = setSetting;
+
   useEffect(() => {
     if (status !== 'ready' || loadedKey.current === definition.key) return;
     let cancelled = false;
@@ -103,8 +121,16 @@ export function usePersistedSetting<T>(
       .then((raw) => {
         if (cancelled) return;
         loadedKey.current = definition.key;
-        setStateValue(readSetting(definition, raw));
+        const stored = readSetting(definition, raw);
+        const replayed = pending.current.reduce((current, mutate) => mutate(current), stored);
+        pending.current = [];
+        valueRef.current = replayed;
+        setStateValue(replayed);
         setLoaded(true);
+        // An edit that could not be saved when it was made can be saved now.
+        if (replayed !== stored) {
+          void setSettingRef.current(definition.key, definition.encode(replayed));
+        }
       })
       .catch(() => {
         // Reading failed (storage went away mid-load). The default stands and
@@ -124,19 +150,18 @@ export function usePersistedSetting<T>(
         typeof next === 'function' ? (next as (current: T) => T)(valueRef.current) : next;
       valueRef.current = resolved;
       setStateValue(resolved);
-      setLoaded(true);
-      const ready = statusRef.current === 'ready';
-      const saved = ready ? ((await setSetting(def.key, def.encode(resolved))) ?? true) : false;
-      // A write that *landed* is also a load: the stored row is now this value,
-      // so a later read cannot un-know it, and re-running the effect is a
-      // wasted query rather than a lost edit.
-      //
-      // A write made before storage was ready settles nothing. It reached no
-      // database — the toggle works for this session, as the panels promise —
-      // and the row still on disk is the truth about what is saved, so the
-      // first real read must still happen and must still win.
-      if (saved) loadedKey.current = def.key;
-      return saved;
+      // The stored row has not been read yet — storage is still opening, or its
+      // read is in flight. This edit was resolved against the *default*, so
+      // writing it now would put a default-shaped value over a row nobody has
+      // looked at; for a map-shaped setting like the overlay state that is
+      // every other preference in it, gone. Queue the mutation instead and let
+      // the read replay it (see `pending`). It reached no database yet, so the
+      // honest answer is `false`.
+      if (loadedKey.current !== def.key) {
+        pending.current.push(typeof next === 'function' ? (next as (c: T) => T) : () => resolved);
+        return false;
+      }
+      return (await setSetting(def.key, def.encode(resolved))) ?? true;
     },
     [setSetting],
   );
