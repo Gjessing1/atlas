@@ -169,21 +169,41 @@ async function readIndex(): Promise<NavDiagnosticTrip[]> {
   const names = (await quietly(() => FileSystem.readDirectoryAsync(DIR))) ?? [];
   const present = new Set(names.filter((name) => name.endsWith('.jsonl')));
   const reconciled: NavDiagnosticTrip[] = [];
+  const abandoned: NavDiagnosticTrip[] = [];
   for (const trip of stored ?? []) {
     if (!trip || typeof trip.file !== 'string' || !present.has(trip.file)) continue;
     present.delete(trip.file);
-    // A trip with no end never got one: the process died inside it. Saying so
-    // is the point — that is the log a crash report needs, and it is now
-    // eligible for the same retention and auto-upload as any finished trip.
-    reconciled.push(
-      trip.endedAt === null ? { ...trip, endedAt: trip.startedAt, outcome: 'interrupted' } : trip,
-    );
+    if (trip.endedAt !== null) {
+      reconciled.push(trip);
+      continue;
+    }
+    // A trip with no end never got one, because the process died inside it —
+    // or because it is the stub that turning recording on opens so that a
+    // switch flipped mid-drive still records the rest of that drive. Size
+    // separates them, and it matters both ways: a stub left in the list would
+    // eat a retention slot per launch and quietly evict the drives this exists
+    // to keep, while a real interrupted trip is exactly the log a crash report
+    // needs. The size has to come from the file — the index entry was written
+    // when the trip opened and the writes that followed never got to update it,
+    // which is what "the process died" means.
+    const info = await quietly(() => FileSystem.getInfoAsync(`${DIR}${trip.file}`));
+    const bytes = info?.exists && typeof info.size === 'number' ? info.size : 0;
+    const interrupted = {
+      ...trip,
+      bytes,
+      endedAt: trip.startedAt,
+      outcome: 'interrupted' as const,
+    };
+    (bytes >= MIN_KEEP_BYTES ? reconciled : abandoned).push(interrupted);
   }
   // Files the index has never heard of (an index write lost to a kill) are
   // kept rather than orphaned — the recording is the valuable half.
   for (const file of present) reconciled.push(adoptOrphan(file));
   reconciled.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   index = reconciled;
+  for (const trip of abandoned) {
+    await quietly(() => FileSystem.deleteAsync(`${DIR}${trip.file}`, { idempotent: true }));
+  }
   await migrateLegacyLog();
   return reconciled;
 }
@@ -424,7 +444,15 @@ export function markNavigationDiagnostic(note?: string): Promise<void> {
 export async function listNavigationDiagnosticTrips(): Promise<NavDiagnosticTrip[]> {
   await writeQueue.catch(() => undefined);
   const trips = await readIndex();
-  return trips.slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return trips
+    .filter(
+      // Hide the still-open stub until it holds an actual drive. The file that
+      // turning recording on opens is real and useful — it is what catches a
+      // switch flipped mid-drive — but until something is recorded into it,
+      // listing it would offer the traveller a trip that is not one.
+      (trip) => trip.endedAt !== null || trip.bytes >= MIN_KEEP_BYTES,
+    )
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 export async function navigationDiagnosticSize(): Promise<number> {

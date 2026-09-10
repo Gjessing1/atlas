@@ -72,12 +72,25 @@ type Diagnostics = typeof DiagnosticsModule;
 
 const uploaded = vi.fn();
 
+/** The module instance the current test is driving, so the next can drain it. */
+let live: Diagnostics | null = null;
+
 /** A fresh copy of the module — its trip state is deliberately module-level. */
 async function load(): Promise<Diagnostics> {
-  vi.resetModules();
+  // Writes are queued and fire-and-forget by design, so let the previous
+  // test's drain before clearing the disk under it.
+  await live?.listNavigationDiagnosticTrips();
   fs.reset();
+  return reload();
+}
+
+/** The next app launch: a new module instance over the same stored files. */
+async function reload(): Promise<Diagnostics> {
+  await live?.listNavigationDiagnosticTrips();
+  vi.resetModules();
   const module = await import('./diagnostics');
   module.configureNavigationDiagnostics(true, 'driver@example.com');
+  live = module;
   return module;
 }
 
@@ -261,8 +274,34 @@ describe('navigation diagnostics storage', () => {
       outcome: 'ended-early',
       report: { samples: 300, distanceM: 900, durationMs: 300_000, routeChanges: 0 },
     });
+    await diagnostics.listNavigationDiagnosticTrips();
     const [file] = tripFiles();
     expect(fs.files.get(file!)).toContain('"note":"roundabout was wrong"');
+  });
+
+  it('does not let the stub each launch opens eat the retention budget', async () => {
+    const diagnostics = await load();
+    // Turning recording on opens a file at once, so a switch flipped mid-drive
+    // still records the rest of that drive — but an empty one is not a trip.
+    expect(await diagnostics.listNavigationDiagnosticTrips()).toHaveLength(0);
+    expect(tripFiles()).toHaveLength(1);
+
+    const relaunched = await reload();
+    expect(await relaunched.listNavigationDiagnosticTrips()).toHaveLength(0);
+    // The previous launch's stub is gone from disk; only this launch's remains.
+    expect(tripFiles()).toHaveLength(1);
+  });
+
+  it('keeps a trip the process died inside, and calls it interrupted', async () => {
+    const diagnostics = await load();
+    diagnostics.navigationDiagnosticsSink({ event: 'trip-start', trip: 'crashed', profile: 'car' });
+    driveFor(diagnostics, 300);
+    await diagnostics.listNavigationDiagnosticTrips();
+
+    const relaunched = await reload();
+    const [trip] = await relaunched.listNavigationDiagnosticTrips();
+    expect(trip?.id).toBe('crashed');
+    expect(trip?.outcome).toBe('interrupted');
   });
 
   it('records nothing at all while the switch is off', async () => {
