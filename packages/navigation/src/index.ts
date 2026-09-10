@@ -4,6 +4,7 @@ export {
   navLineProgress,
   type NavFix,
   type NavigationOptions,
+  type NavMatchTrace,
   type NavState,
   type NavStatus,
   type NavUpdate,
@@ -78,3 +79,34 @@ export { maneuverArrowsGeoJSON } from './overlays.js';
 export { laneGlyphs, laneLabel, type LaneGlyph } from './lanes.js';
 export { shortManeuverText, type ShortenableInstruction } from './instructions.js';
 export { roundaboutGlyph, ROUNDABOUT_RING, type RoundaboutGlyph } from './roundabout.js';
+export {
+  compactMatchTrace,
+  compactNavState,
+  compactPosition,
+  FIX_GAP_MS,
+  NavRouteLedger,
+  NavTripStats,
+  navTripSample,
+  navTripSampleFromLog,
+  routeDigest,
+  routeFingerprint,
+  type CompactNavState,
+  type NavDiagnosticRecord,
+  type NavDiagnosticsSink,
+  type NavRouteFingerprint,
+  type NavRouteGeometry,
+  type NavRouteReason,
+  type NavTripOutcome,
+  type NavTripReport,
+  type NavTripSample,
+} from './diagnostics.js';
+export {
+  analyzeNavLog,
+  formatLogDuration,
+  formatNavLogReport,
+  type NavLogAnalysis,
+  type NavLogFormatOptions,
+  type NavLogIncident,
+  type NavLogRoute,
+  type NavLogTrip,
+} from './navlog.js';

@@ -71,7 +71,10 @@ export function registerDiagnosticsApi(
     '/api/diagnostics/navigation',
     {
       bodyLimit: MAX_LOG_BYTES,
-      config: { rateLimit: { max: 3, timeWindow: '1 hour' } },
+      // Generous enough for a phone with auto-upload on: one POST per finished
+      // trip, plus the retries a drive that ended out of coverage leaves
+      // pending. Still low enough that this route cannot be used as storage.
+      config: { rateLimit: { max: 40, timeWindow: '1 hour' } },
     },
     async (request, reply: FastifyReply) => {
       if (typeof request.body !== 'string' || !validNavigationLog(request.body)) {

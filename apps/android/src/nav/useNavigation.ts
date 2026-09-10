@@ -21,7 +21,7 @@ import {
 } from '../routing/offlineNvdb';
 import { makeRouteProvider, makeTraceTransport } from '../routing/offlineRouting';
 import { useServerOrigin } from '../serverOrigin';
-import { logNavigationDiagnostic } from './diagnostics';
+import { logNavigationDiagnostic, navigationDiagnosticsSink } from './diagnostics';
 import {
   NAV_LOCATION_TASK,
   readPersistedLocationFix,
@@ -39,12 +39,35 @@ const LAST_KNOWN_MAX_AGE_MS = 120_000;
  */
 let utterances = 0;
 
+/**
+ * Duplicate deliveries collapsed into a counter.
+ *
+ * The redundant foreground and background streams deliver the same fix twice
+ * by design, and logging each rejection line by line made 2665 of the uploaded
+ * log's 4055 `gps-stream` records — 18 % of the file — saying nothing but "the
+ * coordinator worked". The tally still proves that, in one line per burst.
+ */
+let duplicateFixes = 0;
+
+function logStreamTransition(transition: { kind: string; source?: string }): void {
+  if (transition.kind === 'fix-duplicate') {
+    duplicateFixes++;
+    return;
+  }
+  if (duplicateFixes > 0) {
+    const count = duplicateFixes;
+    duplicateFixes = 0;
+    void logNavigationDiagnostic({ event: 'gps-duplicates', count });
+  }
+  void logNavigationDiagnostic({ event: 'gps-stream', ...transition });
+}
+
 const locationWatch = new LocationWatchCoordinator(
   NAV_LOCATION_TASK,
   Location,
   setLocationHandler,
   readPersistedLocationFix,
-  (transition) => void logNavigationDiagnostic({ event: 'gps-stream', ...transition }),
+  logStreamTransition,
 );
 
 function focus(on: boolean): void {
@@ -219,25 +242,17 @@ export function useNavigation(): NavController {
     const elevation = httpElevationProfile({ baseUrl: serverOrigin });
     return {
       provider: {
+        // The controller records every request with the *reason* it was made
+        // and the fingerprint of what came back (ROADMAP §1.2); all that is
+        // left worth noting here is where the route was actually served from.
         route: async (query, signal) => {
-          void logNavigationDiagnostic({ event: 'route-request', query });
-          try {
-            const routed = await provider.route(query, signal);
-            const result = query.details
-              ? await enrichPlannedResult(routed, query, trace, elevation, signal)
-              : routed;
-            void logNavigationDiagnostic({ event: 'route-calculated', query, result });
-            return result;
-          } catch (error) {
-            void logNavigationDiagnostic({
-              event: 'route-failed',
-              query,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            throw error;
-          }
+          const routed = await provider.route(query, signal);
+          return query.details
+            ? await enrichPlannedResult(routed, query, trace, elevation, signal)
+            : routed;
         },
       },
+      diagnostics: navigationDiagnosticsSink,
       trafficClosures: httpTrafficClosures(serverOrigin),
       // The same corridor measurements the provider prices a new route with,
       // asked again mid-drive so the trip being followed is re-priced too.

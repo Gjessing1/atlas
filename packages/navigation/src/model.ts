@@ -77,6 +77,15 @@ export interface SectionControlState {
 /** The maneuver the traveller is approaching. */
 export interface UpcomingManeuver {
   instruction: RouteInstruction;
+  /**
+   * Position of this maneuver in the route's own instruction list. The
+   * instruction *objects* are not stable — re-pricing a trip mid-drive
+   * replaces every one of them ({@link NavigationSession.setSchedule}) — so
+   * anything that needs to say *which* maneuver this is across time (voice
+   * prompts, the diagnostic log's per-fix records) must carry the index
+   * rather than compare references.
+   */
+  index: number;
   /** Distance (m) from the current snapped position to the maneuver point. */
   distanceToM: number;
 }
@@ -241,11 +250,56 @@ export interface VoicePrompt {
   thresholdM: number;
 }
 
+/**
+ * Why the matcher decided what it decided, for one fix.
+ *
+ * The state says *what* the session concluded; this says what it concluded it
+ * from. Reconstructing a wrong-way episode from a log used to mean comparing
+ * raw headings against route geometry by hand — the counters and thresholds
+ * that actually fired were nowhere in the record (ROADMAP §1.2). Diagnostics
+ * only: nothing in the app reads it, and it is absent from a `tick()` update
+ * because a reckoned position was matched against nothing.
+ */
+export interface NavMatchTrace {
+  /** Cumulative distance (m) along the route the fix matched to. */
+  alongM: number;
+  /** Which polyline segment the snap landed on. */
+  segmentIndex: number;
+  /** Perpendicular distance (m) from the raw fix to the route. */
+  crossTrackM: number;
+  /** Reported accuracy (m), or null when the platform gives none. */
+  accuracyM: number | null;
+  /** Whether the fix was accurate enough to move the off-route/arrival tallies. */
+  accurate: boolean;
+  /** GPS course used for wrong-way detection (null when not moving). */
+  headingDeg: number | null;
+  /** Route direction compared against it, or null when it was not measured. */
+  tangentDeg: number | null;
+  /** Signed heading-vs-route divergence (deg), or null without both above. */
+  headingDivergenceDeg: number | null;
+  /** Consecutive off-corridor fixes, and the count that would trip off-route. */
+  offRouteCount: number;
+  wrongWayCount: number;
+  graceUpdates: number;
+  /** The corridors actually in force for this profile. */
+  corridorM: number;
+  wrongWayDeg: number;
+  /** Display corridor: inside it the puck is glued to the line. */
+  snapCorridorM: number;
+  snapped: boolean;
+  /** Whether this fix left dead reckoning armed for the next GPS gap. */
+  reckonArmed: boolean;
+  /** Suppressed wrong-way because the position is inside a roundabout. */
+  inRoundabout: boolean;
+}
+
 /** The result of feeding one position fix to a NavigationSession. */
 export interface NavUpdate {
   state: NavState;
   /** Voice prompts newly triggered by this fix (usually zero or one). */
   prompts: VoicePrompt[];
+  /** Why the matcher decided as it did — diagnostics only; see {@link NavMatchTrace}. */
+  match?: NavMatchTrace;
 }
 
 /** Tunables for route following; every field has a sensible default. */

@@ -1,5 +1,6 @@
 import {
   fmtClock,
+  fmtDistanceM,
   layersForProfile,
   MAP_PROFILES,
   MAX_NAV_WIDGETS,
@@ -26,6 +27,7 @@ import {
   type ThemeModeController,
 } from '@atlas/app-hooks';
 import type { UpstreamHealth } from '@atlas/core';
+import { formatLogDuration } from '@atlas/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -44,6 +46,7 @@ import { packJobAction, packJobLabel } from '../regions/downloads';
 import type { LocalPack } from '../regions/packs';
 import { deletePack, fetchAvailableRegions } from '../regions/packs';
 import type { NavPipController } from '../nav/useNavigationPip';
+import type { NavDiagnosticTrip } from '../nav/diagnostics';
 import type { NavigationDiagnosticsController } from '../nav/useNavigationDiagnostics';
 import type { OfflinePrefsController } from '../regions/useOfflinePrefs';
 import type { PackDownloadsController } from '../regions/usePackDownloads';
@@ -1082,9 +1085,113 @@ function ProfileSection({
 }
 
 function diagnosticSize(bytes: number): string {
-  if (bytes < 1024) return bytes === 0 ? 'No log recorded yet' : `${bytes} B recorded`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB recorded`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB recorded`;
+  if (bytes < 1024) return bytes === 0 ? 'Nothing recorded yet' : `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const TRIP_OUTCOME_LABEL: Record<string, string> = {
+  arrived: 'arrived',
+  'ended-early': 'ended early',
+  failed: 'failed to start',
+  interrupted: 'interrupted',
+};
+
+/** "14:43 · 27m 41s · 34.2 km · 2 reroutes · ended early" */
+function tripSummaryLine(trip: NavDiagnosticTrip): string {
+  const parts: string[] = [];
+  if (trip.durationMs > 0) parts.push(formatLogDuration(trip.durationMs));
+  if (trip.distanceM > 0) parts.push(fmtDistanceM(trip.distanceM));
+  if (trip.routeChanges > 0) {
+    parts.push(`${trip.routeChanges} reroute${trip.routeChanges === 1 ? '' : 's'}`);
+  }
+  parts.push(diagnosticSize(trip.bytes));
+  parts.push(TRIP_OUTCOME_LABEL[trip.outcome ?? ''] ?? 'recording');
+  return parts.join(' · ');
+}
+
+/**
+ * One recorded trip, with the three things that can be done to it.
+ *
+ * Per trip rather than per log: a single file meant the drive a report was
+ * about had usually been overwritten by the next one before anybody asked for
+ * it (ROADMAP §1.2), so the list is the feature — it is how the traveller says
+ * *which* drive went wrong.
+ */
+function DiagnosticTripRow({
+  trip,
+  diagnostics,
+  onMessage,
+}: {
+  trip: NavDiagnosticTrip;
+  diagnostics: NavigationDiagnosticsController;
+  onMessage: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const startedMs = Date.parse(trip.startedAt);
+  const when = Number.isFinite(startedMs)
+    ? `${new Date(startedMs).toLocaleDateString()} ${fmtClock(startedMs)}`
+    : trip.startedAt;
+
+  return (
+    <View style={styles.tripRow} testID={`nav-diagnostics-trip-${trip.id}`}>
+      <Text style={styles.rowText} numberOfLines={1}>
+        {when}
+        {trip.profile ? ` · ${trip.profile}` : ''}
+      </Text>
+      <Text style={styles.muted} numberOfLines={1}>
+        {tripSummaryLine(trip)}
+      </Text>
+      {trip.uploaded ? (
+        <Text style={styles.muted} numberOfLines={1}>
+          Uploaded · reference {trip.uploaded}
+        </Text>
+      ) : trip.uploadError ? (
+        <Text style={styles.error} numberOfLines={2}>
+          {trip.uploadError}
+        </Text>
+      ) : null}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={[styles.button, (busy || trip.uploaded !== null) && styles.buttonDisabled]}
+          disabled={busy || trip.uploaded !== null}
+          onPress={() => {
+            setBusy(true);
+            void diagnostics
+              .upload(trip.id)
+              .then((reference) => onMessage(`Uploaded. Reference for support: ${reference}`))
+              .catch((error: unknown) =>
+                onMessage(error instanceof Error ? error.message : 'Diagnostic upload failed.'),
+              )
+              .finally(() => setBusy(false));
+          }}
+          testID={`nav-diagnostics-upload-${trip.id}`}
+        >
+          <Text style={styles.buttonText}>
+            {trip.uploaded ? 'Uploaded' : busy ? 'Uploading…' : 'Upload'}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          onPress={() => {
+            void diagnostics.share(trip.id).then((shared) => {
+              if (!shared) onMessage('That trip is no longer on this device.');
+            });
+          }}
+          testID={`nav-diagnostics-share-${trip.id}`}
+        >
+          <Text style={styles.buttonQuietText}>Share</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          onPress={() => void diagnostics.remove(trip.id)}
+          testID={`nav-diagnostics-delete-${trip.id}`}
+        >
+          <Text style={styles.buttonQuietText}>Delete</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 }
 
 function NavigationDiagnosticsSection({
@@ -1093,7 +1200,7 @@ function NavigationDiagnosticsSection({
   diagnostics: NavigationDiagnosticsController;
 }) {
   const [message, setMessage] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const pending = diagnostics.trips.filter((trip) => trip.uploaded === null).length;
 
   return (
     <View>
@@ -1110,68 +1217,53 @@ function NavigationDiagnosticsSection({
       </View>
       <Text style={styles.muted}>
         Saves raw GPS fixes, accuracy, speed and heading; the calculated route and maneuvers; route
-        matching, dead reckoning, service handoffs and reroutes. The switch syncs with your account.
-        Logs stay on this phone until you explicitly upload, share or clear them.
+        matching, dead reckoning, service handoffs, reroutes and the voice prompts you hear. One log
+        per trip, kept until the list below fills up. Long-press the guidance banner while driving
+        to mark a moment. The switches sync with your account; the logs stay on this phone.
       </Text>
-      <Text style={styles.muted}>{diagnosticSize(diagnostics.sizeBytes)}.</Text>
-      <View style={styles.buttonRow}>
-        <Pressable
-          style={[
-            styles.button,
-            (diagnostics.sizeBytes === 0 || uploading) && styles.buttonDisabled,
-          ]}
-          disabled={diagnostics.sizeBytes === 0 || uploading}
-          onPress={() => {
+      <View style={styles.switchRow}>
+        <Text style={styles.rowText}>Upload finished trips automatically</Text>
+        <Switch
+          value={diagnostics.autoUpload}
+          onValueChange={(on) => {
             setMessage(null);
-            setUploading(true);
-            void diagnostics
-              .upload()
-              .then((reference) =>
-                setMessage(`Uploaded. Send this reference to support: ${reference}`),
-              )
-              .catch((error) =>
-                setMessage(error instanceof Error ? error.message : 'Diagnostic upload failed.'),
-              )
-              .finally(() => setUploading(false));
+            diagnostics.setAutoUpload(on);
           }}
-          testID="nav-diagnostics-upload"
-        >
-          <Text style={styles.buttonText}>{uploading ? 'Uploading…' : 'Upload to Atlas'}</Text>
-        </Pressable>
+          testID="nav-diagnostics-auto-upload"
+        />
       </View>
-      <View style={styles.buttonRow}>
-        <Pressable
-          style={[
-            styles.button,
-            styles.buttonQuiet,
-            diagnostics.sizeBytes === 0 && styles.buttonDisabled,
-          ]}
-          disabled={diagnostics.sizeBytes === 0}
-          onPress={() => {
-            setMessage(null);
-            void diagnostics.share().then((shared) => {
-              if (!shared) setMessage('No diagnostic log is available to share.');
-            });
-          }}
-          testID="nav-diagnostics-share"
-        >
-          <Text style={styles.buttonQuietText}>Share log</Text>
-        </Pressable>
-        <Pressable
-          style={[
-            styles.button,
-            styles.buttonQuiet,
-            diagnostics.sizeBytes === 0 && styles.buttonDisabled,
-          ]}
-          disabled={diagnostics.sizeBytes === 0}
-          onPress={() => {
-            void diagnostics.clear().then(() => setMessage('Diagnostic log cleared.'));
-          }}
-          testID="nav-diagnostics-clear"
-        >
-          <Text style={styles.buttonQuietText}>Clear log</Text>
-        </Pressable>
-      </View>
+      <Text style={styles.muted}>
+        Sends each trip to Atlas when it ends — including a trip you end before arriving. A trip
+        that could not be sent (no coverage) is retried at the next trip or app start.
+      </Text>
+      <Text style={styles.muted}>
+        {diagnostics.trips.length === 0
+          ? 'No trips recorded yet.'
+          : `${diagnostics.trips.length} trip${diagnostics.trips.length === 1 ? '' : 's'} · ${diagnosticSize(
+              diagnostics.sizeBytes,
+            )}${pending > 0 ? ` · ${pending} not uploaded` : ''}`}
+      </Text>
+      {diagnostics.trips.map((trip) => (
+        <DiagnosticTripRow
+          key={trip.id}
+          trip={trip}
+          diagnostics={diagnostics}
+          onMessage={setMessage}
+        />
+      ))}
+      {diagnostics.trips.length > 0 ? (
+        <View style={styles.buttonRow}>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() => {
+              void diagnostics.clear().then(() => setMessage('All diagnostic logs cleared.'));
+            }}
+            testID="nav-diagnostics-clear"
+          >
+            <Text style={styles.buttonQuietText}>Clear all logs</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {message ? <Text style={styles.muted}>{message}</Text> : null}
     </View>
   );
@@ -1609,6 +1701,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 8, alignItems: 'center' },
+  tripRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+  },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   button: {
     backgroundColor: theme.accent,

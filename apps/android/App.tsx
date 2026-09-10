@@ -1409,6 +1409,7 @@ function AppInner() {
             onToggleFollowMode={navPrefs.toggleFollowMode}
             widgets={navPrefs.widgets}
             onAddStop={() => navAddStop.setOpen(!navAddStop.open)}
+            onMark={navDiagnostics.enabled ? navDiagnostics.mark : undefined}
             onHeight={setNavHeight}
           />
 

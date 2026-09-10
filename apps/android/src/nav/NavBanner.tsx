@@ -12,6 +12,7 @@ import {
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
 import { formatTrafficDelay } from '@atlas/traffic';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
@@ -196,6 +197,7 @@ export function NavBanner({
   onToggleFollowMode,
   widgets,
   onAddStop,
+  onMark,
   onHeight,
 }: {
   nav: NavController;
@@ -208,9 +210,24 @@ export function NavBanner({
   widgets: NavWidgetId[];
   /** Open the quick add-a-stop sheet (gas, charging, food). */
   onAddStop: () => void;
+  /**
+   * Mark this moment in the navigation diagnostic log, when one is being
+   * recorded. Every report used to open with "somewhere before Bærum
+   * sykehus"; a long-press on the banner — the biggest target on the screen,
+   * and one that costs no space — turns that into a timestamp (ROADMAP §1.2).
+   */
+  onMark?: () => void;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */
   onHeight?: (height: number) => void;
 }) {
+  // Before the early return below, so the hook order never depends on a phase.
+  const [markedAtMs, setMarkedAtMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (markedAtMs === null) return;
+    const timer = setTimeout(() => setMarkedAtMs(null), 3000);
+    return () => clearTimeout(timer);
+  }, [markedAtMs]);
+
   // The preview phase has its own bottom card (RoutePreview) — no banner.
   if (nav.phase === 'idle' || nav.phase === 'preview') return null;
   // Landscape: park guidance on the leading side so the road ahead owns the
@@ -266,12 +283,27 @@ export function NavBanner({
       ]}
       pointerEvents="box-none"
     >
-      <View
+      {/* The card itself is the mark target: a long-press anywhere on it that
+          is not one of its own controls stamps the moment into the diagnostic
+          log. The responder system gives the buttons inside priority for
+          anything that lands on them, so the guidance rail is unchanged and a
+          driving UI gains no chrome. */}
+      <Pressable
         style={[styles.card, landscape && styles.cardCompact]}
         onLayout={(e) => {
           const { height } = e.nativeEvent.layout;
           onHeight?.(height);
         }}
+        onLongPress={
+          onMark
+            ? () => {
+                onMark();
+                setMarkedAtMs(Date.now());
+              }
+            : undefined
+        }
+        delayLongPress={600}
+        testID="nav-mark"
       >
         {exploring ? (
           <View style={styles.stateBlock}>
@@ -366,6 +398,7 @@ export function NavBanner({
           </View>
         )}
 
+        {markedAtMs !== null ? <Text style={styles.marked}>Moment marked in the log</Text> : null}
         {nav.phase === 'rerouting' ? <Text style={styles.reroute}>Rerouting…</Text> : null}
         {guiding && nav.headingCalibrationNeeded ? (
           <Text style={styles.reroute} accessibilityLiveRegion="polite">
@@ -475,7 +508,7 @@ export function NavBanner({
             ) : null}
           </>
         ) : null}
-      </View>
+      </Pressable>
 
       {/* These map-view controls are part of the guidance layout, rather than
           a second absolutely-positioned overlay. The card, controls and
@@ -796,6 +829,7 @@ const styles = StyleSheet.create({
   },
   elevationBar: { flex: 1, backgroundColor: theme.accent, opacity: 0.78 },
   reroute: { color: theme.warning, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
+  marked: { color: theme.accent, fontSize: 13, fontWeight: '600', marginTop: 8, marginLeft: 74 },
   // Walking modes: off-route is an offer ("Reroute?"), never a silent
   // recalculation — with the bearing back to the track alongside, which is
   // the half that still works offline.

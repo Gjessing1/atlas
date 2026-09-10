@@ -1391,3 +1391,104 @@ describe('useNavigationController — resume an interrupted trip', () => {
     expect(h.spoken.length).toBeGreaterThan(0);
   });
 });
+
+describe('useNavigationController — the diagnostic log', () => {
+  /** A platform that keeps a log, and the records it received. */
+  function recording(routeImpl?: (query: RouteQuery) => Promise<RouteResult>) {
+    const records: Record<string, unknown>[] = [];
+    const h = harness(routeImpl, { diagnostics: (record) => records.push(record) });
+    const events = (name: string) => records.filter((record) => record.event === name);
+    return { h, records, events };
+  }
+
+  it('brackets a trip and closes it with a summary when End comes first', async () => {
+    const { h, events } = recording();
+    const hook = await drive(h);
+    act(() => h.emit(onLine(4, { speedMps: 20 })));
+    act(() => hook.result.current.stop());
+
+    const [start] = events('trip-start');
+    const [end] = events('trip-end');
+    expect(start).toMatchObject({ activity: 'guidance', profile: 'car' });
+    // The point of the whole exercise: a drive abandoned short of the
+    // destination is still a finished, summarised, uploadable trip.
+    expect(end).toMatchObject({ outcome: 'ended-early' });
+    expect((end?.report as { samples: number }).samples).toBeGreaterThan(0);
+    // Every record carries the trip it belongs to.
+    expect(new Set(events('navigation-state').map((record) => record.trip))).toEqual(
+      new Set([start?.trip]),
+    );
+  });
+
+  it('records an arrival as arrived, even though End is what ends the trip', async () => {
+    const { h, events } = recording();
+    const hook = await drive(h);
+    act(() => h.emit(onLine(20, { speedMps: 0 })));
+    await waitFor(() => expect(hook.result.current.phase).toBe('arrived'));
+    act(() => hook.result.current.stop());
+
+    expect(events('trip-arrived')).toHaveLength(1);
+    expect(events('trip-end')[0]).toMatchObject({ outcome: 'arrived' });
+  });
+
+  it('says why every route was asked for', async () => {
+    const { h, events } = recording();
+    const hook = await drive(h);
+    // Off the line by ~200 m for long enough to trip the grace count.
+    for (let i = 0; i < 6; i++) {
+      act(() => h.emit({ lat: 60.002, lng: 10.004, accuracyM: 5, speedMps: 20 }));
+    }
+    await waitFor(() => expect(events('route-request').length).toBeGreaterThan(2));
+    act(() => hook.result.current.stop());
+
+    const reasons = events('route-request').map((record) => record.reason);
+    expect(reasons).toContain('preview');
+    expect(reasons).toContain('depart-refresh');
+    expect(reasons).toContain('off-route');
+    // Every adopted line is fingerprinted and its geometry stored once behind
+    // that digest — here the reroute came back with the same line, so it is
+    // one geometry record for two adoptions, and the log says so instead of
+    // repeating a kilometre of coordinates.
+    const adopted = events('route-adopted');
+    expect(adopted[0]).toMatchObject({ reason: 'departure' });
+    expect(adopted.length).toBeGreaterThan(1);
+    const digests = adopted.map((record) => (record.route as { digest: string }).digest);
+    expect(events('route-geometry')).toHaveLength(new Set(digests).size);
+  });
+
+  it('records the prompts the driver hears, and the ones muting swallowed', async () => {
+    const { h, events } = recording();
+    const hook = await drive(h);
+    act(() => hook.result.current.setMuted(true));
+    act(() => h.emit(onLine(19, { speedMps: 20 })));
+    act(() => hook.result.current.stop());
+
+    const prompts = events('voice-prompt');
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts[0]).toMatchObject({ spoken: true, kind: 'depart' });
+    // A muted cue still leaves a trace: "did it fire" and "did the driver hear
+    // it" are different questions (ROADMAP §1).
+    expect(prompts.some((record) => record.spoken === false)).toBe(true);
+  });
+
+  it('carries the matcher decision inputs on every fix', async () => {
+    const { h, events } = recording();
+    const hook = await drive(h);
+    act(() => h.emit(onLine(6, { speedMps: 20 })));
+    act(() => hook.result.current.stop());
+
+    const match = events('navigation-state').at(-1)?.match as Record<string, unknown>;
+    expect(match).toMatchObject({ accurate: true, offRouteCount: 0 });
+    expect(match.corridorM).toBeGreaterThan(0);
+    expect(match.grace).toBeGreaterThan(0);
+    expect(typeof match.seg).toBe('number');
+  });
+
+  it('does nothing at all on a platform that keeps no log', async () => {
+    const h = harness();
+    const hook = await drive(h);
+    act(() => h.emit(onLine(4, { speedMps: 20 })));
+    act(() => hook.result.current.stop());
+    expect(hook.result.current.phase).toBe('idle');
+  });
+});

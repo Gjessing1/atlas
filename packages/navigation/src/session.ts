@@ -688,6 +688,10 @@ export class NavigationSession {
       this.loiterSinceMs = null;
     }
 
+    // Hoisted out of the branch below only so the matcher trace can report
+    // them: what the wrong-way test compared, and whether it was suppressed.
+    let tangentDeg: number | null = null;
+    let inRoundabout = false;
     if (accurate) {
       if (snap.crossTrackM > this.opts.offRouteM) this.offRouteCount++;
       else this.offRouteCount = 0;
@@ -706,8 +710,9 @@ export class NavigationSession {
       // the straight roads where it actually earns its keep. Cross-track still
       // guards the ring, and the tally resets so a pre-roundabout streak cannot
       // fire on the way out.
-      const inRoundabout = this.currentInstruction(alongM)?.sign === ROUNDABOUT_SIGN;
+      inRoundabout = this.currentInstruction(alongM)?.sign === ROUNDABOUT_SIGN;
       const tangent = headingDeg !== null && !inRoundabout ? this.courseAt(alongM, speedMps) : null;
+      tangentDeg = tangent;
       if (tangent !== null && Math.abs(wrapDeg(headingDeg! - tangent)) > this.opts.wrongWayDeg) {
         this.wrongWayCount++;
       } else if (headingDeg !== null || inRoundabout) {
@@ -859,7 +864,30 @@ export class NavigationSession {
     this.deadReckonArmed = !this.arrived && !offRoute && reckonOnRoute;
     this.lastMeasuredState = state;
     this.lastState = state;
-    return { state, prompts };
+    return {
+      state,
+      prompts,
+      match: {
+        alongM,
+        segmentIndex: snap.segmentIndex,
+        crossTrackM: snap.crossTrackM,
+        accuracyM,
+        accurate,
+        headingDeg,
+        tangentDeg,
+        headingDivergenceDeg:
+          headingDeg !== null && tangentDeg !== null ? wrapDeg(headingDeg - tangentDeg) : null,
+        offRouteCount: this.offRouteCount,
+        wrongWayCount: this.wrongWayCount,
+        graceUpdates: this.opts.offRouteGraceUpdates,
+        corridorM: this.opts.offRouteM,
+        wrongWayDeg: this.opts.wrongWayDeg,
+        snapCorridorM: snapDisplayM,
+        snapped: this.opts.snapDisplayPosition && displayOnRoute,
+        reckonArmed: this.deadReckonArmed,
+        inRoundabout,
+      },
+    };
   }
 
   /**
@@ -1151,7 +1179,7 @@ export class NavigationSession {
   private findUpcoming(alongM: number): UpcomingManeuver | null {
     const i = this.nextManeuverIndex(alongM);
     const m = this.maneuvers[i];
-    return m ? { instruction: m.instruction, distanceToM: m.alongStartM - alongM } : null;
+    return m ? { instruction: m.instruction, index: i, distanceToM: m.alongStartM - alongM } : null;
   }
 
   /**
@@ -1181,9 +1209,16 @@ export class NavigationSession {
     return [
       {
         instruction: this.maneuvers[shown]!.instruction,
+        index: shown,
         distanceToM: this.maneuvers[next]!.alongStartM - alongM,
       },
-      after ? { instruction: after.instruction, distanceToM: after.alongStartM - alongM } : null,
+      after
+        ? {
+            instruction: after.instruction,
+            index: afterIdx,
+            distanceToM: after.alongStartM - alongM,
+          }
+        : null,
     ];
   }
 

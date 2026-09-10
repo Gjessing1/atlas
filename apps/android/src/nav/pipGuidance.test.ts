@@ -36,6 +36,7 @@ describe('pipGuidance', () => {
         state: state({
           upcoming: {
             instruction: instruction(2, 'Turn right onto Storgata'),
+            index: 0,
             distanceToM: 240,
           },
         }),
@@ -54,7 +55,7 @@ describe('pipGuidance', () => {
       nav({
         state: state({
           sustain: { road: 'E18', distanceRemainingM: 8200 },
-          upcoming: { instruction: instruction(2, 'Turn right'), distanceToM: 8200 },
+          upcoming: { instruction: instruction(2, 'Turn right'), index: 0, distanceToM: 8200 },
         }),
       }),
     );
