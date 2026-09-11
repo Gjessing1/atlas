@@ -4,7 +4,12 @@ import path from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 const MAX_LOG_BYTES = 20 * 1024 * 1024;
-const RETAIN_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * How long an uploaded log is kept. Long enough to replay a drive against a
+ * fix written weeks after it; past that, the app has moved on far enough that
+ * the log misleads more than it helps.
+ */
+const RETAIN_MS = 90 * 24 * 60 * 60 * 1000;
 
 export interface DiagnosticsApiOptions {
   now?: () => number;

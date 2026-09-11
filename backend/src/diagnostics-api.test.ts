@@ -55,15 +55,20 @@ describe('navigation diagnostics upload', () => {
     await app.close();
   });
 
-  it('removes uploaded logs after the 30-day retention window', async () => {
+  it('keeps uploaded logs for 90 days and removes them after', async () => {
     const now = Date.UTC(2026, 7, 5);
     const { app, dataDir } = await harness({ now: () => now, makeReference: () => 'FRESH-00001' });
     const dir = path.join(dataDir, 'diagnostics');
     await mkdir(dir);
-    const old = path.join(dir, 'OLD.jsonl');
-    await writeFile(old, '{"event":"old"}\n');
-    const oldDate = new Date(now - 31 * 24 * 60 * 60 * 1000);
-    await utimes(old, oldDate, oldDate);
+    const daysAgo = async (name: string, days: number) => {
+      const file = path.join(dir, name);
+      await writeFile(file, `{"event":"${name}"}\n`);
+      const date = new Date(now - days * 24 * 60 * 60 * 1000);
+      await utimes(file, date, date);
+      return file;
+    };
+    const recent = await daysAgo('RECENT.jsonl', 89);
+    const old = await daysAgo('OLD.jsonl', 91);
 
     const response = await app.inject({
       method: 'POST',
@@ -72,6 +77,7 @@ describe('navigation diagnostics upload', () => {
       payload: '{"event":"new"}\n',
     });
     expect(response.statusCode).toBe(201);
+    expect(await readFile(recent, 'utf8')).toBe('{"event":"RECENT.jsonl"}\n');
     await expect(readFile(old, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await app.close();
   });
