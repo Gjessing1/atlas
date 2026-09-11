@@ -56,7 +56,9 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   page,
   context,
 }) => {
-  await mockRouting(page);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await mockRouting(page, { alternatives: true });
   // An ATK camera mid-route: the amber chip must appear once guidance starts
   // (the fetch is fire-and-forget beside the enrichment pass).
   await page.route('**/api/route/nvdb-cameras', (route) =>
@@ -80,7 +82,15 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-eta')).toHaveText(/^\d+ (min|h( \d+ min)?)$/);
   await expect(page.locator('.nav-summary')).toContainText('arrival');
   await expect(page.locator('.topbar')).toBeHidden();
+  expect(pageErrors).toEqual([]);
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav')));
+  await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav-alternatives')));
+  expect(
+    await page.evaluate(() => ({
+      line: Boolean(window.__atlasMap!.getLayer('atlas-nav-alternatives-line')),
+      label: Boolean(window.__atlasMap!.getLayer('atlas-nav-alternatives-label')),
+    })),
+  ).toEqual({ line: true, label: true });
   await expect(page.locator('.nav-puck')).toBeVisible();
   await expect(page.locator('.nav-dest-marker')).toBeVisible();
 

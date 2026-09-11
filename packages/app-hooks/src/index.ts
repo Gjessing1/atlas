@@ -61,6 +61,7 @@ export {
   type NavOriginFix,
   type NavPhase,
   type NavPlatform,
+  type NavRouteAlternative,
   type NavTripProgress,
   type NavTripSummary,
 } from './useNavigationController.js';

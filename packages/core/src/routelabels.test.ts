@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   altChipLabel,
   modeTimeLabel,
+  routeDeltaLabel,
   stopAlongLabel,
   stopRole,
   stopTitle,
@@ -26,6 +27,19 @@ describe('altChipLabel', () => {
 
   it('appends the via label that distinguishes the alternative', () => {
     expect(altChipLabel(paths, 1, [null, 'E18', null])).toBe('+3 min via E18');
+  });
+});
+
+describe('routeDeltaLabel', () => {
+  it('shows slower and faster choices relative to the active route', () => {
+    expect(routeDeltaLabel(5 * 60_000)).toBe('+5 min');
+    expect(routeDeltaLabel(-2 * 60_000)).toBe('−2 min');
+  });
+
+  it('does not round a real sub-minute difference to zero', () => {
+    expect(routeDeltaLabel(45_000)).toBe('+<1 min');
+    expect(routeDeltaLabel(-45_000)).toBe('−<1 min');
+    expect(routeDeltaLabel(20_000)).toBe('Same ETA');
   });
 });
 

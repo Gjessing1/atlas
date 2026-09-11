@@ -211,6 +211,15 @@ describe('NavTripStats', () => {
     expect(report.markers).toBe(1);
   });
 
+  it('can subtract a shared prefix when a departure route is selected mid-trip', () => {
+    const stats = new NavTripStats();
+    stats.sample(navTripSample(state({ traveledM: 200 }), 5), 1000);
+    stats.routeAdopted(-50);
+    stats.sample(navTripSample(state({ traveledM: 250 }), 5), 2000);
+
+    expect(stats.report().distanceM).toBe(200);
+  });
+
   it('counts a break between states as a gap, not as elapsed navigation', () => {
     const stats = new NavTripStats();
     const atMs = 1_700_000_000_000;

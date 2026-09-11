@@ -70,7 +70,9 @@ export type NavRouteReason =
   /** A DATEX closure appeared on the line being followed. */
   | 'closure-ahead'
   /** The periodic "is there anything better" probe. */
-  | 'faster-probe';
+  | 'faster-probe'
+  /** The driver tapped one of the alternate lines already drawn on the map. */
+  | 'alternative-selected';
 
 /** What ended a trip — the difference between a completed drive and an abandoned one. */
 export type NavTripOutcome =
@@ -453,10 +455,14 @@ export class NavTripStats {
     this.lastFixKind = sample.fix;
   }
 
-  /** A new route was adopted; `bankedM` is what the outgoing session had driven. */
-  routeAdopted(bankedM: number): void {
+  /** A new route was adopted; adjust for distance that the new session does not own. */
+  routeAdopted(accountingAdjustmentM: number): void {
     this.adoptions++;
-    this.bankedM += Math.max(0, bankedM);
+    // Usually this is the outgoing session's distance. It may be negative when
+    // the replacement still contains more of the already-driven prefix than
+    // the old route did; preserving that sign prevents diagnostic totals from
+    // counting the shared road twice.
+    this.bankedM += accountingAdjustmentM;
   }
 
   routeFailed(): void {

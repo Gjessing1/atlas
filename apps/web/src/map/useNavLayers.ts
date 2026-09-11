@@ -1,5 +1,5 @@
 import type { NavController } from '@atlas/app-hooks';
-import { lineStringFeature } from '@atlas/core';
+import { lineStringFeature, routeDeltaLabel } from '@atlas/core';
 import {
   followZoom,
   maneuverArrowsGeoJSON,
@@ -14,6 +14,12 @@ const SOURCE_ID = 'atlas-nav';
 const CASING = 'atlas-nav-casing';
 const LINE = 'atlas-nav-line';
 const NAV_LAYERS = [CASING, LINE];
+
+const ALT_SOURCE = 'atlas-nav-alternatives';
+const ALT_CASING = 'atlas-nav-alternatives-casing';
+const ALT_LINE = 'atlas-nav-alternatives-line';
+const ALT_LABEL = 'atlas-nav-alternatives-label';
+const ALT_LAYERS = [ALT_CASING, ALT_LINE, ALT_LABEL];
 
 const ARROW_SOURCE = 'atlas-nav-arrows';
 const ARROW_CASING = 'atlas-nav-arrows-casing';
@@ -62,6 +68,136 @@ export function useNavLayers(
   const active = nav.phase === 'navigating' || nav.phase === 'rerouting' || nav.phase === 'paused';
   const following =
     nav.phase === 'navigating' || nav.phase === 'rerouting' || nav.phase === 'exploring';
+
+  // Google-style live choices: grey branches sit below the active blue line,
+  // with their cost relative to the route being followed at the clearest
+  // separation point. Both the line and badge are switch targets.
+  const alternativeData = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: nav.routeAlternatives.flatMap((alternative, index) => [
+        {
+          type: 'Feature' as const,
+          properties: { kind: 'line', index },
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: alternative.path.points.map((point) => [point.lng, point.lat]),
+          },
+        },
+        {
+          type: 'Feature' as const,
+          properties: { kind: 'label', index, label: routeDeltaLabel(alternative.deltaMs) },
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [alternative.labelAt.lng, alternative.labelAt.lat],
+          },
+        },
+      ]),
+    }),
+    [nav.routeAlternatives],
+  );
+  const { selectRouteAlternative } = nav;
+  useEffect(() => {
+    if (!map) return;
+    let cancelled = false;
+    let armed = false;
+    const sync = () => {
+      if (cancelled) return;
+      // The active-route effect in this render may have just
+      // added its GeoJSON source, which makes `isStyleLoaded()` transiently
+      // false even though the style is fully usable for another Atlas source.
+      // The deferred arm guarantees the initial style exists; style.load owns
+      // later swaps.
+      map.getStyle();
+      if (alternativeData.features.length === 0) {
+        for (const id of ALT_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(ALT_SOURCE)) map.removeSource(ALT_SOURCE);
+        return;
+      }
+      const source = map.getSource(ALT_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (source) source.setData(alternativeData);
+      else map.addSource(ALT_SOURCE, { type: 'geojson', data: alternativeData });
+      if (!map.getLayer(ALT_CASING)) {
+        const lineFilter: maplibregl.FilterSpecification = ['==', ['get', 'kind'], 'line'];
+        map.addLayer({
+          id: ALT_CASING,
+          type: 'line',
+          source: ALT_SOURCE,
+          filter: lineFilter,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 },
+        });
+        map.addLayer({
+          id: ALT_LINE,
+          type: 'line',
+          source: ALT_SOURCE,
+          filter: lineFilter,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#7d8590', 'line-width': 5, 'line-opacity': 0.95 },
+        });
+        map.addLayer({
+          id: ALT_LABEL,
+          type: 'symbol',
+          source: ALT_SOURCE,
+          filter: ['==', ['get', 'kind'], 'label'],
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-font': ['Noto Sans Bold'],
+            'text-size': 13,
+            'text-allow-overlap': true,
+            'text-ignore-placement': true,
+          },
+          paint: { 'text-color': '#374151', 'text-halo-color': '#ffffff', 'text-halo-width': 5 },
+        });
+      }
+    };
+    // This effect is declared before the active-route effect so its lines sit
+    // underneath the blue route. Arm it one frame later: adding a source makes
+    // `isStyleLoaded()` briefly false, and doing that synchronously here would
+    // starve the active-route effect that follows it in React's effect order.
+    const frame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      sync();
+      map.on('style.load', sync);
+      map.on('idle', sync);
+      armed = true;
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      if (armed) {
+        map.off('style.load', sync);
+        map.off('idle', sync);
+      }
+    };
+  }, [map, alternativeData]);
+
+  useEffect(() => {
+    if (!map || alternativeData.features.length === 0) return;
+    const pick = (event: maplibregl.MapLayerMouseEvent) => {
+      const index = Number(event.features?.[0]?.properties?.['index']);
+      if (Number.isInteger(index)) selectRouteAlternative(index);
+    };
+    const enter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const leave = () => {
+      map.getCanvas().style.cursor = '';
+    };
+    for (const layer of [ALT_CASING, ALT_LINE, ALT_LABEL]) {
+      map.on('click', layer, pick);
+      map.on('mouseenter', layer, enter);
+      map.on('mouseleave', layer, leave);
+    }
+    return () => {
+      for (const layer of [ALT_CASING, ALT_LINE, ALT_LABEL]) {
+        map.off('click', layer, pick);
+        map.off('mouseenter', layer, enter);
+        map.off('mouseleave', layer, leave);
+      }
+      leave();
+    };
+  }, [map, alternativeData, selectRouteAlternative]);
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
   // This must stay exact and in MapLibre's spherical-Mercator line metric:

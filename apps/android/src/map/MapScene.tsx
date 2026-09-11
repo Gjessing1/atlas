@@ -4,6 +4,7 @@ import {
   exploreResultsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  routeDeltaLabel,
   savedStandFeatures,
   waypointLabel,
   type BBox,
@@ -135,6 +136,13 @@ export const EXPLORE_RESULT_LAYER_ID = 'atlas-explore-results-disc';
 /** Layer ids of the nav route-choice preview — App hit-tests taps to switch choice. */
 export const NAV_PREVIEW_LAYER_IDS = ['atlas-nav-preview-alt', 'atlas-nav-preview-sel'];
 
+/** Grey in-drive route branches and their relative-time badges. */
+export const NAV_ALTERNATIVE_LAYER_IDS = [
+  'atlas-nav-alternatives-casing',
+  'atlas-nav-alternatives-line',
+  'atlas-nav-alternatives-label',
+];
+
 /** All route choices as one collection; `index` rides on each feature for tap pick. */
 function previewRoutesGeoJSON(paths: { points: LatLng[] }[], selected: number) {
   return {
@@ -150,6 +158,30 @@ function previewRoutesGeoJSON(paths: { points: LatLng[] }[], selected: number) {
       }))
       // Selected drawn last so it wins overlaps with the muted alternatives.
       .sort((a, b) => Number(a.properties.selected) - Number(b.properties.selected)),
+  };
+}
+
+function navigationAlternativesGeoJSON(alternatives: NavController['routeAlternatives']) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: alternatives.flatMap((alternative, index) => [
+      {
+        type: 'Feature' as const,
+        properties: { kind: 'line', index },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: alternative.path.points.map((point) => [point.lng, point.lat]),
+        },
+      },
+      {
+        type: 'Feature' as const,
+        properties: { kind: 'label', index, label: routeDeltaLabel(alternative.deltaMs) },
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [alternative.labelAt.lng, alternative.labelAt.lat],
+        },
+      },
+    ]),
   };
 }
 
@@ -1117,6 +1149,44 @@ export function MapScene({
                 'line-color': ['case', ['==', ['get', 'recordKind'], 'area'], '#c2410c', '#2a78d6'],
                 'line-width': 4,
                 'line-opacity': 0.9,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {!inPip && nav.routeAlternatives.length > 0 ? (
+          <GeoJSONSource
+            id="atlas-nav-alternatives"
+            data={navigationAlternativesGeoJSON(nav.routeAlternatives)}
+          >
+            <Layer
+              type="line"
+              id="atlas-nav-alternatives-casing"
+              filter={['==', ['get', 'kind'], 'line']}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 }}
+            />
+            <Layer
+              type="line"
+              id="atlas-nav-alternatives-line"
+              filter={['==', ['get', 'kind'], 'line']}
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': '#7d8590', 'line-width': 5, 'line-opacity': 0.95 }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-nav-alternatives-label"
+              filter={['==', ['get', 'kind'], 'label']}
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 13,
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': '#374151',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 5,
               }}
             />
           </GeoJSONSource>

@@ -32,6 +32,7 @@ import {
   navTripProgress,
   navTripSample,
   NavigationSession,
+  routeDigest,
   routeFingerprint,
   NavRouteLedger,
   NavTripStats,
@@ -55,6 +56,7 @@ import {
 import {
   applyNvdbSpeedLimits,
   enrichRoute,
+  routeAlternativeLabelPoint,
   sortRouteChoices,
   viaInsertIndex,
   type NvdbCameraTransport,
@@ -220,6 +222,8 @@ export interface NavController {
   previewLoading: boolean;
   /** Why the last profile switch kept the old choices (no route, offline …). */
   previewError: string | null;
+  /** Google-style muted route choices drawn beside the active route while driving. */
+  routeAlternatives: readonly NavRouteAlternative[];
   /** Latest ground speed in m/s, or null when unknown/stationary. */
   speedMps: number | null;
   /** Latest GPS altitude in metres, or null when the platform has none. */
@@ -260,6 +264,8 @@ export interface NavController {
   acceptFasterRoute: () => void;
   /** Decline it; no new offer until one saves meaningfully more than this. */
   dismissFasterRoute: () => void;
+  /** Switch guidance to a drawn in-drive alternative. */
+  selectRouteAlternative: (index: number) => void;
   /**
    * Insert a stop into the running trip — a tapped POI or a quick "nearest
    * gas" pick. It slots into the remaining stops by along-route position and
@@ -333,6 +339,16 @@ export interface NavController {
   stop: () => void;
 }
 
+export interface NavRouteAlternative {
+  path: RoutePath;
+  /** Intermediate stops this candidate was calculated through. */
+  vias: LatLng[];
+  /** ETA difference against the active route; positive means slower. */
+  deltaMs: number;
+  /** Point on the visibly distinct branch where the relative-time badge sits. */
+  labelAt: LatLng;
+}
+
 /** How long to wait for the fix that a preview is built from. */
 const START_FIX_TIMEOUT_MS = 20_000;
 /** Shorter at Start: the previewed path is a perfectly good fallback. */
@@ -370,6 +386,27 @@ const usesFacingHeading = (profile: RoutingProfile): boolean => profile !== 'car
 
 /** Stops that outlive a render: a plan with no vias always hands back this one. */
 const NO_VIAS: LatLng[] = [];
+
+function inDriveAlternatives(
+  active: RoutePath,
+  candidates: readonly RoutePath[],
+  activeRemainingMs: number,
+  vias: LatLng[] = [],
+): NavRouteAlternative[] {
+  const activeDigest = routeDigest(active.points);
+  const seen = new Set([activeDigest]);
+  const result: NavRouteAlternative[] = [];
+  for (const path of candidates) {
+    const digest = routeDigest(path.points);
+    if (seen.has(digest)) continue;
+    seen.add(digest);
+    const labelAt = routeAlternativeLabelPoint(active.points, path.points);
+    if (!labelAt) continue;
+    result.push({ path, vias, deltaMs: path.timeMs - activeRemainingMs, labelAt });
+    if (result.length === 2) break;
+  }
+  return result;
+}
 
 /**
  * The lifecycle machine, readable synchronously.
@@ -421,6 +458,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [headingSource, setHeadingSourceState] = useState<HeadingSource>('auto');
   const [headingCalibrationNeeded, setHeadingCalibrationNeeded] = useState(false);
   const [muted, setMutedState] = useState(false);
+  const [routeAlternatives, setRouteAlternatives] = useState<NavRouteAlternative[]>([]);
 
   const sessionRef = useRef<NavigationSession | null>(null);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
@@ -591,52 +629,26 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * calculated route and then the adopted copy of it again.
    */
   const logRouteAdopted = useCallback(
-    (reason: NavRouteReason | 'departure', path: RoutePath, bankedM: number): void => {
-      tripStatsRef.current?.routeAdopted(bankedM);
+    (
+      reason: NavRouteReason | 'departure',
+      path: RoutePath,
+      accountingAdjustmentM: number,
+    ): void => {
+      tripStatsRef.current?.routeAdopted(accountingAdjustmentM);
       if (!platformRef.current.diagnostics) return;
       const { fingerprint, geometry } = routeLedgerRef.current.note(path);
       if (geometry) diag({ event: 'route-geometry', ...geometry });
-      diag({ event: 'route-adopted', reason, route: fingerprint, bankedM: Math.round(bankedM) });
+      diag({
+        event: 'route-adopted',
+        reason,
+        route: fingerprint,
+        bankedM: Math.round(accountingAdjustmentM),
+      });
     },
     [platformRef, diag],
   );
 
-  const fetchPath = useCallback(
-    async (
-      reason: NavRouteReason,
-      origin: LatLng,
-      dest: LatLng,
-      prof: RoutingProfile,
-      preferences?: Partial<RoutePreferences>,
-      headingDeg?: number,
-      vias: LatLng[] = [],
-    ): Promise<RoutePath> => {
-      const startedAtMs = Date.now();
-      diag({ event: 'route-request', reason, profile: prof, vias: vias.length });
-      try {
-        const result = await platformRef.current.provider.route({
-          profile: prof,
-          points: [origin, ...vias, dest],
-          instructions: true,
-          // Hike guidance draws the remaining elevation profile and ascent from
-          // this active path. Other modes avoid the extra elevation/trace work.
-          details: prof === 'hike',
-          ...(preferences ? { preferences } : {}),
-          ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
-        });
-        const path = result.paths[0];
-        if (!path) throw new Error('no route found');
-        logRouteResult(reason, [path], startedAtMs);
-        return path;
-      } catch (err) {
-        diag({ event: 'route-failed', reason, error: message(err) });
-        throw err;
-      }
-    },
-    [platformRef, diag, logRouteResult],
-  );
-
-  /** The fastest route plus up to two alternatives, for the preview card. */
+  /** The fastest route plus up to two alternatives, for preview or live guidance. */
   const fetchChoices = useCallback(
     async (
       reason: NavRouteReason,
@@ -645,6 +657,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       prof: RoutingProfile,
       preferences?: Partial<RoutePreferences>,
       vias: LatLng[] = [],
+      headingDeg?: number,
     ): Promise<RoutePath[]> => {
       const startedAtMs = Date.now();
       diag({ event: 'route-request', reason, profile: prof, vias: vias.length });
@@ -658,6 +671,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           alternatives: true,
           details: prof === 'hike',
           ...(preferences ? { preferences } : {}),
+          ...(typeof headingDeg === 'number' ? { headingDeg } : {}),
         });
         if (result.paths.length === 0) throw new Error('no route found');
         const sorted = sortRouteChoices(result.paths);
@@ -776,6 +790,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     setAltitudeM(null);
     setFacing(null);
     setHeadingCalibrationNeeded(false);
+    setRouteAlternatives([]);
     facingBlender.current.reset();
     lastFixRef.current = null;
     offRouteSpokenRef.current = false;
@@ -803,6 +818,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     (err: unknown) => {
       stopWatch();
       sessionRef.current = null;
+      setRouteAlternatives([]);
       releaseTelemetry();
       endTripDiagnostics('failed');
       dispatch({ type: 'failed', message: message(err) });
@@ -901,15 +917,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
         const passedVias = lastStateRef.current?.viasPassed ?? 0;
         const remainingVias =
           viasOverride ?? (passedVias > 0 ? plan.vias.slice(passedVias) : plan.vias);
-        const path = await fetchPath(
+        const choices = await fetchChoices(
           reason,
           from,
           plan.destination,
           prof,
           plan.preferences,
-          heading,
           remainingVias,
+          heading,
         );
+        const path = choices[0];
+        if (!path) throw new Error('no route found');
         // End, arrival or a whole new trip may have happened during the fetch;
         // applying now would resurrect a dead nav UI with a fresh session.
         const live = lifecycleRef.current;
@@ -928,6 +946,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // offer, measured against the route that just died, lapses with it.
         const bankedM = lastStateRef.current?.traveledM ?? 0;
         dispatch({ type: 'route-replaced', path, vias: remainingVias, bankedM });
+        setRouteAlternatives(
+          prof === 'car' ? inDriveAlternatives(path, choices, path.timeMs, remainingVias) : [],
+        );
         logRouteAdopted(reason, path, bankedM);
         enrich(nextSession, path);
         // Seed the new session with the fix that triggered the reroute, so
@@ -960,7 +981,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (lifecycleRef.current.trip === trip) dispatch({ type: 'reroute-settled' });
       }
     },
-    [lifecycleRef, dispatch, fetchPath, speak, enrich, logRouteAdopted],
+    [lifecycleRef, dispatch, fetchChoices, speak, enrich, logRouteAdopted],
   );
 
   /**
@@ -1130,17 +1151,20 @@ export function useNavigationController(platform: NavPlatform): NavController {
           typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
         const passed = state.viasPassed;
         const vias = passed > 0 ? plan.vias.slice(passed) : plan.vias;
-        const candidate = await fetchPath(
+        const choices = await fetchChoices(
           'faster-probe',
           fix,
           plan.destination,
           prof,
           plan.preferences,
-          heading,
           vias,
+          heading,
         );
+        const candidate = choices[0];
+        if (!candidate) return;
         const live = lifecycleRef.current;
         if (live.trip !== trip || !sessionRef.current || live.stage.kind !== 'guiding') return;
+        setRouteAlternatives(inDriveAlternatives(live.stage.path, choices, plannedMs, vias));
         const savesMs = plannedMs - candidate.timeMs;
         const savesM = Math.max(0, plannedM - candidate.distanceM);
         const qualifiesOnTime = savesMs >= FASTER_MIN_SAVING_MS;
@@ -1200,7 +1224,51 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
       }
     },
-    [lifecycleRef, dispatch, platformRef, fetchPath, speak, reroute, repriceTraffic, diag],
+    [lifecycleRef, dispatch, platformRef, fetchChoices, speak, reroute, repriceTraffic, diag],
+  );
+
+  /** Install a route the driver picked from a line already visible on the map. */
+  const replaceWithRouteChoice = useCallback(
+    (path: RoutePath, vias: LatLng[], reason: 'faster-probe' | 'alternative-selected') => {
+      const current = lifecycleRef.current;
+      if (current.stage.kind !== 'guiding' || !sessionRef.current) return;
+      const nextSession = new NavigationSession(
+        path,
+        navOptionsForProfile(current.profile, {
+          startDeparted: lastStateRef.current?.departed ?? true,
+        }),
+      );
+      const oldTraveledM = lastStateRef.current?.traveledM ?? 0;
+      const fix = lastFixRef.current;
+      let seeded: ReturnType<NavigationSession['update']> | null = null;
+      if (fix) {
+        try {
+          seeded = nextSession.update(fix, Date.now());
+        } catch {
+          // The next live fix populates the state instead.
+        }
+      }
+      sessionRef.current = nextSession;
+      // Preview-born alternatives still begin at the departure point. Offset
+      // their already-traversed prefix so switching lines cannot count the
+      // first part of the drive twice; freshly probed alternatives start here
+      // and naturally contribute almost zero.
+      const accountingDeltaM = oldTraveledM - (seeded?.state.traveledM ?? 0);
+      dispatch({ type: 'route-replaced', path, vias, bankedM: accountingDeltaM });
+      setRouteAlternatives([]);
+      logRouteAdopted(reason, path, accountingDeltaM);
+      enrich(nextSession, path);
+      if (seeded) {
+        setState(seeded.state);
+        lastStateRef.current = seeded.state;
+      }
+      const depart = nextSession.departurePrompt();
+      if (depart) speak(depart.text, promptContext(depart));
+      // Rebuild the grey choices from this exact position; the tapped set may
+      // have originated earlier in the drive.
+      resetFasterCheckRef.current();
+    },
+    [lifecycleRef, dispatch, logRouteAdopted, enrich, speak],
   );
 
   /** Take the offered faster route, exactly as a successful reroute would. */
@@ -1209,33 +1277,25 @@ export function useNavigationController(platform: NavPlatform): NavController {
     if (current.stage.kind !== 'guiding') return;
     const { offer } = current.stage;
     if (!offer || !sessionRef.current) return;
-    const { path, vias } = offer;
-    const nextSession = new NavigationSession(
-      path,
-      navOptionsForProfile(current.profile, {
-        startDeparted: lastStateRef.current?.departed ?? true,
-      }),
-    );
-    sessionRef.current = nextSession;
-    // The old session dies here — bank its driven distance for the summary.
-    const bankedM = lastStateRef.current?.traveledM ?? 0;
-    dispatch({ type: 'route-replaced', path, vias, bankedM });
     diag({ event: 'faster-probe', verdict: 'accepted', savesMs: offer.savesMs });
-    logRouteAdopted('faster-probe', path, bankedM);
-    enrich(nextSession, path);
-    const fix = lastFixRef.current;
-    if (fix) {
-      try {
-        const seeded = nextSession.update(fix, Date.now());
-        setState(seeded.state);
-        lastStateRef.current = seeded.state;
-      } catch {
-        // The next live fix populates the state instead.
-      }
-    }
-    const depart = nextSession.departurePrompt();
-    if (depart) speak(depart.text, promptContext(depart));
-  }, [lifecycleRef, dispatch, enrich, speak, diag, logRouteAdopted]);
+    replaceWithRouteChoice(offer.path, offer.vias, 'faster-probe');
+  }, [lifecycleRef, diag, replaceWithRouteChoice]);
+
+  const selectRouteAlternative = useCallback(
+    (index: number) => {
+      if (!Number.isInteger(index)) return;
+      const alternative = routeAlternatives[index];
+      if (!alternative) return;
+      diag({
+        event: 'route-alternative-selected',
+        index,
+        deltaMs: alternative.deltaMs,
+        route: routeFingerprint(alternative.path),
+      });
+      replaceWithRouteChoice(alternative.path, alternative.vias, 'alternative-selected');
+    },
+    [routeAlternatives, diag, replaceWithRouteChoice],
+  );
 
   /** Decline the offer; only a meaningfully better one may interrupt again. */
   const dismissFasterRoute = useCallback(() => {
@@ -1424,6 +1484,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // driving the outgoing session behind the preview meanwhile.
       stopWatch();
       sessionRef.current = null;
+      setRouteAlternatives([]);
       beginTripDiagnostics({
         activity: 'guidance',
         profile: prof,
@@ -1475,6 +1536,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           : undefined;
       stopWatch();
       sessionRef.current = null;
+      setRouteAlternatives([]);
       beginTripDiagnostics({ activity: 'explorer', profile: prof, destination: null });
       const { op } = dispatch({ type: 'explore', profile: prof });
       setState(null);
@@ -1547,7 +1609,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * answers "which way now?".
    */
   const beginGuidance = useCallback(
-    async (path: RoutePath, origin: NavOriginFix | null, restoredProgress?: NavTripProgress) => {
+    async (
+      path: RoutePath,
+      origin: NavOriginFix | null,
+      restoredProgress?: NavTripProgress,
+      choices: readonly RoutePath[] = [],
+    ) => {
       const begun = dispatch({
         type: 'guidance-began',
         path,
@@ -1558,6 +1625,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
       if (begun.stage.kind !== 'guiding') return;
       const session = new NavigationSession(path, navOptionsForProfile(begun.profile));
       sessionRef.current = session;
+      setRouteAlternatives(
+        begun.profile === 'car'
+          ? inDriveAlternatives(path, choices, path.timeMs, begun.stage.plan.vias)
+          : [],
+      );
       offRouteSpokenRef.current = false;
       logRouteAdopted('departure', path, 0);
       enrich(session, path);
@@ -1608,6 +1680,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     const { op } = dispatch({ type: 'go' });
     try {
       let path = previewPath;
+      let guidanceChoices = choices;
       let origin = before.stage.origin;
       // The traveller may have moved while studying the choices, so refresh
       // both the fix and the routes from it. Best-effort: starting on the
@@ -1625,6 +1698,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         );
         if (lifecycleRef.current.op !== op) return;
         path = refreshed[index] ?? refreshed[0] ?? previewPath;
+        guidanceChoices = refreshed;
         origin = fresh;
         dispatch({ type: 'origin-refreshed', origin: fresh });
       } catch {
@@ -1634,7 +1708,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
       // Cancel or profile switch while the refresh was in flight invalidates it.
       if (lifecycleRef.current.op !== op) return;
       await facingReady?.catch(() => undefined);
-      await beginGuidance(path, origin);
+      await beginGuidance(path, origin, undefined, guidanceChoices);
     } catch (err) {
       fail(err);
     } finally {
@@ -1687,24 +1761,26 @@ export function useNavigationController(platform: NavPlatform): NavController {
         plan: { destination: dest, vias, preferences: preferencesOverride },
         profile: prof,
       });
+      setRouteAlternatives([]);
       setSpeedMps(null);
       setAltitudeM(null);
       try {
         const origin = await platformRef.current.currentFix(START_FIX_TIMEOUT_MS);
         if (lifecycleRef.current.op !== op) return;
         dispatch({ type: 'origin-fixed', origin });
-        const path = await fetchPath(
+        const choices = await fetchChoices(
           'resume',
           origin.fix,
           dest,
           prof,
           preferencesOverride,
-          undefined,
           vias,
         );
+        const path = choices[0];
+        if (!path) throw new Error('no route found');
         if (lifecycleRef.current.op !== op) return;
         await facingReady?.catch(() => undefined);
-        await beginGuidance(path, origin, progress);
+        await beginGuidance(path, origin, progress, choices);
       } catch (err) {
         if (lifecycleRef.current.op !== op) return;
         fail(err);
@@ -1716,7 +1792,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         dispatch({ type: 'setup-settled', op });
       }
     },
-    [lifecycleRef, dispatch, platformRef, fetchPath, beginGuidance, fail, beginTripDiagnostics],
+    [lifecycleRef, dispatch, platformRef, fetchChoices, beginGuidance, fail, beginTripDiagnostics],
   );
 
   const guiding = stage.kind === 'guiding';
@@ -1946,6 +2022,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     previewIndex: stage.kind === 'preview' ? stage.index : 0,
     previewLoading: stage.kind === 'preview' ? stage.loading : false,
     previewError: stage.kind === 'preview' ? stage.error : null,
+    routeAlternatives,
     speedMps,
     altitudeM,
     facingDeg: facing?.deg ?? null,
@@ -1962,6 +2039,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     fasterRoute,
     acceptFasterRoute,
     dismissFasterRoute,
+    selectRouteAlternative,
     addStop,
     continuePastIntermediateStop,
     tripSummary: stage.kind === 'arrived' ? stage.summary : null,

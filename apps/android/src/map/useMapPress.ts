@@ -31,6 +31,7 @@ import type { DestinationTarget } from '../ui/DestinationCard';
 import {
   HUNT_FIELDS_FILL_LAYER_ID,
   ICE_OBSERVATION_LAYER_IDS,
+  NAV_ALTERNATIVE_LAYER_IDS,
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
   SPEED_CAMERA_LAYER_IDS,
@@ -234,11 +235,21 @@ export function useMapPress({
       void (async () => {
         const zoom = await mapRef.current?.getZoom();
         if (zoom === undefined) return;
+        const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
+        if (guiding && nav.routeAlternatives.length > 0) {
+          const hits = await mapRef.current
+            ?.queryRenderedFeatures(pixelBounds, { layers: NAV_ALTERNATIVE_LAYER_IDS })
+            .catch(() => undefined);
+          const index = Number(hits?.[0]?.properties?.['index']);
+          if (Number.isInteger(index)) {
+            nav.selectRouteAlternative(index);
+            return;
+          }
+        }
         // Asked in parallel with the local hit-tests below: the pin/POI card
         // opens immediately and the overlay rows drop into it when they land.
         // Not mid-trip, though — a tap there asks "stop here?", and lake-depth
         // rows would only delay that card while burning a network round trip.
-        const guiding = nav.phase === 'navigating' || nav.phase === 'rerouting';
         const tap = ++tapSeq.current;
         const vectorOn = (id: string) =>
           overlays.some((overlay) => overlay.meta.id === id && overlay.meta.vector);

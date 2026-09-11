@@ -265,7 +265,9 @@ export type NavEvent =
   | { type: 'reroute-started' }
   /**
    * The followed route was replaced — by a reroute, an accepted faster route or
-   * a continuation past a stop. `bankedM` is the dying session's distance.
+   * a continuation past a stop. `bankedM` is the accounting adjustment: the
+   * dying session's distance for a route that starts here, or that distance
+   * minus the already-traversed prefix when selecting a preview-born line.
    */
   | { type: 'route-replaced'; path: RoutePath; vias: LatLng[]; bankedM: number }
   | { type: 'reroute-failed'; atMs: number }

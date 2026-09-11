@@ -31,6 +31,18 @@ function path(timeMs: number, lngOffset = 0): RoutePath {
   };
 }
 
+/** A visibly distinct choice that leaves and rejoins the main eastward road. */
+function branchPath(timeMs: number, latOffset = 0.002): RoutePath {
+  const result = path(timeMs);
+  return {
+    ...result,
+    points: result.points.map((point, index) => ({
+      ...point,
+      lat: point.lat + Math.sin((Math.PI * index) / (result.points.length - 1)) * latOffset,
+    })),
+  };
+}
+
 /** A fix on the line, `index` points along it. */
 const onLine = (index: number, extra: Partial<Position> = {}): Position => ({
   ...points[index]!,
@@ -335,6 +347,23 @@ describe('useNavigationController — guidance', () => {
     expect(h.spoken.length).toBeGreaterThan(0);
     // Seeded from the origin fix rather than waiting for the watch's first one.
     expect(result.current.state).not.toBeNull();
+  });
+
+  it('keeps Google-style alternatives available during a drive and switches on tap', async () => {
+    const h = harness(() => Promise.resolve({ paths: [path(600_000), branchPath(900_000)] }));
+    const hook = await drive(h);
+
+    expect(hook.result.current.routeAlternatives).toHaveLength(1);
+    expect(hook.result.current.routeAlternatives[0]).toMatchObject({ deltaMs: 300_000 });
+    act(() => h.emit(onLine(5, { speedMps: 15 })));
+    const distanceBefore = hook.result.current.tripProgress?.distanceM ?? 0;
+
+    act(() => hook.result.current.selectRouteAlternative(0));
+
+    expect(hook.result.current.activePath?.timeMs).toBe(900_000);
+    expect(hook.result.current.phase).toBe('navigating');
+    expect(hook.result.current.routeAlternatives).toEqual([]);
+    expect(hook.result.current.tripProgress?.distanceM ?? 0).toBeCloseTo(distanceBefore, -1);
   });
 
   it('starts only one owned watch when Go is tapped twice', async () => {
@@ -1418,7 +1447,7 @@ describe('useNavigationController — resume an interrupted trip', () => {
     const query = h.route.mock.calls[0]![0] as RouteQuery;
     expect(query.points).toEqual([expect.objectContaining(points[0]!), via, destination]);
     expect(query.preferences).toEqual({ avoidTolls: true });
-    expect(query.alternatives).toBeUndefined();
+    expect(query.alternatives).toBe(true);
   });
 
   it('owns only one route request and watch when Resume is tapped twice', async () => {

@@ -93,7 +93,10 @@ export function encodeShape(coords: [number, number][], precision = 6): string {
  * straight-line trip through the requested locations, so route-planning UI
  * can be exercised without the routing engine.
  */
-export async function mockRouting(page: Page): Promise<void> {
+export async function mockRouting(
+  page: Page,
+  options: { alternatives?: boolean } = {},
+): Promise<void> {
   // Route enrichment (speed limits) — a separate endpoint, so it needs its own
   // mock or it would fall through to whatever Valhalla the host happens to run.
   // One edge spanning the whole shape, so the limit holds for the entire drive.
@@ -131,6 +134,7 @@ export async function mockRouting(page: Page): Promise<void> {
   await page.route('**/api/route', (route) => {
     const body = route.request().postDataJSON() as {
       locations?: { lat: number; lon: number }[];
+      alternates?: number;
     };
     const locs = body.locations ?? [];
     if (locs.length < 2) {
@@ -139,20 +143,46 @@ export async function mockRouting(page: Page): Promise<void> {
     const coords = locs.map((l) => [l.lat, l.lon] as [number, number]);
     const lats = coords.map((c) => c[0]);
     const lngs = coords.map((c) => c[1]);
+    const trip = {
+      units: 'kilometers',
+      legs: [{ shape: encodeShape(coords) }],
+      summary: {
+        length: 12.3,
+        time: 900,
+        min_lat: Math.min(...lats),
+        min_lon: Math.min(...lngs),
+        max_lat: Math.max(...lats),
+        max_lon: Math.max(...lngs),
+      },
+    };
+    const alternateCoords: [number, number][] = [
+      coords[0]!,
+      [(coords[0]![0] + coords.at(-1)![0]) / 2 + 0.003, (coords[0]![1] + coords.at(-1)![1]) / 2],
+      coords.at(-1)!,
+    ];
     return route.fulfill({
       json: {
-        trip: {
-          units: 'kilometers',
-          legs: [{ shape: encodeShape(coords) }],
-          summary: {
-            length: 12.3,
-            time: 900,
-            min_lat: Math.min(...lats),
-            min_lon: Math.min(...lngs),
-            max_lat: Math.max(...lats),
-            max_lon: Math.max(...lngs),
-          },
-        },
+        trip,
+        ...(options.alternatives && body.alternates
+          ? {
+              alternates: [
+                {
+                  trip: {
+                    units: 'kilometers',
+                    legs: [{ shape: encodeShape(alternateCoords) }],
+                    summary: {
+                      length: 13.1,
+                      time: 1200,
+                      min_lat: Math.min(...alternateCoords.map((point) => point[0])),
+                      min_lon: Math.min(...alternateCoords.map((point) => point[1])),
+                      max_lat: Math.max(...alternateCoords.map((point) => point[0])),
+                      max_lon: Math.max(...alternateCoords.map((point) => point[1])),
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
       },
     });
   });

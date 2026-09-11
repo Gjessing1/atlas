@@ -106,6 +106,7 @@ export {
 export { optimizeWaypointOrder } from './optimize.js';
 export { pathViaLabels } from './via.js';
 export { sortRouteChoices } from './choices.js';
+export { routeAlternativeLabelPoint } from './alternatives.js';
 export { viaInsertIndex } from './insert.js';
 export { trackToRoutePoints } from './track.js';
 export {

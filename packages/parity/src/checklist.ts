@@ -960,6 +960,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'acceptFasterRoute' },
   },
   {
+    id: 'nav-route-alternatives',
+    surface: 'navigation',
+    capability: 'See alternate routes with their relative ETA and switch by tapping the map',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/map/useNavLayers.ts', contains: 'selectRouteAlternative' },
+    android: { file: 'apps/android/src/map/useMapPress.ts', contains: 'selectRouteAlternative' },
+    note: 'Car guidance keeps up to two Valhalla choices as muted lines under the active blue route. The shared controller owns their relative time, label anchor and exact-path switch; each client only renders and hit-tests its native MapLibre layer.',
+  },
+  {
     id: 'nav-road-closures',
     surface: 'navigation',
     capability: 'Avoid live road closures and reroute when one appears ahead',

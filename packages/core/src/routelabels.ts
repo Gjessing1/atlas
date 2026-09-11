@@ -24,6 +24,15 @@ export function altChipLabel(
   return via ? `${head} via ${via}` : head;
 }
 
+/** Compact relative ETA for an in-navigation route badge. */
+export function routeDeltaLabel(deltaMs: number): string {
+  const absoluteMs = Math.abs(deltaMs);
+  if (absoluteMs < 30_000) return 'Same ETA';
+  if (absoluteMs < 60_000) return deltaMs > 0 ? '+<1 min' : '−<1 min';
+  const minutes = Math.round(absoluteMs / 60_000);
+  return `${deltaMs > 0 ? '+' : '−'}${minutes} min`;
+}
+
 /**
  * Compact trip time for a mode chip: the duration, "—" when the mode can't
  * route this plan, or "…" while the background pass is still routing it.

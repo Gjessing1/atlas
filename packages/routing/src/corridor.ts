@@ -13,7 +13,7 @@ export const ROUTE_SEARCH_CORRIDOR_M = 5_000;
  * the candidate is both stable and much cheaper than constructing geodesics
  * for every segment. Degenerate one-point paths still get an honest answer.
  */
-export function distanceToRouteM(point: LatLng, route: LatLng[]): number {
+export function distanceToRouteM(point: LatLng, route: readonly LatLng[]): number {
   if (route.length === 0) return Infinity;
   if (route.length === 1) return haversineM(point, route[0]!);
 
