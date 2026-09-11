@@ -685,6 +685,24 @@ function goOffRoute(h: Harness) {
 }
 
 describe('useNavigationController — rerouting', () => {
+  it('uses a heading constraint only once the fix is at driving speed', async () => {
+    const h = harness();
+    const { result } = await drive(h);
+
+    act(() => h.emit(onLine(4, { speedMps: 2.3, headingDeg: 270 })));
+    const beforeSlow = h.route.mock.calls.length;
+    act(() => result.current.rerouteNow());
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(beforeSlow + 1));
+    expect((h.route.mock.calls.at(-1)![0] as RouteQuery).headingDeg).toBeUndefined();
+    await waitFor(() => expect(result.current.phase).toBe('navigating'));
+
+    act(() => h.emit(onLine(5, { speedMps: 6, headingDeg: 90 })));
+    const beforeFast = h.route.mock.calls.length;
+    act(() => result.current.rerouteNow());
+    await waitFor(() => expect(h.route.mock.calls.length).toBe(beforeFast + 1));
+    expect((h.route.mock.calls.at(-1)![0] as RouteQuery).headingDeg).toBe(90);
+  });
+
   it('keeps planner preferences through preview, Start refresh and rerouting', async () => {
     const h = harness();
     const hook = renderHook(() => useNavigationController(h.platform));

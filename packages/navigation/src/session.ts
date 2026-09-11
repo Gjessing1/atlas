@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import { haversineM, type LatLng } from '@atlas/core';
 import {
   speedLimitKphAt,
   tunnelAt,
@@ -74,6 +74,30 @@ const ADVANCE_SPEED_MARGIN = 1.6;
 /** Advance always allowed regardless of speed — a stationary fix still wanders. */
 const ADVANCE_SLACK_M = 20;
 
+/** Shrink a tuned corridor when the receiver can prove it deserves less slack. */
+function accuracyCorridorM(
+  capM: number,
+  floorM: number,
+  factor: number,
+  accuracyM: number | null,
+): number {
+  if (accuracyM === null || !Number.isFinite(accuracyM)) return capM;
+  return Math.min(capM, Math.max(Math.min(floorM, capM), accuracyM * factor));
+}
+
+interface ProgressSample {
+  atMs: number;
+  point: LatLng;
+  alongM: number;
+}
+
+interface ProgressStallEvidence {
+  stalled: boolean;
+  durationMs: number;
+  groundM: number;
+  progressM: number;
+}
+
 /** A time-derived warning distance, never tighter than the tuned fallback. */
 function leadDistanceM(fallbackM: number, leadTimeS: number, speedMps: number | null): number {
   if (speedMps === null || !Number.isFinite(speedMps) || speedMps <= 0) return fallbackM;
@@ -130,6 +154,8 @@ export class NavigationSession {
   private offRouteCount = 0;
   /** Consecutive moving fixes whose heading opposes the route direction. */
   private wrongWayCount = 0;
+  /** Accurate, moving fixes retained only for the short route-progress stall window. */
+  private progressSamples: ProgressSample[] = [];
   private arrived = false;
   /** When the vehicle first stopped inside `arrivalLoiterRadiusM`, else null. */
   private loiterSinceMs: number | null = null;
@@ -573,6 +599,66 @@ export class NavigationSession {
     return this.clockMs;
   }
 
+  /**
+   * Detect the doubled-back-line failure a cross-track corridor cannot see:
+   * the receiver covers real ground while the continuity-bounded matcher can
+   * barely advance. Evidence is deliberately strict — driving speed, a <=10 m
+   * fix, sustained for a full window — because this result tears up a route.
+   */
+  private progressStallEvidence(
+    position: Position,
+    alongM: number,
+    speedMps: number | null,
+    accuracyM: number | null,
+    nowMs: number,
+  ): ProgressStallEvidence {
+    const eligible =
+      this.departed &&
+      !this.arrived &&
+      speedMps !== null &&
+      speedMps >= this.opts.progressStallMinSpeedMps &&
+      accuracyM !== null &&
+      accuracyM <= this.opts.progressStallMaxAccuracyM;
+    if (!eligible) {
+      this.progressSamples = [];
+      return { stalled: false, durationMs: 0, groundM: 0, progressM: 0 };
+    }
+
+    const previous = this.progressSamples.at(-1);
+    if (previous && nowMs - previous.atMs > this.opts.progressStallMaxFixGapMs) {
+      this.progressSamples = [];
+    }
+
+    this.progressSamples.push({
+      atMs: nowMs,
+      point: { lat: position.lat, lng: position.lng },
+      alongM,
+    });
+    const cutoff = nowMs - this.opts.progressStallWindowMs;
+    // Retain the last sample on or before the cutoff as the window anchor.
+    while (this.progressSamples.length > 1 && this.progressSamples[1]!.atMs <= cutoff) {
+      this.progressSamples.shift();
+    }
+
+    const first = this.progressSamples[0]!;
+    const last = this.progressSamples[this.progressSamples.length - 1]!;
+    const durationMs = Math.max(0, last.atMs - first.atMs);
+    let groundM = 0;
+    for (let i = 1; i < this.progressSamples.length; i++) {
+      groundM += haversineM(this.progressSamples[i - 1]!.point, this.progressSamples[i]!.point);
+    }
+    const progressM = Math.max(0, last.alongM - first.alongM);
+    return {
+      stalled:
+        durationMs >= this.opts.progressStallWindowMs &&
+        groundM >= this.opts.progressStallMinGroundM &&
+        progressM <= groundM * this.opts.progressStallMaxRatio,
+      durationMs,
+      groundM,
+      progressM,
+    };
+  }
+
   /** Feed one position fix; returns the new state and any voice prompts it triggered. */
   update(position: Position, nowMs: number = Date.now()): NavUpdate {
     nowMs = this.monotonicMs(nowMs);
@@ -666,6 +752,19 @@ export class NavigationSession {
     // (or arrival) — an uncertain fix leaves the tally untouched either way.
     const accurate = accuracyM === null || accuracyM <= this.opts.offRouteMaxAccuracyM;
 
+    // Departure is evaluated before wrong-way/stall evidence so the first fix
+    // that proves the drive has begun can also start (but never finish) their
+    // sustained evidence windows.
+    if (!this.departed) {
+      if (this.firstFixAlongM === null) this.firstFixAlongM = alongM;
+      if (
+        (speedMps !== null && speedMps >= this.opts.departMinSpeedMps) ||
+        alongM - this.firstFixAlongM >= this.opts.departProgressM
+      ) {
+        this.departed = true;
+      }
+    }
+
     // Tearing the trip down is irreversible, so a poor fix drifting through the
     // arrival radius must not fire it; only an accurate fix may declare arrival.
     if (distanceRemainingM <= this.opts.arrivalRadiusM && accurate) this.arrived = true;
@@ -692,8 +791,14 @@ export class NavigationSession {
     // them: what the wrong-way test compared, and whether it was suppressed.
     let tangentDeg: number | null = null;
     let inRoundabout = false;
+    const offRouteCorridorM = accuracyCorridorM(
+      this.opts.offRouteM,
+      this.opts.offRouteMinM,
+      this.opts.offRouteAccuracyFactor,
+      accuracyM,
+    );
     if (accurate) {
-      if (snap.crossTrackM > this.opts.offRouteM) this.offRouteCount++;
+      if (snap.crossTrackM > offRouteCorridorM) this.offRouteCount++;
       else this.offRouteCount = 0;
       // Wrong-way: heading opposes the route tangent while moving. Cross-track
       // stays ≈ 0 driving the line backwards (the matcher even pins the puck
@@ -711,30 +816,24 @@ export class NavigationSession {
       // guards the ring, and the tally resets so a pre-roundabout streak cannot
       // fire on the way out.
       inRoundabout = this.currentInstruction(alongM)?.sign === ROUNDABOUT_SIGN;
-      const tangent = headingDeg !== null && !inRoundabout ? this.courseAt(alongM, speedMps) : null;
+      const wrongWayEligible =
+        this.departed &&
+        speedMps !== null &&
+        speedMps >= this.opts.wrongWayMinSpeedMps &&
+        headingDeg !== null;
+      const tangent = wrongWayEligible && !inRoundabout ? this.courseAt(alongM, speedMps) : null;
       tangentDeg = tangent;
       if (tangent !== null && Math.abs(wrapDeg(headingDeg! - tangent)) > this.opts.wrongWayDeg) {
         this.wrongWayCount++;
-      } else if (headingDeg !== null || inRoundabout) {
+      } else {
         this.wrongWayCount = 0;
       }
     }
+    const stall = this.progressStallEvidence(position, alongM, speedMps, accuracyM, nowMs);
     const offRoute =
       this.offRouteCount >= this.opts.offRouteGraceUpdates ||
-      this.wrongWayCount >= this.opts.offRouteGraceUpdates;
-
-    // Departure: the drive has visibly begun once the vehicle moves at
-    // driving pace or has progressed along the route (for devices that
-    // report no speed). Sticky for the session's lifetime.
-    if (!this.departed) {
-      if (this.firstFixAlongM === null) this.firstFixAlongM = alongM;
-      if (
-        (speedMps !== null && speedMps >= this.opts.departMinSpeedMps) ||
-        alongM - this.firstFixAlongM >= this.opts.departProgressM
-      ) {
-        this.departed = true;
-      }
-    }
+      this.wrongWayCount >= this.opts.offRouteGraceUpdates ||
+      stall.stalled;
 
     this.lastFixMs = nowMs;
     this.alongAtFixM = alongM;
@@ -777,7 +876,15 @@ export class NavigationSession {
     // road is not evidence the traveller is on it — gluing there was the "it
     // snapped when I was nowhere near" bug — so a fuzzy fix shows its own raw
     // position and lets the puck sit honestly off the line.
-    const snapDisplayM = this.departed ? this.opts.snapDisplayMaxM : this.opts.startSnapDisplayMaxM;
+    const snapDisplayCapM = this.departed
+      ? this.opts.snapDisplayMaxM
+      : this.opts.startSnapDisplayMaxM;
+    const snapDisplayM = accuracyCorridorM(
+      snapDisplayCapM,
+      this.opts.snapDisplayMinM,
+      this.opts.snapDisplayAccuracyFactor,
+      accuracyM,
+    );
     let shown: LatLng;
     let shownCourse: number | null;
     let displayRouteProgress = this.arrived ? 1 : this.renderedProgress(alongM);
@@ -880,7 +987,11 @@ export class NavigationSession {
         offRouteCount: this.offRouteCount,
         wrongWayCount: this.wrongWayCount,
         graceUpdates: this.opts.offRouteGraceUpdates,
-        corridorM: this.opts.offRouteM,
+        progressStalled: stall.stalled,
+        stallDurationMs: stall.durationMs,
+        stallGroundM: stall.groundM,
+        stallProgressM: stall.progressM,
+        corridorM: offRouteCorridorM,
         wrongWayDeg: this.opts.wrongWayDeg,
         snapCorridorM: snapDisplayM,
         snapped: this.opts.snapDisplayPosition && displayOnRoute,

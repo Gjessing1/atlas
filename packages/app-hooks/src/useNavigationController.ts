@@ -339,6 +339,8 @@ const START_FIX_TIMEOUT_MS = 20_000;
 const GO_FIX_TIMEOUT_MS = 8_000;
 /** Beyond this age the preview's fix no longer describes where the traveller is. */
 const ORIGIN_FRESH_MS = 30_000;
+/** Below driving speed a phone course is manoeuvring noise, not a route constraint. */
+const REROUTE_HEADING_MIN_SPEED_MPS = 5;
 /** How often, while driving on-route, to ask whether a faster route exists. */
 const FASTER_CHECK_INTERVAL_MS = 180_000;
 /** Smallest saving worth interrupting a driver for. */
@@ -883,7 +885,9 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // Pass the travel direction (only meaningful when moving) so the new
         // route continues the way the traveller points, not via a U-turn.
         const heading =
-          typeof from.speedMps === 'number' && from.speedMps >= 2 ? from.headingDeg : undefined;
+          typeof from.speedMps === 'number' && from.speedMps >= REROUTE_HEADING_MIN_SPEED_MPS
+            ? from.headingDeg
+            : undefined;
         // Route through the stops still ahead only — a via already visited
         // must not pull the recalculated route back to it. The trimmed list
         // becomes authoritative only if this reroute succeeds; on failure the

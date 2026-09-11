@@ -281,6 +281,11 @@ export interface NavMatchTrace {
   offRouteCount: number;
   wrongWayCount: number;
   graceUpdates: number;
+  /** Whether measured motion has materially outrun matched route progress. */
+  progressStalled: boolean;
+  stallDurationMs: number;
+  stallGroundM: number;
+  stallProgressM: number;
   /** The corridors actually in force for this profile. */
   corridorM: number;
   wrongWayDeg: number;
@@ -306,6 +311,10 @@ export interface NavUpdate {
 export interface NavigationOptions {
   /** Cross-track distance (m) beyond which a fix counts as off-route. */
   offRouteM?: number;
+  /** Smallest accuracy-scaled off-route corridor (m). */
+  offRouteMinM?: number;
+  /** Fix-accuracy multiplier used to shrink `offRouteM`; it never grows the cap. */
+  offRouteAccuracyFactor?: number;
   /**
    * Whether an off-route status should *perform* a reroute or merely *offer*
    * one. In a car a silent recalculation is right — leaving the corridor
@@ -326,6 +335,20 @@ export interface NavigationOptions {
    * grace count it trips `off-route` (and a direction-aware reroute).
    */
   wrongWayDeg?: number;
+  /** Minimum ground speed (m/s) at which a heading may prove wrong-way travel. */
+  wrongWayMinSpeedMps?: number;
+  /** Minimum speed (m/s) at which measured motion may prove route-progress stall. */
+  progressStallMinSpeedMps?: number;
+  /** Largest fix uncertainty (m) admitted to route-progress stall evidence. */
+  progressStallMaxAccuracyM?: number;
+  /** Continuous evidence window required before route-progress stall fires. */
+  progressStallWindowMs?: number;
+  /** Largest gap (ms) between fixes that still counts as continuous stall evidence. */
+  progressStallMaxFixGapMs?: number;
+  /** Minimum measured ground distance within the stall window. */
+  progressStallMinGroundM?: number;
+  /** Largest matched-progress / measured-ground ratio still considered stalled. */
+  progressStallMaxRatio?: number;
   /** Distance (m) to the destination within which arrival is declared. */
   arrivalRadiusM?: number;
   /**
@@ -428,6 +451,10 @@ export interface NavigationOptions {
   chainManeuverM?: number;
   /** Cross-track distance (m) beyond which `snapped` shows the raw fix. */
   snapDisplayMaxM?: number;
+  /** Smallest accuracy-scaled display-snap corridor (m). */
+  snapDisplayMinM?: number;
+  /** Fix-accuracy multiplier used to shrink `snapDisplayMaxM`; it never grows the cap. */
+  snapDisplayAccuracyFactor?: number;
   /** Tighter `snapDisplayMaxM` used before departure (pre-drive honesty). */
   startSnapDisplayMaxM?: number;
   /** Whether the displayed position may be snapped to the planned route. */
@@ -448,9 +475,18 @@ export interface NavigationOptions {
 
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   offRouteM: 40,
+  offRouteMinM: 15,
+  offRouteAccuracyFactor: 4,
   autoReroute: true,
   offRouteGraceUpdates: 3,
   wrongWayDeg: 120, // near-opposite heading; a wrong turn trips cross-track first
+  wrongWayMinSpeedMps: 5, // ~18 km/h: below this a phone heading is car-park noise
+  progressStallMinSpeedMps: 5,
+  progressStallMaxAccuracyM: 10,
+  progressStallWindowMs: 4000,
+  progressStallMaxFixGapMs: 2500,
+  progressStallMinGroundM: 20,
+  progressStallMaxRatio: 0.4,
 
   arrivalRadiusM: 25,
   // Wide enough to cover the car park entrance a poor fix lands you at, tight
@@ -492,6 +528,8 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   wrongBranchDeg: 50, // an in-tunnel fork/roundabout exit turns well past this
   chainManeuverM: 300,
   snapDisplayMaxM: 25,
+  snapDisplayMinM: 12,
+  snapDisplayAccuracyFactor: 3,
   startSnapDisplayMaxM: 10,
   snapDisplayPosition: true,
   departMinSpeedMps: 3, // ~11 km/h: rolling out of a parking spot counts

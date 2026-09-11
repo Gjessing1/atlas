@@ -32,6 +32,8 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // than the driver's 120°. Not disabled outright: at riding speed a genuine
     // wrong-way is still worth catching.
     wrongWayDeg: 150,
+    wrongWayMinSpeedMps: 3,
+    progressStallMinSpeedMps: Infinity,
     arrivalRadiusM: 20,
     arrivalLoiterRadiusM: 40,
     arrivalLoiterMaxSpeedMps: 0.7,
@@ -68,6 +70,7 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     // walker standing still reports no course at all — every input this check
     // needs is either absent or meaningless on foot.
     wrongWayDeg: Infinity,
+    progressStallMinSpeedMps: Infinity,
     arrivalRadiusM: 15,
     // The car's loiter escape hatch inverts on foot: its "stopped" threshold is
     // *walking pace*, so a pedestrian would satisfy it while still walking, and
@@ -125,6 +128,7 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     offRouteMaxAccuracyM: 40,
     discardAccuracyM: 150,
     wrongWayDeg: Infinity,
+    progressStallMinSpeedMps: Infinity,
     arrivalRadiusM: 25,
     // Same reasoning as foot, one notch looser for the fixes terrain gives.
     arrivalLoiterRadiusM: 35,
@@ -152,6 +156,8 @@ const PROFILE_OPTIONS: Record<RoutingProfile, NavigationOptions> = {
     offRouteM: 28,
     offRouteGraceUpdates: 3,
     wrongWayDeg: 130,
+    wrongWayMinSpeedMps: 2.5,
+    progressStallMinSpeedMps: Infinity,
     arrivalRadiusM: 18,
     arrivalLoiterRadiusM: 45,
     arrivalLoiterMs: 12_000,

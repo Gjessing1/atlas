@@ -546,6 +546,24 @@ describe('NavigationSession snapped state', () => {
     expect(state.status).toBe('navigating');
   });
 
+  it('shrinks display snapping to the receiver accuracy while preserving its cap', () => {
+    const offset = { lat: 60.000135, lng: 10.005, speedMps: 8 };
+
+    const precise = new NavigationSession(route(), { startDeparted: true }).update(
+      { ...offset, accuracyM: 4 },
+      0,
+    );
+    expect(precise.match?.snapCorridorM).toBe(12);
+    expect(precise.state.snapped).toEqual({ lat: offset.lat, lng: offset.lng });
+
+    const ordinary = new NavigationSession(route(), { startDeparted: true }).update(
+      { ...offset, accuracyM: 10 },
+      0,
+    );
+    expect(ordinary.match?.snapCorridorM).toBe(25);
+    expect(ordinary.state.snapped.lat).toBeCloseTo(60, 5);
+  });
+
   it('pins the travelled-line boundary to a raw puck rather than the biased match', () => {
     // The route returns west 11 m north of its eastbound leg. After matching
     // the return, continuity keeps guidance there even when the raw fix is
@@ -690,6 +708,44 @@ describe('NavigationSession GPS accuracy', () => {
     expect(s.update({ ...offPoint, accuracyM: 10 }, 9000).state.status).toBe('off-route');
   });
 
+  it('shrinks the off-route corridor for a precise fix but never grows its cap', () => {
+    const precise = new NavigationSession(route(), { startDeparted: true });
+    // ~18 m from the line: outside 4 × 4 m, but well inside the old 40 m cap.
+    const offset = { lat: 60.00016, lng: 10.01, accuracyM: 4, speedMps: 10 };
+    expect(precise.update(offset, 0).match?.corridorM).toBe(16);
+    precise.update(offset, 1000);
+    expect(precise.update(offset, 2000).state.status).toBe('off-route');
+
+    const coarse = new NavigationSession(route(), { startDeparted: true });
+    const samePlace = { ...offset, accuracyM: 20 };
+    for (let t = 0; t < 5; t++) {
+      const update = coarse.update(samePlace, t * 1000);
+      expect(update.match?.corridorM).toBe(40);
+      expect(update.state.status).toBe('navigating');
+    }
+  });
+
+  it('keeps a diverging accurate exit outside the scaled corridor as it curves back', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const offsetsM = [8.8, 25, 49.6, 30.6];
+    const states = offsetsM.map((northM, i) =>
+      s.update(
+        {
+          ...pointAtAlong(200 + i * 20),
+          lat: 60 + northM / 111_320,
+          accuracyM: 4,
+          speedMps: 20,
+          headingDeg: 90,
+        },
+        i * 1000,
+      ),
+    );
+    expect(states.map((update) => update.match?.corridorM)).toEqual([16, 16, 16, 16]);
+    // The final 30.6 m sample used to reset a 40 m threshold after the 49.6 m
+    // peak. At receiver-scale it is still plainly a different road.
+    expect(states.at(-1)!.state.status).toBe('off-route');
+  });
+
   it('ignores hopeless fixes entirely, holding the last state', () => {
     const s = new NavigationSession(route());
     const good = s.update({ ...pointAtAlong(500), accuracyM: 10 }, 0).state;
@@ -818,6 +874,111 @@ describe('NavigationSession wrong-way detection', () => {
       accuracyM: 80,
     };
     for (let t = 0; t < 5; t++) expect(s.update(back, t * 1000).state.status).toBe('navigating');
+  });
+
+  it('ignores an opposing car-park heading below driving speed', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    const manoeuvring = {
+      ...pointAtAlong(routeCum[10]!),
+      speedMps: 2.3,
+      headingDeg: 270,
+      accuracyM: 4,
+    };
+    for (let t = 0; t < 8; t++) {
+      const update = s.update(manoeuvring, t * 1000);
+      expect(update.match?.wrongWayCount).toBe(0);
+      expect(update.state.status).toBe('navigating');
+    }
+  });
+
+  it('requires departure before an opposing heading can count', () => {
+    const s = new NavigationSession(route(), {
+      departMinSpeedMps: 10,
+      departProgressM: 100,
+      wrongWayMinSpeedMps: 5,
+    });
+    const notDeparted = {
+      ...pointAtAlong(20),
+      speedMps: 6,
+      headingDeg: 270,
+      accuracyM: 4,
+    };
+    for (let t = 0; t < 5; t++) {
+      const update = s.update(notDeparted, t * 1000);
+      expect(update.state.departed).toBe(false);
+      expect(update.match?.wrongWayCount).toBe(0);
+    }
+  });
+});
+
+describe('NavigationSession route-progress stall', () => {
+  const atMetres = (eastM: number, northM: number): LatLng => ({
+    lat: 60 + northM / 111_320,
+    lng: 10 + eastM / (111_320 * Math.cos(Math.PI / 3)),
+  });
+  // The planned line goes east, makes a tight U-turn 12 m north, then comes
+  // west. Once continuity pins matching to the first leg, a car genuinely on
+  // the return aisle can cover ground while matched progress cannot catch up.
+  const doubledPoints = [atMetres(0, 0), atMetres(200, 0), atMetres(200, 12), atMetres(0, 12)];
+  const doubled: RoutePath = {
+    points: doubledPoints,
+    distanceM: 412,
+    timeMs: 60_000,
+    ascentM: 0,
+    descentM: 0,
+    instructions: [],
+  };
+
+  it('declares off-route when measured motion outruns matched progress for four seconds', () => {
+    const s = new NavigationSession(doubled, { startDeparted: true, wrongWayDeg: Infinity });
+    // Establish the outbound leg without starting moving evidence.
+    s.update({ ...atMetres(100, 0), accuracyM: 4, speedMps: 0 }, 0);
+
+    const updates = Array.from({ length: 5 }, (_, i) =>
+      s.update(
+        {
+          ...atMetres(100 - i * 6, 12),
+          accuracyM: 4,
+          speedMps: 8,
+          headingDeg: 270,
+        },
+        (i + 1) * 1000,
+      ),
+    );
+    const final = updates.at(-1)!;
+    expect(updates.slice(0, -1).map((update) => update.state.status)).not.toContain('off-route');
+    expect(final.match).toMatchObject({
+      progressStalled: true,
+      stallDurationMs: 4000,
+    });
+    expect(final.match!.stallGroundM).toBeGreaterThanOrEqual(19.9);
+    expect(final.match!.stallProgressM).toBeLessThan(8);
+    expect(final.match!.crossTrackM).toBeLessThan(final.match!.corridorM);
+    expect(final.state.status).toBe('off-route');
+  });
+
+  it('does not call ordinary forward movement a stall', () => {
+    const s = new NavigationSession(route(), { startDeparted: true });
+    for (let t = 0; t <= 5; t++) {
+      const update = s.update(
+        { ...pointAtAlong(100 + t * 10), accuracyM: 4, speedMps: 10, headingDeg: 90 },
+        t * 1000,
+      );
+      expect(update.match?.progressStalled).toBe(false);
+      expect(update.state.status).toBe('navigating');
+    }
+  });
+
+  it('does not bridge a receiver gap into a false sustained stall', () => {
+    const s = new NavigationSession(doubled, { startDeparted: true, wrongWayDeg: Infinity });
+    s.update({ ...atMetres(100, 0), accuracyM: 4, speedMps: 0 }, 0);
+    s.update({ ...atMetres(100, 12), accuracyM: 4, speedMps: 8, headingDeg: 270 }, 1000);
+    const afterGap = s.update(
+      { ...atMetres(70, 12), accuracyM: 4, speedMps: 8, headingDeg: 270 },
+      6000,
+    );
+    expect(afterGap.match).toMatchObject({ progressStalled: false, stallDurationMs: 0 });
+    expect(afterGap.state.status).toBe('navigating');
   });
 });
 
