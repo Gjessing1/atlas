@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 /**
  * Why this point scores what it does — D4's *nothing scores without saying why*,
- * inside the place card (ROADMAP § N5, "tap to explain").
+ * inside the place card (FISH-HUNT-ENGINE.md D4, "tap to explain").
  *
  * Three rules shape what is on screen here, and each is there because the
  * alternative would be a lie of a familiar kind:

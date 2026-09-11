@@ -1,6 +1,6 @@
 /**
- * Raster primitives for the Fish & Hunt potential engine (ROADMAP § N5 / E1,
- * design in docs/FISH-HUNT-ENGINE.md § D1).
+ * Raster primitives for the Fish & Hunt potential engine
+ * (design in docs/FISH-HUNT-ENGINE.md § D1).
  *
  * Pure TypeScript over `Float32Array`, deliberately *not* GDAL: every operation
  * the four models need is small and well understood (Horn slope, exact

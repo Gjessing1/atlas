@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Atlas web ↔ Android parity checklist — which capability each client has, and why for every deliberate difference. Data plus the test that holds it to the source (ROADMAP §7.6).",
+  "description": "Atlas web ↔ Android parity checklist — which capability each client has, and why for every deliberate difference. Data plus the test that holds it to the source.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

@@ -80,7 +80,7 @@ class CommuteWidgetModule : Module() {
 
     // ------------------------------------------------------------ v2 ---
     //
-    // ROADMAP §6.5. The **v2** widget is a second widget, not a new version of
+    // docs/TRANSIT.md §W1–§W7. The **v2** widget is a second widget, not a new version of
     // the one above: v1 pins a *board* and stays the fallback, v2 pins the
     // *commute*. It keeps its own store, so these are separate functions rather
     // than a flag — configuring one must never touch the other's state.
@@ -104,7 +104,7 @@ class CommuteWidgetModule : Module() {
 
     /**
      * The journey the *app's* board is tracking, pushed onto every v2 instance —
-     * ROADMAP §6.4 §7's last piece.
+     * TRANSIT.md §7's last piece.
      *
      * A commitment is one fact with two hands on it: a tap on a widget row and
      * the Track control on the board mean the same thing, and until this existed
@@ -160,8 +160,8 @@ class CommuteWidgetModule : Module() {
     }
 
     /**
-     * The coarse place the app observed while it was in the foreground — §6.5
-     * §2's cached fix, which may choose AUTO's *presentation* and nothing else.
+     * The coarse place the app observed while it was in the foreground — TRANSIT.md
+     * §W2's cached fix, which may choose AUTO's *presentation* and nothing else.
      *
      * Written by the app because the widget cannot honestly read one: a refresh
      * runs in a WorkManager job with no foreground service, where Android

@@ -4,8 +4,7 @@
  *
  * The vocabulary — what a record says, and the trip-start/trip-end brackets
  * this file turns into files — belongs to `@atlas/navigation`; everything here
- * is storage policy, and all of it was written against a real failure
- * (ROADMAP §1.2):
+ * is storage policy, and all of it was written against a real failure:
  *
  *  - **One file per trip.** A single append-only log, rotated only when it
  *    passed 20 MB at a trip boundary and otherwise wiped whole by Settings →

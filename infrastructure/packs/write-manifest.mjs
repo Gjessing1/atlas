@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Write a built pack's manifest — the last step, after the smoke checks
-// (ROADMAP §7.5 DR7).
+// Write a built pack's manifest — the last step, after the smoke checks.
 //
 //   node write-manifest.mjs <plan.json> <pack-dir>
 //

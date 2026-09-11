@@ -1,7 +1,8 @@
 import type { ParityCapability } from './types.js';
 
 /**
- * What each client can do, surface by surface (ROADMAP §7.6).
+ * What each client can do, surface by surface. The two rules it enforces are in
+ * types.ts.
  *
  * Read this at release time — `npm run parity` prints it — and treat every
  * one-sided row as a claim someone has to stand behind. The rows with `open`
@@ -9,7 +10,7 @@ import type { ParityCapability } from './types.js';
  *
  * Adding a capability to one client is not finished until it has a row here.
  * That is cheap when the state already lives in `@atlas/app-hooks` (the `hook`
- * field), which is exactly why §7.6's second rule says to put it there.
+ * field), which is exactly why rule 2 says to put it there.
  */
 export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   // ----------------------------------------------------------------- map ---
@@ -246,7 +247,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useTransitDepartures',
     web: { file: 'apps/web/src/transit/StopDepartures.tsx', contains: 'useTransitDepartures' },
     android: { file: 'apps/android/src/ui/StopDepartures.tsx', contains: 'useTransitDepartures' },
-    note: 'Offered only inside Norway on both clients (`transitCoversPoint`) — §3’s defined non-Norway behaviour is absence, not a button that fails.',
+    note: 'Offered only inside Norway on both clients (`transitCoversPoint`) — the Norway-only rule’s defined non-Norway behaviour is absence, not a button that fails.',
   },
   {
     id: 'card-share-chooser',
@@ -394,7 +395,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Read a saved track’s elevation profile from its row',
     web: { file: 'apps/web/src/App.tsx', contains: 'title={selectedTrack.track.name}' },
     android: { file: 'apps/android/src/ui/TrackProfileSheet.tsx', contains: 'ElevationChart' },
-    note: 'One gesture on both clients: tapping the row name frames the track on the map *and* opens its profile. Android used to do only the framing, and kept the chart in a second Tracks sheet that no longer exists (§6.1).',
+    note: 'One gesture on both clients: tapping the row name frames the track on the map *and* opens its profile. Android used to do only the framing, and kept the chart in a second Tracks sheet that no longer exists.',
   },
   {
     id: 'collections-reorder',
@@ -402,7 +403,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Reorder and re-file rows by hand',
     web: { file: 'apps/web/src/sidebar/useSidebarDnd.ts', contains: 'export function' },
     android: { file: 'apps/android/src/ui/ReorderableList.tsx', contains: 'export function' },
-    note: 'Web uses HTML drag-and-drop, Android a long-press drag — the same capability through each platform’s own gesture. (§7’s rules paragraph called this "drag-and-drop file import"; there is no such thing on either client — both import through a file picker.)',
+    note: 'Web uses HTML drag-and-drop, Android a long-press drag — the same capability through each platform’s own gesture. (An earlier list called this "drag-and-drop file import"; there is no such thing on either client — both import through a file picker.)',
   },
 
   // -------------------------------------------------------------- search ---
@@ -451,7 +452,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Drive the results list from the keyboard',
     web: { file: 'apps/web/src/SearchBox.tsx', contains: 'onKeyDown' },
     android: null,
-    why: 'Web-only by nature (§7): keyboard navigation is a desktop affordance. Android’s equivalent is a tap target.',
+    why: 'Web-only by nature: keyboard navigation is a desktop affordance. Android’s equivalent is a tap target.',
   },
 
   // ------------------------------------------------------------- explore ---
@@ -501,7 +502,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Answer from downloaded data when the server cannot be reached',
     web: null,
     android: { file: 'apps/android/src/search/offlineExplore.ts', contains: 'export' },
-    why: 'Android-only by nature (§7, ARCHITECTURE rule 3): offline packs are a device feature and the web app may assume connectivity. ExplorePanel says so where it returns `offline: false`.',
+    why: 'Android-only by nature (ARCHITECTURE rule 3): offline packs are a device feature and the web app may assume connectivity. ExplorePanel says so where it returns `offline: false`.',
   },
   {
     id: 'explore-along-route',
@@ -617,7 +618,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useRegionPackJobs',
     web: null,
     android: { file: 'apps/android/src/ui/SettingsSheet.tsx', contains: 'RegionsSection' },
-    why: 'Android-only by nature (§7): a browser streams its tiles and has nowhere to keep a region pack.',
+    why: 'Android-only by nature: a browser streams its tiles and has nowhere to keep a region pack.',
   },
   {
     id: 'settings-map-tiles',
@@ -625,7 +626,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Choose between streamed and downloaded basemap tiles',
     web: null,
     android: { file: 'apps/android/src/ui/SettingsSheet.tsx', contains: 'Always stream map tiles' },
-    why: 'Android-only by nature (§7): follows from offline packs — with nothing downloaded there is no choice to make.',
+    why: 'Android-only by nature: follows from offline packs — with nothing downloaded there is no choice to make.',
   },
   {
     id: 'settings-server-origin',
@@ -636,7 +637,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
       file: 'apps/android/src/ui/SettingsSheet.tsx',
       contains: 'Reset to the default server',
     },
-    why: 'Android-only by nature (§7): the web app is served by the server it talks to, so its origin is not a setting.',
+    why: 'Android-only by nature: the web app is served by the server it talks to, so its origin is not a setting.',
   },
   {
     id: 'settings-app-updates',
@@ -644,7 +645,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Check for and install app updates',
     web: null,
     android: { file: 'apps/android/src/ui/SettingsSheet.tsx', contains: 'Check for updates' },
-    why: 'Android-only by nature (§7): OTA bundles and APKs exist because an installed app cannot be redeployed under the user. A reload is the web app’s update.',
+    why: 'Android-only by nature: OTA bundles and APKs exist because an installed app cannot be redeployed under the user. A reload is the web app’s update.',
   },
 
   // ------------------------------------------------------------- planner ---
@@ -732,7 +733,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useRoute',
     web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'routeActionsFor' },
     android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'routeActionsFor' },
-    note: 'Both render `ROUTE_ACTIONS` from @atlas/routing (ROADMAP: "Give each routing type an intentional toolbar"). Driving leads with the stops along the way, walking with the track it will keep and carry, and everything else folds under ⋯. The split is placement only — a mode that *hid* an action would be a planner that can do less depending on how you travel — and availability still decides existence, so an action that cannot act is absent from both rows rather than a dead entry behind a fold. Glyphs since v0.175.0 (`ROUTE_ACTION_ICON`, the same paths on both clients): spelled out, these secondary actions wrapped into two bands of text that outweighed the answer above them. The words survive as each button\'s accessible name and as the fold\'s own labels.',
+    note: "Both render `ROUTE_ACTIONS` from @atlas/routing. Driving leads with the stops along the way, walking with the track it will keep and carry, and everything else folds under ⋯. The split is placement only — a mode that *hid* an action would be a planner that can do less depending on how you travel — and availability still decides existence, so an action that cannot act is absent from both rows rather than a dead entry behind a fold. Glyphs since v0.175.0 (`ROUTE_ACTION_ICON`, the same paths on both clients): spelled out, these secondary actions wrapped into two bands of text that outweighed the answer above them. The words survive as each button's accessible name and as the fold's own labels.",
   },
   {
     id: 'planner-elevation-profile',
@@ -762,7 +763,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Share a link that reopens this plan',
     web: { file: 'apps/web/src/map/useShareHash.ts', contains: 'routePlanState' },
     android: { file: 'apps/android/App.tsx', contains: 'atlasRouteUrl' },
-    note: 'Recorded deliberate in §7.5: web copies the link (its address bar already holds it, kept current by useShareHash), Android hands it to the OS share sheet. Same codec either way.',
+    note: 'Recorded as deliberate: web copies the link (its address bar already holds it, kept current by useShareHash), Android hands it to the OS share sheet. Same codec either way.',
   },
   {
     id: 'planner-open-shared-link',
@@ -829,7 +830,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteDashboard' },
     android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteDashboard' },
     route: { file: 'backend/src/transit-api.ts', contains: 'commuteSegmentQueries' },
-    note: 'ROADMAP §6.4. The marker is the shared controller, not a phrase: the two surfaces used to be hand-written result lists that already disagreed about which time to print (the delayed one on both, which is the wrong one). Every clock time, status, connection and countdown now comes from @atlas/transit, so the panel, the sheet and the home-screen widget cannot quote three different departures for one bus.',
+    note: 'docs/TRANSIT.md. The marker is the shared controller, not a phrase: the two surfaces used to be hand-written result lists that already disagreed about which time to print (the delayed one on both, which is the wrong one). Every clock time, status, connection and countdown now comes from @atlas/transit, so the panel, the sheet and the home-screen widget cannot quote three different departures for one bus.',
   },
   {
     id: 'planner-commute-tracking',
@@ -839,7 +840,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'HereCard' },
     android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'HereCard' },
     route: { file: 'backend/src/transit-api.ts', contains: 'committedAnswer' },
-    note: 'ROADMAP §6.4 §7. The phase ladder, the connection break and the commitment all shipped in v0.182.0 for the *home-screen widget*, whose only consumer is the backend widget route — so the widget knew which leg you were on and the board, the surface you open once you are moving, did not. The commitment is one `local.` setting (never syncs: "the journey I am on" is the least portable fact this app holds) and the board asks for that journey by name, because a board asked "from now" cannot contain one that has already left. That is also why the card carries the journey’s legs: tracking otherwise shows strictly *less* than not tracking, since the leg list — platforms included — is only reachable by expanding a row in a list the tracked journey has fallen out of. On Android the commitment is one fact with two hands on it: `setCommitV2` pushes the board’s onto every v2 widget instance and `commitV2` reports back a tap made on the home screen, adopted only when newer and never as an absence.',
+    note: 'TRANSIT.md §7. The phase ladder, the connection break and the commitment all shipped in v0.182.0 for the *home-screen widget*, whose only consumer is the backend widget route — so the widget knew which leg you were on and the board, the surface you open once you are moving, did not. The commitment is one `local.` setting (never syncs: "the journey I am on" is the least portable fact this app holds) and the board asks for that journey by name, because a board asked "from now" cannot contain one that has already left. That is also why the card carries the journey’s legs: tracking otherwise shows strictly *less* than not tracking, since the leg list — platforms included — is only reachable by expanding a row in a list the tracked journey has fallen out of. On Android the commitment is one fact with two hands on it: `setCommitV2` pushes the board’s onto every v2 widget instance and `commitV2` reports back a tap made on the home screen, adopted only when newer and never as an absence.',
   },
   {
     id: 'planner-commute-lines',
@@ -864,7 +865,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     // The dependency that was invisible: the widget renders nothing it computes
     // itself, so without this route it is a permanent "Couldn't refresh".
     route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/widget'" },
-    why: 'Android-only by nature (§7): a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift. An instance shows a direction or — ROADMAP §6.4 §5 — one hop of the corridor, whose legs come from the same commuteSegments the board’s Interchange mode draws.',
+    why: 'Android-only by nature: a home-screen widget is a launcher surface, and a browser has nowhere to put one. It reads the same saved commute the board writes, and its rows are rendered by @atlas/transit through /api/transit/widget rather than formatted in Kotlin, so there is neither a second configuration nor a second set of labels to drift. An instance shows a direction or — TRANSIT.md §5 — one hop of the corridor, whose legs come from the same commuteSegments the board’s Interchange mode draws.',
   },
 
   {
@@ -881,7 +882,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     // refresh". The marker is the *board builder*, not the route string, because
     // v1 and v2 share one endpoint and only the v2 branch is this row's.
     route: { file: 'backend/src/transit-api.ts', contains: 'commuteWidgetV2Board' },
-    why: 'Android-only by nature (§7), like the v1 widget beside it — a browser has nowhere to put a home-screen widget. ROADMAP §6.5: a second widget rather than a new version of the first, so both are pinnable while v2 is being commuted with and v1 stays the fallback. Where v1 pins one *board*, this pins the *commute*: both directions behind a compact selector, and content that follows where you are in the journey. Where it is decided from is the point — a tap on a row commits to a journey, the operator’s own published departure and arrival records place you inside it, the clock takes over where they are silent, and only then does the time of day decide. No location permission, no activity recognition; a cached coarse fix may choose AUTO’s presentation and nothing else.',
+    why: 'Android-only by nature, like the v1 widget beside it — a browser has nowhere to put a home-screen widget. docs/TRANSIT.md §W1–§W7: a second widget rather than a new version of the first, so both are pinnable while v2 is being commuted with and v1 stays the fallback. Where v1 pins one *board*, this pins the *commute*: both directions behind a compact selector, and content that follows where you are in the journey. Where it is decided from is the point — a tap on a row commits to a journey, the operator’s own published departure and arrival records place you inside it, the clock takes over where they are silent, and only then does the time of day decide. No location permission, no activity recognition; a cached coarse fix may choose AUTO’s presentation and nothing else.',
   },
 
   // ---------------------------------------------------------- navigation ---
@@ -975,7 +976,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     // The route is the capability, not a detail of it: without it every client
     // shows the engine's own schedule and nothing anywhere looks broken.
     route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
-    note: 'Both clients wrap their provider in `trafficAwareRouteProvider(…, httpTrafficDelay())`, so the correction lands in `RoutePath.timeMs` before any UI sees it and the shared `formatTrafficDelay` is the only wording. Norway-only by data (§2.1): outside NPRA’s 202 measured corridors nothing is added and no client says anything.',
+    note: 'Both clients wrap their provider in `trafficAwareRouteProvider(…, httpTrafficDelay())`, so the correction lands in `RoutePath.timeMs` before any UI sees it and the shared `formatTrafficDelay` is the only wording. Norway-only by data: outside NPRA’s 202 measured corridors nothing is added and no client says anything.',
   },
   {
     id: 'nav-traffic-live',
@@ -1070,7 +1071,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Keep a live guidance map on screen after leaving the app',
     web: null,
     android: { file: 'apps/android/src/nav/useNavigationPip.ts', contains: 'export function' },
-    why: 'Android-only by nature (§7): picture-in-picture is an OS window mode. A browser tab that loses focus keeps rendering nothing the driver can see.',
+    why: 'Android-only by nature: picture-in-picture is an OS window mode. A browser tab that loses focus keeps rendering nothing the driver can see.',
   },
   {
     id: 'nav-background-guidance',
@@ -1078,6 +1079,6 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Keep guiding with the screen off or another app in front',
     web: null,
     android: { file: 'apps/android/src/nav/locationTask.ts', contains: 'export' },
-    why: 'Android-only by nature (§7): a foreground service with a background location task. A browser suspends a backgrounded tab, so the equivalent does not exist to be built.',
+    why: 'Android-only by nature: a foreground service with a background location task. A browser suspends a backgrounded tab, so the equivalent does not exist to be built.',
   },
 ];

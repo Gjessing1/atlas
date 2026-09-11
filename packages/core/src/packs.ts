@@ -23,8 +23,7 @@ export interface RegionPackFile {
 
 /**
  * One layer's offline artifact — **the generic slot** the fixed kinds below
- * could never be (ROADMAP § N6's architectural note, needed for the first time
- * by § N5 → E7).
+ * could never be — needed first by derived surfaces kept offline.
  *
  * The fixed slots each name one thing the app cannot work without, so a closed
  * union was right for them. Layer data is the opposite: it is open-ended by
@@ -52,8 +51,7 @@ export interface RegionPackLayerFile extends RegionPackFile {
 }
 
 /**
- * The manifest shape this build of the app writes and understands (ROADMAP
- * §7.5 DR7).
+ * The manifest shape this build of the app writes and understands.
  *
  * Two numbers, because they answer different questions. `schema` is the shape
  * of the document — bumped when a field is added — and exists so a manifest can
@@ -162,7 +160,7 @@ export interface RegionPackManifest {
     /** Map assets (glyphs + sprites) as a zip, for offline label/icon rendering. */
     assets?: RegionPackFile;
     /**
-     * Offline road-data side dataset (ROADMAP §2.1): a SQLite mirroring the
+     * Offline road-data side dataset: a SQLite mirroring the
      * server's nvdb.sqlite — NVDB speed limits, dedicated turn lanes and ATK cameras clipped to the
      * region, plus OSM `highway=speed_camera` point cameras for coverage
      * outside Norway. Read in place (no unzip), same schema the backend's
@@ -171,7 +169,7 @@ export interface RegionPackManifest {
      */
     nvdb?: RegionPackFile;
     /**
-     * Outdoor overlay archive (ROADMAP §4.1/§4.4): a .pmtiles carrying the
+     * Outdoor overlay archive: a .pmtiles carrying the
      * cabins, gates, ramps and shelters the basemap either drops entirely or
      * hides until z14 (infrastructure/tiles/outdoor-schema.yml). Read in place
      * like the basemap, and clipped to the same bbox. Absent on packs built
@@ -179,7 +177,7 @@ export interface RegionPackManifest {
      */
     outdoor?: RegionPackFile;
     /**
-     * Per-layer offline artifacts (ROADMAP § N5 → E7) — the open-ended slot
+     * Per-layer offline artifacts — the open-ended slot
      * beside the fixed ones. Absent on every pack built before it existed, and
      * on any pack whose region carries no layer data.
      */

@@ -15,7 +15,7 @@ import { registerTileRoute } from './tiles.js';
  * - `tiles.ts`    /api/overlay/:id/:z/:x/:y.png and the disk cache
  * - `identify.ts` /api/overlay/:id/identify and the response parsers
  * - `labels.ts`   /api/overlay/:id/labels and the ArcGIS attribute fetch
- * - `features.ts` /api/overlay/:id/features — arcgis-vector GeoJSON (§4.7a)
+ * - `features.ts` /api/overlay/:id/features — arcgis-vector GeoJSON
  *
  * `registerOverlayApi` is the only entry point the app uses; everything else is
  * exported for tests.

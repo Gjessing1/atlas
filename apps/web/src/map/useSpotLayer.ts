@@ -13,7 +13,7 @@ const ALL_LAYERS = [LANES, AIM, HALO, DISC, NUMBER];
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
- * The numbered "best spots in view" markers (ROADMAP § N5 → E6).
+ * The numbered "best spots in view" markers (FISH-HUNT-ENGINE.md § UX).
  *
  * Numbers rather than pins, and the numbers come from the shared
  * `spotsFeatureCollection` rather than from this file: the marker and the list

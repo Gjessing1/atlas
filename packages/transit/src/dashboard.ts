@@ -1,7 +1,7 @@
 /**
  * The commute dashboard: a personal timetable, derived once for both clients.
  *
- * This is the model behind ROADMAP §6.4, and it exists because the surface it
+ * This is the model behind docs/TRANSIT.md, and it exists because the surface it
  * replaces was a *configuration form with a result list stapled underneath*.
  * Opening the commute board meant reading three stop pickers, two time fields,
  * seven day chips and a wall of line chips before reaching the only two
@@ -689,7 +689,7 @@ export function commuteSegments(query: TransitCommuteQuery): CommuteSegment[] {
 }
 
 /**
- * Where a journey the board is tracking *starts* — ROADMAP §6.4 §13.
+ * Where a journey the board is tracking *starts* — TRANSIT.md §13.
  *
  * A commute is stored door to door, so a commitment used to be re-read from the
  * door and nowhere else. The middle mode broke that: a train home committed to
@@ -773,7 +773,7 @@ export function commuteOrigins(
 }
 
 /**
- * The three ways to read one commute — ROADMAP §6.4 §13.
+ * The three ways to read one commute — TRANSIT.md §13.
  *
  * This started as two controls: a direction (`Outbound` / `Return`) and, under
  * it, where the list starts (`Engelsrud Terrasse` / `Asker stasjon`). Two axes

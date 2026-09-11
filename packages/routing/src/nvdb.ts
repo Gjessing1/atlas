@@ -7,7 +7,7 @@ import type { RouteEnrichment, RouteEnrichmentSegment } from './enrich.js';
  * speed limits over the base route enrichment (which comes from the tiles via
  * Valhalla `/trace_attributes`, see enrich.ts).
  *
- * This is the "spatial side-dataset" conflation from ROADMAP §2.1: NVDB's own
+ * This is the "spatial side-dataset" conflation: NVDB's own
  * geometry is matched onto the chosen route by nearest-segment distance, never
  * baked into the routing graph. The mechanism is deliberately the same on both
  * platforms — the web backend runs {@link nvdbSpeedOverrides} against a
@@ -15,7 +15,7 @@ import type { RouteEnrichment, RouteEnrichmentSegment } from './enrich.js';
  * and the client-side merge {@link applyNvdbSpeedLimits} is identical either
  * way. Nothing here is Norway-aware in code: outside Norway the side dataset
  * simply has no segments near the route, so no overrides are produced and the
- * OSM/tile limits stand — exactly the graceful-degradation the §2.1 rule wants.
+ * OSM/tile limits stand — exactly the graceful degradation the Norway-only rule wants.
  */
 
 /**

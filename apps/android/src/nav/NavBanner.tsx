@@ -214,7 +214,7 @@ export function NavBanner({
    * Mark this moment in the navigation diagnostic log, when one is being
    * recorded. Every report used to open with "somewhere before Bærum
    * sykehus"; a long-press on the banner — the biggest target on the screen,
-   * and one that costs no space — turns that into a timestamp (ROADMAP §1.2).
+   * and one that costs no space — turns that into a timestamp.
    */
   onMark?: () => void;
   /** Reports the banner's laid-out height so siblings can sit clear of it. */

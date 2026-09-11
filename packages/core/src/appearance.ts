@@ -549,7 +549,7 @@ const OUTDOOR_POI_CLASSES = [
 /**
  * A cabin you must bring your own food to, versus one with a warden.
  *
- * This is the distinction §4.4 could not draw at all while `wilderness_hut` was
+ * This is the distinction the cabin styling could not draw at all while `wilderness_hut` was
  * missing from the tiles. The palette is **Atlas's own** — deliberately not a
  * claim to reproduce DNT's official cabin colour coding, which covers
  * categories (betjent/selvbetjent/ubetjent) that OSM's three tags do not map

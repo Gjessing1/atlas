@@ -128,7 +128,7 @@ describe('usePotential', () => {
 
   /**
    * A repair is a cell already on screen being derived again because an upstream
-   * it missed came back (ROADMAP N7). The surface stays up and the pill stays
+   * it missed came back. The surface stays up and the pill stays
    * quiet — but the hook has to keep asking, because the tiles keep their URLs
    * and the new ETags in `readyKey` are the only thing that moves the better
    * surface onto the map.

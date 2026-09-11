@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build the offline NVDB dataset (ROADMAP §2.1): speed limits, dedicated turn
+// Build the offline NVDB dataset: speed limits, dedicated turn
 // lanes and ATK cameras.
 //
 //   node build-nvdb.mjs [out.sqlite] [minLng,minLat,maxLng,maxLat]
@@ -11,7 +11,7 @@
 // lanes), 162 (Punkt-ATK speed cameras) and 823 (Streknings-ATK average-speed
 // sections) into a SQLite the backend and Android packs read via NvdbStore /
 // @atlas/routing. This is the offline
-// artefact the §2.1 rule demands: NVDB is an online service, but limits and
+// artefact the Norway-only rule demands: NVDB is an online service, but limits and
 // camera sites are static (sites move on the order of years), so they are
 // baked into a shipped file rather than fetched live.
 //

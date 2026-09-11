@@ -8,7 +8,7 @@
 # Both arguments name entries in a committed spec: specs/<source>.json says
 # which master datasets the source is cut from, which of them a pack may ship
 # without, what the masters cover, and — per region — the bbox plus the search
-# and routing points that prove the result works (ROADMAP §7.5 DR7). Nothing
+# and routing points that prove the result works. Nothing
 # here is derived from the region id any more: the producer used to know that
 # `oslo` meant `tiles/norway.pmtiles` and that Great Britain would want
 # `tiles/outdoor-great-britain.pmtiles`, and none of those rules were visible in
@@ -85,7 +85,7 @@ docker run --rm "${LIMITS[@]}" -v "$(dirname "$IN_BASEMAP"):/tiles:ro" -v "$STAG
 # Optional, and deliberately so: a source that declares no outdoor overlay (or
 # a host that has never run build-outdoor.sh) still produces a complete,
 # working pack — the app falls back to the basemap-only outdoor layers exactly
-# as it does online (ROADMAP §4.1).
+# as it does online.
 if [[ -n "$IN_OUTDOOR" ]]; then
   echo "==> [$REGION] extracting outdoor overlay"
   docker run --rm "${LIMITS[@]}" -v "$(dirname "$IN_OUTDOOR"):/tiles:ro" -v "$STAGE:/out" "$TOOL_PMTILES" \
@@ -108,7 +108,7 @@ node "$SCRIPT_DIR/build-search-db.mjs" "$STAGE/search.sqlite" "$PACK_NAME" < "$W
 node "$SCRIPT_DIR/enrich-place-content.mjs" "$STAGE/search.sqlite"
 
 echo "==> [$REGION] building nvdb.sqlite (speed limits + turn lanes + cameras)"
-# Offline road data (ROADMAP §2.1): NVDB speed limits + turn lanes + ATK cameras
+# Offline road data: NVDB speed limits + turn lanes + ATK cameras
 # clipped from the national master where the source has one, plus OSM speed
 # cameras read from the same region extract — the only camera data available
 # outside Norway. Reuses the search stream, so it must run before the

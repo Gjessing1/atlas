@@ -2,11 +2,11 @@
 <!--
   One journey on the v2 board, and — unlike every row in v1 — a **control**.
 
-  A tap on it is the commitment (§6.5 §2 tier 1): "this is the one I am taking".
+  A tap on it is the commitment (TRANSIT.md §W2 tier 1): "this is the one I am taking".
   That is not a new interaction imposed on the reader; it is the decision they
   already make when they glance at the widget and pick which bus to run for, and
   it is what buys the whole state ladder without a location permission. Tapping
-  the committed row again releases it, which is §3's "explicit release".
+  the committed row again releases it, which is §W3's "explicit release".
 
   One line per row on purpose. v2 spends its height on the focus above — the
   answer — and these rows are the "and if I miss it?" list, where a departure

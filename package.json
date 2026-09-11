@@ -24,7 +24,7 @@
     "test:all": "npm run test --workspaces --if-present -- --testTimeout=300000 --hookTimeout=360000",
     "_comment:gate": "The pre-push gate. Runs format/lint/build/typecheck/tests and decides two things from the diff: whether the slow raster tests apply, and whether this change can break the *image* (a package.json, the lockfile, the Dockerfile) and therefore needs the local `docker build` too. CI's image build always runs the full suite regardless.",
     "gate": "node scripts/gate.mjs",
-    "_comment:parity": "The web↔Android parity checklist, read at release time (ROADMAP §7.6). The gate already enforces it — packages/parity's test resolves every capability's marker in both app trees; this is the human-readable half.",
+    "_comment:parity": "The web↔Android parity checklist, read at release time. The gate already enforces it — packages/parity's test resolves every capability's marker in both app trees; this is the human-readable half.",
     "parity": "node scripts/parity-report.mjs",
     "_comment:lint": "Both caches live under node_modules/.cache (already ignored everywhere, and dockerignored — the image build re-checks every file from cold, which is the run that counts). Together these two stages were ~5 min of every local gate while re-reading a tree that had not changed; both invalidate on content *and* config change, so a cache hit means the same verdict.",
     "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",

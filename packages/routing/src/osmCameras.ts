@@ -1,8 +1,8 @@
 import type { NvdbCameraPoint } from './cameras.js';
 
 /**
- * OSM speed-camera fallback for the *point* half of the ATK feature
- * (ROADMAP §2.1). Where Vegvesen's NVDB is the authoritative source inside
+ * OSM speed-camera fallback for the *point* half of the ATK feature.
+ * Where Vegvesen's NVDB is the authoritative source inside
  * Norway, OSM `highway=speed_camera` nodes are the only camera data available
  * everywhere else — so a route driven on an offline pack outside Norway still
  * gets point-camera warnings, feeding the exact same {@link NvdbCameraPoint}

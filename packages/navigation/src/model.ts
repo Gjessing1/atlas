@@ -181,7 +181,7 @@ export interface NavState {
    * The next fixed speed camera ahead on the route, once it is close enough
    * to show (a camera 40 km away is not guidance). Null without camera data —
    * which outside Norway is always, so no UI may imply "no camera data": the
-   * chip is simply absent (ROADMAP §2.1 rule).
+   * chip is simply absent (the Norway-only rule).
    */
   speedCamera: SpeedCameraState | null;
   /** The average-speed camera stretch being driven, or null outside one. */
@@ -256,7 +256,7 @@ export interface VoicePrompt {
  * The state says *what* the session concluded; this says what it concluded it
  * from. Reconstructing a wrong-way episode from a log used to mean comparing
  * raw headings against route geometry by hand — the counters and thresholds
- * that actually fired were nowhere in the record (ROADMAP §1.2). Diagnostics
+ * that actually fired were nowhere in the record. Diagnostics
  * only: nothing in the app reads it, and it is absent from a `tick()` update
  * because a reckoned position was matched against nothing.
  */

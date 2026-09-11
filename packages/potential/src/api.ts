@@ -1,6 +1,6 @@
 /**
  * The derive service's wire contract — cell addressing and the shapes
- * `/api/potential/…` speaks (ROADMAP § N5 → E2/E3b).
+ * `/api/potential/…` speaks.
  *
  * It lives in the engine package rather than in the backend because both ends
  * need the same answers and neither may guess: the server derives cells and the
@@ -37,7 +37,7 @@ const WEB_MERCATOR_EXTENT = 20037508.342789244;
 /**
  * Norway's data envelope. Every input is a Norwegian government service, so a
  * cell outside this box has nothing to derive from — and per the Norway-only
- * precedent (ROADMAP §2.1) that must read as *absent*, never as an error.
+ * rule (ARCHITECTURE.md) that must read as *absent*, never as an error.
  *
  * Svalbard and Jan Mayen are deliberately outside: NVE's lake register and
  * NIBIO's land cover do not cover them, so a cell there would derive an empty

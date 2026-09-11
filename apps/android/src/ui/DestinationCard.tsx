@@ -144,7 +144,7 @@ export function DestinationCard({
   target: DestinationTarget;
   /**
    * The derived surface's reading of this spot, when one is on and has
-   * something to say here (§N5, "tap to explain"). Null covers every quiet
+   * something to say here (FISH-HUNT-ENGINE.md D4, "tap to explain"). Null covers every quiet
    * case — no derived layer, an unprepared cell, ground the model does not
    * read — because all three should leave the card unchanged.
    */

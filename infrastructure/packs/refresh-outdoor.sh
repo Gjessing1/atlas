@@ -10,9 +10,9 @@ set -euo pipefail
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 MASTER_OUTDOOR="$DATA_DIR/tiles/outdoor.pmtiles"
 PACKS_DIR="$DATA_DIR/packs"
-# Pinned by digest in tools.json, like every other tool the producer runs
-# (ROADMAP §7.5 DR7) — the archive this cuts is recorded in each pack's
-# provenance, and a `:latest` that moved would make that record a guess.
+# Pinned by digest in tools.json, like every other tool the producer runs —
+# the archive this cuts is recorded in each pack's provenance, and a `:latest`
+# that moved would make that record a guess.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PMTILES_IMAGE="$(jq -er '.pmtiles.image' "$SCRIPT_DIR/../tools.json")"
 

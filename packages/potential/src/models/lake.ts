@@ -1,5 +1,5 @@
 /**
- * The lake fishing model (ROADMAP § N5 → E3, design in
+ * The lake fishing model (design in
  * docs/FISH-HUNT-ENGINE.md § "Lake fishing potential").
  *
  * **Two models behind one layer, chosen by data — and the depth-free shore

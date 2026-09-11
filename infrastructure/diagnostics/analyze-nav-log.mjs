@@ -4,7 +4,7 @@
  *
  * Every analysis of an uploaded log used to be written from scratch — a
  * throwaway script per question — so two readings of the same file agreed only
- * by luck and each new question cost another script (ROADMAP §1.2). The
+ * by luck and each new question cost another script. The
  * reading itself lives in `@atlas/navigation` (`analyzeNavLog`), beside the
  * vocabulary the app writes, so the two cannot drift; this is the command that
  * points it at a file.

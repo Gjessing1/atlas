@@ -1467,7 +1467,7 @@ describe('useNavigationController — the diagnostic log', () => {
     expect(prompts.length).toBeGreaterThan(0);
     expect(prompts[0]).toMatchObject({ spoken: true, kind: 'depart' });
     // A muted cue still leaves a trace: "did it fire" and "did the driver hear
-    // it" are different questions (ROADMAP §1).
+    // it" are different questions.
     expect(prompts.some((record) => record.spoken === false)).toBe(true);
   });
 

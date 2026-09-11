@@ -34,7 +34,7 @@ import {
 } from './spots.js';
 
 /**
- * The derived-potential HTTP surface (ROADMAP § N5 → E2, E3).
+ * The derived-potential HTTP surface.
  *
  * Six routes, and the shape of them is the design:
  *
@@ -167,7 +167,7 @@ export async function registerPotentialApi(
    * surface it has, because a degraded surface is a usable one and the
    * alternative — reporting it as "working" — would tell a user their map is
    * unfinished when it is merely improvable. The flag exists so the client keeps
-   * polling long enough to pick up the better tiles (ROADMAP N7 → health.ts).
+   * polling long enough to pick up the better tiles (health.ts).
    */
   const repairIfDue = async (
     model: DeriveModel,

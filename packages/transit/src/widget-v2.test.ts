@@ -24,7 +24,7 @@ import {
 
 /**
  * The v2 widget's own suite. v1's is beside it and stays there: the two boards
- * are different products (ROADMAP §6.5), and one file testing both is how a
+ * are different products (docs/TRANSIT.md §W1–§W7), and one file testing both is how a
  * change made for v2 quietly starts constraining the widget that is still the
  * fallback.
  */
@@ -147,7 +147,7 @@ const result = (...trips: TransitTrip[]): TransitResult => ({ trips, problems: [
 
 // ------------------------------------------------------------ the ladder ---
 
-describe('commuteJourneyProgress — ROADMAP §6.5 §2', () => {
+describe('commuteJourneyProgress — TRANSIT.md §W2', () => {
   it('is a plain timetable read before anything has happened', () => {
     const journey = commuteJourney(twoLegTrip(), hm(6, 30));
     expect(commuteJourneyProgress(journey, hm(6, 30))).toEqual({
@@ -201,7 +201,7 @@ describe('commuteJourneyProgress — ROADMAP §6.5 §2', () => {
 
 // ------------------------------------------------------------- the break ---
 
-describe('commuteConnectionBreak — ROADMAP §6.5 §4', () => {
+describe('commuteConnectionBreak — TRANSIT.md §W4', () => {
   it('says nothing about a change that still holds', () => {
     const journey = commuteJourney(twoLegTrip(), hm(7, 0));
     expect(commuteConnectionBreak(journey, hm(7, 20))).toBeNull();
@@ -241,7 +241,7 @@ describe('commuteConnectionBreak — ROADMAP §6.5 §4', () => {
 
 // -------------------------------------------------------- the substitute ---
 
-describe('the substitute journey — ROADMAP §6.5 §4', () => {
+describe('the substitute journey — TRANSIT.md §W4', () => {
   /** The 280 twelve minutes down, so the 07:41 at Asker is gone. */
   const brokenJourney = () => commuteJourney(twoLegTrip({ delayMs: 12 * 60_000 }), hm(7, 20));
   const brokenAt = (nowMs: number) => commuteConnectionBreak(brokenJourney(), nowMs)!;
@@ -473,7 +473,7 @@ describe('the substitute journey — ROADMAP §6.5 §4', () => {
 
 // ---------------------------------------------------------- the selector ---
 
-describe('the direction selector — ROADMAP §6.5 §1', () => {
+describe('the direction selector — TRANSIT.md §W1', () => {
   it('offers AUTO and the two directions, compactly', () => {
     // `short` is cut and `label` is not: three chips share one row with the ↻,
     // so a chip holds about eight characters — while a screen reader is given
@@ -532,7 +532,7 @@ describe('the direction selector — ROADMAP §6.5 §1', () => {
     expect(expired.reason).toBe('clock');
     expect(expired.pin).toBeNull();
     // The way home pinned in the morning has no *other* window left today, so it
-    // holds to the end of the service day instead — the two halves of §1's rule.
+    // holds to the end of the service day instead — the two halves of §W1's rule.
     const untilDayEnd = resolveCommuteV2Directions({
       query,
       selector: 'inbound',
@@ -575,7 +575,7 @@ describe('the direction selector — ROADMAP §6.5 §1', () => {
     ).toEqual({ directions: ['outbound'], reason: 'clock', pin: null });
   });
 
-  it('draws both directions at the interchange rather than guessing — §5', () => {
+  it('draws both directions at the interchange rather than guessing — §W5', () => {
     expect(
       resolveCommuteV2Directions({
         query: commute(),
@@ -622,7 +622,7 @@ describe('commuteWidgetV2Board', () => {
       ...over,
     });
 
-  it('is a timetable, and invents no commitment — §3', () => {
+  it('is a timetable, and invents no commitment — §W3', () => {
     const answer = board();
     expect(answer.variant).toBe('v2');
     expect(answer.commitId).toBeNull();
@@ -658,7 +658,7 @@ describe('commuteWidgetV2Board', () => {
     expect(answer.focus.action).toBe('Change to 🚆 R14');
     expect(answer.focus.when).toBe('07:41');
     expect(answer.focus.platform).toBe('plat. 3');
-    // Direction and state stay separate axes — §6's second bullet.
+    // Direction and state stay separate axes — §W6's second bullet.
     expect(answer.focus.direction).toBe('outbound');
     expect(answer.focus.directionLabel).toBe('Engelsrud → Nationaltheatret');
   });
@@ -707,7 +707,7 @@ describe('commuteWidgetV2Board', () => {
     expect(answer.focus.countdown).toBe('in 22 min');
   });
 
-  it('states the broken connection instead of pretending the plan holds — §4', () => {
+  it('states the broken connection instead of pretending the plan holds — §W4', () => {
     const committedTrip = twoLegTrip({ delayMs: 12 * 60_000 });
     const commit: TransitWidgetV2Commit = {
       direction: 'outbound',
@@ -757,7 +757,7 @@ describe('commuteWidgetV2Board', () => {
   });
 
   it('keeps a commitment when the selector is pinned the other way, without following it', () => {
-    // §1 says a manual choice wins, and §3 says a commitment releases on its own
+    // §W1 says a manual choice wins, and §W3 says a commitment releases on its own
     // terms — so pinning the way home while riding out must show the way home
     // and must NOT throw the commitment away.
     const answer = board({
@@ -836,7 +836,7 @@ describe('commuteWidgetV2Queries', () => {
 
 // ------------------------------------------------------- the cached fix ----
 
-describe('commutePlaceAt — ROADMAP §6.5 §2, presentation only', () => {
+describe('commutePlaceAt — TRANSIT.md §W2, presentation only', () => {
   const query = commute();
 
   it('names the ends of the commute and the change between them', () => {
@@ -863,7 +863,7 @@ describe('commutePlaceAt — ROADMAP §6.5 §2, presentation only', () => {
 
 // --------------------------------------------------------- the commitment ---
 
-describe('a commitment made from the interchange — §6.4 §13', () => {
+describe('a commitment made from the interchange — TRANSIT.md §13', () => {
   const journey = () => commuteJourney(twoLegTrip(), hm(7, 0));
 
   it('keeps the door form of the id exactly as it was', () => {

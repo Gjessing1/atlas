@@ -169,7 +169,7 @@ export function Sidebar({
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   // Pending destructive action, awaiting the confirmation dialog.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
-  // What the tree is narrowed to (§6.2) — name, tag, notes or address, with a
+  // What the tree is narrowed to — name, tag, notes or address, with a
   // leading `#` meaning tags alone. Session-only, like the expansion state: a
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');

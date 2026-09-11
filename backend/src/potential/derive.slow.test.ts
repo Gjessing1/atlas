@@ -704,7 +704,7 @@ describe('potential routes', () => {
 // ---- best spots in view ---------------------------------------------------
 
 /**
- * The shortlist over a prepared cell (ROADMAP § N5 → E6).
+ * The shortlist over a prepared cell.
  *
  * Everything asserted here is a rule the obvious implementation would break:
  * the list must agree with the ramp about "prime", must merge candidates in

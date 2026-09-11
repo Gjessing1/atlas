@@ -6,8 +6,8 @@ import type { PlaceRecord } from '@atlas/storage';
  * The commute's configuration — three stops, two times, the days it runs and
  * the lines it uses.
  *
- * Split out of `CommutePanel` when the board was put in front of it (ROADMAP
- * §6.3). It is the same form; what changed is that it is no longer the first
+ * Split out of `CommutePanel` when the board was put in front of it.
+ * It is the same form; what changed is that it is no longer the first
  * thing anyone sees. A commute is configured once and read twice a day, so the
  * screen belongs to the answer and this belongs behind a button — opened on
  * demand, or automatically when there is not yet enough saved to ask a question

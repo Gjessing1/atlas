@@ -4,7 +4,7 @@ import appJson from '../app.json';
 import { DEFAULT_SERVER_ORIGIN } from './config';
 
 /**
- * The Android App Links registration (ROADMAP §7 — "open a shared Atlas link").
+ * The Android App Links registration — opening a shared Atlas link in the app.
  *
  * Three facts about it live in `app.json`, where nothing else would notice them
  * going wrong, and all three are silent failures: a link that opens the browser

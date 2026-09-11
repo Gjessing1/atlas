@@ -20,7 +20,7 @@ import org.json.JSONArray
  * be the same widget twice — and the ⚙ that a launcher offers on a resize went
  * nowhere. One question, and every answer is one upstream call rather than two.
  *
- * The answers come in two groups, and the second is ROADMAP §6.4 §5:
+ * The answers come in two groups, and the second is TRANSIT.md §5:
  *
  *  - **A direction** — the whole journey, door to door. The right board at 07:05.
  *  - **One leg of it** — "Asker stasjon → Nationaltheatret" and its next

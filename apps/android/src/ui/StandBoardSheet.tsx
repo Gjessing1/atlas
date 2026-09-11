@@ -8,7 +8,7 @@ import { theme } from './theme';
 
 /**
  * "My stands" on Android — the twin of the web's StandBoardPanel, under the same
- * rules (ROADMAP § E12).
+ * rules.
  *
  * The shortlist beside it answers *where should I sit?*, asked once per area.
  * This answers the one a season repeats every afternoon: **which of the stands I

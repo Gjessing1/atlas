@@ -1,5 +1,5 @@
 /**
- * The **v2** home-screen widget's board — ROADMAP §6.5.
+ * The **v2** home-screen widget's board — docs/TRANSIT.md §W1–§W7.
  *
  * ---
  * **Which widget is this?** Atlas ships two home-screen commute widgets side by
@@ -12,7 +12,7 @@
  *    `CommuteWidgetV2Provider`. One instance holds *the whole commute*.
  *
  * v1 stays the fallback and the reference until v2 has been commuted with
- * (§6.5 §7), so nothing there is bent to suit this file. What helps is reused by
+ * (TRANSIT.md §W7), so nothing there is bent to suit this file. What helps is reused by
  * importing it — `TransitWidgetRow` and `tripWidgetRow` build the rows,
  * `commuteRefreshAtMs` and `windowOpensAtMs` schedule the asking, and
  * `commuteJourney` is still the one derivation of what a journey costs.
@@ -25,7 +25,7 @@
  * The unit worth pinning is the *commute*, so a v2 instance carries both
  * directions behind a compact selector and shows the part of it you are in.
  *
- * **How it knows where you are, and what it deliberately does not do.** §6.5 §2
+ * **How it knows where you are, and what it deliberately does not do.** TRANSIT.md §W2
  * shrinks that question to four tiers, and a lower one may never override a
  * higher one:
  *
@@ -35,7 +35,7 @@
  *     bus to run for.
  *  2. **The published record** — `TransitLeg.actualStartMs` / `actualEndMs`.
  *     Whether a departure has *happened* is a fact operators publish, and it was
- *     measured before it was scoped (§6.5's `/trace_attributes` lesson): on
+ *     measured before it was scoped (§W2: the `/trace_attributes` lesson): on
  *     2026-08-27 past calls carried it on 20/20 Ruter buses, 9/9 trams, 11/11
  *     metros and 27/28 Vy trains, and a `trip()` asked with a past `dateTime`
  *     returns the departed journey with both fields set. Its **absence is not
@@ -106,8 +106,8 @@ import {
 // ------------------------------------------------------------ the ladder ---
 
 /**
- * Where in a committed journey the traveller is — §6.5 §2's ladder, and one of
- * the two axes the widget renders (§6). The other is the direction; conflating
+ * Where in a committed journey the traveller is — TRANSIT.md §W2's ladder, and one of
+ * the two axes the widget renders (§W6). The other is the direction; conflating
  * them is what makes a widget need a special case per combination.
  */
 export type CommuteJourneyPhase =
@@ -144,7 +144,10 @@ const BOARDING_LEAD_MS = 10 * 60_000;
  */
 const MIN_TRANSFER_MS = 60_000;
 
-/** Which tier of §6.5 §2 answered. Reported so a wrong answer can be traced to its source. */
+/**
+ * Which tier of TRANSIT.md §W2 answered. Reported so a wrong answer can be
+ * traced to its source.
+ */
 export type CommutePhaseSource = 'record' | 'clock';
 
 /** Where the traveller is in one journey, and what said so. */
@@ -240,7 +243,7 @@ export function commuteJourneyProgress(
 // ------------------------------------------------------------ the break ----
 
 /**
- * A connection the numbers say no longer holds — §6.5 §4.
+ * A connection the numbers say no longer holds — TRANSIT.md §W4.
  *
  * Computed, never sensed: leg *n*'s expected arrival plus the change's own
  * transfer time is later than leg *n+1*'s expected departure. Both values are
@@ -321,7 +324,7 @@ export function commuteConnectionBreak(
 
 // -------------------------------------------------------- the substitute ---
 //
-// The replacement for a connection the numbers have broken — §6.5 §4, the half
+// The replacement for a connection the numbers have broken — TRANSIT.md §W4, the half
 // that had to wait for real commuting because a leg offered from a board asked
 // seconds earlier is a promise about a connection nobody has stood at yet.
 //
@@ -485,7 +488,7 @@ export interface CommuteConnectionReplacement {
 // -------------------------------------------------------- the commitment ---
 
 /**
- * The journey the user tapped — §6.5 §2 tier 1, and §3's per-instance,
+ * The journey the user tapped — TRANSIT.md §W2 tier 1, and §W3's per-instance,
  * expiring commitment.
  *
  * Identified by the *scheduled* departure and the first line rather than by any
@@ -503,7 +506,7 @@ export interface TransitWidgetV2Commit {
   committedAtMs?: number;
   /**
    * Where the committed journey starts — `door` (the commute's own end) or the
-   * corridor's last `interchange`, §6.4 §13's middle ground.
+   * corridor's last `interchange`, TRANSIT.md §13's middle ground.
    *
    * Optional, and absent means `door`: every commitment made before the board
    * could start anywhere else was one, including those already sitting in a
@@ -664,7 +667,7 @@ export function findCommittedTrip(
 }
 
 /**
- * Slack after the scheduled arrival before a commitment lets go — §6.5 §3's
+ * Slack after the scheduled arrival before a commitment lets go — TRANSIT.md §W3's
  * "releases at the journey's scheduled arrival plus slack".
  *
  * Twenty minutes: long enough that a delayed run still ends under its own
@@ -693,7 +696,7 @@ export type TransitWidgetV2Selector = TransitCommuteDirection | 'auto';
 export type TransitWidgetV2Place = 'home' | 'interchange' | 'away' | 'unknown';
 
 /**
- * Which end of the commute a coarse position is at — §6.5 §2's cached fix,
+ * Which end of the commute a coarse position is at — TRANSIT.md §W2's cached fix,
  * decided here rather than in Kotlin because "what counts as being at the
  * interchange" is a fact about the commute, not a paint decision.
  *
@@ -733,7 +736,7 @@ export interface TransitWidgetV2SelectorState {
   /**
    * `"Pinned until 15:30"`, or null on AUTO.
    *
-   * §6.5 §1: a pinned direction that never expires is wrong for half of every
+   * TRANSIT.md §W1: a pinned direction that never expires is wrong for half of every
    * day. It says when it lets go rather than flipping silently, and returning to
    * AUTO is one tap.
    */
@@ -841,7 +844,7 @@ export interface TransitWidgetV2Resolution {
  *  - a pin that still holds (a tap on the selector),
  *  - a live commitment (a tap on a row),
  *  - standing at the interchange with nothing committed — where either direction
- *    is genuinely live, so AUTO draws both rather than guessing (§6.5 §5),
+ *    is genuinely live, so AUTO draws both rather than guessing (TRANSIT.md §W5),
  *  - the clock (`defaultCommuteDirection`).
  */
 export function resolveCommuteV2Directions({
@@ -905,7 +908,7 @@ export interface TransitWidgetV2Block {
 }
 
 /**
- * The one thing the widget says loudest — §6.5 §6, "next action first".
+ * The one thing the widget says loudest — TRANSIT.md §W6, "next action first".
  *
  * Ordered by what to do next: the direction and state chips, then the action,
  * then the time until it, then the transfer information, then the detail. The
@@ -920,7 +923,7 @@ export interface TransitWidgetV2Focus {
   phase: CommuteJourneyPhase | null;
   /** {@link COMMUTE_PHASE_LABEL}, or null with no phase. */
   phaseLabel: string | null;
-  /** Which tier of §6.5 §2 placed the traveller, for the same reason a log has a source. */
+  /** Which tier of TRANSIT.md §W2 placed the traveller, for the same reason a log has a source. */
   phaseSource: CommutePhaseSource | null;
   /** `"Board the 280"` / `"Change at Asker stasjon"` — the imperative. */
   action: string;
@@ -1009,7 +1012,7 @@ function joinLine(parts: readonly (string | null)[]): string {
 
 /**
  * The headline, built from the phase rather than from a special case per
- * combination of phase and direction — §6.5 §6's second bullet, in code.
+ * combination of phase and direction — TRANSIT.md §W6's second bullet, in code.
  */
 function focusOf({
   query,
@@ -1025,13 +1028,13 @@ function focusOf({
   journey: CommuteJourney | null;
   /**
    * Null when nothing is committed — which is not the same as "upcoming".
-   * §6.5 §3: no commitment is invented, so with no tap the widget stays a
+   * TRANSIT.md §W3: no commitment is invented, so with no tap the widget stays a
    * timetable and says nothing at all about where the traveller is. An assumed
    * commitment that is wrong is the one failure mode with no visible cause.
    */
   progress: CommuteJourneyProgress | null;
   broken: CommuteConnectionBreak | null;
-  /** Set when this journey's own connection was re-planned — §6.5 §4. */
+  /** Set when this journey's own connection was re-planned — TRANSIT.md §W4. */
   replaced: CommuteConnectionReplacement | null;
   nowMs: number;
 }): TransitWidgetV2Focus {
@@ -1116,9 +1119,9 @@ function focusOf({
     }
   })();
 
-  // The transfer information §6 puts fourth: how long the change is, or — once
+  // The transfer information §W6 puts fourth: how long the change is, or — once
   // the numbers have broken it — that it is gone, and then which vehicle takes
-  // over instead (§4). A disruption headline takes the same slot when there is
+  // over instead (§W4). A disruption headline takes the same slot when there is
   // neither, because all three answer "is this plan still true" and a widget has
   // room for one of them.
   //
@@ -1172,7 +1175,7 @@ function focusOf({
 
 /**
  * `"Pinned until 15:30"` — an expiry stated rather than left to surprise
- * someone. §6.5 §1: a pin that never expires is wrong for half of every day, and
+ * someone. TRANSIT.md §W1: a pin that never expires is wrong for half of every day, and
  * one that flips silently is worse than one that says when it will.
  */
 function pinNote(releasesAtMs: number, nowMs: number): string {
@@ -1214,7 +1217,7 @@ export function commuteWidgetV2Board({
   /** The committed journey re-read at its own departure time, when there is one. */
   committedTrip: TransitTrip | null;
   /**
-   * Set when `committedTrip` is a *spliced* journey — §6.5 §4. A spliced
+   * Set when `committedTrip` is a *spliced* journey — TRANSIT.md §W4. A spliced
    * journey is deliberately indistinguishable from one that always looked like
    * this, so the board has to be told in order to say so.
    */
@@ -1253,7 +1256,7 @@ export function commuteWidgetV2Board({
   const committedJourney = committedTrip ? commuteJourney(committedTrip, nowMs) : null;
   const holds = committedJourney !== null && commuteCommitHolds(committedJourney, nowMs);
   // A commitment drives the *focus* only while its own direction is on screen.
-  // The selector is a manual instruction and §1 says it wins, so someone who
+  // The selector is a manual instruction and §W1 says it wins, so someone who
   // pins the way home while riding out gets the way home — but the commitment is
   // not released for it: it stays live, stays echoed back, and the focus returns
   // to it the moment AUTO does. A focus about a direction with no block under it

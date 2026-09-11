@@ -9,8 +9,8 @@ import type { NavigationOptions } from './model.js';
  * peculiar traveller: it cannot face away from the road it is on, it cannot
  * stop dead and turn on the spot, and 40 m off the line means it is genuinely
  * on a different road. None of that is true on foot. Rather than grow a third
- * and fourth code path, every mode-sensitive number lives in this one table —
- * the roadmap's "single mode-indexed table rather than two competing schemes".
+ * and fourth code path, every mode-sensitive number lives in this one table: a
+ * single mode-indexed table rather than two competing schemes.
  *
  * `car` is the empty row by definition: it is what the defaults already are.
  * Read each other row as a diff against it.

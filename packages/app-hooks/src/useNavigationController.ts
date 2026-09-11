@@ -99,7 +99,7 @@ export interface NavPlatform {
   trace?: ValhallaTransport;
   /**
    * Authoritative Norwegian speed limits (NVDB) for a route's distance ranges,
-   * layered over `trace`'s tile limits inside Norway (ROADMAP §2.1). Optional
+   * layered over `trace`'s tile limits inside Norway. Optional
    * and best-effort: absent, unreachable, or an empty result all just leave the
    * tile limits standing, so it can never cost a roundel that `trace` produced.
    */
@@ -107,8 +107,8 @@ export interface NavPlatform {
   /** NVDB dedicated turn lanes, matched onto maneuver indexes. */
   nvdbLanes?: NvdbLaneTransport;
   /**
-   * ATK speed cameras (points + average-speed sections) matched onto a route
-   * (ROADMAP §2.1). Same contract as `nvdbLimits`: optional and best-effort —
+   * ATK speed cameras (points + average-speed sections) matched onto a route.
+   * Same contract as `nvdbLimits`: optional and best-effort —
    * absent, unreachable, or empty simply means no camera guidance, exactly
    * the pre-camera behaviour and the everywhere-outside-Norway behaviour.
    */
@@ -117,7 +117,7 @@ export interface NavPlatform {
   trafficClosures?: TrafficClosureTransport;
   /**
    * Live corridor travel times matched onto a route, for re-pricing the trip
-   * being driven (§2.2). Optional and best-effort in exactly the way the other
+   * being driven. Optional and best-effort in exactly the way the other
    * traffic seam is: without it the trip keeps the schedule it departed with,
    * which is the pre-v0.136.0 behaviour and the behaviour everywhere the feed
    * has nothing to say.
@@ -522,7 +522,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * Logged either way, with `spoken` saying which: the uploaded log recorded
    * fixes, states, phases and routes but not one line about what the driver
    * heard, so "did that cue fire, twice, or never" could only be answered by
-   * asking them (ROADMAP §1).
+   * asking them.
    */
   const speak = useCallback(
     (text: string, context: Record<string, unknown> = {}): void => {
@@ -559,8 +559,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * Record a route the trip asked for. `route-request` used to carry the query
    * and nothing about *why* it was made, so first-fix, off-route, wrong-way,
    * closure, faster-probe, accepted offer and added stop were indistinguishable
-   * in a log and the 3-minute probe cadence was the only way to guess
-   * (ROADMAP §1.2).
+   * in a log and the 3-minute probe cadence was the only way to guess.
    */
   const logRouteResult = useCallback(
     (reason: NavRouteReason, paths: RoutePath[], startedAtMs: number): void => {
@@ -581,7 +580,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
    *
    * `active-route` used to fire on object identity, so a mid-drive traffic
    * re-price that swapped in a path with *identical geometry* looked exactly
-   * like a route change (ROADMAP §1.2). The digest settles that, and doubles
+   * like a route change. The digest settles that, and doubles
    * as the key that stores each distinct line once instead of logging the
    * calculated route and then the adopted copy of it again.
    */

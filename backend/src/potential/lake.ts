@@ -32,8 +32,7 @@ import {
 import type { DeriveModel, ModelResult } from './models.js';
 
 /**
- * The adapter between NVE's vectors and `@atlas/potential`'s lake model
- * (ROADMAP § N5 → E3).
+ * The adapter between NVE's vectors and `@atlas/potential`'s lake model.
  *
  * Everything geographic happens here — projecting lon/lat onto the cell raster,
  * filling lake polygons, deciding which end of a stream is the outlet,

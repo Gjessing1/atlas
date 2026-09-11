@@ -23,7 +23,7 @@ import { StatusRegistry } from '../status.js';
 
 /**
  * A cell derived through an outage keeps the gap for good — unless something
- * notices (ROADMAP § N7). These tests pin the two halves of that: when one
+ * notices. These tests pin the two halves of that: when one
  * degraded cell is worth deriving again, and what the status page is told about
  * all of them.
  */

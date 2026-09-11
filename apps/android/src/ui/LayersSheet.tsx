@@ -74,7 +74,7 @@ function LayerOptionChips({
 }
 
 /**
- * "Keep this area offline" for a derived surface (ROADMAP § N5 → E7).
+ * "Keep this area offline" for a derived surface.
  *
  * It sits under the legend of the switched-on surface rather than in Settings →
  * Offline regions, because what it keeps is *what the map is looking at* — the

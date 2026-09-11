@@ -5,7 +5,7 @@
  * Profiles, Navigation, Account, System) while Android showed eight rows, so
  * the same control lived under two different names — theme and overlays are
  * "Map" on web and "Appearance" + "Map layers" on Android, and a user who
- * learned one had to re-learn the other (ROADMAP §7.5).
+ * learned one had to re-learn the other.
  *
  * The list is data, not UI: web renders it as a tab strip and Android as a
  * drill-down menu, but the sections, their names and their order come from

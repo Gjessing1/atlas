@@ -5,7 +5,7 @@ import { DEFAULT_SERVER_ORIGIN } from './config';
 
 /**
  * The effective Atlas server origin — runtime-configurable so one APK can point
- * at any Atlas server without a rebuild (docs/ROADMAP.md Phase 6). Held in a
+ * at any Atlas server without a rebuild. Held in a
  * tiny module store so both React code (via useServerOrigin) and the plain
  * async helpers (mapStyle, packs — via getServerOrigin) read one live value.
  *

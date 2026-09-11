@@ -66,7 +66,7 @@ export interface MapPressOptions {
   menuOpen: boolean;
   closeMenu: () => void;
   pickDestination: (target: DestinationTarget) => void;
-  /** Report what the overlays say is under the tap (web parity, §Android queue). */
+  /** Report what the overlays say is under the tap (web parity). */
   showIdentify: (at: LatLng, groups: OverlayIdentifyGroup[], sameSpotM: number) => void;
   /** A moving orbit owns its tap and opens the pass predictor, not a ground pin. */
   pickSatellite?: (hit: { layerId: string; noradId: number }) => void;
@@ -211,7 +211,7 @@ export function useMapPress({
           }
           // A tap that lands on something the user has a *name* for becomes
           // that stop, not the coordinate under their finger — the capability
-          // web offers as the card's "Add stop" while a plan is open (§7.2).
+          // web offers as the card's "Add stop" while a plan is open.
           // The planner owns the bottom of the screen here, so there is no card
           // to put the action on; one tap adds the named stop directly.
           const zoom = await mapRef.current?.getZoom();

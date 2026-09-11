@@ -28,7 +28,7 @@ import type { DeriveModel } from './models.js';
 
 /**
  * "Best spots in view" — the shortlist the derived surface turns into a plan
- * (ROADMAP § N5 → E6).
+ * (FISH-HUNT-ENGINE.md § UX).
  *
  * The heatmap already says where to look; what it cannot do is answer *"so
  * where do I go tonight?"*. That answer needs three things the surface has no
@@ -536,7 +536,7 @@ export function spotsNote(counts: {
   if (counts.spots > 0) {
     return counts.pending > 0 ? `Still reading ${counts.pending} more ${areas}.` : null;
   }
-  // Norway-only, stated as an absence rather than an error (ROADMAP §2.1).
+  // Norway-only, stated as an absence rather than an error (the Norway-only rule).
   if (counts.cells === 0) return 'Derived surfaces cover Norway only.';
   if (counts.derived === 0) {
     return counts.pending > 0

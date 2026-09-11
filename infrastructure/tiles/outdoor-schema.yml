@@ -1,7 +1,7 @@
 # Atlas outdoor overlay — a second, small vector source beside the basemap.
 #
-# WHY THIS EXISTS (see docs/ROADMAP.md §4.1/§4.4): three separate map-profile
-# items are blocked on the same two limits of the OpenMapTiles basemap, both
+# WHY THIS EXISTS: three separate map-profile
+# items were blocked on the same two limits of the OpenMapTiles basemap, both
 # verified by decoding norway.pmtiles rather than assumed:
 #
 #   1. POIs are only emitted from z14, so a gate or a cabin cannot be shown
@@ -26,7 +26,7 @@ schema_description: Outdoor POIs, barriers and named hills omitted by the basema
 attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>
 
 # Norway is hardcoded rather than parameterised: this archive exists to carry
-# Norwegian outdoor data (§2.1's two-tier policy), and Planetiler 0.10.3 does
+# Norwegian outdoor data (the Norway-only two-tier policy), and Planetiler 0.10.3 does
 # not interpolate args into a source url anyway — both `${args.area}` and
 # `${area}` fail to resolve at parse time.
 #

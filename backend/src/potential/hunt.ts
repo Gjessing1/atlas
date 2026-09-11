@@ -35,7 +35,7 @@ import type { DeriveModel, ModelResult } from './models.js';
 
 /**
  * The adapter between NIBIO's, Kartverket's, Miljødirektoratet's and SSB's data
- * and `@atlas/potential`'s hunt model (ROADMAP § N5 → E5).
+ * and `@atlas/potential`'s hunt model.
  *
  * Everything geographic and everything administrative happens here — projecting
  * polygons onto the cell raster, painting water and disturbance, deciding which

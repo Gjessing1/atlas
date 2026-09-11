@@ -6,7 +6,7 @@ import type { StatusRegistry } from './status.js';
 /**
  * GET /api/inatur/resolve?offer=<id|url> — resolve an iNatur hunting/fishing
  * *offer* (the one a hunter bought) to its exact boundary, proxied from
- * Geodata's open Open-Inatur ArcGIS service (§4.1 / N5).
+ * Geodata's open Open-Inatur ArcGIS service.
  *
  * Why proxy rather than call from the browser: the same reason as every other
  * upstream here — one place to hold the endpoint, one rate limiter, one origin,

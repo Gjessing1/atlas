@@ -15,7 +15,7 @@
 # below refuses to graph one without it.
 #
 # No elevation (skadi) tiles for now: ascent/descent and point elevation are
-# consciously dropped in the GraphHopper -> Valhalla switch (see ROADMAP).
+# consciously dropped in the GraphHopper -> Valhalla switch.
 set -euo pipefail
 
 # Coverage is a committed list of Geofabrik areas (coverage.list, copied into

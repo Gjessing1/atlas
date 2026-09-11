@@ -50,7 +50,7 @@ class CommuteWidgetV2Worker(
 
     // Read once per run, not per instance: the cached fix is app-owned, and it
     // may only ever choose AUTO's presentation. Stale beyond its TTL the store
-    // answers null and the board falls back to the clock, which is §6.5 §2's
+    // answers null and the board falls back to the clock, which is TRANSIT.md §W2's
     // "the widget must be fully usable with location switched off".
     val place = CommuteWidgetV2Store.place(applicationContext)
 

@@ -499,7 +499,7 @@ describe('POST /api/transit/commute', () => {
     expect(res.headers['cache-control']).toBe('private, max-age=30');
   });
 
-  it('answers the per-leg boards too, but only when asked (§6.4 §5)', async () => {
+  it('answers the per-leg boards too, but only when asked (TRANSIT.md §5)', async () => {
     const plain = await app.inject({ method: 'POST', url: '/api/transit/commute', payload });
     // Absent, not empty: an older client must be able to tell "this backend
     // does not do boards" from "nothing runs on that hop".
@@ -519,7 +519,7 @@ describe('POST /api/transit/commute', () => {
   });
 
   /**
-   * §6.4 §7. The board carries the same commitment the home-screen widget does,
+   * TRANSIT.md §7. The board carries the same commitment the home-screen widget does,
    * and needs the same one extra call for the same reason: a board asked "from
    * now" cannot contain the journey a traveller is *on*.
    */
@@ -580,7 +580,7 @@ describe('POST /api/transit/commute', () => {
     });
 
     /**
-     * §6.4 §13. A journey tracked from the interchange is not in an answer
+     * TRANSIT.md §13. A journey tracked from the interchange is not in an answer
      * asked from the door, so the re-read has to be asked from where the
      * commitment was made — otherwise it releases itself on the next refresh,
      * mid-journey, which is exactly when the card is worth having.
@@ -1055,7 +1055,7 @@ describe('POST /api/transit/widget', () => {
   });
 
   /**
-   * ROADMAP §6.4 §5 on the surface it is most use on: a widget pointed at one
+   * TRANSIT.md §5 on the surface it is most use on: a widget pointed at one
    * hop, for the traveller already on the bus whose only open question is when
    * the train leaves Asker. One `trip(A→B)` call, whatever the commute's shape.
    */
@@ -1106,7 +1106,7 @@ describe('POST /api/transit/widget', () => {
   });
 
   /**
-   * ROADMAP §6.5 — the **v2** board, which is a second widget rather than a new
+   * docs/TRANSIT.md §W1–§W7 — the **v2** board, which is a second widget rather than a new
    * version of the one above. Its request carries a selector and a commitment
    * where v1's carries only "which board", and those are what these cover.
    */
@@ -1231,7 +1231,7 @@ describe('POST /api/transit/widget', () => {
     });
 
     /**
-     * ROADMAP §6.5 §4 — the substitute journey. Two things are asserted about
+     * TRANSIT.md §W4 — the substitute journey. Two things are asserted about
      * it, and the first matters as much as the second: a refresh with nothing
      * broken must cost exactly what it cost before, because this call lands on
      * the worst morning of the year.

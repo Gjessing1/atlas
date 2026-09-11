@@ -9,7 +9,7 @@ import { readManifest, tilePath } from './derive.js';
 import { resolveTarget, type DeriveModel } from './models.js';
 
 /**
- * "Keep this area offline" for a derived surface (ROADMAP § N5 → E7).
+ * "Keep this area offline" for a derived surface.
  *
  * **Nothing is derived here.** A pack is assembled only from cells that already
  * exist on disk, and that is the design rather than an optimisation: a derive

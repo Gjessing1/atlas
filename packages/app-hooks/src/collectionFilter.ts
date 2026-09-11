@@ -1,5 +1,5 @@
 /**
- * Filtering the collections tree — one matcher for both apps (ROADMAP §6.2).
+ * Filtering the collections tree — one matcher for both apps.
  *
  * After a season a hunter has a folder of stands, several imported permits and
  * a few dozen pins, and neither client had any way through them but scrolling a

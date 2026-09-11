@@ -5,7 +5,7 @@ import type { ArcGisVectorUpstream } from './catalog.js';
 import type { OverlayContext } from './context.js';
 
 /**
- * Vector overlays sourced from ArcGIS REST (`arcgis-vector`, §4.7a): the whole
+ * Vector overlays sourced from ArcGIS REST (`arcgis-vector`): the whole
  * coverage pulled once as GeoJSON, disk-cached, and served at
  * `/api/overlay/:id/features`. The client renders + hit-tests it directly (the
  * speed-camera pattern, generalized). The speed-camera layer keeps its own

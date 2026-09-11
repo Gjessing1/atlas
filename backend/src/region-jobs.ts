@@ -362,12 +362,12 @@ export class RegionJobManager {
         progress: 0.65,
         detail: `Adding routing and search from ${enclosing.manifest.name}`,
       });
-      // The enclosing pack's road-data dataset (ROADMAP §2.1) is optional — it's
+      // The enclosing pack's road-data dataset is optional — it's
       // absent for a region with no NVDB clip and no OSM cameras. When present,
       // reuse it whole: it's clipped to the enclosing region (a superset of this
       // custom bbox), and the on-device conflation bbox-filters it anyway.
       //
-      // The outdoor overlay (§4.1) is reused rather than re-extracted for the
+      // The outdoor overlay is reused rather than re-extracted for the
       // same reason plus one of its own: the whole national archive is under
       // 7 MB, so a bbox extract would cost a second Docker round-trip to save
       // kilobytes. MapLibre only ever draws the tiles in view.
@@ -413,7 +413,7 @@ export class RegionJobManager {
         // A custom pack is the enclosing pack's artifacts re-cut to a smaller
         // box — the same tiles, from the same masters, by the same tools — so
         // it inherits that pack's compatibility contract and provenance rather
-        // than claiming a build of its own (ROADMAP §7.5 DR7).
+        // than claiming a build of its own.
         ...(enclosing.manifest.compat ? { compat: enclosing.manifest.compat } : {}),
         ...(enclosing.manifest.provenance
           ? {

@@ -9,7 +9,7 @@ import {
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
- * Two home-screen commute widgets ship side by side — ROADMAP §6.5 — and this
+ * Two home-screen commute widgets ship side by side — docs/TRANSIT.md §W1–§W7 — and this
  * file speaks to both:
  *
  *  - **v1 — "Atlas commute"**: `configureCommuteWidget`, `commuteWidgetSupport`,
@@ -20,7 +20,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  *    whole commute, both directions, following the leg you are on.
  *
  * v1 stays the fallback and the reference until v2 has survived real commuting
- * (§7), so the two never share a store and never share a call.
+ * (§W7), so the two never share a store and never share a call.
  */
 interface CommuteWidgetModule {
   configure(baseUrl: string, queryJson: string | null, segmentsJson: string | null): Promise<void>;
@@ -51,7 +51,7 @@ const native = requireOptionalNativeModule<CommuteWidgetModule>('AtlasCommuteWid
  * storage.
  *
  * The hops travel with the commute rather than being worked out in Kotlin: the
- * ⚙ screen offers a board per leg (ROADMAP §6.4 §5), and what a corridor's legs
+ * ⚙ screen offers a board per leg (TRANSIT.md §5), and what a corridor's legs
  * are — and what each is called — is `commuteSegments`' answer, given once here
  * so the widget cannot come to a second one.
  */
@@ -103,7 +103,7 @@ export async function addCommuteWidget(): Promise<boolean> {
 
 /**
  * Keep the **v2** widget's private configuration aligned with Atlas storage —
- * ROADMAP §6.5.
+ * docs/TRANSIT.md §W1–§W7.
  *
  * No hop list, unlike v1: a v2 instance is never pointed at one hop of the
  * corridor. It holds the whole commute and shows the leg you are on, which is
@@ -124,7 +124,7 @@ export async function configureCommuteWidgetV2(
 }
 
 /**
- * Tell the v2 widget roughly where the phone is — §6.5 §2's cached coarse fix,
+ * Tell the v2 widget roughly where the phone is — TRANSIT.md §W2's cached coarse fix,
  * which may choose AUTO's *presentation* and never the journey, the state or the
  * committed leg.
  *
@@ -145,12 +145,12 @@ export async function reportCommutePlace(
   } catch {
     // An older APK has no `setPlace`. The fix is never load-bearing, so its
     // absence costs nothing: AUTO falls back to the clock, which is exactly
-    // what §6.5 §2 says must happen when the fix is stale or switched off.
+    // what TRANSIT.md §W2 says must happen when the fix is stale or switched off.
   }
 }
 
 /**
- * Hand the v2 widget the journey the *board* is tracking — ROADMAP §6.4 §7.
+ * Hand the v2 widget the journey the *board* is tracking — TRANSIT.md §7.
  *
  * Before this existed the app and the widget each kept an honest commitment and
  * nothing made them the same one: tapping Track on the board left the widget on

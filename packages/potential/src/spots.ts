@@ -1,6 +1,6 @@
 /**
  * "Best spots in view" — the step that turns a heatmap into a plan
- * (ROADMAP § N5 → E6, designed in docs/FISH-HUNT-ENGINE.md § UX).
+ * (designed in docs/FISH-HUNT-ENGINE.md § UX).
  *
  * `bestSpots()` in surface.ts finds the maxima of **one grid**. This file owns
  * everything that is true of a *shortlist shown to a person*, and each rule here
@@ -177,7 +177,7 @@ export interface SpotPlaceDraft {
 }
 
 /**
- * The stand plan as the record keeps it (ROADMAP § E12).
+ * The stand plan as the record keeps it.
  *
  * Only what cannot be recovered later goes in. The rose comes from a terrain and
  * canopy trace over rasters no client holds, and the approach verdict was true

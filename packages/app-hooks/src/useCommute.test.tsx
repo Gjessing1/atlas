@@ -296,7 +296,7 @@ describe('useCommute', () => {
   });
 
   /**
-   * §6.4 §7. The board's commitment lives under `local.`, which never syncs:
+   * TRANSIT.md §7. The board's commitment lives under `local.`, which never syncs:
    * "the journey I am on right now" is the least portable fact this app holds,
    * and syncing it would put a laptop's board on a bus it is not on.
    */

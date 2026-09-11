@@ -82,7 +82,7 @@ export interface CommuteEditor {
 
   /**
    * The interchange the answered journeys all change at, when none is saved —
-   * §6.4 §13's middle ground, offered rather than waited for.
+   * TRANSIT.md §13's middle ground, offered rather than waited for.
    *
    * A commute saved end to end has no `via`, and without one there are no
    * per-leg boards and no "start from" choice: the board can only ever answer
@@ -268,7 +268,7 @@ export function useCommuteEditor({
 
   // ---- the interchange the journeys already agree on -------------------
   //
-  // §6.4 §13. Everything the middle ground and the per-leg boards do hangs off
+  // TRANSIT.md §13. Everything the middle ground and the per-leg boards do hangs off
   // a saved `via`, and a commute is saved door to door — so the corridor that
   // changes at Asker twelve times out of twelve was offering no way to be read
   // from Asker. The answer already on screen knows the stop; this is the offer

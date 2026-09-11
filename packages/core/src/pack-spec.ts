@@ -1,5 +1,5 @@
 /**
- * Region build specs (ROADMAP §7.5 DR7) — what an offline pack is cut from,
+ * Region build specs — what an offline pack is cut from,
  * declared rather than inferred.
  *
  * The producer used to derive its inputs from the region id and one

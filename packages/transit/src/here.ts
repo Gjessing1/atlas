@@ -1,10 +1,10 @@
 /**
- * "You are here" — the committed journey, on the board — ROADMAP §6.4 §7.
+ * "You are here" — the committed journey, on the board — TRANSIT.md §7.
  *
- * This is the one section of the §6.4 specification that neither client
+ * This is the one rule of the board's specification that neither client
  * answered, and the reason is worth keeping: everything it needs already
  * existed and was wired to the wrong surface. `commuteJourneyProgress`,
- * `COMMUTE_PHASE_LABEL` and `commuteConnectionBreak` shipped with §6.5 for the
+ * `COMMUTE_PHASE_LABEL` and `commuteConnectionBreak` shipped with the v2 widget for the
  * *home-screen widget*, whose only consumer is the backend widget route. So the
  * widget knew which leg you were on and the board — the surface a traveller
  * actually opens once they are moving — did not.
@@ -15,13 +15,13 @@
  *    space for the next action; a board can afford the fallback beside it,
  *    which is the answer to the only question worth asking while a connection
  *    is in doubt. The alternative is read off the per-leg board the dashboard
- *    already asks for (§6.4 §5) — no extra upstream call.
+ *    already asks for (TRANSIT.md §5) — no extra upstream call.
  *  - **A phrase for the phase.** `COMMUTE_PHASE_LABEL` is a chip ("On board");
  *    the board has room to say what happens next and when, which is the part a
  *    chip cannot carry.
  *
  * What is deliberately *not* here: any inference that the traveller boarded.
- * §6.5 §3's rule holds on this surface too — the block exists only for a
+ * TRANSIT.md §W3's rule holds on this surface too — the block exists only for a
  * journey the user has explicitly committed to, and the ladder below it reads
  * the operator's record before the clock.
  */
@@ -82,7 +82,7 @@ export interface CommuteHere {
    * reports and one that guesses.
    */
   heading: string;
-  /** Whether the operator's record or the clock placed them (§6.5 §2). */
+  /** Whether the operator's record or the clock placed them (TRANSIT.md §W2). */
   source: CommutePhaseSource;
   /** The vehicle this is about: the one being ridden, or the one to board next. */
   ride: CommuteRide;

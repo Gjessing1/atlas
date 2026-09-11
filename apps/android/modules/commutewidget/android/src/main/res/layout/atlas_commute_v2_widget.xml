@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The **v2** commute widget — ROADMAP §6.5. A second widget beside
+  The **v2** commute widget — docs/TRANSIT.md §W1–§W7. A second widget beside
   `atlas_commute_widget.xml`, not a new version of it: v1 pins a *board*, v2 pins
   the *commute*, and v1 stays the fallback until this one has been commuted with.
 
-  Read top to bottom, it is §6's information hierarchy in the order the spec
+  Read top to bottom, it is §W6's information hierarchy in the order the spec
   states it — direction/context, then the current or next action, then the time
   until it, then transfer information, then secondary detail:
 
@@ -14,7 +14,7 @@
    2. `atlas_v2_focus_*` — the one thing this widget says loudest. What to do
       next, at display size, with the time it happens at beside it.
    3. `atlas_v2_body` — the journeys, filled by `addView`. Each row is tappable,
-      and a tap is the commitment (§2 tier 1).
+      and a tap is the commitment (§W2 tier 1).
    4. `atlas_v2_status` — where the answer came from and how old it is.
 
   Every string comes from `@atlas/transit` through `POST /api/transit/widget`
@@ -77,7 +77,7 @@
     android:layout_height="wrap_content"
     android:layout_marginTop="3dp"
     android:orientation="vertical">
-    <!-- Axis one and axis two, side by side and never merged (§6). -->
+    <!-- Axis one and axis two, side by side and never merged (§W6). -->
     <LinearLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"

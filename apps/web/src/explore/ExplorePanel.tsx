@@ -22,7 +22,7 @@ async function fetchExplore({ category, center, radiusM, signal }: ExploreQuery)
   const response = await fetch(`/api/explore?${params}`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = (await response.json()) as { results: SearchResult[] };
-  // Web has no offline packs (§7's deliberate difference), so an answer here is
+  // Web has no offline packs (a deliberate difference), so an answer here is
   // always the live index — the tag is rendered from shared state regardless,
   // and starts telling the truth by itself the day web gets packs.
   return { results: body.results, offline: false };

@@ -21,7 +21,7 @@ import { POTENTIAL_TARGET_KEY } from './usePotentialTarget.js';
  * control — and it holds no state of its own, reading and writing the same
  * per-device layer state the panel does, so the two can never disagree.
  *
- * Shared rather than written twice for §7.6's reason: the arithmetic of "which
+ * Shared rather than written twice for the parity checklist's rule 2: the arithmetic of "which
  * filters exist right now and what are they set to" is identical on both
  * clients, and only the rendering differs.
  */

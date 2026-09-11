@@ -4,7 +4,7 @@ import { useCallback, useMemo } from 'react';
 /**
  * The Fish & Hunt sub-profile: **what are you after?**
  *
- * The derived potential surfaces (ROADMAP § N5) are one layer per model and one
+ * The derived potential surfaces are one layer per model and one
  * *target* per animal — ørret hold where elg never go, and the target is what
  * selects the row of weights the model runs. Both facts have until now been
  * reachable only from the full layers panel: switch on "Hunt potential", scroll
@@ -18,9 +18,9 @@ import { useCallback, useMemo } from 'react';
  * narrow seam below, so the two can never disagree about what is drawn.
  *
  * Shared rather than written twice because it is the arithmetic of "which
- * surface is on and what is it tuned for", which is exactly the shape §7.6 says
- * belongs in `@atlas/app-hooks`; each client renders the result in its own
- * idiom.
+ * surface is on and what is it tuned for", which is exactly the shape the
+ * parity checklist says belongs in `@atlas/app-hooks`; each client renders the
+ * result in its own idiom.
  */
 
 /** The option key every derived surface declares its animal under. */

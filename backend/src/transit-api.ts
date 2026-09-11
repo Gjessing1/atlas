@@ -338,7 +338,7 @@ function parseCommuteQuery(body: unknown): { query: TransitCommuteQuery } | { er
 
 // ------------------------------------------------- the v2 widget's request ---
 //
-// ROADMAP §6.5. Everything a v2 instance sends beyond the saved commute is
+// docs/TRANSIT.md §W1–§W7. Everything a v2 instance sends beyond the saved commute is
 // parsed here, defensively and in one place: it arrives from a
 // `SharedPreferences` blob written by an APK that may be older than this
 // backend, so an unrecognised value must degrade to the default rather than
@@ -361,11 +361,11 @@ function parseV2Place(raw: unknown): TransitWidgetV2Place | null {
 }
 
 /**
- * The journey the user tapped — §6.5 §2 tier 1.
+ * The journey the user tapped — TRANSIT.md §W2 tier 1.
  *
  * Rejected rather than repaired when any part is missing: a half-read
  * commitment would be a commitment to *something*, and an invented one is the
- * single failure mode §3 calls out as having no visible cause.
+ * single failure mode §W3 calls out as having no visible cause.
  */
 function parseV2Commit(raw: unknown): TransitWidgetV2Commit | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -383,7 +383,7 @@ function parseV2Commit(raw: unknown): TransitWidgetV2Commit | null {
     ...(typeof entry.committedAtMs === 'number' && Number.isFinite(entry.committedAtMs)
       ? { committedAtMs: entry.committedAtMs }
       : {}),
-    // Where the committed journey starts (§6.4 §13). Absent — and anything not
+    // Where the committed journey starts (TRANSIT.md §13). Absent — and anything not
     // this exact word — means the commute's own end, which is what every
     // commitment made before the board could start at the interchange was.
     ...(entry.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
@@ -724,7 +724,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
   };
 
   /**
-   * The re-planned rest of a committed journey — ROADMAP §6.5 §4.
+   * The re-planned rest of a committed journey — TRANSIT.md §W4.
    *
    * **One extra upstream call, and only when the numbers say the change is
    * gone.** A normal refresh costs exactly what it costs today; this one lands
@@ -787,7 +787,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
     const nowMs = Date.now();
     const queries = commuteTransitQueries(parsed.query, nowMs);
-    // The dashboard's per-leg boards (§6.4 §5), fanned out here rather than by
+    // The dashboard's per-leg boards (TRANSIT.md §5), fanned out here rather than by
     // the client: one request over a phone's link instead of five, one failure
     // to handle, and one place that knows the corridor's hops. Opt-in, because
     // the widget and any older client want only the two directions.
@@ -795,7 +795,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     const segmentQueries = wantSegments
       ? commuteSegmentQueries(parsed.query, COMMUTE_SEGMENT_ROWS)
       : [];
-    // §6.4 §7. The board carries the same commitment the home-screen widget
+    // TRANSIT.md §7. The board carries the same commitment the home-screen widget
     // does, and needs the same one extra call for the same reason: a board
     // asked "from now" cannot contain a journey that has already left, which is
     // precisely the journey a traveller mid-commute is asking about. Costs
@@ -821,7 +821,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       if (!outbound.ok) return unavailable(outbound.status);
       if (!inbound.ok) return unavailable(inbound.status);
       status?.record(TRANSIT_PROBE, true);
-      // The committed journey, re-planned if its change has gone (§6.5 §4) —
+      // The committed journey, re-planned if its change has gone (TRANSIT.md §W4) —
       // the same two steps, in the same order, as the v2 widget below. A
       // commitment the upstream no longer offers, or one whose extra call
       // failed, comes back absent and the board releases it rather than
@@ -925,7 +925,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
    *  - `commute` — the saved board. `direction` says which part of it: a
    *    direction (`outbound` / `inbound` / `both` / absent for whichever is
    *    next), one `trip` call each; or one *hop* of the corridor by its id
-   *    (`outbound-0`), which is §5's individual departure board and costs one
+   *    (`outbound-0`), which is TRANSIT.md §5's individual departure board and costs one
    *    call whatever the commute's shape.
    *  - `stop` — "when is my next 280", which is one line-filtered
    *    `estimatedCalls` call instead of two to six `trip` calls.
@@ -986,7 +986,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     const parsed = parseCommuteQuery(body.commute);
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
 
-    // The **v2** board — ROADMAP §6.5, and a second widget rather than a new
+    // The **v2** board — docs/TRANSIT.md §W1–§W7, and a second widget rather than a new
     // version of the one below it. Its whole difference is that the *commute*
     // is the unit: the instance carries both directions behind a selector and
     // shows the part of the journey the traveller is in, which is why the
@@ -1018,7 +1018,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
         // The committed journey is asked for *separately*, around its own
         // departure: a board asked "from now" cannot contain a journey that has
         // already left, and that same call is what brings back the published
-        // record the §6.5 §2 ladder's tier 2 rests on.
+        // record the TRANSIT.md §W2 ladder's tier 2 rests on.
         const [committed, answers] = await Promise.all([
           commit
             ? askDirection(commuteCommitQuery(parsed.query, commit), parsed.query.filter)
@@ -1044,7 +1044,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
         // same way, deliberately: the timetable is still worth showing.
         const committedTrip =
           commit && committed?.ok ? findCommittedTrip(committed.result, commit, nowMs) : null;
-        // §6.5 §4. The *journey the ladder runs on* is replaced rather than the
+        // TRANSIT.md §W4. The *journey the ladder runs on* is replaced rather than the
         // ladder being taught about substitutions: the original leg 2 goes on
         // publishing its own `actualStartMs`, so a phase derived from it would
         // read "riding" on a vehicle nobody boarded.
@@ -1075,7 +1075,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     const requested = body.direction;
 
     // A widget pointed at one *hop* of the corridor rather than at a whole
-    // journey — ROADMAP §6.4 §5, for the reader who is already on the bus and
+    // journey — TRANSIT.md §5, for the reader who is already on the bus and
     // only wants to know when the train leaves Asker. `direction` carries the
     // hop id (`"outbound-0"`) because it is the same question the field always
     // answered: which board is this instance showing.

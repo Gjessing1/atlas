@@ -1,5 +1,5 @@
 /**
- * The saved-stand board — "which of my stands is on tonight?" (ROADMAP § E12).
+ * The saved-stand board — "which of my stands is on tonight?".
  *
  * Every other hunting surface in Atlas answers a question asked once per area.
  * This one answers the question asked once per afternoon, over stands the user

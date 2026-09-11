@@ -544,7 +544,7 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
 }
 
 /**
- * The commute board and both home-screen widgets — ROADMAP §7.4.
+ * The commute board and both home-screen widgets.
  *
  * Twice running, the only real bugs in a release were on this surface, and both
  * were found by a human looking at a home screen: v0.176.0's `optString`
@@ -763,7 +763,7 @@ async function closeCommuteSheet() {
 /** The saved commute, and the board the app draws from it. */
 async function saveCommuteAndReadBoard() {
   await openCommuteSheet();
-  // Nothing is saved after `pm clear`, so the editor opens by itself (§6.3) —
+  // Nothing is saved after `pm clear`, so the editor opens by itself —
   // which is the state this asserts by finding its fields at all.
   await waitForId('commute-end-from', true, 20_000);
   await setCommuteEnd('from', 'engelsrud', 'Engelsrud E2E');
@@ -783,7 +783,7 @@ async function saveCommuteAndReadBoard() {
   // now sits on its own line under the bar rather than inside a chip.
   expectStrings(board, ['🚌 280', '🚆 R14', 'Asker E2E'], 'the commute board');
 
-  // §6.4 §7. Tracking a journey is what turns the board into "where am I": the
+  // TRANSIT.md §7. Tracking a journey is what turns the board into "where am I": the
   // block only exists for a journey the user committed to, so tapping the
   // control is the only way to see it at all.
   await tapAfterScroll('commute-track', 'commute-sheet', 'down');
@@ -827,7 +827,7 @@ async function saveCommuteAndReadBoard() {
   );
   expectStrings(opened, ['plat. B4', 'plat. 3', 'Total '], 'the opened journey');
 
-  // §6.4 §13's middle mode: the change as a stop, drawn as the departures
+  // TRANSIT.md §13's middle mode: the change as a stop, drawn as the departures
   // *leaving* it in both directions — the train in and the bus home, which is
   // the one glance someone standing at Asker is taking.
   await tapAfterScroll('commute-mode-interchange', 'commute-sheet', 'up');
@@ -851,8 +851,8 @@ async function saveCommuteAndReadBoard() {
  * The **v2** widget — "Atlas commute (live)" — pinned, painted, and committed to.
  *
  * The commitment is the half no unit test can reach: tapping a row is what buys
- * the whole state ladder (§6.5 §2), and the fixture's timetable deliberately
- * breaks one journey's connection so the announcement §6.5 §4 rests on is read
+ * the whole state ladder (TRANSIT.md §W2), and the fixture's timetable deliberately
+ * breaks one journey's connection so the announcement TRANSIT.md §W4 rests on is read
  * off a home screen rather than eyeballed on the one morning it matters.
  */
 async function verifyLiveWidget() {
@@ -890,7 +890,7 @@ async function verifyLiveWidget() {
   }
   expectStrings(painted, [served.board.focus.action], 'the live widget');
 
-  // §6.5 §4: commit to the journey whose connection this timetable breaks, and
+  // TRANSIT.md §W4: commit to the journey whose connection this timetable breaks, and
   // the widget must say the change no longer holds.
   const brokenId = served.broken[0];
   const broken = shown.find((row) => row.id === brokenId);
@@ -909,7 +909,7 @@ async function verifyLiveWidget() {
     120_000,
   );
   const alert = committed.board.focus.alert;
-  // §6.5 §4: the broken change is not merely announced, it is re-planned — and
+  // TRANSIT.md §W4: the broken change is not merely announced, it is re-planned — and
   // the vehicle that takes over has to be on the home screen, which is the one
   // place this could ever be read.
   if (!alert?.startsWith('Connection replaced at')) {
@@ -922,7 +922,7 @@ async function verifyLiveWidget() {
 }
 
 /**
- * §6.4 §7 — one commitment, two hands on it: the journey tapped on the *widget*
+ * TRANSIT.md §7 — one commitment, two hands on it: the journey tapped on the *widget*
  * is the journey the *board* is tracking.
  *
  * The board is holding none when this runs — `saveCommuteAndReadBoard` stops

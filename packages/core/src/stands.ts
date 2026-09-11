@@ -1,5 +1,5 @@
 /**
- * A saved hunting stand — the structure that survives the save (ROADMAP § E12).
+ * A saved hunting stand — the structure that survives the save.
  *
  * The shortlist plans a stand as a *direction*: which way you face, how far you
  * can see each way, how far off the paired holding cover is, and whether the

@@ -8,7 +8,7 @@ import { fmtClock } from '@atlas/core';
 import { spotApproachLabel, spotColor, spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 
 /**
- * "Best spots in view" — the shortlist beside the map (ROADMAP § N5 → E6).
+ * "Best spots in view" — the shortlist beside the map (FISH-HUNT-ENGINE.md § UX).
  *
  * What makes this more than a legend is that each row answers the three
  * questions a heatmap cannot: *why here* (the surface's own strongest factor),

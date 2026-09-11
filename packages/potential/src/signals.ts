@@ -1,6 +1,6 @@
 /**
  * Named signals — one function per thing the models actually claim about the
- * ground (ROADMAP § N5 / E1, design in docs/FISH-HUNT-ENGINE.md).
+ * ground (design in docs/FISH-HUNT-ENGINE.md).
  *
  * `raster.ts` is arithmetic; this file is the vocabulary. A signal turns a
  * measurement (bottom slope, distance to an inflow, shoreline curvature) into a

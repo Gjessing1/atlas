@@ -7,7 +7,7 @@ import { substituteEnv, tileCoords, wmsBaseParams } from './overlay/wms.js';
 import type { StatusRegistry } from './status.js';
 
 /**
- * Active upstream probes (ROADMAP § N7).
+ * Active upstream probes.
  *
  * The status page used to learn only from real traffic, and that has one hole
  * this file exists to close: **a source nobody opens is never checked**, and the
@@ -177,7 +177,7 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // redraws fields between seasons.
   'statskog-jaktfelt': { kind: 'count', minFeatures: 400 },
 
-  // --- Curiosities (ROADMAP §4.7) -------------------------------------------
+  // --- Curiosities -------------------------------------------------------
   // Every point and threshold below measured against the live services on
   // 2026-08-03, ink tile / empty tile, with the same LAYERS string the catalog
   // sends. These registers only draw where their subject *is* — a national

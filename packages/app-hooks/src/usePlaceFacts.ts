@@ -1,6 +1,6 @@
 /**
  * "What is this spot like" — the two facts every place card leads with, before
- * anything about what you can *do* with the spot (ROADMAP § 7.2).
+ * anything about what you can *do* with the spot.
  *
  * They are one hook rather than two because they had drifted: the web card
  * showed elevation and light, the Android card showed neither, even though both

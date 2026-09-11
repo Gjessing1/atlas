@@ -7,7 +7,7 @@ import { theme } from './theme';
 
 /**
  * The commute's configuration on Android — the same form as before, moved out
- * of the sheet when the board was put in front of it (ROADMAP §6.3).
+ * of the sheet when the board was put in front of it.
  *
  * Every decision it makes comes from `useCommuteEditor`, shared with the web
  * panel; only the inputs differ. What changed here is where it sits: behind
@@ -69,8 +69,7 @@ function EndField({
           style={styles.hit}
           onPress={() => editor.pickHit(field, hit)}
           // Named per field, because all three ends can be searched in one
-          // session and the regression has to say *which* end it is picking
-          // (ROADMAP §7.4).
+          // session and the regression has to say *which* end it is picking.
           testID={`commute-hit-${field}-${index}`}
         >
           <Text style={styles.hitName} numberOfLines={1}>

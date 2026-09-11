@@ -27,7 +27,7 @@ export type UpstreamHealth = 'ok' | 'degraded' | 'down' | 'unknown';
 /**
  * One upstream service or data source. Outcomes come from two places: real
  * proxy traffic (recorded in the proxy layer) and the backend's own cheap
- * periodic probes (ROADMAP N7). `unknown` means neither has an opinion yet.
+ * periodic probes. `unknown` means neither has an opinion yet.
  */
 export interface UpstreamStatus {
   id: string;

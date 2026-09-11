@@ -26,7 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Paints the **v2** commute widget — ROADMAP §6.5.
+ * Paints the **v2** commute widget — docs/TRANSIT.md §W1–§W7.
  *
  * ---
  * **Which widget is this?** `CommuteWidgetProvider`, one package up, is **v1**:
@@ -34,7 +34,7 @@ import org.json.JSONObject
  * instance holds the whole commute — both directions behind a compact selector,
  * and content that follows where you are in the journey. They coexist on the
  * same home screen deliberately, and v1 remains the fallback and the reference
- * until v2 has been commuted with (§7). Nothing here writes into v1's store, and
+ * until v2 has been commuted with (§W7). Nothing here writes into v1's store, and
  * nothing there reads these keys.
  * ---
  *
@@ -51,11 +51,11 @@ import org.json.JSONObject
  * And two that are v2's own:
  *
  *  - **A tap is the interaction, not a sensor.** Tapping a row commits to that
- *    journey (§2 tier 1); tapping the committed row again releases it. That one
+ *    journey (§W2 tier 1); tapping the committed row again releases it. That one
  *    interaction buys the entire state ladder with no location permission, no
  *    activity recognition and no battery cost — and a wrong guess is one tap from
  *    right, which is the whole argument for spending taps instead of sensors.
- *  - **Direction and journey state are separate axes** (§6). The selector chip
+ *  - **Direction and journey state are separate axes** (§W6). The selector chip
  *    says the direction; the focus chip says the phase. Conflating them is what
  *    makes a widget need a special case per combination, and this file has none.
  */
@@ -97,7 +97,7 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
     val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
     when (intent.action) {
       ACTION_REFRESH -> {
-        // §6.5 §2's last bullet: refresh is the one moment context is
+        // TRANSIT.md §W2's last bullet: refresh is the one moment context is
         // re-evaluated. Re-ask transit, consult the cached fix if it is fresh
         // enough, re-derive direction and state, repaint. "Give the widget a
         // fresh look at my situation."
@@ -127,7 +127,7 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
       ACTION_COMMIT -> {
         if (id < 0) return
         val rowId = intent.getStringExtra(EXTRA_COMMIT) ?: return
-        // Tapping the committed journey again releases it — §3's explicit
+        // Tapping the committed journey again releases it — §W3's explicit
         // release, and the only way out that does not involve waiting.
         val current = commitId(CommuteWidgetV2Store.commit(context, id))
         CommuteWidgetV2Store.setCommit(context, id, if (current == rowId) null else commitJson(rowId))
@@ -458,7 +458,7 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
     }
 
     /**
-     * The compact direction selector — §6.5 §1.
+     * The compact direction selector — TRANSIT.md §W1.
      *
      * Three chips rather than a dropdown, because the section asks for two
      * things a dropdown cannot give at once: the direction obvious at a glance,
@@ -529,7 +529,7 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
     }
 
     /**
-     * The focus — §6.5 §6's "next action first", in the order the section states
+     * The focus — TRANSIT.md §W6's "next action first", in the order the section states
      * it: direction and state, then the action, then the time until it, then the
      * transfer information, then the detail.
      *
@@ -649,7 +649,7 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
 
     /**
      * One journey, and a control: a tap commits to it, and a tap on the one
-     * already committed releases it (§6.5 §2 tier 1, §3).
+     * already committed releases it (TRANSIT.md §W2 tier 1, §W3).
      *
      * The row's request code is derived from its own id rather than its
      * position, so the second row's intent stays about the 07:34 across a

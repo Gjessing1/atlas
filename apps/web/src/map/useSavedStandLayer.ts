@@ -11,7 +11,7 @@ const ALL_LAYERS = [LANES, AIM];
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
- * A saved stand's own rose on the map (ROADMAP § E12).
+ * A saved stand's own rose on the map.
  *
  * The live shortlist has drawn lanes and an aim since v0.139.0, but saving one
  * threw the geometry away: a stand the user had chosen drew as a bare teardrop,

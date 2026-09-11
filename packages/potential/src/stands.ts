@@ -1,5 +1,5 @@
 /**
- * Hunter-side planning over a habitat surface (ROADMAP N5/E8).
+ * Hunter-side planning over a habitat surface.
  *
  * A habitat maximum is where the animal may hold; it is often the wrong place
  * for a person to sit. This module keeps those questions separate. It samples

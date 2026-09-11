@@ -51,7 +51,7 @@
 
   <!--
     ============================ the v2 widget =============================
-    ROADMAP §6.5. A second widget beside the one above, not a new version of it:
+    docs/TRANSIT.md §W1–§W7. A second widget beside the one above, not a new version of it:
     v1 pins a *board* and stays the fallback; v2 pins the *commute* — both
     directions behind a compact selector, and content that follows where you are
     in the journey. The name says so in the launcher's picker, where the two sit

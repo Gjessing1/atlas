@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 
 /**
- * What the **v2** widget knows — ROADMAP §6.5.
+ * What the **v2** widget knows — docs/TRANSIT.md §W1–§W7.
  *
  * ---
  * **Which widget is this?** Two commute widgets ship side by side and they are
@@ -16,7 +16,7 @@ import org.json.JSONObject
  *    commute: both directions behind a compact selector, and content that
  *    follows where you are in the journey.
  *
- * v1 stays the fallback and the reference until v2 has been commuted with (§7),
+ * v1 stays the fallback and the reference until v2 has been commuted with (§W7),
  * so nothing here writes into v1's `SharedPreferences` and nothing there reads
  * these keys. That separation is the whole reason this is its own store: a
  * shared file would make "uninstall v2" or "reset v2" impossible to do without
@@ -45,7 +45,7 @@ internal object CommuteWidgetV2Store {
 
   /**
    * Beyond this, the cached fix is not consulted at all and AUTO drops to the
-   * clock. A coarse position from an hour ago says where you *were*, and §6.5 §2
+   * clock. A coarse position from an hour ago says where you *were*, and TRANSIT.md §W2
    * only ever allows it to choose a presentation — so letting it go quiet is
    * cheaper than letting it be wrong.
    */
@@ -107,7 +107,7 @@ internal object CommuteWidgetV2Store {
   /**
    * The journey this instance is committed to, as the JSON the backend takes:
    * `{"direction","departureMs","line","committedAtMs"}`. Null when the user has
-   * not tapped — and §6.5 §3 is emphatic that none is ever invented, because an
+   * not tapped — and TRANSIT.md §W3 is emphatic that none is ever invented, because an
    * assumed commitment that is wrong is the one failure mode with no visible
    * cause.
    */

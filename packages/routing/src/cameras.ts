@@ -3,13 +3,13 @@ import { haversineM, type LatLng } from '@atlas/core';
 /**
  * Speed-camera conflation — matching Vegvesen's ATK installations (NVDB object
  * types 162 Punkt-ATK and 823 Streknings-ATK) onto a chosen route, the same
- * spatial side-dataset approach as the NVDB speed limits in nvdb.ts
- * (ROADMAP §2.1): static data baked into a shipped SQLite, never a live call,
+ * spatial side-dataset approach as the NVDB speed limits in nvdb.ts:
+ * static data baked into a shipped SQLite, never a live call,
  * matched onto the route by geometry alone. Nothing here is Norway-aware in
  * code — outside Norway the dataset has nothing near the route, no cameras are
  * produced, and navigation carries no camera UI at all (absent, not "no data").
  *
- * The two ATK kinds are deliberately different features, per the roadmap:
+ * The two ATK kinds are deliberately different features:
  * a Punkt-ATK is a point hazard to announce ahead; a Streknings-ATK measures an
  * *average* over a stretch, so it becomes a distance range the navigation
  * session tracks with its own running average. Both are direction-controlled

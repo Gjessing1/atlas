@@ -1,5 +1,5 @@
 {
-  "_": "Build tools, pinned by digest (ROADMAP §7.5 DR7). A pack is only auditable if the tools that cut it are: `:latest` moves under the producer, and 'which pmtiles cut this archive' then has no answer. These are the exact images that built every published pack so far, so pinning changed nothing about the artifacts — it only made them nameable. The digest is what docker enforces; `tag` and `version` are here to be read. To upgrade: pull the new tag, record its RepoDigest (docker image inspect <tag> --format '{{index .RepoDigests 0}}'), and rebuild.",
+  "_": "Build tools, pinned by digest. A pack is only auditable if the tools that cut it are: `:latest` moves under the producer, and 'which pmtiles cut this archive' then has no answer. These are the exact images that built every published pack so far, so pinning changed nothing about the artifacts — it only made them nameable. The digest is what docker enforces; `tag` and `version` are here to be read. To upgrade: pull the new tag, record its RepoDigest (docker image inspect <tag> --format '{{index .RepoDigests 0}}'), and rebuild.",
   "pmtiles": {
     "image": "protomaps/go-pmtiles@sha256:057f8e5a6c77e89b46eebd40d62d295a0b69009371542bc0abfe1ecbc7ee6285",
     "tag": "protomaps/go-pmtiles:latest",

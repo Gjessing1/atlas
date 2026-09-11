@@ -12,7 +12,7 @@
         android:resource="@xml/atlas_commute_widget_info" />
     </receiver>
     <!--
-      ROADMAP §6.5 — the **v2** widget, a second provider beside the one above
+      docs/TRANSIT.md §W1–§W7 — the **v2** widget, a second provider beside the one above
       rather than a replacement for it. Both appear in the launcher's picker
       ("Atlas commute" and "Atlas commute (live)") and both can be placed at
       once, which is the point: v1 stays the fallback and the reference until v2

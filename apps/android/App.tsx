@@ -281,7 +281,7 @@ function AppInner() {
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   // The track whose elevation profile is open, with the geometry the row tap
-  // already loaded to frame it (§6.1 — one gesture, map *and* profile).
+  // already loaded to frame it — one gesture, map *and* profile.
   const [trackProfile, setTrackProfile] = useState<{
     track: TrackRecord;
     data: TrackData | null;
@@ -300,8 +300,8 @@ function AppInner() {
   const commuteFetch = useMemo<CommuteFn>(
     () => (query, signal, commit) =>
       // `segments: true` brings the per-leg boards back in the same request
-      // (§6.4 §5) — one round trip over a phone's link, one failure to handle.
-      // `commit` is the journey the board is tracking (§6.4 §7), which a board
+      // (TRANSIT.md §5) — one round trip over a phone's link, one failure to handle.
+      // `commit` is the journey the board is tracking (TRANSIT.md §7), which a board
       // asked "from now" could not otherwise contain once it has departed.
       fetchTransitCommute(query, { baseUrl: serverOrigin, signal, segments: true, commit }),
     [serverOrigin],
@@ -323,13 +323,13 @@ function AppInner() {
   useEffect(() => {
     if (!commute.ready) return;
     // Both widgets, from the one saved commute: v1 ("Atlas commute") and v2
-    // ("Atlas commute (live)", ROADMAP §6.5) coexist on the home screen while v2
+    // ("Atlas commute (live)", docs/TRANSIT.md §W1–§W7) coexist on the home screen while v2
     // is being commuted with, and each keeps its own native store — so each is
     // told separately rather than through one call with a flag.
     void configureCommuteWidget(serverOrigin, commute.query);
     void configureCommuteWidgetV2(serverOrigin, commute.query);
   }, [commute.query, commute.ready, serverOrigin]);
-  // §6.4 §7's last piece: the journey the board tracks is the journey the
+  // TRANSIT.md §7's last piece: the journey the board tracks is the journey the
   // widget tracks. Every *change* goes down, including a release, which clears
   // every instance.
   //
@@ -338,7 +338,7 @@ function AppInner() {
   // launch would clear a commitment made by tapping the widget while the app
   // was closed, before the read below could ever see it. A widget pinned after
   // a commitment was made therefore starts untracked and catches up on the next
-  // tap, which is the right way round: §6.5 §3 forbids inventing a commitment,
+  // tap, which is the right way round: TRANSIT.md §W3 forbids inventing a commitment,
   // never withholding one.
   const pushedCommitRef = useRef(false);
   useEffect(() => {
@@ -391,7 +391,7 @@ function AppInner() {
     bbox: BBox | null;
   } | null>(null);
   const [pendingRegion, setPendingRegion] = useState<BBox | null>(null);
-  // "Keep this area offline" (§N5 → E7): the framed area of the switched-on
+  // "Keep this area offline": the framed area of the switched-on
   // derived surface, waiting for a name, and whether one is being packed.
   const [keepArea, setKeepArea] = useState<{ layer: string; target: string; bbox: BBox } | null>(
     null,
@@ -483,7 +483,7 @@ function AppInner() {
   const stopGeocode = useGeocode(packs, getBias);
   // The half-built plan survives the app being killed in the background, and a
   // plan someone sent by link wins over it — the same hook, with the same
-  // precedence, as the web app (§7.6). It sits below useBootCamera because the
+  // precedence, as the web app. It sits below useBootCamera because the
   // link is what that hook resolves, and until it has, the saved plan waits.
   useRoutePlanPersistence(route, data, camera.linkPlan);
   // Downloaded tiles win wherever a pack covers the view (Settings can force
@@ -492,7 +492,7 @@ function AppInner() {
   // overlay list is built from it: a derived surface is drawn from a pack too.
   const tiles = useTileSource(data, packs, camera.viewCenter);
   const overlayLabels = useOverlayLabels(overlaysCtl.overlays, camera.labelCell);
-  // Derived potential surfaces (§N5): prepare the cells under the viewport and
+  // Derived potential surfaces: prepare the cells under the viewport and
   // say what is happening while they build. `readyKey` rides into the raster
   // source id below, so a cell that lands appears without a pan.
   const potential = usePotential(
@@ -503,7 +503,7 @@ function AppInner() {
   );
   const overlays = useMemo(
     () =>
-      // …and a surface the user kept offline (§N5 → E7) is then pointed at the
+      // …and a surface the user kept offline is then pointed at the
       // pack's own tiles instead of the derive service.
       withLocalSurfaces(
         overlaysCtl.overlays.map((overlay) =>
@@ -536,7 +536,7 @@ function AppInner() {
   // the chips of whatever is currently drawn, reachable from the map. What makes
   // Curiosities readable — every register in it is a filtered register.
   const layerFilters = useLayerFilters(overlaysCtl);
-  // The shortlist a derived surface turns into a plan (§N5 → E6). Opened by
+  // The shortlist a derived surface turns into a plan. Opened by
   // hand: it is a real request against the derive service and the router, not a
   // legend that could just appear.
   const [spotsOpen, setSpotsOpen] = useState(false);
@@ -562,7 +562,7 @@ function AppInner() {
         }
       : null,
   });
-  // "Keep this area offline" (§N5 → E7). Offered only for a derived surface
+  // "Keep this area offline". Offered only for a derived surface
   // that is switched on and has a settled viewport, because what it keeps is
   // the area on screen — and it reports "kept" instead once a downloaded pack
   // already carries this ground, since a second copy is never what was wanted.
@@ -1213,7 +1213,7 @@ function AppInner() {
         center: [cur.coords.longitude, cur.coords.latitude],
         duration: 700,
       });
-      // §6.5 §2's cached coarse fix, written where a fix is already in hand:
+      // TRANSIT.md §W2's cached coarse fix, written where a fix is already in hand:
       // this is the app in the foreground with a position the user asked for, so
       // it costs no extra permission and no extra battery. The v2 widget may use
       // it to choose AUTO's *presentation* and nothing else — never the journey,

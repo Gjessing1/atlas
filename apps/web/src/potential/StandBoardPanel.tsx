@@ -3,7 +3,7 @@ import { standCellSummary, type StandDayCell, type StandSit } from '@atlas/condi
 import { fmtDayLabel } from '@atlas/core';
 
 /**
- * "My stands" — the saved-stand board beside the map (ROADMAP § E12).
+ * "My stands" — the saved-stand board beside the map.
  *
  * The shortlist next to this one answers *where should I sit?*, asked once per
  * area. This answers the question a season actually repeats: **which of the

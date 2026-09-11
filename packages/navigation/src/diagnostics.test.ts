@@ -99,7 +99,7 @@ describe('compactNavState', () => {
     const compact = compactNavState(state());
     expect(compact.upcoming).toEqual([4, 212.3]);
     // 57 % of the old log was this record carrying the full instruction and
-    // all four verbal strings, once a second (ROADMAP §1.2).
+    // all four verbal strings, once a second.
     expect(JSON.stringify(compact)).not.toContain('Storgata');
     expect(JSON.stringify(compact)).not.toContain('succinct');
   });
@@ -351,7 +351,7 @@ describe('analyzeNavLog', () => {
 
     const offRoute = trip?.incidents.find((incident) => incident.kind === 'off-route');
     // The counter and the threshold it crossed, so nobody re-derives them from
-    // raw headings and route geometry (ROADMAP §1.2).
+    // raw headings and route geometry.
     expect(offRoute?.detail).toContain('offRouteCount 4/4');
     const marker = trip?.incidents.find((incident) => incident.kind === 'marker');
     expect(marker?.detail).toBe('wrong roundabout exit');

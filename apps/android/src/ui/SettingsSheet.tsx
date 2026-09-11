@@ -331,7 +331,7 @@ function AccountSection({ sync, storage }: { sync: SyncState; storage: StorageAv
       {/* An invite-gated server refuses a registration without a code, and the
           Atlas instance this app ships pointed at is exactly that — without
           this field Register could only ever fail here, which is how it stood
-          until §7.6's checklist asked the question. */}
+          until the parity checklist asked the question. */}
       {sync.registration === 'invite' ? (
         <TextInput
           style={styles.input}
@@ -461,7 +461,7 @@ function RegionsSection({
   const pendingJobs = jobs.jobs.filter((job) => !job.manifest);
   const activeDownloads = new Map(downloads.jobs.map((job) => [job.id, job]));
   // A pack that is neither published nor a region job — an area kept offline
-  // from the layer panel (§N5 → E7) — has no row of its own until it finishes
+  // from the layer panel — has no row of its own until it finishes
   // installing. Without this, a user sent here to watch a download would find
   // the screen saying nothing about it.
   const unlistedDownloads = downloads.jobs.filter((job) => !rowsById.has(job.id));
@@ -666,7 +666,7 @@ const HEALTH_COLOR: Record<UpstreamHealth, string> = {
 };
 
 /**
- * Server & upstream health (web parity, §5 N7). The phone talks to the same
+ * Server & upstream health (web parity). The phone talks to the same
  * upstreams as the browser and fails just as silently, so it gets the same
  * answer to "is it me, the server, or Kartverket?" — fetched only while the
  * sheet is open.
@@ -1115,7 +1115,7 @@ function tripSummaryLine(trip: NavDiagnosticTrip): string {
  *
  * Per trip rather than per log: a single file meant the drive a report was
  * about had usually been overwritten by the next one before anybody asked for
- * it (ROADMAP §1.2), so the list is the feature — it is how the traveller says
+ * it, so the list is the feature — it is how the traveller says
  * *which* drive went wrong.
  */
 function DiagnosticTripRow({
@@ -1271,12 +1271,12 @@ function NavigationDiagnosticsSection({
 
 /**
  * The rows, from the shared section list in `@atlas/core` — the same sections,
- * names and order the web tab strip shows (ROADMAP §7.5). Android keeps two
+ * names and order the web tab strip shows. Android keeps two
  * more, Map tiles and Offline regions, which a browser cannot have.
  */
 /**
  * The described vehicle, in the same words web uses — two hand-maintained
- * copies of this explanation is how the clients drift (ROADMAP §7.4). Height
+ * copies of this explanation is how the clients drift. Height
  * leads because it is the field with consequences, and the note is careful not
  * to promise a fit: routing knows roughly 2 800 of the 4 800 height
  * restrictions Norway signs.

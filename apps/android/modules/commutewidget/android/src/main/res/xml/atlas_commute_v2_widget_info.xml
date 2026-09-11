@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The **v2** commute widget — ROADMAP §6.5. A second provider beside
+  The **v2** commute widget — docs/TRANSIT.md §W1–§W7. A second provider beside
   `atlas_commute_widget_info.xml`, coexisting on the same home screen, so the
   shipped one stays the fallback and the reference until v2 has survived real
-  commuting (§7).
+  commuting (§W7).
 
   **No `android:configure`.** v1 needs one because its whole configuration is
   "which board is this instance", asked once and fixed. v2's direction lives on

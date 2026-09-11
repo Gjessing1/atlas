@@ -201,7 +201,7 @@ export interface XyzUpstream {
  * raster tiles (`LayerMeta.vector`). The backend pulls the whole coverage once
  * as GeoJSON, disk-caches it, and serves it at `/api/overlay/:id/features`; the
  * client renders and hit-tests it directly (the speed-camera pattern, but
- * generic and sourced from an upstream). The reusable §4.7a enabler — Statskog
+ * generic and sourced from an upstream). The reusable enabler — Statskog
  * jaktfelt is the first user, the NVE river network the next.
  */
 export interface ArcGisVectorUpstream {
@@ -786,7 +786,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // it has, this draws every mapped channel *and* ranks it by size, which is
       // what tells a river from the ditch beside it.
       //
-      // Raster with an SLD, not `arcgis-vector` as ROADMAP §4.1 pencilled in:
+      // Raster with an SLD, not the `arcgis-vector` first planned for it:
       // the whole coverage is three orders of magnitude past the ~10³-feature
       // ceiling that pattern has (the weakened-ice row measured where it
       // breaks), and NVE's own scale staging — `elvenett` refuses to draw above
@@ -903,7 +903,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // one overlay in the catalog where a wrong reading is measured in lives,
       // so both the panel note and the identify wording say what blank means.
       //
-      // Raster, not `arcgis-vector`, despite ROADMAP §4.1 pencilling in the
+      // Raster, not `arcgis-vector`, despite the plan pencilling in the
       // latter: measured 2026-07-25, the whole coverage as GeoJSON is 17.8 MB
       // even server-simplified to ~5 m (4.6 MB gzipped) — 4× the Statskog set
       // that pattern was built for, and a per-session download on a phone. The
@@ -1270,7 +1270,7 @@ export function norwegianLayers(): OverlayLayer[] {
       // A PLANNING overlay for where you may hunt on state land, not a record
       // of sightings or fellings. The whole national set (922 polygons) is one
       // simplified GeoJSON fetch, disk-cached and hit-tested client-side — the
-      // first user of the generic `arcgis-vector` kind (§4.7a). Identify is a
+      // first user of the generic `arcgis-vector` kind. Identify is a
       // local hit-test against the rendered features, so `identify:false` keeps
       // it out of the WMS GetFeatureInfo path.
       meta: {
@@ -1399,11 +1399,11 @@ export function norwegianLayers(): OverlayLayer[] {
     },
 
     // -------------------------------------------------------------------
-    // Curiosities (ROADMAP §4.7) — the layers that answer "what is out here
+    // Curiosities — the layers that answer "what is out here
     // that I would never have known to look for": burial mounds, wrecks,
     // caves, old mine shafts. Every row is Norway-only and profile-tagged, so
     // outside Norway the profile degrades to the basemap and the overlays are
-    // simply absent (§2.1), never a "no data" message.
+    // simply absent (the Norway-only rule), never a "no data" message.
     //
     // **Every `minzoom` below is derived from the service's own scale limits,
     // with the equator formula `scale ≈ 559 082 264 / 2^z`.** These servers

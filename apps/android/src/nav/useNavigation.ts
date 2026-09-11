@@ -243,7 +243,7 @@ export function useNavigation(): NavController {
     return {
       provider: {
         // The controller records every request with the *reason* it was made
-        // and the fingerprint of what came back (ROADMAP §1.2); all that is
+        // and the fingerprint of what came back; all that is
         // left worth noting here is where the route was actually served from.
         route: async (query, signal) => {
           const routed = await provider.route(query, signal);
@@ -258,7 +258,7 @@ export function useNavigation(): NavController {
       // asked again mid-drive so the trip being followed is re-priced too.
       trafficDelay: httpTrafficDelay(serverOrigin),
       trace,
-      // NVDB speed limits + ATK/OSM cameras, offline-first (ROADMAP §2.1): a
+      // NVDB speed limits + ATK/OSM cameras, offline-first: a
       // downloaded pack that ships nvdb.sqlite answers from its own copy of the
       // dataset with the same conflation the server runs; otherwise these fall
       // back to the server, and an offline drive with no such pack simply keeps

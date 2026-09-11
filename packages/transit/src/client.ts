@@ -173,14 +173,14 @@ export async function fetchTransitStopLines(
 
 export interface FetchTransitCommuteOptions extends FetchTransitOptions {
   /**
-   * Also answer the corridor's per-leg boards (§6.4 §5). Opt-in because the
+   * Also answer the corridor's per-leg boards (TRANSIT.md §5). Opt-in because the
    * widget wants only the two directions, and four extra `trip` calls for a
    * surface that will not draw them is upstream work spent on nothing.
    */
   segments?: boolean;
   /**
    * The journey the board is tracking, so the answer carries it even once it
-   * has left (§6.4 §7). Costs one upstream call, and only while something is
+   * has left (TRANSIT.md §7). Costs one upstream call, and only while something is
    * being tracked.
    */
   commit?: TransitWidgetV2Commit | null;

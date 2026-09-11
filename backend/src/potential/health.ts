@@ -8,8 +8,8 @@ import { inputProbeId } from './inputs.js';
 import { DERIVE_MODELS, type DeriveModel } from './models.js';
 
 /**
- * The derived cells' own health (ROADMAP § N7 → "probe the derived cells, not
- * just their inputs").
+ * The derived cells' own health — probe the derived cells, not
+ * just their inputs.
  *
  * A cell is derived once and then served forever. That is right for the
  * arithmetic — it does not change — but wrong for the *inputs*: a cell built

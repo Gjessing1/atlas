@@ -13,10 +13,10 @@
  *    by `commuteWidgetV2Board`, painted by `CommuteWidgetV2Provider`. One
  *    instance holds the *whole commute*: both directions behind a compact
  *    selector, and content that follows where you are in the journey rather than
- *    where you configured it (ROADMAP §6.5).
+ *    where you configured it (docs/TRANSIT.md §W1–§W7).
  *
  * v1 is the fallback and the reference until v2 has survived real commuting
- * (§6.5 §7), so **nothing here may be changed to suit v2**. v2 reuses what helps
+ * (TRANSIT.md §W7), so **nothing here may be changed to suit v2**. v2 reuses what helps
  * — `TransitWidgetRow`, `tripWidgetRow`, `commuteRefreshAtMs`, the row layouts —
  * by importing it, never by bending it.
  * ---
@@ -674,7 +674,7 @@ export function commuteWidgetBoard({
 
 /**
  * The board a widget shows when it is pointed at **one hop** of the corridor —
- * ROADMAP §6.4 §5's individual departure boards, on the surface they are most
+ * TRANSIT.md §5's individual departure boards, on the surface they are most
  * use on.
  *
  * The journey board answers "when do I leave home and when do I get to town".

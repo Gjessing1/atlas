@@ -3,7 +3,7 @@ import { BAND_LABELS, CELL_MAX_TILE_ZOOM, CELL_ZOOM, SURFACE_BANDS } from '@atla
 import { DERIVE_MODELS, type DeriveModel } from './models.js';
 
 /**
- * Derived surfaces as ordinary catalog rows (ROADMAP § N5 → E3b).
+ * Derived surfaces as ordinary catalog rows.
  *
  * The engine's output is not a new kind of thing to the user: it is a layer you
  * switch on, fade, and tap. So it enters through the same `/api/layers` catalog

@@ -1,19 +1,26 @@
 /**
- * The shape of the web ↔ Android parity checklist (ROADMAP §7.6).
+ * The shape of the web ↔ Android parity checklist, and the two rules it holds
+ * the clients to:
  *
- * §7's standing rule is that a difference between the clients is either fixed
- * or recorded as deliberate, and anything else is drift. A prose checklist
- * cannot enforce that: it agrees with the code on the day it is written and
- * rots quietly afterwards, which is precisely how §7.1–§7.5 accumulated in the
- * first place. So the checklist is *data with evidence* — every "both clients
- * have this" claim names a file and a marker in each app, and the test beside
- * it reads them. Delete a capability from one client and the gate goes red
- * until someone either puts it back or writes down why it is now one-sided.
+ *  1. **A difference between the clients is either fixed or recorded as
+ *     deliberate** — platform idiom or platform capability, with its `why`.
+ *     Anything else is drift.
+ *  2. **Prefer `@atlas/app-hooks` for anything with state.** The surfaces that
+ *     never drifted are the ones whose state was already shared.
+ *
+ * A prose checklist cannot enforce the first rule: it agrees with the code on
+ * the day it is written and rots quietly afterwards, which is precisely how the
+ * first batch of client differences accumulated. So the checklist is *data
+ * with evidence* — every "both clients have this" claim names a file and a
+ * marker in each app, and the test beside it reads them. Delete a capability
+ * from one client and the gate goes red until someone either puts it back or
+ * writes down why it is now one-sided.
  */
 
 /**
- * The surfaces a user meets, in the order §7.6 names them. Deliberately coarse:
- * this is a checklist to be read at release time, not a component inventory.
+ * The surfaces a user meets, in the order the release report prints them.
+ * Deliberately coarse: this is a checklist to be read at release time, not a
+ * component inventory.
  */
 export const PARITY_SURFACES = [
   'map',
@@ -45,13 +52,13 @@ export const PARITY_SURFACE_LABELS: Record<ParitySurface, string> = {
  * give it (the menu entry that opens it, the heading it wears), never by its
  * file name.
  *
- * This exists because of the checklist's second real miss (ROADMAP §6.1): four
+ * This exists because of the checklist's second real miss: four
  * `collections` rows resolved web's `Sidebar.tsx` against Android's separate
  * `TracksSheet.tsx` and stayed green for months, while the two clients
  * disagreed about how many saved-data surfaces there even were. A row asks
  * *whether* a client can do a thing and never *where*, so a capability that has
  * drifted onto a differently-named surface is invisible to it — which is drift
- * of exactly the kind §7 exists to catch.
+ * of exactly the kind rule 1 exists to catch.
  *
  * Only surface *roots* are listed. Everything else (hooks, rows, cards, shared
  * helpers) has no home of its own and is skipped: it lives wherever the surface
@@ -125,7 +132,7 @@ export interface ParityCapability {
   readonly android: ParityEvidence | null;
   /**
    * The `@atlas/app-hooks` export this capability's state lives in, when it has
-   * one. §7.6's second rule ("prefer app-hooks for anything with state") is
+   * one. Rule 2 ("prefer app-hooks for anything with state") is
    * otherwise unobservable — every surface that never drifted is one whose
    * state is already shared, and naming the seam here is what makes a
    * capability with no shared seam visible as the risk it is.

@@ -30,7 +30,7 @@ import { useGeocode } from '../routing/useGeocode.js';
 import { CommuteEditorForm } from './CommuteEditor.js';
 
 /**
- * The commute dashboard — ROADMAP §6.4.
+ * The commute dashboard — docs/TRANSIT.md.
  *
  * What this replaced was a configuration form with a result list underneath it:
  * three stop pickers, two time fields, seven day chips and a wall of line chips
@@ -416,7 +416,7 @@ function JourneyRow({
 }
 
 /**
- * §6.4 §7 — where you are in the journey you are tracking.
+ * TRANSIT.md §7 — where you are in the journey you are tracking.
  *
  * The block every part of which already existed and none of which reached this
  * screen: the phase ladder, the connection break and the commitment all shipped
@@ -587,7 +587,7 @@ function Board({ board }: { board: CommuteDashboardBoard }) {
 
 /**
  * The journey list, whole: its shared notices, its headline, its rows and the
- * reason there is none — §6.4 §13.
+ * reason there is none — TRANSIT.md §13.
  *
  * A component rather than a run of fields on the panel because it is one
  * question's answer: everything in it describes the same direction, door to
@@ -677,7 +677,7 @@ export function CommutePanel({
   });
   const dashboard = useCommuteDashboard(commute);
   const [editing, setEditing] = useState(false);
-  // §6.3: the editor opens by itself only when the board *cannot* ask a
+  // The editor opens by itself only when the board *cannot* ask a
   // question. Keyed on `ready` so it fires once the saved commute has loaded
   // rather than during the moment every launch spends looking unconfigured.
   useEffect(() => {
@@ -697,7 +697,7 @@ export function CommutePanel({
       </div>
       <div className="commute-body">
         {!commute.ready && <p className="commute-state">Loading saved commute…</p>}
-        {/* §6.4 §13's three modes, and the only control over what is shown.
+        {/* TRANSIT.md §13's three modes, and the only control over what is shown.
             Out, back, and the middle ground — the third is not a direction at
             all but the change, drawn as the departures leaving it in both
             directions. A Journeys/Departures switch under this made nine

@@ -182,7 +182,7 @@ export interface RouteQuery {
    * Points the route must not pass through: Valhalla drops the graph edge
    * nearest each one before searching, so a route is forced around it. This is
    * the mechanism road closures use — one point on each closed segment (fed from
-   * the DATEX closure feed, §2.2), independent of any user preference. Ordinary
+   * the DATEX closure feed), independent of any user preference. Ordinary
    * planning leaves this empty. Valhalla caps the list at its
    * `max_exclude_locations` (default 50); callers that could exceed that must
    * trim to the closures near the corridor.
@@ -371,7 +371,7 @@ export interface RoutePath {
   enrichment?: RouteEnrichment;
   /**
    * How much of `timeMs` is measured congestion rather than the engine's own
-   * schedule (§2.2). Set from NPRA's corridor travel times where the route runs
+   * schedule. Set from NPRA's corridor travel times where the route runs
    * on a measured stretch, and **already included in `timeMs`** — it is the
    * part a UI may name, not a number to add on. Absent means no measurement
    * covered this route, which is the normal case outside the Norwegian
@@ -554,9 +554,9 @@ export function routeOptionsSummary(
  * The row used to be the same six buttons for every profile, at one weight:
  * Reverse, Optimize, Clear, Save track, Export GPX, Share — a strip that asked
  * a driver to read past GPX export to reach Clear, and a hiker to read past
- * Optimize to reach the export that is the whole point of planning a walk
- * (ROADMAP: "Give each routing type an intentional toolbar"). Nothing is
- * removed; what changes is which actions a mode shows without being asked.
+ * Optimize to reach the export that is the whole point of planning a walk.
+ * Each routing type now gets an intentional toolbar: nothing is removed; what
+ * changes is which actions a mode shows without being asked.
  */
 export type RouteActionKey =
   'alongRoute' | 'saveTrack' | 'exportGpx' | 'reverse' | 'optimize' | 'clear' | 'share';

@@ -92,7 +92,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     id: 'fishhunt',
     label: 'Fish & Hunt',
     routing: null,
-    // `potential` surfaces the derived rows (§N5) and is deliberately a tag of
+    // `potential` surfaces the derived rows and is deliberately a tag of
     // its own rather than reusing `fishing`: a client whose bundle predates the
     // derive service must not list a layer it would request from the wrong
     // endpoint, and no shipped profile carries this tag.
@@ -134,7 +134,7 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     // Curiosities: the "what is out here that I would never have known to look
     // for" profile — burial mounds, wrecks, caves, old mine shafts, springs.
     // Like Ski and Fish & Hunt it expresses no travel mode; it is a cartography
-    // + overlay preset. Its layers are the registers themselves (ROADMAP §4.7),
+    // + overlay preset. Its layers are the registers themselves,
     // and it is the one profile whose *whole* catalog is contextual: without the
     // `curiosities` tag none of these rows would be offered anywhere.
     id: 'curiosities',

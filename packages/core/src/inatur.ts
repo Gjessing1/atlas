@@ -1,6 +1,6 @@
 /**
  * iNatur offer-boundary resolver: turn an iNatur hunting/fishing *offer* — the
- * one a hunter actually bought — into its exact on-map area (§4.1 / N5).
+ * one a hunter actually bought — into its exact on-map area.
  *
  * iNatur sells access "offers" (tilbud); each is a 24-hex Mongo ObjectId in its
  * inatur.no URL. Geodata's open ArcGIS service publishes the same id as

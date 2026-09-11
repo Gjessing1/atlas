@@ -46,7 +46,7 @@ function Rose({ stand }: { stand: PlaceStand }) {
 
 /**
  * What this pin was saved *as* — the plan the Fish & Hunt shortlist made, on
- * the card rather than buried in the edit form's notes textarea (ROADMAP § E12).
+ * the card rather than buried in the edit form's notes textarea.
  *
  * Everything here is a record of a decision, not a live reading, so the block
  * dates itself: the surface is re-derived and the approach verdict was true of

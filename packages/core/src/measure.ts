@@ -28,7 +28,7 @@ export const MEASURE_DEFAULT_RADII_M: readonly number[] = [100, 200];
 /**
  * The hints, deliberately verb-free. "Click" is wrong on a phone and "tap" is
  * wrong on a desktop mouse, and the two clients used to be free to pick
- * differently — which is exactly the drift §7 exists to stop.
+ * differently — which is exactly the drift the parity checklist exists to stop.
  */
 export const MEASURE_DISTANCE_HINT = 'Add points along a line to measure it.';
 export const MEASURE_RADIUS_HINT = 'Drop a circle to see range rings around it.';

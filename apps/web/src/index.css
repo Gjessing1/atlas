@@ -442,7 +442,7 @@ button {
   background: var(--surface-muted);
 }
 
-/* The saved hunting stand's plan (ROADMAP § E12). Sits above the surface's
+/* The saved hunting stand's plan. Sits above the surface's
    explain block: the ground is context, the direction to face is the answer.
    The rose is a fixed square beside the rows, so the block's height does not
    change with how open the stand is. */
@@ -5001,7 +5001,7 @@ button.transit-notice-summary {
   border: 1px solid var(--border);
 }
 
-/* ---- Derived potential surfaces (ROADMAP §N5) ---- */
+/* ---- Derived potential surfaces ---- */
 
 /* The preparation pill: under the search box, gone once the surface is ready. */
 /* One column under the search box for everything the derived surfaces say: the
@@ -5087,7 +5087,7 @@ button.transit-notice-summary {
   }
 }
 
-/* "Best spots in view" — the affordance and the shortlist (§N5 → E6). */
+/* "Best spots in view" — the affordance and the shortlist (FISH-HUNT-ENGINE.md § UX). */
 .spots-button {
   border: 0;
   border-radius: 999px;
@@ -6303,7 +6303,7 @@ button.transit-notice-summary {
   gap: 2px;
 }
 
-/* --- Commute dashboard (ROADMAP §6.4) ---
+/* --- Commute dashboard (docs/TRANSIT.md) ---
    A timetable, not a form: scheduled times carry the weight, live estimates sit
    under them in muted text, and the only saturated colour on the panel marks a
    service that is in trouble. */
@@ -7381,7 +7381,7 @@ button.transit-notice-summary {
 }
 
 .vehicle-field input {
-  /* 44 px keeps the field within the touch-size baseline of ROADMAP §7.3. */
+  /* 44 px keeps the field within the touch-size baseline. */
   min-height: 44px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -7837,7 +7837,7 @@ button.transit-notice-summary {
 
   /* The planner docks to the bottom as a draggable sheet rather than floating
      near the topbar: on a phone the search box and map controls own the top,
-     and a panel up there competes with them for the same corner (§3.1). The
+     and a panel up there competes with them for the same corner. The
      sheet is a fixed frame anchored to the bottom; useBottomSheet moves it with
      translateY between three snaps (peek / half / full) and the grabber is the
      drag handle. The frame is capped so the map always reads above the full

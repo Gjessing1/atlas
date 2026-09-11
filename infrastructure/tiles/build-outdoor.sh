@@ -42,7 +42,7 @@ XMX="${PLANETILER_XMX:-3g}"
 # Planetiler picks threads from the host CPU count, not the cgroup limit.
 THREADS="${PLANETILER_THREADS:-$CPUS}"
 LOCK_WAIT="${PLANETILER_LOCK_WAIT:-0}"
-# Pinned by digest in infrastructure/tools.json (ROADMAP §7.5 DR7), the same
+# Pinned by digest in infrastructure/tools.json, the same
 # tiler that cuts the basemap beside it.
 PLANETILER_IMAGE="$(jq -er '.planetiler.image' \
   "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools.json")"

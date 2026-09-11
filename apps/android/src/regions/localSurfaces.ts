@@ -5,8 +5,8 @@ import type { ActiveOverlay } from '../layers/useOverlays';
 import type { LocalPack } from './packs';
 
 /**
- * Drawing a derived potential surface from a downloaded pack (ROADMAP § N5 →
- * E7), instead of from the derive service.
+ * Drawing a derived potential surface from a downloaded pack, instead of
+ * from the derive service.
  *
  * The substitution is deliberately the *only* thing that changes: a pack's
  * tiles are the same PNGs the server would have sent, at the same z11–z13

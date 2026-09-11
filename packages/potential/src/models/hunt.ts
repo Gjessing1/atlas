@@ -1,6 +1,5 @@
 /**
- * The hunt model (ROADMAP § N5 → E5, design in docs/FISH-HUNT-ENGINE.md
- * § "Hunt potential").
+ * The hunt model (design in docs/FISH-HUNT-ENGINE.md § "Hunt potential").
  *
  * **Eight quarries, one set of terrain signals.** A roe deer's field edge, a
  * moose's browse, a capercaillie's mature pine and a ptarmigan's tree-line band

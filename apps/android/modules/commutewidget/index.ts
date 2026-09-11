@@ -1,7 +1,7 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
- * Two home-screen commute widgets ship side by side (ROADMAP §6.5), and they are
+ * Two home-screen commute widgets ship side by side (docs/TRANSIT.md §W1–§W7), and they are
  * different products rather than two versions of one:
  *
  *  - **v1 — "Atlas commute"** (`configure` / `support` / `requestPin`). One

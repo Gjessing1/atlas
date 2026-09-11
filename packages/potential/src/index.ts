@@ -1,6 +1,6 @@
 /**
- * `@atlas/potential` — the Fish & Hunt derived-potential engine (ROADMAP § N5,
- * design in docs/FISH-HUNT-ENGINE.md).
+ * `@atlas/potential` — the Fish & Hunt derived-potential engine
+ * (design in docs/FISH-HUNT-ENGINE.md).
  *
  * Pure TypeScript: no network, no fs, no GDAL. The backend's derive service
  * (E2) is a thin adapter that fetches the upstreams and caches the tiles; the

@@ -1,6 +1,5 @@
 /**
- * The commute corridor the Android regression reads off a home screen —
- * ROADMAP §7.4.
+ * The commute corridor the Android regression reads off a home screen.
  *
  * Twice running, the only real bugs in a release were on the one surface with no
  * automated coverage, and both were found by a human looking at a home screen:
@@ -27,14 +26,14 @@
  * different journey a second later and quietly never resolve the commitment.
  *
  * Three departures repeat, so any three consecutive rows contain one of each —
- * the two shapes §7.4 asks for, plus the ordinary one they have to be told from:
+ * the two shapes the regression is for, plus the ordinary one they have to be told from:
  *
  *  - **on time** — nothing to correct, the row that must not grow a `+0 min`.
  *  - **delayed** — `+3 min` against a scheduled time the row still prints, beside
  *    a change that survives it. This is v0.181.0's bug shape.
  *  - **broken** — delayed past its own connection, so
  *    `commuteConnectionBreak` fires on a committed journey and the widget's
- *    focus has to say so (§6.5 §4).
+ *    focus has to say so (TRANSIT.md §W4).
  */
 
 import {
@@ -215,7 +214,7 @@ function corridorResult(query, direction, fromMs, count) {
   };
 }
 
-/** One hop of the corridor as its own small board — §6.4 §5's per-leg boards. */
+/** One hop of the corridor as its own small board — TRANSIT.md §5's per-leg boards. */
 function segmentResult(segment, fromMs, count, rail = segment.index > 0) {
   return {
     trips: departureIndices(fromMs, count).map((index) =>
@@ -226,7 +225,7 @@ function segmentResult(segment, fromMs, count, rail = segment.index > 0) {
 }
 
 /**
- * The backend's §6.5 §4 branch, mirrored: when the committed journey's change
+ * The backend's TRANSIT.md §W4 branch, mirrored: when the committed journey's change
  * has broken, ask one more question and splice the answer in.
  *
  * Mirrored rather than shared because this file *is* the backend as far as the
@@ -257,10 +256,10 @@ export function commuteFixtureResponse(body, nowMs) {
   const query = body;
   const wantSegments = body?.segments === true;
   const rows = 5;
-  // §6.4 §7, mirroring the backend's own two steps: the tracked journey is read
+  // TRANSIT.md §7, mirroring the backend's own two steps: the tracked journey is read
   // around *its own* departure, because a board asked "from now" cannot contain
   // one that has already left — which is exactly when the block is worth
-  // having. Then the same §6.5 §4 re-plan the widget gets.
+  // having. Then the same TRANSIT.md §W4 re-plan the widget gets.
   const commit =
     body?.commit && typeof body.commit.departureMs === 'number'
       ? {

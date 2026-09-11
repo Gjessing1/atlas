@@ -146,7 +146,7 @@ function searchResults(query, transit = false) {
       },
     ];
   }
-  // The commute corridor's three stops (ROADMAP §7.4). Named for real places
+  // The commute corridor's three stops. Named for real places
   // rather than "E2E Origin" for one reason that shows on the widget: the
   // selector's chip is the *first word* of the far end (`directionShort`), so a
   // corridor whose ends both begin "E2E" would draw two chips reading "TO E2E"
@@ -324,7 +324,7 @@ const server = createServer(async (request, response) => {
       await readJson(request);
       return json(response, transitResult());
     }
-    // The commute board and the home-screen widget — ROADMAP §7.4. Both boards
+    // The commute board and the home-screen widget. Both boards
     // come back rendered by `@atlas/transit`, so what the regression reads off
     // the launcher is what the backend would have sent.
     if (url.pathname === '/api/transit/commute' && request.method === 'POST') {

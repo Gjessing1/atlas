@@ -293,7 +293,7 @@ describe('when', () => {
 });
 
 /**
- * §6.4 §13's offer. Everything the middle ground and the per-leg boards do
+ * TRANSIT.md §13's offer. Everything the middle ground and the per-leg boards do
  * hangs off a saved `via`, and a commute is saved door to door — so the corridor
  * that changes at Asker every single time had no way to say so.
  */

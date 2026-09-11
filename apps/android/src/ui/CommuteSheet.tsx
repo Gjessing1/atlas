@@ -39,7 +39,7 @@ import { CheckIcon, PencilIcon } from './icons';
 import { theme } from './theme';
 
 /**
- * The commute dashboard on Android — ROADMAP §6.4, the same model the web panel
+ * The commute dashboard on Android — docs/TRANSIT.md, the same model the web panel
  * renders.
  *
  * What it replaced was a configuration form with a result list stapled under
@@ -480,7 +480,7 @@ function JourneyRow({
 }
 
 /**
- * §6.4 §7 — where you are in the journey you are tracking.
+ * TRANSIT.md §7 — where you are in the journey you are tracking.
  *
  * Every part of this already existed and none of it reached this screen: the
  * phase ladder, the connection break and the commitment all shipped for the
@@ -674,7 +674,7 @@ function Board({
  * pin request directly (8.0+), so ask — but only when the launcher actually
  * accepts one: a button that silently does nothing is worse than a sentence.
  *
- * Two offers, because two widgets ship (ROADMAP §6.5) and they answer different
+ * Two offers, because two widgets ship (docs/TRANSIT.md §W1–§W7) and they answer different
  * questions:
  *
  *  - **Atlas commute (v1)** — one board, pinned. The right widget when what you
@@ -684,12 +684,12 @@ function Board({
  *
  * v2 leads because it is what the section was written for, and v1 stays offered
  * rather than hidden: it is the fallback and the reference until v2 has survived
- * real commuting (§7), and hiding a fallback is how you find out too late that
+ * real commuting (§W7), and hiding a fallback is how you find out too late that
  * it was the one people wanted.
  */
 /**
  * The journey list, whole: its shared notices, its headline, its rows and the
- * reason there is none — §6.4 §13.
+ * reason there is none — TRANSIT.md §13.
  *
  * A component rather than a run of views on the sheet because it is one
  * question's answer: everything in it describes the same direction, door to
@@ -842,7 +842,7 @@ export function CommuteSheet({
   const editor = useCommuteEditor({ commute, places, geocode, fetchStopLines });
   const dashboard = useCommuteDashboard(commute);
   const [editing, setEditing] = useState(false);
-  // §6.3: the editor opens by itself only when the board *cannot* ask a
+  // The editor opens by itself only when the board *cannot* ask a
   // question — not on every launch, which is a moment every launch spends
   // looking unconfigured while storage answers.
   useEffect(() => {
@@ -874,7 +874,7 @@ export function CommuteSheet({
         keyboardShouldPersistTaps="handled"
       >
         {!commute.ready ? <Text style={styles.state}>Loading saved commute…</Text> : null}
-        {/* §6.4 §13's three modes, and the only control over what is shown.
+        {/* TRANSIT.md §13's three modes, and the only control over what is shown.
             Out, back, and the middle ground — the third is not a direction at
             all but the change, drawn as the departures leaving it in both
             directions. A Journeys/Departures switch under this made nine

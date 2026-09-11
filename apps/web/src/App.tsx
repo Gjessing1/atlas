@@ -136,10 +136,10 @@ const CommutePanel = lazy(() =>
   import('./transit/CommutePanel.js').then((m) => ({ default: m.CommutePanel })),
 );
 
-// `segments: true` asks for the per-leg boards too (§6.4 §5) — one request that
+// `segments: true` asks for the per-leg boards too (TRANSIT.md §5) — one request that
 // answers the whole dashboard rather than five the panel would have to
 // orchestrate and fail independently.
-// `commit` carries the journey the board is tracking (§6.4 §7), so the answer
+// `commit` carries the journey the board is tracking (TRANSIT.md §7), so the answer
 // still contains it once it has left — the moment the block is worth having.
 const fetchCommute: CommuteFn = (query, signal, commit) =>
   fetchTransitCommute(query, { signal, segments: true, commit });
@@ -334,7 +334,7 @@ export function App() {
     };
   }, [map]);
 
-  // Derived potential surfaces (§N5): queue the cells under the viewport and
+  // Derived potential surfaces: queue the cells under the viewport and
   // say what is happening while they build. `readyKey` rides into the raster
   // source id below so a cell that lands appears without a pan.
   const potential = usePotential(
@@ -366,7 +366,7 @@ export function App() {
   // the chips of whatever is currently drawn, reachable from the map. What makes
   // Curiosities readable — every register in it is a filtered register.
   const layerFilters = useLayerFilters(layers);
-  // The shortlist a derived surface turns into a plan (§N5 → E6): opened by
+  // The shortlist a derived surface turns into a plan: opened by
   // hand, because it is a real request against the derive service and the
   // router rather than a legend that could just appear.
   const [spotsOpen, setSpotsOpen] = useState(false);

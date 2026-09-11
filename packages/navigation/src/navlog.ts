@@ -4,7 +4,7 @@
  * The reports written from these logs were derived with throwaway scripts, one
  * per investigation, so two readings of the same file agreed only by luck and
  * the fifth question of any analysis ("when exactly did it reroute?") cost
- * another script (ROADMAP §1.2). This module is the reading half of
+ * another script. This module is the reading half of
  * `diagnostics.ts`: it knows the same record vocabulary the trip writes, turns
  * a file into trips, and answers the questions every report actually opens
  * with — what happened, in what order, and what the drive amounted to.

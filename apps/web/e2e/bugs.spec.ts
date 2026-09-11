@@ -45,7 +45,7 @@ test('settings areas own layers and profile layout while map controls stay in on
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.locator('.settings-panel');
   // The tab names come from the shared settings-section list, so they are also
-  // the row names Android shows (ROADMAP §7.5).
+  // the row names Android shows.
   await expect(settings.getByRole('tab')).toHaveText([
     'Appearance',
     'Map layers',

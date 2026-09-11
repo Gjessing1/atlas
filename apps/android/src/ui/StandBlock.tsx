@@ -60,8 +60,8 @@ const APPROACH_STYLE: Record<string, { backgroundColor: string; color: string }>
 };
 
 /**
- * What this pin was saved *as* — the plan the Fish & Hunt shortlist made
- * (ROADMAP § E12), on the card rather than buried in the editor's notes field.
+ * What this pin was saved *as* — the plan the Fish & Hunt shortlist made,
+ * on the card rather than buried in the editor's notes field.
  *
  * A record of a decision, not a live reading, so it dates itself: the surface is
  * re-derived and the approach verdict was true of one route on one day. The

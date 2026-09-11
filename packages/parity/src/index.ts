@@ -26,8 +26,9 @@ export function capabilitiesFor(surface: ParitySurface): readonly ParityCapabili
 
 /**
  * The one-sided capabilities we have *not* justified as platform idiom or
- * platform capability — i.e. the drift §7 asks us to either close or defend.
- * An empty list is the goal; a growing one is the signal §7.6 exists to give.
+ * platform capability — i.e. the drift rule 1 (types.ts) asks us to either close or
+ * defend. An empty list is the goal; a growing one is the signal the checklist
+ * exists to give.
  */
 export function parityGaps(): readonly ParityCapability[] {
   return PARITY_CHECKLIST.filter((cap) => cap.open === true);

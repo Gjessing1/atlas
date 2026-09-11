@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The web ↔ Android parity checklist, printed for a release (ROADMAP §7.6).
+// The web ↔ Android parity checklist, printed for a release.
 //
 // The test beside the checklist is what *enforces* it — every "both clients
 // have this" row names a file and a marker in each app, and the gate reads

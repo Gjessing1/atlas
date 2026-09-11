@@ -40,7 +40,7 @@ export function SpotsButton({
 
 /**
  * "Best spots in view" on Android — the twin of the web's SpotsPanel, and bound
- * by the same rules (ROADMAP § N5 → E6).
+ * by the same rules (FISH-HUNT-ENGINE.md § UX).
  *
  * Each row answers the three things the heatmap cannot: *why here* (the
  * surface's own strongest factor), *when* (today's conditions window — the

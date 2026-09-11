@@ -3,8 +3,7 @@
  * trip records, so the writing half and the reading half (`navlog.ts`) cannot
  * drift apart.
  *
- * Three things shape everything here, all measured on a real 6878-line drive
- * (ROADMAP §1.2):
+ * Three things shape everything here, all measured on a real 6878-line drive:
  *
  *  1. **A log is per trip.** One append-only file lost the drive a report was
  *     actually about, because the next trip's rotation check or a Settings

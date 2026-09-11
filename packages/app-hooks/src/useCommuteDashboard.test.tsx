@@ -100,7 +100,7 @@ function controller(over: Partial<CommuteController> = {}): CommuteController {
   };
 }
 
-/** A journey with a change, which is what §6.4 §7's block is about. */
+/** A journey with a change, which is what TRANSIT.md §7's block is about. */
 const twoLeg = (departMs: number) =>
   trip(ride('270', 'Engelsrud Terrasse', 'Asker stasjon', departMs, departMs + 26 * 60_000), {
     ...ride(
@@ -250,7 +250,7 @@ describe('useCommuteDashboard', () => {
   });
 
   /**
-   * §6.4 §13 — the day that does not start at either door. The departures come
+   * TRANSIT.md §13 — the day that does not start at either door. The departures come
    * from the hops the dashboard already asked for, so the middle mode costs no
    * upstream call.
    */
@@ -365,10 +365,10 @@ describe('useCommuteDashboard', () => {
 });
 
 /**
- * §6.4 §7 — the board's own commitment.
+ * TRANSIT.md §7 — the board's own commitment.
  *
  * Nothing here infers that anyone boarded: the block exists only for a journey
- * the user explicitly tracked, which is the rule §6.5 §3 wrote for the widget
+ * the user explicitly tracked, which is the rule TRANSIT.md §W3 wrote for the widget
  * and this surface inherits.
  */
 describe('tracking a journey', () => {

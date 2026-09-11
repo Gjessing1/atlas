@@ -180,9 +180,9 @@ function AlongRouteStops({
   onPicked: () => void;
 }) {
   // Always open: the disclosure that used to live here is now the toolbar's
-  // "Stops along route" button, which is where a driver looks for it (ROADMAP:
-  // "Give each routing type an intentional toolbar"). Kept as a constant so
-  // useRouteStops keeps its "only search while the panel is showing" contract.
+  // "Stops along route" button, which is where a driver looks for it.
+  // Kept as a constant so useRouteStops keeps its "only search while the
+  // panel is showing" contract.
   const open = true;
   const waypoints = useMemo(() => route.waypoints.map((w) => w.pos), [route.waypoints]);
   const { category, setCategory, hits, status } = useRouteStops({
@@ -339,7 +339,7 @@ export function RoutePanel({
   const [saveOpen, setSaveOpen] = useState(false);
   // The mode-dependent toolbar's fold, and the category browser one of its
   // buttons opens. Both live here rather than in their own components so the
-  // toolbar can own what it shows (ROADMAP: "an intentional toolbar").
+  // toolbar can own what it shows.
   const [moreOpen, setMoreOpen] = useState(false);
   const [alongOpen, setAlongOpen] = useState(false);
   // The route's terms, folded away until asked for. Closed on every open of

@@ -1,5 +1,5 @@
 /**
- * The river fishing model (ROADMAP § N5 → E4, design in
+ * The river fishing model (design in
  * docs/FISH-HUNT-ENGINE.md § "River fishing potential").
  *
  * **One set of channel signals, two kinds of fish.** Pool, riffle, seam,

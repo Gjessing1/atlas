@@ -19,7 +19,7 @@ import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import { listLocalPacks, type LocalPack } from '../regions/packs';
 
 /**
- * Offline NVDB road data (ROADMAP §2.1), the on-device mirror of the backend's
+ * Offline NVDB road data, the on-device mirror of the backend's
  * NvdbStore: speed-limit overrides, turn-lane guidance and speed-camera warnings read out of a
  * downloaded pack's `nvdb.sqlite` — NVDB in Norway plus OSM `speed_camera`
  * points elsewhere — so a drive covered by a pack gets both with no network.

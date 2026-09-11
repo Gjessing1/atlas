@@ -38,7 +38,7 @@ import type { SettingsAccess } from './usePersistedSetting.js';
 export const COMMUTE_SETTING_KEY = 'transit.commute';
 
 /**
- * Where the board keeps the journey it is tracking — §6.4 §7's one decision.
+ * Where the board keeps the journey it is tracking — TRANSIT.md §7's one decision.
  *
  * `local.` is load-bearing, not a naming habit: settings under that prefix
  * never sync (see the storage package's outbox rules), and "the journey I am on
@@ -151,7 +151,7 @@ export interface CommuteController {
   refresh: () => void;
   /** Why a direction is empty, so a board can offer the way out of its own filter. */
   emptyReason: (direction: TransitCommuteDirection) => CommuteEmptyReason;
-  /** The journey the board is tracking (§6.4 §7), or null. */
+  /** The journey the board is tracking (TRANSIT.md §7), or null. */
   commit: TransitWidgetV2Commit | null;
   /**
    * Start or stop tracking a journey. Writing it re-asks the board, which is

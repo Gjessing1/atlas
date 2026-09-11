@@ -1,8 +1,8 @@
 import type { PotentialPrep } from '@atlas/app-hooks';
 
 /**
- * The preparation pill for a derived potential surface (ROADMAP § N5 —
- * "preparation is visible and cancellable").
+ * The preparation pill for a derived potential surface
+ * (FISH-HUNT-ENGINE.md § UX, "preparation is visible and cancellable").
  *
  * A slim line under the search box, and the only place the map admits that the
  * surface it is drawing has to be *built* first. Everything it can say is a

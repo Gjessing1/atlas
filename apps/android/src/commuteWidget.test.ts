@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /**
- * The v2 widget's commitment bridge — ROADMAP §6.4 §7.
+ * The v2 widget's commitment bridge — TRANSIT.md §7.
  *
  * What is worth testing here is not the JSON: it is that this file survives the
  * APK it runs on. A JS bundle reaches a device by OTA, so this code routinely

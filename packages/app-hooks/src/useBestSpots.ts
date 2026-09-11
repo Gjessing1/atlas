@@ -1,6 +1,6 @@
 /**
  * "Best spots in view" — the shortlist, and the *when* that goes with it
- * (ROADMAP § N5 → E6, designed in docs/FISH-HUNT-ENGINE.md § UX).
+ * (designed in docs/FISH-HUNT-ENGINE.md § UX).
  *
  * The derived surface answers **where**. It has nothing to say about tonight,
  * and that is by design: D3 keeps structure and conditions apart, because

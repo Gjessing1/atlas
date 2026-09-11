@@ -357,7 +357,7 @@ export function savedPlaceResults<T extends SearchablePlace>(
  * operator, and the trailing `*` is what makes typing "Bergs" find "Bergsvegen".
  *
  * Lives here rather than in the Android search module because the offline pack
- * producer runs the same query as its smoke check (ROADMAP §7.5 DR7): a pack is
+ * producer runs the same query as its smoke check: a pack is
  * only published once the index answers the way the phone will ask.
  */
 export function ftsMatchQuery(text: string): string | null {

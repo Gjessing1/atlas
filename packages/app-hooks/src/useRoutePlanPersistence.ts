@@ -103,9 +103,9 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
  *
  * Shared because losing a half-built plan is *worse* on the phone, which is
  * where the OS kills a backgrounded app: this lived in the web app for three
- * releases while Android silently dropped every plan on restart (ROADMAP §7.6 —
- * "prefer @atlas/app-hooks for anything with state" is exactly this shape of
- * bug). Nothing in it was ever web-specific.
+ * releases while Android silently dropped every plan on restart (the parity
+ * checklist's rule 2 — "prefer @atlas/app-hooks for anything with state" — is
+ * exactly this shape of bug). Nothing in it was ever web-specific.
  */
 export function useRoutePlanPersistence(
   route: RoutePlanner,

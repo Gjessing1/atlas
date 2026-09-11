@@ -126,10 +126,10 @@ export interface AppOptions {
   placeContentApi?: PlaceContentApiOptions;
   /** Test/deployment seams for custom offline-region extraction. */
   regionJobs?: RegionJobOptions;
-  /** Test seams for the derived-potential engine (ROADMAP N5 → E2). */
+  /** Test seams for the derived-potential engine. */
   potentialApi?: Partial<PotentialApiOptions>;
   /**
-   * Active upstream probes (ROADMAP N7). `enabled` defaults to off under test —
+   * Active upstream probes. `enabled` defaults to off under test —
    * a background sweep against real government services is not something a unit
    * test should trigger by existing.
    */
@@ -238,7 +238,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Basemap freshness is read from the PMTiles archives on disk, not probed.
   status.register('basemap', 'Basemap tiles', 'Map data');
 
-  // Active upstream probes (ROADMAP N7). The runner can only be built after the
+  // Active upstream probes. The runner can only be built after the
   // overlay catalog is registered — that is what knows which layers this instance
   // actually serves — so the status routes below close over this holder rather
   // than over a value that does not exist yet.
@@ -246,7 +246,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // The derived cells are our own artefacts, so their census is a local check
   // like the basemap's — but it watches something the upstream probes cannot
-  // see: a cell built during an outage keeps that gap for good (ROADMAP N7).
+  // see: a cell built during an outage keeps that gap for good.
   const reportCells = createCensusReporter(opts.dataDir);
 
   // ...and the same blind spot one level up: the routing container is deployed
@@ -481,7 +481,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   );
 
   // NVDB speed limits: the authoritative Norwegian source, layered over the
-  // tile limits @atlas/routing already returns (ROADMAP §2.1). Given a route
+  // tile limits @atlas/routing already returns. Given a route
   // shape, the backend matches it against the shipped NVDB dataset and returns
   // the distance ranges where NVDB overrides the limit. Not a proxy — the data
   // is a static SQLite side-table, never a live NVDB call (offline-artefact
@@ -574,7 +574,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     },
   );
 
-  // ATK speed cameras from the same dataset (ROADMAP §2.1): given a route
+  // ATK speed cameras from the same dataset: given a route
   // shape, return the point cameras it passes (direction-filtered) and the
   // average-speed sections it drives end to end. Empty is the normal answer
   // for a dataset without camera tables (an older build) or a route outside
@@ -697,7 +697,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // on a device that has been offline for days.
   registerSatellitesApi(app, { status, dataDir: opts.dataDir, ...opts.satellitesApi });
 
-  // Derived potential surfaces (ROADMAP § N5 → E2): the fixed-z11-cell derive
+  // Derived potential surfaces: the fixed-z11-cell derive
   // service — input adapters, the persisted job queue, and the revalidating tile
   // route. The engine's arithmetic lives in @atlas/potential; this is the
   // adapter that fetches, caches and serves. Cells are durable (they are the

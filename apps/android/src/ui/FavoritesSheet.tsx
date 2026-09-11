@@ -169,7 +169,7 @@ function TagChips({ tags, onPick }: { tags: readonly string[]; onPick: (query: s
  * iNatur permit boundary — which is the same act with a link instead of a file,
  * and shares the destination folder for exactly that reason.
  *
- * This lived in a second sheet of its own until §6.1. Import is not another
+ * This lived in a second sheet of its own until the Collections merge. Import is not another
  * kind of saved data, it is how saved data arrives, so it belongs in the header
  * of the list it fills — which is where web has always kept it.
  */
@@ -363,7 +363,7 @@ function ImportControls({
  * created, renamed, hidden (hiding their contents too) and deleted; a header
  * toggle shows or hides everything at once.
  *
- * Since §6.1 this is the *only* saved-data surface: import (files and whole
+ * Since the Collections merge this is the *only* saved-data surface: import (files and whole
  * backups) and the iNatur permit tool moved in from the Tracks sheet, which is
  * gone. Two lists of the same tracks, reached from two menu entries, was the
  * "I am not sure where to find things" complaint in its purest form.
@@ -477,7 +477,7 @@ export function FavoritesSheet({
     }
   };
 
-  // What the list is narrowed to (§6.2) — name, tag, notes or address, with a
+  // What the list is narrowed to — name, tag, notes or address, with a
   // leading `#` meaning tags alone, which is what a tapped tag chip writes.
   const filtered = useMemo(
     () => filterCollectionRecords({ collections, places, tracks }, filter),

@@ -41,7 +41,7 @@ import type { DeriveModel, ModelResult } from './models.js';
 
 /**
  * The adapter between NVE's and Miljødirektoratet's vectors and
- * `@atlas/potential`'s river model (ROADMAP § N5 → E4).
+ * `@atlas/potential`'s river model.
  *
  * Everything geographic happens here — projecting lon/lat onto the cell raster,
  * deciding which end of a channel is upstream, finding the junctions of the

@@ -127,7 +127,7 @@ describe('probe coverage', () => {
 
   it('covers the N5 inputs the engine reads', () => {
     const ids = inputProbes({}).map((s) => s.id);
-    // The list ROADMAP § N7 names explicitly.
+    // The upstreams the probe sweep was specified to cover.
     for (const id of [
       'input:dtm',
       'input:lake-register',

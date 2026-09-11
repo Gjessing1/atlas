@@ -24,8 +24,7 @@
  * in, arriving by omission rather than by drift.
  *
  * **Clock times are Norwegian wall-clock times** (`norwayClock`), not the
- * device's — ROADMAP §6.3's "format all transit times consistently in Norway's
- * time zone", and not a nicety. Every time in this file came out of Entur, and
+ * device's — and that is not a nicety. Every time in this file came out of Entur, and
  * Entur is Norway by construction (`transitCoverage`): the departure of a
  * Norwegian service *is* a Norwegian clock time, the same one printed on the
  * platform sign. `fmtClock` renders the reader's zone instead, which was right

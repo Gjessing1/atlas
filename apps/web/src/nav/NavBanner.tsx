@@ -207,7 +207,7 @@ export function NavBanner({
   // parallels is driving furniture, not guidance.
   const speedLimit = guiding && !walking ? (state?.speedLimitKph ?? null) : null;
   // ATK camera guidance (car routes in Norway only — elsewhere the data is
-  // simply absent, so no chip: the §2.1 rule). A section in progress outranks
+  // simply absent, so no chip: the Norway-only rule). A section in progress outranks
   // the next point camera; the average is what section control is about.
   const sectionControl = guiding && !walking ? (state?.sectionControl ?? null) : null;
   const speedCamera = !sectionControl && guiding && !walking ? (state?.speedCamera ?? null) : null;

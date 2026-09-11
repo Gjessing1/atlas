@@ -222,7 +222,7 @@ export interface LayerMeta {
    */
   options?: LayerOption[];
   /**
-   * Present when this layer is a **derived potential surface** (ROADMAP § N5):
+   * Present when this layer is a **derived potential surface**:
    * its tiles come from the derive service at `/api/potential/…`, keyed by the
    * layer's `target` option, rather than from the overlay proxy. `overlayTileUrl`
    * is the one place that branches on it, so a client that renders catalog rows

@@ -132,8 +132,8 @@ function isSafeRelPath(relPath: string): boolean {
 
 /**
  * Reject a manifest whose id or file paths could escape the packs directory,
- * are otherwise malformed, or whose artifacts this build cannot read
- * (ROADMAP §7.5 DR7), before any of it is used to build filesystem paths.
+ * are otherwise malformed, or whose artifacts this build cannot read,
+ * before any of it is used to build filesystem paths.
  *
  * Called first thing in `downloadPack`, which is what makes an incompatible
  * pack cost nothing: no staging directory, no bytes, and — the point — the

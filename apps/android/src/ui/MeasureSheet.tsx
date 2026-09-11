@@ -9,7 +9,7 @@ import { theme } from './theme';
  * The measure / radius tool on Android — the web MeasureTool's twin.
  *
  * Range rings around a stand are a field feature and the field device is the
- * phone, which is why this exists at all (ROADMAP §7.5): the geometry had been
+ * phone, which is why this exists at all: the geometry had been
  * shared in `@atlas/core` *for* Android since the web tool shipped, with
  * nothing here consuming it.
  *

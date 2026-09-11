@@ -2,8 +2,7 @@ import type { BBox, RegionPackManifest } from '@atlas/core';
 import type { LngLatBbox } from '@atlas/core';
 
 /**
- * Asking the server to bundle the framed area's derived surface (ROADMAP § N5 →
- * E7).
+ * Asking the server to bundle the framed area's derived surface.
  *
  * The build is synchronous on the server — it zips cells that already exist, so
  * there is nothing to queue and nothing to poll. What can come back instead is

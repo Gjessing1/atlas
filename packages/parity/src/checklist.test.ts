@@ -70,7 +70,7 @@ describe('parity checklist', () => {
     }
   });
 
-  it('covers every surface §7.6 names', () => {
+  it('covers every surface in PARITY_SURFACES', () => {
     for (const surface of PARITY_SURFACES) {
       expect(
         capabilitiesFor(surface).length,
@@ -102,14 +102,14 @@ describe('parity checklist', () => {
       } else {
         expect(
           (cap.why ?? '').trim().length,
-          `${cap.id} is ${side} and says nothing about why — that is the drift §7 forbids`,
+          `${cap.id} is ${side} and says nothing about why — that is the drift rule 1 forbids`,
         ).toBeGreaterThan(20);
       }
     }
   });
 
   /**
-   * The blind spot ROADMAP §6.1 found: a row asks *whether* a client can do a
+   * The blind spot the Collections merge exposed: a row asks *whether* a client can do a
    * thing and never *where*, so four `collections` rows resolved web's
    * Collections panel against Android's separate Tracks sheet and stayed green
    * while the clients disagreed about how many saved-data surfaces existed.
@@ -190,7 +190,7 @@ describe('parity checklist', () => {
   });
 
   /**
-   * §7.6's second rule, made observable: a capability that claims a shared
+   * Rule 2 (types.ts), made observable: a capability that claims a shared
    * state seam must name one that exists. The surfaces that never drifted are
    * the ones whose state already lives in @atlas/app-hooks, so a `hook` that
    * has quietly been renamed or inlined into an app is worth a red build.

@@ -52,12 +52,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommuteController } from './useCommute.js';
 
 /**
- * One journey as the board draws it — §6.4 §1 and §7.
+ * One journey as the board draws it — TRANSIT.md §1 and §7.
  *
  * The ribbon and the break live here rather than in each client because both
  * are derivations, and a derivation done twice is a derivation that disagrees.
  * The break in particular: it is arithmetic on the timetable, so it is computed
- * for *every* listed journey and not only for the tracked one — §6.5 §3 forbids
+ * for *every* listed journey and not only for the tracked one — TRANSIT.md §W3 forbids
  * inferring that someone boarded, not stating that a change no longer holds.
  */
 export interface CommuteDashboardRow {
@@ -77,7 +77,7 @@ export interface CommuteDashboardRow {
   broken: CommuteConnectionBreak | null;
   /** This journey's own notices — the corridor-wide ones are hoisted out. */
   disruptions: CommuteDisruption[];
-  /** This is the journey being tracked (§6.4 §7). */
+  /** This is the journey being tracked (TRANSIT.md §7). */
   tracked: boolean;
 }
 
@@ -90,7 +90,7 @@ export interface CommuteDashboardBoard {
 }
 
 /**
- * The journey list a door mode draws, whole — §6.4 §13.
+ * The journey list a door mode draws, whole — TRANSIT.md §13.
  *
  * Everything a reader needs to judge the direction hangs off it: its headline,
  * its rows, its notices, its emptiness and its own Track. One object rather
@@ -145,7 +145,7 @@ export interface CommuteDashboardSection extends CommuteListing {
 
 export interface CommuteDashboard {
   /**
-   * Which of the three the board is reading — §6.4 §13. `outbound` and
+   * Which of the three the board is reading — TRANSIT.md §13. `outbound` and
    * `inbound` are the commute door to door, as journeys; `interchange` is the
    * change itself, as the departure boards leaving it in both directions.
    */
@@ -161,7 +161,7 @@ export interface CommuteDashboard {
   nowLabel: string;
   /** The clock the countdowns and day notes are measured from. */
   nowMs: number;
-  /** §6.4 §7 — where the traveller is in the journey they are tracking. */
+  /** TRANSIT.md §7 — where the traveller is in the journey they are tracking. */
   here: CommuteHere | null;
   /**
    * That journey whole, so the tracked card can show its legs — each one's

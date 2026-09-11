@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Resolve and validate one region's build plan, before the build spends hours
-// on it (ROADMAP §7.5 DR7).
+// Resolve and validate one region's build plan, before the build spends hours on it.
 //
 //   node plan-pack.mjs <source> <region> [--plan <plan.json>]
 //

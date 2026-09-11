@@ -50,7 +50,7 @@ XMX="${PLANETILER_XMX:-3g}"
 # churn and context switching for no throughput. Keep them equal.
 THREADS="${PLANETILER_THREADS:-$CPUS}"
 
-# Pinned by digest in infrastructure/tools.json (ROADMAP §7.5 DR7): this
+# Pinned by digest in infrastructure/tools.json: this
 # archive becomes a pack input, recorded there by size, mtime and digest, and a
 # tag that moved would make "which tiler cut this" unanswerable.
 PLANETILER_IMAGE="$(jq -er '.planetiler.image' \

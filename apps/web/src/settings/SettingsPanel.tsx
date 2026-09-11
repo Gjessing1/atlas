@@ -55,7 +55,7 @@ interface SettingsPanelProps {
 
 /**
  * The tabs, from the shared section list in `@atlas/core` — the same sections,
- * names and order Android drills into (ROADMAP §7.5). Map tiles and Offline
+ * names and order Android drills into. Map tiles and Offline
  * regions are filtered out there as Android-only, so this is the web six.
  */
 const TABS = settingsSectionsFor('web');

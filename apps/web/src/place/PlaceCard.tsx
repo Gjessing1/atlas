@@ -29,7 +29,7 @@ interface PlaceCardProps {
   target: PlaceTarget;
   /**
    * The derived surface's reading of this spot, when one is switched on and
-   * has something to say here (ROADMAP § N5, "tap to explain"). Null covers
+   * has something to say here (FISH-HUNT-ENGINE.md D4, "tap to explain"). Null covers
    * every quiet case at once — no derived layer, an unprepared cell, or ground
    * the model does not read — because all three should leave the card unchanged.
    */
@@ -419,7 +419,7 @@ export function PlaceCard({
   const showCoords = title !== coords;
 
   // Both "what is this spot like" facts from one shared hook, so the two cards
-  // cannot end up with different halves of the pair (§7.2).
+  // cannot end up with different halves of the pair.
   const { elevation, light } = usePlaceFacts('', target.position);
   const placeContent = usePlaceContent(target.name, target.position);
 

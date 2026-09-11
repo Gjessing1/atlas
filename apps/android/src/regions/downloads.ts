@@ -156,7 +156,7 @@ export class PackDownloadManager {
     } catch (err) {
       // Every caller starts a download without awaiting it, so throwing here
       // would be an unhandled rejection and a button that did nothing. The
-      // reachable case is a pack built for a newer app (ROADMAP §7.5 DR7):
+      // reachable case is a pack built for a newer app:
       // report it where the download's own errors already show.
       this.put({
         id: manifest.id,

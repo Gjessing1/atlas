@@ -230,11 +230,11 @@ export interface TransitLeg {
    *
    * This is the one fact that tells "the bus has gone" apart from "the bus is
    * two minutes late", and it is published rather than sensed, which is why the
-   * v2 widget's state ladder (ROADMAP §6.5 §2, tier 2) rests on it instead of on
+   * v2 widget's state ladder (TRANSIT.md §W2, tier 2) rests on it instead of on
    * a location permission. Absent until the event happens, and absent for good
    * on a service with no live feed — every reader must fall back to the clock.
    *
-   * Measured before it was scoped, as §6.5 asks: past calls at Jernbanetorget on
+   * Measured before it was scoped, as TRANSIT.md §W2 asks: past calls at Jernbanetorget on
    * 2026-08-27 carried it on 20/20 Ruter buses, 9/9 trams and 11/11 metros, and
    * at Oslo S on 27/28 Vy trains — and a `trip()` asked with a `dateTime` in the
    * past returns the departed journey with both fields set (the 280 that left
@@ -575,7 +575,7 @@ export interface TransitCommuteResult {
   segments?: TransitCommuteSegmentResult[];
   /**
    * The journey the board is committed to, asked for around its own departure
-   * — §6.4 §7.
+   * — TRANSIT.md §7.
    *
    * Separate from `outbound`/`inbound` because it cannot be in either: those
    * are asked "from now", and a commitment is worth having exactly while the
@@ -586,7 +586,7 @@ export interface TransitCommuteResult {
    */
   committed?: {
     trip: TransitTrip;
-    /** Set when a broken change was re-planned into it (§6.5 §4). */
+    /** Set when a broken change was re-planned into it (TRANSIT.md §W4). */
     replaced: { at: string; index: number } | null;
   };
 }

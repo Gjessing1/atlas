@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Prove a freshly built pack actually works, before it is published
-// (ROADMAP §7.5 DR7).
+// Prove a freshly built pack actually works, before it is published.
 //
 //   node smoke-pack.mjs <plan.json> <pack-dir>
 //

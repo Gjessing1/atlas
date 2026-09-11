@@ -46,7 +46,7 @@ export interface DeriveJob {
   error?: string;
   /**
    * A re-derive of a cell that already exists, because an upstream it was built
-   * without is answering again (ROADMAP N7 → health.ts). Two consequences: it
+   * without is answering again (health.ts). Two consequences: it
    * must **not** take the "already derived" short-circuit, and it waits behind
    * every fresh cell — someone staring at a blank viewport outranks the quiet
    * improvement of a surface already on their screen.

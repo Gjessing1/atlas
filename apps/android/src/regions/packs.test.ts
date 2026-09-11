@@ -295,7 +295,7 @@ describe('validatePackManifest', () => {
 });
 
 /**
- * The generic layer slot (ROADMAP § N5 → E7). `files` stopped being a flat
+ * The generic layer slot. `files` stopped being a flat
  * object of optional files when it grew `layers`, and every walker here has to
  * agree about that — a pack whose surfaces are silently skipped installs
  * "successfully" and then draws nothing.
@@ -418,7 +418,7 @@ describe('downloadPack', () => {
   it('refuses an incompatible pack without touching the installed one', async () => {
     // The pack the app cannot read is not a failed download to retry: it is a
     // pack this build must decline, and declining costs no bytes and leaves the
-    // region already installed exactly where it was (ROADMAP §7.5 DR7).
+    // region already installed exactly where it was.
     seedLivePack();
     const future = makeManifest();
     future.compat = { schema: 9, minRuntime: 99 };

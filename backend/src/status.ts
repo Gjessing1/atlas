@@ -6,7 +6,7 @@ import type { UpstreamHealth, UpstreamStatus } from '@atlas/core';
  * - **Real traffic** — every proxy records the outcome of the requests it
  *   already makes (`record(id, ok, message?)`). Free, and it reports exactly
  *   what users experienced.
- * - **Active probes** (`probes.ts`, ROADMAP N7) — one cheap request per
+ * - **Active probes** (`probes.ts`) — one cheap request per
  *   upstream every few hours, because piggybacking alone cannot see a source
  *   nobody has opened, and the tile proxy serves later views from its disk
  *   cache without ever re-asking upstream. That blind spot is not theoretical:
@@ -131,7 +131,7 @@ export class StatusRegistry {
    * asked one id at a time.
    *
    * The derive service reads it to decide whether an upstream it missed is worth
-   * asking again (ROADMAP N7). An id nobody has registered or recorded answers
+   * asking again. An id nobody has registered or recorded answers
    * `unknown`, which is the honest answer and, for that caller, a "no".
    */
   healthOf(id: string): UpstreamHealth {

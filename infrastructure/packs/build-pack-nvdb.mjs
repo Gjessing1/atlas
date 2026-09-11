@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build a region pack's offline road-data dataset (ROADMAP §2.1): the same
+// Build a region pack's offline road-data dataset: the same
 // nvdb.sqlite schema the backend's NvdbStore reads, so speed-limit overrides,
 // turn-lane guidance and speed-camera warnings work on-device with no network.
 //
@@ -20,7 +20,7 @@
 // source yields anything (a region with no NVDB clip and no OSM cameras) the
 // file is removed and nothing is shipped — build-pack.sh omits it from the
 // manifest, and a pack with no dataset degrades to exactly the pre-NVDB
-// behaviour, per the §2.1 rule.
+// behaviour, per the Norway-only rule.
 //
 // Requires the workspace packages to be built (`npm run build`) so
 // `@atlas/routing` resolves — like every other post-build pipeline artefact.

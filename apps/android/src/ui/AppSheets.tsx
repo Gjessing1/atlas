@@ -37,7 +37,7 @@ interface AppSheetsProps {
   onCloseEditPlace: () => void;
   layersOpen: boolean;
   onCloseLayers: () => void;
-  /** "Keep this area offline" for the switched-on derived surface (§N5 → E7). */
+  /** "Keep this area offline" for the switched-on derived surface. */
   keepOffline?: KeepOfflineControls;
   /** Overlay catalog + per-device state for the Layers sheet. */
   overlays: OverlaysController;

@@ -1,6 +1,5 @@
 /**
- * "Which of my stands is on tonight?" — the ten-day answer for saved stands
- * (ROADMAP § E12).
+ * "Which of my stands is on tonight?" — the ten-day answer for saved stands.
  *
  * The shortlist answers a question asked once per area: *where should I sit?*
  * The repeat action of a season is the opposite one — three to eight stands you
@@ -285,7 +284,7 @@ export const STAND_SLOPE_BEARINGS: readonly number[] = [0, 45, 90, 135, 180, 225
 /**
  * A cell as words, so web and Android say the same thing about one evening.
  *
- * The wording lives here for the reason §7.6 gave: two hand-maintained copies of
+ * The wording lives here for the parity reason: two hand-maintained copies of
  * "Blown out" is how the clients drift, and this is a sentence a hunter will
  * compare across the two screens on the same afternoon.
  */

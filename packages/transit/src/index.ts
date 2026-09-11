@@ -166,7 +166,7 @@ export {
   type CommuteServiceState,
 } from './dashboard.js';
 /**
- * §6.4 §7's "you are here" — the committed journey stated on the board, built
+ * TRANSIT.md §7's "you are here" — the committed journey stated on the board, built
  * on the same ladder the home-screen widget runs (`widget-v2.ts`).
  */
 export { commuteHere, type CommuteHere, type CommuteHereConnection } from './here.js';
@@ -186,7 +186,7 @@ export {
   type TransitWeekday,
 } from './clock.js';
 /**
- * The **v2** home-screen widget (ROADMAP §6.5) — a second widget beside the one
+ * The **v2** home-screen widget (docs/TRANSIT.md §W1–§W7) — a second widget beside the one
  * above, not a replacement for it. See the header of `widget-v2.ts` for which is
  * which; the short of it is that v1 pins a *board* and v2 pins the *commute*.
  */

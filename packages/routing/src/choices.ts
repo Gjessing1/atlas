@@ -13,7 +13,7 @@ import type { RoutePath } from './model.js';
  * still being shown in each choice's time. NPRA instruments 202 corridors, not
  * the network: ranking on the adjusted time would let a route win for having no
  * measurement rather than for being quicker, and quietly turn an ETA correction
- * into traffic-aware routing on data too sparse to support it (§2.2). So the
+ * into traffic-aware routing on data too sparse to support it. So the
  * order is the engine's own like-for-like judgement, and the "+6 min traffic"
  * label is what explains a slower number sitting first.
  */

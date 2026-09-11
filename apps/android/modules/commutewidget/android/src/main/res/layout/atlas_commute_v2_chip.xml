@@ -2,7 +2,7 @@
 <!--
   One chip of the v2 direction selector: `[ AUTO ]`, `[ TO OSLO ]`, `[ TO HOME ]`.
 
-  Three chips rather than a dropdown, because §6.5 §1 asks for two things a
+  Three chips rather than a dropdown, because TRANSIT.md §W1 asks for two things a
   dropdown cannot give at once: the direction has to be obvious at a glance, and
   returning to AUTO has to be **one tap**. A chooser that opens costs two, and a
   cycling button costs up to three.

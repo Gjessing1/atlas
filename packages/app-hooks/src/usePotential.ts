@@ -1,6 +1,6 @@
 /**
  * Preparing the derived potential surfaces for what the user is looking at
- * (ROADMAP § N5 — "preparation is visible and cancellable").
+ * (FISH-HUNT-ENGINE.md § UX, "preparation is visible and cancellable").
  *
  * A derived layer is unlike every other overlay in one way that the user has to
  * be told about rather than left to discover: **the pixels do not exist until

@@ -965,7 +965,7 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
-        {/* The numbered "best spots in view" markers (§N5 → E6). The numbers come
+        {/* The numbered "best spots in view" markers (FISH-HUNT-ENGINE.md § UX). The numbers come
         from the shared `spotsFeatureCollection`, not from this file: a marker and
         its row in the sheet are the same recommendation, and numbering them
         per-client would break the only link between the two halves of it. */}
@@ -1444,7 +1444,7 @@ export function MapScene({
           ) : null
         ) : null}
         {/* A saved stand's own rose, so which way it faces is visible on the map
-          that planned it (§E12). Deliberately dimmer and thinner than the live
+          that planned it. Deliberately dimmer and thinner than the live
           shortlist above: both are on screen while planning a new area with last
           season's stands visible, and a proposal being considered must not read
           as a decision already made. Geometry comes from the shared
