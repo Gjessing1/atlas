@@ -793,9 +793,21 @@ async function saveCommuteAndReadBoard() {
     (xml) => Boolean(nodeForId(xml, 'commute-here')),
     20_000,
   );
-  // "Tracking" before the first vehicle leaves, never "you are here": the
-  // traveller is following a journey, not standing in it.
-  expectStrings(tracked, ['TRACKING', 'UPCOMING', 'NEXT CONNECTION'], 'the tracked journey');
+  // A run that reaches this immediately sees the ordinary pre-departure
+  // "Tracking / Upcoming" state. Slower emulator runs can cross the ten-minute
+  // boarding threshold, where the product deliberately says "You are here /
+  // Boarding soon" instead. Both are valid before departure; a mixed pair is
+  // not, and the booked connection must remain visible in either phase.
+  const trackedStrings = windowStrings(tracked);
+  const has = (value) => trackedStrings.some((seen) => seen.includes(value));
+  const upcoming = has('TRACKING') && has('UPCOMING');
+  const boarding = has('YOU ARE HERE') && has('BOARDING SOON');
+  if (!upcoming && !boarding) {
+    throw new Error(
+      'the tracked journey is missing a valid pre-departure phase: expected Tracking / Upcoming or You are here / Boarding soon',
+    );
+  }
+  expectStrings(tracked, ['NEXT CONNECTION'], 'the tracked journey');
   // Each leg's own platform, inside the tracked card. Tracking used to show
   // strictly *less* than not tracking — a ribbon and the next connection, but
   // never a platform or a per-leg time — and this is the one surface where the
