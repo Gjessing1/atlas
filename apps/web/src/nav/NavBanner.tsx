@@ -351,7 +351,9 @@ export function NavBanner({
           {nav.fasterRoute && nav.phase === 'navigating' ? (
             <div className="nav-faster-row">
               <span className="nav-faster-text">
-                Faster route — saves {fmtDuration(nav.fasterRoute.savesMs)}
+                {nav.fasterRoute.reason === 'time'
+                  ? `Faster route — saves ${fmtDuration(nav.fasterRoute.savesMs)}`
+                  : `Shorter route — saves ${fmtDistanceM(nav.fasterRoute.savesM)}`}
               </span>
               <button type="button" className="nav-faster-switch" onClick={nav.acceptFasterRoute}>
                 Switch

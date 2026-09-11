@@ -345,6 +345,8 @@ const REROUTE_HEADING_MIN_SPEED_MPS = 5;
 const FASTER_CHECK_INTERVAL_MS = 180_000;
 /** Smallest saving worth interrupting a driver for. */
 const FASTER_MIN_SAVING_MS = 120_000;
+/** A non-slower route this much shorter is worth offering too. */
+const FASTER_MIN_DISTANCE_FRACTION = 0.15;
 /** An unaccepted offer expires — the road it branches from recedes behind. */
 const FASTER_OFFER_TTL_MS = 120_000;
 /** After a dismissal, only an offer this much better may interrupt again. */
@@ -436,6 +438,8 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const headingSourceRef = useRef<HeadingSource>('auto');
   /** Cancels an in-flight route-enrichment fetch (End, or a superseding reroute). */
   const enrichAbort = useRef<AbortController | null>(null);
+  /** Reset the periodic watch after a reroute installs a new baseline route. */
+  const resetFasterCheckRef = useRef<() => void>(() => undefined);
   /** Teardown for the active fix watch, if any. */
   const watchStopRef = useRef<(() => void) | null>(null);
   /**
@@ -940,6 +944,11 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // "Which way now?" is most urgent right after recalculating.
         const depart = nextSession.departurePrompt();
         if (depart) speak(depart.text, promptContext(depart));
+        // A reroute can itself choose a materially longer line (heading,
+        // closures and transient costing all affect it). Judge that new route
+        // now, from the same live fix, rather than waiting out whatever is
+        // left of the old route's three-minute cadence.
+        resetFasterCheckRef.current();
       } catch {
         if (lifecycleRef.current.trip !== trip) return;
         // Keep the old session (the traveller continues on the drawn line) and
@@ -1069,101 +1078,130 @@ export function useNavigationController(platform: NavPlatform): NavController {
    * swap, which is exactly what the off-route reroute is not allowed to be
    * either when the traveller chose the line deliberately.
    */
-  const checkFasterRoute = useCallback(async () => {
-    const before = lifecycleRef.current;
-    const session = sessionRef.current;
-    const fix = lastFixRef.current;
-    const state = lastStateRef.current;
-    if (!session || !fix || !state || before.stage.kind !== 'guiding') return;
-    if (before.stage.probing || before.stage.reroute.inFlight) return;
-    // Only a settled, on-route, live-fix drive is worth second-guessing; and a
-    // trip nearly over cannot save enough to matter.
-    if (state.status !== 'navigating' || state.fix !== 'live' || !state.departed) return;
-    const { trip, profile: prof } = before;
-    const { plan, path: currentPath } = before.stage;
-    dispatch({ type: 'faster-probe-started' });
-    try {
-      // A closure appearing on the line already being followed is not an
-      // optional faster-route offer: the old route has become invalid, so
-      // recalculate proactively. The provider adds the same closure to
-      // Valhalla's exclude_locations when it builds the replacement.
-      const closureTransport = platformRef.current.trafficClosures;
-      if (closureTransport) {
-        const fromIndex = Math.max(
-          0,
-          Math.floor(state.routeProgress * Math.max(0, currentPath.points.length - 1)) - 2,
-        );
-        const closures = await closureTransport(currentPath.points.slice(fromIndex));
-        if (closures.length > 0) {
-          dispatch({ type: 'faster-withdrawn' });
-          dispatch({ type: 'reroute-forced' });
-          speak('Road closure ahead. Rerouting.', { kind: 'alert', cause: 'closure' });
-          await reroute(fix, 'closure-ahead');
+  const checkFasterRoute = useCallback(
+    async (skipClosureCheck = false) => {
+      const before = lifecycleRef.current;
+      const session = sessionRef.current;
+      const fix = lastFixRef.current;
+      const state = lastStateRef.current;
+      if (!session || !fix || !state || before.stage.kind !== 'guiding') return;
+      if (before.stage.probing || before.stage.reroute.inFlight) return;
+      // Only a settled, on-route, live-fix drive is worth second-guessing.
+      if (state.status !== 'navigating' || state.fix !== 'live' || !state.departed) return;
+      const { trip, profile: prof } = before;
+      const { plan, path: currentPath } = before.stage;
+      dispatch({ type: 'faster-probe-started' });
+      try {
+        // A closure appearing on the line already being followed is not an
+        // optional faster-route offer: the old route has become invalid, so
+        // recalculate proactively. The provider adds the same closure to
+        // Valhalla's exclude_locations when it builds the replacement.
+        const closureTransport = platformRef.current.trafficClosures;
+        if (closureTransport && !skipClosureCheck) {
+          const fromIndex = Math.max(
+            0,
+            Math.floor(state.routeProgress * Math.max(0, currentPath.points.length - 1)) - 2,
+          );
+          const closures = await closureTransport(currentPath.points.slice(fromIndex));
+          if (closures.length > 0) {
+            dispatch({ type: 'faster-withdrawn' });
+            dispatch({ type: 'reroute-forced' });
+            speak('Road closure ahead. Rerouting.', { kind: 'alert', cause: 'closure' });
+            await reroute(fix, 'closure-ahead');
+            return;
+          }
+        }
+        // Before comparing anything: bring the followed route's schedule up to
+        // the current measurements. It is the point of the poll in its own right
+        // — the ETA moves without the driver doing anything — and it is what
+        // makes the comparison below fair, since the candidate is priced by the
+        // provider against *now* while the followed route was priced at
+        // departure. Judging one against the other was measuring a jam that has
+        // since cleared against one that has not.
+        await repriceTraffic();
+        if (lifecycleRef.current.trip !== trip || !sessionRef.current) return;
+        const plannedMs = session.plannedRemainingMs();
+        const plannedM = lastStateRef.current?.distanceRemainingM ?? state.distanceRemainingM;
+        if (plannedMs === null || plannedMs <= 0 || plannedM <= 0) {
+          diag({ event: 'faster-probe', verdict: 'skipped', plannedMs, plannedM });
           return;
         }
-      }
-      // Before comparing anything: bring the followed route's schedule up to
-      // the current measurements. It is the point of the poll in its own right
-      // — the ETA moves without the driver doing anything — and it is what
-      // makes the comparison below fair, since the candidate is priced by the
-      // provider against *now* while the followed route was priced at
-      // departure. Judging one against the other was measuring a jam that has
-      // since cleared against one that has not.
-      await repriceTraffic();
-      if (lifecycleRef.current.trip !== trip || !sessionRef.current) return;
-      const plannedMs = session.plannedRemainingMs();
-      if (plannedMs === null || plannedMs <= FASTER_MIN_SAVING_MS) {
-        diag({ event: 'faster-probe', verdict: 'skipped', plannedMs });
-        return;
-      }
-      const heading =
-        typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
-      const passed = state.viasPassed;
-      const vias = passed > 0 ? plan.vias.slice(passed) : plan.vias;
-      const candidate = await fetchPath(
-        'faster-probe',
-        fix,
-        plan.destination,
-        prof,
-        plan.preferences,
-        heading,
-        vias,
-      );
-      const live = lifecycleRef.current;
-      if (live.trip !== trip || !sessionRef.current || live.stage.kind !== 'guiding') return;
-      const savesMs = plannedMs - candidate.timeMs;
-      const dismissed = live.stage.dismissedSavingMs;
-      const dismissedFloor = dismissed === null ? 0 : dismissed + FASTER_REOFFER_STEP_MS;
-      const offering = savesMs >= Math.max(FASTER_MIN_SAVING_MS, dismissedFloor);
-      diag({
-        event: 'faster-probe',
-        verdict: offering ? 'offered' : 'rejected',
-        plannedMs,
-        candidateMs: candidate.timeMs,
-        savesMs,
-        dismissedSavingMs: dismissed,
-        route: routeFingerprint(candidate),
-      });
-      if (offering) {
-        dispatch({
-          type: 'faster-offered',
-          offer: { path: candidate, vias, savesMs, atMs: Date.now() },
-        });
-        const minutes = Math.max(1, Math.round(savesMs / 60_000));
-        speak(
-          `A faster route is available — it saves ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
-          { kind: 'alert', cause: 'faster-route', savesMs },
+        const heading =
+          typeof fix.speedMps === 'number' && fix.speedMps >= 2 ? fix.headingDeg : undefined;
+        const passed = state.viasPassed;
+        const vias = passed > 0 ? plan.vias.slice(passed) : plan.vias;
+        const candidate = await fetchPath(
+          'faster-probe',
+          fix,
+          plan.destination,
+          prof,
+          plan.preferences,
+          heading,
+          vias,
         );
-      } else {
-        // The advantage evaporated before the driver acted on it.
-        dispatch({ type: 'faster-withdrawn' });
+        const live = lifecycleRef.current;
+        if (live.trip !== trip || !sessionRef.current || live.stage.kind !== 'guiding') return;
+        const savesMs = plannedMs - candidate.timeMs;
+        const savesM = Math.max(0, plannedM - candidate.distanceM);
+        const qualifiesOnTime = savesMs >= FASTER_MIN_SAVING_MS;
+        const qualifiesOnDistance =
+          candidate.timeMs <= plannedMs &&
+          candidate.distanceM <= plannedM * (1 - FASTER_MIN_DISTANCE_FRACTION);
+        const dismissed = live.stage.dismissedSavingMs;
+        const dismissedFloor = dismissed === null ? 0 : dismissed + FASTER_REOFFER_STEP_MS;
+        // A dismissal suppresses the same distance-only choice too: after the
+        // driver has declined it, only a route with a meaningfully larger time
+        // advantage may interrupt again.
+        const clearsDismissal = dismissed === null || savesMs >= dismissedFloor;
+        const offering = clearsDismissal && (qualifiesOnTime || qualifiesOnDistance);
+        const reason = qualifiesOnTime ? 'time' : 'distance';
+        diag({
+          event: 'faster-probe',
+          verdict: offering ? 'offered' : 'rejected',
+          plannedMs,
+          plannedM,
+          candidateMs: candidate.timeMs,
+          candidateM: candidate.distanceM,
+          savesMs,
+          savesM,
+          reason: offering ? reason : null,
+          dismissedSavingMs: dismissed,
+          route: routeFingerprint(candidate),
+        });
+        if (offering) {
+          dispatch({
+            type: 'faster-offered',
+            offer: { path: candidate, vias, savesMs, savesM, reason, atMs: Date.now() },
+          });
+          if (reason === 'time') {
+            const minutes = Math.round(savesMs / 60_000);
+            speak(
+              `A faster route is available — it saves ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
+              { kind: 'alert', cause: 'faster-route', savesMs },
+            );
+          } else {
+            const distance =
+              savesM < 1000
+                ? `${Math.round(savesM / 10) * 10} metres`
+                : `${(savesM / 1000).toFixed(savesM < 10_000 ? 1 : 0)} kilometres`;
+            speak(`A shorter route is available — it saves ${distance}.`, {
+              kind: 'alert',
+              cause: 'faster-route',
+              savesMs,
+            });
+          }
+        } else {
+          // The advantage evaporated before the driver acted on it.
+          dispatch({ type: 'faster-withdrawn' });
+        }
+      } catch {
+        // Offline, or no route right now — the next interval asks again.
+      } finally {
+        if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
       }
-    } catch {
-      // Offline, or no route right now — the next interval asks again.
-    } finally {
-      if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
-    }
-  }, [lifecycleRef, dispatch, platformRef, fetchPath, speak, reroute, repriceTraffic, diag]);
+    },
+    [lifecycleRef, dispatch, platformRef, fetchPath, speak, reroute, repriceTraffic, diag],
+  );
 
   /** Take the offered faster route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {
@@ -1693,7 +1731,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
   const offer = guiding ? stage.offer : null;
   const fasterRoute = useMemo<NavFasterRoute | null>(
-    () => (offer ? { savesMs: offer.savesMs } : null),
+    () => (offer ? { savesMs: offer.savesMs, savesM: offer.savesM, reason: offer.reason } : null),
     [offer],
   );
   const tripProgress = navTripProgress(lifecycle, Date.now(), state?.traveledM ?? 0);
@@ -1735,10 +1773,39 @@ export function useNavigationController(platform: NavPlatform): NavController {
   // world that changed (a closure ahead, a mistake at the preview), not to
   // second-guess every kilometre, and each check is a full route request.
   useEffect(() => {
+    resetFasterCheckRef.current = () => undefined;
     if (!guiding) return;
     if (!(navOptionsForProfile(profile).autoReroute ?? true)) return;
-    const timer = setInterval(() => void checkFasterRoute(), FASTER_CHECK_INTERVAL_MS);
-    return () => clearInterval(timer);
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let generation = 0;
+    const schedule = (delayMs: number, skipClosureCheck = false) => {
+      generation++;
+      const scheduledGeneration = generation;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void checkFasterRoute(skipClosureCheck).finally(() => {
+          // A successful reroute may have scheduled an immediate probe while
+          // this probe was still running (the closure path). Do not let the
+          // older completion overwrite that new schedule.
+          if (generation === scheduledGeneration) schedule(FASTER_CHECK_INTERVAL_MS);
+        });
+      }, delayMs);
+    };
+    // The route just installed already handled any closure that caused its
+    // replacement. Rechecking that same closure before the vehicle has moved
+    // can loop forever when the engine has no avoiding line; this immediate
+    // pass is for comparing the new route, while the next periodic pass owns
+    // closure discovery again.
+    const reset = () => schedule(0, true);
+    resetFasterCheckRef.current = reset;
+    schedule(FASTER_CHECK_INTERVAL_MS);
+    return () => {
+      generation++;
+      if (timer !== null) clearTimeout(timer);
+      if (resetFasterCheckRef.current === reset) resetFasterCheckRef.current = () => undefined;
+    };
   }, [guiding, profile, checkFasterRoute]);
 
   // While dead reckoning, feed device yaw into the session so it can notice a

@@ -436,14 +436,16 @@ export function NavBanner({
         {nav.fasterRoute && nav.phase === 'navigating' ? (
           <View style={styles.fasterRow}>
             <Text style={styles.fasterText} numberOfLines={2}>
-              Faster route — saves {formatDuration(nav.fasterRoute.savesMs)}
+              {nav.fasterRoute.reason === 'time'
+                ? `Faster route — saves ${formatDuration(nav.fasterRoute.savesMs)}`
+                : `Shorter route — saves ${formatDistance(nav.fasterRoute.savesM)}`}
             </Text>
             <Pressable
               style={styles.fasterSwitch}
               onPress={nav.acceptFasterRoute}
               testID="faster-switch"
               accessibilityRole="button"
-              accessibilityLabel="Switch to the faster route"
+              accessibilityLabel="Switch to the offered route"
             >
               <Text style={styles.fasterSwitchText}>Switch</Text>
             </Pressable>

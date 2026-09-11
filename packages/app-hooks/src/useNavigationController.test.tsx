@@ -716,7 +716,8 @@ describe('useNavigationController — rerouting', () => {
     goOffRoute(h);
 
     await waitFor(() => expect(hook.result.current.activePath?.timeMs).toBe(300_000));
-    expect(h.route.mock.calls).toHaveLength(3);
+    // The successful reroute is immediately followed by a better-route probe.
+    expect(h.route.mock.calls).toHaveLength(4);
     for (const [query] of h.route.mock.calls) {
       expect(query).toMatchObject({ profile: 'car', preferences });
     }
@@ -1078,6 +1079,64 @@ describe('useNavigationController — faster-route watch', () => {
     expect(hook.result.current.activePath?.timeMs).toBe(600_000);
   });
 
+  it('offers a materially shorter route even when it saves only seconds', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    // Roughly 1,000 m and 540 s remain. This candidate saves only ~10 s, but
+    // cuts about 20% of the remaining distance without taking longer.
+    h.route.mockResolvedValueOnce({
+      paths: [{ ...path(530_000, 0.002), distanceM: 800 }],
+    });
+
+    await driveFor(h, 181);
+
+    expect(hook.result.current.fasterRoute).toMatchObject({
+      reason: 'distance',
+      savesMs: expect.any(Number),
+      savesM: expect.any(Number),
+    });
+    expect(hook.result.current.fasterRoute!.savesMs).toBeLessThan(120_000);
+    expect(hook.result.current.fasterRoute!.savesM).toBeGreaterThan(150);
+    expect(h.spoken.some((text) => text.startsWith('A shorter route is available'))).toBe(true);
+  });
+
+  it('does not offer a shorter route when it takes longer', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    h.route.mockResolvedValueOnce({
+      paths: [{ ...path(550_000, 0.002), distanceM: 800 }],
+    });
+
+    await driveFor(h, 181);
+
+    expect(hook.result.current.fasterRoute).toBeNull();
+    expect(h.spoken.some((text) => text.startsWith('A shorter route is available'))).toBe(false);
+  });
+
+  it('probes immediately after a reroute and restarts the cadence there', async () => {
+    const h = harness();
+    const hook = await fakeDrive(h);
+    const calls = h.route.mock.calls.length;
+    // First answer replaces the route; the second is the immediate comparison
+    // scheduled from that successful replacement.
+    h.route
+      .mockResolvedValueOnce({ paths: [path(600_000, 0.002)] })
+      .mockResolvedValueOnce({ paths: [{ ...path(530_000, 0.003), distanceM: 800 }] });
+
+    await act(async () => {
+      hook.result.current.rerouteNow();
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(h.route.mock.calls.length).toBe(calls + 2);
+    expect(hook.result.current.fasterRoute?.reason).toBe('distance');
+
+    // The original guidance timer would fire at 180 s; resetting the cadence
+    // means no third request arrives just after this immediate probe.
+    await driveFor(h, 179);
+    expect(h.route.mock.calls.length).toBe(calls + 2);
+  });
+
   it('stays quiet when the freshly fetched route is no better', async () => {
     const h = harness();
     const hook = await fakeDrive(h);
@@ -1098,7 +1157,10 @@ describe('useNavigationController — faster-route watch', () => {
     await driveFor(h, 181);
 
     expect(trafficClosures).toHaveBeenCalled();
-    expect(h.route.mock.calls.length).toBe(calls + 1);
+    // One request avoids the closure; a second immediately judges the newly
+    // installed line without re-triggering the same closure.
+    expect(h.route.mock.calls.length).toBe(calls + 2);
+    expect(trafficClosures).toHaveBeenCalledTimes(1);
     expect(h.spoken).toContain('Road closure ahead. Rerouting.');
     expect(hook.result.current.fasterRoute).toBeNull();
   });

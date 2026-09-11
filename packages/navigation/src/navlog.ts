@@ -376,12 +376,21 @@ function applyRecord(trip: TripBuilder, parsed: NavDiagnosticRecord, atMs: numbe
       // wants to see, so it joins the trip's route list as "offered".
       if (candidate) trip.noteRoute(candidate, false);
       const saves = num(parsed.savesMs);
+      const plannedM = num(parsed.plannedM);
+      const candidateM = num(parsed.candidateM);
+      const savesM = num(parsed.savesM);
       trip.add(
         atMs,
         'faster-probe',
         `${text(parsed.verdict) ?? 'unknown'} · planned ${formatLogDuration(num(parsed.plannedMs) ?? 0)} vs ${formatLogDuration(
           num(parsed.candidateMs) ?? 0,
-        )}${saves === null ? '' : ` · saves ${formatLogDuration(saves)}`}`,
+        )}${
+          plannedM === null || candidateM === null
+            ? ''
+            : ` · ${distance(plannedM)} vs ${distance(candidateM)}`
+        }${saves === null ? '' : ` · saves ${formatLogDuration(saves)}`}${
+          savesM === null ? '' : ` / ${distance(savesM)}`
+        }`,
       );
       return;
     }

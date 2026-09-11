@@ -67,6 +67,10 @@ export interface NavTripProgress {
 export interface NavFasterRoute {
   /** Time it saves over the engine's own estimate for the current route. */
   savesMs: number;
+  /** Distance it saves over the remaining followed route. */
+  savesM: number;
+  /** The threshold that made this route worth interrupting the driver for. */
+  reason: 'time' | 'distance';
 }
 
 /**
@@ -121,6 +125,8 @@ export interface NavFasterOffer {
   path: RoutePath;
   vias: LatLng[];
   savesMs: number;
+  savesM: number;
+  reason: 'time' | 'distance';
   atMs: number;
 }
 

@@ -235,7 +235,14 @@ describe('nav lifecycle — rerouting', () => {
   it('withdraws an offer measured against the route that just died', () => {
     const offered = run(...guiding, {
       type: 'faster-offered',
-      offer: { path: path(300_000), vias: [], savesMs: 300_000, atMs: 5_000 },
+      offer: {
+        path: path(300_000),
+        vias: [],
+        savesMs: 300_000,
+        savesM: 500,
+        reason: 'time',
+        atMs: 5_000,
+      },
     });
     expect(offered.stage).toMatchObject({ offer: { savesMs: 300_000 } });
     const replaced = step(offered, {
@@ -250,7 +257,17 @@ describe('nav lifecycle — rerouting', () => {
   it('remembers a dismissal as the bar the next offer must clear', () => {
     const dismissed = run(
       ...guiding,
-      { type: 'faster-offered', offer: { path: path(), vias: [], savesMs: 180_000, atMs: 5_000 } },
+      {
+        type: 'faster-offered',
+        offer: {
+          path: path(),
+          vias: [],
+          savesMs: 180_000,
+          savesM: 300,
+          reason: 'time',
+          atMs: 5_000,
+        },
+      },
       { type: 'faster-dismissed' },
     );
     expect(dismissed.stage).toMatchObject({ offer: null, dismissedSavingMs: 180_000 });
@@ -389,7 +406,17 @@ describe('nav lifecycle — results that belong to a trip that has moved on', ()
       { type: 'reroute-started' },
       { type: 'route-replaced', path: path(), vias: [], bankedM: 100 },
       { type: 'reroute-failed', atMs: 0 },
-      { type: 'faster-offered', offer: { path: path(), vias: [], savesMs: 300_000, atMs: 0 } },
+      {
+        type: 'faster-offered',
+        offer: {
+          path: path(),
+          vias: [],
+          savesMs: 300_000,
+          savesM: 500,
+          reason: 'time',
+          atMs: 0,
+        },
+      },
       { type: 'path-repriced', path: path(500_000) },
       { type: 'pause', atMs: 0, traveledM: 0 },
       { type: 'arrived', atMs: 0, traveledM: 0 },
