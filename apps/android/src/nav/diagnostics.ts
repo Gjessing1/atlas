@@ -97,6 +97,12 @@ export interface NavDiagnosticTrip {
   uploaded: string | null;
   /** Why the last upload attempt failed, so a pending trip explains itself. */
   uploadError: string | null;
+  /**
+   * The server refused this file in a way a resend cannot change (too large,
+   * not a log it accepts), so the automatic flush skips it. Upload still works
+   * by hand. Absent on index entries written before the field existed.
+   */
+  rejected?: boolean;
 }
 
 let enabled = false;
@@ -495,9 +501,24 @@ export async function uploadNavigationDiagnosticTrip(id: string): Promise<string
   }
 }
 
+/**
+ * An upload that failed for a reason the next attempt may not have — offline,
+ * server down, rate-limited. Only this ends an automatic flush.
+ */
+class UploadDeferred extends Error {}
+
 async function postTrip(trip: NavDiagnosticTrip): Promise<string> {
-  const body = await FileSystem.readAsStringAsync(`${DIR}${trip.file}`).catch(() => '');
-  if (!body.trim()) throw new Error('That trip recorded nothing to upload.');
+  const raw = await FileSystem.readAsStringAsync(`${DIR}${trip.file}`).catch(() => '');
+  // A process killed mid-append can leave half a record as the last line, and
+  // the server refuses a log with any line it cannot parse — which would cost
+  // exactly the trip a crash report is about.
+  const body = raw.endsWith('\n') ? raw : raw.slice(0, raw.lastIndexOf('\n') + 1);
+  if (!body.trim()) {
+    trip.uploadError = 'That trip recorded nothing to upload.';
+    trip.rejected = true;
+    await writeIndex();
+    throw new Error(trip.uploadError);
+  }
   let response: Response;
   try {
     response = await fetch(`${getServerOrigin()}/api/diagnostics/navigation`, {
@@ -513,7 +534,7 @@ async function postTrip(trip: NavDiagnosticTrip): Promise<string> {
   } catch (error) {
     trip.uploadError = error instanceof Error ? error.message : 'Upload failed.';
     await writeIndex();
-    throw error instanceof Error ? error : new Error(trip.uploadError);
+    throw new UploadDeferred(trip.uploadError);
   }
   const result = (await response.json().catch(() => null)) as {
     reference?: string;
@@ -521,11 +542,16 @@ async function postTrip(trip: NavDiagnosticTrip): Promise<string> {
   } | null;
   if (!response.ok || !result?.reference) {
     trip.uploadError = result?.error ?? `Upload failed (${response.status}).`;
+    // A 4xx other than timeout or rate limit answers the same bytes the same
+    // way however often they are sent.
+    const status = response.status;
+    trip.rejected = status >= 400 && status < 500 && status !== 408 && status !== 429;
     await writeIndex();
-    throw new Error(trip.uploadError);
+    throw trip.rejected ? new Error(trip.uploadError) : new UploadDeferred(trip.uploadError);
   }
   trip.uploaded = result.reference;
   trip.uploadError = null;
+  trip.rejected = false;
   await writeIndex();
   return result.reference;
 }
@@ -556,14 +582,18 @@ async function runFlush(): Promise<number> {
   const trips = await listNavigationDiagnosticTrips();
   let sent = 0;
   for (const trip of trips) {
-    if (trip.uploaded !== null || trip.endedAt === null || open?.trip === trip) continue;
+    if (trip.uploaded !== null || trip.rejected || trip.endedAt === null || open?.trip === trip) {
+      continue;
+    }
     try {
       await uploadNavigationDiagnosticTrip(trip.id);
       sent++;
-    } catch {
+    } catch (error) {
       // Offline or the server is down: it stays pending, and the next flush
-      // (trip end, app start, toggling the preference) tries again.
-      break;
+      // (trip end, app start, toggling the preference) tries again. Any other
+      // failure belongs to this trip alone — stopping on it would hold back
+      // every trip recorded after it, on every flush, for good.
+      if (error instanceof UploadDeferred) break;
     }
   }
   return sent;

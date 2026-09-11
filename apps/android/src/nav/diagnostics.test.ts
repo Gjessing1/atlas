@@ -202,6 +202,43 @@ describe('navigation diagnostics storage', () => {
     expect(trip?.uploaded).toBe('LATER-00001');
   });
 
+  it('does not let a trip the server refuses hold back the trips after it', async () => {
+    const diagnostics = await load();
+    for (const trip of ['first', 'second']) {
+      diagnostics.navigationDiagnosticsSink({ event: 'trip-start', trip, profile: 'car' });
+      driveFor(diagnostics, 300);
+      diagnostics.navigationDiagnosticsSink({
+        event: 'trip-end',
+        trip,
+        outcome: 'arrived',
+        report: { samples: 300, distanceM: 900, durationMs: 300_000, routeChanges: 0 },
+      });
+    }
+    // Whichever trip the flush reaches first is the one the server refuses.
+    const posted: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: { headers: Record<string, string> }) => {
+        posted.push(init.headers['x-atlas-trip']!);
+        return posted.length === 1
+          ? new Response(JSON.stringify({ error: 'Payload Too Large' }), { status: 413 })
+          : new Response(JSON.stringify({ reference: 'NEXT0-00001' }), { status: 201 });
+      }),
+    );
+    diagnostics.configureNavigationDiagnosticsAutoUpload(true);
+    await diagnostics.flushNavigationDiagnosticUploads();
+    await diagnostics.flushNavigationDiagnosticUploads();
+
+    const [refusedId] = posted;
+    const trips = await diagnostics.listNavigationDiagnosticTrips();
+    expect(trips.find((trip) => trip.id !== refusedId)?.uploaded).toBe('NEXT0-00001');
+    const refused = trips.find((trip) => trip.id === refusedId);
+    expect(refused?.uploaded).toBeNull();
+    expect(refused?.uploadError).toBe('Payload Too Large');
+    // Asked once, then left alone: a resend would get the same answer.
+    expect(posted.filter((trip) => trip === refusedId)).toHaveLength(1);
+  });
+
   it('never uploads anything while auto-upload is off', async () => {
     const diagnostics = await load();
     diagnostics.navigationDiagnosticsSink({ event: 'trip-start', trip: 'private', profile: 'car' });
@@ -302,6 +339,26 @@ describe('navigation diagnostics storage', () => {
     const [trip] = await relaunched.listNavigationDiagnosticTrips();
     expect(trip?.id).toBe('crashed');
     expect(trip?.outcome).toBe('interrupted');
+  });
+
+  it('uploads a trip the process died inside without its half-written last record', async () => {
+    const diagnostics = await load();
+    diagnostics.navigationDiagnosticsSink({ event: 'trip-start', trip: 'killed', profile: 'car' });
+    driveFor(diagnostics, 300);
+    await diagnostics.listNavigationDiagnosticTrips();
+    const [file] = tripFiles();
+    fs.files.set(file!, `${fs.files.get(file!)}{"event":"navigation-sta`);
+
+    const relaunched = await reload();
+    relaunched.configureNavigationDiagnosticsAutoUpload(true);
+    await relaunched.flushNavigationDiagnosticUploads();
+
+    const body = uploaded.mock.calls[0]?.[0] as string;
+    expect(body.endsWith('\n')).toBe(true);
+    const lines = body.split('\n').filter(Boolean);
+    expect(() => lines.forEach((line) => JSON.parse(line))).not.toThrow();
+    const [trip] = await relaunched.listNavigationDiagnosticTrips();
+    expect(trip?.uploaded).toBe('ABCDE-12345');
   });
 
   it('records nothing at all while the switch is off', async () => {
