@@ -17,7 +17,7 @@ import { maneuverArrowsGeoJSON } from './overlays.js';
 import { laneGlyphs, laneLabel } from './lanes.js';
 import { headingRateDegPerSec } from './sensors.js';
 import { navOptionsForProfile } from './profiles.js';
-import { navLineProgress } from './model.js';
+import { DEFAULT_NAV_OPTIONS, FOLLOW_CAMERA_EASE_MS, navLineProgress } from './model.js';
 import { NavigationSession } from './session.js';
 
 // A straight eastward route at lat 60: 21 points, lng 10.000 → 10.020.
@@ -601,12 +601,15 @@ describe('NavigationSession snapped state', () => {
   it('projects the shown position ahead at speed, leaving guidance math honest', () => {
     const s = new NavigationSession(route(), { startDeparted: true });
     const state = s.update({ ...pointAtAlong(200), speedMps: 20 }, 0).state;
-    // predictAheadMs = 1000 → shown ~20 m ahead of the true position.
-    const expected = pointAtAlong(220);
+    // The shared 800 ms follow-camera ease is the only compensated latency,
+    // so 20 m/s puts the display target 16 m ahead of the fresh fix.
+    expect(DEFAULT_NAV_OPTIONS.predictAheadMs).toBe(FOLLOW_CAMERA_EASE_MS);
+    const displayAlongM = 200 + 20 * (FOLLOW_CAMERA_EASE_MS / 1000);
+    const expected = pointAtAlong(displayAlongM);
     expect(state.snapped.lng).toBeCloseTo(expected.lng, 5);
     expect(state.traveledM).toBeCloseTo(200, 0);
     expect(state.routeProgress).toBeCloseTo(200 / routeTotal, 5);
-    expect(state.displayRouteProgress).toBeCloseTo(220 / routeTotal, 5);
+    expect(state.displayRouteProgress).toBeCloseTo(displayAlongM / routeTotal, 5);
     const still = new NavigationSession(route(), { startDeparted: true });
     const noSpeed = still.update(pointAtAlong(200), 0).state;
     expect(noSpeed.snapped.lng).toBeCloseTo(pointAtAlong(200).lng, 5);

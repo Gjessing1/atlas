@@ -473,6 +473,13 @@ export interface NavigationOptions {
   predictAheadMs?: number;
 }
 
+/**
+ * Duration of each follow-camera move on both clients. Position prediction
+ * uses the same horizon: a fresh target should describe where the vehicle
+ * will be when the camera reaches it, not add a whole fix interval on top.
+ */
+export const FOLLOW_CAMERA_EASE_MS = 800;
+
 export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   offRouteM: 40,
   offRouteMinM: 15,
@@ -535,7 +542,7 @@ export const DEFAULT_NAV_OPTIONS: Required<NavigationOptions> = {
   departMinSpeedMps: 3, // ~11 km/h: rolling out of a parking spot counts
   departProgressM: 30,
   startDeparted: false,
-  // One fix interval + most of the camera ease: the shown position lands
-  // where the car will be when the animation finishes, not where it was.
-  predictAheadMs: 1000,
+  // The field log measured fixes at 32 ms p50 / 82 ms p99 age. Compensate the
+  // known camera motion, not a nominal one-second fix interval as well.
+  predictAheadMs: FOLLOW_CAMERA_EASE_MS,
 };

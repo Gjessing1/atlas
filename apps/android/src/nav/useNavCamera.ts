@@ -1,5 +1,11 @@
 import type { NavController } from '@atlas/app-hooks';
-import { CourseFuser, followZoom, navCameraStyle, remainingRouteBounds } from '@atlas/navigation';
+import {
+  CourseFuser,
+  FOLLOW_CAMERA_EASE_MS,
+  followZoom,
+  navCameraStyle,
+  remainingRouteBounds,
+} from '@atlas/navigation';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
@@ -185,7 +191,7 @@ export function useNavCamera(
       bearing: courseUp ? bearingRef.current : 0,
       // Linear easing over roughly the fix interval keeps back-to-back
       // updates from stuttering (web-nav parity).
-      duration: 800,
+      duration: FOLLOW_CAMERA_EASE_MS,
       easing: 'linear',
     });
   }, [

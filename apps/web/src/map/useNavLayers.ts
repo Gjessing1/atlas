@@ -1,6 +1,7 @@
 import type { NavController } from '@atlas/app-hooks';
 import { lineStringFeature, routeDeltaLabel } from '@atlas/core';
 import {
+  FOLLOW_CAMERA_EASE_MS,
   followZoom,
   maneuverArrowsGeoJSON,
   navCameraStyle,
@@ -664,7 +665,7 @@ export function useNavLayers(
       bearing: courseUp ? courseRef.current : 0,
       pitch: courseUp ? camStyle.pitchDeg : 0,
       padding: { top: anchorTop, bottom: 0, left: 0, right: 0 },
-      duration: 800,
+      duration: FOLLOW_CAMERA_EASE_MS,
       // Linear easing keeps back-to-back fixes from stuttering.
       easing: (t) => t,
     });

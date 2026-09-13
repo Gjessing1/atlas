@@ -1,6 +1,7 @@
 export { NavigationSession } from './session.js';
 export {
   DEFAULT_NAV_OPTIONS,
+  FOLLOW_CAMERA_EASE_MS,
   navLineProgress,
   type NavFix,
   type NavigationOptions,
