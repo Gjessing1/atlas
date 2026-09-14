@@ -1,5 +1,7 @@
-import type { LatLng } from '@atlas/core';
+import { utm33ToWgs84, type LatLng } from '@atlas/core';
 import { SaxesParser } from 'saxes';
+
+import type { TrafficClosure } from './model.js';
 
 export type TrafficKind = 'closure' | 'roadworks' | 'incident' | 'restriction';
 export type TrafficSeverity = 'low' | 'medium' | 'high' | 'highest' | 'unknown';
@@ -20,7 +22,7 @@ export interface TrafficSituation {
 export interface DatexSnapshot {
   publishedAt: string;
   situations: TrafficSituation[];
-  closures: Array<{ id: string; position: LatLng; message: string }>;
+  closures: TrafficClosure[];
 }
 
 interface Period {
@@ -40,6 +42,9 @@ interface RecordData {
   periods: Period[];
   comments: string[];
   location: string;
+  roadNumber: string;
+  lineSrs: string;
+  lineText: string;
   lat?: number;
   lng?: number;
 }
@@ -123,13 +128,34 @@ function severity(value: string): TrafficSeverity {
   return raw === 'low' || raw === 'medium' || raw === 'high' || raw === 'highest' ? raw : 'unknown';
 }
 
+/** Reproject one DATEX GML line, rejecting unknown grids and absurd payloads. */
+function roadGeometry(text: string, srs: string): LatLng[] | undefined {
+  if (!/(?:25833|32633)$/.test(srs) || !text) return undefined;
+  const rawValues = text.trim().split(/\s+/);
+  if (rawValues.length > 40_000) return undefined;
+  const values = rawValues.map(Number);
+  if (
+    values.length < 4 ||
+    values.length % 2 !== 0 ||
+    values.some((value) => !Number.isFinite(value))
+  ) {
+    return undefined;
+  }
+  const points: LatLng[] = [];
+  for (let index = 0; index < values.length; index += 2) {
+    points.push(utm33ToWgs84(values[index]!, values[index + 1]!));
+  }
+  return points;
+}
+
 /**
  * Parse the authenticated NPRA DATEX II v3 situation publication.
  *
  * This is deliberately a streaming reader, not XML-to-JS-object conversion:
- * the national snapshot is ~24 MB and most of it is GML line geometry Atlas
- * does not need. Reading only the display coordinate and public text keeps a
- * refresh sub-second instead of blocking the server for tens of seconds.
+ * the national snapshot is tens of megabytes and most of it is GML line
+ * geometry. Only a closure record's affected line is reprojected and retained;
+ * every other record's geometry dies with the streaming record. That keeps a
+ * refresh sub-second instead of building a generic XML object for the feed.
  */
 export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot {
   let publishedAt = '';
@@ -159,7 +185,12 @@ export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot
         periods: [],
         comments: [],
         location: '',
+        roadNumber: '',
+        lineSrs: '',
+        lineText: '',
       };
+    } else if (name === 'gmlLineString' && currentRecord && !currentRecord.lineSrs) {
+      currentRecord.lineSrs = attr(tag.attributes, 'srsName');
     } else if (name === 'validPeriod' && currentRecord) {
       currentPeriod = { days: [] };
     }
@@ -177,6 +208,8 @@ export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot
       name === 'startTimeOfPeriod' ||
       name === 'endTimeOfPeriod' ||
       name === 'roadOrCarriagewayOrLaneManagementType' ||
+      name === 'roadNumber' ||
+      (name === 'posList' && path.includes('gmlLineString')) ||
       name === 'latitude' ||
       name === 'longitude' ||
       (name === 'value' &&
@@ -203,6 +236,10 @@ export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot
         else if (name === 'overallEndTime') currentRecord.overallEnd = value;
         else if (name === 'roadOrCarriagewayOrLaneManagementType') {
           currentRecord.management = value;
+        } else if (name === 'roadNumber' && !currentRecord.roadNumber) {
+          currentRecord.roadNumber = value;
+        } else if (name === 'posList' && !currentRecord.lineText) {
+          currentRecord.lineText = value;
         } else if (name === 'startOfPeriod' && currentPeriod) currentPeriod.start = value;
         else if (name === 'endOfPeriod' && currentPeriod) currentPeriod.end = value;
         else if (name === 'applicableDay' && currentPeriod) currentPeriod.days.push(value);
@@ -258,6 +295,7 @@ export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot
           endTime: ends.at(-1) ?? '',
         });
         if (closed) {
+          const geometry = roadGeometry(closed.lineText, closed.lineSrs);
           closures.push({
             id: currentSituation.id,
             position:
@@ -265,6 +303,8 @@ export function parseDatexSnapshot(xml: string, now = new Date()): DatexSnapshot
                 ? { lat: closed.lat, lng: closed.lng }
                 : position,
             message,
+            ...(closed.roadNumber ? { roadNumber: closed.roadNumber } : {}),
+            ...(geometry ? { roadGeometry: geometry } : {}),
           });
         }
       }

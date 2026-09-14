@@ -28,10 +28,11 @@ export interface TrafficDelay {
 /**
  * How far a corridor vertex may sit from the routed line and still count.
  *
- * Generous compared with the 75 m closure match, because both geometries are
- * *the same road* here: NPRA digitises the carriageway it measures and Valhalla
- * follows the OSM way, so the gap is dual-carriageway separation and
- * generalisation, not uncertainty about which road is meant.
+ * Generous compared with the 12 m closure-road match: travel-time corridors
+ * are long, generalized measurements whose direction is checked separately,
+ * while a closure publishes its exact affected stretch. NPRA digitises the
+ * carriageway it measures and Valhalla follows the OSM way, so the remaining
+ * gap here is generalisation rather than uncertainty about which road is meant.
  */
 const MATCH_TOLERANCE_M = 60;
 /** Below this the route only clips a corridor — a crossing road, not a shared one. */

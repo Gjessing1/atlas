@@ -27,7 +27,10 @@ const situation = (id: string, start: string, end: string, management: string) =
   <sit:generalPublicComment><sit:comment><values><value lang="no">Vegen er stengt.</value></values></sit:comment></sit:generalPublicComment>
   <sit:locationReference xsi:type="loc:LocationGroupByList"><loc:locationContainedInGroup>
    <loc:coordinatesForDisplay><loc:latitude>59.9</loc:latitude><loc:longitude>10.7</loc:longitude></loc:coordinatesForDisplay>
-   <loc:supplementaryPositionalDescription><loc:locationDescription><values><value lang="no">E18 ved Oslo</value></values></loc:locationDescription></loc:supplementaryPositionalDescription>
+   <loc:supplementaryPositionalDescription><loc:locationDescription><values><value lang="no">E18 ved Oslo</value></values></loc:locationDescription>
+    <loc:roadInformation><loc:roadNumber>E18</loc:roadNumber></loc:roadInformation>
+   </loc:supplementaryPositionalDescription>
+   <loc:gmlLineString srsName="25833"><loc:posList>259544.806 6648086.268 259617.153 6649198.368</loc:posList></loc:gmlLineString>
   </loc:locationContainedInGroup></sit:locationReference>
   <sit:roadOrCarriagewayOrLaneManagementType>${management}</sit:roadOrCarriagewayOrLaneManagementType>
  </sit:situationRecord></sit:situation>`;
@@ -77,9 +80,16 @@ describe('DATEX II traffic', () => {
       position: { lat: 59.9, lng: 10.7 },
     });
     expect(snapshot.closures).toHaveLength(1);
+    expect(snapshot.closures[0]).toMatchObject({
+      roadNumber: 'E18',
+      roadGeometry: [
+        { lat: expect.closeTo(59.9, 5), lng: expect.closeTo(10.7, 5) },
+        { lat: expect.closeTo(59.91, 5), lng: expect.closeTo(10.7, 5) },
+      ],
+    });
   });
 
-  it('matches only closures on the routed line', () => {
+  it('falls back to the display point when a closure has no road geometry', () => {
     const route = [
       { lat: 59.9, lng: 10.7 },
       { lat: 59.91, lng: 10.7 },
@@ -93,6 +103,51 @@ describe('DATEX II traffic', () => {
         route,
       ).map((closure) => closure.id),
     ).toEqual(['on']);
+  });
+
+  it('matches the affected road stretch and rejects nearby or crossing roads', () => {
+    const route = [
+      { lat: 59.9, lng: 10.7 },
+      { lat: 59.91, lng: 10.7 },
+    ];
+    const closures = closuresNearRoute(
+      [
+        {
+          id: 'same-road',
+          // The old display-point matcher misses this long closure entirely.
+          position: { lat: 59.9, lng: 10.702 },
+          message: 'same',
+          roadGeometry: [
+            { lat: 59.904, lng: 10.7 },
+            { lat: 59.906, lng: 10.7 },
+          ],
+        },
+        {
+          id: 'parallel-road',
+          // Display point is close enough for the old 75 m matcher; the
+          // official line is the adjacent/opposite carriageway.
+          position: { lat: 59.905, lng: 10.7001 },
+          message: 'parallel',
+          roadGeometry: [
+            { lat: 59.904, lng: 10.7003 },
+            { lat: 59.906, lng: 10.7003 },
+          ],
+        },
+        {
+          id: 'crossing-road',
+          position: { lat: 59.905, lng: 10.7 },
+          message: 'crossing',
+          roadGeometry: [
+            { lat: 59.905, lng: 10.699 },
+            { lat: 59.905, lng: 10.701 },
+          ],
+        },
+      ],
+      route,
+    );
+    expect(closures.map((closure) => closure.id)).toEqual(['same-road']);
+    expect(closures[0]?.position.lng).toBeCloseTo(10.7, 5);
+    expect(closures[0]?.roadGeometry).toBeUndefined();
   });
 
   it('reruns a car route with matching closure points but leaves walking alone', async () => {
