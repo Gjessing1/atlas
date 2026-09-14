@@ -73,6 +73,12 @@ export function RoutePreview({ nav }: { nav: NavController }) {
                     ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
                     : ''}
                 </span>
+                {path.roadWeather?.warnings[0] ? (
+                  <span className="nav-preview-weather">
+                    ⚠ {path.roadWeather.warnings[0].risk === 'high' ? 'Ice risk' : 'Possible ice'}{' '}
+                    on this route
+                  </span>
+                ) : null}
               </button>
             </li>
           );

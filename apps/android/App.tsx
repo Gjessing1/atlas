@@ -94,6 +94,7 @@ import { useSatellites } from './src/layers/useSatellites';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
 import { useTrafficFlow } from './src/layers/useTrafficFlow';
+import { useRoadWeather } from './src/layers/useRoadWeather';
 import { useTransitVehicles } from './src/layers/useTransitVehicles';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
@@ -638,6 +639,7 @@ function AppInner() {
   const speedCameras = useSpeedCameras(overlays, serverOrigin);
   const traffic = useTraffic(overlays, serverOrigin);
   const trafficFlow = useTrafficFlow(overlays, serverOrigin);
+  const roadWeather = useRoadWeather(overlays, serverOrigin);
   const transitVehicles = useTransitVehicles(overlays, serverOrigin, camera.mapViewport);
 
   // The system consumes the first Back press while the keyboard is visible.
@@ -1328,6 +1330,7 @@ function AppInner() {
         speedCameras={speedCameras}
         traffic={traffic}
         trafficFlow={trafficFlow}
+        roadWeather={roadWeather}
         transitVehicles={transitVehicles}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         exploreResults={exploreResults}

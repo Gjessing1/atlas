@@ -64,6 +64,8 @@ import {
   type NvdbLaneTransport,
   type RoutePreferences,
   type RoutePath,
+  type RoadWeatherRoute,
+  type RoadWeatherWarning,
   type RouteProvider,
   type RoutingProfile,
   type ValhallaTransport,
@@ -72,6 +74,7 @@ import {
   applyTrafficDelay,
   type TrafficClosureTransport,
   type TrafficDelayTransport,
+  type RoadWeatherTransport,
 } from '@atlas/traffic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -125,6 +128,8 @@ export interface NavPlatform {
    * has nothing to say.
    */
   trafficDelay?: TrafficDelayTransport;
+  /** Live measured/forecast road-surface conditions matched to a driving route. */
+  roadWeather?: RoadWeatherTransport;
   /**
    * One fix now, for the preview origin. Should reject with a
    * user-presentable message — it becomes the error phase's text — and must
@@ -228,6 +233,8 @@ export interface NavController {
   speedMps: number | null;
   /** Latest GPS altitude in metres, or null when the platform has none. */
   altitudeM: number | null;
+  /** Nearest ice-risk reading within 20 km ahead, refreshed with live traffic. */
+  roadWeatherWarning: (RoadWeatherWarning & { distanceAheadM: number }) | null;
   /**
    * Which way the traveller faces (deg from north): the device compass while
    * standing, crossfading to the stable route course as they pick up walking
@@ -463,6 +470,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
   const [headingCalibrationNeeded, setHeadingCalibrationNeeded] = useState(false);
   const [muted, setMutedState] = useState(false);
   const [routeAlternatives, setRouteAlternatives] = useState<NavRouteAlternative[]>([]);
+  const [roadWeather, setRoadWeather] = useState<RoadWeatherRoute | null>(null);
 
   const sessionRef = useRef<NavigationSession | null>(null);
   // Read inside the fix handler (which closes over a stale `muted`), so keep a ref.
@@ -1096,6 +1104,35 @@ export function useNavigationController(platform: NavPlatform): NavController {
     }
   }, [lifecycleRef, dispatch, platformRef, diag]);
 
+  /** Refresh ice risk without changing or restarting the route being driven. */
+  const refreshRoadWeather = useCallback(async (): Promise<void> => {
+    const before = lifecycleRef.current;
+    const transport = platformRef.current.roadWeather;
+    if (!transport || before.stage.kind !== 'guiding' || before.profile !== 'car') return;
+    const { trip } = before;
+    const { path } = before.stage;
+    try {
+      // Progress moves the clock: a station 10 km ahead five hours into a
+      // drive is reached in minutes, not five hours from now.
+      const latest = await transport(
+        path.points,
+        path.timeMs,
+        undefined,
+        lastStateRef.current?.traveledM ?? 0,
+      );
+      const live = lifecycleRef.current;
+      if (
+        live.trip === trip &&
+        live.stage.kind === 'guiding' &&
+        live.stage.path.points === path.points
+      ) {
+        setRoadWeather(latest);
+      }
+    } catch {
+      // Keep the last good reading while offline or while DATEX refreshes.
+    }
+  }, [lifecycleRef, platformRef]);
+
   /**
    * The faster-route watch: ask the engine for today's best route from where
    * the car actually is, and compare engine estimate against engine estimate.
@@ -1143,7 +1180,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         // provider against *now* while the followed route was priced at
         // departure. Judging one against the other was measuring a jam that has
         // since cleared against one that has not.
-        await repriceTraffic();
+        await Promise.all([repriceTraffic(), refreshRoadWeather()]);
         if (lifecycleRef.current.trip !== trip || !sessionRef.current) return;
         const plannedMs = session.plannedRemainingMs();
         const plannedM = lastStateRef.current?.distanceRemainingM ?? state.distanceRemainingM;
@@ -1228,7 +1265,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
       }
     },
-    [lifecycleRef, dispatch, platformRef, fetchChoices, speak, reroute, repriceTraffic, diag],
+    [
+      lifecycleRef,
+      dispatch,
+      platformRef,
+      fetchChoices,
+      speak,
+      reroute,
+      repriceTraffic,
+      refreshRoadWeather,
+      diag,
+    ],
   );
 
   /** Install a route the driver picked from a line already visible on the map. */
@@ -1816,6 +1863,42 @@ export function useNavigationController(platform: NavPlatform): NavController {
   );
   const tripProgress = navTripProgress(lifecycle, Date.now(), state?.traveledM ?? 0);
 
+  // A new/re-routed path arrives with the road-weather result fetched beside
+  // its traffic price. Mid-drive refreshes then replace this local copy.
+  useEffect(() => {
+    setRoadWeather(activePath?.roadWeather ?? null);
+  }, [activePath?.points]);
+
+  // Warnings place stations along the path's own points, as `traveledM` does;
+  // the engine's `distanceM` is a different metre and drifts over a long trip.
+  const traveledOnPathM = activePath ? (state?.traveledM ?? 0) : 0;
+  const roadWeatherWarning = useMemo(() => {
+    const warning = roadWeather?.warnings.find((entry) => entry.atM >= traveledOnPathM - 500);
+    if (!warning) return null;
+    const distanceAheadM = Math.max(0, warning.atM - traveledOnPathM);
+    return distanceAheadM <= 20_000 ? { ...warning, distanceAheadM } : null;
+  }, [roadWeather, traveledOnPathM]);
+  // Keyed by station (the warning id), not by reading: an observation that
+  // refreshes during the approach is the same hazard, announced once.
+  const spokenWeatherRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!guiding) {
+      spokenWeatherRef.current = null;
+      return;
+    }
+    if (
+      roadWeatherWarning &&
+      roadWeatherWarning.distanceAheadM <= 10_000 &&
+      spokenWeatherRef.current !== roadWeatherWarning.id
+    ) {
+      spokenWeatherRef.current = roadWeatherWarning.id;
+      speak(
+        `${roadWeatherWarning.risk === 'high' ? 'Ice risk' : 'Possible ice'} ahead near ${roadWeatherWarning.stationName}.`,
+        { kind: 'alert', cause: 'road-weather' },
+      );
+    }
+  }, [guiding, roadWeatherWarning, speak]);
+
   // Session heartbeat: dead-reckons through GPS gaps (tunnels) and flips the
   // state to signal-lost when fixes stop, so the puck never just freezes.
   useEffect(() => {
@@ -2030,6 +2113,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     routeAlternatives,
     speedMps,
     altitudeM,
+    roadWeatherWarning,
     facingDeg: facing?.deg ?? null,
     facingAccuracyDeg: facing?.accuracyDeg ?? null,
     headingSource,

@@ -593,6 +593,35 @@ export function trafficFlowIdentify(
   return { title: 'Traffic flow', properties: rows };
 }
 
+/** A tapped NPRA road-weather station, including the reading's timestamp. */
+export function roadWeatherIdentify(
+  properties: Record<string, unknown> | null | undefined,
+): OverlayIdentifyGroup | null {
+  if (!properties) return null;
+  const rows: Record<string, string> = {};
+  const road = str(properties['roadNumber']);
+  if (road) rows['Road'] = road;
+  const surface = num(properties['surfaceTemperatureC']);
+  if (surface !== null) rows['Road surface'] = `${surface.toFixed(1)} °C`;
+  else if (properties['surfaceSuspect'] === true) {
+    rows['Road surface'] = 'sensor unreliable (near freezing in warm air)';
+  }
+  const air = num(properties['airTemperatureC']);
+  if (air !== null) rows['Air'] = `${air.toFixed(1)} °C`;
+  const condition = str(properties['condition']);
+  if (condition && condition !== 'unknown') {
+    rows['Condition'] = condition.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  }
+  const risk = str(properties['risk']);
+  if (risk === 'high') rows['Ice'] = 'Ice risk';
+  else if (risk === 'possible') rows['Ice'] = 'Possible ice';
+  const validAt = Date.parse(str(properties['validAt']) ?? '');
+  if (Number.isFinite(validAt)) {
+    rows[properties['source'] === 'forecast' ? 'Forecast for' : 'Measured'] = fmtClock(validAt);
+  }
+  return { title: str(properties['name']) ?? 'Road weather', properties: rows };
+}
+
 /**
  * How much of an identify answer a place card shows: at most this many
  * overlays, and this many attributes from each.

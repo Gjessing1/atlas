@@ -8,6 +8,7 @@ import {
   speedCameraIdentify,
   trafficFlowIdentify,
   trafficIdentify,
+  roadWeatherIdentify,
 } from '@atlas/core';
 import type { OverlayEntry } from '@atlas/app-hooks';
 import { transitVehicleIdentify } from '@atlas/transit';
@@ -21,6 +22,7 @@ import { satelliteIdentifyLayers } from './useSatellitesLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
 import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
+import { ROAD_WEATHER_IDENTIFY_LAYERS } from './useRoadWeatherLayer.js';
 import { TRANSIT_VEHICLE_IDENTIFY_LAYERS } from './useTransitVehicleLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
@@ -360,6 +362,7 @@ export function useOverlayIdentify(
         iceObservationIdentify(drawn(ICE_OBSERVATION_IDENTIFY_LAYERS)),
         speedCameraIdentify(drawn(SPEED_CAMERA_IDENTIFY_LAYERS)),
         trafficIdentify(drawn(TRAFFIC_IDENTIFY_LAYERS)),
+        roadWeatherIdentify(drawn(ROAD_WEATHER_IDENTIFY_LAYERS)),
         transitVehicleIdentify(drawn(TRANSIT_VEHICLE_IDENTIFY_LAYERS)),
         // Not `drawn`: a box over the corridor layer catches both directions of
         // the same road, so the tapped one has to be chosen rather than taken.

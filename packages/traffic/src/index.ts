@@ -33,9 +33,11 @@ export {
 export {
   httpTrafficClosures,
   httpTrafficDelay,
+  httpRoadWeather,
   trafficAwareRouteProvider,
   type TrafficClosureTransport,
   type TrafficDelayTransport,
+  type RoadWeatherTransport,
 } from './routing.js';
 export {
   parseTravelTimeCorridors,
@@ -45,3 +47,16 @@ export {
   type TravelTimeSnapshot,
   type TravelTimeStatus,
 } from './traveltime.js';
+export {
+  formatRoadWeatherWarning,
+  parseForecastRoadWeather,
+  parseMeasuredRoadWeather,
+  parseRoadWeatherSites,
+  roadIceRisk,
+  roadWeatherFeatureCollection,
+  roadWeatherForRoute,
+  type RoadWeatherFeatureCollection,
+  type RoadWeatherReading,
+  type RoadWeatherSite,
+  type RoadWeatherSnapshot,
+} from './weather.js';

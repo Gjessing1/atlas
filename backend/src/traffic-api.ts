@@ -1,15 +1,22 @@
-import type { LayerMeta, LatLng } from '@atlas/core';
+import { decodePolyline, type LayerMeta, type LatLng } from '@atlas/core';
 import {
   closuresNearRoute,
   parseDatexSnapshot,
   parseTravelTimeCorridors,
   parseTravelTimeSnapshot,
+  parseForecastRoadWeather,
+  parseMeasuredRoadWeather,
+  parseRoadWeatherSites,
+  roadWeatherFeatureCollection,
+  roadWeatherForRoute,
   trafficDelayForRoute,
   trafficFeatureCollection,
   trafficFlowFeatureCollection,
   type DatexSnapshot,
   type TravelTimeCorridor,
   type TravelTimeSnapshot,
+  type RoadWeatherReading,
+  type RoadWeatherSite,
 } from '@atlas/traffic';
 import type { FastifyInstance } from 'fastify';
 
@@ -21,11 +28,16 @@ const SITUATION_URL = `${DATEX_BASE}/GetSituation/pullsnapshotdata`;
 const TRAVEL_TIME_URL = `${DATEX_BASE}/GetTravelTimeData/pullsnapshotdata`;
 /** The corridor geometry those measurements refer to, by predefined-location id. */
 const CORRIDOR_URL = `${DATEX_BASE}/GetPredefinedTravelTimeLocations/pullsnapshotdata`;
+const ROAD_WEATHER_SITES_URL = `${DATEX_BASE}/GetMeasurementWeatherSiteTable/pullsnapshotdata`;
+const ROAD_WEATHER_MEASURED_URL = `${DATEX_BASE}/GetMeasuredWeatherData/pullsnapshotdata`;
+const ROAD_WEATHER_FORECAST_URL = `${DATEX_BASE}/GetForecastPointData/pullsnapshotdata`;
 const CACHE_TTL_MS = 3 * 60_000;
 /** NPRA republishes every five minutes; asking more often only costs both ends. */
 const TRAVEL_TIME_TTL_MS = 60_000;
 /** The corridor table changes with the road network, not with the traffic. */
 const CORRIDOR_TTL_MS = 6 * 60 * 60_000;
+const ROAD_WEATHER_MEASURED_TTL_MS = 3 * 60_000;
+const ROAD_WEATHER_FORECAST_TTL_MS = 30 * 60_000;
 const MAX_XML_BYTES = 50 * 1024 * 1024;
 
 export interface TrafficApiOptions {
@@ -86,9 +98,34 @@ export function trafficFlowLayerMeta(): LayerMeta {
   };
 }
 
-const routeShape = (raw: unknown): LatLng[] =>
-  Array.isArray(raw)
-    ? raw
+/** Live road-surface observations, with the forecast filling future route checks. */
+export function roadWeatherLayerMeta(): LayerMeta {
+  return {
+    id: 'road-weather',
+    rev: 1,
+    title: 'Road weather',
+    description: 'Measured road temperature and surface condition from Statens vegvesen.',
+    group: 'Driving',
+    attribution: '© Statens vegvesen (NLOD)',
+    metadataUrl: 'https://www.vegvesen.no/trafikkinformasjon/reiseinformasjon/vaer-og-fore/',
+    minzoom: 6,
+    maxzoom: 18,
+    defaultOpacity: 1,
+    identify: false,
+    coverageNote:
+      'Selected Norwegian road-weather stations; an internet connection is required. Missing warnings do not prove a road is ice-free.',
+    profiles: ['driving'],
+    vector: true,
+  };
+}
+
+const routeShape = (raw: unknown, encoded?: unknown): LatLng[] => {
+  const decoded =
+    typeof encoded === 'string' && encoded.length <= 500_000
+      ? decodePolyline(encoded, 6).map(([lat, lng]) => ({ lat, lng }))
+      : raw;
+  return Array.isArray(decoded)
+    ? decoded
         .filter(
           (point): point is LatLng =>
             typeof point === 'object' &&
@@ -102,6 +139,7 @@ const routeShape = (raw: unknown): LatLng[] =>
         )
         .slice(0, 20_000)
     : [];
+};
 
 /** Authenticated DATEX proxy, parsed cache, map features and route closures. */
 export function registerTrafficApi(
@@ -118,8 +156,9 @@ export function registerTrafficApi(
   const cacheTtlMs = options.cacheTtlMs ?? CACHE_TTL_MS;
   status.register('datex', 'DATEX traffic', 'Routing');
   status.register('datex-traveltime', 'DATEX travel times', 'Routing');
+  status.register('datex-road-weather', 'DATEX road weather', 'Routing');
 
-  const pull = async (url: string): Promise<string> => {
+  const pull = async (url: string, maxBytes = MAX_XML_BYTES): Promise<string> => {
     const response = await fetchImpl(url, {
       headers: {
         Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
@@ -130,9 +169,9 @@ export function registerTrafficApi(
     });
     if (!response.ok) throw new Error(`DATEX HTTP ${response.status}`);
     const declaredBytes = Number(response.headers.get('content-length') ?? 0);
-    if (declaredBytes > MAX_XML_BYTES) throw new Error('DATEX snapshot exceeds size limit');
+    if (declaredBytes > maxBytes) throw new Error('DATEX snapshot exceeds size limit');
     const xml = await response.text();
-    if (xml.length > MAX_XML_BYTES) throw new Error('DATEX snapshot exceeds size limit');
+    if (xml.length > maxBytes) throw new Error('DATEX snapshot exceeds size limit');
     return xml;
   };
 
@@ -226,6 +265,69 @@ export function registerTrafficApi(
     },
   );
 
+  const roadWeatherSites = cachedFeed(
+    'datex-road-weather-sites',
+    CORRIDOR_TTL_MS,
+    async (): Promise<RoadWeatherSite[]> => {
+      try {
+        return parseRoadWeatherSites(await pull(ROAD_WEATHER_SITES_URL)).sites;
+      } catch (error) {
+        status.record('datex-road-weather', false, 'station table unreachable');
+        status.setDetail('datex-road-weather', null);
+        throw error;
+      }
+    },
+  );
+  const measuredRoadWeather = cachedFeed(
+    'datex-road-weather-measured',
+    ROAD_WEATHER_MEASURED_TTL_MS,
+    async (): Promise<RoadWeatherReading[]> => {
+      try {
+        return parseMeasuredRoadWeather(await pull(ROAD_WEATHER_MEASURED_URL)).readings;
+      } catch (error) {
+        status.record('datex-road-weather', false, 'measurements unreachable');
+        status.setDetail('datex-road-weather', null);
+        throw error;
+      }
+    },
+  );
+  const forecastRoadWeather = cachedFeed(
+    'datex-road-weather-forecast',
+    ROAD_WEATHER_FORECAST_TTL_MS,
+    async (): Promise<RoadWeatherReading[]> => {
+      try {
+        // 38 MB on 2026-09-14 — stations × 25 hourly rows, already three
+        // quarters of the shared cap, and it grows with every new station.
+        return parseForecastRoadWeather(await pull(ROAD_WEATHER_FORECAST_URL, 4 * MAX_XML_BYTES))
+          .readings;
+      } catch (error) {
+        status.record('datex-road-weather', false, 'forecast unreachable');
+        status.setDetail('datex-road-weather', null);
+        throw error;
+      }
+    },
+  );
+
+  const roadWeather = async () => {
+    try {
+      const [sites, measured, forecast] = await Promise.all([
+        roadWeatherSites.get(),
+        measuredRoadWeather.get(),
+        forecastRoadWeather.get(),
+      ]);
+      status.record('datex-road-weather', true);
+      status.setDetail(
+        'datex-road-weather',
+        `${measured.length} stations measuring; ${forecast.length} hourly forecasts`,
+      );
+      return { sites, measured, forecast };
+    } catch (error) {
+      status.record('datex-road-weather', false, 'unreachable');
+      status.setDetail('datex-road-weather', null);
+      throw error;
+    }
+  };
+
   const snapshot = () => situations.get();
 
   app.get('/api/overlay/traffic/features', async (request, reply) => {
@@ -257,27 +359,80 @@ export function registerTrafficApi(
     }
   });
 
-  app.post<{ Body: { points?: unknown } }>('/api/traffic/closures', async (request, reply) => {
-    const points = routeShape(request.body?.points);
-    if (points.length < 2) return reply.code(400).send({ error: 'route points are required' });
+  app.get('/api/overlay/road-weather/features', async (request, reply) => {
     try {
-      const current = await snapshot();
-      return reply.send({ closures: closuresNearRoute(current.closures, points) });
+      const current = await roadWeather();
+      return reply
+        .header('cache-control', 'public, max-age=120, stale-while-revalidate=300')
+        .send(
+          roadWeatherFeatureCollection(current.sites, current.measured, current.forecast, now()),
+        );
     } catch (error) {
-      request.log.error({ err: error }, 'DATEX closure lookup failed');
-      return reply.code(502).send({ error: 'traffic unavailable' });
+      request.log.error({ err: error }, 'DATEX road-weather snapshot failed');
+      return reply.code(502).send({ error: 'road weather unavailable' });
     }
   });
 
-  app.post<{ Body: { points?: unknown } }>('/api/traffic/travel-times', async (request, reply) => {
-    const points = routeShape(request.body?.points);
+  app.post<{ Body: { points?: unknown; shape?: unknown } }>(
+    '/api/traffic/closures',
+    async (request, reply) => {
+      const points = routeShape(request.body?.points, request.body?.shape);
+      if (points.length < 2) return reply.code(400).send({ error: 'route points are required' });
+      try {
+        const current = await snapshot();
+        return reply.send({ closures: closuresNearRoute(current.closures, points) });
+      } catch (error) {
+        request.log.error({ err: error }, 'DATEX closure lookup failed');
+        return reply.code(502).send({ error: 'traffic unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Body: { points?: unknown; shape?: unknown } }>(
+    '/api/traffic/travel-times',
+    async (request, reply) => {
+      const points = routeShape(request.body?.points, request.body?.shape);
+      if (points.length < 2) return reply.code(400).send({ error: 'route points are required' });
+      try {
+        const [table, measured] = await Promise.all([corridors.get(), travelTimes.get()]);
+        return reply.send(trafficDelayForRoute(points, table, measured.measurements));
+      } catch (error) {
+        request.log.error({ err: error }, 'DATEX travel-time lookup failed');
+        return reply.code(502).send({ error: 'traffic unavailable' });
+      }
+    },
+  );
+
+  app.post<{
+    Body: { points?: unknown; shape?: unknown; durationMs?: unknown; traveledM?: unknown };
+  }>('/api/traffic/road-weather', async (request, reply) => {
+    const points = routeShape(request.body?.points, request.body?.shape);
+    const durationMs = Number(request.body?.durationMs);
+    // Metres already driven along `points`; mid-drive checks time each station from there.
+    const traveledM = Number(request.body?.traveledM ?? 0);
     if (points.length < 2) return reply.code(400).send({ error: 'route points are required' });
+    if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 7 * 24 * 60 * 60_000) {
+      return reply.code(400).send({ error: 'valid route duration is required' });
+    }
+    if (!Number.isFinite(traveledM) || traveledM < 0) {
+      return reply.code(400).send({ error: 'traveled distance must not be negative' });
+    }
     try {
-      const [table, measured] = await Promise.all([corridors.get(), travelTimes.get()]);
-      return reply.send(trafficDelayForRoute(points, table, measured.measurements));
+      const current = await roadWeather();
+      return reply.send(
+        roadWeatherForRoute(
+          points,
+          durationMs,
+          current.sites,
+          current.measured,
+          current.forecast,
+          now(),
+          traveledM,
+        ),
+      );
     } catch (error) {
-      request.log.error({ err: error }, 'DATEX travel-time lookup failed');
-      return reply.code(502).send({ error: 'traffic unavailable' });
+      request.log.error({ err: error }, 'DATEX route weather lookup failed');
+      return reply.code(502).send({ error: 'road weather unavailable' });
     }
   });
 
@@ -291,5 +446,11 @@ export function registerTrafficApi(
   void corridors
     .refresh()
     .catch((error) => app.log.warn({ err: error }, 'initial DATEX corridor fetch failed'));
-  return { enabled: true, metas: [trafficLayerMeta(), trafficFlowLayerMeta()] };
+  void roadWeather().catch((error) =>
+    app.log.warn({ err: error }, 'initial DATEX road-weather fetch failed'),
+  );
+  return {
+    enabled: true,
+    metas: [trafficLayerMeta(), trafficFlowLayerMeta(), roadWeatherLayerMeta()],
+  };
 }

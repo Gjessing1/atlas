@@ -3,6 +3,8 @@ import {
   bboxContains,
   circleFeature,
   destinationPoint,
+  decodePolyline,
+  encodePolyline,
   haversineM,
   markerScaleForZoom,
   metersPerPixel,
@@ -13,6 +15,19 @@ import {
 } from './index.js';
 
 const oslo: LatLng = { lat: 59.91, lng: 10.75 };
+
+describe('polyline codec', () => {
+  it('round-trips Valhalla precision-6 geometry, including negative deltas', () => {
+    const points = [
+      { lat: 59.91, lng: 10.75 },
+      { lat: 59.910042, lng: 10.749981 },
+      { lat: 59.9099, lng: 10.7512 },
+    ];
+    expect(
+      decodePolyline(encodePolyline(points, 6), 6).map(([lat, lng]) => ({ lat, lng })),
+    ).toEqual(points);
+  });
+});
 
 describe('bboxContains', () => {
   const norway: BBox = { sw: { lat: 57.9, lng: 4.5 }, ne: { lat: 71.2, lng: 31.2 } };

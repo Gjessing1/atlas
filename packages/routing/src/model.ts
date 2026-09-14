@@ -378,6 +378,33 @@ export interface RoutePath {
    * corridors and everywhere without a live traffic feed.
    */
   trafficDelayMs?: number;
+  /** Route-matched NPRA road observations/forecasts that indicate ice risk. */
+  roadWeather?: RoadWeatherRoute;
+}
+
+/** One risky road-weather point at the time this route is expected to reach it. */
+export interface RoadWeatherWarning {
+  /** The station's id — stable while its reading refreshes, so one hazard is announced once. */
+  id: string;
+  stationName: string;
+  roadNumber: string;
+  position: LatLng;
+  /** Distance from the route start to the nearest point, in metres. */
+  atM: number;
+  /** Distance from the weather point to the routed line. */
+  offsetM: number;
+  validAt: string;
+  source: 'measured' | 'forecast';
+  risk: 'possible' | 'high';
+  surfaceTemperatureC?: number;
+  condition?: string;
+}
+
+/** Coverage and warnings from one route-weather check. Empty warnings means checked, not safe. */
+export interface RoadWeatherRoute {
+  checkedAt: string;
+  matchedSites: number;
+  warnings: RoadWeatherWarning[];
 }
 
 /** Road attributes that hold over one stretch of a routed path. */

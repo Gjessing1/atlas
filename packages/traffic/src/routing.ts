@@ -1,5 +1,5 @@
-import type { LatLng } from '@atlas/core';
-import type { RouteProvider, RouteQuery, RouteResult } from '@atlas/routing';
+import { encodePolyline, type LatLng } from '@atlas/core';
+import type { RoadWeatherRoute, RouteProvider, RouteQuery, RouteResult } from '@atlas/routing';
 
 import { applyTrafficDelay, type TrafficDelay } from './delay.js';
 import type { TrafficClosure } from './model.js';
@@ -14,6 +14,15 @@ export type TrafficDelayTransport = (
   signal?: AbortSignal,
 ) => Promise<TrafficDelay>;
 
+export type RoadWeatherTransport = (
+  route: readonly LatLng[],
+  /** Expected duration of the whole route. */
+  durationMs: number,
+  signal?: AbortSignal,
+  /** Metres already travelled along `route`; stations are timed from there. */
+  traveledM?: number,
+) => Promise<RoadWeatherRoute>;
+
 /** Same-origin/Atlas-server closure matcher. Empty means no live closure on this line. */
 export function httpTrafficClosures(
   baseUrl = '',
@@ -25,12 +34,22 @@ export function httpTrafficClosures(
     signal?.addEventListener('abort', relay, { once: true });
     const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetchImpl(`${baseUrl}/api/traffic/closures`, {
+      let response = await fetchImpl(`${baseUrl}/api/traffic/closures`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ points: route }),
+        body: JSON.stringify({ shape: encodePolyline(route, 6) }),
         signal: controller.signal,
       });
+      // During an OTA rollout a new Android bundle can briefly meet the
+      // previous backend. Retry its old JSON-point contract once.
+      if (response.status === 400) {
+        response = await fetchImpl(`${baseUrl}/api/traffic/closures`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ points: route }),
+          signal: controller.signal,
+        });
+      }
       if (!response.ok) throw new Error(`traffic closures failed (HTTP ${response.status})`);
       const body = (await response.json()) as { closures?: TrafficClosure[] };
       return body.closures ?? [];
@@ -52,14 +71,52 @@ export function httpTrafficDelay(
     signal?.addEventListener('abort', relay, { once: true });
     const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetchImpl(`${baseUrl}/api/traffic/travel-times`, {
+      let response = await fetchImpl(`${baseUrl}/api/traffic/travel-times`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ points: route }),
+        body: JSON.stringify({ shape: encodePolyline(route, 6) }),
         signal: controller.signal,
       });
+      if (response.status === 400) {
+        response = await fetchImpl(`${baseUrl}/api/traffic/travel-times`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ points: route }),
+          signal: controller.signal,
+        });
+      }
       if (!response.ok) throw new Error(`travel times failed (HTTP ${response.status})`);
       return (await response.json()) as TrafficDelay;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', relay);
+    }
+  };
+}
+
+/** Same-origin route check against measured and forecast NPRA road conditions. */
+export function httpRoadWeather(
+  baseUrl = '',
+  fetchImpl: typeof fetch = fetch,
+): RoadWeatherTransport {
+  return async (route, durationMs, signal, traveledM = 0) => {
+    const controller = new AbortController();
+    const relay = () => controller.abort();
+    signal?.addEventListener('abort', relay, { once: true });
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await fetchImpl(`${baseUrl}/api/traffic/road-weather`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shape: encodePolyline(route, 6),
+          durationMs,
+          ...(traveledM > 0 ? { traveledM: Math.round(traveledM) } : {}),
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`road weather failed (HTTP ${response.status})`);
+      return (await response.json()) as RoadWeatherRoute;
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener('abort', relay);
@@ -85,27 +142,30 @@ export function trafficAwareRouteProvider(
   provider: RouteProvider,
   closures: TrafficClosureTransport,
   delays?: TrafficDelayTransport,
+  roadWeather?: RoadWeatherTransport,
 ): RouteProvider {
-  const priced = async (result: RouteResult, signal?: AbortSignal): Promise<RouteResult> => {
-    if (!delays || result.paths.length === 0) return result;
-    try {
-      // Every offered path is priced, not just the primary: a preview lists
-      // them side by side, so one line carrying its measured congestion while
-      // the others show free-flow times would read as the others being
-      // quicker. `sortRouteChoices` still ranks them on the engine's own
-      // schedule, so what the measurement changes is the number shown, never
-      // which route is recommended.
-      const measured = await Promise.all(result.paths.map((path) => delays(path.points, signal)));
-      return {
-        paths: result.paths.map((path, index) =>
-          applyTrafficDelay(path, measured[index] ?? { delayMs: 0, segments: [], measuredAt: '' }),
-        ),
-      };
-    } catch {
-      // Traffic is enhancement data: an unreachable feed leaves the engine's
-      // own estimate standing rather than failing the route.
-      return result;
-    }
+  const liveData = async (result: RouteResult, signal?: AbortSignal): Promise<RouteResult> => {
+    if ((!delays && !roadWeather) || result.paths.length === 0) return result;
+    // Each enhancement fails independently. A dead forecast must not discard
+    // a valid congestion correction (or vice versa), and neither can make an
+    // ordinary route fail.
+    const paths = await Promise.all(
+      result.paths.map(async (original) => {
+        const [delayResult, weatherResult] = await Promise.allSettled([
+          delays?.(original.points, signal),
+          roadWeather?.(original.points, original.timeMs, signal),
+        ]);
+        let path = original;
+        if (delayResult.status === 'fulfilled' && delayResult.value) {
+          path = applyTrafficDelay(path, delayResult.value);
+        }
+        if (weatherResult.status === 'fulfilled' && weatherResult.value) {
+          path = { ...path, roadWeather: weatherResult.value };
+        }
+        return path;
+      }),
+    );
+    return { paths };
   };
 
   return {
@@ -122,17 +182,17 @@ export function trafficAwareRouteProvider(
         } catch {
           // Traffic is live enhancement data. A stale/unreachable feed must not
           // make ordinary online or downloaded-pack routing unavailable.
-          return priced(result, signal);
+          return liveData(result, signal);
         }
         const known = new Set(exclusions.map(key));
         const fresh = matches
           .map((match) => match.position)
           .filter((point) => !known.has(key(point)));
-        if (fresh.length === 0) return priced(result, signal);
+        if (fresh.length === 0) return liveData(result, signal);
         exclusions = [...exclusions, ...fresh].slice(0, 50);
         result = await provider.route({ ...query, excludeLocations: exclusions }, signal);
       }
-      return priced(result, signal);
+      return liveData(result, signal);
     },
   };
 }

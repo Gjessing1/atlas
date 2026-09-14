@@ -103,6 +103,7 @@ export const TRAFFIC_LAYER_IDS = ['atlas-traffic-symbol', 'atlas-traffic-dot'];
 
 /** Measured congestion corridors hit-tested for their travel time. */
 export const TRAFFIC_FLOW_LAYER_IDS = ['atlas-traffic-flow-line'];
+export const ROAD_WEATHER_LAYER_IDS = ['atlas-road-weather-symbol', 'atlas-road-weather-dot'];
 
 /** Live Entur vehicles hit-tested for line, delay and occupancy. */
 export const TRANSIT_VEHICLE_LAYER_IDS = [
@@ -262,6 +263,8 @@ interface MapSceneProps {
   traffic: VectorOverlayData | null;
   /** Measured corridor congestion (null when the layer is off/offline). */
   trafficFlow: VectorOverlayData | null;
+  /** Measured road temperature and surface condition. */
+  roadWeather: VectorOverlayData | null;
   /** Live public-transport vehicles in the current viewport. */
   transitVehicles: VectorOverlayData | null;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
@@ -342,6 +345,7 @@ export function MapScene({
   speedCameras,
   traffic,
   trafficFlow,
+  roadWeather,
   transitVehicles,
   spots,
   exploreResults,
@@ -926,6 +930,36 @@ export function MapScene({
                   trafficFlow.opacity,
                 ],
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {!inPip && roadWeather ? (
+          <GeoJSONSource id="atlas-road-weather" data={roadWeather.data}>
+            <Layer
+              type="circle"
+              id="atlas-road-weather-dot"
+              minzoom={6}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 4, 11, 7, 16, 10],
+                'circle-color': ['get', 'markerColor'],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': roadWeather.opacity,
+                'circle-stroke-opacity': roadWeather.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-road-weather-symbol"
+              minzoom={6}
+              layout={{
+                'text-field': ['get', 'symbol'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 6, 9, 11, 12, 16, 15],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff', 'text-opacity': roadWeather.opacity }}
             />
           </GeoJSONSource>
         ) : null}

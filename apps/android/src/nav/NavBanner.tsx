@@ -11,7 +11,7 @@ import {
   type ElevationPoint,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
-import { formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -505,6 +505,12 @@ export function NavBanner({
                 ]}
               />
             </View>
+            {nav.roadWeatherWarning ? (
+              <Text style={styles.roadWeather} numberOfLines={2} accessibilityLiveRegion="polite">
+                ⚠ {formatRoadWeatherWarning(nav.roadWeatherWarning)} ·{' '}
+                {formatDistance(nav.roadWeatherWarning.distanceAheadM)} ahead
+              </Text>
+            ) : null}
             {nav.profile === 'hike' && nav.activePath ? (
               <RemainingElevationChart points={nav.activePath.points} traveledM={state.traveledM} />
             ) : null}
@@ -803,6 +809,12 @@ const styles = StyleSheet.create({
     color: theme.warning,
     fontSize: 13,
     fontWeight: '700',
+  },
+  roadWeather: {
+    color: theme.warning,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   progressTrack: {
     height: 3,

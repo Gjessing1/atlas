@@ -8,7 +8,12 @@ import {
   type RouteQuery,
   type ValhallaTransport,
 } from '@atlas/routing';
-import { httpTrafficClosures, httpTrafficDelay, trafficAwareRouteProvider } from '@atlas/traffic';
+import {
+  httpRoadWeather,
+  httpTrafficClosures,
+  httpTrafficDelay,
+  trafficAwareRouteProvider,
+} from '@atlas/traffic';
 
 import { Valhalla } from '../../modules/valhalla';
 import { listLocalPacks, type LocalPack } from '../regions/packs';
@@ -105,6 +110,7 @@ export function makeRouteProvider(serverOrigin: string): RouteProvider {
     base,
     httpTrafficClosures(serverOrigin),
     httpTrafficDelay(serverOrigin),
+    httpRoadWeather(serverOrigin),
   );
 }
 

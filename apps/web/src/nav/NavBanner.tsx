@@ -11,7 +11,7 @@ import {
   tunnelChipLabel,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
-import { formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
 import { TurnIcon } from './TurnIcon.js';
 
 /** Ground speed in km/h, or null when stationary/unknown. */
@@ -399,6 +399,12 @@ export function NavBanner({
                   }}
                 />
               </div>
+              {nav.roadWeatherWarning ? (
+                <div className="nav-road-weather" role="status">
+                  ⚠ {formatRoadWeatherWarning(nav.roadWeatherWarning)} ·{' '}
+                  {fmtDistanceM(nav.roadWeatherWarning.distanceAheadM)} ahead
+                </div>
+              ) : null}
               {nav.profile === 'hike' && nav.activePath ? (
                 <RemainingElevationChart
                   points={nav.activePath.points}

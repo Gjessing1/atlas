@@ -11,6 +11,8 @@ export type {
   VehicleProfile,
   RouteQuery,
   RoutePath,
+  RoadWeatherRoute,
+  RoadWeatherWarning,
   RouteEnrichment,
   RouteEnrichmentSegment,
   RouteOptionsSummary,

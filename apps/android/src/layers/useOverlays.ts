@@ -29,6 +29,7 @@ const RENDERABLE_VECTOR_IDS = new Set([
   'ice-observations',
   'traffic',
   'traffic-flow',
+  'road-weather',
   'transit-vehicles',
   SATELLITES_ID,
   STARLINK_ID,

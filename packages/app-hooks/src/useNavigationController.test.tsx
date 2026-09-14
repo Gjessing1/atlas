@@ -1277,6 +1277,40 @@ describe('useNavigationController — faster-route watch', () => {
     expect(hook.result.current.phase).toBe('navigating');
   });
 
+  it('refreshes an approaching road-ice warning and speaks it once', async () => {
+    const roadWeather = vi.fn(async () => ({
+      checkedAt: new Date().toISOString(),
+      matchedSites: 1,
+      warnings: [
+        {
+          id: 'ice-1',
+          stationName: 'E18 Ice hill',
+          roadNumber: 'E18',
+          position: points[10]!,
+          atM: 557,
+          offsetM: 3,
+          validAt: new Date().toISOString(),
+          source: 'measured' as const,
+          risk: 'high' as const,
+          surfaceTemperatureC: -0.4,
+          condition: 'wet',
+        },
+      ],
+    }));
+    const h = harness(undefined, { roadWeather });
+    const hook = await fakeDrive(h);
+
+    await driveFor(h, 181);
+
+    expect(roadWeather).toHaveBeenCalled();
+    expect(hook.result.current.roadWeatherWarning).toMatchObject({
+      stationName: 'E18 Ice hill',
+      risk: 'high',
+      distanceAheadM: expect.any(Number),
+    });
+    expect(h.spoken.filter((text) => text.startsWith('Ice risk ahead'))).toHaveLength(1);
+  });
+
   it('never second-guesses a walking trip', async () => {
     const h = harness();
     const hook = renderHook(() => useNavigationController(h.platform));

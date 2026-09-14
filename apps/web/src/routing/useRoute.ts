@@ -6,7 +6,12 @@ import {
   httpTraceTransport,
   type VehicleProfile,
 } from '@atlas/routing';
-import { httpTrafficClosures, httpTrafficDelay, trafficAwareRouteProvider } from '@atlas/traffic';
+import {
+  httpRoadWeather,
+  httpTrafficClosures,
+  httpTrafficDelay,
+  trafficAwareRouteProvider,
+} from '@atlas/traffic';
 
 export type { RoutePlanner, RouteWaypoint } from '@atlas/app-hooks';
 
@@ -17,6 +22,7 @@ const provider = trafficAwareRouteProvider(
   httpRouteProvider(),
   httpTrafficClosures(),
   httpTrafficDelay(),
+  httpRoadWeather(),
 );
 const route: RouteFn = async (query, signal) => {
   const result = await provider.route(query, signal);

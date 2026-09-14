@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { encodePolyline } from '@atlas/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StatusRegistry } from './status.js';
@@ -56,21 +57,64 @@ const travelTimesXml = `
   </rtd:pertinentLocation>
   <rtd:basicData xsi:type="rtd:TrafficStatus">
    <rtd:trafficStatus><rtd:trafficStatusValue>slow</rtd:trafficStatusValue></rtd:trafficStatus>
-  </rtd:basicData></rtd:physicalQuantity></mc:payload></mc:messageContainer>`;
+</rtd:basicData></rtd:physicalQuantity></mc:payload></mc:messageContainer>`;
+
+const weatherSitesXml = `
+<messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:rtd="http://datex2.eu/schema/3/roadTrafficData"
+ xmlns:loc="http://datex2.eu/schema/3/locationReferencing"><publicationTime>2026-07-31T09:00:00+02:00</publicationTime>
+ <rtd:measurementSiteTable><rtd:measurementSite id="weather-1"><rtd:measurementSiteName><values>
+ <value lang="nob">E18 Ice hill</value></values></rtd:measurementSiteName><rtd:measurementSiteLocation>
+ <loc:supplementaryPositionalDescription><loc:roadInformation><loc:roadNumber>E18</loc:roadNumber></loc:roadInformation>
+ </loc:supplementaryPositionalDescription><loc:pointByCoordinates><loc:pointCoordinates><loc:latitude>59.905</loc:latitude>
+ <loc:longitude>10.7</loc:longitude></loc:pointCoordinates></loc:pointByCoordinates></rtd:measurementSiteLocation>
+ </rtd:measurementSite></rtd:measurementSiteTable></messageContainer>`;
+
+const measuredWeatherXml = `
+<messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:rtd="http://datex2.eu/schema/3/roadTrafficData"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><publicationTime>2026-07-31T10:00:00+02:00</publicationTime>
+ <rtd:siteMeasurements><rtd:measurementSiteReference id="weather-1"/><rtd:physicalQuantity><rtd:physicalQuantity>
+ <rtd:basicData xsi:type="rtd:RoadSurfaceConditionInformation"><rtd:weatherRelatedRoadConditionType>wet</rtd:weatherRelatedRoadConditionType>
+ <rtd:roadSurfaceConditionMeasurements><roadSurfaceTemperature><temperature>0.4</temperature></roadSurfaceTemperature>
+ </rtd:roadSurfaceConditionMeasurements></rtd:basicData></rtd:physicalQuantity></rtd:physicalQuantity>
+ <rtd:measurementTimeDefault><rtd:timeValue>2026-07-31T10:00:00+02:00</rtd:timeValue></rtd:measurementTimeDefault>
+ </rtd:siteMeasurements></messageContainer>`;
+
+const forecastWeatherXml = `
+<messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:rtd="http://datex2.eu/schema/3/roadTrafficData"
+ xmlns:loc="http://datex2.eu/schema/3/locationReferencing" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <publicationTime>2026-07-31T10:00:00+02:00</publicationTime><rtd:physicalQuantity><rtd:pertinentLocation>
+ <loc:predefinedLocationReference id="weather-1"/></rtd:pertinentLocation><rtd:basicData xsi:type="rtd:RoadSurfaceConditionInformation">
+ <rtd:measurementOrCalculationTime><rtd:timeValue>2026-07-31T10:00:00+02:00</rtd:timeValue></rtd:measurementOrCalculationTime>
+ <rtd:weatherRelatedRoadConditionType>wet</rtd:weatherRelatedRoadConditionType><rtd:roadSurfaceConditionMeasurements>
+ <roadSurfaceTemperature><temperature>0.2</temperature></roadSurfaceTemperature></rtd:roadSurfaceConditionMeasurements>
+ </rtd:basicData></rtd:physicalQuantity></messageContainer>`;
 
 /** Serves each DATEX publication from its own URL, as the real server does. */
 const datexFetch = (overrides: Record<string, () => Response> = {}) =>
   vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const href = String(url);
     expect((init?.headers as Record<string, string>)['Authorization']).toMatch(/^Basic /);
-    const key = href.includes('GetPredefinedTravelTimeLocations')
-      ? 'corridors'
-      : href.includes('GetTravelTimeData')
-        ? 'travelTimes'
-        : 'situations';
+    const key = href.includes('GetMeasurementWeatherSiteTable')
+      ? 'weatherSites'
+      : href.includes('GetMeasuredWeatherData')
+        ? 'measuredWeather'
+        : href.includes('GetForecastPointData')
+          ? 'forecastWeather'
+          : href.includes('GetPredefinedTravelTimeLocations')
+            ? 'corridors'
+            : href.includes('GetTravelTimeData')
+              ? 'travelTimes'
+              : 'situations';
     const override = overrides[key];
     if (override) return override();
-    const body = { corridors: corridorsXml, travelTimes: travelTimesXml, situations: xml }[key]!;
+    const body = {
+      corridors: corridorsXml,
+      travelTimes: travelTimesXml,
+      situations: xml,
+      weatherSites: weatherSitesXml,
+      measuredWeather: measuredWeatherXml,
+      forecastWeather: forecastWeatherXml,
+    }[key]!;
     return new Response(body, { status: 200, headers: { 'content-type': 'text/xml' } });
   }) as typeof fetch;
 
@@ -96,7 +140,7 @@ describe('DATEX traffic API', () => {
         fetchImpl: datexFetch(),
         now: () => new Date('2026-07-31T10:00:00+02:00'),
       }).metas.map((meta) => meta.id),
-    ).toEqual(['traffic', 'traffic-flow']);
+    ).toEqual(['traffic', 'traffic-flow', 'road-weather']);
     await app.ready();
     const flow = await app.inject('/api/overlay/traffic-flow/features');
     expect(flow.statusCode).toBe(200);
@@ -170,9 +214,9 @@ describe('DATEX traffic API', () => {
       },
     });
     expect(off.json().closures).toEqual([]);
-    // The situation feed is fetched once and cached; the corridor table is
-    // warmed alongside it, which is the second call.
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // The situation feed is fetched once and cached; the corridor table and
+    // the three road-weather publications are warmed alongside it.
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     await app.close();
   });
 
@@ -215,6 +259,42 @@ describe('DATEX traffic API', () => {
       },
     });
     expect(elsewhere.json()).toMatchObject({ delayMs: 0, segments: [] });
+    await app.close();
+  });
+
+  it('shows road conditions and warns for ice on a planned route', async () => {
+    const app = Fastify();
+    registerTrafficApi(app, new StatusRegistry(), {
+      username: 'user',
+      password: 'secret',
+      fetchImpl: datexFetch(),
+      now: () => new Date('2026-07-31T10:00:00+02:00'),
+    });
+    await app.ready();
+    const layer = await app.inject('/api/overlay/road-weather/features');
+    expect(layer.statusCode).toBe(200);
+    expect(layer.json().features[0].properties).toMatchObject({
+      name: 'E18 Ice hill',
+      condition: 'wet',
+      surfaceTemperatureC: 0.4,
+      risk: 'high',
+    });
+    const route = await app.inject({
+      method: 'POST',
+      url: '/api/traffic/road-weather',
+      payload: {
+        durationMs: 600_000,
+        shape: encodePolyline([
+          { lat: 59.9, lng: 10.7 },
+          { lat: 59.91, lng: 10.7 },
+        ]),
+      },
+    });
+    expect(route.statusCode).toBe(200);
+    expect(route.json()).toMatchObject({
+      matchedSites: 1,
+      warnings: [{ stationName: 'E18 Ice hill', risk: 'high' }],
+    });
     await app.close();
   });
 

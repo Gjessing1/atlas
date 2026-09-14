@@ -397,6 +397,10 @@ const server = createServer(async (request, response) => {
       await readJson(request);
       return json(response, { delayMs: 0, segments: [], measuredAt: new Date().toISOString() });
     }
+    if (url.pathname === '/api/traffic/road-weather' && request.method === 'POST') {
+      await readJson(request);
+      return json(response, { checkedAt: new Date().toISOString(), matchedSites: 0, warnings: [] });
+    }
     if (url.pathname === '/api/route/nvdb-limits' && request.method === 'POST') {
       await readJson(request);
       return json(response, { overrides: [] });

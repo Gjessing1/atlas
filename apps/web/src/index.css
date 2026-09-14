@@ -2255,6 +2255,24 @@ button {
   font-weight: 600;
 }
 
+.route-weather-warning,
+.nav-preview-weather,
+.nav-road-weather {
+  color: var(--warning);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.route-weather-warning,
+.nav-preview-weather {
+  display: block;
+  margin-top: 0.3rem;
+}
+
+.nav-road-weather {
+  margin-top: 0.35rem;
+}
+
 /* A ferry crossing is timetabled — a route stat that needs words, not a number. */
 .route-ferry-note {
   margin-top: 4px;

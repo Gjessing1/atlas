@@ -118,6 +118,12 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
                     ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
                     : ''}
                 </Text>
+                {path.roadWeather?.warnings[0] ? (
+                  <Text style={styles.weatherWarning}>
+                    ⚠ {path.roadWeather.warnings[0].risk === 'high' ? 'Ice risk' : 'Possible ice'}{' '}
+                    on this route
+                  </Text>
+                ) : null}
               </View>
               <View style={[styles.radio, selected && styles.radioSelected]} />
             </Pressable>
@@ -175,6 +181,7 @@ const styles = StyleSheet.create({
   choiceTimeSelected: { color: theme.accent },
   choiceExtra: { fontSize: 14, fontWeight: '600', color: theme.textMuted },
   choiceDetail: { fontSize: 13, color: theme.textMuted },
+  weatherWarning: { fontSize: 12, color: theme.warning, fontWeight: '600' },
   radio: {
     width: 18,
     height: 18,

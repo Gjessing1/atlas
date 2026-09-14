@@ -227,3 +227,33 @@ export function decodePolyline(encoded: string, precision = 6): [number, number]
   }
   return coords;
 }
+
+/** Encode points using the Google/Valhalla signed-delta polyline codec. */
+export function encodePolyline(
+  points: readonly { readonly lat: number; readonly lng: number }[],
+  precision = 6,
+): string {
+  const factor = 10 ** precision;
+  let previousLat = 0;
+  let previousLng = 0;
+  let encoded = '';
+  const append = (delta: number) => {
+    // Arithmetic rather than bitwise shifts keeps the helper correct if a
+    // caller needs more than precision 6 (bitwise operators truncate to i32).
+    let value = delta < 0 ? -delta * 2 - 1 : delta * 2;
+    while (value >= 0x20) {
+      encoded += String.fromCharCode(0x20 + (value % 0x20) + 63);
+      value = Math.floor(value / 0x20);
+    }
+    encoded += String.fromCharCode(value + 63);
+  };
+  for (const point of points) {
+    const lat = Math.round(point.lat * factor);
+    const lng = Math.round(point.lng * factor);
+    append(lat - previousLat);
+    append(lng - previousLng);
+    previousLat = lat;
+    previousLng = lng;
+  }
+  return encoded;
+}

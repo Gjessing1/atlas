@@ -8,6 +8,7 @@ import {
   speedCameraIdentify,
   trafficFlowIdentify,
   trafficIdentify,
+  roadWeatherIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
   type SearchResult,
@@ -25,6 +26,7 @@ import type { ActiveOverlay } from '../layers/useOverlays';
 import { SPEED_CAMERAS_ID } from '../layers/useSpeedCameras';
 import { TRAFFIC_ID } from '../layers/useTraffic';
 import { TRAFFIC_FLOW_ID } from '../layers/useTrafficFlow';
+import { ROAD_WEATHER_ID } from '../layers/useRoadWeather';
 import { TRANSIT_VEHICLES_ID } from '../layers/useTransitVehicles';
 import type { RoutePlanner } from '../routing/useRoute';
 import type { DestinationTarget } from '../ui/DestinationCard';
@@ -37,6 +39,7 @@ import {
   SPEED_CAMERA_LAYER_IDS,
   TRAFFIC_FLOW_LAYER_IDS,
   TRAFFIC_LAYER_IDS,
+  ROAD_WEATHER_LAYER_IDS,
   TRANSIT_VEHICLE_LAYER_IDS,
 } from './MapScene';
 
@@ -291,6 +294,7 @@ export function useMapPress({
               cameraHits,
               trafficHits,
               flowHits,
+              roadWeatherHits,
               transitVehicleHits,
             ] = await Promise.all([
               identifyOverlays(
@@ -307,6 +311,7 @@ export function useMapPress({
               query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
               query(vectorOn(TRAFFIC_ID), TRAFFIC_LAYER_IDS),
               query(vectorOn(TRAFFIC_FLOW_ID), TRAFFIC_FLOW_LAYER_IDS),
+              query(vectorOn(ROAD_WEATHER_ID), ROAD_WEATHER_LAYER_IDS),
               query(vectorOn(TRANSIT_VEHICLES_ID), TRANSIT_VEHICLE_LAYER_IDS),
             ]);
             // Local groups lead: they are what the user aimed at, and the
@@ -319,6 +324,7 @@ export function useMapPress({
               // Not `hitProps`: the tap box catches both directions of the
               // same road, so the corridor to describe is chosen, not taken.
               trafficFlowIdentify(tappedFlowProperties({ lat, lng }, flowHits)),
+              roadWeatherIdentify(hitProps(roadWeatherHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);

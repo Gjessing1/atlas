@@ -59,6 +59,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'Both draw the same server-classified colours (`@atlas/traffic` owns the levels) and both offset the line right of the direction of travel, because every corridor has a reverse twin over the same road. Off by default on both: the ETA already carries the measurement, so this layer answers "why", which is a question you ask rather than one you want asked for you.',
   },
   {
+    id: 'map-road-weather',
+    surface: 'map',
+    capability: 'See and identify measured road temperature, condition and ice risk',
+    web: { file: 'apps/web/src/map/useRoadWeatherLayer.ts', contains: 'useRoadWeatherLayer' },
+    android: { file: 'apps/android/src/layers/useRoadWeather.ts', contains: 'useRoadWeather' },
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/overlay/road-weather/features'" },
+    note: 'Both clients draw the same server-classified station points and use the shared identify wording. The timestamp is part of the answer; a missing marker or warning is never presented as proof of an ice-free road.',
+  },
+  {
     id: 'map-live-transit-vehicles',
     surface: 'map',
     capability: 'Watch live public-transport vehicles and inspect delay and occupancy',
@@ -1002,6 +1011,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     },
     route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
     note: 'Both clients pass the same `httpTrafficDelay` transport as `NavPlatform.trafficDelay`; the shared controller re-prices on the 3-minute watch and `NavigationSession.setSchedule` swaps the maneuver schedule without restarting the trip. The banner shows only the traffic still *ahead*, so it falls away as the queue is driven through.',
+  },
+  {
+    id: 'nav-road-weather',
+    surface: 'navigation',
+    capability: 'Warn about measured or forecast ice risk on a route and again on approach',
+    hook: 'useNavigationController',
+    web: { file: 'apps/web/src/nav/NavBanner.tsx', contains: 'roadWeatherWarning' },
+    android: { file: 'apps/android/src/nav/NavBanner.tsx', contains: 'roadWeatherWarning' },
+    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/road-weather'" },
+    note: 'The backend selects the station forecast nearest the route arrival time. Planning shows the first risk; guidance refreshes it with the 3-minute traffic watch, displays it within 20 km and speaks it once per station within 10 km, timing each station from the distance already driven.',
   },
   {
     id: 'nav-off-route',

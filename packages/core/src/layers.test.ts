@@ -15,6 +15,7 @@ import {
   speedCameraIdentify,
   trafficFlowIdentify,
   trafficIdentify,
+  roadWeatherIdentify,
   layerOptionSignature,
   normalizeLayerOptions,
   overlayIdentifyUrl,
@@ -447,6 +448,52 @@ describe('local overlay identify groups', () => {
       ],
     ).toBe('6 min (normally 5 min)');
     expect(trafficFlowIdentify(null)).toBeNull();
+  });
+
+  it('identifies a road-temperature reading with risk and freshness', () => {
+    const validAt = new Date(2026, 0, 2, 8, 5).toISOString();
+    expect(
+      roadWeatherIdentify({
+        name: 'E18 Ice hill',
+        roadNumber: 'E18',
+        source: 'measured',
+        validAt,
+        surfaceTemperatureC: -0.4,
+        airTemperatureC: 1.2,
+        condition: 'wet',
+        risk: 'high',
+      }),
+    ).toEqual({
+      title: 'E18 Ice hill',
+      properties: {
+        Road: 'E18',
+        'Road surface': '-0.4 °C',
+        Air: '1.2 °C',
+        Condition: 'wet',
+        Ice: 'Ice risk',
+        Measured: '08:05',
+      },
+    });
+  });
+
+  it('says a road sensor is unreliable instead of printing a contradicted reading', () => {
+    expect(
+      roadWeatherIdentify({
+        name: 'E136 Tresfjordbrua',
+        roadNumber: 'E136',
+        source: 'measured',
+        validAt: new Date(2026, 8, 14, 19, 50).toISOString(),
+        airTemperatureC: 10.9,
+        condition: 'unknown',
+        risk: 'none',
+        surfaceSuspect: true,
+      })?.properties,
+    ).toEqual({
+      Road: 'E136',
+      'Road surface': 'sensor unreliable (near freezing in warm air)',
+      Air: '10.9 °C',
+      Measured: '19:50',
+    });
   });
 
   it('shows the exact Regobs observation clock and useful report context', () => {

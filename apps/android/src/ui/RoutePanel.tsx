@@ -33,7 +33,7 @@ import {
   vehicleChipLabel,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
-import { formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
 import type { TransitTrip } from '@atlas/transit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -921,6 +921,12 @@ export function RoutePanel({
                         ↗ {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
                       </Text>
                     ) : null}
+                    {path.roadWeather?.warnings[0] ? (
+                      <Text style={styles.weatherWarning}>
+                        ⚠ {formatRoadWeatherWarning(path.roadWeather.warnings[0])} ·{' '}
+                        {fmtKm(path.roadWeather.warnings[0].atM)} along route
+                      </Text>
+                    ) : null}
                   </>
                 ) : (
                   <Text style={styles.summaryDetail}>
@@ -1263,6 +1269,7 @@ const styles = StyleSheet.create({
   /** The one number the sheet was opened for, so the one number set in display size. */
   summaryTime: { fontSize: 24, fontWeight: '700', color: theme.text },
   summaryDetail: { fontSize: 13, color: theme.textMuted },
+  weatherWarning: { fontSize: 13, lineHeight: 18, color: theme.warning, fontWeight: '600' },
   selfStart: { alignSelf: 'flex-start' },
   /* Still the only accent-filled control on the sheet — primary by being the
      one thing that is coloured, not by being the widest. */

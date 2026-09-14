@@ -14,7 +14,12 @@ import {
   httpRouteProvider,
   httpTraceTransport,
 } from '@atlas/routing';
-import { httpTrafficClosures, httpTrafficDelay, trafficAwareRouteProvider } from '@atlas/traffic';
+import {
+  httpRoadWeather,
+  httpTrafficClosures,
+  httpTrafficDelay,
+  trafficAwareRouteProvider,
+} from '@atlas/traffic';
 import { useMemo } from 'react';
 
 /** Promisified single geolocation fix. */
@@ -140,7 +145,13 @@ export function useWebNavigation(): NavController {
   const platform = useMemo<NavPlatform>(() => {
     const trafficClosures = httpTrafficClosures();
     const trafficDelay = httpTrafficDelay();
-    const provider = trafficAwareRouteProvider(httpRouteProvider(), trafficClosures, trafficDelay);
+    const roadWeather = httpRoadWeather();
+    const provider = trafficAwareRouteProvider(
+      httpRouteProvider(),
+      trafficClosures,
+      trafficDelay,
+      roadWeather,
+    );
     const trace = httpTraceTransport();
     const elevation = httpElevationProfile();
     return {
@@ -156,6 +167,7 @@ export function useWebNavigation(): NavController {
       // The same corridor measurements the provider prices a new route with,
       // asked again mid-drive so the trip being followed is re-priced too.
       trafficDelay,
+      roadWeather,
       trace,
       nvdbLimits: httpNvdbLimits(),
       nvdbLanes: httpNvdbLanes(),

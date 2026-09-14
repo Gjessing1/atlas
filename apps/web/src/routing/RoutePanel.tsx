@@ -34,7 +34,7 @@ import {
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
-import { formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import {
@@ -861,6 +861,13 @@ export function RoutePanel({
                     {(path.ascentM > 0 || path.descentM > 0) && (
                       <span className="route-summary-detail">
                         ↗ {Math.round(path.ascentM)} m ↘ {Math.round(path.descentM)} m
+                      </span>
+                    )}
+                    {path.roadWeather?.warnings[0] && (
+                      <span className="route-weather-warning">
+                        ⚠ {formatRoadWeatherWarning(path.roadWeather.warnings[0])}
+                        {' · '}
+                        {fmtKm(path.roadWeather.warnings[0].atM)} along route
                       </span>
                     )}
                   </>

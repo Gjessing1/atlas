@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { parseDatexSnapshot } from './datex.js';
 import { closuresNearRoute } from './model.js';
-import { trafficAwareRouteProvider } from './routing.js';
+import { httpTrafficClosures, trafficAwareRouteProvider } from './routing.js';
 
 const publication = (records: string) => `
 <messageContainer xmlns="http://datex2.eu/schema/3/common"
@@ -33,6 +33,22 @@ const situation = (id: string, start: string, end: string, management: string) =
  </sit:situationRecord></sit:situation>`;
 
 describe('DATEX II traffic', () => {
+  it('sends dense route geometry as a precision-6 polyline', async () => {
+    const route = Array.from({ length: 1_000 }, (_, index) => ({
+      lat: 59.9 + index * 0.00004,
+      lng: 10.7,
+    }));
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { shape?: string; points?: unknown };
+      expect(body.shape).toEqual(expect.any(String));
+      expect(body.points).toBeUndefined();
+      expect(String(init?.body).length).toBeLessThan(JSON.stringify({ points: route }).length / 4);
+      return new Response(JSON.stringify({ closures: [] }), { status: 200 });
+    }) as typeof fetch;
+    await httpTrafficClosures('', fetchImpl)(route);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps only active records and extracts Norwegian closure data', () => {
     const snapshot = parseDatexSnapshot(
       publication(
@@ -134,6 +150,36 @@ describe('DATEX II traffic', () => {
     const result = await aware.route({ profile: 'car', points: leg(0).points });
     expect(result.paths.map((path) => path.timeMs)).toEqual([720_000, 780_000]);
     expect(result.paths.map((path) => path.trafficDelayMs)).toEqual([120_000, 120_000]);
+  });
+
+  it('checks road weather for every offered route without coupling it to traffic delay', async () => {
+    const path = {
+      points: [
+        { lat: 59.9, lng: 10.7 },
+        { lat: 59.91, lng: 10.7 },
+      ],
+      distanceM: 1000,
+      timeMs: 600_000,
+      ascentM: 0,
+      descentM: 0,
+    };
+    const weather = vi.fn(async () => ({
+      checkedAt: '2026-01-02T08:00:00Z',
+      matchedSites: 1,
+      warnings: [],
+    }));
+    const aware = trafficAwareRouteProvider(
+      { route: async () => ({ paths: [path] }) },
+      async () => [],
+      async () => {
+        throw new Error('traffic down');
+      },
+      weather,
+    );
+    const result = await aware.route({ profile: 'car', points: path.points });
+    expect(weather).toHaveBeenCalledWith(path.points, path.timeMs, undefined);
+    expect(result.paths[0]?.roadWeather).toMatchObject({ matchedSites: 1 });
+    expect(result.paths[0]?.timeMs).toBe(600_000);
   });
 
   it('keeps the engine estimate standing when the travel-time feed fails', async () => {
