@@ -55,7 +55,7 @@ export function trafficLayerMeta(): LayerMeta {
     rev: 1,
     title: 'Traffic and road closures',
     description: 'Current road closures, roadworks and incidents from Statens vegvesen.',
-    group: 'Traffic',
+    group: 'Driving',
     attribution: '© Statens vegvesen (NLOD)',
     metadataUrl: 'https://www.vegvesen.no/fag/teknologi/nasjonal-vegdatabank/',
     minzoom: 6,
@@ -63,6 +63,7 @@ export function trafficLayerMeta(): LayerMeta {
     defaultOpacity: 1,
     identify: false,
     coverageNote: 'Live Norwegian traffic only; an internet connection is required.',
+    profiles: ['driving'],
     vector: true,
   };
 }
@@ -81,7 +82,7 @@ export function trafficFlowLayerMeta(): LayerMeta {
     title: 'Traffic flow',
     description:
       'Measured travel times on Statens vegvesen’s corridors — how the main roads are running now.',
-    group: 'Traffic',
+    group: 'Driving',
     attribution: '© Statens vegvesen (NLOD)',
     metadataUrl: 'https://www.vegvesen.no/fag/teknologi/nasjonal-vegdatabank/',
     // The corridors are motorway-scale (median 5.4 km) and there are only 202
@@ -92,6 +93,7 @@ export function trafficFlowLayerMeta(): LayerMeta {
     identify: false,
     coverageNote:
       'Only the 202 stretches Statens vegvesen measures, in Norway; an internet connection is required.',
+    profiles: ['driving'],
     vector: true,
   };
 }

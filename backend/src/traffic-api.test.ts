@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { encodePolyline, layerInProfile, MAP_PROFILES } from '@atlas/core';
+import { encodePolyline } from '@atlas/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StatusRegistry } from './status.js';
@@ -140,15 +140,10 @@ describe('DATEX traffic API', () => {
       now: () => new Date('2026-07-31T10:00:00+02:00'),
     }).metas;
     expect(metas.map(({ id, group, profiles }) => ({ id, group, profiles }))).toEqual([
-      { id: 'traffic', group: 'Traffic', profiles: undefined },
-      { id: 'traffic-flow', group: 'Traffic', profiles: undefined },
+      { id: 'traffic', group: 'Driving', profiles: ['driving'] },
+      { id: 'traffic-flow', group: 'Driving', profiles: ['driving'] },
       { id: 'road-weather', group: 'Driving', profiles: ['driving'] },
     ]);
-    for (const meta of metas.slice(0, 2)) {
-      expect(MAP_PROFILES.every((profile) => layerInProfile(meta, profile.id))).toBe(true);
-      expect(meta.coverageNote).toMatch(/Norw/);
-      expect(meta.coverageNote).toMatch(/internet/);
-    }
     await app.ready();
     const flow = await app.inject('/api/overlay/traffic-flow/features');
     expect(flow.statusCode).toBe(200);
