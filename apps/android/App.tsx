@@ -217,7 +217,12 @@ function AppInner() {
   const vehicle = useVehicleProfile(data);
   const route = useRoute(vehicle.vehicle);
   const transit = useTransitPlan(route);
-  const directions = useDirections(route);
+  // Reveal the position puck once any planner action has obtained a fix. This
+  // includes the automatic "Directions" origin, not only the idle locate
+  // button, so walking-route planning can show the live native compass.
+  const [showPuck, setShowPuck] = useState(false);
+  const revealPuck = useCallback(() => setShowPuck(true), []);
+  const directions = useDirections(route, revealPuck);
   // Geometry of the visible tracks, for the map's track line layer.
   const trackGeo = useTrackGeometry(data.storage, data.tracks);
   // The active profile and quick overlay state are device-local; the preferred
@@ -405,7 +410,6 @@ function AppInner() {
   // Show the location puck once the user has asked to be located (also true
   // while navigating). Idle recentres are one-shot fly-tos, so tapping locate
   // never locks the camera and fights a pan.
-  const [showPuck, setShowPuck] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
 

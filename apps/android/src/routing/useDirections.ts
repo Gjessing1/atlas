@@ -23,7 +23,7 @@ export interface AndroidDirections extends Directions {
  * The device half of "Directions to here": the planner hand-off itself is
  * shared with the web (`@atlas/app-hooks`), only the fix comes from here.
  */
-export function useDirections(route: RoutePlanner): AndroidDirections {
+export function useDirections(route: RoutePlanner, onLocated?: () => void): AndroidDirections {
   const getMyLocation = useCallback(async (): Promise<LatLng | null> => {
     try {
       const fg = await Location.requestForegroundPermissionsAsync();
@@ -36,11 +36,13 @@ export function useDirections(route: RoutePlanner): AndroidDirections {
       ]);
       const pos =
         fresh ?? (await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }));
-      return pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null;
+      if (!pos) return null;
+      onLocated?.();
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude };
     } catch {
       return null;
     }
-  }, []);
+  }, [onLocated]);
 
   const directions = useSharedDirections(route, getMyLocation);
   return { ...directions, getMyLocation };

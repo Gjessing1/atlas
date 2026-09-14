@@ -381,6 +381,10 @@ function useLatest<T>(value: T): { current: T } {
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** A hand-held compass needs near-frame feedback; the map tree still stays outside this state. */
+const FACING_REFRESH_MS = 50;
+const FACING_REFRESH_DEG = 0.5;
+
 /** Profiles where facing the device and direction of travel can diverge. */
 const usesFacingHeading = (profile: RoutingProfile): boolean => profile !== 'car';
 
@@ -1934,11 +1938,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
         }
         return;
       }
-      // Compass events arrive at sensor rate; re-render at most ~5 Hz and
-      // only for a visible change, or the puck costs more than it shows.
+      // The Android rotation-vector feed arrives at 20 Hz. Preserve that
+      // responsiveness while ignoring sub-degree sensor noise. It is active
+      // only for non-driving live guidance, where the arrow is being watched.
       const delta =
         lastSetDeg === null ? 180 : Math.abs(((sample.deg - lastSetDeg + 540) % 360) - 180);
-      if (now - lastSetMs < 200 || delta < 2) return;
+      if (now - lastSetMs < FACING_REFRESH_MS || delta < FACING_REFRESH_DEG) return;
       lastSetMs = now;
       lastSetDeg = sample.deg;
       setFacing(sample);

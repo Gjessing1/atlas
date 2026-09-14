@@ -29,9 +29,12 @@ import {
   toPosition,
 } from './locationTask';
 import { LocationWatchCoordinator } from './locationWatch';
+import { magneticDeclinationDeg, motionFacingDeg } from './motionFacing';
 
 /** How stale a last-known position may be when a live fix never arrives. */
 const LAST_KNOWN_MAX_AGE_MS = 120_000;
+/** Device orientation cadence; fast enough for a hand-held compass to feel direct. */
+const MOTION_UPDATE_MS = 50;
 
 /**
  * Utterances queued or playing. Audio focus is held while it is non-zero, so
@@ -160,7 +163,7 @@ async function watchFixes(
  * (a turn taken with no fixes), and the follow camera for the whole trip.
  */
 export function watchHeadingRate(onDelta: (deltaDeg: number, dtSec: number) => void): () => void {
-  DeviceMotion.setUpdateInterval(100);
+  DeviceMotion.setUpdateInterval(MOTION_UPDATE_MS);
   let lastMs: number | null = null;
   const sub = DeviceMotion.addListener((m) => {
     const rot = m.rotationRate;
@@ -201,13 +204,33 @@ const HEADING_ACCURACY_DEG: Record<number, number> = { 3: 15, 2: 30, 1: 45, 0: 9
  * the route tangent points down a path they have not chosen. True heading
  * where declination is known, magnetic as the fallback.
  */
-function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void): () => void {
+export function watchFacing(
+  onFacing: (deg: number, accuracyDeg: number | null) => void,
+): () => void {
   let sub: Location.LocationSubscription | null = null;
   let stopped = false;
+  let declinationDeg = 0;
+  let accuracyDeg: number | null = null;
+  let anchored = false;
+
+  // expo-location deliberately uses SENSOR_DELAY_NORMAL for heading updates.
+  // Keep it as the absolute/accuracy anchor, but let Android's fused rotation
+  // vector supply the frames between those slow samples. Both native modules
+  // derive azimuth from the same rotation matrix, so there is no source jump.
+  DeviceMotion.setUpdateInterval(MOTION_UPDATE_MS);
+  const motionSub = DeviceMotion.addListener((motion) => {
+    if (!anchored) return;
+    const deg = motionFacingDeg(motion.rotation.alpha, declinationDeg);
+    if (deg !== null) onFacing(deg, accuracyDeg);
+  });
+
   Location.watchHeadingAsync((heading) => {
     const deg = heading.trueHeading >= 0 ? heading.trueHeading : heading.magHeading;
     if (typeof deg !== 'number' || deg < 0) return;
-    onFacing(deg, HEADING_ACCURACY_DEG[heading.accuracy] ?? null);
+    declinationDeg = magneticDeclinationDeg(heading.magHeading, heading.trueHeading) ?? 0;
+    accuracyDeg = HEADING_ACCURACY_DEG[heading.accuracy] ?? null;
+    anchored = true;
+    onFacing(deg, accuracyDeg);
   })
     .then((subscription) => {
       if (stopped) subscription.remove();
@@ -216,6 +239,7 @@ function watchFacing(onFacing: (deg: number, accuracyDeg: number | null) => void
     .catch((err) => console.warn('heading watch failed', err));
   return () => {
     stopped = true;
+    motionSub.remove();
     sub?.remove();
     sub = null;
   };

@@ -1380,6 +1380,35 @@ describe('useNavigationController — walking modes', () => {
     expect(facingSink).toBeNull();
   });
 
+  it('publishes a real compass turn within one 50 ms sensor frame', async () => {
+    let facingSink: ((deg: number, accuracyDeg: number | null) => void) | null = null;
+    const h = harness(undefined, {
+      watchFacing: (onFacing) => {
+        facingSink = onFacing;
+        return () => {
+          facingSink = null;
+        };
+      },
+    });
+    const { result } = await walk(h);
+    await waitFor(() => expect(facingSink).not.toBeNull());
+
+    let now = 1_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      act(() => facingSink?.(0, 15));
+      await waitFor(() => expect(result.current.facingDeg).toBe(0));
+
+      // The old 200 ms UI throttle held this sample even though Android's
+      // rotation vector had already measured a clearly visible turn.
+      now += 60;
+      act(() => facingSink?.(10, 15));
+      await waitFor(() => expect(result.current.facingDeg).toBeGreaterThan(2));
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('reports calibration trouble and honours forced compass and GPS sources', async () => {
     let facingSink: ((deg: number, accuracyDeg: number | null) => void) | null = null;
     const h = harness(undefined, {

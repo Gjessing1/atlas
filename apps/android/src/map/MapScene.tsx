@@ -17,6 +17,7 @@ import {
   Layer,
   Map as MapLibreMap,
   Marker,
+  NativeUserLocation,
   RasterSource,
   UserLocation,
   ViewAnnotation,
@@ -1464,7 +1465,17 @@ export function MapScene({
             zoom: initialView.zoom,
           }}
         />
-        {!suppressPuck && locating ? <UserLocation heading={following} animated /> : null}
+        {!suppressPuck && locating ? (
+          planning && route.profile !== 'car' ? (
+            // Planning has no navigation session to draw Atlas's own facing
+            // arrow. Use MapLibre Native's compass mode here: it listens to
+            // device orientation in native code, rather than waiting for the
+            // one-second GPS course carried by the JS UserLocation puck.
+            <NativeUserLocation mode="heading" androidPreferredFramesPerSecond={30} />
+          ) : (
+            <UserLocation heading={following} animated />
+          )
+        ) : null}
         {/* Map-anchored nav dot: the honest marker while the follow camera is
             paused or in overview. Directionless on purpose — the map carries
             whatever bearing the user left it at, so an arrow drawn here would
