@@ -769,6 +769,24 @@ async function saveCommuteAndReadBoard() {
   await setCommuteEnd('from', 'engelsrud', 'Engelsrud E2E');
   await setCommuteEnd('via', 'asker', 'Asker E2E');
   await setCommuteEnd('to', 'oslo', 'Oslo E2E');
+  // The commute editor uses Android's native clock, not a row of five-minute
+  // nudges. Seeing and accepting the platform dialog proves the native seam is
+  // present in the installed binary; the chosen value then returns to Atlas.
+  await tapAfterScroll('commute-time-outbound', 'commute-sheet');
+  const timeDialog = await waitFor(
+    'the native commute time picker',
+    hierarchy,
+    (xml) => Boolean(nodeForId(xml, 'android:id/button1')),
+    20_000,
+  );
+  tapId(timeDialog, 'android:id/button1');
+  await waitForId('commute-sheet', true, 20_000);
+
+  // Common weeks are presets, but individual day controls remain alongside
+  // them for custom schedules.
+  await tapAfterScroll('commute-days-weekdays', 'commute-sheet');
+  await waitForId('commute-day-7');
+  await tapAfterScroll('commute-days-every-day', 'commute-sheet');
   // "Done": the board is what the reader came for, the editor is not.
   await tapAfterScroll('commute-edit', 'commute-sheet', 'down');
   const board = await waitFor(

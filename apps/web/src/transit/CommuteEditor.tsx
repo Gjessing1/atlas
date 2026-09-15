@@ -192,17 +192,32 @@ export function CommuteEditorForm({
         <TimeField direction="inbound" label="Return" editor={editor} />
       </div>
       <div className="commute-days" role="group" aria-label="Days this commute runs">
-        {editor.days.map((day) => (
-          <button
-            type="button"
-            key={day.day}
-            aria-pressed={day.on}
-            className={day.on ? 'on' : ''}
-            onClick={() => editor.toggleDay(day.day)}
-          >
-            {day.label}
-          </button>
-        ))}
+        <div className="commute-day-presets">
+          {editor.dayPresets.map((preset) => (
+            <button
+              type="button"
+              key={preset.id}
+              aria-pressed={preset.on}
+              className={preset.on ? 'on' : ''}
+              onClick={() => editor.applyDayPreset(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="commute-day-choices">
+          {editor.days.map((day) => (
+            <button
+              type="button"
+              key={day.day}
+              aria-pressed={day.on}
+              className={day.on ? 'on' : ''}
+              onClick={() => editor.toggleDay(day.day)}
+            >
+              {day.label}
+            </button>
+          ))}
+        </div>
       </div>
       {editor.missing && <p className="commute-state">{editor.missing}</p>}
       {editor.lineGroups.length > 0 && (

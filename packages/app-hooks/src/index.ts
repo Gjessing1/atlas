@@ -114,6 +114,7 @@ export {
 } from './useCommute.js';
 export {
   useCommuteEditor,
+  type CommuteDayPreset,
   type CommuteEditor,
   type CommuteEndKey,
   type CommuteLineGroup,

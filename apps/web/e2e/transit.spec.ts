@@ -200,6 +200,22 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await expect(panel).toContainText('If I leave now');
   await expect(panel).toContainText('Next journeys');
 
+  // Common schedules are one choice, while the seven individual days remain
+  // available for a genuinely custom week.
+  await panel.getByRole('button', { name: 'Weekdays' }).click();
+  await expect(panel.getByRole('button', { name: 'Weekdays' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(panel.getByRole('button', { name: 'Sat' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(panel.getByRole('button', { name: 'Sun' })).toHaveAttribute('aria-pressed', 'false');
+  await panel.getByRole('button', { name: 'Every day' }).click();
+  await expect(panel.getByRole('button', { name: 'Every day' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(panel.getByRole('button', { name: 'Sun' })).toHaveAttribute('aria-pressed', 'true');
+
   await panel.getByRole('button', { name: 'Done' }).click();
   const clock = (offsetMs: number) =>
     new Intl.DateTimeFormat('en-GB', {

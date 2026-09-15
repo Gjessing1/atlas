@@ -1,6 +1,7 @@
 import type { CommuteEditor, CommuteEndKey, CommuteLineOption } from '@atlas/app-hooks';
 import { minutesOfDayLabel, type TransitCommuteDirection } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { theme } from './theme';
@@ -147,7 +148,7 @@ function LineChip({ line, editor }: { line: CommuteLineOption; editor: CommuteEd
   );
 }
 
-/** "Leave at 07:10" / "Arrive by 08:30", nudged in five-minute steps. */
+/** "Leave at 07:10" / "Arrive by 08:30", picked with Android's own clock. */
 function TimeField({
   direction,
   label,
@@ -158,9 +159,20 @@ function TimeField({
   editor: CommuteEditor;
 }) {
   const time = direction === 'outbound' ? editor.config.outboundTime : editor.config.inboundTime;
-  const nudge = (deltaMinutes: number) => {
-    const base = time.minutesOfDay ?? 7 * 60;
-    editor.setTime(direction, (((base + deltaMinutes) % 1440) + 1440) % 1440);
+  const pickTime = () => {
+    const value = new Date();
+    if (time.minutesOfDay !== null) {
+      value.setHours(Math.floor(time.minutesOfDay / 60), time.minutesOfDay % 60, 0, 0);
+    }
+    DateTimePickerAndroid.open({
+      value,
+      mode: 'time',
+      is24Hour: true,
+      onChange: (event, picked) => {
+        if (event.type !== 'set' || !picked) return;
+        editor.setTime(direction, picked.getHours() * 60 + picked.getMinutes());
+      },
+    });
   };
   return (
     <View style={styles.field}>
@@ -172,14 +184,16 @@ function TimeField({
         >
           <Text style={styles.smallButtonText}>{time.arriveBy ? 'Arrive by' : 'Leave at'}</Text>
         </Pressable>
-        <Pressable style={styles.smallButton} onPress={() => nudge(-5)}>
-          <Text style={styles.smallButtonText}>−</Text>
-        </Pressable>
-        <Text style={styles.timeValue}>
-          {time.minutesOfDay === null ? 'now' : minutesOfDayLabel(time.minutesOfDay)}
-        </Text>
-        <Pressable style={styles.smallButton} onPress={() => nudge(5)}>
-          <Text style={styles.smallButtonText}>+</Text>
+        <Pressable
+          style={[styles.smallButton, styles.timeButton]}
+          onPress={pickTime}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} time`}
+          testID={`commute-time-${direction}`}
+        >
+          <Text style={styles.timeValue}>
+            {time.minutesOfDay === null ? 'Choose time' : minutesOfDayLabel(time.minutesOfDay)}
+          </Text>
         </Pressable>
         {time.minutesOfDay !== null ? (
           <Pressable style={styles.smallButton} onPress={() => editor.setTime(direction, null)}>
@@ -208,12 +222,31 @@ export function CommuteEditorForm({
       <TimeField direction="inbound" label="Return" editor={editor} />
       <View style={styles.field}>
         <Text style={styles.fieldLabel}>Days</Text>
+        <View style={[styles.chipWrap, styles.presetRow]}>
+          {editor.dayPresets.map((preset) => (
+            <Pressable
+              key={preset.id}
+              style={[styles.preset, preset.on && styles.presetOn]}
+              onPress={() => editor.applyDayPreset(preset.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: preset.on }}
+              testID={`commute-days-${preset.id}`}
+            >
+              <Text style={[styles.presetText, preset.on && styles.presetTextOn]}>
+                {preset.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
         <View style={styles.chipWrap}>
           {editor.days.map((day) => (
             <Pressable
               key={day.day}
               style={[styles.chip, day.on && styles.chipOn]}
               onPress={() => editor.toggleDay(day.day)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: day.on }}
+              testID={`commute-day-${day.day}`}
             >
               <Text style={[styles.chipText, day.on && styles.chipTextOn]}>{day.label}</Text>
             </Pressable>
@@ -314,7 +347,18 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   smallButtonText: { color: theme.text, fontSize: 11, fontWeight: '700' },
-  timeValue: { color: theme.text, fontSize: 14, fontWeight: '800', minWidth: 46 },
+  timeButton: { minWidth: 96, alignItems: 'center' },
+  timeValue: { color: theme.text, fontSize: 13, fontWeight: '800' },
+  presetRow: { marginBottom: 6 },
+  preset: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: theme.surface,
+  },
+  presetOn: { backgroundColor: theme.accentFaint },
+  presetText: { color: theme.textMuted, fontSize: 11, fontWeight: '700' },
+  presetTextOn: { color: theme.accent },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   chip: {
     paddingHorizontal: 10,

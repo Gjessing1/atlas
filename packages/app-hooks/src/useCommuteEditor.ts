@@ -57,6 +57,8 @@ export interface CommuteLineGroup {
   lines: CommuteLineOption[];
 }
 
+export type CommuteDayPreset = 'weekdays' | 'every-day';
+
 /** Fetch every line calling at a stop — the platform seam for the picker. */
 export type StopLinesFn = (stopId: string, signal: AbortSignal) => Promise<TransitStopLines>;
 
@@ -115,6 +117,8 @@ export interface CommuteEditor {
   setTime: (direction: TransitCommuteDirection, minutesOfDay: number | null) => void;
   setArriveBy: (direction: TransitCommuteDirection, arriveBy: boolean) => void;
   timeLabel: (direction: TransitCommuteDirection) => string;
+  dayPresets: { id: CommuteDayPreset; label: string; on: boolean }[];
+  applyDayPreset: (preset: CommuteDayPreset) => void;
   days: { day: TransitWeekday; label: string; on: boolean }[];
   toggleDay: (day: TransitWeekday) => void;
 
@@ -134,6 +138,8 @@ const WEEKDAY_LABEL: Record<TransitWeekday, string> = {
   6: 'Sat',
   7: 'Sun',
 };
+
+const WORKDAYS: TransitWeekday[] = [1, 2, 3, 4, 5];
 
 const FIELD_LABEL: Record<CommuteEndKey, string> = { from: 'From', via: 'Via', to: 'To' };
 
@@ -512,6 +518,29 @@ export function useCommuteEditor({
     [config.days],
   );
 
+  const dayPresets = useMemo(
+    () => [
+      {
+        id: 'weekdays' as const,
+        label: 'Weekdays',
+        on:
+          config.days.length === WORKDAYS.length &&
+          WORKDAYS.every((day) => config.days.includes(day)),
+      },
+      {
+        id: 'every-day' as const,
+        label: 'Every day',
+        on: config.days.length === 0,
+      },
+    ],
+    [config.days],
+  );
+
+  const applyDayPreset = useCallback(
+    (preset: CommuteDayPreset) => patch({ days: preset === 'weekdays' ? [...WORKDAYS] : [] }),
+    [patch],
+  );
+
   const toggleDay = useCallback(
     (day: TransitWeekday) => {
       const current =
@@ -559,6 +588,8 @@ export function useCommuteEditor({
     setTime,
     setArriveBy,
     timeLabel,
+    dayPresets,
+    applyDayPreset,
     days,
     toggleDay,
     missing,

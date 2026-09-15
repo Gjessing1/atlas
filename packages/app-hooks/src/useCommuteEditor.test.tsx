@@ -290,6 +290,32 @@ describe('when', () => {
     act(() => view.result.current.toggleDay(7));
     expect(saved[0]!.days).toEqual([1, 2, 3, 4, 5, 6]);
   });
+
+  it('applies weekday and every-day presets without hiding custom days', () => {
+    const { view, saved } = harness({
+      config: { ...EMPTY_COMMUTE_CONFIG, days: [2, 4] },
+    });
+    expect(view.result.current.dayPresets.map((preset) => preset.on)).toEqual([false, false]);
+
+    act(() => view.result.current.applyDayPreset('weekdays'));
+    expect(saved[0]!.days).toEqual([1, 2, 3, 4, 5]);
+
+    act(() => view.result.current.applyDayPreset('every-day'));
+    expect(saved[1]!.days).toEqual([]);
+  });
+
+  it('marks the preset represented by the compact saved value', () => {
+    const everyDay = harness();
+    expect(everyDay.view.result.current.dayPresets).toMatchObject([
+      { id: 'weekdays', on: false },
+      { id: 'every-day', on: true },
+    ]);
+    const weekdays = harness({ config: { ...EMPTY_COMMUTE_CONFIG, days: [1, 2, 3, 4, 5] } });
+    expect(weekdays.view.result.current.dayPresets).toMatchObject([
+      { id: 'weekdays', on: true },
+      { id: 'every-day', on: false },
+    ]);
+  });
 });
 
 /**

@@ -6156,6 +6156,22 @@ button.transit-notice-summary {
   margin-top: 10px;
 }
 
+.commute-days {
+  display: grid;
+  gap: 6px;
+}
+
+.commute-day-presets,
+.commute-day-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.commute-day-presets button {
+  border-radius: 6px;
+}
+
 .commute-days button,
 .commute-modes button {
   padding: 5px 8px;
