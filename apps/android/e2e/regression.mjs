@@ -282,11 +282,6 @@ async function dismissKeyboard() {
 }
 
 async function replaceText(id, text, expectedText = text) {
-  const xml = await waitForId(id);
-  tapId(xml, id);
-  shell('input', 'keyevent', 'KEYCODE_MOVE_END');
-  shell('input', 'keyevent', ...Array.from({ length: 100 }, () => 'KEYCODE_DEL'));
-  await delay(300);
   // React-controlled TextInputs can lose the first part of one fast `adb input
   // text` event while JS is reconciling it. Key characters individually so the
   // value observed by the app is the value the scenario asked for.
@@ -301,28 +296,27 @@ async function replaceText(id, text, expectedText = text) {
       await delay(80);
     }
   };
-  await type();
   // The soft keyboard can keep what was typed as *composing* text: it stands in
   // the IME's suggestion strip while the field the app reads is still empty, so
-  // waiting longer never resolves it — and neither does retyping, which composes
-  // exactly the same way. This AVD runs `hw.keyboard = no`, so every typed field
-  // goes through that path; on 2026-08-30 "engelsrud" sat in the strip through
-  // both passes and the run died on a field showing its own hint.
-  //
-  // Closing the keyboard ends the input connection, and *that* is what commits.
-  // Deliberately not a trailing space: a space commits the IME's correction —
-  // the bold middle candidate — where finishing the input commits what was
-  // actually typed.
-  if (!holds(hierarchy())) await dismissKeyboard();
-  if (!holds(hierarchy())) {
+  // closing it is part of each attempt. Dismissing an IME may also drop the
+  // input connection altogether on a loaded emulator, so every retry re-taps
+  // and proves focus instead of assuming the previous connection survived.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const xml = await waitForId(id);
+    tapId(xml, id);
+    await waitFor(
+      `${id} to take focus`,
+      hierarchy,
+      (next) => /focused="true"/.test(nodeForId(next, id) ?? ''),
+      10_000,
+    );
     shell('input', 'keyevent', 'KEYCODE_MOVE_END');
     shell('input', 'keyevent', ...Array.from({ length: 100 }, () => 'KEYCODE_DEL'));
     await delay(300);
-    // The second pass types into a field with no keyboard in front of it, which
-    // is the more reliable of the two: with no IME view there is nothing to
-    // compose in.
     await type();
+    if (holds(hierarchy())) return;
     await dismissKeyboard();
+    if (holds(hierarchy())) return;
   }
   await waitFor(`${id} to contain ${expectedText}`, hierarchy, holds);
 }
