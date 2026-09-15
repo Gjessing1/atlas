@@ -54,6 +54,58 @@ export function tagQuery(tag: string): string {
   return `#${tag}`;
 }
 
+/**
+ * The user's existing tag vocabulary, shared by both item editors.
+ * Case-insensitive de-duplication prevents `Hike` and `hike` becoming two
+ * suggestions while preserving the spelling already stored in user data.
+ */
+export function collectionTagSuggestions(records: readonly FilterableRecord[]): string[] {
+  const tags = new Map<string, string>();
+  for (const record of records) {
+    for (const raw of record.tags ?? []) {
+      const tag = raw.trim();
+      const key = tag.toLocaleLowerCase();
+      if (tag && !tags.has(key)) tags.set(key, tag);
+    }
+  }
+  return [...tags.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * The tags in an editor's comma-separated field. A tag repeated in another
+ * case is kept once, in the spelling typed first — `Hike, hike` is one tag,
+ * exactly as the suggestions count it.
+ */
+export function parseTagList(text: string): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const raw of text.split(',')) {
+    const tag = raw.trim();
+    const key = tag.toLocaleLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/** Whether `tags` already carries `tag`, in any case. */
+export function includesTag(tags: readonly string[], tag: string): boolean {
+  const key = tag.toLocaleLowerCase();
+  return tags.some((candidate) => candidate.toLocaleLowerCase() === key);
+}
+
+/**
+ * A suggestion pill pressed: add the tag, or take it off when the record
+ * already has it. Removal ignores case because the pill shows the vocabulary's
+ * spelling, which need not be the one this record stored.
+ */
+export function toggleTag(tags: readonly string[], tag: string): string[] {
+  if (!includesTag(tags, tag)) return [...tags, tag];
+  const key = tag.toLocaleLowerCase();
+  return tags.filter((candidate) => candidate.toLocaleLowerCase() !== key);
+}
+
 const hasTag = (record: FilterableRecord, text: string): boolean =>
   (record.tags ?? []).some((tag) => tag.toLowerCase().includes(text));
 

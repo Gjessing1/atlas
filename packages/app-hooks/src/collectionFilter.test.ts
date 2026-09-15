@@ -1,11 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  collectionTagSuggestions,
   filterCollectionRecords,
+  includesTag,
   parseCollectionQuery,
+  parseTagList,
   recordMatchesQuery,
   tagQuery,
+  toggleTag,
 } from './collectionFilter.js';
+
+describe('collectionTagSuggestions', () => {
+  it('builds one sorted, reusable vocabulary across saved records', () => {
+    expect(
+      collectionTagSuggestions([
+        { name: 'One', tags: [' family ', 'Hike'] },
+        { name: 'Two', tags: ['hike', 'permit', ''] },
+      ]),
+    ).toEqual(['family', 'Hike', 'permit']);
+  });
+});
+
+describe('parseTagList', () => {
+  it('drops blanks and keeps a tag repeated in another case once', () => {
+    expect(parseTagList(' hike, Family ,, HIKE,family ')).toEqual(['hike', 'Family']);
+  });
+});
+
+describe('toggleTag', () => {
+  it('adds a missing tag after the ones already there', () => {
+    expect(toggleTag(['family'], 'Hike')).toEqual(['family', 'Hike']);
+  });
+
+  it('takes off a tag the record stored in a different case from the pill', () => {
+    expect(includesTag(['hike'], 'HIKE')).toBe(true);
+    expect(toggleTag(['hike', 'family'], 'Hike')).toEqual(['family']);
+  });
+});
 
 const folder = (id: string, name: string, parentId: string | null = null) => ({
   id,

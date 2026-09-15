@@ -6,6 +6,8 @@ import { ItemEditor, type ItemPatch } from '../sidebar/ItemEditor.js';
 interface PlaceEditDialogProps {
   place: PlaceRecord;
   collections: CollectionRecord[];
+  /** Tags already in use anywhere in the collection, offered as pills. */
+  tagSuggestions: readonly string[];
   onPatch: (patch: ItemPatch) => void;
   onDelete: () => void;
   /** Show this place in the Collections tree, in its folder, instead. */
@@ -30,6 +32,7 @@ interface PlaceEditDialogProps {
 export function PlaceEditDialog({
   place,
   collections,
+  tagSuggestions,
   onPatch,
   onDelete,
   onShowInCollections,
@@ -83,6 +86,7 @@ export function PlaceEditDialog({
               tags={place.tags}
               collectionId={place.collectionId}
               collections={collections}
+              tagSuggestions={tagSuggestions}
               style={{ icon: place.icon, color: place.color }}
               onPatch={onPatch}
               onDelete={() =>

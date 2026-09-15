@@ -1,5 +1,6 @@
 import {
   ancestorFolderIds,
+  collectionTagSuggestions,
   filterCollectionRecords,
   promoteParentId,
   tagQuery,
@@ -184,6 +185,12 @@ export function Sidebar({
         filter,
       ),
     [data.collections, data.places, data.tracks, filter],
+  );
+  // The whole vocabulary, not the filtered one: a filter narrows what is on
+  // screen, never which tags an editor may offer.
+  const tagSuggestions = useMemo(
+    () => collectionTagSuggestions([...data.places, ...data.tracks]),
+    [data.places, data.tracks],
   );
   // The shared tree derivation: one orphan policy for both apps (a folder whose
   // parent is gone shows at the root instead of vanishing with its subtree).
@@ -397,6 +404,7 @@ export function Sidebar({
             tags={place.tags}
             collectionId={place.collectionId}
             collections={data.collections}
+            tagSuggestions={tagSuggestions}
             style={{ icon: place.icon, color: place.color }}
             onPatch={(patch) => void data.updatePlace(place.id, patch)}
             onDelete={() =>
@@ -455,6 +463,7 @@ export function Sidebar({
             tags={track.tags}
             collectionId={track.collectionId}
             collections={data.collections}
+            tagSuggestions={tagSuggestions}
             onPatch={(patch) => void data.updateTrack(track.id, patch)}
             onDelete={() =>
               setConfirm({

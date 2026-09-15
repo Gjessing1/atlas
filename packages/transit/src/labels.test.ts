@@ -8,6 +8,7 @@ import {
   co2Label,
   delayLabel,
   DELAY_THRESHOLD_MS,
+  departureBoardLiveLabel,
   legStopsLabel,
   legTimeParts,
   quayLabel,
@@ -24,6 +25,20 @@ import type { TransitLeg, TransitMode, TransitPlace, TransitTrip } from './model
 // that renders it (see the note at the top of labels.ts). Under a UTC test
 // runner a `new Date(...)` fixture read back two hours out.
 const at = (h: number, m: number) => norwayInstant(2026, 6, 21, h * 60 + m);
+
+describe('departureBoardLiveLabel', () => {
+  it('does not call an in-flight request an offline connection', () => {
+    expect(departureBoardLiveLabel(null, true, false)).toBe('Connecting to live timetable…');
+  });
+
+  it('states a successful live check without warning that a connection is needed', () => {
+    expect(departureBoardLiveLabel(at(8, 5), false, false)).toBe('Live timetable, checked 08:05.');
+  });
+
+  it('leaves the specific failure reason to the board error', () => {
+    expect(departureBoardLiveLabel(null, false, true)).toBe('Live timetable unavailable.');
+  });
+});
 
 const place = (name: string, quay?: string): TransitPlace => ({
   name,

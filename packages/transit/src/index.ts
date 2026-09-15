@@ -57,6 +57,7 @@ export {
   clockDelayLabel,
   co2Label,
   delayLabel,
+  departureBoardLiveLabel,
   expectedTimeLabel,
   legStopsLabel,
   legTimeParts,

@@ -1,5 +1,6 @@
 import {
   collectionDropZone,
+  collectionTagSuggestions,
   filterCollectionRecords,
   importedCount,
   promoteParentId,
@@ -49,6 +50,8 @@ export function PlaceEditSheet({
   visible,
   place,
   collections,
+  places,
+  tracks,
   onPatch,
   onDelete,
   onClose,
@@ -57,12 +60,19 @@ export function PlaceEditSheet({
   visible: boolean;
   place: PlaceRecord | null;
   collections: CollectionRecord[];
+  /** Every saved place and track: the editor's tag suggestions come from all of them. */
+  places: PlaceRecord[];
+  tracks: TrackRecord[];
   onPatch: (id: string, patch: EditablePlacePatch) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
   bottomInset?: number;
 }) {
   const folders = useMemo(() => flattenFolders(collections), [collections]);
+  const tagSuggestions = useMemo(
+    () => collectionTagSuggestions([...places, ...tracks]),
+    [places, tracks],
+  );
   if (!place) return null;
   return (
     <BottomSheet
@@ -91,6 +101,7 @@ export function PlaceEditSheet({
           notes={place.notes}
           tags={place.tags}
           folders={folders}
+          tagSuggestions={tagSuggestions}
           onSave={(patch) => onPatch(place.id, patch)}
           onDelete={() => onDelete(place.id)}
           onClose={onClose}
@@ -447,6 +458,10 @@ export function FavoritesSheet({
   const [newFolder, setNewFolder] = useState('');
   // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
+  // The folder whose name is open for editing. Otherwise a name is plain text:
+  // a single-line field that is always live scrolls to its caret at the end, so
+  // a long name showed only its tail and a narrow nested row could show nothing.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   // Folders whose contents are showing (the ▾/▸ chevron toggles them). Empty by
   // default: on a phone, expanding everything at once buries the folder list
   // itself under its contents. Kept in memory only — which folders are open is a
@@ -508,6 +523,11 @@ export function FavoritesSheet({
   // Pickers (move-to-folder, import destination) offer *every* folder: a filter
   // narrows what you are looking at, never where you are allowed to put things.
   const flatFolders = useMemo(() => flattenFolders(collections), [collections]);
+  // Tag pills offer the whole vocabulary for the same reason.
+  const tagSuggestions = useMemo(
+    () => collectionTagSuggestions([...places, ...tracks]),
+    [places, tracks],
+  );
 
   // While a filter is up every folder left standing is part of the answer, so
   // it opens: the point is to see the matches, not which folders they are in.
@@ -636,6 +656,7 @@ export function FavoritesSheet({
             notes={place.notes}
             tags={place.tags}
             folders={flatFolders}
+            tagSuggestions={tagSuggestions}
             onSave={(patch) => onPatch(place.id, patch)}
             onDelete={() => onDelete(place.id)}
             onClose={() => setEditingKey(null)}
@@ -699,6 +720,7 @@ export function FavoritesSheet({
             notes={track.notes}
             tags={track.tags}
             folders={flatFolders}
+            tagSuggestions={tagSuggestions}
             actions={
               <>
                 <Pressable
@@ -808,16 +830,35 @@ export function FavoritesSheet({
                 >
                   <Text style={styles.folderIcon}>{isOpen(folder.id) ? '📂' : '📁'}</Text>
                 </Pressable>
-                <TextInput
-                  style={styles.folderName}
-                  defaultValue={folder.name}
-                  onEndEditing={(e) => {
-                    const value = e.nativeEvent.text.trim();
-                    if (value && value !== folder.name) onRenameFolder(folder.id, value);
-                  }}
-                  returnKeyType="done"
-                  testID={`folder-name-${folder.id}`}
-                />
+                {renamingFolder === folder.id ? (
+                  <TextInput
+                    style={styles.folderName}
+                    defaultValue={folder.name}
+                    autoFocus
+                    selectTextOnFocus
+                    onEndEditing={(e) => {
+                      const value = e.nativeEvent.text.trim();
+                      if (value && value !== folder.name) onRenameFolder(folder.id, value);
+                      // Only this row's own edit ends it: tapping another name
+                      // blurs this field after that row has already opened.
+                      setRenamingFolder((current) => (current === folder.id ? null : current));
+                    }}
+                    returnKeyType="done"
+                    accessibilityLabel={`Rename ${folder.name}`}
+                    testID={`folder-rename-${folder.id}`}
+                  />
+                ) : (
+                  <Pressable
+                    style={styles.folderNameButton}
+                    onPress={() => setRenamingFolder(folder.id)}
+                    accessibilityHint="Rename folder"
+                    testID={`folder-name-${folder.id}`}
+                  >
+                    <Text style={styles.folderNameText} numberOfLines={1}>
+                      {folder.name}
+                    </Text>
+                  </Pressable>
+                )}
                 <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
                 {folder.parentId !== null ? (
                   <Pressable
@@ -1090,6 +1131,8 @@ const styles = StyleSheet.create({
     color: theme.text,
     paddingVertical: 4,
   },
+  folderNameButton: { flexGrow: 1, flexShrink: 1, paddingVertical: 4 },
+  folderNameText: { fontSize: 16, color: theme.text },
   newFolderInput: {
     borderWidth: 1,
     borderColor: theme.border,

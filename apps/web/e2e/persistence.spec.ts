@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { waitForMap } from './helpers';
+import { closePlaceEditor, waitForMap } from './helpers';
 
 // OPFS storage is per-browser-context and single-tab (exclusive SAH-pool file
 // handles), so these journeys share one context. The last two tests
@@ -17,9 +17,8 @@ async function saveCentrePin(page: Page): Promise<void> {
   // The pin is named by its coordinates, so the editor opens on it to be named.
   // These journeys are about what survives a reload, so keep that default name
   // and close the dialog.
-  await expect(page.locator('.place-edit-dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: '★ Edit' })).toBeVisible();
+  await closePlaceEditor(page);
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
 }
 
 test('a saved pin survives closing the tab and reopening', async ({ page, context }) => {

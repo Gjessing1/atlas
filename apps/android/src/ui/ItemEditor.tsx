@@ -1,3 +1,4 @@
+import { includesTag, parseTagList, toggleTag } from '@atlas/app-hooks';
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord } from '@atlas/storage';
 import { useState, type ReactNode } from 'react';
@@ -50,6 +51,7 @@ export function ItemEditor({
   notes,
   tags,
   folders,
+  tagSuggestions = [],
   actions,
   onSave,
   onDelete,
@@ -71,6 +73,11 @@ export function ItemEditor({
   notes: string;
   tags: string[];
   folders: { folder: CollectionRecord; depth: number }[];
+  /**
+   * Every tag already in use across saved places and tracks, offered as pills
+   * so filing into a group is a tap instead of retyping its exact spelling.
+   */
+  tagSuggestions?: readonly string[];
   /** Extra actions rendered beside Delete (e.g. a track's GPX/KML export). */
   actions?: ReactNode;
   onSave: (patch: ItemPatch) => void;
@@ -86,6 +93,7 @@ export function ItemEditor({
   const [notesValue, setNotesValue] = useState(notes);
   const [tagsValue, setTagsValue] = useState(tags.join(', '));
   const Noun = noun[0]!.toUpperCase() + noun.slice(1);
+  const typedTags = parseTagList(tagsValue);
 
   const save = () => {
     const trimmedName = nameValue.trim();
@@ -99,10 +107,7 @@ export function ItemEditor({
       ...(style ? { icon, color } : {}),
       collectionId: folderId,
       notes: notesValue,
-      tags: tagsValue
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean),
+      tags: typedTags,
     });
     onClose();
   };
@@ -213,6 +218,25 @@ export function ItemEditor({
           testID={`${testPrefix}-tags-${id}`}
         />
       </View>
+      {tagSuggestions.length > 0 ? (
+        <View style={styles.choiceRow}>
+          {tagSuggestions.map((tag) => {
+            const on = includesTag(typedTags, tag);
+            return (
+              <Pressable
+                key={tag}
+                style={[styles.folderChip, on && styles.folderChipSelected]}
+                onPress={() => setTagsValue(toggleTag(typedTags, tag).join(', '))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                testID={`${testPrefix}-tag-${id}-${tag}`}
+              >
+                <Text style={styles.folderChipText}>{tag}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
       <View style={styles.editorActions}>
         <Pressable
           style={[styles.button, !nameValue.trim() && styles.buttonDisabled]}

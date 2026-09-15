@@ -208,10 +208,14 @@ export {
   type TreeItem,
 } from './useCollectionTree.js';
 export {
+  collectionTagSuggestions,
   filterCollectionRecords,
+  includesTag,
   parseCollectionQuery,
+  parseTagList,
   recordMatchesQuery,
   tagQuery,
+  toggleTag,
   type CollectionFilterInput,
   type CollectionFilterResult,
   type CollectionQuery,

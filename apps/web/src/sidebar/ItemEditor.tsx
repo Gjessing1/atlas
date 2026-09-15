@@ -1,5 +1,7 @@
+import { includesTag, parseTagList, toggleTag } from '@atlas/app-hooks';
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord } from '@atlas/storage';
+import { useState } from 'react';
 
 /** The fields the editor can change; every key is optional and auto-saved. */
 export interface ItemPatch {
@@ -26,6 +28,11 @@ interface EditorProps {
   style?: { icon: string; color: string };
   /** Extra actions rendered beside Delete (e.g. track downloads). */
   actions?: React.ReactNode;
+  /**
+   * Every tag already in use across saved places and tracks, offered as pills
+   * so filing into a group is a tap instead of retyping its exact spelling.
+   */
+  tagSuggestions?: readonly string[];
 }
 
 /** Inline detail editor shared by places and tracks; every change auto-saves. */
@@ -40,7 +47,15 @@ export function ItemEditor({
   onDelete,
   style,
   actions,
+  tagSuggestions = [],
 }: EditorProps) {
+  const [tagText, setTagText] = useState(tags.join(', '));
+  const typedTags = parseTagList(tagText);
+  // Auto-saved like every other field, but only when the list really changed:
+  // blur fires on every tab through the editor.
+  const commitTags = (next: string[]) => {
+    if (next.join('\n') !== tags.join('\n')) onPatch({ tags: next });
+  };
   return (
     <div className="item-editor">
       {style && (
@@ -113,17 +128,34 @@ export function ItemEditor({
       <label>
         Tags
         <input
-          defaultValue={tags.join(', ')}
+          value={tagText}
           placeholder="hike, family, todo"
-          onBlur={(e) => {
-            const next = e.target.value
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean);
-            if (next.join('\n') !== tags.join('\n')) onPatch({ tags: next });
-          }}
+          onChange={(e) => setTagText(e.target.value)}
+          onBlur={() => commitTags(typedTags)}
         />
       </label>
+      {tagSuggestions.length > 0 && (
+        <div className="tag-suggestions">
+          {tagSuggestions.map((tag) => {
+            const on = includesTag(typedTags, tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                className={`tag-pill${on ? ' selected' : ''}`}
+                aria-pressed={on}
+                onClick={() => {
+                  const next = toggleTag(typedTags, tag);
+                  setTagText(next.join(', '));
+                  commitTags(next);
+                }}
+              >
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <label>
         Notes
         <textarea

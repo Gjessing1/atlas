@@ -1052,6 +1052,9 @@ button {
 }
 
 .place-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1525,6 +1528,34 @@ button {
 
 .tag-chip:hover {
   border-color: var(--accent);
+  color: var(--text);
+}
+
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-pill {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tag-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.tag-pill.selected {
+  border-color: var(--accent);
+  background: var(--surface-selected);
   color: var(--text);
 }
 

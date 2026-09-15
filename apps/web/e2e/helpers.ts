@@ -198,3 +198,22 @@ export async function startNavigationFromCard(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Directions' }).click();
   await page.getByRole('button', { name: 'Start navigation' }).click();
 }
+
+/**
+ * Dismiss the place editor that saving a coordinate-named pin opens. Escape is
+ * sent only once focus is inside the dialog: it is visible a frame before its
+ * effects attach the Escape listener — in the same pass that focuses the Name
+ * field — and a key sent in that gap is lost, leaving the dialog's backdrop
+ * over the page to swallow every later click.
+ */
+export async function closePlaceEditor(page: Page): Promise<void> {
+  const dialog = page.locator('.place-edit-dialog');
+  await dialog.waitFor({ timeout: 10_000 });
+  await page.waitForFunction(
+    () => Boolean(document.activeElement?.closest('.place-edit-dialog')),
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 10_000 });
+}

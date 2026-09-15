@@ -41,6 +41,9 @@ test('a place card opens a live next-hour departure board', async ({ page }) => 
   await expect(board).toContainText('Asker stasjon');
   await expect(board).toContainText('R14');
   await expect(board).toContainText('Kongsvinger');
+  await expect(board).toContainText(/Live timetable, checked \d\d:\d\d\./);
+  await expect(board).not.toContainText('needs a connection');
+  await expect(page.getByRole('button', { name: 'Departures' }).locator('svg')).toBeVisible();
   expect(requested?.searchParams.get('lat')).toBe('59.8337');
   expect(requested?.searchParams.get('lon')).toBe('10.4348');
 });

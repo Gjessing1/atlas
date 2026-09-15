@@ -25,6 +25,7 @@ import {
   type VisibilityFolder,
 } from '@atlas/core';
 import {
+  collectionTagSuggestions,
   useMapProfile,
   useMapProfilePreferences,
   useMapStyleEditor,
@@ -930,6 +931,10 @@ export function App() {
     () => (editPlaceId ? (userData.places.find((p) => p.id === editPlaceId) ?? null) : null),
     [editPlaceId, userData.places],
   );
+  const tagSuggestions = useMemo(
+    () => collectionTagSuggestions([...userData.places, ...userData.tracks]),
+    [userData.places, userData.tracks],
+  );
 
   const onSaveTarget = useCallback(() => {
     if (!target) return;
@@ -949,7 +954,7 @@ export function App() {
     }).then((place) => {
       if (place && needsName) setEditPlaceId(place.id);
     });
-    // No sidebar pop-open: the button flipping to "★ Edit" is the confirmation,
+    // No sidebar pop-open: the button flipping to "Edit" is the confirmation,
     // and the sidebar would slide in over the card the user is still reading.
   }, [target, savePlace]);
 
@@ -1419,6 +1424,7 @@ export function App() {
         <PlaceEditDialog
           place={editPlace}
           collections={userData.collections}
+          tagSuggestions={tagSuggestions}
           onPatch={(patch) => void userData.updatePlace(editPlace.id, patch)}
           onDelete={() => void userData.deletePlace(editPlace.id)}
           onShowInCollections={() => {

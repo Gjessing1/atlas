@@ -296,6 +296,26 @@ export function liveTimetableLabel(checkedMs: number | null): string {
 }
 
 /**
+ * Connection state for the small departure board in a place card.
+ *
+ * Unlike a saved commute, this board has no stale timetable to explain before
+ * its first request completes. Calling that initial loading state "needs a
+ * connection" made a healthy, online device look offline. The request error
+ * already carries the useful failure reason; this line only says whether the
+ * live board is connecting, current, or unavailable.
+ */
+export function departureBoardLiveLabel(
+  checkedMs: number | null,
+  loading: boolean,
+  failed: boolean,
+): string {
+  if (loading) return 'Connecting to live timetable…';
+  if (checkedMs !== null) return `Live timetable, checked ${norwayClock(checkedMs)}.`;
+  if (failed) return 'Live timetable unavailable.';
+  return 'Live timetable.';
+}
+
+/**
  * Per-passenger CO₂ as a traveller can hold it: grams below a kilo, one
  * decimal of a kilo above. Null when the planner had no figure — an unknown
  * emission is silence, not a zero, because the number's whole job is to make

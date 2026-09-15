@@ -1,9 +1,9 @@
 import { useTransitDepartures, type TransitDeparturesFn } from '@atlas/app-hooks';
 import { fmtDistanceM } from '@atlas/core';
 import {
+  departureBoardLiveLabel,
   fetchTransitDepartures,
   legTimeParts,
-  liveTimetableLabel,
   TRANSIT_MODE_LABEL,
   type TransitLocation,
 } from '@atlas/transit';
@@ -87,7 +87,9 @@ export function StopDepartures({ location }: { location: TransitLocation }) {
           })}
         </ol>
       )}
-      <p className="stop-departures-live">Entur · {liveTimetableLabel(state.updatedMs)}</p>
+      <p className="stop-departures-live">
+        Entur · {departureBoardLiveLabel(state.updatedMs, state.loading, state.error !== null)}
+      </p>
     </section>
   );
 }

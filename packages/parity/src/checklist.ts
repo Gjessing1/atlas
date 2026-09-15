@@ -239,8 +239,8 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'card-edit-saved',
     surface: 'card',
     capability: 'Edit the saved place behind the spot straight from its card',
-    web: { file: 'apps/web/src/place/PlaceCard.tsx', contains: '★ Edit' },
-    android: { file: 'apps/android/src/ui/DestinationCard.tsx', contains: '★ Edit' },
+    web: { file: 'apps/web/src/place/PlaceCard.tsx', contains: 'onEdit(saved)' },
+    android: { file: 'apps/android/src/ui/DestinationCard.tsx', contains: 'once(onEdit)' },
   },
   {
     id: 'card-weather',
@@ -329,6 +329,15 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     capability: 'Give a place its own icon and colour',
     web: { file: 'apps/web/src/sidebar/ItemEditor.tsx', contains: 'PLACE_ICONS' },
     android: { file: 'apps/android/src/ui/ItemEditor.tsx', contains: 'PLACE_ICONS' },
+  },
+  {
+    id: 'collections-tag-suggestions',
+    surface: 'collections',
+    capability: 'Reuse a tag already in use from a pill instead of retyping it',
+    hook: 'collectionTagSuggestions',
+    web: { file: 'apps/web/src/sidebar/ItemEditor.tsx', contains: 'toggleTag' },
+    android: { file: 'apps/android/src/ui/ItemEditor.tsx', contains: 'toggleTag' },
+    note: 'Web applies a pressed pill at once, like every other web editor field; Android folds it into the editor’s explicit Save.',
   },
   {
     id: 'collections-delete-with-undo',

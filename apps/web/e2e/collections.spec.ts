@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { waitForMap } from './helpers';
+import { closePlaceEditor, waitForMap } from './helpers';
 
 test('a saved place can be hidden from and restored to the map', async ({ page }) => {
   await page.goto('/');
@@ -14,9 +14,8 @@ test('a saved place can be hidden from and restored to the map', async ({ page }
   await card.getByRole('button', { name: 'Save', exact: true }).click();
   // Saving a coordinate-named pin opens its editor to be named; this journey is
   // about visibility, so close it and keep the coordinates as the name.
-  await expect(page.locator('.place-edit-dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(card.getByRole('button', { name: '★ Edit' })).toBeVisible();
+  await closePlaceEditor(page);
+  await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
   await card.getByRole('button', { name: 'Remove pin' }).click();
   await expect(page.locator('.place-marker')).toHaveCount(1);
 
@@ -191,6 +190,44 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   await expect(filter).toHaveValue('#stand');
   await expect(page.locator('.item-name')).toHaveText(['Elgpost nord']);
   await expect(page.locator('.folder-name')).toHaveCount(0);
+});
+
+test('a tag already in use is offered as a pill in another place’s editor', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  const dialog = page.locator('.place-edit-dialog');
+  const savePin = async (dx: number, name: string) => {
+    await page.mouse.click(canvas.x + canvas.width / 2 + dx, canvas.y + canvas.height / 2, {
+      button: 'right',
+    });
+    await page.locator('.place-card').getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Name').fill(name);
+    await page.keyboard.press('Tab');
+  };
+
+  // The first place writes the vocabulary by hand…
+  await savePin(0, 'Elgpost nord');
+  await dialog.getByLabel('Tags').fill('Stand, family');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  // …and the second files into it with a tap, in the spelling already stored.
+  await savePin(160, 'Elgpost sør');
+  const pill = dialog.getByRole('button', { name: 'Stand', exact: true });
+  await expect(pill).toHaveAttribute('aria-pressed', 'false');
+  await pill.click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.getByLabel('Tags')).toHaveValue('Stand');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByLabel('Filter collections').fill('#stand');
+  await expect(page.locator('.item-name')).toHaveCount(2);
+  await expect(page.locator('.item-name', { hasText: 'Elgpost sør' })).toBeVisible();
 });
 
 test('only one panel is open at a time', async ({ page }) => {

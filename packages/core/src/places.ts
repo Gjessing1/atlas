@@ -58,6 +58,22 @@ export const PLACE_ICONS = [
   '⛪',
   '📷',
   '🔧',
+  '🥾',
+  '🧗',
+  '🛖',
+  '🛏️',
+  '🔥',
+  '💧',
+  '🌊',
+  '🐕',
+  '🐎',
+  '🚗',
+  '🚌',
+  '🚤',
+  '🦆',
+  '🐾',
+  '🛝',
+  '💊',
 ] as const;
 
 /** Defaults for a freshly saved place (also the storage column defaults). */

@@ -25,7 +25,8 @@ import { copyToClipboard } from './clipboard';
 import { PotentialExplainCard } from './PotentialExplainCard';
 import { StandBlock } from './StandBlock';
 import { StopDepartures } from './StopDepartures';
-import { WeatherIcon } from './icons';
+import { PencilIcon, WeatherIcon } from './icons';
+import { BusIcon, DirectionsIcon, ShareIcon } from './modeIcons';
 import { theme } from './theme';
 
 /**
@@ -512,6 +513,7 @@ export function DestinationCard({
           onPress={once(onDirections)}
           testID="destination-navigate"
         >
+          <DirectionsIcon color={theme.onAccent} size={19} />
           <Text style={styles.navigateText}>Directions</Text>
         </Pressable>
         {target.canSave && onSave ? (
@@ -529,9 +531,8 @@ export function DestinationCard({
             onPress={once(onEdit)}
             testID="destination-edit"
           >
-            {/* The star says "already saved" — the same word and mark the web
-                card uses once a spot has a place behind it. */}
-            <Text style={styles.saveText}>★ Edit</Text>
+            <PencilIcon />
+            <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -552,6 +553,7 @@ export function DestinationCard({
             accessibilityState={{ expanded: departuresOpen }}
             testID="destination-departures"
           >
+            <BusIcon size={19} />
             <Text style={styles.saveText}>Departures</Text>
           </Pressable>
         ) : null}
@@ -560,6 +562,7 @@ export function DestinationCard({
           onPress={onShare}
           testID="destination-share"
         >
+          <ShareIcon />
           <Text style={styles.saveText}>Share</Text>
         </Pressable>
       </View>
@@ -660,23 +663,24 @@ const styles = StyleSheet.create({
   articleText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   navigate: {
-    flexGrow: 1,
-    flexBasis: '100%',
+    flexDirection: 'row',
+    gap: 7,
     backgroundColor: theme.accent,
     borderRadius: 10,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
-  navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 15 },
+  navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 14 },
   save: {
     flexDirection: 'row',
     gap: 7,
     backgroundColor: theme.surfaceMuted,
     borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
-  saveText: { color: theme.text, fontWeight: '700', fontSize: 15 },
+  saveText: { color: theme.text, fontWeight: '700', fontSize: 14 },
   pressed: { opacity: 0.65 },
 });

@@ -19,6 +19,7 @@ import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useRef, useState } from 'react';
+import { PencilIcon, RouteIcon, ShareIcon, SunIcon, TrainIcon } from '../icons.js';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
 import { StandBlock } from './StandBlock.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
@@ -412,7 +413,7 @@ export function PlaceCard({
   const subtitle = placeTargetSubtitle(target, userAt);
   // A pin the user saved and named keeps showing its coordinates otherwise: the
   // target is a bare coordinate and knows nothing of the place now standing on
-  // it. The card already claims that spot *is* that place — it offers ★ Edit for
+  // it. The card already claims that spot *is* that place — it offers Edit for
   // it — so it should call it by the name the user gave it.
   const title = target.name?.trim() || saved?.name || coords;
   // A bare pin already shows its coordinates as the heading; don't repeat them.
@@ -495,6 +496,7 @@ export function PlaceCard({
       />
       <div className="place-card-actions">
         <button type="button" className="primary" onClick={onDirections}>
+          <RouteIcon size={17} />
           Directions
         </button>
         {routeActive && (
@@ -506,7 +508,8 @@ export function PlaceCard({
             it, filing it, adding a note — not being shown that it exists. */}
         {saved ? (
           <button type="button" onClick={() => onEdit(saved)}>
-            ★ Edit
+            <PencilIcon size={17} />
+            Edit
           </button>
         ) : (
           <button
@@ -519,6 +522,7 @@ export function PlaceCard({
           </button>
         )}
         <button type="button" onClick={onWeather}>
+          <SunIcon size={17} />
           Weather
         </button>
         {transitCoversPoint(target.position) && (
@@ -527,6 +531,7 @@ export function PlaceCard({
             aria-expanded={departuresOpen}
             onClick={() => setDeparturesOpen((open) => !open)}
           >
+            <TrainIcon size={17} />
             Departures
           </button>
         )}
@@ -535,6 +540,7 @@ export function PlaceCard({
           aria-expanded={shareOpen}
           onClick={() => setShareOpen((open) => !open)}
         >
+          <ShareIcon size={17} />
           {copied ? 'Copied' : 'Share'}
         </button>
         {target.source === 'pin' && (

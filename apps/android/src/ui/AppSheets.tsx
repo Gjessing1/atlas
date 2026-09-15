@@ -166,6 +166,8 @@ export function AppSheets({
         visible={editPlaceId !== null}
         place={editPlace}
         collections={data.collections}
+        places={data.places}
+        tracks={data.tracks}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}
         onClose={onCloseEditPlace}

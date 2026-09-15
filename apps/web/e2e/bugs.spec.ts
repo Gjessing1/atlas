@@ -83,7 +83,7 @@ test('saving a search hit keeps its address on the card and in the editor', asyn
   await card.getByRole('button', { name: 'Save', exact: true }).click();
   // A search hit arrives with a name, so nothing opens by itself; the card's
   // own Edit action is the way into the editor for it.
-  await card.getByRole('button', { name: '★ Edit' }).click();
+  await card.getByRole('button', { name: 'Edit', exact: true }).click();
 
   await expect(page.locator('.place-edit-dialog')).toBeVisible();
   await expect(page.getByLabel('Address')).toHaveValue('Preikestolvegen 521, 4105 Jørpeland');
