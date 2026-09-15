@@ -6,10 +6,13 @@ import {
   COMMUTE_SETTING_KEY,
   commuteQueryFrom,
   EMPTY_COMMUTE_CONFIG,
+  EMPTY_COMMUTE_LIBRARY,
   isLegacyCommuteSetting,
   parseCommuteCommit,
   parseCommuteConfig,
+  parseCommuteLibrary,
   serializeCommuteConfig,
+  serializeCommuteLibrary,
   useCommute,
   type CommuteSettings,
 } from './useCommute.js';
@@ -109,9 +112,9 @@ describe('commute settings', () => {
     });
 
     it('is idempotent: the migrated value is not migrated again', () => {
-      const once = parseCommuteConfig(v1)!;
-      const written = serializeCommuteConfig(once);
-      expect(parseCommuteConfig(written)).toEqual(once);
+      const once = parseCommuteLibrary(v1)!;
+      const written = serializeCommuteLibrary(once);
+      expect(parseCommuteLibrary(written)).toEqual(once);
       expect(isLegacyCommuteSetting(v1)).toBe(true);
       expect(isLegacyCommuteSetting(written)).toBe(false);
     });
@@ -125,6 +128,18 @@ describe('commute settings', () => {
       expect(written).not.toHaveProperty('excludedRailStops');
       expect(written).not.toHaveProperty('fromId');
     });
+  });
+
+  it('round-trips several named commutes and keeps board and widget choices separate', () => {
+    const library = {
+      commutes: [
+        { id: 'work', name: 'Work', config: EMPTY_COMMUTE_CONFIG },
+        { id: 'cabin', name: 'Cabin', config: { ...EMPTY_COMMUTE_CONFIG, from: ENGELSRUD } },
+      ],
+      activeId: 'cabin',
+      widgetId: 'work',
+    };
+    expect(parseCommuteLibrary(serializeCommuteLibrary(library))).toEqual(library);
   });
 });
 
@@ -405,7 +420,10 @@ describe('useCommute', () => {
       );
       await waitFor(() => expect(result.current.ready).toBe(true));
       act(() => result.current.setCommit(commit));
-      expect(setSetting).toHaveBeenCalledWith(COMMUTE_COMMIT_SETTING_KEY, JSON.stringify(commit));
+      expect(setSetting).toHaveBeenCalledWith(
+        COMMUTE_COMMIT_SETTING_KEY,
+        JSON.stringify({ commuteId: 'commute', commit }),
+      );
       expect(COMMUTE_COMMIT_SETTING_KEY.startsWith('local.')).toBe(true);
     });
 
@@ -416,6 +434,98 @@ describe('useCommute', () => {
       expect(parseCommuteCommit('{"direction":"outbound","line":"280"}')).toBeNull();
       expect(parseCommuteCommit(JSON.stringify(commit))).toMatchObject(commit);
     });
+  });
+
+  it('switches named commutes without repointing the widget', async () => {
+    const setSetting = vi.fn();
+    const work = {
+      ...EMPTY_COMMUTE_CONFIG,
+      from: ENGELSRUD,
+      to: NATIONALTHEATRET,
+    };
+    const cabin = {
+      ...EMPTY_COMMUTE_CONFIG,
+      from: { ...ENGELSRUD, name: 'Cabin bus' },
+      to: { ...NATIONALTHEATRET, name: 'Trailhead' },
+    };
+    const stored = serializeCommuteLibrary({
+      commutes: [
+        { id: 'work', name: 'Work', config: work },
+        { id: 'cabin', name: 'Cabin', config: cabin },
+      ],
+      activeId: 'work',
+      widgetId: 'work',
+    });
+    const { result } = renderHook(() =>
+      useCommute(
+        settings(() => Promise.resolve(stored), setSetting),
+        [],
+        vi.fn(),
+        false,
+      ),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    act(() => result.current.selectCommute('cabin'));
+    expect(result.current.activeId).toBe('cabin');
+    expect(result.current.query?.from.name).toBe('Cabin bus');
+    expect(result.current.widgetCommuteId).toBe('work');
+    expect(result.current.widgetQuery?.from.name).toBe('Engelsrud');
+  });
+
+  it('adds, renames, assigns and safely deletes a commute', async () => {
+    const { result } = renderHook(() =>
+      useCommute(
+        settings(() => Promise.resolve(null)),
+        [],
+        vi.fn(),
+        false,
+      ),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    act(() => result.current.addCommute());
+    const addedId = result.current.activeId;
+    expect(addedId).not.toBe('commute');
+    expect(result.current.commutes).toHaveLength(2);
+    act(() => result.current.renameCommute(addedId, '  Cabin  '));
+    expect(result.current.commutes.find((item) => item.id === addedId)?.name).toBe('Cabin');
+    act(() => result.current.setWidgetCommute(addedId));
+    expect(result.current.widgetCommuteId).toBe(addedId);
+    act(() => result.current.deleteCommute(addedId));
+    expect(result.current.commutes).toHaveLength(1);
+    expect(result.current.activeId).toBe('commute');
+    expect(result.current.widgetCommuteId).toBe('commute');
+  });
+
+  it('marks saved-place use and stale copies across the library', async () => {
+    const stored = serializeCommuteLibrary({
+      ...EMPTY_COMMUTE_LIBRARY,
+      commutes: [
+        {
+          id: 'commute',
+          name: 'Work',
+          config: {
+            ...EMPTY_COMMUTE_CONFIG,
+            from: { name: 'Current', position: { lat: 59.9, lng: 10.7 }, placeId: 'e' },
+            to: { name: 'Deleted', position: { lat: 60, lng: 11 }, placeId: 'gone' },
+          },
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useCommute(
+        settings(() => Promise.resolve(stored)),
+        [saved('e', 'Current')],
+        vi.fn(),
+        false,
+      ),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.placeCommutes.get('e')).toEqual(['Work']);
+    expect(result.current.staleEnds).toEqual([
+      { commuteId: 'commute', commuteName: 'Work', end: 'to', placeId: 'gone' },
+    ]);
+    // The stale coordinate remains usable until the user reconnects it.
+    expect(result.current.query?.to.name).toBe('Deleted');
   });
 
   it('falls back to blaming the timetable when an older backend says nothing', async () => {

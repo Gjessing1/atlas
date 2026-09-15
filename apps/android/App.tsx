@@ -332,9 +332,23 @@ function AppInner() {
     // ("Atlas commute (live)", docs/TRANSIT.md §W1–§W7) coexist on the home screen while v2
     // is being commuted with, and each keeps its own native store — so each is
     // told separately rather than through one call with a flag.
-    void configureCommuteWidget(serverOrigin, commute.query);
-    void configureCommuteWidgetV2(serverOrigin, commute.query);
-  }, [commute.query, commute.ready, serverOrigin]);
+    void configureCommuteWidget(serverOrigin, commute.widgetQuery);
+    void configureCommuteWidgetV2(serverOrigin, commute.widgetQuery);
+  }, [commute.widgetQuery, commute.ready, serverOrigin]);
+  const widgetCommuteRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!commute.ready) return;
+    if (widgetCommuteRef.current === null) {
+      widgetCommuteRef.current = commute.widgetCommuteId;
+      return;
+    }
+    if (widgetCommuteRef.current === commute.widgetCommuteId) return;
+    widgetCommuteRef.current = commute.widgetCommuteId;
+    // A commitment identifies a journey inside the previous query. Carrying
+    // it across a deliberate widget-commute change could make the new board
+    // follow a similarly numbered service from the wrong corridor.
+    void setCommuteWidgetCommit(null);
+  }, [commute.ready, commute.widgetCommuteId]);
   // TRANSIT.md §7's last piece: the journey the board tracks is the journey the
   // widget tracks. Every *change* goes down, including a release, which clears
   // every instance.
@@ -349,12 +363,16 @@ function AppInner() {
   const pushedCommitRef = useRef(false);
   useEffect(() => {
     if (!commute.ready) return;
+    // Looking at another saved commute must not retarget or clear the widget's
+    // tracked journey. Only the commute explicitly marked for the home screen
+    // shares this decision with native widget instances.
+    if (commute.activeId !== commute.widgetCommuteId) return;
     if (!pushedCommitRef.current) {
       pushedCommitRef.current = true;
       return;
     }
     void setCommuteWidgetCommit(commute.commit);
-  }, [commute.commit, commute.ready]);
+  }, [commute.activeId, commute.commit, commute.ready, commute.widgetCommuteId]);
   // The other direction: a tap made on the *widget*, which happens on the home
   // screen with the app in the background or gone. Read on every return to the
   // foreground — not when the board opens, because Atlas comes back from the
@@ -371,6 +389,7 @@ function AppInner() {
   const setCommuteCommit = commute.setCommit;
   useEffect(() => {
     if (!commute.ready) return;
+    if (commute.activeId !== commute.widgetCommuteId) return;
     let current = true;
     const adopt = () => {
       void readCommuteWidgetCommit().then((pinned) => {
@@ -387,7 +406,7 @@ function AppInner() {
       current = false;
       subscription.remove();
     };
-  }, [commute.ready, setCommuteCommit]);
+  }, [commute.activeId, commute.ready, commute.widgetCommuteId, setCommuteCommit]);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
   const measure = useMeasure();
@@ -1831,6 +1850,7 @@ function AppInner() {
 
           <AppSheets
             data={data}
+            placeCommutes={commute.placeCommutes}
             sync={sync}
             packs={packs}
             onPacksChanged={refreshPacks}

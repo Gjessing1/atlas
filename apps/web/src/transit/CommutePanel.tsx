@@ -656,6 +656,103 @@ function Journeys({
   );
 }
 
+function CommutePicker({ commute }: { commute: CommuteController }) {
+  const active = commute.commutes.find((item) => item.id === commute.activeId)!;
+  const [renaming, setRenaming] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [name, setName] = useState(active.name);
+  useEffect(() => {
+    setName(active.name);
+    setRenaming(false);
+    setConfirmingDelete(false);
+  }, [active.id, active.name]);
+  const saveName = () => {
+    commute.renameCommute(active.id, name);
+    setRenaming(false);
+  };
+  return (
+    <div className="commute-picker">
+      {renaming ? (
+        <input
+          autoFocus
+          value={name}
+          maxLength={80}
+          aria-label="Commute name"
+          onChange={(event) => setName(event.target.value)}
+          onBlur={saveName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') saveName();
+            if (event.key === 'Escape') {
+              setName(active.name);
+              setRenaming(false);
+            }
+          }}
+        />
+      ) : (
+        <select
+          value={commute.activeId}
+          aria-label="Saved commute"
+          onChange={(event) => commute.selectCommute(event.target.value)}
+        >
+          {commute.commutes.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+              {item.id === commute.widgetCommuteId ? ' · home screen' : ''}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        className={active.id === commute.widgetCommuteId ? 'on' : ''}
+        aria-pressed={active.id === commute.widgetCommuteId}
+        aria-label="Use this commute on the Android home screen"
+        title="Use this commute on the Android home screen"
+        onClick={() => commute.setWidgetCommute(active.id)}
+      >
+        {active.id === commute.widgetCommuteId ? '★ Widget' : '☆ Widget'}
+      </button>
+      <button
+        type="button"
+        title="Rename commute"
+        aria-label="Rename commute"
+        onClick={() => setRenaming(true)}
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        title="Add commute"
+        aria-label="Add commute"
+        disabled={!commute.canAddCommute}
+        onClick={commute.addCommute}
+      >
+        ＋
+      </button>
+      {confirmingDelete ? (
+        <>
+          <button type="button" className="danger" onClick={() => commute.deleteCommute(active.id)}>
+            Delete “{active.name}”
+          </button>
+          <button type="button" onClick={() => setConfirmingDelete(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          title="Delete commute"
+          aria-label="Delete commute"
+          disabled={commute.commutes.length <= 1}
+          onClick={() => setConfirmingDelete(true)}
+        >
+          Delete
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function CommutePanel({
   commute,
   places,
@@ -683,6 +780,8 @@ export function CommutePanel({
   useEffect(() => {
     if (commute.ready && !commute.query) setEditing(true);
   }, [commute.ready, commute.query]);
+  useEffect(() => setEditing(!commute.query), [commute.activeId]);
+  const stale = commute.staleEnds.filter((item) => item.commuteId === commute.activeId);
 
   return (
     <aside className="commute-panel" aria-label="Commute board">
@@ -697,6 +796,13 @@ export function CommutePanel({
       </div>
       <div className="commute-body">
         {!commute.ready && <p className="commute-state">Loading saved commute…</p>}
+        {commute.ready && <CommutePicker commute={commute} />}
+        {stale.map((item) => (
+          <p className="commute-state commute-warning" key={`${item.commuteId}:${item.end}`}>
+            {item.end === 'from' ? 'From' : item.end === 'to' ? 'To' : 'Via'} uses the last copy of
+            a deleted saved place. Choose it again to reconnect it.
+          </p>
+        ))}
         {/* TRANSIT.md §13's three modes, and the only control over what is shown.
             Out, back, and the middle ground — the third is not a direction at
             all but the change, drawn as the departures leaving it in both

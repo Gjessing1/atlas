@@ -1484,6 +1484,7 @@ export function App() {
           <Sidebar
             data={userData}
             selectedTrackId={selectedTrack?.track.id ?? null}
+            placeCommutes={commute.placeCommutes}
             revealPlaceId={revealPlaceId}
             onRevealed={onRevealed}
             onShowPlace={showPlace}

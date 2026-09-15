@@ -25,6 +25,7 @@ import { SettingsSheet } from './SettingsSheet';
 
 interface AppSheetsProps {
   data: UserData;
+  placeCommutes?: ReadonlyMap<string, readonly string[]>;
   sync: SyncState;
   packs: LocalPack[];
   onPacksChanged: () => void;
@@ -78,6 +79,7 @@ interface AppSheetsProps {
  */
 export function AppSheets({
   data,
+  placeCommutes,
   sync,
   packs,
   onPacksChanged,
@@ -118,6 +120,7 @@ export function AppSheets({
         visible={favoritesOpen}
         onClose={onCloseFavorites}
         places={data.places}
+        placeCommutes={placeCommutes}
         tracks={data.tracks}
         collections={data.collections}
         onFlyTo={(place) =>

@@ -24,7 +24,16 @@ import {
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import {
   addCommuteWidget,
@@ -822,6 +831,118 @@ function WidgetOffer() {
   );
 }
 
+function CommutePicker({ commute }: { commute: CommuteController }) {
+  const active = commute.commutes.find((item) => item.id === commute.activeId)!;
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(active.name);
+  useEffect(() => {
+    setName(active.name);
+    setRenaming(false);
+  }, [active.id, active.name]);
+  const saveName = () => {
+    commute.renameCommute(active.id, name);
+    setRenaming(false);
+  };
+  return (
+    <View style={styles.commutePicker}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.commuteChoices}
+      >
+        {commute.commutes.map((item) => {
+          const selected = item.id === commute.activeId;
+          return (
+            <Pressable
+              key={item.id}
+              style={[styles.commuteChoice, selected && styles.commuteChoiceOn]}
+              onPress={() => commute.selectCommute(item.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              testID={`commute-pick-${item.id}`}
+            >
+              <Text style={[styles.commuteChoiceText, selected && styles.commuteChoiceTextOn]}>
+                {item.id === commute.widgetCommuteId ? '★ ' : ''}
+                {item.name}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      {renaming ? (
+        <View style={styles.commuteRename}>
+          <TextInput
+            autoFocus
+            value={name}
+            maxLength={80}
+            style={styles.commuteNameInput}
+            placeholder="Commute name"
+            placeholderTextColor={theme.textMuted}
+            onChangeText={setName}
+            onSubmitEditing={saveName}
+            testID="commute-name"
+          />
+          <Pressable style={styles.commuteAction} onPress={saveName} testID="commute-name-save">
+            <Text style={styles.commuteActionText}>Save</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.commuteActions}>
+          <Pressable
+            style={[
+              styles.commuteAction,
+              active.id === commute.widgetCommuteId && styles.commuteActionOn,
+            ]}
+            onPress={() => commute.setWidgetCommute(active.id)}
+            testID="commute-use-widget"
+          >
+            <Text
+              style={[
+                styles.commuteActionText,
+                active.id === commute.widgetCommuteId && styles.commuteActionTextOn,
+              ]}
+            >
+              {active.id === commute.widgetCommuteId ? '★ Widget' : '☆ Widget'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.commuteAction}
+            onPress={() => setRenaming(true)}
+            testID="commute-rename"
+          >
+            <Text style={styles.commuteActionText}>Rename</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.commuteAction, !commute.canAddCommute && styles.disabled]}
+            disabled={!commute.canAddCommute}
+            onPress={commute.addCommute}
+            testID="commute-add"
+          >
+            <Text style={styles.commuteActionText}>＋ Add</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.commuteAction, commute.commutes.length <= 1 && styles.disabled]}
+            disabled={commute.commutes.length <= 1}
+            onPress={() =>
+              Alert.alert(`Delete “${active.name}”?`, 'The saved commute will be removed.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: () => commute.deleteCommute(active.id),
+                },
+              ])
+            }
+            testID="commute-delete"
+          >
+            <Text style={styles.commuteActionText}>Delete</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function CommuteSheet({
   visible,
   commute,
@@ -848,6 +969,8 @@ export function CommuteSheet({
   useEffect(() => {
     if (commute.ready && !commute.query) setEditing(true);
   }, [commute.ready, commute.query]);
+  useEffect(() => setEditing(!commute.query), [commute.activeId]);
+  const stale = commute.staleEnds.filter((item) => item.commuteId === commute.activeId);
 
   return (
     <BottomSheet
@@ -874,6 +997,13 @@ export function CommuteSheet({
         keyboardShouldPersistTaps="handled"
       >
         {!commute.ready ? <Text style={styles.state}>Loading saved commute…</Text> : null}
+        {commute.ready ? <CommutePicker commute={commute} /> : null}
+        {stale.map((item) => (
+          <Text style={[styles.state, styles.warning]} key={`${item.commuteId}:${item.end}`}>
+            {item.end === 'from' ? 'From' : item.end === 'to' ? 'To' : 'Via'} uses the last copy of
+            a deleted saved place. Choose it again to reconnect it.
+          </Text>
+        ))}
         {/* TRANSIT.md §13's three modes, and the only control over what is shown.
             Out, back, and the middle ground — the third is not a direction at
             all but the change, drawn as the departures leaving it in both
@@ -991,6 +1121,44 @@ const styles = StyleSheet.create({
   closeText: { color: theme.textMuted, fontSize: 18 },
   body: { flex: 1 },
   bodyContent: { paddingHorizontal: 16, paddingBottom: 24 },
+
+  commutePicker: { gap: 7, marginBottom: 10 },
+  commuteChoices: { gap: 6, paddingRight: 8 },
+  commuteChoice: {
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+  },
+  commuteChoiceOn: { backgroundColor: theme.accentFaint },
+  commuteChoiceText: { color: theme.textMuted, fontSize: 12, fontWeight: '700' },
+  commuteChoiceTextOn: { color: theme.accent },
+  commuteActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  commuteRename: { flexDirection: 'row', gap: 6 },
+  commuteNameInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+    color: theme.text,
+    fontSize: 13,
+  },
+  commuteAction: {
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  commuteActionOn: { borderColor: theme.accent, backgroundColor: theme.accentFaint },
+  commuteActionText: { color: theme.textMuted, fontSize: 11, fontWeight: '700' },
+  commuteActionTextOn: { color: theme.accent },
+  disabled: { opacity: 0.45 },
 
   toolbar: { flexDirection: 'row', alignItems: 'stretch', gap: 6, marginBottom: 10 },
   modes: { flex: 1, flexDirection: 'row', gap: 6 },
@@ -1324,6 +1492,7 @@ const styles = StyleSheet.create({
     marginTop: 9,
   },
   error: { color: theme.danger },
+  warning: { color: theme.warning },
   escape: {
     alignSelf: 'flex-start',
     marginTop: 7,

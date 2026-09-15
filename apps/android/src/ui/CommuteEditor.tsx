@@ -91,6 +91,7 @@ function EndField({
               key={place.id}
               style={styles.hit}
               onPress={() => editor.pickPlace(field, place)}
+              testID={`commute-place-${field}-${place.id}`}
             >
               <Text style={styles.hitName} numberOfLines={1}>
                 {place.name}

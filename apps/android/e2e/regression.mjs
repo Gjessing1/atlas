@@ -871,6 +871,33 @@ async function saveCommuteAndReadBoard() {
   await tapAfterScroll('commute-mode-outbound', 'commute-sheet', 'up');
 }
 
+/** Multiple commute identities, and the saved-place marker they contribute. */
+async function verifyMultipleCommutes(placeId) {
+  await tapAfterScroll('commute-rename', 'commute-sheet', 'up');
+  await replaceText('commute-name', 'Work E2E');
+  await tap('commute-name-save');
+  await tap('commute-add');
+  // A new commute is selected and genuinely empty; it must not inherit the
+  // corridor that remains assigned to the home-screen widget.
+  await waitForId('commute-end-from', true, 20_000);
+  await tap('commute-end-from');
+  await tap(`commute-place-from-${placeId}`);
+  await tap('commute-rename');
+  await replaceText('commute-name', 'Cabin E2E');
+  await tap('commute-name-save');
+  // The migrated/first commute has a deterministic id. Returning to it brings
+  // its board back, while the widget remains on that corridor throughout.
+  await tap('commute-pick-commute');
+  await waitForId('commute-leave-now', true, 60_000);
+
+  await closeCommuteSheet();
+  await openMenuItem('open-favorites');
+  await waitForId('favorites-sheet');
+  await scrollToString('Commute · Cabin E2E', 'the saved-place commute marker', 'favorites-sheet');
+  await tap('favorites-close');
+  await openCommuteSheet();
+}
+
 /**
  * The **v2** widget — "Atlas commute (live)" — pinned, painted, and committed to.
  *
@@ -1108,6 +1135,7 @@ async function main() {
   await verifyPersistence({ ...ids, trackId });
   console.log('Android regression: commute board, then both widgets on the home screen');
   await saveCommuteAndReadBoard();
+  await verifyMultipleCommutes(ids.placeId);
   const committedRow = await verifyLiveWidget();
   await returnToApp();
   await openCommuteSheet();

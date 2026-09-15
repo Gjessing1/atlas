@@ -18,6 +18,8 @@ import type { ImportOptions, ImportResult, UserData } from './storage/useUserDat
 interface SidebarProps {
   data: UserData;
   selectedTrackId: string | null;
+  /** Commutes that use each saved place as an end. */
+  placeCommutes?: ReadonlyMap<string, readonly string[]>;
   /**
    * A place to bring into view as the sidebar opens: its folders are expanded
    * and the row is scrolled to and highlighted. Null when nothing asked.
@@ -133,6 +135,7 @@ function TagChips({ tags, onPick }: { tags: readonly string[]; onPick: (query: s
 export function Sidebar({
   data,
   selectedTrackId,
+  placeCommutes = new Map(),
   revealPlaceId = null,
   onRevealed,
   onShowPlace,
@@ -344,6 +347,14 @@ export function Sidebar({
           <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
             {place.name}
           </button>
+          {placeCommutes.has(place.id) && (
+            <span
+              className="place-commute-badge"
+              title={`Used by ${placeCommutes.get(place.id)!.join(', ')}`}
+            >
+              Commute
+            </span>
+          )}
           <span className="row-actions">
             {/* Straight into the planner, as on Android. Without it the same
                 trip was row → card → Directions on this client alone. */}

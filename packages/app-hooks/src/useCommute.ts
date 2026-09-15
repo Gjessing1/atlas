@@ -18,8 +18,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SettingsAccess } from './usePersistedSetting.js';
 
 /**
- * The saved commute: one synced setting, read by the web board, the Android
- * board and the home-screen widget, so those three cannot disagree.
+ * The saved commute library: one synced setting, read by the web board, the
+ * Android board and the home-screen widget, so those three cannot disagree.
  *
  * What changed in the rework, and why it had to:
  *  - **Ends are stops, not favorites.** The previous config held three
@@ -37,6 +37,9 @@ import type { SettingsAccess } from './usePersistedSetting.js';
 
 export const COMMUTE_SETTING_KEY = 'transit.commute';
 
+/** A deliberately small library: enough for home, work and recurring journeys without clutter. */
+export const MAX_SAVED_COMMUTES = 8;
+
 /**
  * Where the board keeps the journey it is tracking — TRANSIT.md §7's one decision.
  *
@@ -46,32 +49,41 @@ export const COMMUTE_SETTING_KEY = 'transit.commute';
  * laptop's board on a bus it is not on, and hand the tablet at home a
  * commitment that expires while nobody is looking at it.
  *
- * The value is a {@link TransitWidgetV2Commit} — the *same* shape the
- * home-screen widget stores per instance, so a tap in the app and a tap on the
- * widget mean one thing. Two stores with no shared shape between them is how
- * "the journey I'm on" grows a second definition.
+ * The nested value is a {@link TransitWidgetV2Commit} — the *same* shape the
+ * home-screen widget stores per instance — plus the commute that owns it. That
+ * identity prevents a tracked Work journey from appearing on Cabin merely
+ * because the reader switched boards.
  */
-export const COMMUTE_COMMIT_SETTING = jsonSetting<TransitWidgetV2Commit | null>({
+interface StoredCommuteCommit {
+  commuteId: string;
+  commit: TransitWidgetV2Commit;
+}
+
+export const COMMUTE_COMMIT_SETTING = jsonSetting<StoredCommuteCommit | null>({
   key: 'local.transit.commit',
   scope: 'local',
   defaultValue: null,
   parse: (value) => {
     if (!isRecord(value)) return null;
-    const direction = value.direction === 'inbound' ? 'inbound' : 'outbound';
-    const departureMs = value.departureMs;
-    const line = value.line;
+    const candidate = isRecord(value.commit) ? value.commit : value;
+    const direction = candidate.direction === 'inbound' ? 'inbound' : 'outbound';
+    const departureMs = candidate.departureMs;
+    const line = candidate.line;
     if (typeof departureMs !== 'number' || !Number.isFinite(departureMs)) return null;
     if (typeof line !== 'string') return null;
     return {
-      direction,
-      departureMs,
-      line,
-      ...(typeof value.committedAtMs === 'number' ? { committedAtMs: value.committedAtMs } : {}),
-      // Absent means the commute's own end, which is what every commitment
-      // written before the board could start at the interchange was. Kept
-      // through the widget's round trip for the same reason it is stored: the
-      // question that re-reads the journey depends on it.
-      ...(value.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
+      // A legacy bare commitment is attached to the migrated commute after the
+      // library is read. New values always carry the owning commute id.
+      commuteId: trimmed(value.commuteId, 100) ?? '',
+      commit: {
+        direction,
+        departureMs,
+        line,
+        ...(typeof candidate.committedAtMs === 'number'
+          ? { committedAtMs: candidate.committedAtMs }
+          : {}),
+        ...(candidate.origin === 'interchange' ? { origin: 'interchange' as const } : {}),
+      },
     };
   },
 });
@@ -81,11 +93,12 @@ export const COMMUTE_COMMIT_SETTING_KEY = COMMUTE_COMMIT_SETTING.key;
 
 /** Read a stored commitment, ignoring anything that is not one. */
 export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit | null {
-  return readSetting(COMMUTE_COMMIT_SETTING, value);
+  return readSetting(COMMUTE_COMMIT_SETTING, value)?.commit ?? null;
 }
 
-/** The shape written today. Bumped when a migration has to tell versions apart. */
+/** The individual commute shape; the enclosing library owns its own version. */
 const CONFIG_VERSION = 2;
+const LIBRARY_VERSION = 3;
 
 /**
  * One end of the commute. Coordinates and a stop id are stored *and* a favorite
@@ -116,6 +129,27 @@ export interface CommuteConfig {
   days: TransitWeekday[];
 }
 
+export interface SavedCommute {
+  id: string;
+  name: string;
+  config: CommuteConfig;
+}
+
+export interface CommuteLibrary {
+  commutes: SavedCommute[];
+  /** The board opened in Atlas. */
+  activeId: string;
+  /** The one commute copied into Android's home-screen widget stores. */
+  widgetId: string;
+}
+
+export interface StaleCommuteEnd {
+  commuteId: string;
+  commuteName: string;
+  end: 'from' | 'via' | 'to';
+  placeId: string;
+}
+
 export const EMPTY_COMMUTE_CONFIG: CommuteConfig = {
   from: null,
   via: null,
@@ -126,6 +160,14 @@ export const EMPTY_COMMUTE_CONFIG: CommuteConfig = {
   outboundTime: { minutesOfDay: null, arriveBy: false },
   inboundTime: { minutesOfDay: null, arriveBy: false },
   days: [],
+};
+
+const DEFAULT_COMMUTE_ID = 'commute';
+
+export const EMPTY_COMMUTE_LIBRARY: CommuteLibrary = {
+  commutes: [{ id: DEFAULT_COMMUTE_ID, name: 'Commute', config: EMPTY_COMMUTE_CONFIG }],
+  activeId: DEFAULT_COMMUTE_ID,
+  widgetId: DEFAULT_COMMUTE_ID,
 };
 
 /** The shared settings seam (see `usePersistedSetting`). */
@@ -143,6 +185,20 @@ export interface CommuteController {
   ready: boolean;
   config: CommuteConfig;
   setConfig: (config: CommuteConfig) => void;
+  commutes: SavedCommute[];
+  activeId: string;
+  widgetCommuteId: string;
+  widgetQuery: TransitCommuteQuery | null;
+  selectCommute: (id: string) => void;
+  addCommute: () => void;
+  renameCommute: (id: string, name: string) => void;
+  deleteCommute: (id: string) => void;
+  setWidgetCommute: (id: string) => void;
+  canAddCommute: boolean;
+  /** Saved-place copies whose source place was deleted. */
+  staleEnds: StaleCommuteEnd[];
+  /** Commute names using each saved place, for Collections badges. */
+  placeCommutes: ReadonlyMap<string, readonly string[]>;
   query: TransitCommuteQuery | null;
   result: TransitCommuteResult | null;
   loading: boolean;
@@ -277,12 +333,60 @@ function parseCommuteValue(raw: unknown): CommuteConfig | null {
   };
 }
 
+function parseSavedCommute(value: unknown): SavedCommute | null {
+  if (!isRecord(value)) return null;
+  const id = trimmed(value.id, 100);
+  const name = trimmed(value.name, 80);
+  const config = parseCommuteValue(value.config);
+  if (!id || !name || !config) return null;
+  return { id, name, config };
+}
+
+/** Read today's named-list shape, or migrate the former single commute into it. */
+export function parseCommuteLibrary(value: string | null): CommuteLibrary | null {
+  if (!value) return null;
+  try {
+    const raw: unknown = JSON.parse(value);
+    if (!isRecord(raw)) return null;
+    if (raw.version === LIBRARY_VERSION && Array.isArray(raw.commutes)) {
+      const seen = new Set<string>();
+      const commutes = raw.commutes
+        .map(parseSavedCommute)
+        .filter((item): item is SavedCommute => Boolean(item))
+        .filter((item) => (seen.has(item.id) ? false : (seen.add(item.id), true)))
+        .slice(0, MAX_SAVED_COMMUTES);
+      if (commutes.length === 0) return null;
+      const active = trimmed(raw.activeId, 100);
+      const widget = trimmed(raw.widgetId, 100);
+      return {
+        commutes,
+        activeId: commutes.some((item) => item.id === active) ? active! : commutes[0]!.id,
+        widgetId: commutes.some((item) => item.id === widget) ? widget! : commutes[0]!.id,
+      };
+    }
+    const config = parseCommuteValue(raw);
+    return config
+      ? {
+          commutes: [{ id: DEFAULT_COMMUTE_ID, name: 'Commute', config }],
+          activeId: DEFAULT_COMMUTE_ID,
+          widgetId: DEFAULT_COMMUTE_ID,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeCommuteLibrary(library: CommuteLibrary): string {
+  return JSON.stringify({ version: LIBRARY_VERSION, ...library });
+}
+
 /** Whether a parsed config still needs writing back in the current shape. */
 export function isLegacyCommuteSetting(value: string | null): boolean {
   if (!value) return false;
   try {
     const raw: unknown = JSON.parse(value);
-    return isRecord(raw) && raw.version !== CONFIG_VERSION;
+    return isRecord(raw) && raw.version !== LIBRARY_VERSION;
   } catch {
     return false;
   }
@@ -293,23 +397,22 @@ export function serializeCommuteConfig(config: CommuteConfig): string {
 }
 
 /**
- * The saved commute as a definition: **synced**, unlike everything else the
- * board keeps. That is the whole point of it — the commute is configuration a
- * person owns, and the web board, the Android board and the home-screen widget
- * all have to see the same one. The scope is stated here rather than inferred
- * from the absence of a prefix, so the day someone renames the key the
- * definition refuses it instead of silently making every user's commute
- * device-local.
+ * The saved commute library as a definition: **synced**, unlike everything
+ * else the board keeps. Commutes are configuration a person owns, and the web
+ * board, Android board and explicit home-screen choice all have to see the same
+ * list. The scope is stated here rather than inferred from the absence of a
+ * prefix, so a renamed key cannot silently make the library device-local.
  *
- * `parse` is the v1 → v2 migration (see {@link parseCommuteConfig}) — the one
- * feature-owned path a stored value takes, whichever shape it was written in.
+ * `parse` owns both migrations: old favorite ids → stop-aware config, then the
+ * single config → named library. The existing commute deterministically becomes
+ * `commute`, selected both in Atlas and for the widget.
  */
-export const COMMUTE_SETTING = defineSetting<CommuteConfig>({
+export const COMMUTE_SETTING = defineSetting<CommuteLibrary>({
   key: COMMUTE_SETTING_KEY,
   scope: 'synced',
-  defaultValue: EMPTY_COMMUTE_CONFIG,
-  decode: (raw) => parseCommuteConfig(raw) ?? undefined,
-  encode: serializeCommuteConfig,
+  defaultValue: EMPTY_COMMUTE_LIBRARY,
+  decode: (raw) => parseCommuteLibrary(raw) ?? undefined,
+  encode: serializeCommuteLibrary,
 });
 
 /** Resolve one end against the current favorites, preferring live place data. */
@@ -370,14 +473,14 @@ export function useCommute(
   active: boolean,
 ): CommuteController {
   const { status, getSetting, setSetting: saveSetting } = settings;
-  const [config, setConfigState] = useState<CommuteConfig>(EMPTY_COMMUTE_CONFIG);
+  const [library, setLibrary] = useState<CommuteLibrary>(EMPTY_COMMUTE_LIBRARY);
   const [loaded, setLoaded] = useState(false);
   const [result, setResult] = useState<TransitCommuteResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedMs, setUpdatedMs] = useState<number | null>(null);
   const [seed, setSeed] = useState(0);
-  const [commit, setCommitState] = useState<TransitWidgetV2Commit | null>(null);
+  const [storedCommit, setStoredCommit] = useState<StoredCommuteCommit | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Both settings before `ready`, not each on its own promise. Two reasons, and
@@ -395,8 +498,11 @@ export function useCommute(
     ]).then(([saved, savedCommit]) => {
       if (!current) return;
       const next = readSetting(COMMUTE_SETTING, saved);
-      setConfigState(next);
-      setCommitState(readSetting(COMMUTE_COMMIT_SETTING, savedCommit));
+      const nextCommit = readSetting(COMMUTE_COMMIT_SETTING, savedCommit);
+      setLibrary(next);
+      setStoredCommit(
+        nextCommit ? { ...nextCommit, commuteId: nextCommit.commuteId || next.activeId } : null,
+      );
       // Write back only to finish a migration. A first run writes nothing: an
       // empty commute is not worth a synced row on every device.
       if (saved && isLegacyCommuteSetting(saved)) {
@@ -409,9 +515,25 @@ export function useCommute(
     };
   }, [getSetting, loaded, saveSetting, status]);
 
+  const activeCommute =
+    library.commutes.find((item) => item.id === library.activeId) ?? library.commutes[0]!;
+  const config = activeCommute.config;
+  const commit = storedCommit?.commuteId === activeCommute.id ? storedCommit.commit : null;
   const query = useMemo(() => commuteQueryFrom(config, places), [config, places]);
+  const widgetConfig =
+    library.commutes.find((item) => item.id === library.widgetId)?.config ??
+    library.commutes[0]!.config;
+  const widgetQuery = useMemo(() => commuteQueryFrom(widgetConfig, places), [widgetConfig, places]);
   const queryKey = query ? JSON.stringify(query) : '';
   const commitKey = commit ? `${commit.direction}:${commit.departureMs}:${commit.line}` : '';
+
+  useEffect(() => {
+    // A second commute is a different board even when its request will take a
+    // moment. Never leave the previous corridor's journeys under the new name.
+    setResult(null);
+    setError(null);
+    setUpdatedMs(null);
+  }, [activeCommute.id]);
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -454,21 +576,98 @@ export function useCommute(
     // not re-ask the board, or every answer would trigger the next request.
   }, [active, commitKey, fetchCommute, loaded, queryKey, seed]);
 
-  const setConfig = useCallback(
-    (next: CommuteConfig) => {
-      setConfigState(next);
-      void saveSetting(COMMUTE_SETTING.key, COMMUTE_SETTING.encode(next));
+  const updateLibrary = useCallback(
+    (change: (current: CommuteLibrary) => CommuteLibrary) => {
+      setLibrary((current) => {
+        const next = change(current);
+        void saveSetting(COMMUTE_SETTING.key, COMMUTE_SETTING.encode(next));
+        return next;
+      });
     },
     [saveSetting],
   );
+  const setConfig = useCallback(
+    (next: CommuteConfig) =>
+      updateLibrary((current) => ({
+        ...current,
+        commutes: current.commutes.map((item) =>
+          item.id === current.activeId ? { ...item, config: next } : item,
+        ),
+      })),
+    [updateLibrary],
+  );
+  const selectCommute = useCallback(
+    (id: string) =>
+      updateLibrary((current) =>
+        current.commutes.some((item) => item.id === id) ? { ...current, activeId: id } : current,
+      ),
+    [updateLibrary],
+  );
+  const addCommute = useCallback(() => {
+    updateLibrary((current) => {
+      if (current.commutes.length >= MAX_SAVED_COMMUTES) return current;
+      const id = crypto.randomUUID();
+      let number = current.commutes.length + 1;
+      const names = new Set(current.commutes.map((item) => item.name.toLocaleLowerCase()));
+      while (names.has(`commute ${number}`)) number += 1;
+      return {
+        ...current,
+        activeId: id,
+        commutes: [
+          ...current.commutes,
+          { id, name: `Commute ${number}`, config: { ...EMPTY_COMMUTE_CONFIG } },
+        ],
+      };
+    });
+  }, [updateLibrary]);
+  const renameCommute = useCallback(
+    (id: string, name: string) => {
+      const clean = name.trim().slice(0, 80);
+      if (!clean) return;
+      updateLibrary((current) => ({
+        ...current,
+        commutes: current.commutes.map((item) =>
+          item.id === id ? { ...item, name: clean } : item,
+        ),
+      }));
+    },
+    [updateLibrary],
+  );
+  const deleteCommute = useCallback(
+    (id: string) =>
+      updateLibrary((current) => {
+        if (current.commutes.length <= 1 || !current.commutes.some((item) => item.id === id)) {
+          return current;
+        }
+        const commutes = current.commutes.filter((item) => item.id !== id);
+        const fallback = commutes[0]!.id;
+        return {
+          commutes,
+          activeId: current.activeId === id ? fallback : current.activeId,
+          widgetId: current.widgetId === id ? fallback : current.widgetId,
+        };
+      }),
+    [updateLibrary],
+  );
+  const setWidgetCommute = useCallback(
+    (id: string) =>
+      updateLibrary((current) =>
+        current.commutes.some((item) => item.id === id) ? { ...current, widgetId: id } : current,
+      ),
+    [updateLibrary],
+  );
   const setCommit = useCallback(
     (next: TransitWidgetV2Commit | null) => {
-      setCommitState(next);
+      const stored = next ? { commuteId: activeCommute.id, commit: next } : null;
+      setStoredCommit(stored);
       // Written even when clearing, so a board reopened later starts untracked
       // rather than re-reading a commitment the user let go of.
-      void saveSetting(COMMUTE_COMMIT_SETTING.key, next ? COMMUTE_COMMIT_SETTING.encode(next) : '');
+      void saveSetting(
+        COMMUTE_COMMIT_SETTING.key,
+        stored ? COMMUTE_COMMIT_SETTING.encode(stored) : '',
+      );
     },
-    [saveSetting],
+    [activeCommute.id, saveSetting],
   );
   const refresh = useCallback(() => setSeed((value) => value + 1), []);
   const emptyReason = useCallback(
@@ -480,10 +679,49 @@ export function useCommute(
     [result],
   );
 
+  const existingPlaceIds = useMemo(() => new Set(places.map((place) => place.id)), [places]);
+  const staleEnds = useMemo<StaleCommuteEnd[]>(() => {
+    const out: StaleCommuteEnd[] = [];
+    for (const item of library.commutes) {
+      for (const end of ['from', 'via', 'to'] as const) {
+        const placeId = item.config[end]?.placeId;
+        if (placeId && !existingPlaceIds.has(placeId)) {
+          out.push({ commuteId: item.id, commuteName: item.name, end, placeId });
+        }
+      }
+    }
+    return out;
+  }, [existingPlaceIds, library.commutes]);
+  const placeCommutes = useMemo<ReadonlyMap<string, readonly string[]>>(() => {
+    const out = new Map<string, string[]>();
+    for (const item of library.commutes) {
+      for (const end of ['from', 'via', 'to'] as const) {
+        const placeId = item.config[end]?.placeId;
+        if (!placeId) continue;
+        const names = out.get(placeId) ?? [];
+        if (!names.includes(item.name)) names.push(item.name);
+        out.set(placeId, names);
+      }
+    }
+    return out;
+  }, [library.commutes]);
+
   return {
     ready: loaded,
     config,
     setConfig,
+    commutes: library.commutes,
+    activeId: activeCommute.id,
+    widgetCommuteId: library.widgetId,
+    widgetQuery,
+    selectCommute,
+    addCommute,
+    renameCommute,
+    deleteCommute,
+    setWidgetCommute,
+    canAddCommute: library.commutes.length < MAX_SAVED_COMMUTES,
+    staleEnds,
+    placeCommutes,
     query,
     result,
     loading,

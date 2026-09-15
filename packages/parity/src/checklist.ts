@@ -818,7 +818,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'planner-commute-board',
     surface: 'planner',
-    capability: 'A saved two-way commute between stops, on the lines you actually ride',
+    capability: 'Named two-way commutes between stops, with one chosen for the home-screen widget',
     hook: 'useCommuteEditor',
     // The seam, not a spelling. This row used to resolve the sentence
     // "Favorite-to-favorite live journeys" inside two hand-written forms — which
@@ -828,7 +828,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteEditor' },
     android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteEditor' },
     route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/commute'" },
-    note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The saved configuration is one synced setting (`transit.commute`), so the board is the same on both clients.',
+    note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The named library is one synced setting (`transit.commute`), so both clients share every commute and the explicit widget choice.',
   },
   {
     id: 'planner-commute-dashboard',

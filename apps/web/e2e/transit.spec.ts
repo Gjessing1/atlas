@@ -48,9 +48,10 @@ test('a place card opens a live next-hour departure board', async ({ page }) => 
 test('saved commute uses favorite endpoints, Asker via, and exact filters', async ({ page }) => {
   // Longest journey in the suite: a backup import, a reload to re-read the
   // synced setting, then a board that only settles once OPFS is warm. 120 s was
-  // enough on an idle host and ran out mid-test on a loaded one — each run
-  // reached a later line, which is a clock problem, not a broken control.
-  test.setTimeout(300_000);
+  // enough on an idle host and ran out mid-test on a loaded one. The named
+  // commute and Collections round-trip extends the same persistence scenario;
+  // each timed-out run reached a later line, which is a clock problem, not a broken control.
+  test.setTimeout(420_000);
   const now = Date.now();
   let requested: Record<string, unknown> | null = null;
   // A complete leg, not a stub: the dashboard reads its clock times off the
@@ -288,6 +289,32 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await panel.getByRole('tab', { name: 'Return' }).click();
   // The route line is the panel's header now, not a field halfway down a form.
   await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');
+
+  // Several named commutes share one library. Adding another opens its empty
+  // editor, while switching back restores this board rather than overwriting it.
+  await panel.getByRole('button', { name: 'Rename commute' }).click();
+  const nameInput = panel.getByRole('textbox', { name: 'Commute name' });
+  await nameInput.fill('Work');
+  await nameInput.press('Enter');
+  await panel.getByRole('button', { name: 'Add commute' }).click();
+  await expect(panel.getByRole('button', { name: 'Choose a From stop…' })).toBeVisible();
+  await panel.getByRole('button', { name: 'Rename commute' }).click();
+  await panel.getByRole('textbox', { name: 'Commute name' }).fill('Cabin');
+  await panel.getByRole('textbox', { name: 'Commute name' }).press('Enter');
+  await panel.getByRole('button', { name: 'Use this commute on the Android home screen' }).click();
+  await panel.getByRole('combobox', { name: 'Saved commute' }).selectOption({ label: 'Work' });
+  await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');
+  await expect(panel.getByRole('combobox', { name: 'Saved commute' })).toContainText(
+    'Cabin · home screen',
+  );
+
+  // Collections states why these saved places are special rather than leaving
+  // a delete to silently turn their endpoints into stale coordinate copies.
+  await panel.getByRole('button', { name: 'Close panel' }).click();
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(
+    page.locator('.item-row').filter({ hasText: 'Engelsrud' }).locator('.place-commute-badge'),
+  ).toHaveText('Commute');
 });
 
 /**
