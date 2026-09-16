@@ -10,7 +10,7 @@ import {
 } from '@atlas/conditions';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { PNG } from 'pngjs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { registerWeatherMapsApi, weatherLayerMetas } from './weather-maps-api.js';
 
@@ -132,6 +132,7 @@ describe('weather layer catalog rows', () => {
       'weather-temperature',
       'weather-clouds',
       'weather-sea-temperature',
+      'aurora-forecast',
       'weather-warnings',
     ]);
     expect(metas.every((m) => m.group === 'Weather')).toBe(true);
@@ -141,6 +142,7 @@ describe('weather layer catalog rows', () => {
     expect(metas.at(-1)!.vector).toBe(true);
     // Outlines and badges read over any field, so warnings are not in the group.
     expect(metas.at(-1)!.exclusive).toBeUndefined();
+    expect(weatherLayerMetas('frost-client').map((m) => m.id)).toContain('weather-lightning');
   });
 });
 
@@ -338,6 +340,73 @@ describe('/api/overlay/weather-warnings/features', () => {
   it('502s when MET is down and nothing was cached', async () => {
     const { app } = await start({ pixels: PIXELS, fail: true });
     expect((await app.inject('/api/overlay/weather-warnings/features')).statusCode).toBe(502);
+  });
+});
+
+describe('live sky layers', () => {
+  it('authenticates to Frost server-side, scopes lightning to the viewport and caches it', async () => {
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe('https://frost.met.no');
+      expect(url.searchParams.get('referencetime')).toBe('latest');
+      expect(url.searchParams.get('maxage')).toBe('PT90M');
+      expect(url.searchParams.get('geometry')).toContain('POLYGON((8 58,12 58');
+      expect(new Headers(init?.headers).get('authorization')).toBe(
+        `Basic ${Buffer.from('client-id:').toString('base64')}`,
+      );
+      return new Response(
+        '0 2026 09 16 12 15 00 0 60.1000 10.2000 -24 0 5 7 0 0 0 0 0 0 0 1 1 0 1\n',
+      );
+    });
+    app = Fastify();
+    registerWeatherMapsApi(app, {
+      fetchImpl: fetchImpl as typeof fetch,
+      frostClientId: 'client-id',
+      userAgent: 'test',
+      now: () => NOW,
+    });
+    await app.ready();
+
+    const url = '/api/overlay/weather-lightning/features?bbox=8.1,58.2,11.9,61.1';
+    const first = await app.inject(url);
+    expect(first.statusCode).toBe(200);
+    expect(first.json().features[0]).toMatchObject({
+      geometry: { coordinates: [10.2, 60.1] },
+      properties: { ageMinutes: 5, polarity: 'negative', peakCurrentKa: -24 },
+    });
+    await app.inject(url);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(
+      (await app.inject('/api/overlay/weather-lightning/features?bbox=-180,-80,180,80')).statusCode,
+    ).toBe(400);
+  });
+
+  it('turns NOAA OVATION probability into a transparent, refreshable raster', async () => {
+    const coordinates = Array.from({ length: 360 * 181 }, (_, index) => {
+      const lng = Math.floor(index / 181);
+      const lat = (index % 181) - 90;
+      return [lng, lat, lat > 55 ? 80 : 0];
+    });
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        'Observation Time': '2026-09-16T12:00:00Z',
+        'Forecast Time': '2026-09-16T12:45:00Z',
+        coordinates,
+      }),
+    );
+    app = Fastify();
+    registerWeatherMapsApi(app, { fetchImpl: fetchImpl as typeof fetch, userAgent: 'test' });
+    await app.ready();
+
+    const first = await app.inject('/api/overlay/aurora-forecast/0/0/0.png?v=1');
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['content-type']).toBe('image/png');
+    expect(first.headers['cache-control']).toContain('max-age=240');
+    expect(first.headers['x-atlas-forecast-time']).toBe('2026-09-16T12:45:00Z');
+    expect(readPixel(first.rawPayload, 128, 32)[3]).toBeGreaterThan(100);
+    expect(readPixel(first.rawPayload, 128, 128)[3]).toBe(0);
+    await app.inject('/api/overlay/aurora-forecast/0/0/0.png?v=1');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

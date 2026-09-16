@@ -126,6 +126,9 @@ export const ICE_OBSERVATION_LAYER_IDS = [
   'atlas-ice-observations-dot',
 ];
 
+/** Frost strike dots answer with observation time, age, polarity and peak current. */
+export const LIGHTNING_LAYER_IDS = ['atlas-lightning-dot', 'atlas-lightning-halo'];
+
 /** Moving satellite dots hit-tested by useMapPress. */
 export const SATELLITE_LAYER_IDS = [
   'atlas-satellites-label',
@@ -262,6 +265,8 @@ interface MapSceneProps {
   huntingFields: HuntingFields | null;
   /** Rolling Regobs markers for the current viewport. */
   iceObservations: VectorOverlayData | null;
+  /** Rolling Frost lightning strikes for the current viewport. */
+  lightning: VectorOverlayData | null;
   /** Stations + naked-eye catalog, propagated on the device. */
   satellites: SatelliteLayerData;
   /** Starlink constellation, kept behind its own catalog switch. */
@@ -355,6 +360,7 @@ export function MapScene({
   overlayLabels,
   huntingFields,
   iceObservations,
+  lightning,
   satellites,
   starlink,
   speedCameras,
@@ -838,6 +844,45 @@ export function MapScene({
                 'text-halo-color': 'rgba(0,0,0,0.18)',
                 'text-halo-width': 0.7,
                 'text-opacity': iceObservations.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Frost lightning: colour is observation age, size follows absolute peak current. */}
+        {!inPip && lightning ? (
+          <GeoJSONSource id="atlas-lightning" data={lightning.data}>
+            <Layer
+              type="circle"
+              id="atlas-lightning-halo"
+              minzoom={4}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 10, 16, 15],
+                'circle-color': ['get', 'markerColor'],
+                'circle-opacity': 0.2 * lightning.opacity,
+                'circle-blur': 0.6,
+              }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-lightning-dot"
+              minzoom={4}
+              paint={{
+                'circle-radius': [
+                  'interpolate',
+                  ['linear'],
+                  ['abs', ['get', 'peakCurrentKa']],
+                  0,
+                  2.5,
+                  25,
+                  4,
+                  100,
+                  7,
+                ],
+                'circle-color': ['get', 'markerColor'],
+                'circle-stroke-color': '#3b2445',
+                'circle-stroke-width': 1,
+                'circle-opacity': lightning.opacity,
+                'circle-stroke-opacity': lightning.opacity,
               }}
             />
           </GeoJSONSource>

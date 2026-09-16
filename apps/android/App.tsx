@@ -91,6 +91,7 @@ import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
 import { useIceObservations } from './src/layers/useIceObservations';
+import { useLightning } from './src/layers/useLightning';
 import { useSatellites } from './src/layers/useSatellites';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
@@ -618,6 +619,7 @@ function AppInner() {
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
+  const lightning = useLightning(overlays, serverOrigin, camera.mapViewport);
   // The horizon circle is drawn against whatever point the sheet is predicting
   // for, so switching to "map centre" moves the disc with it.
   const satelliteFootprint = useMemo(
@@ -1375,6 +1377,7 @@ function AppInner() {
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
         iceObservations={iceObservations}
+        lightning={lightning}
         satellites={satellites}
         starlink={starlink}
         speedCameras={speedCameras}

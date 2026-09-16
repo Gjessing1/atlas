@@ -15,6 +15,7 @@ import {
   speedCameraIdentify,
   trafficFlowIdentify,
   trafficIdentify,
+  viewportFeaturesUrl,
   roadWeatherIdentify,
   layerOptionSignature,
   normalizeLayerOptions,
@@ -86,6 +87,16 @@ describe('overlay tile URLs', () => {
     ).toBe(
       'https://atlas.example/api/overlay/ice-observations/features?bbox=9.5,59,11.25,60.5&v=3',
     );
+  });
+
+  it('builds a revisioned viewport URL for other rolling point feeds', () => {
+    expect(
+      viewportFeaturesUrl(
+        'https://atlas.example',
+        { id: 'weather-lightning', rev: 2 },
+        [8, 58, 12, 62],
+      ),
+    ).toBe('https://atlas.example/api/overlay/weather-lightning/features?bbox=8,58,12,62&v=2');
   });
 
   describe('derived surfaces', () => {

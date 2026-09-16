@@ -288,6 +288,34 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     },
   },
   {
+    id: 'map-lightning-observations',
+    surface: 'map',
+    capability: 'See and identify live Frost lightning strikes coloured by age',
+    web: {
+      file: 'apps/web/src/map/useLightningLayer.ts',
+      contains: 'useLightningLayer',
+    },
+    android: {
+      file: 'apps/android/src/layers/useLightning.ts',
+      contains: 'useLightning',
+    },
+    route: {
+      file: 'backend/src/weather-maps-api.ts',
+      contains: '/api/overlay/${LIGHTNING_OBSERVATIONS_ID}/features',
+    },
+  },
+  {
+    id: 'map-aurora-forecast',
+    surface: 'map',
+    capability: 'Overlay NOAA’s 30-minute aurora probability forecast with cloud cover',
+    web: { file: 'apps/web/src/map/useOverlayLayers.ts', contains: 'refreshSeconds' },
+    android: { file: 'apps/android/src/layers/useOverlays.ts', contains: 'refreshSeconds' },
+    route: {
+      file: 'backend/src/weather-maps-api.ts',
+      contains: '/api/overlay/${AURORA_FORECAST_ID}/:z/:x/:y.png',
+    },
+  },
+  {
     id: 'card-weather-at-point',
     surface: 'card',
     capability: 'Tap the map with a weather layer on to read the weather there at the time shown',

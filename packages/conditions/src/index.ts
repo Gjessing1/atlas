@@ -72,6 +72,20 @@ export {
 } from './weather-maps.js';
 export { compass16, sunDay, sunPosition, type SunDay, type SunPos } from './sun.js';
 export {
+  AURORA_FORECAST_ID,
+  LIGHTNING_BOUNDS,
+  LIGHTNING_OBSERVATIONS_ID,
+  lightningIdentify,
+  paintAuroraTile,
+  parseOvation,
+  parseUalf,
+  type LightningAge,
+  type LightningResponse,
+  type LightningStrikeFeature,
+  type LightningStrikeProperties,
+  type OvationGrid,
+} from './sky.js';
+export {
   assessConditions,
   assessFishingBite,
   assessHuntStand,

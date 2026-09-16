@@ -16,6 +16,7 @@ services:
       # Accounts + sync stay off unless both of these are set (see CLAUDE.md).
       # DATABASE_URL: postgres://atlas:<password>@atlas-postgres:5432/atlas
       # JWT_SECRET: <long random string>
+      # FROST_CLIENT_ID: <Frost client id; open lightning does not need the secret>
     ports:
       # The app defaults to 3100 (3000 is taken by Forgejo on this host).
       - '3100:3100'

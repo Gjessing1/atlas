@@ -11,9 +11,9 @@ import {
   roadWeatherIdentify,
 } from '@atlas/core';
 import type { OverlayEntry } from '@atlas/app-hooks';
-import { weatherWarningIdentify } from '@atlas/conditions';
+import { lightningIdentify, weatherWarningIdentify } from '@atlas/conditions';
 import { transitVehicleIdentify } from '@atlas/transit';
-import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
+import type { OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
 import { tappedFlowProperties } from '@atlas/traffic';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
@@ -26,6 +26,7 @@ import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
 import { ROAD_WEATHER_IDENTIFY_LAYERS } from './useRoadWeatherLayer.js';
 import { TRANSIT_VEHICLE_IDENTIFY_LAYERS } from './useTransitVehicleLayer.js';
 import { WEATHER_WARNING_IDENTIFY_LAYERS } from './useWeatherWarningsLayer.js';
+import { LIGHTNING_IDENTIFY_LAYERS } from './useLightningLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -135,12 +136,35 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
     };
 
     sync();
+    const refreshMs = overlays.reduce(
+      (best, overlay) =>
+        overlay.meta.refreshSeconds && !overlay.meta.vector && !overlay.meta.weather
+          ? Math.min(best, overlay.meta.refreshSeconds * 1000)
+          : best,
+      Number.POSITIVE_INFINITY,
+    );
+    const refreshTimer = Number.isFinite(refreshMs)
+      ? setInterval(() => {
+          try {
+            for (const overlay of overlays) {
+              if (!overlay.meta.refreshSeconds) continue;
+              const id = sourceId(overlay);
+              if (map.getLayer(id)) map.removeLayer(id);
+              if (map.getSource(id)) map.removeSource(id);
+            }
+            sync();
+          } catch {
+            // A style swap will retry on its own event.
+          }
+        }, refreshMs)
+      : undefined;
     map.on('style.load', sync);
     map.on('idle', sync);
     return () => {
       cancelled = true;
       map.off('style.load', sync);
       map.off('idle', sync);
+      if (refreshTimer) clearInterval(refreshTimer);
     };
   }, [map, overlays]);
 }
@@ -382,6 +406,7 @@ export function useOverlayIdentify(
         trafficFlowIdentify(tappedFlowProperties(at, hits(TRAFFIC_FLOW_IDENTIFY_LAYERS))),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
         weatherWarningIdentify(drawn(WEATHER_WARNING_IDENTIFY_LAYERS)),
+        lightningIdentify(drawn(LIGHTNING_IDENTIFY_LAYERS)),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);
       // Served same-origin, so the shared helper needs no origin prefix. The
       // options ride along so a filtered layer answers for what it draws.

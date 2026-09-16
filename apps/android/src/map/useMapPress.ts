@@ -13,7 +13,12 @@ import {
   type OverlayIdentifyGroup,
   type SearchResult,
 } from '@atlas/core';
-import { WEATHER_WARNINGS_ID, weatherWarningIdentify } from '@atlas/conditions';
+import {
+  LIGHTNING_OBSERVATIONS_ID,
+  lightningIdentify,
+  WEATHER_WARNINGS_ID,
+  weatherWarningIdentify,
+} from '@atlas/conditions';
 import { viaInsertIndex } from '@atlas/routing';
 import { tappedFlowProperties } from '@atlas/traffic';
 import { transitVehicleIdentify } from '@atlas/transit';
@@ -34,6 +39,7 @@ import type { DestinationTarget } from '../ui/DestinationCard';
 import {
   HUNT_FIELDS_FILL_LAYER_ID,
   ICE_OBSERVATION_LAYER_IDS,
+  LIGHTNING_LAYER_IDS,
   NAV_ALTERNATIVE_LAYER_IDS,
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
@@ -308,6 +314,7 @@ export function useMapPress({
               roadWeatherHits,
               transitVehicleHits,
               warningHits,
+              lightningHits,
               leading,
             ] = await Promise.all([
               identifyOverlays(
@@ -327,6 +334,7 @@ export function useMapPress({
               query(vectorOn(ROAD_WEATHER_ID), ROAD_WEATHER_LAYER_IDS),
               query(vectorOn(TRANSIT_VEHICLES_ID), TRANSIT_VEHICLE_LAYER_IDS),
               query(vectorOn(WEATHER_WARNINGS_ID), WEATHER_WARNING_LAYER_IDS),
+              query(vectorOn(LIGHTNING_OBSERVATIONS_ID), LIGHTNING_LAYER_IDS),
               leadingRef.current?.({ lat, lng }).catch(() => []) ?? Promise.resolve([]),
             ]);
             // Local groups lead: they are what the user aimed at, and the
@@ -343,6 +351,7 @@ export function useMapPress({
               roadWeatherIdentify(hitProps(roadWeatherHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               weatherWarningIdentify(hitProps(warningHits)),
+              lightningIdentify(hitProps(lightningHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);
             if (tap === tapSeq.current) showIdentify({ lat, lng }, groups, tapToleranceM(zoom));

@@ -692,7 +692,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       iceObservationLayerMeta(),
       satellitesLayerMeta(),
       starlinkLayerMeta(),
-      ...weatherLayerMetas(),
+      ...weatherLayerMetas(opts.weatherMapsApi?.frostClientId),
       ...derivedLayerMetas(),
     ],
     ...opts.overlayApi,

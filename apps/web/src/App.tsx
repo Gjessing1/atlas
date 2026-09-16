@@ -106,6 +106,7 @@ import {
 } from './map/useWeatherGridLayers.js';
 import { useWeatherMapLayer } from './map/useWeatherMapLayer.js';
 import { useWeatherWarningsLayer } from './map/useWeatherWarningsLayer.js';
+import { useLightningLayer } from './map/useLightningLayer.js';
 import { useTransitVehicleLayer } from './map/useTransitVehicleLayer.js';
 import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
@@ -397,6 +398,7 @@ export function App() {
   );
   useWeatherValueLabels(map, useWeatherGrid('', weatherMaps, valueViewport, valuesOn));
   useWeatherWarningsLayer(map, overlays);
+  useLightningLayer(map, overlays);
   const weatherMapsRef = useRef(weatherMaps);
   weatherMapsRef.current = weatherMaps;
   // With a weather map up, a tap asks what the weather is there, at the time shown.

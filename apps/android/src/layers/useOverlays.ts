@@ -3,7 +3,7 @@ import {
   type OverlayEntry,
   type OverlayPreferences,
 } from '@atlas/app-hooks';
-import { WEATHER_WARNINGS_ID } from '@atlas/conditions';
+import { LIGHTNING_OBSERVATIONS_ID, WEATHER_WARNINGS_ID } from '@atlas/conditions';
 import {
   jsonSetting,
   layerOptionSignature,
@@ -35,6 +35,7 @@ const RENDERABLE_VECTOR_IDS = new Set([
   SATELLITES_ID,
   STARLINK_ID,
   WEATHER_WARNINGS_ID,
+  LIGHTNING_OBSERVATIONS_ID,
 ]);
 
 /**
@@ -160,6 +161,18 @@ export function useOverlays(
     customizedLayers,
   });
 
+  const liveRefreshSeconds = preferences.overlays.reduce(
+    (best, overlay) =>
+      overlay.meta.refreshSeconds ? Math.min(best, overlay.meta.refreshSeconds) : best,
+    Number.POSITIVE_INFINITY,
+  );
+  const [liveTick, setLiveTick] = useState(0);
+  useEffect(() => {
+    if (!Number.isFinite(liveRefreshSeconds)) return;
+    const timer = setInterval(() => setLiveTick((value) => value + 1), liveRefreshSeconds * 1000);
+    return () => clearInterval(timer);
+  }, [liveRefreshSeconds]);
+
   const overlays = useMemo(
     () =>
       preferences.overlays.map((overlay) => {
@@ -167,10 +180,12 @@ export function useOverlays(
         return {
           ...overlay,
           tileUrlTemplate: overlayTileUrl(origin, overlay.meta, overlay.options),
-          sourceId: `atlas-overlay-${overlay.meta.id}${signature ? `--${signature}` : ''}`,
+          sourceId:
+            `atlas-overlay-${overlay.meta.id}${signature ? `--${signature}` : ''}` +
+            (overlay.meta.refreshSeconds ? `--live-${liveTick}` : ''),
         };
       }),
-    [preferences.overlays, origin],
+    [preferences.overlays, origin, liveTick],
   );
 
   return { ...preferences, allCatalog: renderableLayers, overlays };

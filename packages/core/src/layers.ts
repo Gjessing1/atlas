@@ -207,6 +207,8 @@ export interface LayerMeta {
    * carries those tags, so the entry never surfaces there.
    */
   vector?: boolean;
+  /** Rolling raster data should be remounted on this cadence to fetch a fresh snapshot. */
+  refreshSeconds?: number;
   /**
    * Present when `/api/overlay/:id/labels` can draw a number directly on the
    * map for this layer — the value a raster tile cannot show because it lives
@@ -334,6 +336,19 @@ export function overlayFeaturesUrl(origin: string, meta: Pick<LayerMeta, 'id' | 
  * to a GeoJSON source.
  */
 export function iceObservationsUrl(
+  origin: string,
+  meta: Pick<LayerMeta, 'id' | 'rev'>,
+  bbox: LngLatBbox,
+): string {
+  const rev = Number.isInteger(meta.rev) && meta.rev > 0 ? meta.rev : 1;
+  return (
+    `${origin}/api/overlay/${encodeURIComponent(meta.id)}/features` +
+    `?bbox=${bbox.join(',')}&v=${encodeURIComponent(String(rev))}`
+  );
+}
+
+/** Cache-revisioned viewport URL shared by rolling point feeds such as lightning. */
+export function viewportFeaturesUrl(
   origin: string,
   meta: Pick<LayerMeta, 'id' | 'rev'>,
   bbox: LngLatBbox,

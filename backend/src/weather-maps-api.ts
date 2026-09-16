@@ -1,11 +1,17 @@
 import { createHash } from 'node:crypto';
 
 import {
+  AURORA_FORECAST_ID,
   closestFrameIndex,
   FROZEN_PRECIPITATION_MAX_C,
+  LIGHTNING_BOUNDS,
+  LIGHTNING_OBSERVATIONS_ID,
   legendRowSwatches,
   normalizeMetAlerts,
+  paintAuroraTile,
   paintWeatherTile,
+  parseOvation,
+  parseUalf,
   tilePixelAt,
   weatherGridZoom,
   weatherMapLegend,
@@ -32,6 +38,8 @@ import {
   type WeatherPointSample,
   type WeatherMosaic,
   type WeatherRaster,
+  type LightningResponse,
+  type OvationGrid,
 } from '@atlas/conditions';
 import type { LayerMeta } from '@atlas/core';
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -60,6 +68,8 @@ import type { StatusRegistry } from './status.js';
 
 const YR_MAPS_URL = 'https://prod.yr-maps.met.no/api';
 const METALERTS_URL = 'https://api.met.no/weatherapi/metalerts/2.0/current.json?lang=en';
+const FROST_LIGHTNING_URL = 'https://frost.met.no/lightning/v0.ualf';
+const OVATION_URL = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
 const ATTRIBUTION = 'Weather maps © MET Norway (CC BY 4.0)';
 /**
  * Bump when the painting changes: it rides on every tile URL, because the frame
@@ -110,12 +120,16 @@ const ALERTS_TTL_MS = 5 * MINUTE;
 const DECODED_CACHE_ENTRIES = 96;
 const PAINTED_CACHE_BYTES = 48 * 1024 * 1024;
 const MAX_GRID = 160;
+const LIGHTNING_TTL_MS = 60_000;
+const AURORA_TTL_MS = 5 * MINUTE;
 
 export interface WeatherMapsApiOptions {
   userAgent?: string;
   fetchImpl?: typeof fetch;
   status?: StatusRegistry;
   now?: () => number;
+  /** Frost credentials stay server-side. Open lightning needs the client id only. */
+  frostClientId?: string;
 }
 
 interface YrMapDataset {
@@ -216,8 +230,8 @@ function legacyLegend(layer: WeatherMapLayerId): WeatherMapLegendStop[] {
   }));
 }
 
-/** The catalog rows that switch the weather layers on, one per field plus warnings. */
-export function weatherLayerMetas(): LayerMeta[] {
+/** The catalog rows that switch the weather layers on, plus live sky observations. */
+export function weatherLayerMetas(frostClientId = process.env.FROST_CLIENT_ID): LayerMeta[] {
   const fields = WEATHER_MAP_LAYER_IDS.map((id): LayerMeta => {
     const spec = WEATHER_MAP_LAYER_SPECS.find((candidate) => candidate.id === id)!;
     return {
@@ -240,6 +254,41 @@ export function weatherLayerMetas(): LayerMeta[] {
   });
   return [
     ...fields,
+    ...(frostClientId
+      ? [
+          {
+            id: LIGHTNING_OBSERVATIONS_ID,
+            rev: 1,
+            title: 'Lightning',
+            description: 'Detected lightning strikes from the last 90 minutes, coloured by age.',
+            group: 'Weather',
+            attribution: 'Lightning observations © MET Norway',
+            metadataUrl: 'https://frost.met.no/',
+            minzoom: 4,
+            maxzoom: 18,
+            defaultOpacity: 1,
+            identify: false,
+            coverageNote:
+              'Nordic detection network. Pale yellow is newest, orange is 15–45 minutes, and pink is 45–90 minutes old.',
+            vector: true,
+          } satisfies LayerMeta,
+        ]
+      : []),
+    {
+      id: AURORA_FORECAST_ID,
+      rev: 1,
+      title: 'Aurora forecast',
+      description: 'NOAA’s 30-minute aurora probability forecast, refreshed every five minutes.',
+      group: 'Weather',
+      attribution: 'Aurora forecast © NOAA SWPC',
+      metadataUrl: 'https://www.swpc.noaa.gov/products/aurora-30-minute-forecast',
+      maxzoom: 5,
+      defaultOpacity: 0.85,
+      identify: false,
+      refreshSeconds: 300,
+      coverageNote:
+        'Green to yellow/red means increasing model probability. Daylight and cloud are not included; enable Clouds as well to assess viewing conditions.',
+    },
     {
       id: WEATHER_WARNINGS_ID,
       rev: 1,
@@ -323,10 +372,15 @@ export function registerWeatherMapsApi(
     opts.userAgent ??
     process.env.METNO_USER_AGENT ??
     'atlas-maps/1.0 git.gjessing.io/gjessing1/atlas lars@gjessing.io';
+  const frostClientId = opts.frostClientId ?? process.env.FROST_CLIENT_ID;
   const MAPS_PROBE = 'yr-maps';
   const ALERTS_PROBE = 'metalerts';
+  const LIGHTNING_PROBE = 'frost-lightning';
+  const AURORA_PROBE = 'noaa-ovation';
   status?.register(MAPS_PROBE, 'MET Norway (weather maps)', 'Weather');
   status?.register(ALERTS_PROBE, 'MET Norway (weather warnings)', 'Weather');
+  if (frostClientId) status?.register(LIGHTNING_PROBE, 'MET Norway (lightning)', 'Weather');
+  status?.register(AURORA_PROBE, 'NOAA SWPC (aurora forecast)', 'Weather');
 
   // ------------------------------------------------------------- catalog ---
 
@@ -445,9 +499,10 @@ export function registerWeatherMapsApi(
         layers,
         attribution: ATTRIBUTION,
         lightning: {
-          available: false,
-          reason:
-            'Live lightning is open data, but its supported Frost endpoint requires a client ID.',
+          available: Boolean(frostClientId),
+          reason: frostClientId
+            ? 'Live observations are available as the Lightning layer.'
+            : 'Live lightning is open data, but its supported Frost endpoint requires a client ID.',
         },
       },
       frames,
@@ -670,6 +725,125 @@ export function registerWeatherMapsApi(
       },
     );
   }
+
+  // ------------------------------------------------------- aurora forecast ---
+
+  let aurora: { fetchedAt: number; grid: OvationGrid } | null = null;
+  let auroraInflight: Promise<OvationGrid> | null = null;
+  const auroraTiles = new Lru<Buffer>(64, 24 * 1024 * 1024, (value) => value.byteLength);
+
+  async function currentAurora(): Promise<OvationGrid> {
+    if (aurora && now() - aurora.fetchedAt < AURORA_TTL_MS) return aurora.grid;
+    if (auroraInflight) return auroraInflight;
+    auroraInflight = (async () => {
+      try {
+        const response = await fetchImpl(OVATION_URL, {
+          headers: { 'User-Agent': userAgent, Accept: 'application/json' },
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!response.ok) throw new Error(`ovation ${response.status}`);
+        const grid = parseOvation(await response.json());
+        if (!grid) throw new Error('ovation returned an invalid grid');
+        aurora = { fetchedAt: now(), grid };
+        status?.record(AURORA_PROBE, true);
+        return grid;
+      } catch (error) {
+        status?.record(AURORA_PROBE, false, 'unreachable');
+        if (aurora) return aurora.grid;
+        throw error;
+      } finally {
+        auroraInflight = null;
+      }
+    })();
+    return auroraInflight;
+  }
+
+  app.get<{ Params: { z: string; x: string; y: string } }>(
+    `/api/overlay/${AURORA_FORECAST_ID}/:z/:x/:y.png`,
+    async (request, reply) => {
+      const z = Number(request.params.z);
+      const x = Number(request.params.x);
+      const y = Number(request.params.y);
+      if (!validTile(z, x, y) || z > 5)
+        return reply.code(400).send({ error: 'invalid tile coordinate' });
+      try {
+        const grid = await currentAurora();
+        const key = `${grid.forecastTime}/${z}/${x}/${y}`;
+        let bytes = auroraTiles.get(key);
+        if (!bytes) {
+          const png = new PNG({ width: 256, height: 256, colorType: 6 });
+          png.data = Buffer.from(paintAuroraTile(grid, z, x, y));
+          bytes = PNG.sync.write(png);
+          auroraTiles.set(key, bytes);
+        }
+        reply.header('content-type', 'image/png');
+        reply.header('cache-control', 'public, max-age=240');
+        reply.header('x-atlas-forecast-time', grid.forecastTime);
+        return reply.send(bytes);
+      } catch (error) {
+        request.log.error({ err: error }, 'aurora forecast upstream failed');
+        return reply.code(502).send();
+      }
+    },
+  );
+
+  // --------------------------------------------------- lightning observations ---
+
+  const lightningCache = new Map<string, { fetchedAt: number; data: LightningResponse }>();
+
+  const lightningBbox = (raw: string | undefined): [number, number, number, number] | null => {
+    const value = (raw ?? '').split(',').map(Number);
+    if (value.length !== 4 || value.some((n) => !Number.isFinite(n))) return null;
+    const [w, s, e, n] = value as [number, number, number, number];
+    if (w >= e || s >= n || e - w > 90 || n - s > 60) return null;
+    const clipped: [number, number, number, number] = [
+      Math.max(LIGHTNING_BOUNDS[0], Math.floor(w / 2) * 2),
+      Math.max(LIGHTNING_BOUNDS[1], Math.floor(s / 2) * 2),
+      Math.min(LIGHTNING_BOUNDS[2], Math.ceil(e / 2) * 2),
+      Math.min(LIGHTNING_BOUNDS[3], Math.ceil(n / 2) * 2),
+    ];
+    return clipped[0] < clipped[2] && clipped[1] < clipped[3] ? clipped : null;
+  };
+
+  app.get<{ Querystring: { bbox?: string } }>(
+    `/api/overlay/${LIGHTNING_OBSERVATIONS_ID}/features`,
+    async (request, reply) => {
+      if (!frostClientId)
+        return reply.code(503).send({ error: 'lightning observations are not configured' });
+      const bbox = lightningBbox(request.query.bbox);
+      if (!bbox) return reply.code(400).send({ error: 'valid bounded bbox required' });
+      const key = bbox.join(',');
+      const cached = lightningCache.get(key);
+      if (cached && now() - cached.fetchedAt < LIGHTNING_TTL_MS) return reply.send(cached.data);
+      const [w, s, e, n] = bbox;
+      const query = new URLSearchParams({
+        referencetime: 'latest',
+        maxage: 'PT90M',
+        geometry: `POLYGON((${w} ${s},${e} ${s},${e} ${n},${w} ${n},${w} ${s}))`,
+      });
+      try {
+        const response = await fetchImpl(`${FROST_LIGHTNING_URL}?${query}`, {
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${frostClientId}:`).toString('base64')}`,
+            'User-Agent': userAgent,
+            Accept: 'text/plain',
+          },
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (!response.ok) throw new Error(`frost lightning ${response.status}`);
+        const data = parseUalf(await response.text(), now());
+        lightningCache.set(key, { fetchedAt: now(), data });
+        status?.record(LIGHTNING_PROBE, true);
+        reply.header('cache-control', 'public, max-age=45');
+        return reply.send(data);
+      } catch (error) {
+        status?.record(LIGHTNING_PROBE, false, 'unreachable');
+        request.log.error({ err: error }, 'lightning observations upstream failed');
+        if (cached) return reply.send(cached.data);
+        return reply.code(502).send({ error: 'lightning observations unavailable' });
+      }
+    },
+  );
 
   // ---------------------------------------------------------------- grid ---
 

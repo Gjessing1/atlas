@@ -875,7 +875,7 @@ export interface WeatherMapsResponse {
   layers: WeatherMapLayer[];
   attribution: string;
   /** Kept for the same pre-timeline bundles, which read `lightning.reason` unguarded. */
-  lightning: { available: false; reason: string };
+  lightning: { available: boolean; reason: string };
 }
 
 // --------------------------------------------------------------- timeline ---
