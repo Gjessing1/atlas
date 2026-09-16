@@ -260,14 +260,41 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/DestinationCard.tsx', contains: 'onWeather' },
   },
   {
-    id: 'map-weather-forecast',
+    id: 'map-weather-layers',
     surface: 'map',
-    capability: 'Animated precipitation, temperature, wind, cloud and sea-temperature maps',
+    capability:
+      'Switch on precipitation (radar or forecast), wind, temperature, cloud or sea-temperature layers and play them through time',
     hook: 'useWeatherMaps',
-    web: { file: 'apps/web/src/map/useWeatherMapLayer.ts', contains: 'useWeatherMapLayer' },
-    android: { file: 'apps/android/src/map/MapScene.tsx', contains: 'weatherMaps.frame' },
-    route: { file: 'backend/src/weather-api.ts', contains: "'/api/weather/maps'" },
-    note: 'Both clients share the discovered MET Norway timeline, nearest-time layer switching, play loop and colour scales. Lightning remains visibly unavailable until Atlas has credentials for the supported Frost feed.',
+    web: { file: 'apps/web/src/weather/WeatherDock.tsx', contains: 'weather-timeline-switch' },
+    android: { file: 'apps/android/src/ui/WeatherDock.tsx', contains: 'weather-timeline-' },
+    route: { file: 'backend/src/weather-maps-api.ts', contains: "'/api/weather/maps'" },
+    note: 'Both clients offer the fields as ordinary layer rows (one field at a time) and show the same dock — legend, play, Radar/Forecast, scrubber with Now — only while one is on. The backend decodes and paints MET’s data tiles, so the pixels are identical. Wind is animated particles on the web and arrows with speeds on Android, where MapLibre Native has no custom layer to animate; temperature numbers sit under town names on the web and on a collision-placed grid on Android.',
+  },
+  {
+    id: 'map-weather-warnings',
+    surface: 'map',
+    capability: 'See and identify MET’s live yellow, orange and red weather warnings',
+    web: {
+      file: 'apps/web/src/map/useWeatherWarningsLayer.ts',
+      contains: 'useWeatherWarningsLayer',
+    },
+    android: {
+      file: 'apps/android/src/layers/useWeatherLayers.ts',
+      contains: 'useWeatherWarnings',
+    },
+    route: {
+      file: 'backend/src/weather-maps-api.ts',
+      contains: '/api/overlay/${WEATHER_WARNINGS_ID}/features',
+    },
+  },
+  {
+    id: 'card-weather-at-point',
+    surface: 'card',
+    capability: 'Tap the map with a weather layer on to read the weather there at the time shown',
+    hook: 'useWeatherMaps',
+    web: { file: 'apps/web/src/App.tsx', contains: 'weatherPointIdentify' },
+    android: { file: 'apps/android/App.tsx', contains: 'weatherPointIdentify' },
+    route: { file: 'backend/src/weather-maps-api.ts', contains: "'/api/weather/maps/point'" },
   },
   {
     id: 'card-transit-departures',

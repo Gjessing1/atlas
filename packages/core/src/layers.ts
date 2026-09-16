@@ -227,6 +227,22 @@ export interface LayerMeta {
    */
   options?: LayerOption[];
   /**
+   * Present on an animated weather field (MET Norway's maps, `@atlas/conditions`
+   * names the `layer`). Its tiles are addressed per time step through
+   * `/api/weather/maps` rather than `overlayTileUrl`, and a client shows its
+   * timeline and legend only while the row is on. A client that predates the
+   * field draws the row as an ordinary raster, which the backend answers with
+   * the frame nearest now — so an old bundle sees a still map, not a blank one.
+   */
+  weather?: { layer: string };
+  /**
+   * Rows sharing this key are alternatives: switching one on switches the rest
+   * of the group off in the same profile. For layers that paint the same ground
+   * in competing colours (two weather fields), where the second one on is never
+   * what the reader wants *added*.
+   */
+  exclusive?: string;
+  /**
    * Present when this layer is a **derived potential surface**:
    * its tiles come from the derive service at `/api/potential/…`, keyed by the
    * layer's `target` option, rather than from the overlay proxy. `overlayTileUrl`

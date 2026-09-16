@@ -11,6 +11,7 @@ import {
   roadWeatherIdentify,
 } from '@atlas/core';
 import type { OverlayEntry } from '@atlas/app-hooks';
+import { weatherWarningIdentify } from '@atlas/conditions';
 import { transitVehicleIdentify } from '@atlas/transit';
 import type { LayerMeta, OverlayIdentifyGroup, OverlayLabelsResponse } from '@atlas/core';
 import { tappedFlowProperties } from '@atlas/traffic';
@@ -24,6 +25,7 @@ import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
 import { TRAFFIC_IDENTIFY_LAYERS } from './useTrafficLayer.js';
 import { ROAD_WEATHER_IDENTIFY_LAYERS } from './useRoadWeatherLayer.js';
 import { TRANSIT_VEHICLE_IDENTIFY_LAYERS } from './useTransitVehicleLayer.js';
+import { WEATHER_WARNING_IDENTIFY_LAYERS } from './useWeatherWarningsLayer.js';
 
 /** Shared empty payload for a label source before its first fetch lands. */
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -92,8 +94,11 @@ export function useOverlayLayers(map: maplibregl.Map | null, overlays: ActiveOve
         return;
       }
       // Vector overlays are drawn by their own hooks (useSpeedCameraLayer) —
-      // requesting raster tiles for them would only 404.
-      const wanted = new Map(overlays.filter((o) => !o.meta.vector).map((o) => [sourceId(o), o]));
+      // requesting raster tiles for them would only 404. Weather fields are
+      // rasters, but one per time step, drawn by useWeatherMapLayer.
+      const wanted = new Map(
+        overlays.filter((o) => !o.meta.vector && !o.meta.weather).map((o) => [sourceId(o), o]),
+      );
       try {
         for (const layer of style.layers ?? []) {
           if (layer.id.startsWith(ID_PREFIX) && !wanted.has(layer.id)) map.removeLayer(layer.id);
@@ -309,7 +314,15 @@ export function useOverlayIdentify(
   suppress: { readonly current: boolean } | undefined,
   onIdentify: (at: { lat: number; lng: number }, groups: OverlayIdentifyGroup[]) => void,
   onSatellite?: (hit: { layerId: string; noradId: number }) => void,
+  /**
+   * Answers that come from neither a drawn feature nor an overlay's identify
+   * route — the weather at the tapped point while a weather layer is on. They
+   * lead the card: with a weather map up, that is the question being asked.
+   */
+  leading?: (at: { lat: number; lng: number }) => Promise<OverlayIdentifyGroup[]>,
 ): void {
+  const leadingRef = useRef(leading);
+  leadingRef.current = leading;
   const overlaysRef = useRef(overlays);
   overlaysRef.current = overlays;
   const onIdentifyRef = useRef(onIdentify);
@@ -368,17 +381,21 @@ export function useOverlayIdentify(
         // the same road, so the tapped one has to be chosen rather than taken.
         trafficFlowIdentify(tappedFlowProperties(at, hits(TRAFFIC_FLOW_IDENTIFY_LAYERS))),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
+        weatherWarningIdentify(drawn(WEATHER_WARNING_IDENTIFY_LAYERS)),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);
       // Served same-origin, so the shared helper needs no origin prefix. The
       // options ride along so a filtered layer answers for what it draws.
-      const results = await identifyOverlays(
-        '',
-        overlaysRef.current.map((o) => o.meta),
-        e.lngLat,
-        map.getZoom(),
-        (meta) => overlaysRef.current.find((o) => o.meta.id === meta.id)?.options,
-      );
-      const groups = [...local, ...results];
+      const [results, lead] = await Promise.all([
+        identifyOverlays(
+          '',
+          overlaysRef.current.map((o) => o.meta),
+          e.lngLat,
+          map.getZoom(),
+          (meta) => overlaysRef.current.find((o) => o.meta.id === meta.id)?.options,
+        ),
+        leadingRef.current?.(at).catch(() => []) ?? Promise.resolve([]),
+      ]);
+      const groups = [...lead, ...local, ...results];
       if (groups.length === 0 || click !== clickSeq.current) return;
       onIdentifyRef.current(at, groups);
     };

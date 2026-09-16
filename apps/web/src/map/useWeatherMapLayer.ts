@@ -1,21 +1,34 @@
 import type { WeatherMapsController } from '@atlas/app-hooks';
 import type maplibregl from 'maplibre-gl';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
-const SOURCE_PREFIX = 'atlas-weather-map-';
+const PREFIX = 'atlas-weather-map-';
 
-/** Draw the selected weather frame below labels, replacing the source per time step. */
+/**
+ * The switched-on weather field's current frame, under the basemap's labels.
+ *
+ * Each frame is its own raster source. The frames play reaches next are added
+ * too, at zero opacity, so their tiles are fetched before they are shown — and
+ * the picture on screen only changes once the new frame has loaded. Swapping a
+ * source's URL in place, or showing a frame whose tiles are still on their way,
+ * blanks the map between steps and makes the animation strobe.
+ */
 export function useWeatherMapLayer(
   map: maplibregl.Map | null,
-  weatherMaps: WeatherMapsController,
+  maps: WeatherMapsController,
+  opacity: number,
 ): void {
-  const layer = weatherMaps.visible ? weatherMaps.layer : null;
-  const frame = weatherMaps.visible ? weatherMaps.frame : null;
+  const { layerId, timeline, frame, upcoming, attribution } = maps;
+  // The frame last actually shown: kept on screen until its successor is ready.
+  const shownRef = useRef<string | null>(null);
+  const upcomingKey = upcoming.map((f) => f.id).join(',');
 
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    const wantedId = layer && frame ? `${SOURCE_PREFIX}${layer.id}-${frame.id}` : null;
+    const sourceId = (frameId: string) => `${PREFIX}${layerId}-${frameId}`;
+    const wanted = frame && timeline && layerId ? [frame, ...upcoming] : [];
+    const currentId = frame && layerId ? sourceId(frame.id) : null;
 
     const sync = () => {
       if (cancelled) return;
@@ -26,50 +39,84 @@ export function useWeatherMapLayer(
         return;
       }
       try {
-        for (const candidate of style.layers ?? []) {
-          if (candidate.id.startsWith(SOURCE_PREFIX) && candidate.id !== wantedId)
-            map.removeLayer(candidate.id);
+        const previous = shownRef.current;
+        const currentReady =
+          currentId !== null && Boolean(map.getSource(currentId)) && map.isSourceLoaded(currentId);
+        // Switched off, nothing stays; otherwise hold the old frame until the new one is in.
+        const visibleId =
+          currentId === null ||
+          currentReady ||
+          !previous ||
+          previous === currentId ||
+          !map.getSource(previous)
+            ? currentId
+            : previous;
+
+        const keep = new Set(wanted.map((f) => sourceId(f.id)));
+        if (visibleId) keep.add(visibleId);
+        for (const layer of style.layers ?? []) {
+          if (layer.id.startsWith(PREFIX) && !keep.has(layer.id)) map.removeLayer(layer.id);
         }
         for (const id of Object.keys(style.sources ?? {})) {
-          if (id.startsWith(SOURCE_PREFIX) && id !== wantedId) map.removeSource(id);
+          if (id.startsWith(PREFIX) && !keep.has(id)) map.removeSource(id);
         }
-        if (!wantedId || !layer || !frame) return;
-        const labelAnchor = (style.layers ?? []).find(
-          (candidate) => candidate.type === 'symbol',
-        )?.id;
-        if (!map.getSource(wantedId)) {
-          map.addSource(wantedId, {
-            type: 'raster',
-            tiles: [frame.tileUrlTemplate],
-            tileSize: 256,
-            minzoom: layer.minzoom,
-            maxzoom: layer.maxzoom,
-            attribution: weatherMaps.attribution,
-          });
+        if (!timeline) {
+          shownRef.current = null;
+          return;
         }
-        if (!map.getLayer(wantedId)) {
-          map.addLayer(
-            {
-              id: wantedId,
+
+        const labelAnchor = (style.layers ?? []).find((layer) => layer.type === 'symbol')?.id;
+        for (const next of wanted) {
+          const id = sourceId(next.id);
+          if (!map.getSource(id)) {
+            map.addSource(id, {
               type: 'raster',
-              source: wantedId,
-              paint: { 'raster-opacity': 0.78, 'raster-fade-duration': 250 },
-            },
-            labelAnchor,
-          );
+              tiles: [next.tileUrlTemplate],
+              tileSize: 256,
+              minzoom: timeline.minzoom,
+              maxzoom: timeline.maxzoom,
+              bounds: timeline.bounds,
+              attribution,
+            });
+          }
+          if (!map.getLayer(id)) {
+            map.addLayer(
+              {
+                id,
+                type: 'raster',
+                source: id,
+                paint: { 'raster-opacity': 0, 'raster-fade-duration': 0 },
+              },
+              labelAnchor,
+            );
+          }
         }
+        for (const id of keep) {
+          if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'raster-opacity', id === visibleId ? opacity : 0);
+          }
+        }
+        shownRef.current = visibleId;
       } catch {
-        // A style swap retries on style.load/idle.
+        // The style is mid-swap: style.load re-runs this pass.
       }
+    };
+
+    // The moment the frame being waited for finishes loading is the moment to show it.
+    const onData = (event: maplibregl.MapSourceDataEvent) => {
+      if (event.sourceId === currentId && shownRef.current !== currentId) sync();
     };
 
     sync();
     map.on('style.load', sync);
     map.on('idle', sync);
+    map.on('sourcedata', onData);
     return () => {
       cancelled = true;
       map.off('style.load', sync);
       map.off('idle', sync);
+      map.off('sourcedata', onData);
     };
-  }, [map, layer, frame, weatherMaps.attribution]);
+    // upcomingKey stands in for `upcoming`, a fresh array on every render.
+  }, [map, layerId, timeline, frame?.id, upcomingKey, opacity, attribution]);
 }

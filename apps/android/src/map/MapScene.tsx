@@ -1,4 +1,4 @@
-import type { NavController, WeatherMapsController } from '@atlas/app-hooks';
+import type { NavController } from '@atlas/app-hooks';
 import {
   bboxOutlinesFeatureCollection,
   exploreResultsFeatureCollection,
@@ -35,6 +35,7 @@ import type { ActiveOverlay } from '../layers/useOverlays';
 import type { SatelliteLayerData } from '../layers/useSatellites';
 import type { SpeedCameras } from '../layers/useSpeedCameras';
 import type { VectorOverlayData } from '../layers/useVectorOverlay';
+import type { WeatherLayers } from '../layers/useWeatherLayers';
 import { spotsFeatureCollection, type PotentialSpot } from '@atlas/potential';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
@@ -104,6 +105,14 @@ export const TRAFFIC_LAYER_IDS = ['atlas-traffic-symbol', 'atlas-traffic-dot'];
 /** Measured congestion corridors hit-tested for their travel time. */
 export const TRAFFIC_FLOW_LAYER_IDS = ['atlas-traffic-flow-line'];
 export const ROAD_WEATHER_LAYER_IDS = ['atlas-road-weather-symbol', 'atlas-road-weather-dot'];
+const WEATHER_ANCHOR_ID = 'atlas-weather-anchor';
+const WEATHER_ANCHOR_LAYER_ID = 'atlas-weather-anchor-layer';
+const EMPTY_WEATHER_ANCHOR: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+/** A warning's badge or area answers a tap. */
+export const WEATHER_WARNING_LAYER_IDS = [
+  'atlas-weather-warnings-badge',
+  'atlas-weather-warnings-fill',
+];
 
 /** Live Entur vehicles hit-tested for line, delay and occupancy. */
 export const TRANSIT_VEHICLE_LAYER_IDS = [
@@ -267,8 +276,12 @@ interface MapSceneProps {
   roadWeather: VectorOverlayData | null;
   /** Live public-transport vehicles in the current viewport. */
   transitVehicles: VectorOverlayData | null;
-  /** Selected frame of the animated MET weather-map surface. */
-  weatherMaps: WeatherMapsController;
+  /** The switched-on weather field: its frames, opacity and grid labels. */
+  weather: WeatherLayers;
+  /** MET's warning areas while that layer is on. */
+  weatherWarnings: VectorOverlayData | null;
+  /** How far the weather dock lifts the scale bar and compass off the bottom edge. */
+  chromeLift: number;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
   /** Numbered category-browse results, retained while the picked card is open. */
@@ -349,7 +362,9 @@ export function MapScene({
   trafficFlow,
   roadWeather,
   transitVehicles,
-  weatherMaps,
+  weather,
+  weatherWarnings,
+  chromeLift,
   spots,
   exploreResults,
   measure,
@@ -520,7 +535,8 @@ export function MapScene({
           polygons) draw as their own GeoJSON source below, not as rasters. */}
         {!inPip
           ? overlays
-              .filter((overlay) => !overlay.meta.vector)
+              // Weather fields are rasters too, but one per time step (below).
+              .filter((overlay) => !overlay.meta.vector && !overlay.meta.weather)
               .map((overlay) => (
                 <RasterSource
                   // Keyed on the *variant* id, not the layer id: switching species
@@ -542,22 +558,168 @@ export function MapScene({
                 </RasterSource>
               ))
           : null}
-        {!inPip && weatherMaps.visible && weatherMaps.layer && weatherMaps.frame ? (
-          <RasterSource
-            key={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}`}
-            id={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}`}
-            tiles={[weatherMaps.frame.tileUrlTemplate]}
-            tileSize={256}
-            minzoom={weatherMaps.layer.minzoom}
-            maxzoom={weatherMaps.layer.maxzoom}
-            attribution={weatherMaps.attribution}
-          >
+        {/* Where weather frames go. Native MapLibre adds a layer on top of the
+          map unless told otherwise, so a frame mounted mid-animation would land
+          over the route, the warnings and the wind arrows. This empty layer is
+          mounted once, here, and every frame is inserted beneath it. */}
+        <GeoJSONSource id={WEATHER_ANCHOR_ID} data={EMPTY_WEATHER_ANCHOR}>
+          <Layer type="circle" id={WEATHER_ANCHOR_LAYER_ID} paint={{ 'circle-opacity': 0 }} />
+        </GeoJSONSource>
+        {/* The weather field: the frame on screen, plus the frames play reaches
+          next at zero opacity so their tiles are already loaded when they show.
+          Keyed per frame, so stepping forward reveals a mounted source instead of
+          swapping a URL under a live one. */}
+        {!inPip && weather.maps.frame && weather.maps.timeline
+          ? [weather.maps.frame, ...weather.maps.upcoming].map((frame, index) => (
+              <RasterSource
+                key={`atlas-weather-${weather.maps.layerId}-${frame.id}`}
+                id={`atlas-weather-${weather.maps.layerId}-${frame.id}`}
+                tiles={[frame.tileUrlTemplate]}
+                tileSize={256}
+                minzoom={weather.maps.timeline!.minzoom}
+                maxzoom={weather.maps.timeline!.maxzoom}
+                attribution={weather.maps.attribution}
+              >
+                <Layer
+                  type="raster"
+                  id={`atlas-weather-${weather.maps.layerId}-${frame.id}-layer`}
+                  beforeId={WEATHER_ANCHOR_LAYER_ID}
+                  paint={{
+                    'raster-opacity': index === 0 ? weather.opacity : 0,
+                    'raster-fade-duration': 0,
+                  }}
+                />
+              </RasterSource>
+            ))
+          : null}
+        {!inPip && weatherWarnings ? (
+          <GeoJSONSource id="atlas-weather-warnings" data={weatherWarnings.data}>
             <Layer
-              type="raster"
-              id={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}-layer`}
-              paint={{ 'raster-opacity': 0.78, 'raster-fade-duration': 250 }}
+              type="fill"
+              id="atlas-weather-warnings-fill"
+              filter={['!=', ['get', 'badge'], true]}
+              paint={{
+                'fill-color': ['get', 'color'],
+                'fill-opacity': 0.25 * weatherWarnings.opacity,
+              }}
             />
-          </RasterSource>
+            <Layer
+              type="line"
+              id="atlas-weather-warnings-line"
+              filter={['!=', ['get', 'badge'], true]}
+              paint={{
+                'line-color': ['get', 'color'],
+                'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.2, 10, 2.2],
+                'line-opacity': weatherWarnings.opacity,
+              }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-weather-warnings-badge"
+              filter={['==', ['get', 'badge'], true]}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 9, 8, 13],
+                'circle-color': ['get', 'color'],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': weatherWarnings.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-weather-warnings-badge-text"
+              filter={['==', ['get', 'badge'], true]}
+              layout={{
+                'text-field': '!',
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 3, 12, 8, 16],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': ['match', ['get', 'level'], 'yellow', '#2b2200', '#ffffff'],
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-weather-warnings-badge-label"
+              filter={['==', ['get', 'badge'], true]}
+              minzoom={5}
+              layout={{
+                'text-field': ['get', 'eventLabel'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12,
+                'text-anchor': 'top',
+                'text-offset': [0, 1.2],
+              }}
+              paint={{
+                'text-color': '#1f2328',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.5,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Wind arrows with their speed, or temperature numbers, over the field.
+          The web animates particles; MapLibre Native has no layer to run them. */}
+        {!inPip && weather.labels && weather.maps.layerId === 'wind' ? (
+          <GeoJSONSource id="atlas-weather-labels" data={weather.labels}>
+            <Layer
+              type="symbol"
+              id="atlas-weather-wind-arrows"
+              layout={{
+                'text-field': '↑',
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['get', 'speed'], 0, 14, 15, 24],
+                'text-rotate': ['get', 'rotation'],
+                'text-rotation-alignment': 'map',
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': '#ffffff',
+                'text-halo-color': 'rgba(20, 30, 40, 0.55)',
+                'text-halo-width': 1.2,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-weather-wind-speed"
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 11,
+                'text-anchor': 'top',
+                'text-offset': [0, 0.9],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{
+                'text-color': '#1c2530',
+                'text-halo-color': 'rgba(255,255,255,0.85)',
+                'text-halo-width': 1.2,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {!inPip && weather.labels && weather.maps.layerId !== 'wind' ? (
+          <GeoJSONSource id="atlas-weather-values" data={weather.labels}>
+            <Layer
+              type="symbol"
+              id="atlas-weather-values-text"
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 13,
+                'text-padding': 10,
+              }}
+              paint={{
+                'text-color': '#1c2530',
+                'text-halo-color': 'rgba(255,255,255,0.85)',
+                'text-halo-width': 1.4,
+              }}
+            />
+          </GeoJSONSource>
         ) : null}
         {/* Attribute labels drawn over the raster — the number a tile can't
           carry (a surveyed lake's max depth). Mounted after the rasters so
@@ -1627,7 +1789,7 @@ export function MapScene({
         <ScaleBar
           lat={scaleAt.lat}
           zoom={scaleAt.zoom}
-          bottom={bottomInset + 88}
+          bottom={bottomInset + 88 + chromeLift}
           left={side.left + 20}
         />
       ) : null}
@@ -1638,7 +1800,7 @@ export function MapScene({
       {showIdleChrome && bearing !== 0 ? (
         <MapCompass
           bearing={bearing}
-          bottom={bottomInset + 78}
+          bottom={bottomInset + 78 + chromeLift}
           right={side.right + 12}
           onPress={faceNorth}
         />

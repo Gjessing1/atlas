@@ -182,11 +182,29 @@ export function useOverlayPreferences(
 
   const setOn = useCallback(
     (id: string, on: boolean) =>
-      update((current) => ({
-        ...current,
-        [stateKey(profileId, id)]: { ...current[stateKey(profileId, id)], on },
-      })),
-    [update, profileId],
+      update((current) => {
+        const next = {
+          ...current,
+          [stateKey(profileId, id)]: { ...current[stateKey(profileId, id)], on },
+        };
+        // Switching on one of an exclusive group switches its siblings off —
+        // explicitly, so a sibling that is on by default or by preset stops too.
+        const group = on ? allLayers.find((meta) => meta.id === id)?.exclusive : undefined;
+        if (group) {
+          for (const sibling of allLayers) {
+            if (sibling.id === id || sibling.exclusive !== group) continue;
+            if (!resolveOn(current, profileId, sibling.id, preferredLayers, customizedLayers)) {
+              continue;
+            }
+            next[stateKey(profileId, sibling.id)] = {
+              ...current[stateKey(profileId, sibling.id)],
+              on: false,
+            };
+          }
+        }
+        return next;
+      }),
+    [update, profileId, allLayers, preferredLayers, customizedLayers],
   );
 
   const setProfileOn = useCallback(

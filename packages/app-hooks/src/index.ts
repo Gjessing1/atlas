@@ -182,9 +182,12 @@ export {
 } from './useExplore.js';
 export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
+  useWeatherGrid,
   useWeatherMaps,
   type ActiveWeatherMapFrame,
+  type WeatherGridViewport,
   type WeatherMapsController,
+  type WeatherMapsOptions,
 } from './useWeatherMaps.js';
 export {
   fetchTerrainSlope,

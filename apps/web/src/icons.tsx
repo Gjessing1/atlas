@@ -601,6 +601,23 @@ export function CheckIcon(props: IconProps) {
   );
 }
 
+export function PlayIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path d="M8 5.5v13l10.5-6.5L8 5.5z" fill="currentColor" />
+    </IconFrame>
+  );
+}
+
+export function PauseIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <rect x="6.5" y="5.5" width="4" height="13" rx="1" fill="currentColor" />
+      <rect x="13.5" y="5.5" width="4" height="13" rx="1" fill="currentColor" />
+    </IconFrame>
+  );
+}
+
 /**
  * One glyph per secondary action, keyed by the shared descriptor so the two
  * clients cannot end up drawing different pictures for the same button.

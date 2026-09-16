@@ -59,6 +59,11 @@ import {
 } from './transit-api.js';
 import { registerTrafficApi, type TrafficApiOptions } from './traffic-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
+import {
+  registerWeatherMapsApi,
+  weatherLayerMetas,
+  type WeatherMapsApiOptions,
+} from './weather-maps-api.js';
 import { createPgStores } from './pg.js';
 import {
   parseRegistrationMode,
@@ -114,6 +119,7 @@ export interface AppOptions {
   overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
   /** Test seams for the met.no weather proxy. */
   weatherApi?: WeatherApiOptions;
+  weatherMapsApi?: WeatherMapsApiOptions;
   /** Test seams for the Entur public-transport proxy. */
   transitApi?: TransitApiOptions;
   /** Test seams for the authenticated NPRA DATEX traffic proxy. */
@@ -686,6 +692,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       iceObservationLayerMeta(),
       satellitesLayerMeta(),
       starlinkLayerMeta(),
+      ...weatherLayerMetas(),
       ...derivedLayerMetas(),
     ],
     ...opts.overlayApi,
@@ -738,6 +745,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // Weather: met.no Locationforecast proxy (ToS discipline lives in
   // weather-api.ts — identifying UA, Expires caching, stale-on-failure).
   registerWeatherApi(app, { status, ...opts.weatherApi });
+
+  // Animated weather layers and warnings: MET's map data decoded and painted
+  // (weather-maps-api.ts), so both clients draw a plain raster.
+  registerWeatherMapsApi(app, { status, ...opts.weatherMapsApi });
 
   // Public transport: Entur journey planner proxy (transit-api.ts — mandatory
   // ET-Client-Name header, Norway-only coverage check, Atlas trip model out).

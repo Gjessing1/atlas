@@ -3,6 +3,7 @@ import {
   type OverlayEntry,
   type OverlayPreferences,
 } from '@atlas/app-hooks';
+import { WEATHER_WARNINGS_ID } from '@atlas/conditions';
 import {
   jsonSetting,
   layerOptionSignature,
@@ -33,6 +34,7 @@ const RENDERABLE_VECTOR_IDS = new Set([
   'transit-vehicles',
   SATELLITES_ID,
   STARLINK_ID,
+  WEATHER_WARNINGS_ID,
 ]);
 
 /**

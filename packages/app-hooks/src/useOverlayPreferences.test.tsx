@@ -300,6 +300,40 @@ describe('useOverlayPreferences', () => {
     });
   });
 
+  describe('exclusive groups', () => {
+    const wind = layer('weather-wind', { exclusive: 'weather-field' });
+    const rain = layer('weather-precipitation', { exclusive: 'weather-field' });
+    const weatherCatalog = [...catalog, wind, rain];
+
+    it('switches the rest of the group off when one is switched on', async () => {
+      const { result, saved } = render({ profileId: 'explore', catalog: weatherCatalog });
+      await loaded(result);
+      act(() => result.current.setOn('weather-wind', true));
+      await waitFor(() => expect(result.current.isOn('weather-wind')).toBe(true));
+      act(() => result.current.toggle('weather-precipitation'));
+      await waitFor(() => expect(result.current.isOn('weather-precipitation')).toBe(true));
+      expect(result.current.isOn('weather-wind')).toBe(false);
+      expect(saved()).toEqual({
+        'explore:weather-wind': { on: false },
+        'explore:weather-precipitation': { on: true },
+      });
+    });
+
+    it('leaves layers outside the group, and siblings that were already off, untouched', async () => {
+      const { result, saved } = render({ profileId: 'explore', catalog: weatherCatalog });
+      await loaded(result);
+      act(() => result.current.setOn('hillshade', true));
+      await waitFor(() => expect(result.current.isOn('hillshade')).toBe(true));
+      act(() => result.current.setOn('weather-wind', true));
+      await waitFor(() => expect(result.current.isOn('weather-wind')).toBe(true));
+      expect(result.current.isOn('hillshade')).toBe(true);
+      expect(saved()).toEqual({
+        'explore:hillshade': { on: true },
+        'explore:weather-wind': { on: true },
+      });
+    });
+  });
+
   describe('storage that is not ready', () => {
     it('keeps toggles working in-session and writes nothing', async () => {
       const seam = store();

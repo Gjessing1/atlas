@@ -59,7 +59,7 @@ export function MainMenuSheet({
     },
     {
       label: 'Weather',
-      detail: 'Forecasts and animated maps',
+      detail: 'Forecast for the map centre',
       testID: 'open-weather',
       onPress: onOpenWeather,
     },

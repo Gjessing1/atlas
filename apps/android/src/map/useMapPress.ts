@@ -13,6 +13,7 @@ import {
   type OverlayIdentifyGroup,
   type SearchResult,
 } from '@atlas/core';
+import { WEATHER_WARNINGS_ID, weatherWarningIdentify } from '@atlas/conditions';
 import { viaInsertIndex } from '@atlas/routing';
 import { tappedFlowProperties } from '@atlas/traffic';
 import { transitVehicleIdentify } from '@atlas/transit';
@@ -41,6 +42,7 @@ import {
   TRAFFIC_LAYER_IDS,
   ROAD_WEATHER_LAYER_IDS,
   TRANSIT_VEHICLE_LAYER_IDS,
+  WEATHER_WARNING_LAYER_IDS,
 } from './MapScene';
 
 /** Finger-sized query box for layer hit-tests (a 1 px point is too strict). */
@@ -85,6 +87,12 @@ export interface MapPressOptions {
   /** Numbered Explore markers use the same reliable distance hit-test as spots. */
   exploreResults?: readonly SearchResult[];
   pickExplore?: (result: SearchResult) => void;
+  /**
+   * Answers that lead the card and come from neither a drawn feature nor an
+   * overlay's identify route: the weather at the tapped point, while a weather
+   * layer is on — with a weather map up, that is the question being asked.
+   */
+  leadingIdentify?: (at: LatLng) => Promise<OverlayIdentifyGroup[]>;
 }
 
 const coordName = (p: LatLng) => `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
@@ -125,7 +133,10 @@ export function useMapPress({
   pickSpot,
   exploreResults,
   pickExplore,
+  leadingIdentify,
 }: MapPressOptions): MapPressHandlers {
+  const leadingRef = useRef(leadingIdentify);
+  leadingRef.current = leadingIdentify;
   // Identify is a network round trip, so a second tap can land before the first
   // answers. Only the newest tap's answer may reach the card — otherwise the
   // rows would describe a point the user has already moved away from.
@@ -296,6 +307,8 @@ export function useMapPress({
               flowHits,
               roadWeatherHits,
               transitVehicleHits,
+              warningHits,
+              leading,
             ] = await Promise.all([
               identifyOverlays(
                 origin,
@@ -313,10 +326,13 @@ export function useMapPress({
               query(vectorOn(TRAFFIC_FLOW_ID), TRAFFIC_FLOW_LAYER_IDS),
               query(vectorOn(ROAD_WEATHER_ID), ROAD_WEATHER_LAYER_IDS),
               query(vectorOn(TRANSIT_VEHICLES_ID), TRANSIT_VEHICLE_LAYER_IDS),
+              query(vectorOn(WEATHER_WARNINGS_ID), WEATHER_WARNING_LAYER_IDS),
+              leadingRef.current?.({ lat, lng }).catch(() => []) ?? Promise.resolve([]),
             ]);
             // Local groups lead: they are what the user aimed at, and the
             // server rows are ambient context for the same point.
             const groups = [
+              ...leading,
               iceObservationIdentify(hitProps(iceHits)),
               speedCameraIdentify(hitProps(cameraHits)),
               trafficIdentify(hitProps(trafficHits)),
@@ -326,6 +342,7 @@ export function useMapPress({
               trafficFlowIdentify(tappedFlowProperties({ lat, lng }, flowHits)),
               roadWeatherIdentify(hitProps(roadWeatherHits)),
               huntingFieldIdentify(hitProps(huntHits)),
+              weatherWarningIdentify(hitProps(warningHits)),
               ...serverGroups,
             ].filter((group): group is OverlayIdentifyGroup => group !== null);
             if (tap === tapSeq.current) showIdentify({ lat, lng }, groups, tapToleranceM(zoom));

@@ -49,11 +49,13 @@ import {
   usePlanningAreas,
   useThemeMode,
   usePersistedSetting,
+  useWeatherGrid,
   useWeatherMaps,
   type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
+import { weatherPointIdentify, weatherPointUrl, type WeatherPointSample } from '@atlas/conditions';
 import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
@@ -76,6 +78,7 @@ import {
   TrainIcon,
 } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
+import { WeatherDock } from './weather/WeatherDock.js';
 import { LayerFilterSwitch } from './layers/LayerFilterSwitch.js';
 import { LayerQuickSwitch } from './layers/LayerQuickSwitch.js';
 import { PotentialPill } from './potential/PotentialPill.js';
@@ -96,7 +99,13 @@ import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
 import { useRoadWeatherLayer } from './map/useRoadWeatherLayer.js';
+import {
+  useWeatherGridViewport,
+  useWeatherValueLabels,
+  useWindParticles,
+} from './map/useWeatherGridLayers.js';
 import { useWeatherMapLayer } from './map/useWeatherMapLayer.js';
+import { useWeatherWarningsLayer } from './map/useWeatherWarningsLayer.js';
 import { useTransitVehicleLayer } from './map/useTransitVehicleLayer.js';
 import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
@@ -368,6 +377,37 @@ export function App() {
   );
   useOverlayLayers(map, overlays);
   useOverlayLabels(map, overlays);
+
+  // ---- weather layers ----
+  // A weather field is an overlay row like any other; while one is on, its
+  // timeline drives the raster, the wind particles or temperature numbers, and
+  // the dock at the bottom of the map.
+  const weatherOverlay = overlays.find((overlay) => overlay.meta.weather);
+  const weatherMaps = useWeatherMaps('', weatherOverlay?.meta.weather?.layer ?? null);
+  useWeatherMapLayer(map, weatherMaps, weatherOverlay?.opacity ?? 0.8);
+  const windOn = weatherMaps.layerId === 'wind';
+  const valuesOn =
+    weatherMaps.layerId === 'temperature' || weatherMaps.layerId === 'sea-temperature';
+  const windViewport = useWeatherGridViewport(map, windOn ? (mapViewport?.bbox ?? null) : null, 24);
+  useWindParticles(map, useWeatherGrid('', weatherMaps, windViewport, windOn));
+  const valueViewport = useWeatherGridViewport(
+    map,
+    valuesOn ? (mapViewport?.bbox ?? null) : null,
+    60,
+  );
+  useWeatherValueLabels(map, useWeatherGrid('', weatherMaps, valueViewport, valuesOn));
+  useWeatherWarningsLayer(map, overlays);
+  const weatherMapsRef = useRef(weatherMaps);
+  weatherMapsRef.current = weatherMaps;
+  // With a weather map up, a tap asks what the weather is there, at the time shown.
+  const weatherAtTap = useCallback(async (at: { lat: number; lng: number }) => {
+    const { layerId, frame } = weatherMapsRef.current;
+    if (!layerId || !frame) return [];
+    const res = await fetch(weatherPointUrl('', at, Date.parse(frame.time)));
+    if (!res.ok) return [];
+    const group = weatherPointIdentify((await res.json()) as WeatherPointSample, layerId);
+    return group ? [group] : [];
+  }, []);
   // "Why is this water good?" for whatever the place card is pointing at. The
   // derived layers are not identify-capable overlays — a tap on one is answered
   // with reasoning rather than upstream attributes, and both now land in the
@@ -650,8 +690,6 @@ export function App() {
   const weatherAt = useWeatherTarget(pin, getBias, DEFAULT_VIEW.center);
   const weatherTarget = weatherAt.target;
   const weather = useWeather(weatherTarget);
-  const weatherMaps = useWeatherMaps('', weatherTarget !== null);
-  useWeatherMapLayer(map, weatherMaps);
 
   const { followPin } = weatherAt;
 
@@ -774,7 +812,14 @@ export function App() {
     },
     [satelliteLayer, starlinkLayer],
   );
-  useOverlayIdentify(map, overlays, blockPassiveClicksRef, onIdentify, onSatellitePick);
+  useOverlayIdentify(
+    map,
+    overlays,
+    blockPassiveClicksRef,
+    onIdentify,
+    onSatellitePick,
+    weatherAtTap,
+  );
 
   const useMapCenterForSatellite = useCallback(() => {
     const center = mapRef.current?.getCenter();
@@ -1287,11 +1332,23 @@ export function App() {
           )}
         </div>
       )}
+      {/* The weather layer's scale and timeline: present exactly while a
+          weather field is switched on, like a layer's own controls. */}
+      {weatherOverlay && nav.phase === 'idle' && (
+        <WeatherDock
+          maps={weatherMaps}
+          title={weatherOverlay.meta.title}
+          shifted={leftPanelOpen || spotsOpen || standBoardOpen || Boolean(target)}
+          compactHidden={Boolean(target) || route.active}
+        />
+      )}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}
       {nav.phase === 'idle' && (
-        <div className="map-control-grid">
+        <div
+          className={`map-control-grid${weatherMaps.layerId ? ' map-control-grid-weather' : ''}`}
+        >
           {/* The Fish & Hunt sub-profile, one row above the layers it tunes.
               Renders nothing in the other profiles — their catalogs carry no
               derived surface. */}
@@ -1483,7 +1540,6 @@ export function App() {
           <WeatherPanel
             target={weatherTarget}
             weather={weather}
-            maps={weatherMaps}
             settings={userData}
             onRetarget={weatherAt.retarget}
             onClose={() => weatherAt.setTarget(null)}

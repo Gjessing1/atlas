@@ -1,4 +1,4 @@
-import { useTerrainSlope, type WeatherMapsController } from '@atlas/app-hooks';
+import { useTerrainSlope } from '@atlas/app-hooks';
 import {
   bestWindows,
   buildPlanner,
@@ -10,7 +10,6 @@ import {
   type ConditionsKind,
   type ForecastPeriodCell,
   type PlannerHour,
-  type WeatherMapLayerId,
 } from '@atlas/conditions';
 import { fmtClock, fmtDayClock, fmtDayLabel, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
@@ -20,7 +19,7 @@ import type { WeatherState } from './useWeather.js';
 const MODE_SETTING = 'local.weather.mode';
 const SPECIES_SETTING = 'local.weather.species';
 
-type Mode = 'weather' | 'maps' | ConditionsKind;
+type Mode = 'weather' | ConditionsKind;
 
 interface SettingsAccess {
   status: string;
@@ -32,7 +31,6 @@ interface WeatherPanelProps {
   origin?: string;
   target: LatLng;
   weather: WeatherState;
-  maps: WeatherMapsController;
   settings: SettingsAccess;
   /** Re-target the forecast to the current map centre. */
   onRetarget: () => void;
@@ -92,97 +90,6 @@ function WeatherFacts({ row }: { row: PlannerHour }) {
           </span>
         )}
       </div>
-    </div>
-  );
-}
-
-function frameKind(kind: string): string {
-  return kind === 'observation' ? 'Radar observation' : kind === 'nowcast' ? 'Nowcast' : 'Forecast';
-}
-
-/** Layer picker, intuitive colour scale and one shared three-day playback timeline. */
-function WeatherMapControls({ maps }: { maps: WeatherMapsController }) {
-  const layer = maps.layer;
-  const frame = maps.frame;
-  return (
-    <div className="weather-map-controls">
-      <div className="weather-map-layers" aria-label="Weather map layer">
-        {maps.layers.map((candidate) => (
-          <button
-            key={candidate.id}
-            type="button"
-            aria-pressed={layer?.id === candidate.id}
-            onClick={() => maps.selectLayer(candidate.id as WeatherMapLayerId)}
-          >
-            {candidate.title}
-          </button>
-        ))}
-        <button type="button" disabled title={maps.lightningReason ?? 'Lightning unavailable'}>
-          Lightning
-        </button>
-      </div>
-      {maps.status === 'loading' && !layer && <p className="weather-note">Loading weather maps…</p>}
-      {maps.status === 'error' && !layer && (
-        <p className="weather-note">Weather maps are unavailable right now.</p>
-      )}
-      {layer && frame && (
-        <>
-          <div className="weather-map-title">
-            <div>
-              <strong>{fmtStep(Date.parse(frame.time))}</strong>
-              <span>{frameKind(frame.kind)}</span>
-            </div>
-            <button
-              type="button"
-              className="weather-play"
-              onClick={maps.togglePlaying}
-              aria-label={maps.playing ? 'Pause weather animation' : 'Play weather animation'}
-            >
-              {maps.playing ? 'Pause' : 'Play'}
-            </button>
-          </div>
-          <input
-            type="range"
-            className="weather-map-scrub"
-            min={0}
-            max={layer.frames.length - 1}
-            value={maps.frameIndex}
-            onChange={(event) => maps.selectFrame(Number(event.target.value))}
-            aria-label={`${layer.title} forecast time`}
-          />
-          <div className="weather-map-step-buttons">
-            <button type="button" onClick={maps.previous} disabled={maps.frameIndex === 0}>
-              ← Earlier
-            </button>
-            <span>{layer.description}</span>
-            <button
-              type="button"
-              onClick={maps.next}
-              disabled={maps.frameIndex === layer.frames.length - 1}
-            >
-              Later →
-            </button>
-          </div>
-          <div className="weather-legend" aria-label={`${layer.title} scale in ${layer.unit}`}>
-            <div className="weather-legend-heading">
-              <span>{layer.title}</span>
-              <span>{layer.unit}</span>
-            </div>
-            <div className="weather-legend-gradient">
-              {layer.legend.map((stop) => (
-                <span key={`${stop.label}-${stop.color}`} style={{ background: stop.color }} />
-              ))}
-            </div>
-            <div className="weather-legend-labels">
-              {layer.legend.map((stop) => (
-                <span key={stop.label}>{stop.label}</span>
-              ))}
-            </div>
-          </div>
-          <p className="weather-attribution">{maps.attribution}</p>
-          {maps.lightningReason && <p className="weather-lightning-note">{maps.lightningReason}</p>}
-        </>
-      )}
     </div>
   );
 }
@@ -353,7 +260,6 @@ export function WeatherPanel({
   origin = '',
   target,
   weather,
-  maps,
   settings,
   onRetarget,
   onClose,
@@ -368,8 +274,8 @@ export function WeatherPanel({
   useEffect(() => {
     if (settingsStatus !== 'ready') return;
     void getSetting(MODE_SETTING).then((raw) => {
-      if (raw === 'weather' || raw === 'maps' || raw === 'fishing' || raw === 'hunting')
-        setMode(raw);
+      // 'maps' was a tab until weather maps became layers; it reads as the forecast.
+      if (raw === 'weather' || raw === 'fishing' || raw === 'hunting') setMode(raw);
     });
     void getSetting(SPECIES_SETTING).then((raw) => {
       if (raw && (SPECIES as readonly string[]).includes(raw)) setSpecies(raw);
@@ -384,11 +290,6 @@ export function WeatherPanel({
     setSpecies(s);
     setSetting(SPECIES_SETTING, s);
   };
-
-  useEffect(() => {
-    maps.setVisible(mode === 'maps');
-    return () => maps.setVisible(false);
-  }, [mode, maps.setVisible]);
 
   const rows = useMemo(
     () =>
@@ -437,7 +338,7 @@ export function WeatherPanel({
       </div>
 
       <div className="weather-modes" role="tablist">
-        {(['weather', 'maps', 'fishing', 'hunting'] as const).map((m) => (
+        {(['weather', 'fishing', 'hunting'] as const).map((m) => (
           <button
             key={m}
             type="button"
@@ -446,13 +347,7 @@ export function WeatherPanel({
             aria-pressed={mode === m}
             onClick={() => pickMode(m)}
           >
-            {m === 'weather'
-              ? 'Forecast'
-              : m === 'maps'
-                ? 'Maps'
-                : m === 'fishing'
-                  ? 'Fishing'
-                  : 'Hunting'}
+            {m === 'weather' ? 'Forecast' : m === 'fishing' ? 'Fishing' : 'Hunting'}
           </button>
         ))}
       </div>
@@ -471,16 +366,14 @@ export function WeatherPanel({
         </div>
       )}
 
-      {mode === 'maps' && <WeatherMapControls maps={maps} />}
-
-      {mode !== 'maps' && weather.status === 'error' && (
+      {weather.status === 'error' && (
         <p className="weather-note">Forecast unavailable right now — try again in a bit.</p>
       )}
-      {mode !== 'maps' && weather.status === 'loading' && rows.length === 0 && (
+      {weather.status === 'loading' && rows.length === 0 && (
         <p className="weather-note">Loading forecast…</p>
       )}
 
-      {mode !== 'maps' && row && (
+      {row && (
         <>
           <div className="weather-time">
             <span className="weather-step">{fmtStep(row.timeMs)}</span>

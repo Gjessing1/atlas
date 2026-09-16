@@ -5638,157 +5638,316 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
-.weather-map-controls {
+/* --- Weather dock: the scale and the timeline, shown only while a weather
+   layer is on. It floats over the map's bottom edge between the place card /
+   panels on the left and the control grid on the right, and never takes a
+   panel's worth of the map. --- */
+.weather-dock {
+  position: absolute;
+  left: 50%;
+  /* Clear of the attribution line along the bottom edge. */
+  bottom: 30px;
+  transform: translateX(-50%);
+  width: min(660px, calc(100vw - 300px));
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-top: 2px;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 2;
 }
 
-.weather-map-layers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+/* A panel or the place card owns the left: the dock takes the space between
+   it and the control grid instead of centring under it. */
+.weather-dock-shifted {
+  left: 376px;
+  right: 128px;
+  width: auto;
+  max-width: 660px;
+  transform: none;
 }
 
-.weather-map-layers button {
-  flex: 1 0 auto;
-  min-width: 76px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-muted);
+.weather-dock > * {
+  pointer-events: auto;
+}
+
+.weather-legend,
+.weather-timeline {
+  background: var(--surface-overlay);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
   color: var(--text);
-  font: inherit;
+}
+
+.weather-legend {
+  width: min(300px, 100%);
+  padding: 6px 12px 4px;
+  border-radius: 12px;
+}
+
+.weather-legend-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.weather-legend-head span {
+  color: var(--text-muted);
   font-size: 11px;
-  cursor: pointer;
 }
 
-.weather-map-layers button[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--surface-selected);
-  font-weight: 700;
+.weather-legend-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.weather-map-layers button:disabled {
-  opacity: 0.48;
-  cursor: help;
+.weather-legend-row + .weather-legend-row {
+  margin-top: 3px;
 }
 
-.weather-map-title {
+.weather-legend-row-label {
+  flex: 0 0 34px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 10px;
+}
+
+.weather-legend-scale {
+  flex: 1;
+  min-width: 0;
+}
+
+.weather-legend-bar {
+  height: 9px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.weather-legend-ticks {
+  position: relative;
+  height: 14px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-legend-ticks span {
+  position: absolute;
+  top: 1px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.weather-timeline {
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  padding: 6px 8px 6px 6px;
+  border-radius: 999px;
 }
 
-.weather-map-title > div {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.weather-map-title strong {
-  font-size: 14px;
-}
-
-.weather-map-title span {
-  font-size: 11px;
+.weather-timeline-status {
+  padding: 10px 16px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 
 .weather-play {
-  min-width: 64px;
-  padding: 7px 12px;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent, #fff);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.weather-map-scrub {
-  width: 100%;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.weather-map-step-buttons {
+  flex: 0 0 auto;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.weather-map-step-buttons span {
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: 10px;
-  text-align: center;
-}
-
-.weather-map-step-buttons button {
-  padding: 4px 6px;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
   border: none;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 11px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
   cursor: pointer;
 }
 
-.weather-map-step-buttons button:disabled {
-  color: var(--text-muted);
-  opacity: 0.45;
-  cursor: default;
+.weather-play:hover {
+  background: var(--accent-hover);
 }
 
-.weather-legend {
-  padding: 8px 9px 7px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.weather-timeline-switch {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 2px;
+  border-radius: 999px;
   background: var(--surface-muted);
 }
 
-.weather-legend-heading,
-.weather-legend-labels {
-  display: flex;
-  justify-content: space-between;
-  gap: 2px;
+.weather-timeline-switch button {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
-.weather-legend-heading {
-  margin-bottom: 5px;
-  font-size: 11px;
+.weather-timeline-switch button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+/* The range's thumb travels inside 8px of each end, so markers are placed on
+   the same inset scale to line up with the frame they name. */
+.weather-track {
+  position: relative;
+  flex: 1;
+  min-width: 90px;
+  height: 38px;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 4px;
+  box-sizing: border-box;
+}
+
+.weather-track input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.weather-track-now,
+.weather-track-day {
+  position: absolute;
+  top: 3px;
+  bottom: 10px;
+  left: calc(8px + var(--at) * (100% - 16px));
+  width: 0;
+  pointer-events: none;
+}
+
+.weather-track-now {
+  border-left: 2px solid var(--text);
+}
+
+.weather-track-day {
+  border-left: 1px dashed var(--border);
+}
+
+.weather-track-now span,
+.weather-track-day span {
+  position: absolute;
+  top: -2px;
+  left: 4px;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.weather-track-now span {
   font-weight: 700;
 }
 
-.weather-legend-gradient {
+.weather-track-day span {
+  color: var(--text-muted);
+}
+
+.weather-time {
+  flex: 0 0 auto;
   display: flex;
-  height: 12px;
-  overflow: hidden;
-  border-radius: 4px;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 112px;
+  padding: 2px 10px 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
 }
 
-.weather-legend-gradient span {
-  flex: 1;
-}
-
-.weather-legend-labels {
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 9px;
+.weather-time strong {
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.weather-lightning-note {
-  margin: -4px 0 0;
+.weather-time span {
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Scrubbed away from now: the readout is the way back, so it says so. */
+.weather-time-away strong {
+  color: var(--accent);
+}
+
+.weather-particles {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .weather-dock-shifted {
+    left: 50%;
+    right: auto;
+    width: min(660px, calc(100vw - 300px));
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 640px) {
+  /* A phone: the dock spans the bottom edge and the control grid steps up
+     above it (see .map-control-grid-weather). */
+  .weather-dock,
+  .weather-dock-shifted {
+    left: 8px;
+    right: 8px;
+    bottom: 32px;
+    width: auto;
+    transform: none;
+  }
+
+  /* The place card and the planner sheet own a phone's bottom edge. */
+  .weather-dock-compact-hidden {
+    display: none;
+  }
+
+  .weather-timeline {
+    gap: 6px;
+  }
+
+  .weather-time {
+    min-width: 0;
+    padding-right: 6px;
+  }
+
+  .weather-time span {
+    display: none;
+  }
+
+  .weather-legend {
+    width: min(250px, 100%);
+  }
+
+  /* Above the dock's legend too: the zoom row is wider than the gap beside it. */
+  .map-control-grid-weather {
+    bottom: 160px;
+  }
+
+  .weather-track-day span {
+    display: none;
+  }
 }
 
 .weather-species {

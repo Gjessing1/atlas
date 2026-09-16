@@ -19,7 +19,6 @@ import {
   usePlanningAreas,
   useStandBoard,
   useThemeMode,
-  useWeatherMaps,
   type FetchNearbyFn,
   type ExploreArea,
   type CommuteFn,
@@ -45,6 +44,7 @@ import {
   type VisibilityFolder,
   type SettingsSectionId,
 } from '@atlas/core';
+import { weatherPointIdentify, weatherPointUrl, type WeatherPointSample } from '@atlas/conditions';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
 import { trainOf, type SatelliteOmm } from '@atlas/satellites';
 import type { TrackRecord } from '@atlas/storage';
@@ -96,6 +96,7 @@ import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
 import { useTrafficFlow } from './src/layers/useTrafficFlow';
 import { useRoadWeather } from './src/layers/useRoadWeather';
+import { useWeatherLayers, useWeatherWarnings } from './src/layers/useWeatherLayers';
 import { useTransitVehicles } from './src/layers/useTransitVehicles';
 import { useOverlayLabels } from './src/layers/useOverlayLabels';
 import { PotentialPill, potentialPillVisible } from './src/layers/PotentialPill';
@@ -158,6 +159,7 @@ import { useGeocode } from './src/ui/useGeocode';
 import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
+import { WeatherDock } from './src/ui/WeatherDock';
 import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
@@ -426,7 +428,6 @@ function AppInner() {
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
-  const weatherMaps = useWeatherMaps(serverOrigin, weatherTarget !== null);
   // Point whose share-format chooser is open (null = closed).
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   // Show the location puck once the user has asked to be located (also true
@@ -661,6 +662,26 @@ function AppInner() {
   const traffic = useTraffic(overlays, serverOrigin);
   const trafficFlow = useTrafficFlow(overlays, serverOrigin);
   const roadWeather = useRoadWeather(overlays, serverOrigin);
+  // Weather layers: a field's timeline, grid labels and the dock that appears
+  // while one is on, plus MET's warnings — the same catalog rows as the web.
+  const weatherLayers = useWeatherLayers(overlays, serverOrigin, camera.mapViewport);
+  const weatherWarnings = useWeatherWarnings(overlays, serverOrigin);
+  const weatherTitle = overlays.find((overlay) => overlay.meta.weather)?.meta.title ?? '';
+  const [weatherDockHeight, setWeatherDockHeight] = useState(0);
+  const weatherMapsRef = useRef(weatherLayers.maps);
+  weatherMapsRef.current = weatherLayers.maps;
+  // With a weather map up, a tap asks what the weather is there, at the time shown.
+  const weatherAtTap = useCallback(
+    async (at: LatLng) => {
+      const { layerId, frame } = weatherMapsRef.current;
+      if (!layerId || !frame) return [];
+      const res = await fetch(weatherPointUrl(serverOrigin, at, Date.parse(frame.time)));
+      if (!res.ok) return [];
+      const group = weatherPointIdentify((await res.json()) as WeatherPointSample, layerId);
+      return group ? [group] : [];
+    },
+    [serverOrigin],
+  );
   const transitVehicles = useTransitVehicles(overlays, serverOrigin, camera.mapViewport);
 
   // The system consumes the first Back press while the keyboard is visible.
@@ -888,6 +909,7 @@ function AppInner() {
     pickSpot: onPickSpotById,
     exploreResults,
     pickExplore: onPickExplore,
+    leadingIdentify: weatherAtTap,
   });
   const selectOfflineRegionPoint = useCallback((point: LatLng) => {
     setOfflineRegion((current) => {
@@ -1078,6 +1100,13 @@ function AppInner() {
   // that region from route startup through arrival/error, not only while its
   // follow camera is running.
   const showIdleChrome = !planning && !navActive && !idleSheetOpen;
+  // MapActivityControls stacks a row per quarry and filter switch over its
+  // bottom row; the weather dock sits above all of them, and the scale bar and
+  // compass step up over the dock.
+  const activityRows =
+    (potentialTargets.groups.length > 0 ? 1 : 0) + (layerFilters.groups.length > 0 ? 1 : 0);
+  const weatherDockLift =
+    showIdleChrome && weatherLayers.maps.layerId ? weatherDockHeight + 52 * activityRows : 0;
 
   // Route planning and guidance both repurpose map taps, so the measure tool
   // cannot stay open into either: its sheet is hidden there, and a hidden tool
@@ -1353,7 +1382,9 @@ function AppInner() {
         trafficFlow={trafficFlow}
         roadWeather={roadWeather}
         transitVehicles={transitVehicles}
-        weatherMaps={weatherMaps}
+        weather={weatherLayers}
+        weatherWarnings={weatherWarnings}
+        chromeLift={weatherDockLift}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         exploreResults={exploreResults}
         measure={measure.open ? measure.features : null}
@@ -1495,6 +1526,16 @@ function AppInner() {
               onOpenSearch={() => setSearchOpen(true)}
               onPlanRoute={() => route.start()}
               onExplore={startExplorer}
+            />
+          ) : null}
+
+          {showIdleChrome && weatherLayers.maps.layerId ? (
+            <WeatherDock
+              maps={weatherLayers.maps}
+              title={weatherTitle}
+              // Above the bottom control row and the activity rows stacked on it.
+              bottom={bottomInset + 24 + 52 * (1 + activityRows)}
+              onHeight={setWeatherDockHeight}
             />
           ) : null}
 
@@ -1825,7 +1866,6 @@ function AppInner() {
             onClose={() => setWeatherTarget(null)}
             target={weatherTarget}
             weather={weather}
-            maps={weatherMaps}
             data={data}
             bottomInset={bottomInset}
           />
