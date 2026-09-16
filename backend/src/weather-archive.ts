@@ -313,7 +313,6 @@ export function createWeatherArchive(options: WeatherArchiveOptions): WeatherArc
     await load();
     const at = now();
     let bounds: [number, number, number, number] | null = null;
-    let stored = 0;
     const failures: string[] = [];
     // Radar first: every dataset is kept over the radar composite's bounds
     // (history is a radar feature, and a global temperature archive would be
@@ -345,7 +344,6 @@ export function createWeatherArchive(options: WeatherArchiveOptions): WeatherArc
             Math.min(dataset.maxzoom, live.maxzoom),
           );
           frames.set(frame.stamp, frame);
-          stored++;
         }
       } catch (error) {
         failures.push(dataset.name);
@@ -355,13 +353,21 @@ export function createWeatherArchive(options: WeatherArchiveOptions): WeatherArc
     await prune().catch((error) =>
       options.log?.warn({ err: error }, 'weather archive prune failed'),
     );
-    const kept = index.get(RADAR_ARCHIVE_DATASET)?.size ?? 0;
     options.status?.record(
       PROBE,
       failures.length === 0,
-      failures.length === 0
-        ? `${kept} radar frames kept${stored ? `, ${stored} new` : ''}`
-        : `capture failed: ${failures.join(', ')}`,
+      failures.length > 0 ? `capture failed: ${failures.join(', ')}` : undefined,
+    );
+    // How far back the timeline can reach right now: what a stalled archive
+    // shows first, since a pass that stores nothing still succeeds.
+    const radar = [...(index.get(RADAR_ARCHIVE_DATASET)?.values() ?? [])];
+    const oldest = Math.min(...radar.map((frame) => frame.ms));
+    const newest = Math.max(...radar.map((frame) => frame.ms));
+    options.status?.setDetail(
+      PROBE,
+      radar.length === 0
+        ? 'no radar frames kept yet'
+        : `${radar.length} radar frames, ${((at - oldest) / HOUR).toFixed(1)} h back, newest ${Math.round((at - newest) / MINUTE)} min old`,
     );
   }
 

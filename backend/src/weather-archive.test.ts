@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { StatusRegistry } from './status.js';
 import {
   archiveStamp,
   createWeatherArchive,
@@ -98,13 +99,19 @@ describe('weather archive', () => {
       },
       absent: '/tiles/3/',
     });
+    const status = new StatusRegistry(() => NOW);
     const archive = createWeatherArchive({
       dir,
       fetchImpl: met.fetchImpl,
       now: () => NOW,
       datasets: DATASETS,
+      status,
     });
     await archive.capture();
+    expect(status.toStatus().find((row) => row.id === 'weather-archive')).toMatchObject({
+      health: 'ok',
+      detail: '2 radar frames, 0.3 h back, newest 5 min old',
+    });
 
     const radar = await archive.frames('precipitation-observations');
     expect(radar.map((frame) => frame.time)).toEqual([
