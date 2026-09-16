@@ -157,6 +157,59 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
   ).toBe(12);
 });
 
+test('outdoor profiles can enter and leave 3D terrain', async ({ page }) => {
+  await page.route('**/assets/styles/liberty.json', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: 8,
+        name: 'Terrain fixture',
+        sources: {},
+        layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#eee' } }],
+      }),
+    }),
+  );
+  // One transparent pixel is enough for this interaction test: it proves the
+  // same-origin tile request is wired without making CI depend on Mapterhorn.
+  let terrainRequests = 0;
+  await page.route('**/api/terrain/**', (route) => {
+    terrainRequests += 1;
+    return route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
+        'base64',
+      ),
+    });
+  });
+  await page.goto('/');
+  await waitForMap(page);
+
+  await page.getByRole('radio', { name: 'Hike' }).click();
+  const terrain = page.getByRole('button', { name: 'Switch to 3D terrain' });
+  await expect(terrain).toBeVisible();
+  await terrain.click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
+    .toBe('Atlas Light · hike · 3D');
+  await expect.poll(() => page.evaluate(() => window.__atlasMap!.getPitch())).toBeGreaterThan(50);
+  const style = await page.evaluate(() => window.__atlasMap!.getStyle());
+  expect(style.terrain).toEqual({ source: 'atlas-terrain-dem', exaggeration: 1 });
+  expect(style.sources['atlas-terrain-dem']).toMatchObject({
+    type: 'raster-dem',
+    encoding: 'terrarium',
+  });
+  expect(style.layers?.some((layer) => layer.id === 'atlas-terrain-hillshade')).toBe(true);
+  await expect.poll(() => terrainRequests).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: 'Switch to 2D map' }).click();
+  await expect.poll(() => page.evaluate(() => window.__atlasMap!.getPitch())).toBeLessThan(1);
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getSource('atlas-terrain-dem'))))
+    .toBe(false);
+});
+
 test('right-click drops a pin and opens the place card', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);

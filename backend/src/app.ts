@@ -38,6 +38,7 @@ import type { RegionJobOptions } from './region-jobs.js';
 import { createRoutingRevisionReporter, ROUTING_STATUS_ID } from './routing-revision.js';
 import { StatusRegistry } from './status.js';
 import { registerTilesApi, type TilesApiOptions } from './tiles-api.js';
+import { registerTerrainApi, type TerrainApiOptions } from './terrain-api.js';
 import { registerUpdatesApi } from './updates-api.js';
 import { registerInaturApi, type InaturApiOptions } from './inatur-api.js';
 import {
@@ -107,6 +108,8 @@ export interface AppOptions {
   worldTilesUrl?: string;
   /** Test seams for the world tile proxy. */
   tilesApi?: Pick<TilesApiOptions, 'localTiles' | 'fetchImpl'>;
+  /** Test/deployment seams for the proxied Terrarium DEM. */
+  terrainApi?: TerrainApiOptions;
   /** Test seams for the overlay layer catalog + WMS proxy. */
   overlayApi?: Pick<OverlayApiOptions, 'layers' | 'fetchImpl' | 'env'>;
   /** Test seams for the met.no weather proxy. */
@@ -186,6 +189,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       timeWindow: '1 minute',
       allowList: (request) =>
         request.url.startsWith('/api/tiles/') ||
+        request.url.startsWith('/api/terrain/') ||
         request.url.startsWith('/api/overlay/') ||
         // Derived tiles only: /api/potential/prepare has its own tighter limit,
         // because it queues work rather than reading a file.
@@ -654,6 +658,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     worldTilesUrl: opts.worldTilesUrl ?? process.env.WORLD_TILES_URL,
     ...opts.tilesApi,
   });
+  registerTerrainApi(app, status, opts.terrainApi);
   if (existsSync(tilesDir)) {
     await app.register(fastifyStatic, {
       root: tilesDir,

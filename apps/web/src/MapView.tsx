@@ -2,6 +2,7 @@ import {
   applyMapAppearance,
   markerScaleForZoom,
   outdoorTilesUrl,
+  terrainTilesUrl,
   POI_LAYER_IDS,
   poiCategoryLabel,
   resolveStyleTemplate,
@@ -36,6 +37,7 @@ async function loadStyle(
   profile: string,
   custom: MapStyleOverrides,
   basemap: boolean,
+  terrain: boolean,
 ): Promise<string | StyleSpecification> {
   try {
     templatePromise ??= fetch(STYLE_TEMPLATE_URL).then(async (res) => {
@@ -54,6 +56,8 @@ async function loadStyle(
         // Unconditional: only the outdoor profiles bind it, and a server with
         // no archive answers empty rather than wrong (see outdoorTilesUrl).
         outdoorTiles: outdoorTilesUrl(origin),
+        terrain,
+        terrainTiles: terrainTilesUrl(origin),
       }),
     ) as StyleSpecification;
   } catch (err) {
@@ -118,6 +122,8 @@ interface MapViewProps {
    * in it is read honestly (see `MapAppearance.basemap`).
    */
   basemap: boolean;
+  /** Web-only DEM mesh; Android intentionally keeps its native 2D renderer. */
+  terrain: boolean;
   /** Incremented by the shared control grid to trigger MapLibre geolocation. */
   locateRequest: number;
 }
@@ -135,6 +141,7 @@ export function MapView({
   profile,
   customStyle,
   basemap,
+  terrain,
   locateRequest,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -283,13 +290,23 @@ export function MapView({
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    void loadStyle(colorScheme, profile, customStyle, basemap).then((style) => {
+    void loadStyle(colorScheme, profile, customStyle, basemap, terrain).then((style) => {
       if (!cancelled) map.setStyle(style);
     });
     return () => {
       cancelled = true;
     };
-  }, [map, colorScheme, profile, customStyle, basemap]);
+  }, [map, colorScheme, profile, customStyle, basemap, terrain]);
+
+  // The mesh exists in a top-down camera too, but reads as an ordinary flat
+  // map. Enter/leave with a deliberate camera move so the control has an
+  // immediate visible result; subsequent pitch gestures remain entirely free.
+  const previousTerrainRef = useRef(false);
+  useEffect(() => {
+    if (!map || previousTerrainRef.current === terrain) return;
+    previousTerrainRef.current = terrain;
+    map.easeTo({ pitch: terrain ? 55 : 0, duration: 700 });
+  }, [map, terrain]);
 
   // Render the (single) dropped pin as a draggable marker. Clicking it reopens
   // the place card; the card itself is App-level React, not a MapLibre popup.

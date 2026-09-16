@@ -293,6 +293,28 @@ export function LayersIcon(props: IconProps) {
   );
 }
 
+/** Two overlapping ridges: the web map's DEM-backed 3D terrain control. */
+export function TerrainIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M2.8 19l6.3-10 3.1 4.4 2.5-3.7L21.2 19H2.8z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.8 19l4.1-6.2M12.2 13.4l2.5 3.5 2.1-3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 /**
  * Funnel glyph for the layer-filter control: what the layers on the map are
  * narrowed to. A funnel rather than sliders — every one of these filters picks

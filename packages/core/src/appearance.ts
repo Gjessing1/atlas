@@ -36,6 +36,10 @@ export interface MapAppearance {
    * basemap's layers: it is their absence.
    */
   basemap?: boolean;
+  /** Web-only for now: draw a DEM mesh and hillshade beneath roads and labels. */
+  terrain?: boolean;
+  /** Same-origin Terrarium tile template used when `terrain` is on. */
+  terrainTiles?: string;
 }
 
 /** The deliberately small, portable style-editor surface shared by both maps. */
@@ -95,6 +99,52 @@ interface MapStyleDocument {
   name?: string;
   layers: StyleLayer[];
   [key: string]: unknown;
+}
+
+const TERRAIN_SOURCE_ID = 'atlas-terrain-dem';
+const TERRAIN_HILLSHADE_SOURCE_ID = 'atlas-terrain-hillshade';
+
+/**
+ * Add the same Terrarium DEM twice: terrain and hillshade maintain independent
+ * tile caches in MapLibre, avoiding contention while a pitched camera streams
+ * both consumers. Lines and labels stay above the shade so paths remain crisp.
+ */
+function addTerrain(style: MapStyleDocument, tiles: string, dark: boolean): void {
+  const sources =
+    style['sources'] && typeof style['sources'] === 'object'
+      ? (style['sources'] as Record<string, unknown>)
+      : ((style['sources'] = {}) as Record<string, unknown>);
+  const source = {
+    type: 'raster-dem',
+    tiles: [tiles],
+    encoding: 'terrarium',
+    tileSize: 512,
+    minzoom: 0,
+    maxzoom: 17,
+  };
+  sources[TERRAIN_SOURCE_ID] = {
+    ...source,
+    attribution:
+      '<a href="https://mapterhorn.com/attribution">Terrain: © Mapterhorn / Kartverket / Copernicus</a>',
+  };
+  sources[TERRAIN_HILLSHADE_SOURCE_ID] = source;
+  style['terrain'] = { source: TERRAIN_SOURCE_ID, exaggeration: 1 };
+
+  const hillshade: StyleLayer = {
+    id: 'atlas-terrain-hillshade',
+    type: 'hillshade',
+    source: TERRAIN_HILLSHADE_SOURCE_ID,
+    paint: {
+      'hillshade-exaggeration': dark ? 0.32 : 0.26,
+      'hillshade-shadow-color': dark ? '#111b22' : '#514738',
+      'hillshade-highlight-color': dark ? '#b4c2c8' : '#fff7e7',
+      'hillshade-accent-color': dark ? '#27343b' : '#6d6252',
+    },
+  };
+  const firstLineOrLabel = style.layers.findIndex(
+    (layer) => layer.type === 'line' || layer.type === 'symbol',
+  );
+  style.layers.splice(firstLineOrLabel < 0 ? style.layers.length : firstLineOrLabel, 0, hillshade);
 }
 
 function paint(layer: StyleLayer, property: string, value: unknown): void {
@@ -1336,11 +1386,21 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     style.layers.splice(baseIndex + 1, 0, layer);
   }
 
+  const terrainTiles =
+    appearance.terrain === true &&
+    typeof appearance.terrainTiles === 'string' &&
+    appearance.terrainTiles.length > 0
+      ? appearance.terrainTiles
+      : null;
+  if (terrainTiles) {
+    addTerrain(style, terrainTiles, dark);
+  }
+
   if (appearance.custom) {
     const custom = sanitizeMapStyleOverrides(appearance.custom);
     for (const layer of style.layers) applyCustomStyle(layer, custom);
   }
 
-  style.name = `Atlas ${dark ? 'Dark' : 'Light'} · ${profile}`;
+  style.name = `Atlas ${dark ? 'Dark' : 'Light'} · ${profile}${terrainTiles ? ' · 3D' : ''}`;
   return JSON.stringify(style);
 }

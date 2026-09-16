@@ -2931,13 +2931,49 @@ button.transit-notice-summary {
     'quarry quarry'
     'filters filters'
     'profiles layers'
-    '. measure'
+    'terrain measure'
     '. follow'
     'zoom locate';
   grid-template-columns: minmax(0, auto) 40px;
   justify-items: end;
   align-items: end;
   gap: 6px;
+}
+
+.map-terrain-control {
+  grid-area: terrain;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 52px;
+  height: 40px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.map-terrain-control span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.map-terrain-control:hover:enabled {
+  background: var(--surface);
+}
+
+.map-terrain-control.on {
+  color: var(--accent);
+}
+
+.map-terrain-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .layer-switch {

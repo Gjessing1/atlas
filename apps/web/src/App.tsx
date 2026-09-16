@@ -1,5 +1,6 @@
 import {
   atlasShareUrl,
+  booleanSetting,
   clampExploreRadiusM,
   decodeMapHash,
   decodePanelLink,
@@ -7,6 +8,7 @@ import {
   haversineM,
   mapProfile,
   mapProfileForRouting,
+  mapProfileSupportsTerrain,
   placeIsVisible,
   placeTargetTitle,
   resolveInaturOffer,
@@ -46,6 +48,7 @@ import {
   useLayerFilters,
   usePlanningAreas,
   useThemeMode,
+  usePersistedSetting,
   type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
@@ -79,6 +82,7 @@ import { PotentialTargetSwitch } from './potential/PotentialTargetSwitch.js';
 import { SpotsButton, SpotsPanel } from './potential/SpotsPanel.js';
 import { StandBoardButton, StandBoardPanel } from './potential/StandBoardPanel.js';
 import { MapProfileSwitch } from './layers/MapProfileSwitch.js';
+import { TerrainControl } from './layers/TerrainControl.js';
 import { useLayerCatalog } from './layers/useLayerCatalog.js';
 import { useCameraPersistence } from './map/useCameraPersistence.js';
 import { useNavLayers } from './map/useNavLayers.js';
@@ -147,6 +151,11 @@ const fetchCommute: CommuteFn = (query, signal, commit) =>
   fetchTransitCommute(query, { signal, segments: true, commit });
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
+const TERRAIN_3D_SETTING = booleanSetting({
+  key: 'local.map.terrain-3d',
+  scope: 'local',
+  defaultValue: false,
+});
 
 /**
  * How near an overlay's answer must land, on screen, to belong to the card that
@@ -297,6 +306,7 @@ export function App() {
   // ---- overlay layers (catalog + raster rendering + tap-to-identify) ----
 
   const profiles = useMapProfile(userData);
+  const terrainPreference = usePersistedSetting(userData, TERRAIN_3D_SETTING);
   const profilePreferences = useMapProfilePreferences(userData);
   const layers = useLayerCatalog(
     userData,
@@ -304,6 +314,8 @@ export function App() {
     profilePreferences.preferredLayers(profiles.profile.id),
     profilePreferences.customizedLayers(profiles.profile.id),
   );
+  const terrainAvailable = mapProfileSupportsTerrain(profiles.profile.id);
+  const terrain3d = terrainAvailable && terrainPreference.value && layers.basemapOn;
   // Picking an activity also moves the planner's travel mode, when that
   // activity has one (Explore and Ski express no routing opinion). The planner
   // still offers every mode, so this is a default and not a restriction.
@@ -1062,6 +1074,7 @@ export function App() {
         profile={profiles.profile.id}
         customStyle={mapStyleEditor.value}
         basemap={layers.basemapOn}
+        terrain={terrain3d}
         locateRequest={locateRequest}
       />
       {/* Sustained dead reckoning ≈ inside a tunnel: dim the map (the UI on
@@ -1288,6 +1301,12 @@ export function App() {
             onPick={onPickProfile}
           />
           <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
+          <TerrainControl
+            available={terrainAvailable}
+            enabled={terrain3d}
+            basemap={layers.basemapOn}
+            onToggle={() => void terrainPreference.setValue((current) => !current)}
+          />
           <button
             type="button"
             className={`map-measure-control${measure.open ? ' on' : ''}`}
@@ -1319,7 +1338,7 @@ export function App() {
               type="button"
               aria-label="Reset north"
               title="Reset north"
-              onClick={() => map?.resetNorthPitch()}
+              onClick={() => map?.easeTo({ bearing: 0, pitch: terrain3d ? 55 : 0 })}
             >
               <CompassIcon size={18} />
             </button>

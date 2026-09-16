@@ -693,6 +693,42 @@ describe('map appearance', () => {
       result.find((layer) => layer.id === 'atlas-outdoor-poi')?.layout?.['text-size'],
     ).toBeCloseTo(12 * 1.25 * 1.5);
   });
+
+  it('adds independent Terrarium mesh and hillshade sources beneath roads', () => {
+    const parsed = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        terrain: true,
+        terrainTiles: 'https://atlas.example/api/terrain/{z}/{x}/{y}.webp',
+      }),
+    ) as {
+      name: string;
+      terrain: { source: string; exaggeration: number };
+      sources: Record<string, Record<string, unknown>>;
+      layers: TestLayer[];
+    };
+    expect(parsed.name).toBe('Atlas Light · hike · 3D');
+    expect(parsed.terrain).toEqual({ source: 'atlas-terrain-dem', exaggeration: 1 });
+    expect(parsed.sources['atlas-terrain-dem']).toMatchObject({
+      type: 'raster-dem',
+      encoding: 'terrarium',
+      tileSize: 512,
+      maxzoom: 17,
+      tiles: ['https://atlas.example/api/terrain/{z}/{x}/{y}.webp'],
+    });
+    expect(parsed.sources['atlas-terrain-hillshade']).toMatchObject({
+      type: 'raster-dem',
+      encoding: 'terrarium',
+      tiles: ['https://atlas.example/api/terrain/{z}/{x}/{y}.webp'],
+    });
+    expect(parsed.sources['atlas-terrain-hillshade']?.['attribution']).toBeUndefined();
+    const shade = parsed.layers.find((layer) => layer.id === 'atlas-terrain-hillshade');
+    expect(shade?.type).toBe('hillshade');
+    expect(parsed.layers.indexOf(shade!)).toBeLessThan(
+      parsed.layers.findIndex((layer) => layer.id === 'road_path_pedestrian'),
+    );
+  });
 });
 
 describe('basemap off', () => {
@@ -753,6 +789,17 @@ describe('basemap off', () => {
     expect(
       layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'curiosities' })).length,
     ).toBeGreaterThan(1);
+    const terrainBlank = JSON.parse(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        basemap: false,
+        terrain: true,
+        terrainTiles: 'https://atlas.example/api/terrain/{z}/{x}/{y}.webp',
+      }),
+    ) as { sources: Record<string, unknown>; terrain?: unknown };
+    expect(terrainBlank.sources).toEqual({});
+    expect(terrainBlank.terrain).toBeUndefined();
   });
 });
 

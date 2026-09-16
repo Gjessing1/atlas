@@ -140,6 +140,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     },
     note: 'Both clients offer it in two places, the map-corner switcher and the full layer list, and both store it per profile in the same overlay state as visibility (`BASEMAP_STATE_ID`). `applyMapAppearance` does the work for both: `basemap: false` returns one flat background and no basemap layer at all — the case is the 1826 amtskart overlay, whose holes today’s coloured land fills in until it reads as part of the old survey.',
   },
+  {
+    id: 'map-terrain-3d',
+    surface: 'map',
+    capability: 'Switch Hike, Ski and Fish & Hunt between a 2D map and DEM-backed 3D terrain',
+    hook: 'usePersistedSetting',
+    web: { file: 'apps/web/src/layers/TerrainControl.tsx', contains: 'Switch to 3D terrain' },
+    android: null,
+    route: { file: 'backend/src/terrain-api.ts', contains: "'/api/terrain/:z/:x/:y.webp'" },
+    why: 'MapLibre GL JS meshes raster DEM sources, while MapLibre Native 13.2.0 only decodes them for hillshade. Android deliberately stays on its existing 2D hillshade until native terrain support lands.',
+  },
 
   // ---------------------------------------------------------------- card ---
   {

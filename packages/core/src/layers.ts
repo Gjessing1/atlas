@@ -91,6 +91,11 @@ export function outdoorTilesUrl(origin: string): string {
   return `${origin}/api/tiles/outdoor/{z}/{x}/{y}.pbf`;
 }
 
+/** Same-origin Terrarium DEM used by the web terrain mesh and its hillshade. */
+export function terrainTilesUrl(origin: string): string {
+  return `${origin}/api/terrain/{z}/{x}/{y}.webp`;
+}
+
 /** One selectable value of a `LayerOption`. */
 export interface LayerOptionChoice {
   /** Stored and sent to the backend. Restricted to `[a-z0-9-]` (see LayerOption). */
