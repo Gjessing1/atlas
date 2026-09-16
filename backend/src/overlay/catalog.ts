@@ -560,6 +560,29 @@ export function norwegianLayers(): OverlayLayer[] {
   return [
     {
       meta: {
+        id: 'light-pollution',
+        rev: 1,
+        title: 'Light pollution',
+        description: 'Artificial light observed at night by the VIIRS satellite.',
+        group: 'Weather',
+        attribution: '© NASA Earth Observatory / Suomi NPP VIIRS',
+        metadataUrl: 'https://gibs.earthdata.nasa.gov/layer-metadata/v1.0/VIIRS_Night_Lights.json',
+        maxzoom: 8,
+        defaultOpacity: 0.72,
+        identify: false,
+        coverageNote:
+          '2016 annual night-light radiance. A useful dark-sky proxy, not a direct ground-level sky-brightness or Bortle measurement.',
+      },
+      upstream: {
+        kind: 'xyz',
+        // GIBS publishes this annual cloud-minimized composite as Web Mercator
+        // tiles through level 8. WMTS REST uses z/row/column (z/y/x).
+        template:
+          'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Night_Lights/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png',
+      },
+    },
+    {
+      meta: {
         id: 'hillshade',
         rev: 1,
         title: 'Hillshade',

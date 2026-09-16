@@ -59,10 +59,11 @@ describe('fmtDayLabel', () => {
   const on = (day: number, h: number) => new Date(2026, 6, day, h, 0).getTime();
   const now = on(20, 12);
 
-  it('names today and tomorrow', () => {
+  it('names yesterday, today and tomorrow', () => {
     expect(fmtDayLabel(on(20, 3), now)).toBe('Today');
     expect(fmtDayLabel(on(20, 23), now)).toBe('Today');
     expect(fmtDayLabel(on(21, 0), now)).toBe('Tomorrow');
+    expect(fmtDayLabel(on(19, 23), now)).toBe('Yesterday');
   });
 
   it('uses weekday + day number further out', () => {

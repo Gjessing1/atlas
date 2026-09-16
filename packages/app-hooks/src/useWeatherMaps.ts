@@ -33,9 +33,9 @@ export interface WeatherMapsController {
   frameIndex: number;
   frame: ActiveWeatherMapFrame | null;
   /**
-   * The frames play reaches next. A renderer loads them invisibly, so a step of
-   * the animation shows a picture that is already there instead of a blank map
-   * while its tiles arrive.
+   * The frames play reaches next, in play order (wrapping to where the loop
+   * starts). A renderer loads them invisibly, so a step of the animation shows a
+   * picture that is already there instead of a blank map while its tiles arrive.
    */
   upcoming: ActiveWeatherMapFrame[];
   /** Where now sits on the timeline (the newest radar picture, or the nearest hour). */
@@ -51,6 +51,13 @@ export interface WeatherMapsController {
   togglePlaying: () => void;
   previous: () => void;
   next: () => void;
+  /**
+   * The renderer's answer to "are this frame's tiles loaded for the view on
+   * screen?". Play steps only onto a ready frame — or, if one never loads, after
+   * a short wait — so an animation slows down on a slow connection instead of
+   * flashing the map between pictures. `null` unregisters.
+   */
+  setFrameReadiness: (check: ((frameId: string) => boolean) | null) => void;
 }
 
 export interface WeatherMapsOptions {
@@ -65,6 +72,33 @@ const REFRESH_MS = 5 * 60_000;
 const STEP_MS: Record<WeatherMapTimelineId, number> = { radar: 450, forecast: 750 };
 /** Play pauses on the last frame for this many steps before looping, so the end is readable. */
 const END_HOLD_STEPS = 3;
+/**
+ * Where play loops back to, before now. Radar keeps its familiar last 90 minutes
+ * even with a day of history behind it — a day at a step per picture is a minute
+ * of animation — unless play was started further back. The forecast loops whole.
+ */
+const PLAY_LOOP_BACK_MS: Record<WeatherMapTimelineId, number> = {
+  radar: 90 * 60_000,
+  forecast: Number.POSITIVE_INFINITY,
+};
+/** The longest play waits for a frame that is not ready before stepping onto it anyway. */
+const READY_WAIT_MS = 2_500;
+/** How often a waiting play asks again. */
+const READY_POLL_MS = 100;
+/** Frames preloaded ahead: one more while playing, where a step is due in under a second. */
+const LOOKAHEAD = { paused: 2, playing: 3 };
+
+/** The index play loops back to when started at `index`. */
+function loopStartIndex(
+  frames: readonly WeatherMapFrame[],
+  index: number,
+  nowMs: number,
+  timeline: WeatherMapTimelineId,
+): number {
+  const back = PLAY_LOOP_BACK_MS[timeline];
+  if (!Number.isFinite(back) || frames.length === 0) return 0;
+  return Math.min(index, closestFrameIndex(frames, nowMs - back));
+}
 
 function absoluteTemplate(origin: string, path: string): string {
   if (/^https?:\/\//.test(path)) return path;
@@ -172,15 +206,38 @@ export function useWeatherMaps(
   );
   const rawFrame = frames[frameIndex];
   const frame = useMemo(() => active(rawFrame), [active, rawFrame]);
+  const timelineId = timeline?.id ?? 'forecast';
+
+  // Play steps through the frames and loops, holding briefly on the last one.
+  const playState = useRef({
+    frames,
+    index: frameIndex,
+    hold: 0,
+    loopStartMs: Number.NEGATIVE_INFINITY,
+    playing: false,
+  });
+  playState.current.frames = frames;
+  playState.current.index = frameIndex;
+  const readinessRef = useRef<((frameId: string) => boolean) | null>(null);
+  const setFrameReadiness = useCallback((check: ((frameId: string) => boolean) | null) => {
+    readinessRef.current = check;
+  }, []);
+
+  const loopStart = playing
+    ? closestFrameIndex(frames, playState.current.loopStartMs)
+    : loopStartIndex(frames, frameIndex, nowMs, timelineId);
   const upcoming = useMemo(() => {
     if (frames.length < 2) return [];
     const out: ActiveWeatherMapFrame[] = [];
-    for (let step = 1; step <= Math.min(2, frames.length - 1); step++) {
-      const next = active(frames[(frameIndex + step) % frames.length]);
+    let index = frameIndex;
+    for (let step = 0; step < (playing ? LOOKAHEAD.playing : LOOKAHEAD.paused); step++) {
+      index = index >= frames.length - 1 ? loopStart : index + 1;
+      if (index === frameIndex) break;
+      const next = active(frames[index]);
       if (next) out.push(next);
     }
     return out;
-  }, [active, frames, frameIndex]);
+  }, [active, frames, frameIndex, loopStart, playing]);
 
   const selectFrame = useCallback(
     (index: number) => {
@@ -200,31 +257,67 @@ export function useWeatherMaps(
     setSelectedMs(null);
   }, []);
 
-  // Play steps through the frames and loops, holding briefly on the last one.
-  const playState = useRef({ frames, index: frameIndex, hold: 0 });
-  playState.current.frames = frames;
-  playState.current.index = frameIndex;
-  const stepMs = STEP_MS[timeline?.id ?? 'forecast'];
+  const stepMs = STEP_MS[timelineId];
   useEffect(() => {
     if (!playing || !on || frames.length < 2) return;
-    playState.current.hold = 0;
-    const timer = setInterval(() => {
-      const state = playState.current;
+    const state = playState.current;
+    state.hold = 0;
+    let waitingSince: number | null = null;
+    let timer: ReturnType<typeof setTimeout>;
+    const attempt = () => {
       const count = state.frames.length;
-      if (count < 2) return;
-      if (state.index >= count - 1 && state.hold < END_HOLD_STEPS) {
-        state.hold += 1;
+      const here = state.frames[state.index];
+      if (count < 2 || !here) {
+        timer = setTimeout(attempt, stepMs);
         return;
       }
+      // Scrubbed back past the loop's start while playing: the loop grows to match.
+      state.loopStartMs = Math.min(state.loopStartMs, Date.parse(here.time));
+      if (state.index >= count - 1 && state.hold < END_HOLD_STEPS) {
+        state.hold += 1;
+        timer = setTimeout(attempt, stepMs);
+        return;
+      }
+      const nextIndex =
+        state.index >= count - 1
+          ? closestFrameIndex(state.frames, state.loopStartMs)
+          : state.index + 1;
+      const next = state.frames[nextIndex]!;
+      if (readinessRef.current && !readinessRef.current(next.id)) {
+        waitingSince ??= Date.now();
+        if (Date.now() - waitingSince < READY_WAIT_MS) {
+          timer = setTimeout(attempt, READY_POLL_MS);
+          return;
+        }
+      }
+      waitingSince = null;
       state.hold = 0;
-      const nextIndex = state.index >= count - 1 ? 0 : state.index + 1;
       state.index = nextIndex;
-      setSelectedMs(Date.parse(state.frames[nextIndex]!.time));
-    }, stepMs);
-    return () => clearInterval(timer);
+      setSelectedMs(Date.parse(next.time));
+      timer = setTimeout(attempt, stepMs);
+    };
+    timer = setTimeout(attempt, stepMs);
+    return () => clearTimeout(timer);
   }, [playing, on, frames.length, stepMs]);
 
-  const togglePlaying = useCallback(() => setPlaying((current) => !current), []);
+  const nowMsRef = useRef(nowMs);
+  nowMsRef.current = nowMs;
+  const timelineIdRef = useRef(timelineId);
+  timelineIdRef.current = timelineId;
+  const togglePlaying = useCallback(() => {
+    const state = playState.current;
+    if (!state.playing && state.frames.length > 0) {
+      const start = loopStartIndex(
+        state.frames,
+        state.index,
+        nowMsRef.current,
+        timelineIdRef.current,
+      );
+      state.loopStartMs = Date.parse(state.frames[start]!.time);
+    }
+    setPlaying((current) => !current);
+  }, []);
+  playState.current.playing = on && playing;
   const previous = useCallback(() => selectFrame(frameIndex - 1), [frameIndex, selectFrame]);
   const next = useCallback(() => selectFrame(frameIndex + 1), [frameIndex, selectFrame]);
   const legend = useMemo(() => (layerId ? weatherMapLegend(layerId) : null), [layerId]);
@@ -250,6 +343,7 @@ export function useWeatherMaps(
     togglePlaying,
     previous,
     next,
+    setFrameReadiness,
   };
 }
 

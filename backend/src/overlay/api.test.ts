@@ -334,6 +334,7 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
     expect(ids).toContain('world-imagery');
+    expect(ids).toContain('light-pollution');
     expect(ids).toContain('ice-weak');
     expect(ids).toContain('protected-areas');
     expect(ids).toContain('heritage-sites');

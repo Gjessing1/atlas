@@ -189,6 +189,7 @@ export {
   type WeatherMapsController,
   type WeatherMapsOptions,
 } from './useWeatherMaps.js';
+export { useSkyLayers, type SkyLayersController } from './useSkyLayers.js';
 export {
   fetchTerrainSlope,
   terrainSlopeRing,

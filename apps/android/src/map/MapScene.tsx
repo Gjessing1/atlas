@@ -24,6 +24,7 @@ import {
   type CameraRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
+import { WEATHER_FRAME_FADE } from '@atlas/conditions';
 import { maneuverArrowsGeoJSON, navLineProgress } from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
@@ -36,6 +37,11 @@ import type { SatelliteLayerData } from '../layers/useSatellites';
 import type { SpeedCameras } from '../layers/useSpeedCameras';
 import type { VectorOverlayData } from '../layers/useVectorOverlay';
 import type { WeatherLayers } from '../layers/useWeatherLayers';
+import {
+  LIGHTNING_CORE_LAYER_ID,
+  LIGHTNING_DOT_LAYER_ID,
+  LightningLayers,
+} from './LightningLayers';
 import { spotsFeatureCollection, type PotentialSpot } from '@atlas/potential';
 import { isRideMode, type TransitTrip } from '@atlas/transit';
 import type { LocalPack } from '../regions/packs';
@@ -127,7 +133,7 @@ export const ICE_OBSERVATION_LAYER_IDS = [
 ];
 
 /** Frost strike dots answer with observation time, age, polarity and peak current. */
-export const LIGHTNING_LAYER_IDS = ['atlas-lightning-dot', 'atlas-lightning-halo'];
+export const LIGHTNING_LAYER_IDS = [LIGHTNING_CORE_LAYER_ID, LIGHTNING_DOT_LAYER_ID];
 
 /** Moving satellite dots hit-tested by useMapPress. */
 export const SATELLITE_LAYER_IDS = [
@@ -501,6 +507,14 @@ export function MapScene({
           onRegionChange(e.nativeEvent.zoom, e.nativeEvent.center[1], e.nativeEvent.bearing);
           if (e.nativeEvent.userInteraction) onUserGesture();
         }}
+        // Render events are how the weather layers know a frame's tiles have
+        // loaded; listened to only while a weather field is on.
+        onDidFinishRenderingFrame={
+          weather.maps.frame ? () => weather.onRenderedFrame(false) : undefined
+        }
+        onDidFinishRenderingFrameFully={
+          weather.maps.frame ? () => weather.onRenderedFrame(true) : undefined
+        }
         onRegionDidChange={(e) => {
           const [lng, lat] = e.nativeEvent.center;
           onRegionChange(e.nativeEvent.zoom, lat, e.nativeEvent.bearing);
@@ -571,15 +585,16 @@ export function MapScene({
         <GeoJSONSource id={WEATHER_ANCHOR_ID} data={EMPTY_WEATHER_ANCHOR}>
           <Layer type="circle" id={WEATHER_ANCHOR_LAYER_ID} paint={{ 'circle-opacity': 0 }} />
         </GeoJSONSource>
-        {/* The weather field: the frame on screen, plus the frames play reaches
-          next at zero opacity so their tiles are already loaded when they show.
-          Keyed per frame, so stepping forward reveals a mounted source instead of
-          swapping a URL under a live one. */}
-        {!inPip && weather.maps.frame && weather.maps.timeline
-          ? [weather.maps.frame, ...weather.maps.upcoming].map((frame, index) => (
+        {/* The weather field: the frame on screen, the one fading out under it,
+          and the frames play reaches next at zero opacity so their tiles are
+          loaded before they show. Keyed per frame and kept in first-mount order
+          (useWeatherFrameStack), so a step reveals a mounted source instead of
+          swapping a URL under a live one or re-adding a source. */}
+        {!inPip && weather.maps.timeline
+          ? weather.stack.map(({ frame, role }) => (
               <RasterSource
-                key={`atlas-weather-${weather.maps.layerId}-${frame.id}`}
-                id={`atlas-weather-${weather.maps.layerId}-${frame.id}`}
+                key={`atlas-weather-${frame.id}`}
+                id={`atlas-weather-${frame.id}`}
                 tiles={[frame.tileUrlTemplate]}
                 tileSize={256}
                 minzoom={weather.maps.timeline!.minzoom}
@@ -588,10 +603,19 @@ export function MapScene({
               >
                 <Layer
                   type="raster"
-                  id={`atlas-weather-${weather.maps.layerId}-${frame.id}-layer`}
+                  id={`atlas-weather-${frame.id}-layer`}
                   beforeId={WEATHER_ANCHOR_LAYER_ID}
                   paint={{
-                    'raster-opacity': index === 0 ? weather.opacity : 0,
+                    'raster-opacity': role === 'shown' ? weather.opacity : 0,
+                    'raster-opacity-transition':
+                      role === 'shown'
+                        ? { duration: WEATHER_FRAME_FADE.inMs, delay: 0 }
+                        : role === 'fading'
+                          ? {
+                              duration: WEATHER_FRAME_FADE.outMs,
+                              delay: WEATHER_FRAME_FADE.outDelayMs,
+                            }
+                          : { duration: 0, delay: 0 },
                     'raster-fade-duration': 0,
                   }}
                 />
@@ -848,45 +872,8 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
-        {/* Frost lightning: colour is observation age, size follows absolute peak current. */}
-        {!inPip && lightning ? (
-          <GeoJSONSource id="atlas-lightning" data={lightning.data}>
-            <Layer
-              type="circle"
-              id="atlas-lightning-halo"
-              minzoom={4}
-              paint={{
-                'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 10, 16, 15],
-                'circle-color': ['get', 'markerColor'],
-                'circle-opacity': 0.2 * lightning.opacity,
-                'circle-blur': 0.6,
-              }}
-            />
-            <Layer
-              type="circle"
-              id="atlas-lightning-dot"
-              minzoom={4}
-              paint={{
-                'circle-radius': [
-                  'interpolate',
-                  ['linear'],
-                  ['abs', ['get', 'peakCurrentKa']],
-                  0,
-                  2.5,
-                  25,
-                  4,
-                  100,
-                  7,
-                ],
-                'circle-color': ['get', 'markerColor'],
-                'circle-stroke-color': '#3b2445',
-                'circle-stroke-width': 1,
-                'circle-opacity': lightning.opacity,
-                'circle-stroke-opacity': lightning.opacity,
-              }}
-            />
-          </GeoJSONSource>
-        ) : null}
+        {/* Frost lightning, drawn by strike age (see LightningLayers). */}
+        {!inPip && lightning ? <LightningLayers lightning={lightning} /> : null}
         {/* Orbital elements arrive only on refresh; every position between
           them is propagated here on the device. Yellow is sunlit, slate is in
           shadow, purple is a batch launched days ago and still flying nose to

@@ -1,5 +1,6 @@
-import type { WeatherMapsController } from '@atlas/app-hooks';
+import type { SkyLayersController, WeatherMapsController } from '@atlas/app-hooks';
 import {
+  lightningLegendBands,
   timelineDayMarks,
   weatherFrameCaption,
   weatherFrameLabel,
@@ -56,6 +57,9 @@ interface WeatherDockProps {
   shifted: boolean;
   /** A bottom sheet or card owns the bottom of a phone screen right now. */
   compactHidden: boolean;
+  sky: SkyLayersController;
+  lightningOn: boolean;
+  auroraOn: boolean;
 }
 
 /**
@@ -65,7 +69,15 @@ interface WeatherDockProps {
  * and forecast. Everything else (which layer, how opaque) stays in the layer
  * switcher like every other overlay.
  */
-export function WeatherDock({ maps, title, shifted, compactHidden }: WeatherDockProps) {
+export function WeatherDock({
+  maps,
+  title,
+  shifted,
+  compactHidden,
+  sky,
+  lightningOn,
+  auroraOn,
+}: WeatherDockProps) {
   // Captions say "25 min ago": keep them honest while the dock sits open.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -83,10 +95,15 @@ export function WeatherDock({ maps, title, shifted, compactHidden }: WeatherDock
     .filter(Boolean)
     .join(' ');
 
-  if (!frame || frames.length === 0) {
+  const weatherOn = maps.layerId !== null;
+  const forecastMs = sky.aurora.forecast
+    ? Date.parse(sky.aurora.forecast.forecastTime)
+    : Number.NaN;
+
+  if (weatherOn && (!frame || frames.length === 0) && !lightningOn && !auroraOn) {
     return (
-      <div className={className} role="status">
-        <div className="weather-timeline weather-timeline-status">
+      <div className={className}>
+        <div role="status" className="weather-timeline weather-timeline-status">
           {maps.status === 'error'
             ? `${title}: weather maps are unavailable right now.`
             : `Loading ${title.toLowerCase()}…`}
@@ -95,89 +112,146 @@ export function WeatherDock({ maps, title, shifted, compactHidden }: WeatherDock
     );
   }
 
-  const frameMs = Date.parse(frame.time);
-  const label = weatherFrameLabel(frameMs, nowMs);
-  const caption = weatherFrameCaption(frame, nowMs);
   const nowAt = nowIndex / last;
-  // A day's name is only drawn where it has room: clear of "Now" and of the end
-  // of the track, where it would run into the time readout.
   const marks = timelineDayMarks(frames, nowMs).map((mark) => ({
     ...mark,
     named: Math.abs(mark.at - nowAt) > 0.1 && mark.at < 0.86,
   }));
+  const weatherTimeline = frame ? (
+    <div className="weather-timeline" role="group" aria-label={`${title} timeline`}>
+      <button
+        type="button"
+        className="weather-play"
+        onClick={maps.togglePlaying}
+        aria-label={maps.playing ? 'Pause' : 'Play'}
+        title={maps.playing ? 'Pause' : 'Play'}
+      >
+        {maps.playing ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
+      </button>
+      {maps.timelineIds.length > 1 && (
+        <div className="weather-timeline-switch" role="group" aria-label="Precipitation source">
+          {maps.timelineIds.map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={maps.timeline?.id === id}
+              onClick={() => maps.setTimeline(id)}
+              title={
+                id === 'radar'
+                  ? 'Radar: the last day and the next 90 minutes'
+                  : 'Forecast: the next three days'
+              }
+            >
+              {id === 'radar' ? 'Radar' : 'Forecast'}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="weather-track">
+        <input
+          type="range"
+          min={0}
+          max={frames.length - 1}
+          step={1}
+          value={frameIndex}
+          onChange={(event) => maps.selectFrame(Number(event.target.value))}
+          aria-label={`${title} time`}
+          aria-valuetext={`${weatherFrameLabel(Date.parse(frame.time), nowMs)}, ${weatherFrameCaption(frame, nowMs)}`}
+        />
+        <span
+          className="weather-track-now"
+          style={{ '--at': nowAt } as React.CSSProperties}
+          aria-hidden="true"
+        >
+          <span>Now</span>
+        </span>
+        {marks.map((mark) => (
+          <span
+            key={`${mark.at}`}
+            className="weather-track-day"
+            style={{ '--at': mark.at } as React.CSSProperties}
+            aria-hidden="true"
+          >
+            {mark.named && <span>{mark.label}</span>}
+          </span>
+        ))}
+      </div>
+      <button
+        type="button"
+        className={`weather-time${maps.followingNow ? '' : ' weather-time-away'}`}
+        onClick={maps.goToNow}
+        title="Back to now"
+        aria-label={`${weatherFrameLabel(Date.parse(frame.time), nowMs)}, ${weatherFrameCaption(frame, nowMs)}. Back to now`}
+      >
+        <strong>{weatherFrameLabel(Date.parse(frame.time), nowMs)}</strong>
+        <span>{weatherFrameCaption(frame, nowMs)}</span>
+      </button>
+    </div>
+  ) : weatherOn ? (
+    <div className="weather-timeline weather-timeline-status" role="status">
+      {maps.status === 'error' ? 'Weather maps unavailable' : `Loading ${title.toLowerCase()}…`}
+    </div>
+  ) : null;
 
   return (
     <div className={className}>
       {legend && <WeatherLegend title={title} legend={legend} />}
-      <div className="weather-timeline" role="group" aria-label={`${title} timeline`}>
-        <button
-          type="button"
-          className="weather-play"
-          onClick={maps.togglePlaying}
-          aria-label={maps.playing ? 'Pause' : 'Play'}
-          title={maps.playing ? 'Pause' : 'Play'}
+      {weatherTimeline}
+      {lightningOn && (
+        <div
+          className="weather-timeline sky-control"
+          role="group"
+          aria-label="Lightning time window"
         >
-          {maps.playing ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
-        </button>
-        {maps.timelineIds.length > 1 && (
-          <div className="weather-timeline-switch" role="group" aria-label="Precipitation source">
-            {maps.timelineIds.map((id) => (
+          <strong className="sky-control-title">Lightning</strong>
+          <div className="weather-timeline-switch">
+            {sky.lightning.windows.map((candidate) => (
               <button
-                key={id}
+                key={candidate.id}
                 type="button"
-                aria-pressed={maps.timeline?.id === id}
-                onClick={() => maps.setTimeline(id)}
-                title={
-                  id === 'radar'
-                    ? 'Radar: the last 90 minutes and the next 90'
-                    : 'Forecast: the next three days'
-                }
+                aria-pressed={sky.lightning.window === candidate.id}
+                onClick={() => sky.lightning.setWindow(candidate.id)}
               >
-                {id === 'radar' ? 'Radar' : 'Forecast'}
+                {candidate.id === '1h' ? 'Last hour' : candidate.label}
               </button>
             ))}
           </div>
-        )}
-        <div className="weather-track">
-          <input
-            type="range"
-            min={0}
-            max={frames.length - 1}
-            step={1}
-            value={frameIndex}
-            onChange={(event) => maps.selectFrame(Number(event.target.value))}
-            aria-label={`${title} time`}
-            aria-valuetext={`${label}, ${caption}`}
-          />
-          <span
-            className="weather-track-now"
-            style={{ '--at': nowAt } as React.CSSProperties}
-            aria-hidden="true"
-          >
-            <span>Now</span>
+          <span className="sky-age-key" aria-label="Lightning strike age">
+            {lightningLegendBands(sky.lightning.window).map((band, index) => (
+              <span key={band.age} className={`sky-age-band sky-age-${band.age}`}>
+                <i
+                  style={{
+                    background: band.color,
+                    opacity: Math.max(band.opacity, 0.55),
+                    width: `${Math.max(5, band.radius * 1.6)}px`,
+                    height: `${Math.max(5, band.radius * 1.6)}px`,
+                  }}
+                />
+                {index === 0 ? `< ${band.label}` : band.label}
+              </span>
+            ))}
           </span>
-          {marks.map((mark) => (
-            <span
-              key={`${mark.at}`}
-              className="weather-track-day"
-              style={{ '--at': mark.at } as React.CSSProperties}
-              aria-hidden="true"
-            >
-              {mark.named && <span>{mark.label}</span>}
-            </span>
-          ))}
         </div>
-        <button
-          type="button"
-          className={`weather-time${maps.followingNow ? '' : ' weather-time-away'}`}
-          onClick={maps.goToNow}
-          title="Back to now"
-          aria-label={`${label}, ${caption}. Back to now`}
-        >
-          <strong>{label}</strong>
-          <span>{caption}</span>
-        </button>
-      </div>
+      )}
+      {auroraOn && (
+        <div className="weather-timeline sky-control" aria-label="Aurora forecast time">
+          <div className="aurora-scale" aria-hidden="true" />
+          <div className="sky-control-copy">
+            <strong>Aurora viewing chance</strong>
+            <span>NOAA intensity · darkness · MET clouds · VIIRS light pollution</span>
+          </div>
+          <div className="weather-time sky-forecast-time">
+            <strong>
+              {Number.isFinite(forecastMs)
+                ? weatherFrameLabel(forecastMs, nowMs)
+                : sky.aurora.status === 'error'
+                  ? 'Unavailable'
+                  : 'Loading…'}
+            </strong>
+            <span>30-minute forecast</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

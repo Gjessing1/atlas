@@ -12,6 +12,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { archiveStamp, type ArchivedFrame, type WeatherArchive } from './weather-archive.js';
 import { registerWeatherMapsApi, weatherLayerMetas } from './weather-maps-api.js';
 
 const NOW = Date.parse('2026-09-16T12:20:00Z');
@@ -100,10 +101,10 @@ function fakeMet(upstream: Upstream) {
 
 let app: FastifyInstance | null = null;
 
-async function start(upstream: Upstream, now = () => NOW) {
+async function start(upstream: Upstream, now = () => NOW, archive?: WeatherArchive) {
   const met = fakeMet(upstream);
   app = Fastify();
-  registerWeatherMapsApi(app, { fetchImpl: met.fetchImpl, userAgent: 'test', now });
+  registerWeatherMapsApi(app, { fetchImpl: met.fetchImpl, userAgent: 'test', now, archive });
   await app.ready();
   return { app, ...met };
 }
@@ -309,6 +310,105 @@ describe('/api/weather/maps/point', () => {
   });
 });
 
+describe('radar history from the archive', () => {
+  const archived = (dataset: string, minutes: number): ArchivedFrame => {
+    const ms = NOW + minutes * 60_000;
+    return {
+      dataset,
+      time: new Date(ms).toISOString(),
+      ms,
+      stamp: archiveStamp(ms),
+      bounds: [-8, 53, 41, 74],
+      minzoom: 0,
+      maxzoom: dataset === 'air-temperature' ? 5 : 6,
+    };
+  };
+  /** An archive of whole frames whose every tile is one pixel value. */
+  function fakeArchive(
+    frames: Record<string, ArchivedFrame[]>,
+    pixels: Record<string, [number, number, number, number]>,
+  ) {
+    const reads: string[] = [];
+    const archive: WeatherArchive = {
+      frames: async (dataset) => frames[dataset] ?? [],
+      tile: async (frame, z, x, y) => {
+        reads.push(`${frame.dataset}/${frame.stamp}/${z}/${x}/${y}`);
+        const pixel = pixels[frame.dataset];
+        return pixel ? tile(pixel) : null;
+      },
+      capture: async () => {},
+      start: () => {},
+      stop: async () => {},
+    };
+    return { archive, reads };
+  }
+
+  it('reaches a day back before MET’s live window, without overlapping it', async () => {
+    const { archive } = fakeArchive(
+      {
+        'precipitation-observations': [-26 * 60, -5 * 60, -15, -10].map((m) =>
+          archived('precipitation-observations', m),
+        ),
+      },
+      {},
+    );
+    const { app } = await start({ pixels: PIXELS }, () => NOW, archive);
+    const body = (await app.inject('/api/weather/maps')).json<WeatherMapsResponse>();
+    const rain = body.layers.find((l) => l.id === 'precipitation')!;
+    const radar = rain.timelines.find((t) => t.id === 'radar')!;
+    // Older than a day is dropped; −10 is MET's own live picture, not the archive's.
+    expect(radar.frames.map((f) => [f.time, f.kind])).toEqual([
+      [iso(-5 * 60), 'observation'],
+      [iso(-15), 'observation'],
+      [iso(-10), 'observation'],
+      [iso(-5), 'observation'],
+      [iso(0), 'nowcast'],
+      [iso(5), 'nowcast'],
+    ]);
+    expect(radar.frames[0]!.id).toMatch(/^observation-20260916-072000-[0-9a-f]{8}$/);
+    // Bundles from before timelines keep MET's live window only.
+    expect(rain.frames.some((f) => f.time === iso(-5 * 60))).toBe(false);
+  });
+
+  it('paints an archived picture from disk, with the snow phase of its own hour', async () => {
+    const { archive, reads } = fakeArchive(
+      {
+        'precipitation-observations': [archived('precipitation-observations', -5 * 60)],
+        'air-temperature': [archived('air-temperature', -5 * 60 - 20)],
+      },
+      {
+        'precipitation-observations': [0, 85, 255, 255], // level 5
+        'air-temperature': [127, 0, 0, 255], // −1 °C
+      },
+    );
+    const { app, requests } = await start({ pixels: PIXELS }, () => NOW, archive);
+    const body = (await app.inject('/api/weather/maps')).json<WeatherMapsResponse>();
+    const frame = body.layers
+      .find((l) => l.id === 'precipitation')!
+      .timelines.find((t) => t.id === 'radar')!.frames[0]!;
+    const before = requests.filter((u) => u.endsWith('.png')).length;
+    const res = await app.inject(
+      frame.tilePath.replace('{z}', '6').replace('{x}', '33').replace('{y}', '18'),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(readPixel(res.rawPayload).slice(0, 3)).toEqual(hex(SNOW_COLORS[4]!));
+    // Nothing of it came from MET: those runs no longer exist upstream.
+    expect(requests.filter((u) => u.endsWith('.png')).length).toBe(before);
+    expect(reads.some((r) => r.startsWith('precipitation-observations/'))).toBe(true);
+    expect(reads.some((r) => r.startsWith('air-temperature/'))).toBe(true);
+
+    // A tap at that time answers from the same archived pictures.
+    const sample = (
+      await app.inject(`/api/weather/maps/point?lat=59.91&lng=10.75&time=${iso(-5 * 60 + 2)}`)
+    ).json<WeatherPointSample>();
+    expect(sample).toMatchObject({
+      time: iso(-5 * 60),
+      temperatureC: -1,
+      precipitation: { level: 5, frozen: true, radar: true },
+    });
+  });
+});
+
 describe('/api/overlay/weather-warnings/features', () => {
   const alert = {
     type: 'Feature',
@@ -349,7 +449,7 @@ describe('live sky layers', () => {
       const url = new URL(String(input));
       expect(url.origin).toBe('https://frost.met.no');
       expect(url.searchParams.get('referencetime')).toBe('latest');
-      expect(url.searchParams.get('maxage')).toBe('PT90M');
+      expect(url.searchParams.get('maxage')).toBe('PT24H');
       expect(url.searchParams.get('geometry')).toContain('POLYGON((8 58,12 58');
       expect(new Headers(init?.headers).get('authorization')).toBe(
         `Basic ${Buffer.from('client-id:').toString('base64')}`,
@@ -367,7 +467,7 @@ describe('live sky layers', () => {
     });
     await app.ready();
 
-    const url = '/api/overlay/weather-lightning/features?bbox=8.1,58.2,11.9,61.1';
+    const url = '/api/overlay/weather-lightning/features?bbox=8.1,58.2,11.9,61.1&window=24h';
     const first = await app.inject(url);
     expect(first.statusCode).toBe(200);
     expect(first.json().features[0]).toMatchObject({
@@ -387,13 +487,22 @@ describe('live sky layers', () => {
       const lat = (index % 181) - 90;
       return [lng, lat, lat > 55 ? 80 : 0];
     });
-    const fetchImpl = vi.fn(async () =>
-      Response.json({
-        'Observation Time': '2026-09-16T12:00:00Z',
-        'Forecast Time': '2026-09-16T12:45:00Z',
-        coordinates,
-      }),
-    );
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.includes('ovation_aurora')) {
+        return Response.json({
+          'Observation Time': '2026-09-16T12:00:00Z',
+          'Forecast Time': '2026-09-16T12:45:00Z',
+          coordinates,
+        });
+      }
+      if (url.includes('VIIRS_Night_Lights')) {
+        return new Response(new Uint8Array(tile([0, 0, 0, 255])), {
+          headers: { 'content-type': 'image/png' },
+        });
+      }
+      return new Response('', { status: 404 });
+    });
     app = Fastify();
     registerWeatherMapsApi(app, { fetchImpl: fetchImpl as typeof fetch, userAgent: 'test' });
     await app.ready();
@@ -403,10 +512,17 @@ describe('live sky layers', () => {
     expect(first.headers['content-type']).toBe('image/png');
     expect(first.headers['cache-control']).toContain('max-age=240');
     expect(first.headers['x-atlas-forecast-time']).toBe('2026-09-16T12:45:00Z');
-    expect(readPixel(first.rawPayload, 128, 32)[3]).toBeGreaterThan(100);
+    expect(readPixel(first.rawPayload, 128, 32)[3]).toBeGreaterThan(0);
     expect(readPixel(first.rawPayload, 128, 128)[3]).toBe(0);
-    await app.inject('/api/overlay/aurora-forecast/0/0/0.png?v=1');
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const metadata = await app.inject('/api/weather/aurora');
+    expect(metadata.json()).toMatchObject({
+      forecastTime: '2026-09-16T12:45:00Z',
+      factors: ['aurora', 'darkness', 'clouds', 'light-pollution'],
+    });
+    await app.inject('/api/overlay/aurora-forecast/0/0/0.png?v=2');
+    expect(
+      fetchImpl.mock.calls.filter(([input]) => String(input).includes('ovation_aurora')),
+    ).toHaveLength(1);
   });
 });
 

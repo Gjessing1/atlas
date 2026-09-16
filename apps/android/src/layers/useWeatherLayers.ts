@@ -1,11 +1,12 @@
 import {
   useWeatherGrid,
   useWeatherMaps,
+  type ActiveWeatherMapFrame,
   type PotentialView,
   type WeatherMapsController,
 } from '@atlas/app-hooks';
-import { WEATHER_WARNINGS_ID, weatherGridLabels } from '@atlas/conditions';
-import { useMemo } from 'react';
+import { WEATHER_FRAME_FADE, WEATHER_WARNINGS_ID, weatherGridLabels } from '@atlas/conditions';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowDimensions } from 'react-native';
 
 import type { ActiveOverlay } from './useOverlays';
@@ -22,6 +23,137 @@ export interface WeatherLayers {
    * numbers. Null for the other fields.
    */
   labels: GeoJSON.FeatureCollection | null;
+  /** The frames to mount, in the order they were first mounted (see useWeatherFrameStack). */
+  stack: WeatherFrameLayer[];
+  /** Feed MapLibre's render events here: they are how a frame is known to be loaded. */
+  onRenderedFrame: (fully: boolean) => void;
+}
+
+export interface WeatherFrameLayer {
+  frame: ActiveWeatherMapFrame;
+  /** `shown` is drawn; `fading` is leaving over the next frame; `loading` waits unseen. */
+  role: 'shown' | 'fading' | 'loading';
+}
+
+/**
+ * How long a frame must have been mounted before a "fully rendered" map counts
+ * for it: render events are delivered asynchronously, and one from a frame drawn
+ * before the mount would otherwise vouch for tiles nobody had asked for yet.
+ */
+const MOUNT_SETTLE_MS = 400;
+/** A frame that never finishes loading is shown after this, rather than never. */
+const SHOW_ANYWAY_MS = 3_000;
+const FADE_OUT_TOTAL_MS = WEATHER_FRAME_FADE.outDelayMs + WEATHER_FRAME_FADE.outMs;
+
+/**
+ * Which weather frames MapScene mounts, and how each is drawn — the Android
+ * half of the web's useWeatherMapLayer.
+ *
+ * MapLibre Native cannot be asked whether one source has loaded, but it reports
+ * every rendered frame and whether that frame was complete. A frame mounted a
+ * moment ago, on a map whose latest render was complete, has its tiles. Until
+ * then the picture before it stays up; after, the new one crossfades in over it
+ * (WEATHER_FRAME_FADE). Play asks the same question before stepping.
+ *
+ * The stack keeps first-mount order: each frame is inserted beneath the weather
+ * anchor, so mount order *is* the drawing order, and reordering React children
+ * would make the native side remove and re-add sources — the blank flash this
+ * exists to prevent.
+ */
+function useWeatherFrameStack(maps: WeatherMapsController) {
+  const renderRef = useRef({ fully: false });
+  const mountedAt = useRef(new Map<string, number>());
+  const [shown, setShown] = useState<ActiveWeatherMapFrame | null>(null);
+  const [fading, setFading] = useState<ActiveWeatherMapFrame[]>([]);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  // One unmount timer per fading frame: a frame that fades, returns and fades
+  // again must not be taken down by its first timer halfway through the second.
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((timer) => clearTimeout(timer));
+  }, []);
+
+  const current = maps.frame;
+  const wanted = useMemo(
+    () => (current && maps.timeline ? [current, ...maps.upcoming] : []),
+    [current, maps.timeline, maps.upcoming],
+  );
+
+  const ready = useCallback((frameId: string) => {
+    const at = mountedAt.current.get(frameId);
+    return at !== undefined && Date.now() - at >= MOUNT_SETTLE_MS && renderRef.current.fully;
+  }, []);
+  const { setFrameReadiness } = maps;
+  useEffect(() => {
+    setFrameReadiness(ready);
+    return () => setFrameReadiness(null);
+  }, [setFrameReadiness, ready]);
+
+  // Show the wanted frame once it is ready, fading the one it replaces.
+  const currentId = current?.id ?? null;
+  useEffect(() => {
+    if (!current) {
+      setShown(null);
+      setFading([]);
+      return;
+    }
+    if (shownRef.current?.id === current.id) return;
+    const since = Date.now();
+    const swap = () => {
+      const previous = shownRef.current;
+      if (previous && !ready(current.id) && Date.now() - since < SHOW_ANYWAY_MS) return false;
+      setShown(current);
+      setFading((list) => [
+        ...list.filter((f) => f.id !== current.id && f.id !== previous?.id),
+        ...(previous && previous.id !== current.id ? [previous] : []),
+      ]);
+      if (previous) {
+        clearTimeout(timers.current.get(previous.id));
+        timers.current.set(
+          previous.id,
+          setTimeout(() => {
+            timers.current.delete(previous.id);
+            setFading((list) => list.filter((f) => f.id !== previous.id));
+          }, FADE_OUT_TOTAL_MS + 50),
+        );
+      }
+      return true;
+    };
+    if (swap()) return;
+    const poll = setInterval(() => {
+      if (swap()) clearInterval(poll);
+    }, 100);
+    return () => clearInterval(poll);
+    // `current` changes identity with every catalog refresh; its id is what matters.
+  }, [currentId, ready]);
+
+  // First-mount order, kept across renders.
+  const order = useRef<string[]>([]);
+  const byId = new Map<string, WeatherFrameLayer>();
+  for (const frame of wanted) byId.set(frame.id, { frame, role: 'loading' });
+  for (const frame of fading) byId.set(frame.id, { frame, role: 'fading' });
+  if (shown && current) byId.set(shown.id, { frame: shown, role: 'shown' });
+  order.current = [
+    ...order.current.filter((id) => byId.has(id)),
+    ...[...byId.keys()].filter((id) => !order.current.includes(id)),
+  ];
+  const stack = order.current.map((id) => byId.get(id)!);
+  const stackKey = order.current.join(',');
+
+  useEffect(() => {
+    const now = Date.now();
+    const ids = new Set(stackKey.split(',').filter(Boolean));
+    for (const id of ids) if (!mountedAt.current.has(id)) mountedAt.current.set(id, now);
+    for (const id of [...mountedAt.current.keys()]) if (!ids.has(id)) mountedAt.current.delete(id);
+  }, [stackKey]);
+
+  const onRenderedFrame = useCallback((fully: boolean) => {
+    renderRef.current.fully = fully;
+  }, []);
+
+  return { stack, onRenderedFrame };
 }
 
 /** Density of the label grid, in dp of screen per cell. */
@@ -62,7 +194,8 @@ export function useWeatherLayers(
   }, [w, s, e, n, window.width, window.height, cell]);
   const grid = useWeatherGrid(origin, maps, gridViewport, wind || values);
   const labels = useMemo(() => (grid ? weatherGridLabels(grid) : null), [grid]);
-  return { maps, opacity: active?.opacity ?? 0.8, labels };
+  const { stack, onRenderedFrame } = useWeatherFrameStack(maps);
+  return { maps, opacity: active?.opacity ?? 0.8, labels, stack, onRenderedFrame };
 }
 
 const WARNINGS_REFRESH_MS = 5 * 60_000;

@@ -51,11 +51,18 @@ import {
   usePersistedSetting,
   useWeatherGrid,
   useWeatherMaps,
+  useSkyLayers,
   type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
 } from '@atlas/app-hooks';
-import { weatherPointIdentify, weatherPointUrl, type WeatherPointSample } from '@atlas/conditions';
+import {
+  AURORA_FORECAST_ID,
+  LIGHTNING_OBSERVATIONS_ID,
+  weatherPointIdentify,
+  weatherPointUrl,
+  type WeatherPointSample,
+} from '@atlas/conditions';
 import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
@@ -398,7 +405,11 @@ export function App() {
   );
   useWeatherValueLabels(map, useWeatherGrid('', weatherMaps, valueViewport, valuesOn));
   useWeatherWarningsLayer(map, overlays);
-  useLightningLayer(map, overlays);
+  const lightningOn = overlays.some((overlay) => overlay.meta.id === LIGHTNING_OBSERVATIONS_ID);
+  const auroraOn = overlays.some((overlay) => overlay.meta.id === AURORA_FORECAST_ID);
+  const skyLayers = useSkyLayers('', auroraOn);
+  useLightningLayer(map, overlays, skyLayers.lightning.window);
+  const timeDockOn = Boolean(weatherOverlay) || lightningOn || auroraOn;
   const weatherMapsRef = useRef(weatherMaps);
   weatherMapsRef.current = weatherMaps;
   // With a weather map up, a tap asks what the weather is there, at the time shown.
@@ -1336,21 +1347,22 @@ export function App() {
       )}
       {/* The weather layer's scale and timeline: present exactly while a
           weather field is switched on, like a layer's own controls. */}
-      {weatherOverlay && nav.phase === 'idle' && (
+      {timeDockOn && nav.phase === 'idle' && (
         <WeatherDock
           maps={weatherMaps}
-          title={weatherOverlay.meta.title}
+          title={weatherOverlay?.meta.title ?? ''}
           shifted={leftPanelOpen || spotsOpen || standBoardOpen || Boolean(target)}
           compactHidden={Boolean(target) || route.active}
+          sky={skyLayers}
+          lightningOn={lightningOn}
+          auroraOn={auroraOn}
         />
       )}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}
       {nav.phase === 'idle' && (
-        <div
-          className={`map-control-grid${weatherMaps.layerId ? ' map-control-grid-weather' : ''}`}
-        >
+        <div className={`map-control-grid${timeDockOn ? ' map-control-grid-weather' : ''}`}>
           {/* The Fish & Hunt sub-profile, one row above the layers it tunes.
               Renders nothing in the other profiles — their catalogs carry no
               derived surface. */}

@@ -59,6 +59,7 @@ export function fmtDayLabel(epochMs: number, nowMs = Date.now()): string {
   const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 86_400_000);
   if (dayDiff === 0) return 'Today';
   if (dayDiff === 1) return 'Tomorrow';
+  if (dayDiff === -1) return 'Yesterday';
   const weekday = d.toLocaleDateString([], { weekday: 'short' });
   return `${weekday} ${d.getDate()}`;
 }

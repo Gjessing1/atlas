@@ -18,6 +18,7 @@ import {
   useLayerFilters,
   usePlanningAreas,
   useStandBoard,
+  useSkyLayers,
   useThemeMode,
   type FetchNearbyFn,
   type ExploreArea,
@@ -44,7 +45,13 @@ import {
   type VisibilityFolder,
   type SettingsSectionId,
 } from '@atlas/core';
-import { weatherPointIdentify, weatherPointUrl, type WeatherPointSample } from '@atlas/conditions';
+import {
+  AURORA_FORECAST_ID,
+  LIGHTNING_OBSERVATIONS_ID,
+  weatherPointIdentify,
+  weatherPointUrl,
+  type WeatherPointSample,
+} from '@atlas/conditions';
 import { buildGpx, trackBounds, type TrackData } from '@atlas/gpx';
 import { trainOf, type SatelliteOmm } from '@atlas/satellites';
 import type { TrackRecord } from '@atlas/storage';
@@ -619,7 +626,15 @@ function AppInner() {
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
   const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
-  const lightning = useLightning(overlays, serverOrigin, camera.mapViewport);
+  const lightningOn = overlays.some((overlay) => overlay.meta.id === LIGHTNING_OBSERVATIONS_ID);
+  const auroraOn = overlays.some((overlay) => overlay.meta.id === AURORA_FORECAST_ID);
+  const skyLayers = useSkyLayers(serverOrigin, auroraOn);
+  const lightning = useLightning(
+    overlays,
+    serverOrigin,
+    camera.mapViewport,
+    skyLayers.lightning.window,
+  );
   // The horizon circle is drawn against whatever point the sheet is predicting
   // for, so switching to "map centre" moves the disc with it.
   const satelliteFootprint = useMemo(
@@ -669,6 +684,7 @@ function AppInner() {
   const weatherLayers = useWeatherLayers(overlays, serverOrigin, camera.mapViewport);
   const weatherWarnings = useWeatherWarnings(overlays, serverOrigin);
   const weatherTitle = overlays.find((overlay) => overlay.meta.weather)?.meta.title ?? '';
+  const timeDockOn = Boolean(weatherLayers.maps.layerId) || lightningOn || auroraOn;
   const [weatherDockHeight, setWeatherDockHeight] = useState(0);
   const weatherMapsRef = useRef(weatherLayers.maps);
   weatherMapsRef.current = weatherLayers.maps;
@@ -1107,8 +1123,7 @@ function AppInner() {
   // compass step up over the dock.
   const activityRows =
     (potentialTargets.groups.length > 0 ? 1 : 0) + (layerFilters.groups.length > 0 ? 1 : 0);
-  const weatherDockLift =
-    showIdleChrome && weatherLayers.maps.layerId ? weatherDockHeight + 52 * activityRows : 0;
+  const weatherDockLift = showIdleChrome && timeDockOn ? weatherDockHeight + 52 * activityRows : 0;
 
   // Route planning and guidance both repurpose map taps, so the measure tool
   // cannot stay open into either: its sheet is hidden there, and a hidden tool
@@ -1532,13 +1547,16 @@ function AppInner() {
             />
           ) : null}
 
-          {showIdleChrome && weatherLayers.maps.layerId ? (
+          {showIdleChrome && timeDockOn ? (
             <WeatherDock
               maps={weatherLayers.maps}
               title={weatherTitle}
               // Above the bottom control row and the activity rows stacked on it.
               bottom={bottomInset + 24 + 52 * (1 + activityRows)}
               onHeight={setWeatherDockHeight}
+              sky={skyLayers}
+              lightningOn={lightningOn}
+              auroraOn={auroraOn}
             />
           ) : null}
 

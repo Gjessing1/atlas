@@ -59,6 +59,7 @@ import {
 } from './transit-api.js';
 import { registerTrafficApi, type TrafficApiOptions } from './traffic-api.js';
 import { registerWeatherApi, type WeatherApiOptions } from './weather-api.js';
+import { createWeatherArchive } from './weather-archive.js';
 import {
   registerWeatherMapsApi,
   weatherLayerMetas,
@@ -748,7 +749,26 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // Animated weather layers and warnings: MET's map data decoded and painted
   // (weather-maps-api.ts), so both clients draw a plain raster.
-  registerWeatherMapsApi(app, { status, ...opts.weatherMapsApi });
+  // A day of radar history is written to disk as it happens (MET keeps only its
+  // live 90 minutes). On in production; elsewhere only with WEATHER_ARCHIVE_DIR,
+  // so a dev backend never writes into the data directory the deploy owns.
+  const weatherArchiveDir =
+    process.env.WEATHER_ARCHIVE_DIR ??
+    (process.env.NODE_ENV === 'production' ? path.join(opts.dataDir, 'weather-archive') : null);
+  const weatherArchive =
+    opts.weatherMapsApi?.archive ??
+    (weatherArchiveDir
+      ? createWeatherArchive({
+          dir: weatherArchiveDir,
+          status,
+          log: app.log,
+        })
+      : undefined);
+  if (weatherArchive && !opts.weatherMapsApi?.archive) {
+    weatherArchive.start();
+    app.addHook('onClose', () => weatherArchive.stop());
+  }
+  registerWeatherMapsApi(app, { status, ...opts.weatherMapsApi, archive: weatherArchive });
 
   // Public transport: Entur journey planner proxy (transit-api.ts — mandatory
   // ET-Client-Name header, Norway-only coverage check, Atlas trip model out).

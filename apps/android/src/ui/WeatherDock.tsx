@@ -1,6 +1,7 @@
-import type { WeatherMapsController } from '@atlas/app-hooks';
+import type { SkyLayersController, WeatherMapsController } from '@atlas/app-hooks';
 import {
   legendRowSwatches,
+  lightningLegendBands,
   timelineDayMarks,
   weatherFrameCaption,
   weatherFrameLabel,
@@ -79,6 +80,9 @@ export function WeatherDock({
   title,
   bottom,
   onHeight,
+  sky,
+  lightningOn,
+  auroraOn,
 }: {
   maps: WeatherMapsController;
   title: string;
@@ -86,6 +90,9 @@ export function WeatherDock({
   bottom: number;
   /** The dock's height, so the scale bar and compass can clear it. */
   onHeight: (height: number) => void;
+  sky: SkyLayersController;
+  lightningOn: boolean;
+  auroraOn: boolean;
 }) {
   const side = useSideInsets();
   const [trackWidth, setTrackWidth] = useState(0);
@@ -97,6 +104,9 @@ export function WeatherDock({
   useEffect(() => () => onHeight(0), [onHeight]);
 
   const { frames, frame, frameIndex, nowIndex, legend } = maps;
+  const forecastMs = sky.aurora.forecast
+    ? Date.parse(sky.aurora.forecast.forecastTime)
+    : Number.NaN;
   const last = Math.max(1, frames.length - 1);
   const seek = (event: GestureResponderEvent) => {
     if (trackWidth <= 0 || frames.length === 0) return;
@@ -123,93 +133,156 @@ export function WeatherDock({
           ))}
         </View>
       ) : null}
-      <View style={styles.timeline}>
-        {!frame ? (
-          <Text style={styles.status}>
-            {maps.status === 'error'
-              ? 'Weather maps are unavailable right now.'
-              : `Loading ${title.toLowerCase()}…`}
-          </Text>
-        ) : (
-          <>
-            <Pressable
-              style={styles.play}
-              onPress={maps.togglePlaying}
-              accessibilityLabel={maps.playing ? 'Pause' : 'Play'}
-              testID="weather-play"
-            >
-              <PlayGlyph playing={maps.playing} />
-            </Pressable>
-            <View style={styles.middle}>
-              {maps.timelineIds.length > 1 ? (
-                <View style={styles.switch}>
-                  {maps.timelineIds.map((id) => {
-                    const on = maps.timeline?.id === id;
-                    return (
-                      <Pressable
-                        key={id}
-                        style={[styles.switchButton, on ? styles.switchButtonOn : null]}
-                        onPress={() => maps.setTimeline(id)}
-                        testID={`weather-timeline-${id}`}
-                      >
-                        <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
-                          {id === 'radar' ? 'Radar' : 'Forecast'}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ) : null}
-              <View
-                style={styles.track}
-                onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-                onStartShouldSetResponder={() => true}
-                onMoveShouldSetResponder={() => true}
-                onResponderGrant={seek}
-                onResponderMove={seek}
-                accessibilityRole="adjustable"
-                accessibilityLabel={`${title} time`}
-                accessibilityValue={{ text: weatherFrameLabel(Date.parse(frame.time), nowMs) }}
-                accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-                onAccessibilityAction={(event) =>
-                  event.nativeEvent.actionName === 'increment' ? maps.next() : maps.previous()
-                }
-                testID="weather-track"
+      {maps.layerId ? (
+        <View style={styles.timeline}>
+          {!frame ? (
+            <Text style={styles.status}>
+              {maps.status === 'error'
+                ? 'Weather maps are unavailable right now.'
+                : `Loading ${title.toLowerCase()}…`}
+            </Text>
+          ) : (
+            <>
+              <Pressable
+                style={styles.play}
+                onPress={maps.togglePlaying}
+                accessibilityLabel={maps.playing ? 'Pause' : 'Play'}
+                testID="weather-play"
               >
-                <View style={styles.rail} pointerEvents="none">
-                  <View style={[styles.railFill, { width: `${(frameIndex / last) * 100}%` }]} />
-                </View>
-                {timelineDayMarks(frames, nowMs).map((mark) => (
+                <PlayGlyph playing={maps.playing} />
+              </Pressable>
+              <View style={styles.middle}>
+                {maps.timelineIds.length > 1 ? (
+                  <View style={styles.switch}>
+                    {maps.timelineIds.map((id) => {
+                      const on = maps.timeline?.id === id;
+                      return (
+                        <Pressable
+                          key={id}
+                          style={[styles.switchButton, on ? styles.switchButtonOn : null]}
+                          onPress={() => maps.setTimeline(id)}
+                          testID={`weather-timeline-${id}`}
+                        >
+                          <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
+                            {id === 'radar' ? 'Radar' : 'Forecast'}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+                <View
+                  style={styles.track}
+                  onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={seek}
+                  onResponderMove={seek}
+                  accessibilityRole="adjustable"
+                  accessibilityLabel={`${title} time`}
+                  accessibilityValue={{ text: weatherFrameLabel(Date.parse(frame.time), nowMs) }}
+                  accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                  onAccessibilityAction={(event) =>
+                    event.nativeEvent.actionName === 'increment' ? maps.next() : maps.previous()
+                  }
+                  testID="weather-track"
+                >
+                  <View style={styles.rail} pointerEvents="none">
+                    <View style={[styles.railFill, { width: `${(frameIndex / last) * 100}%` }]} />
+                  </View>
+                  {timelineDayMarks(frames, nowMs).map((mark) => (
+                    <View
+                      key={mark.at}
+                      pointerEvents="none"
+                      style={[styles.dayMark, { left: `${mark.at * 100}%` }]}
+                    />
+                  ))}
                   <View
-                    key={mark.at}
                     pointerEvents="none"
-                    style={[styles.dayMark, { left: `${mark.at * 100}%` }]}
+                    style={[styles.nowMark, { left: `${(nowIndex / last) * 100}%` }]}
                   />
-                ))}
-                <View
-                  pointerEvents="none"
-                  style={[styles.nowMark, { left: `${(nowIndex / last) * 100}%` }]}
-                />
-                <View
-                  pointerEvents="none"
-                  style={[styles.thumb, { left: `${(frameIndex / last) * 100}%` }]}
-                />
+                  <View
+                    pointerEvents="none"
+                    style={[styles.thumb, { left: `${(frameIndex / last) * 100}%` }]}
+                  />
+                </View>
               </View>
-            </View>
-            <Pressable style={styles.time} onPress={maps.goToNow} testID="weather-now">
-              <Text
-                style={[styles.timeLabel, maps.followingNow ? null : styles.timeLabelAway]}
-                numberOfLines={1}
-              >
-                {weatherFrameLabel(Date.parse(frame.time), nowMs)}
-              </Text>
-              <Text style={styles.timeCaption} numberOfLines={1}>
-                {weatherFrameCaption(frame, nowMs)}
-              </Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+              <Pressable style={styles.time} onPress={maps.goToNow} testID="weather-now">
+                <Text
+                  style={[styles.timeLabel, maps.followingNow ? null : styles.timeLabelAway]}
+                  numberOfLines={1}
+                >
+                  {weatherFrameLabel(Date.parse(frame.time), nowMs)}
+                </Text>
+                <Text style={styles.timeCaption} numberOfLines={1}>
+                  {weatherFrameCaption(frame, nowMs)}
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      ) : null}
+      {lightningOn ? (
+        <View style={styles.timeline} accessibilityLabel="Lightning time window">
+          <Text style={styles.skyTitle}>Lightning</Text>
+          <View style={styles.switch}>
+            {sky.lightning.windows.map((candidate) => {
+              const on = sky.lightning.window === candidate.id;
+              return (
+                <Pressable
+                  key={candidate.id}
+                  style={[styles.switchButton, on ? styles.switchButtonOn : null]}
+                  onPress={() => sky.lightning.setWindow(candidate.id)}
+                  testID={`lightning-window-${candidate.id}`}
+                >
+                  <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
+                    {candidate.id === '1h' ? 'Last hour' : candidate.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.ageKey} accessibilityLabel="Lightning strike age">
+            {lightningLegendBands(sky.lightning.window).map((band, index) => (
+              <View key={band.age} style={styles.ageBand}>
+                <View
+                  style={[
+                    styles.ageDot,
+                    {
+                      backgroundColor: band.color,
+                      opacity: Math.max(band.opacity, 0.55),
+                      width: Math.max(5, band.radius * 1.6),
+                      height: Math.max(5, band.radius * 1.6),
+                    },
+                  ]}
+                />
+                <Text style={styles.ageText}>{index === 0 ? `<${band.label}` : band.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      {auroraOn ? (
+        <View style={styles.timeline} accessibilityLabel="Aurora forecast time">
+          <View style={styles.auroraDot} />
+          <View style={styles.skyCopy}>
+            <Text style={styles.skyTitle}>Aurora viewing chance</Text>
+            <Text style={styles.skyCaption} numberOfLines={1}>
+              NOAA intensity · darkness · MET clouds · VIIRS light pollution
+            </Text>
+          </View>
+          <View style={styles.time}>
+            <Text style={styles.timeLabel} numberOfLines={1}>
+              {Number.isFinite(forecastMs)
+                ? weatherFrameLabel(forecastMs, nowMs)
+                : sky.aurora.status === 'error'
+                  ? 'Unavailable'
+                  : 'Loading…'}
+            </Text>
+            <Text style={styles.timeCaption}>30-minute forecast</Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -258,6 +331,20 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   status: { flex: 1, paddingHorizontal: 10, fontSize: 13, color: theme.textMuted },
+  skyTitle: { fontSize: 12, fontWeight: '700', color: theme.text },
+  skyCopy: { flex: 1, minWidth: 0 },
+  skyCaption: { fontSize: 9, color: theme.textMuted, opacity: 0.72 },
+  ageKey: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 3 },
+  ageBand: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  ageDot: { borderRadius: 5, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.8)' },
+  ageText: { fontSize: 8, color: theme.textMuted, opacity: 0.75 },
+  auroraDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#54e879',
+    opacity: 0.82,
+  },
   play: {
     width: 40,
     height: 40,

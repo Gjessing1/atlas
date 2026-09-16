@@ -6,6 +6,7 @@ import {
   FROZEN_PRECIPITATION_MAX_C,
   LIGHTNING_BOUNDS,
   LIGHTNING_OBSERVATIONS_ID,
+  lightningWindow,
   legendRowSwatches,
   normalizeMetAlerts,
   paintAuroraTile,
@@ -40,12 +41,20 @@ import {
   type WeatherRaster,
   type LightningResponse,
   type OvationGrid,
+  type AuroraForecastStatus,
 } from '@atlas/conditions';
 import type { LayerMeta } from '@atlas/core';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { PNG } from 'pngjs';
 
 import type { StatusRegistry } from './status.js';
+import {
+  METNO_MAPS_USER_AGENT,
+  RADAR_ARCHIVE_DATASET,
+  TEMPERATURE_ARCHIVE_DATASET,
+  type ArchivedFrame,
+  type WeatherArchive,
+} from './weather-archive.js';
 
 /**
  * Animated weather layers: MET Norway's map data (the tiles behind yr.no's
@@ -70,6 +79,9 @@ const YR_MAPS_URL = 'https://prod.yr-maps.met.no/api';
 const METALERTS_URL = 'https://api.met.no/weatherapi/metalerts/2.0/current.json?lang=en';
 const FROST_LIGHTNING_URL = 'https://frost.met.no/lightning/v0.ualf';
 const OVATION_URL = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
+const VIIRS_LIGHTS_TEMPLATE =
+  'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Night_Lights/default/' +
+  '2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png';
 const ATTRIBUTION = 'Weather maps © MET Norway (CC BY 4.0)';
 /**
  * Bump when the painting changes: it rides on every tile URL, because the frame
@@ -103,11 +115,14 @@ const MAP_SOURCES: Record<
   'sea-temperature': { forecast: [{ name: 'sea-temperature', kind: 'forecast' }] },
 };
 
-/** How far back and forward each timeline reaches from now. Radar is Yr's ±90 minutes. */
+/** How far back and forward each timeline reaches from now in MET's live catalog: Yr's ±90 minutes of radar. */
 const WINDOWS: Record<WeatherMapTimelineId, readonly [number, number]> = {
   radar: [-95 * MINUTE, 125 * MINUTE],
   forecast: [-60 * MINUTE, 72 * HOUR],
 };
+
+/** How far back the radar timeline reaches when the archive (weather-archive.ts) has kept the pictures. */
+const RADAR_HISTORY_MS = 24 * HOUR;
 
 /** Frames further than this from a requested time are not the weather at that time. */
 const POINT_TOLERANCE: Record<WeatherMapTimelineId, number> = {
@@ -120,7 +135,8 @@ const ALERTS_TTL_MS = 5 * MINUTE;
 const DECODED_CACHE_ENTRIES = 96;
 const PAINTED_CACHE_BYTES = 48 * 1024 * 1024;
 const MAX_GRID = 160;
-const LIGHTNING_TTL_MS = 60_000;
+/** Short: the newest strikes pulse for their first minute, so a minute of caching would hide it. */
+const LIGHTNING_TTL_MS = 20_000;
 const AURORA_TTL_MS = 5 * MINUTE;
 
 export interface WeatherMapsApiOptions {
@@ -130,6 +146,8 @@ export interface WeatherMapsApiOptions {
   now?: () => number;
   /** Frost credentials stay server-side. Open lightning needs the client id only. */
   frostClientId?: string;
+  /** A day of radar kept on disk; without it the radar timeline is MET's live 90 minutes. */
+  archive?: WeatherArchive;
 }
 
 interface YrMapDataset {
@@ -148,13 +166,20 @@ interface FrameSource {
   upstream: string;
   minzoom: number;
   maxzoom: number;
+  /** Served from the archive rather than MET's live catalog. */
+  archived?: boolean;
+}
+
+/** An archived frame's tiles, addressed like an upstream template so painting treats both alike. */
+function archiveTemplate(frame: ArchivedFrame): string {
+  return `archive:${frame.dataset}/${frame.stamp}/{z}/{x}/{y}.png`;
 }
 
 interface WeatherMapCatalog {
   response: WeatherMapsResponse;
   /** `layer/frameId` → source. */
   frames: Map<string, FrameSource>;
-  /** Hourly air-temperature frames, for precipitation's snow/rain phase. */
+  /** Hourly air-temperature frames, live and archived, for precipitation's snow/rain phase. */
   temperature: FrameSource[];
   /** Per layer, the spliced frames an older client draws for "now". */
   legacy: Map<WeatherMapLayerId, FrameSource[]>;
@@ -258,9 +283,9 @@ export function weatherLayerMetas(frostClientId = process.env.FROST_CLIENT_ID): 
       ? [
           {
             id: LIGHTNING_OBSERVATIONS_ID,
-            rev: 1,
+            rev: 2,
             title: 'Lightning',
-            description: 'Detected lightning strikes from the last 90 minutes, coloured by age.',
+            description: 'Detected lightning strikes from the last hour, 12 hours or 24 hours.',
             group: 'Weather',
             attribution: 'Lightning observations © MET Norway',
             metadataUrl: 'https://frost.met.no/',
@@ -269,25 +294,26 @@ export function weatherLayerMetas(frostClientId = process.env.FROST_CLIENT_ID): 
             defaultOpacity: 1,
             identify: false,
             coverageNote:
-              'Nordic detection network. Pale yellow is newest, orange is 15–45 minutes, and pink is 45–90 minutes old.',
+              'Nordic detection network. The newest strikes pulse orange, then fade through magenta (to 15 min), violet (1 h) and grey (6 h) to a faint grey for the rest of the day.',
             vector: true,
           } satisfies LayerMeta,
         ]
       : []),
     {
       id: AURORA_FORECAST_ID,
-      rev: 1,
-      title: 'Aurora forecast',
-      description: 'NOAA’s 30-minute aurora probability forecast, refreshed every five minutes.',
+      rev: 2,
+      title: 'Aurora viewing chance',
+      description:
+        'NOAA’s 30-minute aurora probability adjusted for darkness, clouds and artificial light.',
       group: 'Weather',
-      attribution: 'Aurora forecast © NOAA SWPC',
+      attribution: 'Aurora © NOAA SWPC · clouds © MET Norway · night lights © NASA',
       metadataUrl: 'https://www.swpc.noaa.gov/products/aurora-30-minute-forecast',
       maxzoom: 5,
       defaultOpacity: 0.85,
       identify: false,
       refreshSeconds: 300,
       coverageNote:
-        'Green to yellow/red means increasing model probability. Daylight and cloud are not included; enable Clouds as well to assess viewing conditions.',
+        'A brighter, more opaque green band means a better viewing chance. Low/medium/high cloud, solar darkness and VIIRS artificial-light radiance reduce it.',
     },
     {
       id: WEATHER_WARNINGS_ID,
@@ -368,10 +394,7 @@ export function registerWeatherMapsApi(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const status = opts.status;
   const now = opts.now ?? Date.now;
-  const userAgent =
-    opts.userAgent ??
-    process.env.METNO_USER_AGENT ??
-    'atlas-maps/1.0 git.gjessing.io/gjessing1/atlas lars@gjessing.io';
+  const userAgent = opts.userAgent ?? process.env.METNO_USER_AGENT ?? METNO_MAPS_USER_AGENT;
   const frostClientId = opts.frostClientId ?? process.env.FROST_CLIENT_ID;
   const MAPS_PROBE = 'yr-maps';
   const ALERTS_PROBE = 'metalerts';
@@ -412,6 +435,12 @@ export function registerWeatherMapsApi(
     });
 
     const at = now();
+    const [archivedRadar, archivedTemperature] = opts.archive
+      ? await Promise.all([
+          opts.archive.frames(RADAR_ARCHIVE_DATASET).catch(() => []),
+          opts.archive.frames(TEMPERATURE_ARCHIVE_DATASET).catch(() => []),
+        ])
+      : [[], []];
     const frames = new Map<string, FrameSource>();
     const legacy = new Map<WeatherMapLayerId, FrameSource[]>();
     const layers: WeatherMapLayer[] = [];
@@ -426,7 +455,7 @@ export function registerWeatherMapsApi(
         // Later sources replace earlier ones at the same instant: observed
         // radar is listed last, so it beats the nowcast at "now".
         const byTime = new Map<string, FrameSource>();
-        let reference: YrMapDataset | undefined;
+        let reference: Pick<YrMapDataset, 'bounds' | 'minzoom' | 'maxzoom'> | undefined;
         for (const source of sources) {
           const dataset = datasets.get(source.name);
           if (!dataset) continue;
@@ -453,6 +482,35 @@ export function registerWeatherMapsApi(
             });
           }
         }
+        // The day before MET's live window, from the archive: up to the first
+        // live picture, so the two never overlap and never leave a gap.
+        if (spec.id === 'precipitation' && timelineId === 'radar') {
+          const earliestLive = Math.min(
+            Number.POSITIVE_INFINITY,
+            ...[...byTime.values()].map((source) => Date.parse(source.frame.time)),
+          );
+          for (const archived of archivedRadar) {
+            if (archived.ms < at - RADAR_HISTORY_MS || archived.ms >= earliestLive) continue;
+            if (archived.ms > at) continue;
+            reference ??= archived;
+            const upstream = archiveTemplate(archived);
+            const id = `observation-${compactTime(archived.ms)}-${runTag(upstream)}`;
+            byTime.set(new Date(archived.ms).toISOString(), {
+              layer: spec.id,
+              timeline: timelineId,
+              frame: {
+                id,
+                time: new Date(archived.ms).toISOString(),
+                kind: 'observation',
+                tilePath: tilePath(spec.id, id),
+              },
+              upstream,
+              minzoom: archived.minzoom,
+              maxzoom: archived.maxzoom,
+              archived: true,
+            });
+          }
+        }
         const ordered = [...byTime.values()].sort(
           (a, b) => Date.parse(a.frame.time) - Date.parse(b.frame.time),
         );
@@ -474,7 +532,8 @@ export function registerWeatherMapsApi(
       // the forecast elsewhere.
       const spliced = new Map<string, FrameSource>();
       for (const list of [...sourcesByTimeline].reverse()) {
-        for (const source of list) spliced.set(source.frame.time, source);
+        // Those bundles never had history; their single timeline stays MET's live window.
+        for (const source of list) if (!source.archived) spliced.set(source.frame.time, source);
       }
       const legacyFrames = [...spliced.values()].sort(
         (a, b) => Date.parse(a.frame.time) - Date.parse(b.frame.time),
@@ -493,7 +552,27 @@ export function registerWeatherMapsApi(
     }
 
     if (layers.length === 0) throw new Error('yr-maps returned no usable datasets');
-    const temperature = [...frames.values()].filter((source) => source.layer === 'temperature');
+    const temperature = [
+      ...[...frames.values()].filter((source) => source.layer === 'temperature'),
+      ...archivedTemperature.map((archived): FrameSource => {
+        const upstream = archiveTemplate(archived);
+        const id = `forecast-${compactTime(archived.ms)}-${runTag(upstream)}`;
+        return {
+          layer: 'temperature',
+          timeline: 'forecast',
+          frame: {
+            id,
+            time: new Date(archived.ms).toISOString(),
+            kind: 'forecast',
+            tilePath: tilePath('temperature', id),
+          },
+          upstream,
+          minzoom: archived.minzoom,
+          maxzoom: archived.maxzoom,
+          archived: true,
+        };
+      }),
+    ];
     return {
       response: {
         layers,
@@ -560,6 +639,16 @@ export function registerWeatherMapsApi(
     const hit = decoded.get(url);
     if (hit) return hit;
     const task = (async () => {
+      if (url.startsWith('archive:')) {
+        const [dataset, stamp] = url.slice('archive:'.length).split('/');
+        const bytes =
+          opts.archive && dataset && stamp
+            ? await opts.archive.tile({ dataset, stamp }, z, x, y)
+            : null;
+        if (!bytes) return null;
+        const png = PNG.sync.read(bytes, { skipRescale: true });
+        return { width: png.width, height: png.height, data: png.data } satisfies WeatherRaster;
+      }
       const res = await fetchImpl(url, {
         headers: { 'User-Agent': userAgent, Accept: 'image/png' },
         signal: AbortSignal.timeout(8000),
@@ -768,11 +857,41 @@ export function registerWeatherMapsApi(
         return reply.code(400).send({ error: 'invalid tile coordinate' });
       try {
         const grid = await currentAurora();
-        const key = `${grid.forecastTime}/${z}/${x}/${y}`;
+        const forecastMs = Date.parse(grid.forecastTime);
+        let cloudSource: FrameSource | null = null;
+        try {
+          const cloudFrames = [...(await catalog()).frames.values()].filter(
+            (source) => source.layer === 'clouds' && source.timeline === 'forecast',
+          );
+          if (cloudFrames.length > 0) {
+            const candidate =
+              cloudFrames[
+                closestFrameIndex(
+                  cloudFrames.map((source) => source.frame),
+                  forecastMs,
+                )
+              ]!;
+            if (Math.abs(Date.parse(candidate.frame.time) - forecastMs) <= 90 * MINUTE) {
+              cloudSource = candidate;
+            }
+          }
+        } catch {
+          // OVATION still draws when the weather-map catalog is temporarily unavailable.
+        }
+        const key = `${grid.forecastTime}/${cloudSource?.frame.id ?? 'no-cloud'}/${z}/${x}/${y}`;
         let bytes = auroraTiles.get(key);
         if (!bytes) {
+          const [clouds, lightPollution] = await Promise.all([
+            cloudSource ? mosaicFor(cloudSource, z, x, y).catch(() => undefined) : undefined,
+            decodeUpstream(VIIRS_LIGHTS_TEMPLATE, z, x, y).catch(() => null),
+          ]);
           const png = new PNG({ width: 256, height: 256, colorType: 6 });
-          png.data = Buffer.from(paintAuroraTile(grid, z, x, y));
+          png.data = Buffer.from(
+            paintAuroraTile(grid, z, x, y, {
+              ...(clouds ? { clouds } : {}),
+              ...(lightPollution ? { lightPollution } : {}),
+            }),
+          );
           bytes = PNG.sync.write(png);
           auroraTiles.set(key, bytes);
         }
@@ -787,9 +906,31 @@ export function registerWeatherMapsApi(
     },
   );
 
+  app.get('/api/weather/aurora', async (request, reply) => {
+    try {
+      const grid = await currentAurora();
+      const response: AuroraForecastStatus = {
+        observationTime: grid.observationTime,
+        forecastTime: grid.forecastTime,
+        factors: ['aurora', 'darkness', 'clouds', 'light-pollution'],
+      };
+      reply.header('cache-control', 'public, max-age=240');
+      return reply.send(response);
+    } catch (error) {
+      request.log.error({ err: error }, 'aurora forecast metadata upstream failed');
+      return reply.code(502).send({ error: 'aurora forecast unavailable' });
+    }
+  });
+
   // --------------------------------------------------- lightning observations ---
 
-  const lightningCache = new Map<string, { fetchedAt: number; data: LightningResponse }>();
+  // Keyed by snapped viewport and window, so bounded: a day of strikes over a
+  // wide view is megabytes, and every pan to a new cell adds a key.
+  const lightningCache = new Lru<{ fetchedAt: number; data: LightningResponse }>(
+    128,
+    48 * 1024 * 1024,
+    (entry) => 256 + entry.data.features.length * 260,
+  );
 
   const lightningBbox = (raw: string | undefined): [number, number, number, number] | null => {
     const value = (raw ?? '').split(',').map(Number);
@@ -805,20 +946,21 @@ export function registerWeatherMapsApi(
     return clipped[0] < clipped[2] && clipped[1] < clipped[3] ? clipped : null;
   };
 
-  app.get<{ Querystring: { bbox?: string } }>(
+  app.get<{ Querystring: { bbox?: string; window?: string } }>(
     `/api/overlay/${LIGHTNING_OBSERVATIONS_ID}/features`,
     async (request, reply) => {
       if (!frostClientId)
         return reply.code(503).send({ error: 'lightning observations are not configured' });
       const bbox = lightningBbox(request.query.bbox);
       if (!bbox) return reply.code(400).send({ error: 'valid bounded bbox required' });
-      const key = bbox.join(',');
+      const selectedWindow = lightningWindow(request.query.window);
+      const key = `${selectedWindow.id}/${bbox.join(',')}`;
       const cached = lightningCache.get(key);
       if (cached && now() - cached.fetchedAt < LIGHTNING_TTL_MS) return reply.send(cached.data);
       const [w, s, e, n] = bbox;
       const query = new URLSearchParams({
         referencetime: 'latest',
-        maxage: 'PT90M',
+        maxage: selectedWindow.frostDuration,
         geometry: `POLYGON((${w} ${s},${e} ${s},${e} ${n},${w} ${n},${w} ${s}))`,
       });
       try {
@@ -831,10 +973,10 @@ export function registerWeatherMapsApi(
           signal: AbortSignal.timeout(12_000),
         });
         if (!response.ok) throw new Error(`frost lightning ${response.status}`);
-        const data = parseUalf(await response.text(), now());
+        const data = parseUalf(await response.text(), now(), 10_000, selectedWindow.minutes);
         lightningCache.set(key, { fetchedAt: now(), data });
         status?.record(LIGHTNING_PROBE, true);
-        reply.header('cache-control', 'public, max-age=45');
+        reply.header('cache-control', 'public, max-age=15');
         return reply.send(data);
       } catch (error) {
         status?.record(LIGHTNING_PROBE, false, 'unreachable');
@@ -964,7 +1106,19 @@ export function registerWeatherMapsApi(
         const read = async (source: FrameSource | null) =>
           source ? await valueAt(source, lng, lat).catch(() => null) : null;
 
-        const temperatureSource = nearest('temperature', 'forecast');
+        // Live or archived: a radar picture from yesterday still wants yesterday's temperature.
+        const temperatureSource = (() => {
+          if (cat.temperature.length === 0) return null;
+          const best =
+            cat.temperature[
+              closestFrameIndex(
+                cat.temperature.map((f) => f.frame),
+                requested,
+              )
+            ]!;
+          const off = Math.abs(Date.parse(best.frame.time) - requested);
+          return off <= POINT_TOLERANCE.forecast ? best : null;
+        })();
         const temperature = await read(temperatureSource);
         const temperatureC = temperature?.layer === 'temperature' ? temperature.value : null;
 

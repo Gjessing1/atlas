@@ -5802,6 +5802,93 @@ button.transit-notice-summary {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
+.sky-control {
+  min-height: 50px;
+}
+
+.sky-control-title {
+  flex: 0 0 auto;
+  padding-left: 8px;
+  font-size: 13px;
+}
+
+.sky-age-key {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.sky-age-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+}
+
+/* Size and colour come from the shared age bands, inline. */
+.sky-age-key i {
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+/* The newest band pulses on the map; its key does too, unless motion is unwelcome. */
+.sky-age-flash i {
+  animation: sky-age-pulse 1.6s ease-out infinite;
+}
+
+@keyframes sky-age-pulse {
+  0% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.7),
+      0 0 0 0 rgba(255, 122, 0, 0.8);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.7),
+      0 0 0 7px rgba(255, 122, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-age-flash i {
+    animation: none;
+  }
+}
+
+.aurora-scale {
+  flex: 0 0 42px;
+  height: 32px;
+  border-radius: 18px;
+  background: radial-gradient(circle, rgba(160, 255, 120, 0.95), rgba(30, 190, 90, 0.16));
+}
+
+.sky-control-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.sky-control-copy strong {
+  font-size: 13px;
+}
+
+.sky-control-copy span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sky-forecast-time {
+  cursor: default;
+}
+
 /* The range's thumb travels inside 8px of each end, so markers are placed on
    the same inset scale to line up with the frame they name. */
 .weather-track {
@@ -5938,6 +6025,19 @@ button.transit-notice-summary {
 
   .weather-legend {
     width: min(250px, 100%);
+  }
+
+  .sky-age-key {
+    display: none;
+  }
+
+  .sky-control-title {
+    padding-left: 4px;
+  }
+
+  .sky-control .weather-timeline-switch button {
+    padding-right: 7px;
+    padding-left: 7px;
   }
 
   /* Above the dock's legend too: the zoom row is wider than the gap beside it. */

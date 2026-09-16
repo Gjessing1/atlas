@@ -1,16 +1,32 @@
 import type { PotentialView } from '@atlas/app-hooks';
-import { LIGHTNING_OBSERVATIONS_ID, type LightningResponse } from '@atlas/conditions';
+import {
+  LIGHTNING_OBSERVATIONS_ID,
+  type LightningResponse,
+  type LightningWindow,
+} from '@atlas/conditions';
 import { viewportFeaturesUrl } from '@atlas/core';
 import { useEffect, useRef, useState } from 'react';
 
 import type { ActiveOverlay } from './useOverlays';
 import type { VectorOverlayData } from './useVectorOverlay';
 
-/** Viewport-scoped Frost strikes, refreshed once a minute so age colours advance. */
+/** Often enough that a strike can still be inside its pulsing first minute on arrival. */
+const REFRESH_MS = 20_000;
+
+function sameStrikes(a: LightningResponse | null, b: LightningResponse): boolean {
+  if (!a || a.features.length !== b.features.length) return false;
+  const edge = (r: LightningResponse, i: number) => r.features[i]?.properties.observedMs;
+  return (
+    edge(a, 0) === edge(b, 0) && edge(a, a.features.length - 1) === edge(b, b.features.length - 1)
+  );
+}
+
+/** Viewport-scoped Frost strikes; LightningLayers moves their age bands on between refreshes. */
 export function useLightning(
   overlays: ActiveOverlay[],
   origin: string,
   view: PotentialView | null,
+  window: LightningWindow,
 ): VectorOverlayData | null {
   const active = overlays.find(
     (overlay) => overlay.meta.id === LIGHTNING_OBSERVATIONS_ID && overlay.meta.vector,
@@ -24,7 +40,7 @@ export function useLightning(
 
   useEffect(() => {
     if (!present) return;
-    const timer = setInterval(() => setTick((value) => value + 1), 60_000);
+    const timer = setInterval(() => setTick((value) => value + 1), REFRESH_MS);
     return () => clearInterval(timer);
   }, [present]);
 
@@ -40,18 +56,21 @@ export function useLightning(
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(viewportFeaturesUrl(origin, meta, view.bbox));
+        const response = await fetch(
+          `${viewportFeaturesUrl(origin, meta, view.bbox)}&window=${window}`,
+        );
         if (!response.ok || cancelled) return;
         const body = (await response.json()) as LightningResponse;
-        if (!cancelled) setData(body);
+        // The same strikes again (a quiet sky, mostly) must not re-render the whole app.
+        if (!cancelled) setData((previous) => (sameStrikes(previous, body) ? previous : body));
       } catch {
-        // Preserve the last strike set; the minute tick or next camera move retries.
+        // Preserve the last strike set; the next tick or camera move retries.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [origin, key]);
+  }, [origin, key, window]);
 
   if (!present || !view || view.zoom < minzoom || !data) return null;
   return { data: data as GeoJSON.FeatureCollection, opacity: active?.opacity ?? 1 };

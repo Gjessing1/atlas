@@ -263,12 +263,12 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'map-weather-layers',
     surface: 'map',
     capability:
-      'Switch on precipitation (radar or forecast), wind, temperature, cloud or sea-temperature layers and play them through time',
+      'Switch on precipitation (a day of radar, or the forecast), wind, temperature, cloud or sea-temperature layers and play them through time',
     hook: 'useWeatherMaps',
     web: { file: 'apps/web/src/weather/WeatherDock.tsx', contains: 'weather-timeline-switch' },
     android: { file: 'apps/android/src/ui/WeatherDock.tsx', contains: 'weather-timeline-' },
     route: { file: 'backend/src/weather-maps-api.ts', contains: "'/api/weather/maps'" },
-    note: 'Both clients offer the fields as ordinary layer rows (one field at a time) and show the same dock — legend, play, Radar/Forecast, scrubber with Now — only while one is on. The backend decodes and paints MET’s data tiles, so the pixels are identical. Wind is animated particles on the web and arrows with speeds on Android, where MapLibre Native has no custom layer to animate; temperature numbers sit under town names on the web and on a collision-placed grid on Android.',
+    note: 'Both clients offer the fields as ordinary layer rows (one field at a time) and show the same dock — legend, play, Radar/Forecast, scrubber with Now — only while one is on. The backend decodes and paints MET’s data tiles, so the pixels are identical, and keeps a day of radar MET itself does not. Play steps only onto a frame whose tiles have loaded and crossfades into it (WEATHER_FRAME_FADE): the web asks MapLibre whether the source is loaded; Android, which cannot ask per source, reads the map’s render events. Wind is animated particles on the web and arrows with speeds on Android, where MapLibre Native has no custom layer to animate; temperature numbers sit under town names on the web and on a collision-placed grid on Android.',
   },
   {
     id: 'map-weather-warnings',
@@ -290,7 +290,8 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'map-lightning-observations',
     surface: 'map',
-    capability: 'See and identify live Frost lightning strikes coloured by age',
+    capability: 'See and identify Frost lightning over selectable 1 h, 12 h or 24 h windows',
+    hook: 'useSkyLayers',
     web: {
       file: 'apps/web/src/map/useLightningLayer.ts',
       contains: 'useLightningLayer',
@@ -303,17 +304,30 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
       file: 'backend/src/weather-maps-api.ts',
       contains: '/api/overlay/${LIGHTNING_OBSERVATIONS_ID}/features',
     },
+    note: 'Both clients put the same three time-window buttons in the weather dock, and draw the same age bands (LIGHTNING_AGE_BANDS) against their own clock: a pulsing orange strike with a shockwave ring under a minute old, then magenta, dark violet, grey and a faint grey to 24 hours. The web animates at display rate, Android at ~15 fps from its own component; both hold the ring still for reduced motion.',
   },
   {
     id: 'map-aurora-forecast',
     surface: 'map',
-    capability: 'Overlay NOAA’s 30-minute aurora probability forecast with cloud cover',
+    capability:
+      'See NOAA’s valid-time aurora viewing chance adjusted for darkness, cloud decks and artificial light',
+    hook: 'useSkyLayers',
     web: { file: 'apps/web/src/map/useOverlayLayers.ts', contains: 'refreshSeconds' },
     android: { file: 'apps/android/src/layers/useOverlays.ts', contains: 'refreshSeconds' },
     route: {
       file: 'backend/src/weather-maps-api.ts',
       contains: '/api/overlay/${AURORA_FORECAST_ID}/:z/:x/:y.png',
     },
+    note: 'The green band’s brightness follows OVATION intensity while opacity applies solar darkness, MET’s low/medium/high cloud forecast and NASA VIIRS night-light radiance. The dock names all four inputs and the exact forecast-valid time.',
+  },
+  {
+    id: 'map-light-pollution',
+    surface: 'map',
+    capability: 'Inspect VIIRS-observed artificial night light as its own dark-sky planning layer',
+    web: { file: 'apps/web/src/map/useOverlayLayers.ts', contains: 'overlayTileUrl' },
+    android: { file: 'apps/android/src/layers/useOverlays.ts', contains: 'overlayTileUrl' },
+    route: { file: 'backend/src/overlay/catalog.ts', contains: "id: 'light-pollution'" },
+    note: 'The catalog labels the 2016 annual NASA composite as emitted radiance: a useful stable proxy for light pollution, not a direct Bortle or ground-level sky-brightness measurement.',
   },
   {
     id: 'card-weather-at-point',

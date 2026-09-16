@@ -789,7 +789,7 @@ export const WEATHER_MAP_LAYER_SPECS: readonly WeatherMapLayerSpec[] = [
   {
     id: 'precipitation',
     title: 'Precipitation',
-    description: 'Radar for the last 90 minutes and the next 90, or the three-day forecast.',
+    description: 'Radar for the last day and the next 90 minutes, or the three-day forecast.',
     unit: 'mm/h',
     coverageNote:
       'Radar covers Norway, Sweden, Finland and Denmark; the forecast covers the world. Snow and sleet are told from rain by the forecast air temperature.',
@@ -880,6 +880,18 @@ export interface WeatherMapsResponse {
 
 // --------------------------------------------------------------- timeline ---
 
+/**
+ * How a weather frame replaces the one on screen, identically on both clients.
+ * The two pictures overlap rather than swap: the new one fades in, and the old
+ * one starts fading out just after, so the base map never shows between them
+ * and a shower slides rather than blinks. The 60 ms lead is what keeps the pair
+ * about as opaque as one picture: with none the overlap dips, and with the old
+ * one held until the new one is in (tried first) a 0.7-opacity field brightens
+ * by about a quarter on every step — a pulse, measured on the emulator. All of
+ * it fits inside radar's 450 ms step.
+ */
+export const WEATHER_FRAME_FADE = { inMs: 240, outDelayMs: 60, outMs: 260 } as const;
+
 /** Index of the frame nearest a time; 0 for an empty list. */
 export function closestFrameIndex(frames: readonly { time: string }[], targetMs: number): number {
   let answer = 0;
@@ -913,14 +925,17 @@ export function weatherFrameLabel(timeMs: number, nowMs = Date.now()): string {
 }
 
 /**
- * What a frame is, relative to now: "Radar · 25 min ago", "Nowcast · in 30 min",
- * "Forecast". Radar minutes matter — a shower 50 minutes old has moved on.
+ * What a frame is, relative to now: "Radar · 25 min ago", "Radar · 5 h 15 min
+ * ago", "Nowcast · in 30 min", "Forecast". Radar minutes matter — a shower 50
+ * minutes old has moved on.
  */
 export function weatherFrameCaption(frame: WeatherMapFrame, nowMs = Date.now()): string {
   if (frame.kind === 'forecast') return 'Forecast';
   const minutes = Math.round((Date.parse(frame.time) - nowMs) / 60_000);
+  const span = (m: number) =>
+    m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`;
   const when =
-    Math.abs(minutes) < 3 ? 'now' : minutes < 0 ? `${-minutes} min ago` : `in ${minutes} min`;
+    Math.abs(minutes) < 3 ? 'now' : minutes < 0 ? `${span(-minutes)} ago` : `in ${span(minutes)}`;
   return `${frame.kind === 'observation' ? 'Radar' : 'Nowcast'} · ${when}`;
 }
 

@@ -143,6 +143,66 @@ describe('useWeatherMaps', () => {
     expect(result.current.frameIndex).toBe(0);
   });
 
+  it('steps only onto a frame whose tiles are ready, and stops waiting for one that never is', async () => {
+    serve();
+    const { result } = track(renderHook(() => useWeatherMaps('', 'wind', { now: () => NOW })));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const ready = new Set<string>();
+    act(() => result.current.setFrameReadiness((id) => ready.has(id)));
+    vi.useFakeTimers();
+    act(() => result.current.togglePlaying());
+    act(() => vi.advanceTimersByTime(750 + 400));
+    // Still on the first picture: the second has not loaded, so play holds it.
+    expect(result.current.frameIndex).toBe(0);
+    ready.add('forecast-40');
+    act(() => vi.advanceTimersByTime(100));
+    expect(result.current.frameIndex).toBe(1);
+    // A frame that never loads is shown after a bounded wait, not never.
+    act(() => vi.advanceTimersByTime(750 + 2_400));
+    expect(result.current.frameIndex).toBe(1);
+    act(() => vi.advanceTimersByTime(200));
+    expect(result.current.frameIndex).toBe(2);
+  });
+
+  it('loops radar over its last 90 minutes even with a day of history behind it', async () => {
+    const history = {
+      ...response,
+      layers: [
+        layer('precipitation', [
+          timeline('radar', [
+            ...frames('observation', [-20 * 60, -5 * 60, -90, -45, -5]),
+            ...frames('nowcast', [0, 5]),
+          ]),
+        ]),
+      ],
+    };
+    serve(history);
+    const { result } = track(
+      renderHook(() => useWeatherMaps('', 'precipitation', { now: () => NOW })),
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.frame?.id).toBe('observation--5');
+    vi.useFakeTimers();
+    act(() => result.current.togglePlaying());
+    // Preloads in play order, which wraps to the loop's start rather than a day ago.
+    expect(result.current.upcoming.map((f) => f.id)).toEqual([
+      'nowcast-0',
+      'nowcast-5',
+      'observation--90',
+    ]);
+    act(() => vi.advanceTimersByTime(450 * 2));
+    expect(result.current.frame?.id).toBe('nowcast-5');
+    act(() => vi.advanceTimersByTime(450 * 4));
+    expect(result.current.frame?.id).toBe('observation--90');
+
+    // Scrubbed back to yesterday and played, the loop starts there instead.
+    act(() => result.current.togglePlaying());
+    act(() => result.current.selectFrame(0));
+    act(() => result.current.togglePlaying());
+    act(() => vi.advanceTimersByTime(450 * 6 + 450 * 4));
+    expect(result.current.frame?.id).toBe('observation--1200');
+  });
+
   it('stops playing when the layer is switched off', async () => {
     serve();
     const { result, rerender } = track(

@@ -287,6 +287,10 @@ describe('timeline', () => {
     expect(weatherFrameCaption(radar[0]!, NOW)).toBe('Radar · 10 min ago');
     expect(weatherFrameCaption(radar[3]!, NOW)).toBe('Nowcast · in 5 min');
     expect(weatherFrameCaption(frame('2026-09-17T12:00:00Z', 'forecast'), NOW)).toBe('Forecast');
+    // A day of archived radar reads in hours, not "315 min ago".
+    const hoursAgo = (m: number) => frame(new Date(NOW - m * 60_000).toISOString(), 'observation');
+    expect(weatherFrameCaption(hoursAgo(315), NOW)).toBe('Radar · 5 h 15 min ago');
+    expect(weatherFrameCaption(hoursAgo(20 * 60), NOW)).toBe('Radar · 20 h ago');
   });
 
   it('marks day boundaries along the track', () => {
