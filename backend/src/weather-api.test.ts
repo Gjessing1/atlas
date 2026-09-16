@@ -19,11 +19,21 @@ function metPayload(temp = 14.3) {
                 cloud_area_fraction: 62.5,
                 relative_humidity: 71,
                 air_pressure_at_sea_level: 1009.4,
+                apparent_air_temperature: 12.8,
+                dew_point_temperature: 8.1,
+                fog_area_fraction: 12,
+                ultraviolet_index_clear_sky: 3.4,
               },
             },
             next_1_hours: {
               summary: { symbol_code: 'lightrain' },
-              details: { precipitation_amount: 0.4, probability_of_precipitation: 55 },
+              details: {
+                precipitation_amount: 0.4,
+                precipitation_amount_min: 0.1,
+                precipitation_amount_max: 0.8,
+                probability_of_precipitation: 55,
+                probability_of_thunder: 18,
+              },
             },
           },
         },
@@ -100,12 +110,86 @@ describe('/api/weather', () => {
       windFromDir: 245,
       cloud: 62.5,
       pressure: 1009.4,
+      apparentTemp: 12.8,
+      dewPoint: 8.1,
+      fog: 12,
       precip: 0.4,
+      precipMin: 0.1,
+      precipMax: 0.8,
       precipProb: 55,
+      thunderProb: 18,
+      uvIndex: 3.4,
       symbol: 'lightrain',
     });
     // 6-hourly tail: precip/symbol fall through to next_6_hours, gust absent.
     expect(body.series[1]).toMatchObject({ precip: 1.2, symbol: 'cloudy', windGust: null });
+  });
+
+  it('discovers the public weather maps, merges precipitation timelines and proxies tiles', async () => {
+    const now = Date.parse('2026-07-19T12:20:00Z');
+    const requests: URL[] = [];
+    const dataset = (name: string) => ({
+      bounds: name.includes('precipitation') ? [-8, 53, 41, 74] : [-180, -85, 180, 85],
+      minzoom: 0,
+      maxzoom: 6,
+      name,
+      times: [
+        {
+          time: '2026-07-19T12:00:00Z',
+          tiles: { webp: `https://prod.yr-maps.met.no/${name}/12/{z}/{x}/{y}.webp` },
+        },
+        {
+          time: '2026-07-19T13:00:00Z',
+          tiles: { webp: `https://prod.yr-maps.met.no/${name}/13/{z}/{x}/{y}.webp` },
+        },
+        {
+          time: '2026-07-22T14:00:00Z', // beyond the three-day window
+          tiles: { webp: `https://prod.yr-maps.met.no/${name}/late/{z}/{x}/{y}.webp` },
+        },
+      ],
+    });
+    const fetchImpl = (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      if (!url.pathname.endsWith('/available.json')) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: { 'content-type': 'image/webp', 'cache-control': 'public, max-age=123' },
+        });
+      }
+      const name = url.pathname.split('/').at(-2)!;
+      return new Response(JSON.stringify(dataset(name)));
+    }) as typeof fetch;
+    app = Fastify();
+    registerWeatherApi(app, { fetchImpl, userAgent: 'test', now: () => now });
+    await app.ready();
+
+    const metadata = await app.inject('/api/weather/maps');
+    expect(metadata.statusCode).toBe(200);
+    const body = metadata.json();
+    expect(body.layers.map((layer: { id: string }) => layer.id)).toEqual([
+      'precipitation',
+      'temperature',
+      'wind',
+      'clouds',
+      'sea-temperature',
+    ]);
+    const precipitation = body.layers[0];
+    expect(precipitation.frames).toHaveLength(2);
+    // The observation source wins over nowcast/forecast at an overlapping time.
+    expect(precipitation.frames[0].kind).toBe('observation');
+    expect(body.lightning.available).toBe(false);
+
+    const path = precipitation.frames[0].tilePath
+      .replace('{z}', '0')
+      .replace('{x}', '0')
+      .replace('{y}', '0');
+    const tile = await app.inject(path);
+    expect(tile.statusCode).toBe(200);
+    expect(tile.headers['content-type']).toContain('image/webp');
+    expect(tile.headers['cache-control']).toBe('public, max-age=123');
+    expect(requests.at(-1)?.href).toBe(
+      'https://prod.yr-maps.met.no/precipitation-observations/12/0/0/0.webp',
+    );
   });
 
   it('serves from cache until Expires; nearby coordinates share the entry', async () => {

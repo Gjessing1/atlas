@@ -1,4 +1,4 @@
-import type { NavController } from '@atlas/app-hooks';
+import type { NavController, WeatherMapsController } from '@atlas/app-hooks';
 import {
   bboxOutlinesFeatureCollection,
   exploreResultsFeatureCollection,
@@ -267,6 +267,8 @@ interface MapSceneProps {
   roadWeather: VectorOverlayData | null;
   /** Live public-transport vehicles in the current viewport. */
   transitVehicles: VectorOverlayData | null;
+  /** Selected frame of the animated MET weather-map surface. */
+  weatherMaps: WeatherMapsController;
   /** Numbered "best spots in view" markers; empty while the shortlist is closed. */
   spots: readonly PotentialSpot[];
   /** Numbered category-browse results, retained while the picked card is open. */
@@ -347,6 +349,7 @@ export function MapScene({
   trafficFlow,
   roadWeather,
   transitVehicles,
+  weatherMaps,
   spots,
   exploreResults,
   measure,
@@ -539,6 +542,23 @@ export function MapScene({
                 </RasterSource>
               ))
           : null}
+        {!inPip && weatherMaps.visible && weatherMaps.layer && weatherMaps.frame ? (
+          <RasterSource
+            key={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}`}
+            id={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}`}
+            tiles={[weatherMaps.frame.tileUrlTemplate]}
+            tileSize={256}
+            minzoom={weatherMaps.layer.minzoom}
+            maxzoom={weatherMaps.layer.maxzoom}
+            attribution={weatherMaps.attribution}
+          >
+            <Layer
+              type="raster"
+              id={`atlas-weather-${weatherMaps.layer.id}-${weatherMaps.frame.id}-layer`}
+              paint={{ 'raster-opacity': 0.78, 'raster-fade-duration': 250 }}
+            />
+          </RasterSource>
+        ) : null}
         {/* Attribute labels drawn over the raster — the number a tile can't
           carry (a surveyed lake's max depth). Mounted after the rasters so
           they read on top, and only while the overlay itself is on. */}

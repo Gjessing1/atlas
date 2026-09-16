@@ -1,4 +1,15 @@
 export type { WeatherForecast, WeatherPoint } from './weather.js';
+export {
+  WEATHER_MAP_LAYER_SPECS,
+  weatherMapLayerSpec,
+  type WeatherMapFrame,
+  type WeatherMapFrameKind,
+  type WeatherMapLayer,
+  type WeatherMapLayerId,
+  type WeatherMapLayerSpec,
+  type WeatherMapLegendStop,
+  type WeatherMapsResponse,
+} from './weather-maps.js';
 export { compass16, sunDay, sunPosition, type SunDay, type SunPos } from './sun.js';
 export {
   assessConditions,

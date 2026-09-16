@@ -16,6 +16,10 @@ export interface WeatherPoint {
   time: string;
   /** Air temperature, °C. */
   temp: number;
+  /** Perceived temperature after wind/humidity effects, °C. */
+  apparentTemp?: number | null;
+  /** Dew point, °C. */
+  dewPoint?: number | null;
   /** Sustained wind speed, m/s. */
   windSpeed: number;
   /** Gust speed, m/s, or null when the product omits it. */
@@ -24,14 +28,23 @@ export interface WeatherPoint {
   windFromDir: number;
   /** Total cloud cover, %. */
   cloud: number;
+  /** Fog-covered area, %. */
+  fog?: number | null;
   /** Relative humidity, %. */
   humidity: number;
   /** Air pressure at sea level, hPa, or null when the product omits it. */
   pressure: number | null;
   /** Precipitation expected in the hour after `time`, mm (null past the hourly horizon). */
   precip: number | null;
+  /** Lower/upper model range for precipitation, mm. */
+  precipMin?: number | null;
+  precipMax?: number | null;
   /** Probability of precipitation in that hour, % (null when unavailable). */
   precipProb: number | null;
+  /** Probability of thunder in the following period, %. */
+  thunderProb?: number | null;
+  /** Clear-sky UV index. */
+  uvIndex?: number | null;
   /**
    * MET `symbol_code` for the period after `time` (e.g. `clearsky_day`,
    * `lightrain`). Keeps the `_day`/`_night`/`_polartwilight` variant so the

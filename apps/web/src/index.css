@@ -5638,6 +5638,159 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
+.weather-map-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.weather-map-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.weather-map-layers button {
+  flex: 1 0 auto;
+  min-width: 76px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.weather-map-layers button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  font-weight: 700;
+}
+
+.weather-map-layers button:disabled {
+  opacity: 0.48;
+  cursor: help;
+}
+
+.weather-map-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weather-map-title > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.weather-map-title strong {
+  font-size: 14px;
+}
+
+.weather-map-title span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.weather-play {
+  min-width: 64px;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.weather-map-scrub {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.weather-map-step-buttons {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.weather-map-step-buttons span {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.weather-map-step-buttons button {
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.weather-map-step-buttons button:disabled {
+  color: var(--text-muted);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.weather-legend {
+  padding: 8px 9px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.weather-legend-heading,
+.weather-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+}
+
+.weather-legend-heading {
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.weather-legend-gradient {
+  display: flex;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.weather-legend-gradient span {
+  flex: 1;
+}
+
+.weather-legend-labels {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-lightning-note {
+  margin: -4px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .weather-species {
   display: flex;
   gap: 4px;

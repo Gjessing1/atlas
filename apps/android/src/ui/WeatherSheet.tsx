@@ -1,4 +1,4 @@
-import { useTerrainSlope } from '@atlas/app-hooks';
+import { useTerrainSlope, type WeatherMapsController } from '@atlas/app-hooks';
 import {
   bestWindows,
   buildPlanner,
@@ -11,6 +11,7 @@ import {
   type FactorRating,
   type ForecastPeriodCell,
   type PlannerHour,
+  type WeatherMapLayerId,
 } from '@atlas/conditions';
 import { fmtClock, fmtDayClock, fmtDayLabel, type LatLng } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
@@ -25,9 +26,10 @@ import { theme } from './theme';
 const MODE_SETTING = 'local.weather.mode';
 const SPECIES_SETTING = 'local.weather.species';
 
-type Mode = 'weather' | ConditionsKind;
+type Mode = 'weather' | 'maps' | ConditionsKind;
 const MODES: { id: Mode; label: string }[] = [
-  { id: 'weather', label: 'Weather' },
+  { id: 'weather', label: 'Forecast' },
+  { id: 'maps', label: 'Maps' },
   { id: 'fishing', label: 'Fishing' },
   { id: 'hunting', label: 'Hunting' },
 ];
@@ -49,6 +51,131 @@ const FACTOR_COLOR: Record<FactorRating, string> = {
 const fmtTime = (ms: number): string => fmtClock(ms);
 const fmtStep = (ms: number): string => fmtDayClock(ms);
 
+function frameKind(kind: string): string {
+  return kind === 'observation' ? 'Radar observation' : kind === 'nowcast' ? 'Nowcast' : 'Forecast';
+}
+
+function WeatherMapControls({ maps }: { maps: WeatherMapsController }): React.JSX.Element {
+  const layer = maps.layer;
+  const frame = maps.frame;
+  return (
+    <ScrollView style={styles.mapScroll}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.mapLayerRow}
+      >
+        {maps.layers.map((candidate) => (
+          <Pressable
+            key={candidate.id}
+            style={[styles.mapLayerChip, layer?.id === candidate.id ? styles.mapLayerActive : null]}
+            onPress={() => maps.selectLayer(candidate.id as WeatherMapLayerId)}
+            testID={`weather-map-${candidate.id}`}
+          >
+            <Text
+              style={[
+                styles.mapLayerText,
+                layer?.id === candidate.id ? styles.mapLayerTextActive : null,
+              ]}
+            >
+              {candidate.title}
+            </Text>
+          </Pressable>
+        ))}
+        <View style={[styles.mapLayerChip, styles.mapLayerDisabled]}>
+          <Text style={styles.mapLayerText}>Lightning</Text>
+        </View>
+      </ScrollView>
+
+      {maps.status === 'loading' && !layer ? (
+        <Text style={styles.muted}>Loading weather maps…</Text>
+      ) : null}
+      {maps.status === 'error' && !layer ? (
+        <Text style={styles.muted}>Weather maps are unavailable right now.</Text>
+      ) : null}
+
+      {layer && frame ? (
+        <>
+          <View style={styles.mapTimeRow}>
+            <View>
+              <Text style={styles.mapTime}>{fmtStep(Date.parse(frame.time))}</Text>
+              <Text style={styles.mapKind}>{frameKind(frame.kind)}</Text>
+            </View>
+            <Pressable style={styles.playButton} onPress={maps.togglePlaying} testID="weather-play">
+              <Text style={styles.playText}>{maps.playing ? 'Pause' : 'Play'}</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.mapTimeline}
+            contentContainerStyle={styles.mapTimelineContent}
+          >
+            {layer.frames.map((candidate, index) => (
+              <Pressable
+                key={candidate.id}
+                onPress={() => maps.selectFrame(index)}
+                style={[
+                  styles.mapTick,
+                  candidate.kind === 'observation'
+                    ? styles.mapTickObserved
+                    : candidate.kind === 'nowcast'
+                      ? styles.mapTickNowcast
+                      : styles.mapTickForecast,
+                  index === maps.frameIndex ? styles.mapTickSelected : null,
+                ]}
+                accessibilityLabel={fmtStep(Date.parse(candidate.time))}
+              />
+            ))}
+          </ScrollView>
+          <View style={styles.stepButtons}>
+            <Pressable
+              style={styles.stepButton}
+              onPress={maps.previous}
+              disabled={maps.frameIndex === 0}
+            >
+              <Text style={styles.stepButtonText}>◀ Earlier</Text>
+            </Pressable>
+            <Pressable
+              style={styles.stepButton}
+              onPress={maps.next}
+              disabled={maps.frameIndex === layer.frames.length - 1}
+            >
+              <Text style={styles.stepButtonText}>Later ▶</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.mapDescription}>{layer.description}</Text>
+          <View style={styles.legendBox}>
+            <View style={styles.legendHeading}>
+              <Text style={styles.legendTitle}>{layer.title}</Text>
+              <Text style={styles.legendTitle}>{layer.unit}</Text>
+            </View>
+            <View style={styles.legendGradient}>
+              {layer.legend.map((stop) => (
+                <View
+                  key={`${stop.label}-${stop.color}`}
+                  style={[styles.legendColor, { backgroundColor: stop.color }]}
+                />
+              ))}
+            </View>
+            <View style={styles.legendLabels}>
+              {layer.legend.map((stop) => (
+                <Text key={stop.label} style={styles.legendLabel}>
+                  {stop.label}
+                </Text>
+              ))}
+            </View>
+          </View>
+          <Text style={styles.attribution}>{maps.attribution}</Text>
+          {maps.lightningReason ? (
+            <Text style={styles.lightningNote}>{maps.lightningReason}</Text>
+          ) : null}
+        </>
+      ) : null}
+    </ScrollView>
+  );
+}
+
 /**
  * Weather & conditions sheet — the Android twin of the web WeatherPanel. A
  * tappable hour strip over the proxied met.no forecast with sunrise/sunset,
@@ -63,6 +190,7 @@ export function WeatherSheet({
   onClose,
   target,
   weather,
+  maps,
   data,
   bottomInset = 0,
 }: {
@@ -71,6 +199,7 @@ export function WeatherSheet({
   onClose: () => void;
   target: LatLng | null;
   weather: WeatherState;
+  maps: WeatherMapsController;
   data: UserData;
   bottomInset?: number;
 }) {
@@ -84,7 +213,8 @@ export function WeatherSheet({
   useEffect(() => {
     if (settingsStatus !== 'ready') return;
     void getSetting(MODE_SETTING).then((raw) => {
-      if (raw === 'weather' || raw === 'fishing' || raw === 'hunting') setMode(raw);
+      if (raw === 'weather' || raw === 'maps' || raw === 'fishing' || raw === 'hunting')
+        setMode(raw);
     });
     void getSetting(SPECIES_SETTING).then((raw) => {
       if (raw && (SPECIES as readonly string[]).includes(raw)) setSpecies(raw);
@@ -100,11 +230,16 @@ export function WeatherSheet({
     setSetting(SPECIES_SETTING, s);
   };
 
+  useEffect(() => {
+    maps.setVisible(visible && mode === 'maps');
+    return () => maps.setVisible(false);
+  }, [visible, mode, maps.setVisible]);
+
   const rows = useMemo(
     () =>
       weather.forecast
         ? buildPlanner(weather.forecast, {
-            kind: mode === 'weather' ? null : mode,
+            kind: mode === 'fishing' || mode === 'hunting' ? mode : null,
             species,
             slopeDeg: mode === 'hunting' ? terrain.fit?.slopeDeg : undefined,
             aspectDeg: mode === 'hunting' ? terrain.fit?.aspectDeg : undefined,
@@ -112,7 +247,10 @@ export function WeatherSheet({
         : [],
     [weather.forecast, mode, species, terrain.fit],
   );
-  const windows = useMemo(() => (mode === 'weather' ? [] : bestWindows(rows)), [rows, mode]);
+  const windows = useMemo(
+    () => (mode === 'fishing' || mode === 'hunting' ? bestWindows(rows) : []),
+    [rows, mode],
+  );
 
   const idx = Math.min(selected, Math.max(0, rows.length - 1));
   const row = rows[idx];
@@ -172,14 +310,16 @@ export function WeatherSheet({
         </View>
       ) : null}
 
-      {weather.status === 'error' ? (
+      {mode === 'maps' ? <WeatherMapControls maps={maps} /> : null}
+
+      {mode !== 'maps' && weather.status === 'error' ? (
         <Text style={styles.muted}>Forecast unavailable right now — try again in a bit.</Text>
       ) : null}
-      {weather.status === 'loading' && rows.length === 0 ? (
+      {mode !== 'maps' && weather.status === 'loading' && rows.length === 0 ? (
         <Text style={styles.muted}>Loading forecast…</Text>
       ) : null}
 
-      {row ? (
+      {mode !== 'maps' && row ? (
         <ScrollView style={styles.scroll}>
           <View style={styles.timeRow}>
             <Text style={styles.stepLabel}>{fmtStep(row.timeMs)}</Text>
@@ -304,9 +444,15 @@ export function WeatherSheet({
 function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
   const p = row.point;
   const gust = p.windGust != null ? ` (${Math.round(p.windGust)})` : '';
+  const precipAmount =
+    p.precipMin != null && p.precipMax != null && Math.abs(p.precipMax - p.precipMin) >= 0.1
+      ? `${p.precipMin.toFixed(1)}–${p.precipMax.toFixed(1)} mm`
+      : p.precip != null
+        ? `${p.precip.toFixed(1)} mm`
+        : null;
   const precip =
     p.precip != null && p.precip > 0
-      ? `${p.precip.toFixed(1)} mm${p.precipProb != null ? ` · ${Math.round(p.precipProb)}%` : ''}`
+      ? `${precipAmount}${p.precipProb != null ? ` · ${Math.round(p.precipProb)}%` : ''}`
       : 'dry';
   const trend =
     row.pressureTrendHpa != null
@@ -324,7 +470,23 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
       </View>
       <View style={styles.detailsRow}>
         <Text style={styles.detailItem}>☁ {Math.round(p.cloud)}%</Text>
+        <Text style={styles.detailItem}>Humidity {Math.round(p.humidity)}%</Text>
         <Text style={styles.detailItem}>🌧 {precip}</Text>
+        {p.apparentTemp != null && Math.abs(p.apparentTemp - p.temp) >= 1 ? (
+          <Text style={styles.detailItem}>Feels {Math.round(p.apparentTemp)}°</Text>
+        ) : null}
+        {p.dewPoint != null ? (
+          <Text style={styles.detailItem}>Dew {Math.round(p.dewPoint)}°</Text>
+        ) : null}
+        {p.uvIndex != null && p.uvIndex >= 1 ? (
+          <Text style={styles.detailItem}>UV {p.uvIndex.toFixed(1)}</Text>
+        ) : null}
+        {p.thunderProb != null && p.thunderProb >= 10 ? (
+          <Text style={styles.detailItem}>⚡ {Math.round(p.thunderProb)}%</Text>
+        ) : null}
+        {p.fog != null && p.fog >= 10 ? (
+          <Text style={styles.detailItem}>Fog {Math.round(p.fog)}%</Text>
+        ) : null}
         {p.pressure != null ? (
           <Text style={styles.detailItem}>
             {Math.round(p.pressure)} hPa{trend}
@@ -546,6 +708,61 @@ const styles = StyleSheet.create({
   wind: { fontSize: 13, color: theme.text, flexShrink: 1 },
   detailsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   detailItem: { fontSize: 13, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+
+  mapScroll: { marginTop: 10 },
+  mapLayerRow: { gap: 7, paddingVertical: 2 },
+  mapLayerChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  mapLayerActive: { backgroundColor: theme.surfaceActive, borderColor: theme.accent },
+  mapLayerDisabled: { opacity: 0.42 },
+  mapLayerText: { fontSize: 12, color: theme.text },
+  mapLayerTextActive: { color: theme.accent, fontWeight: '700' },
+  mapTimeRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  mapTime: { fontSize: 16, fontWeight: '700', color: theme.text },
+  mapKind: { marginTop: 1, fontSize: 12, color: theme.textMuted },
+  playButton: {
+    minWidth: 72,
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  playText: { color: theme.onAccent, fontSize: 13, fontWeight: '700' },
+  mapTimeline: { marginTop: 14, maxHeight: 28 },
+  mapTimelineContent: { alignItems: 'center', gap: 2, paddingHorizontal: 2 },
+  mapTick: { width: 7, height: 22, borderRadius: 3 },
+  mapTickObserved: { backgroundColor: '#4aa8ed' },
+  mapTickNowcast: { backgroundColor: '#7b57ed' },
+  mapTickForecast: { backgroundColor: '#b4bec8' },
+  mapTickSelected: { borderWidth: 2, borderColor: theme.text },
+  mapDescription: { marginTop: 10, fontSize: 12, color: theme.textMuted, textAlign: 'center' },
+  legendBox: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
+  },
+  legendHeading: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  legendTitle: { fontSize: 12, fontWeight: '700', color: theme.text },
+  legendGradient: { flexDirection: 'row', height: 14, borderRadius: 5, overflow: 'hidden' },
+  legendColor: { flex: 1 },
+  legendLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  legendLabel: { fontSize: 9, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+  lightningNote: { marginTop: 8, fontSize: 11, lineHeight: 15, color: theme.textMuted },
 
   assessment: { marginTop: 14, gap: 12 },
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },

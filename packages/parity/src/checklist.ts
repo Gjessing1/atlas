@@ -260,6 +260,16 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/DestinationCard.tsx', contains: 'onWeather' },
   },
   {
+    id: 'map-weather-forecast',
+    surface: 'map',
+    capability: 'Animated precipitation, temperature, wind, cloud and sea-temperature maps',
+    hook: 'useWeatherMaps',
+    web: { file: 'apps/web/src/map/useWeatherMapLayer.ts', contains: 'useWeatherMapLayer' },
+    android: { file: 'apps/android/src/map/MapScene.tsx', contains: 'weatherMaps.frame' },
+    route: { file: 'backend/src/weather-api.ts', contains: "'/api/weather/maps'" },
+    note: 'Both clients share the discovered MET Norway timeline, nearest-time layer switching, play loop and colour scales. Lightning remains visibly unavailable until Atlas has credentials for the supported Frost feed.',
+  },
+  {
     id: 'card-transit-departures',
     surface: 'card',
     capability: 'The next hour of departures from the stop nearest this spot',

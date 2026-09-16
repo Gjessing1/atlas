@@ -49,6 +49,7 @@ import {
   usePlanningAreas,
   useThemeMode,
   usePersistedSetting,
+  useWeatherMaps,
   type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
@@ -95,6 +96,7 @@ import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
 import { useRoadWeatherLayer } from './map/useRoadWeatherLayer.js';
+import { useWeatherMapLayer } from './map/useWeatherMapLayer.js';
 import { useTransitVehicleLayer } from './map/useTransitVehicleLayer.js';
 import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
@@ -648,6 +650,8 @@ export function App() {
   const weatherAt = useWeatherTarget(pin, getBias, DEFAULT_VIEW.center);
   const weatherTarget = weatherAt.target;
   const weather = useWeather(weatherTarget);
+  const weatherMaps = useWeatherMaps('', weatherTarget !== null);
+  useWeatherMapLayer(map, weatherMaps);
 
   const { followPin } = weatherAt;
 
@@ -1479,6 +1483,7 @@ export function App() {
           <WeatherPanel
             target={weatherTarget}
             weather={weather}
+            maps={weatherMaps}
             settings={userData}
             onRetarget={weatherAt.retarget}
             onClose={() => weatherAt.setTarget(null)}

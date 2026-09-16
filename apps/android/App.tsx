@@ -19,6 +19,7 @@ import {
   usePlanningAreas,
   useStandBoard,
   useThemeMode,
+  useWeatherMaps,
   type FetchNearbyFn,
   type ExploreArea,
   type CommuteFn,
@@ -425,6 +426,7 @@ function AppInner() {
   // Point the weather & conditions sheet is showing (null = closed).
   const [weatherTarget, setWeatherTarget] = useState<LatLng | null>(null);
   const weather = useWeather(weatherTarget);
+  const weatherMaps = useWeatherMaps(serverOrigin, weatherTarget !== null);
   // Point whose share-format chooser is open (null = closed).
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   // Show the location puck once the user has asked to be located (also true
@@ -1351,6 +1353,7 @@ function AppInner() {
         trafficFlow={trafficFlow}
         roadWeather={roadWeather}
         transitVehicles={transitVehicles}
+        weatherMaps={weatherMaps}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         exploreResults={exploreResults}
         measure={measure.open ? measure.features : null}
@@ -1694,6 +1697,11 @@ function AppInner() {
             onClose={() => setMenuOpen(false)}
             onOpenFavorites={() => setFavoritesOpen(true)}
             onOpenLayers={() => setLayersOpen(true)}
+            onOpenWeather={() => {
+              void getBias().then((center) =>
+                setWeatherTarget(center ?? viewRef.current?.center ?? DEFAULT_VIEW.center),
+              );
+            }}
             onOpenExplore={() => {
               setExploreSelection(null);
               setExploreOpen(true);
@@ -1817,6 +1825,7 @@ function AppInner() {
             onClose={() => setWeatherTarget(null)}
             target={weatherTarget}
             weather={weather}
+            maps={weatherMaps}
             data={data}
             bottomInset={bottomInset}
           />

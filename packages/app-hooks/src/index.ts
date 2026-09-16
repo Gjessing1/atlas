@@ -182,6 +182,11 @@ export {
 } from './useExplore.js';
 export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
+  useWeatherMaps,
+  type ActiveWeatherMapFrame,
+  type WeatherMapsController,
+} from './useWeatherMaps.js';
+export {
   fetchTerrainSlope,
   terrainSlopeRing,
   useTerrainSlope,

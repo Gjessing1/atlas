@@ -16,6 +16,7 @@ export function MainMenuSheet({
   onClose,
   onOpenFavorites,
   onOpenLayers,
+  onOpenWeather,
   onOpenExplore,
   onOpenMeasure,
   onOpenCommute,
@@ -26,6 +27,7 @@ export function MainMenuSheet({
   onClose: () => void;
   onOpenFavorites: () => void;
   onOpenLayers: () => void;
+  onOpenWeather: () => void;
   onOpenExplore: () => void;
   onOpenMeasure: () => void;
   onOpenCommute: () => void;
@@ -56,6 +58,12 @@ export function MainMenuSheet({
       onPress: onOpenLayers,
     },
     {
+      label: 'Weather',
+      detail: 'Forecasts and animated maps',
+      testID: 'open-weather',
+      onPress: onOpenWeather,
+    },
+    {
       label: 'Measure',
       detail: 'Distance and range rings',
       testID: 'open-measure',
@@ -81,7 +89,7 @@ export function MainMenuSheet({
       mode="map"
       onClose={onClose}
       initialSnap="peek"
-      peekHeight={330}
+      peekHeight={410}
       bottomInset={bottomInset}
       testID="main-menu-sheet"
     >
