@@ -253,6 +253,21 @@ describe('useTransitPlan', () => {
     expect(asked.dateTimeMs).toBe(5_000_000);
   });
 
+  it('reopens a commute journey at its departure with the commute mode filter', async () => {
+    const transit = vi.fn<TransitFn>(() => Promise.resolve(result(1_000)));
+    const { result: r } = renderPlan(transit, [OSLO, BERGEN]);
+    await settle();
+
+    act(() => r.current.transit.prepareJourney(5_000_000, ['bus', 'rail']));
+    await settle();
+
+    expect(transit.mock.calls.at(-1)?.[0]).toMatchObject({
+      dateTimeMs: 5_000_000,
+      modes: ['bus', 'rail'],
+    });
+    expect(transit.mock.calls.at(-1)?.[0].arriveBy).toBeUndefined();
+  });
+
   it('carries the planner’s reason for an empty answer', async () => {
     const transit = vi.fn<TransitFn>(() =>
       Promise.resolve({ trips: [], problems: [{ code: 'noStopsInRange' as const }] }),

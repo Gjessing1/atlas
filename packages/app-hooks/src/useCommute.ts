@@ -16,6 +16,7 @@ import { defineSetting, jsonSetting, readSetting } from '@atlas/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SettingsAccess } from './usePersistedSetting.js';
+import type { RouteWaypoint, StoredRoutePlan } from './useRoute.js';
 
 /**
  * The saved commute library: one synced setting, read by the web board, the
@@ -191,6 +192,8 @@ export interface CommuteController {
   widgetQuery: TransitCommuteQuery | null;
   selectCommute: (id: string) => void;
   addCommute: () => void;
+  /** Save a planner-built corridor as a new commute, or fill the first-run placeholder. */
+  saveCommute: (config: CommuteConfig, name: string) => void;
   renameCommute: (id: string, name: string) => void;
   deleteCommute: (id: string) => void;
   setWidgetCommute: (id: string) => void;
@@ -214,6 +217,52 @@ export interface CommuteController {
    * the point: the tracked journey has to come back even once it has left.
    */
   setCommit: (commit: TransitWidgetV2Commit | null) => void;
+}
+
+export interface PlannedCommute {
+  name: string;
+  config: CommuteConfig;
+}
+
+const commuteEndFromWaypoint = (waypoint: RouteWaypoint): CommuteEnd => ({
+  name: waypoint.name?.trim() || `${waypoint.pos.lat.toFixed(5)}, ${waypoint.pos.lng.toFixed(5)}`,
+  position: waypoint.pos,
+  ...(waypoint.transitStopId ? { stopId: waypoint.transitStopId } : {}),
+});
+
+/**
+ * Turn the ordinary planner question into the saved, reversible corridor the
+ * commute board owns. One explicit intermediate stop is retained as its
+ * interchange; more cannot be represented by the commute editor and is
+ * refused rather than silently discarded.
+ */
+export function plannedCommuteFromWaypoints(
+  waypoints: readonly RouteWaypoint[],
+): PlannedCommute | null {
+  if (waypoints.length < 2 || waypoints.length > 3) return null;
+  const from = commuteEndFromWaypoint(waypoints[0]!);
+  const to = commuteEndFromWaypoint(waypoints[waypoints.length - 1]!);
+  return {
+    name: `${from.name} → ${to.name}`,
+    config: {
+      ...EMPTY_COMMUTE_CONFIG,
+      from,
+      via: waypoints.length === 3 ? commuteEndFromWaypoint(waypoints[1]!) : null,
+      to,
+    },
+  };
+}
+
+/** Reopen a commute corridor in the normal planner, where its full trip cards live. */
+export function routePlanFromCommute(query: TransitCommuteQuery): StoredRoutePlan {
+  return {
+    profile: 'foot',
+    waypoints: [query.from, ...query.via, query.to].map((place) => ({
+      pos: { lat: place.lat, lng: place.lng },
+      name: place.name,
+      ...(place.stopId ? { transitStopId: place.stopId } : {}),
+    })),
+  };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -620,6 +669,42 @@ export function useCommute(
       };
     });
   }, [updateLibrary]);
+  const saveCommute = useCallback(
+    (config: CommuteConfig, name: string) => {
+      updateLibrary((current) => {
+        const active = current.commutes.find((item) => item.id === current.activeId);
+        const firstRunPlaceholder =
+          current.commutes.length === 1 && !active?.config.from && !active?.config.to;
+        const requested = name.trim().slice(0, 80) || 'Commute';
+        const names = new Set(
+          current.commutes
+            .filter((item) => !firstRunPlaceholder || item.id !== active?.id)
+            .map((item) => item.name.toLocaleLowerCase()),
+        );
+        let unique = requested;
+        let number = 2;
+        while (names.has(unique.toLocaleLowerCase())) {
+          const suffix = ` (${number})`;
+          unique = `${requested.slice(0, 80 - suffix.length)}${suffix}`;
+          number += 1;
+        }
+        if (firstRunPlaceholder && active) {
+          return {
+            ...current,
+            commutes: [{ ...active, name: unique, config }],
+          };
+        }
+        if (current.commutes.length >= MAX_SAVED_COMMUTES) return current;
+        const id = crypto.randomUUID();
+        return {
+          ...current,
+          activeId: id,
+          commutes: [...current.commutes, { id, name: unique, config }],
+        };
+      });
+    },
+    [updateLibrary],
+  );
   const renameCommute = useCallback(
     (id: string, name: string) => {
       const clean = name.trim().slice(0, 80);
@@ -716,6 +801,7 @@ export function useCommute(
     widgetQuery,
     selectCommute,
     addCommute,
+    saveCommute,
     renameCommute,
     deleteCommute,
     setWidgetCommute,

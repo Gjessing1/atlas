@@ -21,6 +21,7 @@ import {
   type CommuteRibbonPart,
   type CommuteServiceState,
   type TransitMode,
+  type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
@@ -449,11 +450,13 @@ function JourneyRow({
   open,
   onToggle,
   onTrack,
+  onOpenJourney,
 }: {
   row: CommuteDashboardRow;
   open: boolean;
   onToggle: () => void;
   onTrack: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   const { journey } = row;
   // No state edge on the card: the ribbon paints state per vehicle, which is
@@ -482,6 +485,13 @@ function JourneyRow({
               {row.tracked ? 'Stop tracking' : 'Track this journey'}
             </Text>
           </Pressable>
+          <Pressable
+            style={styles.track}
+            onPress={() => onOpenJourney(journey.trip)}
+            testID="commute-open-journey-row"
+          >
+            <Text style={styles.trackText}>Full journey</Text>
+          </Pressable>
         </>
       ) : null}
     </View>
@@ -500,11 +510,13 @@ function HereCard({
   here,
   journey,
   onStop,
+  onOpenJourney,
 }: {
   here: CommuteHere;
   /** The tracked journey whole, for the leg detail below the connection block. */
   journey: CommuteJourney | null;
   onStop: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   return (
     <View style={[styles.card, styles.cardAccent]} testID="commute-here">
@@ -550,6 +562,15 @@ function HereCard({
           times per leg. Below the connection block on purpose — that block is
           the decision, this is the reference you check once you have made it. */}
       {journey ? <Legs journey={journey} activeIndex={here.rideIndex} /> : null}
+      {journey ? (
+        <Pressable
+          style={styles.track}
+          onPress={() => onOpenJourney(journey.trip)}
+          testID="commute-open-journey-here"
+        >
+          <Text style={styles.trackText}>Full journey</Text>
+        </Pressable>
+      ) : null}
       <Pressable style={styles.track} onPress={onStop} testID="commute-stop-tracking">
         <Text style={styles.trackText}>Stop tracking</Text>
       </Pressable>
@@ -573,6 +594,7 @@ function LeaveNow({
   primary,
   showTrack,
   onTrack,
+  onOpenJourney,
 }: {
   row: CommuteDashboardRow;
   /**
@@ -589,6 +611,7 @@ function LeaveNow({
    */
   showTrack: boolean;
   onTrack: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   return (
     <View style={[styles.card, primary && styles.cardAccent]} testID="commute-leave-now">
@@ -619,6 +642,13 @@ function LeaveNow({
           </Text>
         </Pressable>
       ) : null}
+      <Pressable
+        style={[styles.track, styles.trackWide]}
+        onPress={() => onOpenJourney(row.journey.trip)}
+        testID="commute-open-journey"
+      >
+        <Text style={styles.trackText}>Full journey</Text>
+      </Pressable>
     </View>
   );
 }
@@ -712,6 +742,7 @@ function Journeys({
   expanded,
   onToggle,
   onClearLines,
+  onOpenJourney,
 }: {
   section: CommuteDashboardSection;
   nowMs: number;
@@ -720,6 +751,7 @@ function Journeys({
   expanded: string | null;
   onToggle: (key: string) => void;
   onClearLines: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   const lead = section.leadRow;
   return (
@@ -736,6 +768,7 @@ function Journeys({
           primary={!tracking}
           showTrack={!lead.tracked || !tracking}
           onTrack={() => section.track(lead.tracked ? null : lead.journey)}
+          onOpenJourney={onOpenJourney}
         />
       ) : null}
       {section.emptyNote ? (
@@ -761,6 +794,7 @@ function Journeys({
               open={expanded === row.key}
               onToggle={() => onToggle(row.key)}
               onTrack={() => section.track(row.tracked ? null : row.journey)}
+              onOpenJourney={onOpenJourney}
             />
           ))}
         </>
@@ -950,6 +984,7 @@ export function CommuteSheet({
   geocode,
   fetchStopLines,
   onClose,
+  onOpenJourney,
   bottomInset,
 }: {
   visible: boolean;
@@ -958,6 +993,7 @@ export function CommuteSheet({
   geocode: StopGeocodeFn;
   fetchStopLines: StopLinesFn;
   onClose: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
   bottomInset: number;
 }) {
   const editor = useCommuteEditor({ commute, places, geocode, fetchStopLines });
@@ -1077,6 +1113,7 @@ export function CommuteSheet({
             here={dashboard.here}
             journey={dashboard.hereJourney}
             onStop={dashboard.stopTracking}
+            onOpenJourney={onOpenJourney}
           />
         ) : null}
         {/* One mode, one kind of content: a door mode has the journey list and
@@ -1091,6 +1128,7 @@ export function CommuteSheet({
             expanded={dashboard.expanded}
             onToggle={dashboard.toggle}
             onClearLines={editor.clearLines}
+            onOpenJourney={onOpenJourney}
           />
         ) : null}
         {dashboard.boards.map((board, index) => (

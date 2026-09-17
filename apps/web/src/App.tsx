@@ -28,6 +28,8 @@ import {
 } from '@atlas/core';
 import {
   collectionTagSuggestions,
+  plannedCommuteFromWaypoints,
+  routePlanFromCommute,
   useMapProfile,
   useMapProfilePreferences,
   useMapStyleEditor,
@@ -303,6 +305,10 @@ export function App() {
   // profiles. The panel lists the journeys; the map draws the selected one, and
   // the road line stands down while it does.
   const transit = useTransitPlan(route);
+  const plannedCommute = useMemo(
+    () => plannedCommuteFromWaypoints(route.waypoints),
+    [route.waypoints],
+  );
   // The place card's hand-off into the planner (seeds "My location" as start).
   const directions = useDirections(route);
 
@@ -615,6 +621,22 @@ export function App() {
       stopRoute();
     },
     [stopRoute, transit.startGuidance],
+  );
+  const makePlannedCommute = useCallback(() => {
+    if (!plannedCommute || !commute.ready) return;
+    commute.saveCommute(plannedCommute.config, plannedCommute.name);
+    route.stop();
+    setPanel('commute');
+  }, [commute, plannedCommute, route]);
+  const openCommuteJourney = useCallback(
+    (trip: TransitTrip) => {
+      if (!commute.query) return;
+      route.restore(routePlanFromCommute(commute.query));
+      transit.prepareJourney(trip.startMs, commute.query.filter.modes);
+      transit.setEnabled(true);
+      closePanels();
+    },
+    [closePanels, commute.query, route, transit],
   );
   // "Directions" on the place card opens the planner with that point as the
   // destination (Android parity): the planner is the one travel-mode picker, so
@@ -1572,6 +1594,14 @@ export function App() {
             onNavigate={onStartNavigation}
             onOpenVehicleSettings={openVehicleSettings}
             onStartTransitGuidance={startTransitGuidance}
+            onMakeCommute={
+              plannedCommute &&
+              commute.ready &&
+              (commute.canAddCommute ||
+                (commute.commutes.length === 1 && !commute.config.from && !commute.config.to))
+                ? makePlannedCommute
+                : undefined
+            }
             onSaveTrack={async (data, name, collectionId) =>
               (await userData.saveTrack(data, name, collectionId)) !== null
             }
@@ -1618,6 +1648,7 @@ export function App() {
             places={userData.places}
             getBias={getBias}
             onClose={closePanels}
+            onOpenJourney={openCommuteJourney}
           />
         )}
         {/* Route detail samples terrain heights; outside coverage, skip the

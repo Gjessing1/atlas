@@ -983,6 +983,7 @@ test('transit stop search plans exact stops and starts guided transit', async ({
     from?: { lat: number; lng: number; stopId?: string };
     to?: { lat: number; lng: number; stopId?: string };
   } | null = null;
+  let servedTrip: Record<string, unknown> | null = null;
 
   await page.route('**/api/search**', (route) => {
     const q = new URL(route.request().url()).searchParams.get('q') ?? '';
@@ -1026,44 +1027,52 @@ test('transit stop search plans exact stops and starts guided transit', async ({
   });
   await page.route('**/api/transit', (route) => {
     transitBody = route.request().postDataJSON() as typeof transitBody;
+    servedTrip = {
+      startMs: now + 240_000,
+      endMs: now + 600_000,
+      durationMs: 360_000,
+      walkDistanceM: 0,
+      legs: [
+        {
+          mode: 'rail',
+          distanceM: 5_000,
+          durationMs: 360_000,
+          aimedStartMs: now,
+          expectedStartMs: now + 240_000,
+          aimedEndMs: now + 360_000,
+          expectedEndMs: now + 600_000,
+          realtime: true,
+          startPredictionInaccurate: true,
+          endPredictionInaccurate: false,
+          from: {
+            name: 'Oslo S',
+            position: { lat: 59.910357, lng: 10.753051 },
+            quay: { publicCode: '2' },
+          },
+          to: {
+            name: 'Nationaltheatret',
+            position: { lat: 59.9147, lng: 10.7333 },
+          },
+          line: { publicCode: 'R14', headsign: 'Kongsvinger' },
+          intermediateStops: [],
+          points: [],
+          situations: [],
+        },
+      ],
+    };
     route.fulfill({
       json: {
-        trips: [
-          {
-            startMs: now + 240_000,
-            endMs: now + 600_000,
-            durationMs: 360_000,
-            walkDistanceM: 0,
-            legs: [
-              {
-                mode: 'rail',
-                distanceM: 5_000,
-                durationMs: 360_000,
-                aimedStartMs: now,
-                expectedStartMs: now + 240_000,
-                aimedEndMs: now + 360_000,
-                expectedEndMs: now + 600_000,
-                realtime: true,
-                startPredictionInaccurate: true,
-                endPredictionInaccurate: false,
-                from: {
-                  name: 'Oslo S',
-                  position: { lat: 59.910357, lng: 10.753051 },
-                  quay: { publicCode: '2' },
-                },
-                to: {
-                  name: 'Nationaltheatret',
-                  position: { lat: 59.9147, lng: 10.7333 },
-                },
-                line: { publicCode: 'R14', headsign: 'Kongsvinger' },
-                intermediateStops: [],
-                points: [],
-                situations: [],
-              },
-            ],
-          },
-        ],
+        trips: [servedTrip],
         problems: [],
+      },
+    });
+  });
+  await page.route('**/api/transit/commute', (route) => {
+    route.fulfill({
+      json: {
+        outbound: { trips: servedTrip ? [servedTrip] : [], problems: [] },
+        inbound: { trips: [], problems: [] },
+        segments: [],
       },
     });
   });
@@ -1103,6 +1112,15 @@ test('transit stop search plans exact stops and starts guided transit', async ({
   await expect(page.locator('.transit-results')).toBeVisible();
   await expect(page.locator('.transit-summary-departure')).toContainText('planned');
   await expect(page.locator('.transit-summary-departure')).toContainText('Live estimate uncertain');
+
+  // The planner, daily board and detailed journey are one connected flow: the
+  // exact stop ids survive saving, and the commute card can return to the
+  // standard trip view at the chosen departure.
+  await page.getByRole('button', { name: 'Make this my commute' }).click();
+  const commute = page.locator('.commute-panel');
+  await expect(commute).toContainText('Oslo S → Nationaltheatret');
+  await commute.getByRole('button', { name: 'Full journey' }).first().click();
+  await expect(page.locator('.transit-results')).toBeVisible();
 
   await page.context().grantPermissions(['notifications']);
   await page.getByRole('button', { name: 'Start journey' }).click();

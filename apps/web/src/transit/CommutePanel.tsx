@@ -21,6 +21,7 @@ import {
   type CommuteLineBadge,
   type CommuteRibbonPart,
   type CommuteServiceState,
+  type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useState } from 'react';
@@ -374,11 +375,13 @@ function JourneyRow({
   open,
   onToggle,
   onTrack,
+  onOpenJourney,
 }: {
   row: CommuteDashboardRow;
   open: boolean;
   onToggle: () => void;
   onTrack: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   const { journey } = row;
   // No state edge on the card: the ribbon paints state per vehicle, which is
@@ -409,6 +412,13 @@ function JourneyRow({
           <button type="button" className="commute-track" onClick={onTrack}>
             {row.tracked ? 'Stop tracking' : 'Track this journey'}
           </button>
+          <button
+            type="button"
+            className="commute-track"
+            onClick={() => onOpenJourney(journey.trip)}
+          >
+            Full journey
+          </button>
         </>
       )}
     </li>
@@ -427,11 +437,13 @@ function HereCard({
   here,
   journey,
   onStop,
+  onOpenJourney,
 }: {
   here: CommuteHere;
   /** The tracked journey whole, for the leg detail below the ribbon. */
   journey: CommuteJourney | null;
   onStop: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   return (
     <section className="commute-card here" aria-label="You are here">
@@ -471,6 +483,11 @@ function HereCard({
           times per leg. Below the connection block on purpose — that block is
           the decision, this is the reference you check once you have made it. */}
       {journey && <Legs journey={journey} activeIndex={here.rideIndex} />}
+      {journey && (
+        <button type="button" className="commute-track" onClick={() => onOpenJourney(journey.trip)}>
+          Full journey
+        </button>
+      )}
       <button type="button" className="commute-track" onClick={onStop}>
         Stop tracking
       </button>
@@ -494,6 +511,7 @@ function LeaveNow({
   primary,
   showTrack,
   onTrack,
+  onOpenJourney,
 }: {
   row: CommuteDashboardRow;
   /**
@@ -510,6 +528,7 @@ function LeaveNow({
    */
   showTrack: boolean;
   onTrack: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   return (
     <section className={`commute-card${primary ? ' primary' : ''}`} aria-label={label}>
@@ -532,6 +551,13 @@ function LeaveNow({
           {row.tracked ? 'Stop tracking' : 'Track this journey'}
         </button>
       )}
+      <button
+        type="button"
+        className="commute-track wide"
+        onClick={() => onOpenJourney(row.journey.trip)}
+      >
+        Full journey
+      </button>
     </section>
   );
 }
@@ -598,10 +624,12 @@ function Journeys({
   section,
   dashboard,
   editor,
+  onOpenJourney,
 }: {
   section: CommuteDashboardSection;
   dashboard: CommuteDashboard;
   editor: { clearLines: () => void };
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   const lead = section.leadRow;
   return (
@@ -618,6 +646,7 @@ function Journeys({
           primary={!dashboard.here}
           showTrack={!lead.tracked || !dashboard.here}
           onTrack={() => section.track(lead.tracked ? null : lead.journey)}
+          onOpenJourney={onOpenJourney}
         />
       )}
       {section.emptyNote && (
@@ -647,6 +676,7 @@ function Journeys({
                 open={dashboard.expanded === row.key}
                 onToggle={() => dashboard.toggle(row.key)}
                 onTrack={() => section.track(row.tracked ? null : row.journey)}
+                onOpenJourney={onOpenJourney}
               />
             ))}
           </ol>
@@ -758,12 +788,14 @@ export function CommutePanel({
   places,
   getBias,
   onClose,
+  onOpenJourney,
 }: {
   commute: CommuteController;
   places: readonly PlaceRecord[];
   /** Map centre, so a stop search resolves near where the user is looking. */
   getBias: () => LatLng | null;
   onClose: () => void;
+  onOpenJourney: (trip: TransitTrip) => void;
 }) {
   const geocode = useGeocode(getBias);
   const editor = useCommuteEditor({
@@ -866,6 +898,7 @@ export function CommutePanel({
             here={dashboard.here}
             journey={dashboard.hereJourney}
             onStop={dashboard.stopTracking}
+            onOpenJourney={onOpenJourney}
           />
         )}
         {/* One mode, one kind of content: a door mode has the journey list and
@@ -873,7 +906,12 @@ export function CommutePanel({
             list. Both are drawn rather than switched on here, because which
             mode answers with what is the model's fact, not the panel's. */}
         {dashboard.section && (
-          <Journeys section={dashboard.section} dashboard={dashboard} editor={editor} />
+          <Journeys
+            section={dashboard.section}
+            dashboard={dashboard}
+            editor={editor}
+            onOpenJourney={onOpenJourney}
+          />
         )}
         {dashboard.boards.map((board) => (
           <Board board={board} key={board.segment.id} />

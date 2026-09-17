@@ -8,11 +8,13 @@ import {
   EMPTY_COMMUTE_CONFIG,
   EMPTY_COMMUTE_LIBRARY,
   isLegacyCommuteSetting,
+  plannedCommuteFromWaypoints,
   parseCommuteCommit,
   parseCommuteConfig,
   parseCommuteLibrary,
   serializeCommuteConfig,
   serializeCommuteLibrary,
+  routePlanFromCommute,
   useCommute,
   type CommuteSettings,
 } from './useCommute.js';
@@ -198,6 +200,62 @@ describe('commuteQueryFrom', () => {
   it('refuses a commute from a stop to itself', () => {
     expect(
       commuteQueryFrom({ ...EMPTY_COMMUTE_CONFIG, from: ENGELSRUD, to: ENGELSRUD }, []),
+    ).toBeNull();
+  });
+});
+
+describe('planner and commute hand-offs', () => {
+  it('keeps exact stops and one interchange when saving a planned trip', () => {
+    const planned = plannedCommuteFromWaypoints([
+      {
+        id: 1,
+        pos: ENGELSRUD.position,
+        name: ENGELSRUD.name,
+        transitStopId: ENGELSRUD.stopId,
+      },
+      { id: 2, pos: { lat: 59.834, lng: 10.435 }, name: 'Asker stasjon' },
+      {
+        id: 3,
+        pos: NATIONALTHEATRET.position,
+        name: NATIONALTHEATRET.name,
+        transitStopId: NATIONALTHEATRET.stopId,
+      },
+    ]);
+
+    expect(planned).toMatchObject({
+      name: 'Engelsrud → Nationaltheatret',
+      config: {
+        from: { name: 'Engelsrud', stopId: ENGELSRUD.stopId },
+        via: { name: 'Asker stasjon' },
+        to: { name: 'Nationaltheatret', stopId: NATIONALTHEATRET.stopId },
+      },
+    });
+    expect(routePlanFromCommute(commuteQueryFrom(planned!.config, [])!)).toEqual({
+      profile: 'foot',
+      waypoints: [
+        {
+          pos: ENGELSRUD.position,
+          name: ENGELSRUD.name,
+          transitStopId: ENGELSRUD.stopId,
+        },
+        { pos: { lat: 59.834, lng: 10.435 }, name: 'Asker stasjon' },
+        {
+          pos: NATIONALTHEATRET.position,
+          name: NATIONALTHEATRET.name,
+          transitStopId: NATIONALTHEATRET.stopId,
+        },
+      ],
+    });
+  });
+
+  it('refuses to lose a planner corridor with more than one intermediate stop', () => {
+    expect(
+      plannedCommuteFromWaypoints([
+        { id: 1, pos: ENGELSRUD.position },
+        { id: 2, pos: { lat: 59.82, lng: 10.4 } },
+        { id: 3, pos: { lat: 59.85, lng: 10.5 } },
+        { id: 4, pos: NATIONALTHEATRET.position },
+      ]),
     ).toBeNull();
   });
 });
@@ -494,6 +552,33 @@ describe('useCommute', () => {
     expect(result.current.commutes).toHaveLength(1);
     expect(result.current.activeId).toBe('commute');
     expect(result.current.widgetCommuteId).toBe('commute');
+  });
+
+  it('fills the first-run placeholder from a plan, then adds later plans by name', async () => {
+    const { result } = renderHook(() =>
+      useCommute(
+        settings(() => Promise.resolve(null)),
+        [],
+        vi.fn(),
+        false,
+      ),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const work = {
+      ...EMPTY_COMMUTE_CONFIG,
+      from: ENGELSRUD,
+      to: NATIONALTHEATRET,
+    };
+    act(() => result.current.saveCommute(work, 'Work'));
+    expect(result.current.commutes).toHaveLength(1);
+    expect(result.current.commutes[0]).toMatchObject({ name: 'Work', config: work });
+
+    act(() =>
+      result.current.saveCommute({ ...work, from: { ...ENGELSRUD, name: 'Cabin' } }, 'Work'),
+    );
+    expect(result.current.commutes).toHaveLength(2);
+    expect(result.current.commutes[1]?.name).toBe('Work (2)');
+    expect(result.current.activeId).toBe(result.current.commutes[1]?.id);
   });
 
   it('marks saved-place use and stale copies across the library', async () => {

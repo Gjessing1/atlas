@@ -6,6 +6,8 @@ import {
   useMapStyleEditor,
   useMeasure,
   useCommute,
+  plannedCommuteFromWaypoints,
+  routePlanFromCommute,
   routePlanState,
   useNavAddStop,
   useNavPrefs,
@@ -229,6 +231,10 @@ function AppInner() {
   const vehicle = useVehicleProfile(data);
   const route = useRoute(vehicle.vehicle);
   const transit = useTransitPlan(route);
+  const plannedCommute = useMemo(
+    () => plannedCommuteFromWaypoints(route.waypoints),
+    [route.waypoints],
+  );
   // Reveal the position puck once any planner action has obtained a fix. This
   // includes the automatic "Directions" origin, not only the idle locate
   // button, so walking-route planning can show the live native compass.
@@ -331,6 +337,22 @@ function AppInner() {
     [serverOrigin],
   );
   const commute = useCommute(data, data.places, commuteFetch, commuteOpen);
+  const makePlannedCommute = useCallback(() => {
+    if (!plannedCommute || !commute.ready) return;
+    commute.saveCommute(plannedCommute.config, plannedCommute.name);
+    route.stop();
+    setCommuteOpen(true);
+  }, [commute, plannedCommute, route]);
+  const openCommuteJourney = useCallback(
+    (trip: TransitTrip) => {
+      if (!commute.query) return;
+      route.restore(routePlanFromCommute(commute.query));
+      transit.prepareJourney(trip.startMs, commute.query.filter.modes);
+      transit.setEnabled(true);
+      setCommuteOpen(false);
+    },
+    [commute.query, route, transit],
+  );
   // Only speak for the home-screen widget once the saved commute has actually
   // been read. Every launch passes through `query === null` first, and handing
   // that to the widget clears its stored question and blanks it to "Open Atlas
@@ -1788,6 +1810,7 @@ function AppInner() {
             geocode={stopGeocode}
             fetchStopLines={stopLinesFetch}
             onClose={() => setCommuteOpen(false)}
+            onOpenJourney={openCommuteJourney}
             bottomInset={bottomInset}
           />
 
@@ -2021,6 +2044,14 @@ function AppInner() {
               onOpenVehicleSettings={openVehicleSettings}
               onShowTransitTrip={showTransitTrip}
               onStartTransitGuidance={startTransitGuidance}
+              onMakeCommute={
+                plannedCommute &&
+                commute.ready &&
+                (commute.canAddCommute ||
+                  (commute.commutes.length === 1 && !commute.config.from && !commute.config.to))
+                  ? makePlannedCommute
+                  : undefined
+              }
               getMyLocation={directions.getMyLocation}
               locatingOrigin={directions.locatingOrigin}
               bottomInset={bottomInset}
