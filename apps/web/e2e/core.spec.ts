@@ -222,6 +222,11 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   await expect(card.locator('strong')).toHaveText(/^-?\d+\.\d{5}, -?\d+\.\d{5}$/);
   await expect(card.getByRole('button', { name: 'Directions' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Save' })).toBeVisible();
+  const nearbyActions = card.locator('.place-card-nearby-buttons').getByRole('button');
+  await expect(nearbyActions).toHaveCount(3);
+  await expect(nearbyActions.nth(0)).toHaveAccessibleName('Photos nearby');
+  await expect(nearbyActions.nth(1)).toHaveAccessibleName('Nearby places');
+  await expect(nearbyActions.nth(2)).toHaveAccessibleName('Weather');
   // The Light row is offline maths, so it is always there and always 24-hour.
   // Elevation is deliberately not asserted: it comes from a live upstream, and a
   // Geonorge outage should fail this suite's *own* subject, not this test.
@@ -963,8 +968,19 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
   await openRoutePlannerAt(page, 59.905, 10.74);
+  await expect(page.getByRole('searchbox', { name: 'Search for a start' })).toBeVisible();
+  const routed = page.waitForRequest(
+    (request) => request.url().endsWith('/api/route') && request.method() === 'POST',
+  );
   const [x2, y2] = await project(page, 59.915, 10.76);
   await page.mouse.click(x2, y2);
+  const body = (await routed).postDataJSON() as {
+    locations: { lat: number; lon: number }[];
+  };
+  expect(body.locations[0]!.lat).toBeCloseTo(59.915, 3);
+  expect(body.locations[0]!.lon).toBeCloseTo(10.76, 3);
+  expect(body.locations[1]!.lat).toBeCloseTo(59.905, 3);
+  expect(body.locations[1]!.lon).toBeCloseTo(10.74, 3);
   await expect(page.locator('.route-stats')).toContainText('km');
   await expect(page.locator('.route-stats')).toContainText('Surface');
   await expect(page.locator('.elevation-panel')).toBeVisible();

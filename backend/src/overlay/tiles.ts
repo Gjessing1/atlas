@@ -21,6 +21,49 @@ const TRANSPARENT_PNG = Buffer.from(
 
 const TILE_MAX_AGE_S = 7 * 24 * 3600; // upstream data changes on the order of months
 
+/** Classic dark-sky map progression, sampled by the VIIRS tile's luminance. */
+const LIGHT_PALETTE = [
+  [0, 0, 0, 0, 0],
+  [8, 40, 18, 92, 82],
+  [24, 18, 64, 156, 125],
+  [56, 0, 151, 190, 155],
+  [96, 55, 190, 82, 180],
+  [144, 241, 218, 48, 205],
+  [192, 245, 116, 24, 225],
+  [232, 204, 28, 44, 240],
+  [255, 255, 255, 255, 248],
+] as const;
+
+/**
+ * Turn GIBS' black/white radiance image into a readable overlay. Black becomes
+ * transparent so the base map remains legible; increasing radiance follows the
+ * familiar World-Atlas/Lorenz blue → green → yellow → red → white sequence.
+ * It remains a radiance proxy — colour does not invent Bortle classes.
+ */
+export async function colorizeLightPollutionTile(data: Buffer): Promise<Buffer> {
+  const image = await Jimp.read(data);
+  image.scan(0, 0, image.bitmap.width, image.bitmap.height, (_x, _y, offset) => {
+    const pixels = image.bitmap.data;
+    const sourceAlpha = pixels[offset + 3] ?? 255;
+    const value = Math.round(
+      pixels[offset]! * 0.2126 + pixels[offset + 1]! * 0.7152 + pixels[offset + 2]! * 0.0722,
+    );
+    let upper = LIGHT_PALETTE.findIndex((stop) => stop[0] >= value);
+    if (upper <= 0) upper = 1;
+    const low = LIGHT_PALETTE[upper - 1]!;
+    const high = LIGHT_PALETTE[Math.min(upper, LIGHT_PALETTE.length - 1)]!;
+    const mix = high[0] === low[0] ? 0 : (value - low[0]) / (high[0] - low[0]);
+    for (let channel = 1; channel <= 4; channel += 1) {
+      pixels[offset + channel - 1] = Math.round(
+        low[channel]! + (high[channel]! - low[channel]!) * mix,
+      );
+    }
+    // Preserve upstream transparency (normally opaque, but part of the source contract).
+    pixels[offset + 3] = Math.round((pixels[offset + 3]! * sourceAlpha) / 255);
+  });
+  return image.getBufferAsync(Jimp.MIME_PNG);
+}
+
 async function overzoomParentTile(
   parent: Buffer,
   z: number,
@@ -238,15 +281,20 @@ export function registerTileRoute(ctx: OverlayContext): void {
       }
       // A real image is unambiguous: the upstream is serving this layer.
       ctx.record(layer.meta.id, true);
-      const data = Buffer.from(await res.arrayBuffer());
+      let data: Buffer<ArrayBufferLike> = Buffer.from(await res.arrayBuffer());
+      let servedType = contentType;
+      if (layer.upstream.kind === 'xyz' && layer.upstream.transform === 'light-pollution-palette') {
+        data = await colorizeLightPollutionTile(data);
+        servedType = 'image/png';
+      }
       if (diskCache) {
         await writeCache(file, data);
-        return serveImage(data, contentType);
+        return serveImage(data, servedType);
       }
       // Preserve only the cache behaviour the imagery provider granted. An
       // absent header becomes no-store rather than Atlas inventing permission.
       const cacheControl = res.headers.get('cache-control') ?? 'no-store';
-      return serveImage(data, contentType, cacheControl);
+      return serveImage(data, servedType, cacheControl);
     } catch (err) {
       request.log.error({ err, layer: layer.meta.id }, 'overlay upstream unreachable');
       ctx.record(layer.meta.id, false, 'unreachable');

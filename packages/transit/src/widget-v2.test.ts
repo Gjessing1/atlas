@@ -474,20 +474,23 @@ describe('the substitute journey — TRANSIT.md §W4', () => {
 // ---------------------------------------------------------- the selector ---
 
 describe('the direction selector — TRANSIT.md §W1', () => {
-  it('offers AUTO and the two directions, compactly', () => {
-    // `short` is cut and `label` is not: three chips share one row with the ↻,
-    // so a chip holds about eight characters — while a screen reader is given
-    // the whole direction from `label` as the chip's description.
+  it('offers the same three modes as the commute panel', () => {
     expect(commuteSelectorOptions(commute())).toEqual([
-      { key: 'auto', label: 'Whichever is next', short: 'AUTO' },
-      { key: 'outbound', label: 'Engelsrud → Nationaltheatret', short: 'TO NATIONALTHEA…' },
-      { key: 'inbound', label: 'Nationaltheatret → Engelsrud', short: 'TO ENGELSRUD' },
+      { key: 'outbound', label: 'Engelsrud → Nationaltheatret', short: 'OUTBOUND' },
+      {
+        key: 'interchange',
+        label: 'Departures from the interchange',
+        short: 'INTERCHANGE',
+      },
+      { key: 'inbound', label: 'Nationaltheatret → Engelsrud', short: 'RETURN' },
     ]);
   });
 
-  it('takes the place name`s first word and leaves the rest', () => {
-    const query = commute({ to: { name: 'Oslo S, Oslo', lat: 59.91, lng: 10.75 } });
-    expect(commuteSelectorOptions(query)[1]?.short).toBe('TO OSLO');
+  it('omits interchange when the commute has no saved change', () => {
+    expect(commuteSelectorOptions(commute({ via: [] })).map((option) => option.key)).toEqual([
+      'outbound',
+      'inbound',
+    ]);
   });
 
   it('releases a pin when the other direction`s window opens', () => {
@@ -583,6 +586,19 @@ describe('the direction selector — TRANSIT.md §W1', () => {
         pinnedAtMs: 0,
         commit: null,
         place: 'interchange',
+        nowMs: hm(12, 0),
+      }),
+    ).toEqual({ directions: ['outbound', 'inbound'], reason: 'interchange', pin: null });
+  });
+
+  it('lets the interchange pill select the two boards explicitly', () => {
+    expect(
+      resolveCommuteV2Directions({
+        query: commute(),
+        selector: 'interchange',
+        pinnedAtMs: hm(7, 30),
+        commit: null,
+        place: null,
         nowMs: hm(12, 0),
       }),
     ).toEqual({ directions: ['outbound', 'inbound'], reason: 'interchange', pin: null });
@@ -731,7 +747,7 @@ describe('commuteWidgetV2Board', () => {
         pin: { direction: 'outbound', releasesAtMs: hm(16, 0) },
       },
     });
-    expect(answer.selector.label).toBe('TO NATIONALTHEA…');
+    expect(answer.selector.label).toBe('OUTBOUND');
     expect(answer.selector.note).toBe('Pinned until 16:00');
     expect(answer.selector.releasesAtMs).toBe(hm(16, 0));
   });
@@ -831,6 +847,28 @@ describe('commuteWidgetV2Queries', () => {
       maxRows: 3,
     });
     expect(asked.map((entry) => entry.query.dateTimeMs)).toEqual([hm(7, 0), hm(16, 0)]);
+  });
+
+  it('asks the two departures from the saved interchange', () => {
+    const asked = commuteWidgetV2Queries({
+      query: commute(),
+      directions: ['outbound', 'inbound'],
+      interchange: true,
+      commit: null,
+      nowMs: hm(6, 0),
+      maxRows: 3,
+    });
+    expect(
+      asked.map(({ label, query }) => ({ label, from: query.from.name, to: query.to.name })),
+    ).toEqual([
+      {
+        label: 'Asker stasjon → Nationaltheatret',
+        from: 'Asker stasjon',
+        to: 'Nationaltheatret',
+      },
+      { label: 'Asker stasjon → Engelsrud', from: 'Asker stasjon', to: 'Engelsrud' },
+    ]);
+    expect(asked.every((entry) => entry.query.dateTimeMs === undefined)).toBe(true);
   });
 });
 

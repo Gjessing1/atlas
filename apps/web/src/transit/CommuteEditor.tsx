@@ -49,7 +49,7 @@ function EndField({
               <li key={`${hit.name}-${hit.position.lat}-${hit.position.lng}`}>
                 <button type="button" onClick={() => editor.pickHit(field, hit)}>
                   <strong>{hit.name}</strong>
-                  <span>{hit.transitStopId ? 'Stop' : hit.label}</span>
+                  <span>{hit.label || (hit.transitStopId ? 'Public transport stop' : '')}</span>
                 </button>
               </li>
             ))}

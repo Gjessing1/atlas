@@ -676,7 +676,12 @@ describe('commuteBoardRows', () => {
       ),
       NOW,
     );
-    expect(row).toMatchObject({ aimed: '08:36', arrival: '09:02', countdown: 'in 4 min' });
+    expect(row).toMatchObject({
+      aimed: '08:36',
+      arrival: '09:02',
+      duration: '26 min',
+      countdown: 'in 4 min',
+    });
   });
 
   /**

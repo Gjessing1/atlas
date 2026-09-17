@@ -148,10 +148,12 @@ function NearbyPhotos({ photos, articles }: { photos: PlacePhoto[]; articles: Pl
 function NearbyFeatures({
   at,
   articles,
+  onWeather,
   onShowNearby,
 }: {
   at: LatLng;
   articles: PlaceContent[];
+  onWeather: () => void;
   onShowNearby: (place: NearbyPlaceArticle) => void;
 }) {
   const [placesOpen, setPlacesOpen] = useState(false);
@@ -185,6 +187,15 @@ function NearbyFeatures({
         >
           <WikiBadge />
           Nearby
+        </button>
+        <button
+          type="button"
+          className="place-card-nearby-weather"
+          onClick={onWeather}
+          aria-label="Weather"
+          title="Weather"
+        >
+          <SunIcon size={17} />
         </button>
       </div>
       {photosOpen && photos.status === 'loading' && !hasPhotos && (
@@ -494,6 +505,7 @@ export function PlaceCard({
       <NearbyFeatures
         at={target.position}
         articles={placeContent.content}
+        onWeather={onWeather}
         onShowNearby={onShowNearby}
       />
       <div className="place-card-actions">
@@ -528,15 +540,6 @@ export function PlaceCard({
             Save
           </button>
         )}
-        <button
-          type="button"
-          className="icon-only"
-          onClick={onWeather}
-          aria-label="Weather"
-          title="Weather"
-        >
-          <SunIcon size={17} />
-        </button>
         {transitCoversPoint(target.position) && (
           <button
             type="button"

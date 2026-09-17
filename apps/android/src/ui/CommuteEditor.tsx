@@ -77,7 +77,7 @@ function EndField({
             {hit.name}
           </Text>
           <Text style={styles.hitLabel} numberOfLines={1}>
-            {hit.transitStopId ? 'Stop' : hit.label}
+            {hit.label || (hit.transitStopId ? 'Public transport stop' : '')}
           </Text>
         </Pressable>
       ))}

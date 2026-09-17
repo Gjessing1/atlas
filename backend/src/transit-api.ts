@@ -352,9 +352,9 @@ function parseCommuteQuery(body: unknown): { query: TransitCommuteQuery } | { er
 // backend, so an unrecognised value must degrade to the default rather than
 // 400 a home screen into permanent "Couldn't refresh".
 
-/** The selector's setting. Anything else is AUTO, which is also its default. */
+/** The selector's setting. Anything else uses the automatic compatibility default. */
 function parseV2Selector(raw: unknown): TransitWidgetV2Selector {
-  return raw === 'outbound' || raw === 'inbound' ? raw : 'auto';
+  return raw === 'outbound' || raw === 'interchange' || raw === 'inbound' ? raw : 'auto';
 }
 
 /**
@@ -1018,6 +1018,7 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
       const queries = commuteWidgetV2Queries({
         query: parsed.query,
         directions: resolution.directions,
+        interchange: resolution.reason === 'interchange',
         commit,
         nowMs,
         maxRows,
@@ -1032,8 +1033,9 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
             ? askDirection(commuteCommitQuery(parsed.query, commit), parsed.query.filter)
             : Promise.resolve(null),
           Promise.all(
-            queries.map(async ({ key, query }) => ({
+            queries.map(async ({ key, query, label }) => ({
               key,
+              ...(label ? { label } : {}),
               answer: await askDirection(query, parsed.query.filter),
             })),
           ),
@@ -1062,8 +1064,17 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
             : null;
         return commuteWidgetV2Board({
           query: parsed.query,
-          results: answers.flatMap(({ key, answer }) =>
-            answer.ok ? [{ key, result: answer.result, emptyReason: answer.emptyReason }] : [],
+          results: answers.flatMap(({ key, label, answer }) =>
+            answer.ok
+              ? [
+                  {
+                    key,
+                    result: answer.result,
+                    emptyReason: answer.emptyReason,
+                    ...(label ? { label } : {}),
+                  },
+                ]
+              : [],
           ),
           resolution,
           selector,

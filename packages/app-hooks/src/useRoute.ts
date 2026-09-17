@@ -39,6 +39,8 @@ export interface RouteWaypoint {
 export interface StoredRoutePlan {
   profile: RoutingProfile;
   waypoints: { pos: LatLng; name?: string; transitStopId?: string }[];
+  /** The sole waypoint was supplied as the destination; the start is still empty. */
+  missingStart?: boolean;
   roundTripKm?: number;
   roundTripDirection?: RoundTripDirection;
   /** Custom costing choices for this profile. */
@@ -87,6 +89,8 @@ export interface RoutePlanner {
   profile: RoutingProfile;
   preferences: RoutePreferences;
   waypoints: RouteWaypoint[];
+  /** A Directions hand-off supplied the destination before an origin was available. */
+  missingStart: boolean;
   roundTrip: boolean;
   roundTripKm: number;
   roundTripDirection: RoundTripDirection;
@@ -187,6 +191,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     [profile, preferencesByProfile, vehicle],
   );
   const [waypoints, setWaypoints] = useState<RouteWaypoint[]>([]);
+  const [missingStart, setMissingStart] = useState(false);
   const [roundTrip, setRoundTripState] = useState(false);
   const [roundTripKm, setRoundTripKm] = useState(10);
   const [roundTripDirection, setRoundTripDirection] = useState<RoundTripDirection>('either');
@@ -326,6 +331,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   const start = useCallback(
     (at?: LatLng, name?: string) => {
       setActive(true);
+      if (waypoints.length === 0) setMissingStart(false);
       // Only seeds an empty plan; re-opening the panel keeps the existing stops.
       if (!at || waypoints.length > 0) return null;
       const wp = nextWaypoint(at, name);
@@ -353,6 +359,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
         setRoundTripDirection(plan.roundTripDirection ?? 'either');
       }
       setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name, w.transitStopId)));
+      setMissingStart(plan.missingStart === true && plan.waypoints.length === 1);
     },
     [nextWaypoint],
   );
@@ -367,8 +374,13 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     const custom = preferencesByProfile[profile];
     const base =
       custom && Object.keys(custom).length > 0
-        ? { profile, waypoints: stops, preferences: custom }
-        : { profile, waypoints: stops };
+        ? {
+            profile,
+            waypoints: stops,
+            preferences: custom,
+            ...(missingStart ? { missingStart } : {}),
+          }
+        : { profile, waypoints: stops, ...(missingStart ? { missingStart } : {}) };
     return roundTrip ? { ...base, roundTripKm, roundTripDirection } : base;
   }, [
     active,
@@ -378,6 +390,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     roundTrip,
     roundTripKm,
     roundTripDirection,
+    missingStart,
   ]);
 
   const setPreference = useCallback(
@@ -393,6 +406,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   const stop = useCallback(() => {
     setActive(false);
     setWaypoints([]);
+    setMissingStart(false);
     setRoundTripState(false);
     setRoundTripDirection('either');
     setPaths(null);
@@ -407,10 +421,11 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
       const wp = nextWaypoint(pos, name, transitStopId);
       // Loops take stops like any other plan — they are places to ride past on
       // the way round, and the route returns to the start regardless.
-      setWaypoints((wps) => [...wps, wp]);
+      setWaypoints((wps) => (missingStart ? [wp, ...wps] : [...wps, wp]));
+      if (missingStart) setMissingStart(false);
       return wp.id;
     },
-    [nextWaypoint],
+    [missingStart, nextWaypoint],
   );
 
   // Both halves of "route me there" in one commit, so neither reads the
@@ -420,15 +435,17 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
       const wp = nextWaypoint(pos, name, transitStopId);
       setRoundTripState(false);
       setWaypoints((wps) => [...wps, wp]);
+      setMissingStart(waypoints.length === 0);
       return wp.id;
     },
-    [nextWaypoint],
+    [nextWaypoint, waypoints.length],
   );
 
   const insertWaypoint = useCallback(
     (index: number, pos: LatLng, name?: string, transitStopId?: string) => {
       const wp = nextWaypoint(pos, name, transitStopId);
       setWaypoints((wps) => [...wps.slice(0, index), wp, ...wps.slice(index)]);
+      if (index === 0) setMissingStart(false);
       return wp.id;
     },
     [nextWaypoint],
@@ -490,6 +507,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
 
   const clear = useCallback(() => {
     setWaypoints([]);
+    setMissingStart(false);
   }, []);
 
   const optimize = useCallback(() => {
@@ -506,6 +524,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   // of the requested length instead.
   const setRoundTrip = useCallback((on: boolean) => {
     setRoundTripState(on);
+    if (on) setMissingStart(false);
   }, []);
 
   const newLoop = useCallback(() => {
@@ -517,6 +536,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     profile,
     preferences,
     waypoints,
+    missingStart,
     roundTrip,
     roundTripKm,
     roundTripDirection,

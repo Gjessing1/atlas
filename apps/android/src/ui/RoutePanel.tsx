@@ -369,7 +369,6 @@ export function RoutePanel({
   const folders = useMemo(() => flattenFolders(collections), [collections]);
   /** Waypoint id whose search box is open for re-pointing, or null. */
   const [editing, setEditing] = useState<number | null>(null);
-  const [addingStop, setAddingStop] = useState(false);
   const [reorderingStops, setReorderingStops] = useState(false);
   // What the driving plan is actually being costed for. Read from the merged
   // preferences rather than the setting, so the chip can only ever say what was
@@ -421,7 +420,7 @@ export function RoutePanel({
   // Which end the *search box* fills: the first stop is the start, anything
   // after it extends the route, which in transit mode means the destination.
   // The My-location button is deliberately not governed by this — see below.
-  const nextRole = stops.length === 0 ? 'start' : 'destination';
+  const nextRole = route.missingStart || stops.length === 0 ? 'start' : 'destination';
 
   /**
    * Put the current position at the front of the plan. Always the start, never
@@ -606,40 +605,6 @@ export function RoutePanel({
             </Pressable>
           ) : null}
         </View>
-
-        {/* While a stop is being re-pointed, the add-a-stop box stands down —
-          two open search boxes with two different meanings is how you end up
-          appending a stop you meant to replace. */}
-        {editing === null && (stops.length < 2 || addingStop) ? (
-          <StopSearch
-            places={places}
-            geocode={geocode}
-            placeholder={
-              nextRole === 'start'
-                ? 'Start: address or saved place'
-                : // A loop comes home to its start, so nothing entered after the
-                  // first point is a destination — it is somewhere to go by way of.
-                  route.roundTrip || stops.length >= 2
-                  ? 'Add a stop'
-                  : 'Destination: address or saved place'
-            }
-            transit={transitMode}
-            onPick={(position, name, transitStopId) => {
-              route.addWaypoint(position, name, transitStopId);
-              if (stops.length >= 2) setAddingStop(false);
-            }}
-            onCancel={stops.length >= 2 ? () => setAddingStop(false) : undefined}
-          />
-        ) : null}
-        {editing === null && stops.length >= 2 && !addingStop ? (
-          <Pressable
-            style={styles.addStop}
-            onPress={() => setAddingStop(true)}
-            testID="route-add-stop"
-          >
-            <Text style={styles.addStopText}>+ Add stop</Text>
-          </Pressable>
-        ) : null}
 
         {/* One row for the two things that are neither a stop nor the answer:
           where the plan starts from, and the terms it is planned under.
@@ -881,10 +846,31 @@ export function RoutePanel({
         ) : (
           <Text style={styles.muted}>
             {route.roundTrip
-              ? 'Set the starting point above, or tap the map.'
-              : 'Add a start and a destination above, or tap the map.'}
+              ? 'Set the starting point below, or tap the map.'
+              : 'Add a start and a destination below, or tap the map.'}
           </Text>
         )}
+
+        {/* The next stop is always an open field directly below the stop list.
+          While one existing stop is being re-pointed it stands down so the two
+          searches cannot be confused. */}
+        {editing === null ? (
+          <StopSearch
+            places={places}
+            geocode={geocode}
+            placeholder={
+              nextRole === 'start'
+                ? 'Start: address or saved place'
+                : route.roundTrip || stops.length >= 2
+                  ? 'Add a stop'
+                  : 'Destination: address or saved place'
+            }
+            transit={transitMode}
+            onPick={(position, name, transitStopId) =>
+              route.addWaypoint(position, name, transitStopId)
+            }
+          />
+        ) : null}
 
         {/* Via points cannot be honoured by a timetable, so say so rather than
           quietly planning between the ends only. */}
@@ -1272,7 +1258,13 @@ const styles = StyleSheet.create({
   wpNameTap: { flexGrow: 1, flexShrink: 1, paddingVertical: 4 },
   wpName: { fontSize: 14, color: theme.text },
   wpEdit: { flexGrow: 1, flexShrink: 1 },
-  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  sourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   chipBusy: { opacity: 0.6 },
   hint: { fontSize: 12, color: theme.textMuted },
   /* The result and its one action, on one line: the trip time leads, the rest

@@ -668,7 +668,9 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
           <View style={styles.legLineRow}>
             <Badge badge={row.badge} mode={row.mode} line={row.line} />
           </View>
-          <Text style={styles.boardArrival}>arrives {row.arrival}</Text>
+          <Text style={styles.boardArrival}>
+            arrives {row.arrival} · <Text style={styles.boardDuration}>{row.duration}</Text>
+          </Text>
         </View>
         <View style={styles.boardWhen}>
           <Text style={styles.boardWhenText}>{row.countdown}</Text>
@@ -1502,7 +1504,8 @@ const styles = StyleSheet.create({
   boardEstimate: { color: theme.textMuted, fontSize: 10 },
   boardLine: { flex: 1 },
   boardLineText: { color: theme.text, fontSize: 12, fontWeight: '700' },
-  boardArrival: { color: theme.textMuted, fontSize: 10 },
+  boardArrival: { color: theme.text, fontSize: 11 },
+  boardDuration: { color: theme.text, fontWeight: '800' },
   boardWhen: { alignItems: 'flex-end' },
   boardWhenText: { color: theme.textMuted, fontSize: 11 },
   boardWhenSub: { color: theme.textMuted, fontSize: 10 },

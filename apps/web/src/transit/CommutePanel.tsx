@@ -576,7 +576,9 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
             {glyph(row.mode)} {row.line}
           </span>
         </strong>
-        <span>arrives {row.arrival}</span>
+        <span className="commute-board-arrival">
+          arrives {row.arrival} · <strong>{row.duration}</strong>
+        </span>
       </span>
       <span className="commute-board-when">
         {row.countdown}

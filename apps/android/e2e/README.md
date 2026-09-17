@@ -68,9 +68,9 @@ that are _about_ search. Every typed step is another chance to lose a 25-minute 
 
 `emu geo fix` sets a position and the permissions are granted, but `getCurrentPositionAsync`
 usually times out here (8 s) and last-known is empty after `pm clear`. Anything that plans _from
-my location_ then quietly lacks its start: Directions on a place card opens the planner holding
-only the place, "Getting location…" clears, and nothing routes (`route-action-alongRoute` never
-appears; the dump shows one `drag-*` row and `route-my-location` still offered). Also:
+my location_ then lacks its start: Directions on a place card opens the planner holding only the
+destination and explicitly asks for a start. The next searched or map-tapped stop is inserted
+before that destination. Also:
 
 - **Favorites "Go" opens the place's card, not the planner** — tap `destination-navigate` next.
 - **Wait out the lookup before acting on the plan**, or a late fix and your own edit race: the fix

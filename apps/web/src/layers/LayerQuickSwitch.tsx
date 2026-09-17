@@ -67,6 +67,16 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
   const searching = query.trim().length > 0;
   const visibleGroups = useMemo(() => searchLayerGroups(groups, query), [groups, query]);
   const activeLayers = layers.catalog.filter((meta) => layers.isOn(meta.id));
+  const visibleIds = new Set(visibleGroups.flatMap((group) => group.layers.map((meta) => meta.id)));
+  const visibleActiveLayers = searching
+    ? activeLayers.filter((meta) => visibleIds.has(meta.id))
+    : activeLayers;
+  const availableGroups = visibleGroups
+    .map((group) => ({
+      ...group,
+      layers: group.layers.filter((meta) => !layers.isOn(meta.id)),
+    }))
+    .filter((group) => group.layers.length > 0);
 
   if (layers.catalog.length === 0) return null;
 
@@ -102,10 +112,10 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
               autoFocus
             />
           )}
-          {activeLayers.length > 0 && !searching && (
+          {visibleActiveLayers.length > 0 && (
             <div className="layer-switch-group layer-switch-active">
               <div className="layer-switch-heading">Active</div>
-              {activeLayers.map((meta) => (
+              {visibleActiveLayers.map((meta) => (
                 <button
                   key={`active-${meta.id}`}
                   type="button"
@@ -120,7 +130,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
               ))}
             </div>
           )}
-          {visibleGroups.map((group) => (
+          {availableGroups.map((group) => (
             <div key={group.name} className="layer-switch-group">
               <div className="layer-switch-heading">{group.name}</div>
               {group.layers.map((meta) => {

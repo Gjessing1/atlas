@@ -69,6 +69,12 @@ describe('maneuverActionText', () => {
       maneuverActionText({ text: 'Turn left onto Slyngveien.', streetName: 'Slyngveien' }),
     ).toBe('Turn left');
     expect(maneuverActionText({ text: 'Continue on E18.', streetName: 'E18' })).toBe('Continue');
+    expect(
+      maneuverActionText({
+        text: 'Turn right to stay on Slyngveien.',
+        streetName: 'Slyngveien',
+      }),
+    ).toBe('Turn right');
   });
 
   it('keeps a useful instruction when no separate road name exists', () => {

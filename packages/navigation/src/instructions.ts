@@ -70,5 +70,13 @@ export function maneuverActionText(instruction: ShortenableInstruction): string 
   const road = instruction.streetName?.trim();
   if (!road) return text;
   const escaped = road.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return text.replace(new RegExp(`\\s+(?:onto|on)\\s+${escaped}$`, 'i'), '').trim() || text;
+  return (
+    text
+      // Valhalla uses “to stay on …” when the named road bends. The banner
+      // already prints that road on its own line; keeping the connective makes
+      // the following cue read as the unfinished “Then turn right to stay”.
+      .replace(new RegExp(`\\s+to\\s+stay\\s+on\\s+${escaped}$`, 'i'), '')
+      .replace(new RegExp(`\\s+(?:onto|on)\\s+${escaped}$`, 'i'), '')
+      .trim() || text
+  );
 }

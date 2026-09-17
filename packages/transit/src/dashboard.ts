@@ -968,6 +968,8 @@ export interface CommuteBoardRow {
   aimed: string;
   /** Scheduled arrival at the far end of this hop. */
   arrival: string;
+  /** Total scheduled time from boarding this hop to its far end. */
+  duration: string;
   /**
    * The live line beneath it: `"08:43 est."`, `"On time"`, `"Cancelled"` or
    * `"Timetable"` for a service with no live feed at all. Always present, so the
@@ -1047,6 +1049,7 @@ export function commuteBoardRows(
           expectedMs: ride.expectedStartMs,
           aimed: departure.aimed,
           arrival: norwayClock(lastRide.aimedEndMs),
+          duration: commuteDurationLabel(lastRide.aimedEndMs - ride.aimedStartMs),
           estimate: commuteEstimateLabel(departure, cancelled),
           mode: ride.mode,
           line: ride.line?.publicCode || TRANSIT_MODE_LABEL[ride.mode],

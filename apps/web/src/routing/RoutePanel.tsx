@@ -280,7 +280,6 @@ export function RoutePanel({
   const [copied, setCopied] = useState(false);
   // Waypoint id whose search box is open for re-pointing, or null.
   const [editing, setEditing] = useState<number | null>(null);
-  const [addingStop, setAddingStop] = useState(false);
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -334,7 +333,7 @@ export function RoutePanel({
   const stops = route.waypoints;
   // Which end the add-a-stop box fills: the first stop is the start, anything
   // after it extends the route, which in transit mode means the destination.
-  const nextRole = stops.length === 0 ? 'start' : 'destination';
+  const nextRole = route.missingStart || stops.length === 0 ? 'start' : 'destination';
 
   // A stop that disappears (cleared, removed, reversed away) must not leave an
   // orphaned editor bound to an id that no longer exists.
@@ -552,6 +551,47 @@ export function RoutePanel({
           )}
         </div>
 
+        {/* Planner-wide controls sit with the profile choice, aligned to its
+            right edge. The stop stack below is now only stops: From, To, then
+            the always-open field for the next one. */}
+        {editing === null && (
+          <div className="route-source-row">
+            {stops[0]?.name !== 'My location' && (
+              <button
+                type="button"
+                className="route-chip"
+                disabled={locating}
+                aria-label="Use my location as the start"
+                onClick={() => void addMyLocation()}
+              >
+                <CrosshairIcon size={14} /> {locating ? 'Locating…' : 'My location'}
+              </button>
+            )}
+            {!transitMode && (
+              <button
+                type="button"
+                className={optionsSummary.count > 0 ? 'route-chip route-chip-set' : 'route-chip'}
+                aria-expanded={optionsOpen}
+                aria-label={optionsSummary.ariaLabel}
+                onClick={() => setOptionsOpen((open) => !open)}
+              >
+                <SlidersIcon size={14} /> {optionsSummary.label}
+              </button>
+            )}
+            {!transitMode && vehicleLabel && (
+              <button
+                type="button"
+                className="route-chip route-chip-set"
+                onClick={onOpenVehicleSettings}
+                title="Height, width and cruising speed — opens Settings → Navigation"
+                aria-label={`Vehicle: ${vehicleLabel}. Change in settings`}
+              >
+                <CarIcon size={14} /> {vehicleLabel}
+              </button>
+            )}
+          </div>
+        )}
+
         {route.waypoints.length > 0 ? (
           <ol className="route-waypoints">
             {route.waypoints.map((w, i) => {
@@ -643,7 +683,7 @@ export function RoutePanel({
           next row. While a stop is being re-pointed it stands down: two open
           search boxes with two different meanings is how you end up appending a
           stop you meant to replace. */}
-        {editing === null && (stops.length < 2 || addingStop) && (
+        {editing === null && (
           <StopSearch
             places={places}
             geocode={geocode}
@@ -666,71 +706,8 @@ export function RoutePanel({
             transit={transitMode}
             onPick={(position, name, transitStopId) => {
               route.addWaypoint(position, name, transitStopId);
-              if (stops.length >= 2) setAddingStop(false);
             }}
-            onCancel={stops.length >= 2 ? () => setAddingStop(false) : undefined}
           />
-        )}
-        {editing === null && stops.length >= 2 && !addingStop && (
-          <button type="button" className="route-add-stop" onClick={() => setAddingStop(true)}>
-            + Add stop
-          </button>
-        )}
-
-        {/* One row for the two things that are neither a stop nor the answer:
-          where the plan starts from, and the terms it is planned under.
-
-          Both used to be bands of their own. "My location" sat beside an "or
-          click the map" reminder that the empty state above already gives, and
-          the route's terms were a wrapping row of chips — five of them driving
-          — parked above the stops, where a phone has the least room and the
-          user is doing something else. Folding them behind one button costs a
-          tap for the rare change and gives the stops the space; the button
-          still *names* the constraint when there is exactly one
-          (`routeOptionsSummary`), so a plan under terms never looks like a plan
-          under none. */}
-        {editing === null && (
-          <div className="route-source-row">
-            {stops[0]?.name !== 'My location' && (
-              <button
-                type="button"
-                className="route-chip"
-                disabled={locating}
-                aria-label="Use my location as the start"
-                onClick={() => void addMyLocation()}
-              >
-                <CrosshairIcon size={14} /> {locating ? 'Locating…' : 'My location'}
-              </button>
-            )}
-            {!transitMode && (
-              <button
-                type="button"
-                className={optionsSummary.count > 0 ? 'route-chip route-chip-set' : 'route-chip'}
-                aria-expanded={optionsOpen}
-                aria-label={optionsSummary.ariaLabel}
-                onClick={() => setOptionsOpen((open) => !open)}
-              >
-                <SlidersIcon size={14} /> {optionsSummary.label}
-              </button>
-            )}
-            {/* Outside the fold, and only once a vehicle is described: the
-              height a plan is costed for is the strongest thing the panel can
-              say about it, and hiding it behind a tap would undo v0.173.0,
-              which put it here because a motorhome driver had no reason to
-              believe the feature existed. Unset, it is one more control and
-              lives inside the fold with the rest. */}
-            {!transitMode && vehicleLabel && (
-              <button
-                type="button"
-                className="route-chip route-chip-set"
-                onClick={onOpenVehicleSettings}
-                title="Height, width and cruising speed — opens Settings → Navigation"
-                aria-label={`Vehicle: ${vehicleLabel}. Change in settings`}
-              >
-                <CarIcon size={14} /> {vehicleLabel}
-              </button>
-            )}
-          </div>
         )}
 
         {/* The fold: every term of the plan, as the chips that state it. Chips
@@ -823,7 +800,9 @@ export function RoutePanel({
           </p>
         )}
         {!route.roundTrip && route.waypoints.length === 1 && (
-          <p className="route-hint">Click the map to add the destination.</p>
+          <p className="route-hint">
+            Click the map to add the {route.missingStart ? 'start' : 'destination'}.
+          </p>
         )}
         {/* Via points and route-line clicks belong to the road profiles: a
           timetable cannot honour either, so the advice would be a lie here.

@@ -92,6 +92,16 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
   const searching = query.trim().length > 0;
   const visibleGroups = searchLayerGroups(groups, query);
   const activeLayers = layers.catalog.filter((meta) => layers.isOn(meta.id));
+  const visibleIds = new Set(visibleGroups.flatMap((group) => group.layers.map((meta) => meta.id)));
+  const visibleActiveLayers = searching
+    ? activeLayers.filter((meta) => visibleIds.has(meta.id))
+    : activeLayers;
+  const availableGroups = visibleGroups
+    .map((group) => ({
+      ...group,
+      layers: group.layers.filter((meta) => !layers.isOn(meta.id)),
+    }))
+    .filter((group) => group.layers.length > 0);
   const note = mapProfile(layers.profileId).note;
 
   const layerRow = (meta: LayerMeta, key: string) => {
@@ -185,13 +195,13 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
           overlay with gaps on its own — this profile only.
         </div>
       </div>
-      {activeLayers.length > 0 && !searching && (
+      {visibleActiveLayers.length > 0 && (
         <div className="layers-active">
           <div className="layers-group">Active</div>
-          {activeLayers.map((meta) => layerRow(meta, `active-${meta.id}`))}
+          {visibleActiveLayers.map((meta) => layerRow(meta, `active-${meta.id}`))}
         </div>
       )}
-      {visibleGroups.map((group) => (
+      {availableGroups.map((group) => (
         <div key={group.name}>
           <div className="layers-group">{group.name}</div>
           {group.layers.map((meta) => layerRow(meta, meta.id))}

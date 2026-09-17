@@ -354,11 +354,22 @@ test('offers the interchange every journey changes at, and saves it as a stop', 
           ? [
               {
                 name: stop.name,
-                label: 'Bus · Train',
+                label: stop.name === 'Engelsrud' ? 'Bus · Asker' : 'Bus · Train',
                 position: { lat: stop.lat, lng: stop.lng },
                 kind: 'public_transport/busStation',
                 transitStopId: stop.id,
               },
+              ...(stop.name === 'Engelsrud'
+                ? [
+                    {
+                      name: 'Engelsrud',
+                      label: 'Bus · Lillestrøm',
+                      position: { lat: 59.96, lng: 11.04 },
+                      kind: 'public_transport/busStation',
+                      transitStopId: 'NSR:StopPlace:99999',
+                    },
+                  ]
+                : []),
             ]
           : [],
       },
@@ -442,7 +453,16 @@ test('offers the interchange every journey changes at, and saves it as a stop', 
     await panel.locator('.commute-hits button').first().click();
   };
   // Door to door, exactly as a commute is normally saved: no interchange.
-  await pick('Choose a From stop…', 'engelsrud');
+  await expect(panel.getByRole('button', { name: 'Choose a From stop…' })).toBeEnabled({
+    timeout: 90_000,
+  });
+  await panel.getByRole('button', { name: 'Choose a From stop…' }).click();
+  await panel.getByRole('searchbox').fill('engelsrud');
+  const engelsrudHits = panel.locator('.commute-hits button');
+  await expect(engelsrudHits).toHaveCount(2);
+  await expect(engelsrudHits.nth(0)).toContainText('Bus · Asker');
+  await expect(engelsrudHits.nth(1)).toContainText('Bus · Lillestrøm');
+  await engelsrudHits.nth(0).click();
   await pick('Choose a To stop…', 'nationaltheatret');
 
   // Nothing to choose between yet — which is the state that used to be silent.

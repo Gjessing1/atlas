@@ -194,6 +194,8 @@ export interface XyzUpstream {
   missingTile?: 'arcgis-etag';
   /** Parent level used to synthesize correctly aligned missing detail tiles. */
   fallbackMaxzoom?: number;
+  /** Server-side colour treatment for a source whose native imagery is not a usable map. */
+  transform?: 'light-pollution-palette';
 }
 
 /**
@@ -561,9 +563,9 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'light-pollution',
-        rev: 1,
+        rev: 2,
         title: 'Light pollution',
-        description: 'Artificial light observed at night by the VIIRS satellite.',
+        description: 'VIIRS artificial-light radiance in a dark-sky planning palette.',
         group: 'Weather',
         attribution: '© NASA Earth Observatory / Suomi NPP VIIRS',
         metadataUrl: 'https://gibs.earthdata.nasa.gov/layer-metadata/v1.0/VIIRS_Night_Lights.json',
@@ -571,7 +573,7 @@ export function norwegianLayers(): OverlayLayer[] {
         defaultOpacity: 0.72,
         identify: false,
         coverageNote:
-          '2016 annual night-light radiance. A useful dark-sky proxy, not a direct ground-level sky-brightness or Bortle measurement.',
+          '2016 annual radiance, recoloured from dark blue through green, yellow and red. A useful dark-sky proxy, not a direct Bortle measurement.',
       },
       upstream: {
         kind: 'xyz',
@@ -579,6 +581,7 @@ export function norwegianLayers(): OverlayLayer[] {
         // tiles through level 8. WMTS REST uses z/row/column (z/y/x).
         template:
           'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Night_Lights/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png',
+        transform: 'light-pollution-palette',
       },
     },
     {

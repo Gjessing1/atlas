@@ -141,6 +141,80 @@ export function LayersContent({
   const searching = query.trim().length > 0;
   const visibleGroups = searchLayerGroups(groups, query);
   const activeLayers = overlays.catalog.filter((meta) => overlays.isOn(meta.id));
+  const visibleIds = new Set(visibleGroups.flatMap((group) => group.layers.map((meta) => meta.id)));
+  const visibleActiveLayers = searching
+    ? activeLayers.filter((meta) => visibleIds.has(meta.id))
+    : activeLayers;
+  const availableGroups = visibleGroups
+    .map((group) => ({
+      ...group,
+      layers: group.layers.filter((meta) => !overlays.isOn(meta.id)),
+    }))
+    .filter((group) => group.layers.length > 0);
+  const layerRow = (meta: LayerMeta, keyPrefix = '') => {
+    const on = overlays.isOn(meta.id);
+    const opacity = overlays.opacityFor(meta.id);
+    return (
+      <View key={`${keyPrefix}${meta.id}`} style={styles.row}>
+        <Pressable
+          style={styles.toggleRow}
+          onPress={() => overlays.toggle(meta.id)}
+          testID={`layer-toggle-${meta.id}`}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: on }}
+        >
+          <Text style={styles.layerTitle}>{meta.title}</Text>
+          <View style={[styles.toggle, on ? styles.toggleOn : null]}>
+            <View style={[styles.toggleThumb, on ? styles.toggleThumbOn : null]} />
+          </View>
+        </Pressable>
+        <Text style={styles.muted}>
+          {meta.description}{' '}
+          {meta.metadataUrl ? (
+            <Text style={styles.sourceLink} onPress={() => void Linking.openURL(meta.metadataUrl!)}>
+              source
+            </Text>
+          ) : null}
+        </Text>
+        {on
+          ? meta.options?.map((option) => (
+              <LayerOptionChips key={option.key} overlays={overlays} meta={meta} option={option} />
+            ))
+          : null}
+        {on ? <DerivedLegend meta={meta} /> : null}
+        {on && meta.derived && keepOffline ? (
+          <KeepOffline meta={meta} controls={keepOffline} />
+        ) : null}
+        {on && meta.minzoom !== undefined ? (
+          <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
+        ) : null}
+        {on && meta.coverageNote ? <Text style={styles.hint}>{meta.coverageNote}</Text> : null}
+        {on ? (
+          <View style={styles.opacityRow}>
+            {OPACITY_STEPS.map((step) => (
+              <Pressable
+                key={step}
+                style={[
+                  styles.opacityChip,
+                  Math.abs(opacity - step) < 0.125 ? styles.opacityChipOn : null,
+                ]}
+                onPress={() => overlays.setOpacity(meta.id, step)}
+              >
+                <Text
+                  style={[
+                    styles.opacityChipText,
+                    Math.abs(opacity - step) < 0.125 ? styles.opacityChipTextOn : null,
+                  ]}
+                >
+                  {Math.round(step * 100)}%
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   return (
     <View>
@@ -192,100 +266,16 @@ export function LayersContent({
           overlay with gaps on its own — this profile only.
         </Text>
       </View>
-      {activeLayers.length > 0 && !searching ? (
+      {visibleActiveLayers.length > 0 ? (
         <View style={styles.activeSection}>
           <Text style={styles.groupHeading}>Active</Text>
-          {activeLayers.map((meta) => (
-            <Pressable
-              key={`active-${meta.id}`}
-              style={styles.activeRow}
-              onPress={() => overlays.toggle(meta.id)}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: true }}
-            >
-              <Text style={styles.layerTitle}>{meta.title}</Text>
-              <View style={[styles.toggle, styles.toggleOn]}>
-                <View style={[styles.toggleThumb, styles.toggleThumbOn]} />
-              </View>
-            </Pressable>
-          ))}
+          {visibleActiveLayers.map((meta) => layerRow(meta, 'active-'))}
         </View>
       ) : null}
-      {visibleGroups.map((group) => (
+      {availableGroups.map((group) => (
         <View key={group.name}>
           <Text style={styles.groupHeading}>{group.name}</Text>
-          {group.layers.map((meta) => {
-            const on = overlays.isOn(meta.id);
-            const opacity = overlays.opacityFor(meta.id);
-            return (
-              <View key={meta.id} style={styles.row}>
-                <Pressable
-                  style={styles.toggleRow}
-                  onPress={() => overlays.toggle(meta.id)}
-                  testID={`layer-toggle-${meta.id}`}
-                >
-                  <Text style={styles.layerTitle}>{meta.title}</Text>
-                  <View style={[styles.toggle, on ? styles.toggleOn : null]}>
-                    <View style={[styles.toggleThumb, on ? styles.toggleThumbOn : null]} />
-                  </View>
-                </Pressable>
-                <Text style={styles.muted}>
-                  {meta.description}{' '}
-                  {meta.metadataUrl ? (
-                    <Text
-                      style={styles.sourceLink}
-                      onPress={() => void Linking.openURL(meta.metadataUrl!)}
-                    >
-                      source
-                    </Text>
-                  ) : null}
-                </Text>
-                {on
-                  ? meta.options?.map((option) => (
-                      <LayerOptionChips
-                        key={option.key}
-                        overlays={overlays}
-                        meta={meta}
-                        option={option}
-                      />
-                    ))
-                  : null}
-                {on ? <DerivedLegend meta={meta} /> : null}
-                {on && meta.derived && keepOffline ? (
-                  <KeepOffline meta={meta} controls={keepOffline} />
-                ) : null}
-                {on && meta.minzoom !== undefined ? (
-                  <Text style={styles.hint}>Visible from zoom {meta.minzoom} — zoom in.</Text>
-                ) : null}
-                {on && meta.coverageNote ? (
-                  <Text style={styles.hint}>{meta.coverageNote}</Text>
-                ) : null}
-                {on ? (
-                  <View style={styles.opacityRow}>
-                    {OPACITY_STEPS.map((step) => (
-                      <Pressable
-                        key={step}
-                        style={[
-                          styles.opacityChip,
-                          Math.abs(opacity - step) < 0.125 ? styles.opacityChipOn : null,
-                        ]}
-                        onPress={() => overlays.setOpacity(meta.id, step)}
-                      >
-                        <Text
-                          style={[
-                            styles.opacityChipText,
-                            Math.abs(opacity - step) < 0.125 ? styles.opacityChipTextOn : null,
-                          ]}
-                        >
-                          {Math.round(step * 100)}%
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
+          {group.layers.map((meta) => layerRow(meta))}
         </View>
       ))}
     </View>
@@ -394,7 +384,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: theme.surfaceMuted,
   },
-  activeRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 10 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   toggle: {
     width: 34,

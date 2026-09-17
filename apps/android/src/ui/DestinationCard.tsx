@@ -62,6 +62,8 @@ export interface DestinationTarget {
   placeId?: string;
   /** Exact National Stop Register identity, when picked from Entur stop search. */
   transitStopId?: string;
+  /** False when the basemap already draws the selected POI at this coordinate. */
+  showMapMarker?: boolean;
   /**
    * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
    * depth, a parcel's number). Arrives after the card opens — the network round
@@ -414,6 +416,14 @@ export function DestinationCard({
           <WikiBadge />
           <Text style={styles.nearbyToggleText}>Nearby</Text>
         </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.nearbyWeather, pressed && styles.pressed]}
+          onPress={onWeather}
+          accessibilityLabel="Weather"
+          testID="destination-weather"
+        >
+          <WeatherIcon />
+        </Pressable>
       </View>
       {photosOpen ? (
         photos.status === 'loading' && !content.content.some((article) => article.image) ? (
@@ -525,7 +535,7 @@ export function DestinationCard({
             onPress={once(onSave)}
             testID="destination-save"
           >
-            <Text style={styles.saveText}>Save pin</Text>
+            <Text style={styles.saveText}>Save</Text>
           </Pressable>
         ) : null}
         {onEdit ? (
@@ -538,14 +548,6 @@ export function DestinationCard({
             <PencilIcon />
           </Pressable>
         ) : null}
-        <Pressable
-          style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
-          onPress={onWeather}
-          accessibilityLabel="Weather"
-          testID="destination-weather"
-        >
-          <WeatherIcon />
-        </Pressable>
         {transitCoversPoint(at) ? (
           <Pressable
             style={({ pressed }) => [styles.save, pressed && styles.pressed]}
@@ -652,6 +654,17 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
   },
   nearbyButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  nearbyWeather: {
+    width: 34,
+    height: 34,
+    marginLeft: 'auto',
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
   nearbyToggleOpen: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   nearbyToggleText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   nearbyList: { maxHeight: 200, marginTop: 6 },

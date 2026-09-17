@@ -27,6 +27,21 @@ test('settings areas own layers and profile layout while map controls stay in on
   await expect(grid.getByRole('button', { name: 'Find my location' })).toBeVisible();
   await expect(grid.getByRole('button', { name: 'Map layers' })).toBeVisible();
 
+  await grid.getByRole('button', { name: 'Map layers' }).click();
+  const quickLayers = page.getByRole('group', { name: 'Map layers' });
+  const terrainLayers = quickLayers.locator('.layer-switch-group').filter({ hasText: 'Terrain' });
+  await terrainLayers.getByRole('switch', { name: 'Hillshade' }).click();
+  await expect(
+    quickLayers.locator('.layer-switch-active').getByRole('switch', { name: 'Hillshade' }),
+  ).toHaveCount(1);
+  await expect(terrainLayers.getByRole('switch', { name: 'Hillshade' })).toHaveCount(0);
+  await quickLayers
+    .locator('.layer-switch-active')
+    .getByRole('switch', { name: 'Hillshade' })
+    .click();
+  await expect(terrainLayers.getByRole('switch', { name: 'Hillshade' })).toHaveCount(1);
+  await grid.getByRole('button', { name: 'Map layers' }).click();
+
   const cells = await Promise.all(
     ['.profile-switch', '.layer-switch', '.map-zoom-controls', '.map-locate-control'].map(
       (selector) => grid.locator(selector).boundingBox(),

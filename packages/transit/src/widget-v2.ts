@@ -68,12 +68,18 @@ import { haversineM } from '@atlas/core';
 
 import { norwayClock, norwayInstant, norwayTime } from './clock.js';
 import type { CommuteEmptyReason } from './commute.js';
-import { commuteLineFilter, commuteTransitQueries, defaultCommuteDirection } from './commute.js';
+import {
+  commuteLineFilter,
+  commuteSegmentQueries,
+  commuteTransitQueries,
+  defaultCommuteDirection,
+} from './commute.js';
 import {
   commuteCountdown,
   commuteDurationLabel,
   commuteJourney,
   commuteJourneyList,
+  commuteInterchangeHops,
   commuteOrigins,
   commuteSegments,
   type CommuteJourney,
@@ -613,16 +619,33 @@ export function commuteCommitQuery(
 export function commuteWidgetV2Queries({
   query,
   directions,
+  interchange = false,
   commit,
   nowMs,
   maxRows,
 }: {
   query: TransitCommuteQuery;
   directions: readonly TransitCommuteDirection[];
+  /** Ask the two outgoing hops from the saved change, like the panel's middle mode. */
+  interchange?: boolean;
   commit: TransitWidgetV2Commit | null;
   nowMs: number;
   maxRows: number;
-}): { key: TransitCommuteDirection; query: TransitQuery }[] {
+}): { key: TransitCommuteDirection; query: TransitQuery; label?: string }[] {
+  if (interchange) {
+    const primary = defaultCommuteDirection(query, nowMs);
+    const hops = commuteInterchangeHops(query, primary);
+    if (hops.length > 0) {
+      const questions = commuteSegmentQueries(query, maxRows);
+      return hops.flatMap((hop) => {
+        const found = questions.find((entry) => entry.segment.id === hop.id);
+        return found ? [{ key: hop.direction, query: found.query, label: hop.label }] : [];
+      });
+    }
+    // A stale cached place can still say "interchange" after that stop was
+    // removed from the commute. Keep the useful two-direction board rather
+    // than turning the widget blank while the cache catches up.
+  }
   const base = commuteTransitQueries({ ...query, limit: maxRows }, nowMs);
   return directions.map((key) => {
     const asked = base[key];
@@ -682,8 +705,8 @@ export function commuteCommitHolds(journey: CommuteJourney, nowMs: number): bool
 
 // ---------------------------------------------------------- the selector ---
 
-/** What the selector is set to. `auto` is the default and the thing one tap returns to. */
-export type TransitWidgetV2Selector = TransitCommuteDirection | 'auto';
+/** Visible panel modes plus the automatic setting kept by already-installed widgets. */
+export type TransitWidgetV2Selector = TransitCommuteDirection | 'interchange' | 'auto';
 
 /**
  * A coarse, cached idea of where the phone is — AUTO's *presentation* only.
@@ -721,9 +744,9 @@ export function commutePlaceAt(query: TransitCommuteQuery, point: LatLng): Trans
 /** One option in the compact direction selector. */
 export interface TransitWidgetV2Option {
   key: TransitWidgetV2Selector;
-  /** `"Whichever is next"` — the full phrasing, for the chooser and the reader. */
+  /** Full phrasing for accessibility. */
   label: string;
-  /** `"AUTO"`, `"TO OSLO"`, `"TO HOME"` — what fits on the widget's own chip. */
+  /** `"OUTBOUND"`, `"INTERCHANGE"`, `"RETURN"` — panel parity on the widget. */
   short: string;
 }
 
@@ -811,16 +834,24 @@ function directionShort(query: TransitCommuteQuery, direction: TransitCommuteDir
 /** Every option the selector offers, in the order it draws them. */
 export function commuteSelectorOptions(query: TransitCommuteQuery): TransitWidgetV2Option[] {
   return [
-    { key: 'auto', label: 'Whichever is next', short: 'AUTO' },
     {
       key: 'outbound',
       label: commuteDirectionLabel(query, 'outbound'),
-      short: directionShort(query, 'outbound'),
+      short: 'OUTBOUND',
     },
+    ...(query.via.length > 0
+      ? [
+          {
+            key: 'interchange' as const,
+            label: 'Departures from the interchange',
+            short: 'INTERCHANGE',
+          },
+        ]
+      : []),
     {
       key: 'inbound',
       label: commuteDirectionLabel(query, 'inbound'),
-      short: directionShort(query, 'inbound'),
+      short: 'RETURN',
     },
   ];
 }
@@ -863,6 +894,9 @@ export function resolveCommuteV2Directions({
   place: TransitWidgetV2Place | null;
   nowMs: number;
 }): TransitWidgetV2Resolution {
+  if (selector === 'interchange') {
+    return { directions: ['outbound', 'inbound'], reason: 'interchange', pin: null };
+  }
   if (selector !== 'auto') {
     const releasesAtMs = commuteDirectionPinReleaseMs(query, selector, pinnedAtMs || nowMs);
     if (nowMs < releasesAtMs) {
@@ -1210,6 +1244,8 @@ export function commuteWidgetV2Board({
     key: TransitCommuteDirection;
     result: TransitResult;
     emptyReason: CommuteEmptyReason;
+    /** Interchange mode narrows the block to one outgoing corridor hop. */
+    label?: string;
   }[];
   resolution: TransitWidgetV2Resolution;
   selector: TransitWidgetV2Selector;
@@ -1230,7 +1266,7 @@ export function commuteWidgetV2Board({
   // Derived once per direction and kept: the focus needs the *journey* behind
   // the leading row, and re-deriving it from the same trips would be a second
   // answer to what the first departure is.
-  const prepared = results.map(({ key, result, emptyReason }) => {
+  const prepared = results.map(({ key, result, emptyReason, label }) => {
     const journeys = directionJourneys(result, nowMs, maxRows);
     const rows: TransitWidgetV2Row[] = journeys.map((journey) => {
       const id = commuteCommitId(key, journey);
@@ -1240,7 +1276,7 @@ export function commuteWidgetV2Board({
       journeys,
       block: {
         key,
-        label: commuteDirectionLabel(query, key),
+        label: label ?? commuteDirectionLabel(query, key),
         short: directionShort(query, key),
         rows,
         note: rows.length === 0 && emptyReason !== 'none' ? emptyDirectionNote(emptyReason) : null,
@@ -1287,6 +1323,15 @@ export function commuteWidgetV2Board({
     blocks.find((block) => block.note)?.note ?? null,
   );
   const options = commuteSelectorOptions(query);
+  const interchangeAvailable = query.via.length > 0;
+  const displayedMode: Exclude<TransitWidgetV2Selector, 'auto'> =
+    selector === 'auto'
+      ? resolution.reason === 'interchange' && interchangeAvailable
+        ? 'interchange'
+        : (resolution.directions[0] ?? 'outbound')
+      : selector === 'interchange' && !interchangeAvailable
+        ? (resolution.directions[0] ?? 'outbound')
+        : selector;
   const timetableRefreshMs = commuteRefreshAtMs(
     query,
     [...allRows].sort((a, b) => a.whenMs - b.whenMs),
@@ -1297,8 +1342,8 @@ export function commuteWidgetV2Board({
     variant: 'v2',
     route: commuteRouteLabel(query),
     selector: {
-      mode: selector,
-      label: options.find((option) => option.key === selector)?.short ?? 'AUTO',
+      mode: displayedMode,
+      label: options.find((option) => option.key === displayedMode)?.short ?? 'OUTBOUND',
       options,
       note: resolution.pin ? pinNote(resolution.pin.releasesAtMs, nowMs) : null,
       releasesAtMs: resolution.pin?.releasesAtMs ?? null,

@@ -1191,7 +1191,6 @@ describe('POST /api/transit/widget', () => {
       expect(board.blocks[0].key).toBe('outbound');
       expect(board.selector.mode).toBe('outbound');
       expect(board.selector.options.map((o: { key: string }) => o.key)).toEqual([
-        'auto',
         'outbound',
         'inbound',
       ]);

@@ -1808,7 +1808,7 @@ export function MapScene({
                 <PlacePin color="#16324f" icon="🏁" />
               </View>
             </Marker>
-          ) : destination ? (
+          ) : destination && destination.showMapMarker !== false ? (
             // Draggable (long-press + drag) so a picked point can be fine-tuned;
             // full-size on purpose: the annotation renders to a bitmap, so the
             // zoom-proportional transform the Markers use wouldn't refresh it.

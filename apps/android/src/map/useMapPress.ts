@@ -205,6 +205,10 @@ export function useMapPress({
           name,
           detail: kind || undefined,
           canSave: true,
+          // The style's POI symbol is already the visual target. A second
+          // teardrop at the same coordinate can reorder behind it while the
+          // map pans/zooms and flash through as a stray blue-backed pin.
+          showMapMarker: false,
         };
       };
 

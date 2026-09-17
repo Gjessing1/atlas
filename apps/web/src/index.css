@@ -986,6 +986,21 @@ button {
   border-color: var(--accent);
 }
 
+.place-card-nearby-weather {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .place-card-nearby ul {
   list-style: none;
   margin: 0;
@@ -3947,6 +3962,7 @@ button.transit-notice-summary {
 .route-source-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -7854,10 +7870,14 @@ button.transit-notice-summary {
   font-size: 12px;
 }
 
-.commute-board-line span {
-  color: var(--text-muted);
-  font-size: 10px;
+.commute-board-line .commute-board-arrival {
+  color: var(--text);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.commute-board-arrival strong {
+  font-weight: 800;
 }
 
 .commute-board-when {

@@ -129,6 +129,24 @@ describe('useRoute', () => {
     expect(route.mock.calls.at(-1)![0].roundTrip).toBeUndefined();
   });
 
+  it('keeps a Directions destination last when its start is entered later', async () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+
+    act(() => result.current.start());
+    act(() => result.current.addDestination(B, 'Bergen'));
+    expect(result.current.missingStart).toBe(true);
+    expect(result.current.waypoints.map((w) => w.pos)).toEqual([B]);
+
+    // Search, a map tap and the late GPS fill all use these same planner
+    // operations, so the first point supplied becomes the origin.
+    act(() => result.current.addWaypoint(A, 'Oslo'));
+    await settle();
+    expect(result.current.missingStart).toBe(false);
+    expect(result.current.waypoints.map((w) => w.pos)).toEqual([A, B]);
+    expect(route.mock.calls.at(-1)![0].points).toEqual([A, B]);
+  });
+
   it('routes every mode in the background so the picker can show trip times', async () => {
     const timeByProfile: Record<string, number> = {
       car: 1_440_000,

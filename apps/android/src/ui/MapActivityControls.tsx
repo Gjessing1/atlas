@@ -117,6 +117,18 @@ export function MapActivityControls({
     [layerGroups, layerQuery],
   );
   const activeLayers = overlays.catalog.filter((meta) => overlays.isOn(meta.id));
+  const visibleLayerIds = new Set(
+    visibleLayerGroups.flatMap((group) => group.layers.map((meta) => meta.id)),
+  );
+  const visibleActiveLayers = searchingLayers
+    ? activeLayers.filter((meta) => visibleLayerIds.has(meta.id))
+    : activeLayers;
+  const availableLayerGroups = visibleLayerGroups
+    .map((group) => ({
+      ...group,
+      layers: group.layers.filter((meta) => !overlays.isOn(meta.id)),
+    }))
+    .filter((group) => group.layers.length > 0);
   const menuBottom = bottom + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
   const closeMenus = () => {
     setLayersOpen(false);
@@ -340,10 +352,10 @@ export function MapActivityControls({
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.layerMenuContent}
           >
-            {activeLayers.length > 0 && !searchingLayers ? (
+            {visibleActiveLayers.length > 0 ? (
               <View style={styles.activeLayers}>
                 <Text style={styles.layerGroupHeading}>Active</Text>
-                {activeLayers.map((meta) => (
+                {visibleActiveLayers.map((meta) => (
                   <Pressable
                     key={`active-${meta.id}`}
                     style={styles.layerItem}
@@ -361,7 +373,7 @@ export function MapActivityControls({
                 ))}
               </View>
             ) : null}
-            {visibleLayerGroups.map((group) => (
+            {availableLayerGroups.map((group) => (
               <View key={group.name}>
                 <Text style={styles.layerGroupHeading}>{group.name}</Text>
                 {group.layers.map((meta) => {
@@ -394,7 +406,9 @@ export function MapActivityControls({
                 })}
               </View>
             ))}
-            {searchingLayers && visibleLayerGroups.length === 0 ? (
+            {searchingLayers &&
+            visibleActiveLayers.length === 0 &&
+            availableLayerGroups.length === 0 ? (
               <Text style={styles.layerNoMatch}>No layers match.</Text>
             ) : null}
             {/* The map the overlays are drawn on, at the foot and below a rule.
