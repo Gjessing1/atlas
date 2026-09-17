@@ -25,7 +25,7 @@ import { copyToClipboard } from './clipboard';
 import { PotentialExplainCard } from './PotentialExplainCard';
 import { StandBlock } from './StandBlock';
 import { StopDepartures } from './StopDepartures';
-import { PencilIcon, WeatherIcon } from './icons';
+import { CameraIcon, PencilIcon, WeatherIcon } from './icons';
 import { BusIcon, DirectionsIcon, ShareIcon } from './modeIcons';
 import { theme } from './theme';
 
@@ -85,7 +85,7 @@ function WikiBadge() {
 /**
  * The two "what is this spot like" facts, above everything about what can be
  * *done* with the spot. Elevation is fetched and Norway-only, so it states its
- * own absence rather than silently leaving the row short; light is local maths
+ * own absence rather than silently leaving the row short; daylight is local maths
  * and is simply omitted on the rare day it has nothing to say.
  */
 function PlaceFacts({ elevation, light }: ReturnType<typeof usePlaceFacts>) {
@@ -107,7 +107,7 @@ function PlaceFacts({ elevation, light }: ReturnType<typeof usePlaceFacts>) {
       </View>
       {light ? (
         <View style={styles.factRow}>
-          <Text style={styles.factLabel}>Light</Text>
+          <Text style={styles.factLabel}>Daylight</Text>
           <Text style={styles.factValue}>{light}</Text>
         </View>
       ) : null}
@@ -392,10 +392,12 @@ export function DestinationCard({
             if (opening) expand();
           }}
           accessibilityRole="button"
+          accessibilityLabel="Photos nearby"
           accessibilityState={{ expanded: photosOpen }}
           testID="destination-photos-toggle"
         >
-          <Text style={styles.nearbyToggleText}>◫ Photos nearby</Text>
+          <CameraIcon />
+          <Text style={styles.nearbyToggleText}>Nearby</Text>
         </Pressable>
         <Pressable
           style={[styles.nearbyToggle, nearbyOpen && styles.nearbyToggleOpen]}
@@ -405,11 +407,12 @@ export function DestinationCard({
             if (opening) expand();
           }}
           accessibilityRole="button"
+          accessibilityLabel="Nearby places"
           accessibilityState={{ expanded: nearbyOpen }}
           testID="destination-nearby-toggle"
         >
           <WikiBadge />
-          <Text style={styles.nearbyToggleText}>Nearby places</Text>
+          <Text style={styles.nearbyToggleText}>Nearby</Text>
         </Pressable>
       </View>
       {photosOpen ? (
@@ -527,21 +530,21 @@ export function DestinationCard({
         ) : null}
         {onEdit ? (
           <Pressable
-            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
             onPress={once(onEdit)}
+            accessibilityLabel="Edit saved place"
             testID="destination-edit"
           >
             <PencilIcon />
-            <Text style={styles.saveText}>Edit</Text>
           </Pressable>
         ) : null}
         <Pressable
-          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
           onPress={onWeather}
+          accessibilityLabel="Weather"
           testID="destination-weather"
         >
           <WeatherIcon />
-          <Text style={styles.saveText}>Weather</Text>
         </Pressable>
         {transitCoversPoint(at) ? (
           <Pressable
@@ -558,12 +561,12 @@ export function DestinationCard({
           </Pressable>
         ) : null}
         <Pressable
-          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
           onPress={onShare}
+          accessibilityLabel="Share"
           testID="destination-share"
         >
           <ShareIcon />
-          <Text style={styles.saveText}>Share</Text>
         </Pressable>
       </View>
       {departuresOpen ? (
@@ -585,12 +588,12 @@ const styles = StyleSheet.create({
   name: { fontSize: 17, fontWeight: '700', color: theme.text },
   detail: { fontSize: 13, color: theme.textMuted, marginTop: 1 },
   close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
-  facts: { marginTop: 10, gap: 2 },
-  factRow: { flexDirection: 'row', gap: 6, alignItems: 'flex-start' },
+  facts: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  factRow: { flexDirection: 'row', gap: 4, alignItems: 'flex-start' },
   // A fixed label column keeps the two values aligned; the light line is long
   // enough to wrap, and wrapping under a ragged label reads as two columns.
-  factLabel: { width: 62, fontSize: 12, color: theme.textMuted },
-  factValue: { flex: 1, fontSize: 12, color: theme.text },
+  factLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+  factValue: { fontSize: 12, color: theme.text },
   identify: { maxHeight: 132, marginTop: 12 },
   // Opened by "Show more" — still bounded, so the card's actions stay on the
   // sheet however much the upstream has to say.
@@ -680,6 +683,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     alignItems: 'center',
+  },
+  iconAction: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surfaceMuted,
   },
   saveText: { color: theme.text, fontWeight: '700', fontSize: 14 },
   pressed: { opacity: 0.65 },

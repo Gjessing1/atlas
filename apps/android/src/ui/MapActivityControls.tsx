@@ -3,9 +3,17 @@ import type {
   MapProfileController,
   PotentialTargetSwitch,
 } from '@atlas/app-hooks';
-import { groupLayerCatalog, type LayerMeta, type MapProfile } from '@atlas/core';
+import { groupLayerCatalog, searchLayerGroups, type LayerMeta, type MapProfile } from '@atlas/core';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import { useSideInsets } from './insets';
@@ -20,6 +28,15 @@ function variantLabel(overlays: OverlaysController, meta: LayerMeta): string | n
     .map((option) => option.choices.find((choice) => choice.value === chosen[option.key])?.label)
     .filter((label): label is string => Boolean(label));
   return labels.length > 0 ? labels.join(' · ') : null;
+}
+
+/** A persistent on/off state, drawn as a switch rather than a form checkbox. */
+function SwitchTrack({ on }: { on: boolean }) {
+  return (
+    <View style={[styles.switchTrack, on && styles.switchTrackOn]} pointerEvents="none">
+      <View style={[styles.switchThumb, on && styles.switchThumbOn]} />
+    </View>
+  );
 }
 
 /**
@@ -69,6 +86,8 @@ export function MapActivityControls({
   const [profilesOpen, setProfilesOpen] = useState(false);
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [layerSearchOpen, setLayerSearchOpen] = useState(false);
+  const [layerQuery, setLayerQuery] = useState('');
   const win = useWindowDimensions();
   // In landscape the system navigation bar sits on a side of the screen: the
   // triggers and the menus they open both start inside it. `right` is the
@@ -92,9 +111,17 @@ export function MapActivityControls({
     () => groupLayerCatalog(overlays.catalog, overlays.profileId),
     [overlays.catalog, overlays.profileId],
   );
+  const searchingLayers = layerQuery.trim().length > 0;
+  const visibleLayerGroups = useMemo(
+    () => searchLayerGroups(layerGroups, layerQuery),
+    [layerGroups, layerQuery],
+  );
+  const activeLayers = overlays.catalog.filter((meta) => overlays.isOn(meta.id));
   const menuBottom = bottom + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
   const closeMenus = () => {
     setLayersOpen(false);
+    setLayerSearchOpen(false);
+    setLayerQuery('');
     setProfilesOpen(false);
     setTargetsOpen(false);
     setFiltersOpen(false);
@@ -277,8 +304,64 @@ export function MapActivityControls({
           ]}
           accessibilityLabel="Map layers"
         >
-          <ScrollView bounces={false} contentContainerStyle={styles.layerMenuContent}>
-            {layerGroups.map((group) => (
+          {/* Web's twin (LayerQuickSwitch): a header whose search narrows the
+              profile's own catalog, then everything switched on in one place,
+              then the categories — which still show those layers as on, so the
+              structure reads the same either way. */}
+          <View style={styles.layerMenuHead}>
+            <Text style={styles.layerMenuTitle}>Layers</Text>
+            <Pressable
+              style={styles.layerSearchButton}
+              onPress={() => {
+                if (layerSearchOpen) setLayerQuery('');
+                setLayerSearchOpen((open) => !open);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Search layers"
+              accessibilityState={{ expanded: layerSearchOpen }}
+              testID="layer-quick-search-toggle"
+            >
+              <Text style={styles.layerSearchGlyph}>⌕</Text>
+            </Pressable>
+          </View>
+          {layerSearchOpen ? (
+            <TextInput
+              style={styles.layerSearchInput}
+              value={layerQuery}
+              onChangeText={setLayerQuery}
+              placeholder="Search layers"
+              placeholderTextColor={theme.textMuted}
+              autoFocus
+              testID="layer-quick-search"
+            />
+          ) : null}
+          <ScrollView
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.layerMenuContent}
+          >
+            {activeLayers.length > 0 && !searchingLayers ? (
+              <View style={styles.activeLayers}>
+                <Text style={styles.layerGroupHeading}>Active</Text>
+                {activeLayers.map((meta) => (
+                  <Pressable
+                    key={`active-${meta.id}`}
+                    style={styles.layerItem}
+                    onPress={() => overlays.toggle(meta.id)}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: true }}
+                    accessibilityLabel={meta.title}
+                    testID={`layer-quick-active-${meta.id}`}
+                  >
+                    <Text style={[styles.layerLabel, styles.layerLabelOn]} numberOfLines={1}>
+                      {meta.title}
+                    </Text>
+                    <SwitchTrack on />
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            {visibleLayerGroups.map((group) => (
               <View key={group.name}>
                 <Text style={styles.layerGroupHeading}>{group.name}</Text>
                 {group.layers.map((meta) => {
@@ -295,9 +378,6 @@ export function MapActivityControls({
                       accessibilityLabel={variant ? `${meta.title}, ${variant}` : meta.title}
                       testID={`layer-quick-${meta.id}`}
                     >
-                      <View style={[styles.check, on && styles.checkOn]}>
-                        {on ? <Text style={styles.checkText}>✓</Text> : null}
-                      </View>
                       <Text
                         style={[styles.layerLabel, on && styles.layerLabelOn]}
                         numberOfLines={1}
@@ -308,11 +388,15 @@ export function MapActivityControls({
                       {on && tooLowZoom ? (
                         <Text style={styles.zoomHint}>z{meta.minzoom}+</Text>
                       ) : null}
+                      <SwitchTrack on={on} />
                     </Pressable>
                   );
                 })}
               </View>
             ))}
+            {searchingLayers && visibleLayerGroups.length === 0 ? (
+              <Text style={styles.layerNoMatch}>No layers match.</Text>
+            ) : null}
             {/* The map the overlays are drawn on, at the foot and below a rule.
                 Off is how a scanned 1826 sheet — or any raster with holes — is
                 read honestly; today's coloured land fills the holes. */}
@@ -324,15 +408,13 @@ export function MapActivityControls({
               accessibilityLabel="Base map"
               testID="layer-quick-basemap"
             >
-              <View style={[styles.check, overlays.basemapOn && styles.checkOn]}>
-                {overlays.basemapOn ? <Text style={styles.checkText}>✓</Text> : null}
-              </View>
               <Text
                 style={[styles.layerLabel, overlays.basemapOn && styles.layerLabelOn]}
                 numberOfLines={1}
               >
                 Base map
               </Text>
+              <SwitchTrack on={overlays.basemapOn} />
             </Pressable>
           </ScrollView>
         </View>
@@ -422,6 +504,8 @@ export function MapActivityControls({
               setProfilesOpen(false);
               setTargetsOpen(false);
               setFiltersOpen(false);
+              setLayerSearchOpen(false);
+              setLayerQuery('');
               setLayersOpen((open) => !open);
             }}
             accessibilityRole="button"
@@ -595,17 +679,50 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   layerItemOn: { backgroundColor: theme.surfaceActive },
-  check: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: theme.border,
+  switchTrack: {
+    width: 30,
+    height: 18,
+    padding: 2,
+    borderRadius: 9,
+    backgroundColor: theme.border,
+  },
+  switchTrackOn: { backgroundColor: theme.accent },
+  switchThumb: { width: 14, height: 14, borderRadius: 7, backgroundColor: theme.surface },
+  switchThumbOn: { transform: [{ translateX: 12 }] },
+  layerMenuHead: {
+    minHeight: 36,
+    paddingLeft: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  layerMenuTitle: { color: theme.text, fontSize: 14, fontWeight: '700' },
+  layerSearchButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkOn: { borderColor: theme.accent, backgroundColor: theme.accent },
-  checkText: { color: theme.onAccent, fontWeight: '800', fontSize: 12, lineHeight: 14 },
+  layerSearchGlyph: { color: theme.text, fontSize: 20 },
+  layerSearchInput: {
+    marginHorizontal: 4,
+    marginBottom: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    color: theme.text,
+    fontSize: 14,
+  },
+  activeLayers: {
+    marginBottom: 4,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  layerNoMatch: { paddingHorizontal: 9, paddingVertical: 10, color: theme.textMuted, fontSize: 13 },
   layerLabel: { flex: 1, color: theme.text, fontSize: 14 },
   layerLabelOn: { color: theme.accent, fontWeight: '700' },
   layerGroupHeading: {

@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_TRANSIT_PREFERENCES } from '@atlas/transit';
 import { registerTransitApi } from './transit-api.js';
 import { StatusRegistry } from './status.js';
 
@@ -209,6 +210,30 @@ describe('POST /api/transit', () => {
       arriveBy: true,
       walkSpeed: 1,
     });
+  });
+
+  it('validates and forwards journey preferences', async () => {
+    await plan({
+      from: asker,
+      to: nationaltheatret,
+      preferences: {
+        ...DEFAULT_TRANSIT_PREFERENCES,
+        accessMode: 'bicycle',
+        walkReluctance: 4,
+        transferSlackSeconds: 300,
+        maximumTransfers: 2,
+      },
+    });
+    expect(captured?.body.variables).toMatchObject({
+      walkReluctance: 4,
+      transferSlack: 300,
+      maximumTransfers: 2,
+      modes: { accessMode: 'bicycle', egressMode: 'bicycle' },
+    });
+
+    expect(
+      (await plan({ from: asker, to: nationaltheatret, preferences: 'fast' })).statusCode,
+    ).toBe(400);
   });
 
   it('forwards ordered via places as real timetable visits', async () => {

@@ -571,6 +571,21 @@ export function ShareIcon(props: IconProps) {
   );
 }
 
+/** Camera outline for photo discovery actions. */
+export function CameraIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M4 8.5h3l1.3-2h7.4l1.3 2h3v10H4z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13.5" r="3.1" stroke="currentColor" strokeWidth="1.7" />
+    </IconFrame>
+  );
+}
+
 /** Edit — the nib and its stroke, so a settings button need not spell itself out. */
 export function PencilIcon(props: IconProps) {
   return (

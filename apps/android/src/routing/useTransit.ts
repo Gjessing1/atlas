@@ -1,5 +1,6 @@
 import { useTransitPlan as useSharedTransitPlan, type TransitFn } from '@atlas/app-hooks';
 import { fetchTransitTrips } from '@atlas/transit';
+import type { TransitPreferences } from '@atlas/transit';
 import { useMemo } from 'react';
 
 import { useServerOrigin } from '../serverOrigin';
@@ -12,11 +13,11 @@ export type { TransitPlan } from '@atlas/app-hooks';
  * back to: a timetable without the network is a lie, so this always goes to the
  * configured Atlas server, and the board says so when the fetch fails.
  */
-export function useTransitPlan(route: RoutePlanner) {
+export function useTransitPlan(route: RoutePlanner, preferences: TransitPreferences) {
   const baseUrl = useServerOrigin();
   const transit = useMemo<TransitFn>(
     () => (query, signal) => fetchTransitTrips(query, { baseUrl, signal }),
     [baseUrl],
   );
-  return useSharedTransitPlan(route, transit);
+  return useSharedTransitPlan(route, transit, preferences);
 }

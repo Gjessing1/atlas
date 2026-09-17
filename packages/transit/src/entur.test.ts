@@ -9,6 +9,7 @@ import {
   TransitError,
 } from './entur.js';
 import { fetchTransitDepartures, fetchTransitTrips } from './client.js';
+import { DEFAULT_TRANSIT_PREFERENCES } from './preferences.js';
 import {
   isRideMode,
   legDelayMs,
@@ -110,6 +111,36 @@ describe('buildEnturRequest', () => {
         { transportMode: 'coach' },
         { transportMode: 'tram' },
       ],
+    });
+  });
+
+  it('maps walking, transfer and city-bike preferences onto the live Entur inputs', () => {
+    const { variables } = buildEnturRequest({
+      from: asker,
+      to: nationaltheatret,
+      preferences: {
+        ...DEFAULT_TRANSIT_PREFERENCES,
+        accessMode: 'bike_rental',
+        walkSpeedMps: 1.6,
+        walkReluctance: 6,
+        transferSlackSeconds: 300,
+        maximumTransfers: 2,
+        bikeOptimisation: 'safe',
+        bikeRentalNetworks: ['oslobysykkel'],
+      },
+    });
+    expect(variables).toMatchObject({
+      walkSpeed: 1.6,
+      walkReluctance: 6,
+      transferSlack: 300,
+      maximumTransfers: 2,
+      bikePreferences: { speed: 4.2, reluctance: 2, optimisationMethod: 'safe' },
+      whiteListed: { rentalNetworks: ['oslobysykkel'] },
+      modes: {
+        accessMode: 'bike_rental',
+        egressMode: 'bike_rental',
+        directMode: 'bike_rental',
+      },
     });
   });
 

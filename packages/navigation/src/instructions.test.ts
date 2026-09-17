@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { shortManeuverText } from './instructions.js';
+import { maneuverActionText, shortManeuverText } from './instructions.js';
 
 describe('shortManeuverText', () => {
   it('reduces a roundabout to the exit to count and the road it leads to', () => {
@@ -60,5 +60,20 @@ describe('shortManeuverText', () => {
   it('leaves an already short instruction alone, minus its full stop', () => {
     expect(shortManeuverText({ text: 'Turn left onto Storgata.' })).toBe('Turn left onto Storgata');
     expect(shortManeuverText({ text: '' })).toBe('');
+  });
+});
+
+describe('maneuverActionText', () => {
+  it("leaves the road name for the banner's dedicated line", () => {
+    expect(
+      maneuverActionText({ text: 'Turn left onto Slyngveien.', streetName: 'Slyngveien' }),
+    ).toBe('Turn left');
+    expect(maneuverActionText({ text: 'Continue on E18.', streetName: 'E18' })).toBe('Continue');
+  });
+
+  it('keeps a useful instruction when no separate road name exists', () => {
+    expect(maneuverActionText({ text: 'Keep right toward Drammen.' })).toBe(
+      'Keep right toward Drammen',
+    );
   });
 });

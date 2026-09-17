@@ -134,18 +134,72 @@ export function exploreCategory(id: ExploreCategoryId): ExploreCategory {
   return CATEGORIES_BY_ID.get(id)!;
 }
 
-/** Numbered map markers in the exact order used by the Explore result list. */
+/**
+ * Numbered map markers in the exact order used by the Explore result list.
+ * Results within a finger-width at close zoom are spread around their shared
+ * centre with a short leader line. At ordinary zoom the source's clustering
+ * still folds them together; once the final cluster opens, every result has a
+ * distinct hit target instead of occupying the same pixels.
+ */
 export function exploreResultsFeatureCollection(results: readonly SearchResult[]) {
+  const closeGroups: number[][] = [];
+  results.forEach((result, index) => {
+    const group = closeGroups.find((memberIndexes) =>
+      memberIndexes.some(
+        (memberIndex) => haversineM(results[memberIndex]!.position, result.position) <= 12,
+      ),
+    );
+    if (group) group.push(index);
+    else closeGroups.push([index]);
+  });
+  const displayed = new Map<number, LatLng>();
+  for (const group of closeGroups) {
+    if (group.length < 2) continue;
+    const centre = group.reduce(
+      (sum, index) => ({
+        lat: sum.lat + results[index]!.position.lat / group.length,
+        lng: sum.lng + results[index]!.position.lng / group.length,
+      }),
+      { lat: 0, lng: 0 },
+    );
+    const radiusDeg = 0.00018;
+    const lngScale = Math.max(Math.cos((centre.lat * Math.PI) / 180), 0.2);
+    group.forEach((index, slot) => {
+      const angle = (2 * Math.PI * slot) / group.length - Math.PI / 2;
+      displayed.set(index, {
+        lat: centre.lat + Math.sin(angle) * radiusDeg,
+        lng: centre.lng + (Math.cos(angle) * radiusDeg) / lngScale,
+      });
+    });
+  }
   return {
     type: 'FeatureCollection' as const,
-    features: results.map((result, index) => ({
-      type: 'Feature' as const,
-      properties: { index, label: String(index + 1), name: result.name },
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [result.position.lng, result.position.lat],
-      },
-    })),
+    features: results.flatMap((result, index) => {
+      const shown = displayed.get(index) ?? result.position;
+      const point = {
+        type: 'Feature' as const,
+        properties: { index, label: String(index + 1), name: result.name },
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [shown.lng, shown.lat],
+        },
+      };
+      if (!displayed.has(index)) return [point];
+      return [
+        {
+          type: 'Feature' as const,
+          properties: { spiderLeg: true },
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: [
+              [result.position.lng, result.position.lat],
+              [shown.lng, shown.lat],
+            ],
+          },
+        },
+        point,
+      ];
+    }),
   };
 }
 

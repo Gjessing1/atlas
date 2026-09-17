@@ -1,4 +1,11 @@
-import { groupLayerCatalog, mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
+import {
+  groupLayerCatalog,
+  mapProfile,
+  searchLayerGroups,
+  type LayerMeta,
+  type LayerOption,
+} from '@atlas/core';
+import { useState } from 'react';
 import type { LayerCatalog } from './useLayerCatalog.js';
 
 /**
@@ -77,14 +84,87 @@ interface LayersPanelProps {
  * beats collapsible trees.
  */
 export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   if (layers.catalog.length === 0) return null;
 
   const groups = groupLayerCatalog(layers.catalog, layers.profileId);
+  const searching = query.trim().length > 0;
+  const visibleGroups = searchLayerGroups(groups, query);
+  const activeLayers = layers.catalog.filter((meta) => layers.isOn(meta.id));
   const note = mapProfile(layers.profileId).note;
+
+  const layerRow = (meta: LayerMeta, key: string) => {
+    const on = layers.isOn(meta.id);
+    const opacity = layers.opacityFor(meta.id);
+    return (
+      <div key={key} className="layer-row">
+        <label className="layer-toggle">
+          <span className="layer-name">{meta.title}</span>
+          <input type="checkbox" checked={on} onChange={() => layers.toggle(meta.id)} />
+          <span className="layer-toggle-control" aria-hidden="true" />
+        </label>
+        {on && (
+          <input
+            type="range"
+            className="layer-opacity"
+            min={10}
+            max={100}
+            value={Math.round(opacity * 100)}
+            onChange={(e) => layers.setOpacity(meta.id, Number(e.target.value) / 100)}
+            aria-label={`${meta.title} opacity`}
+            title="Opacity"
+          />
+        )}
+        <div className="layer-desc">
+          {meta.description}{' '}
+          {meta.metadataUrl && (
+            <a href={meta.metadataUrl} target="_blank" rel="noreferrer">
+              source
+            </a>
+          )}
+        </div>
+        {on &&
+          meta.options?.map((option) => (
+            <LayerOptionChips key={option.key} layers={layers} meta={meta} option={option} />
+          ))}
+        {on && <DerivedLegend meta={meta} />}
+        {on && meta.minzoom !== undefined && mapZoom < meta.minzoom && (
+          <div className="layer-hint">Zoom in to z{meta.minzoom}+ to see this layer.</div>
+        )}
+        {on && meta.coverageNote && <div className="layer-hint">{meta.coverageNote}</div>}
+      </div>
+    );
+  };
 
   return (
     <section className="layers-section" aria-label="Map layers">
-      <div className="layers-title">Map layers</div>
+      <div className="layers-title-row">
+        <div className="layers-title">Map layers</div>
+        <button
+          type="button"
+          className="layer-search-toggle"
+          aria-label="Search layers"
+          aria-expanded={searchOpen}
+          onClick={() => {
+            setSearchOpen((value) => !value);
+            if (searchOpen) setQuery('');
+          }}
+        >
+          ⌕
+        </button>
+      </div>
+      {searchOpen && (
+        <input
+          className="layer-search"
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search layers"
+          aria-label="Search available layers"
+          autoFocus
+        />
+      )}
       {note && <p className="layers-profile-note">{note}</p>}
       {/* The map the overlays are drawn on, above the overlays themselves.
           Switching it off is the honest way to read a raster with holes in it —
@@ -92,67 +172,29 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
           coloured land fills those holes and reads as part of the old map. */}
       <div className="layer-row">
         <label className="layer-toggle">
+          <span className="layer-name">Base map</span>
           <input
             type="checkbox"
             checked={layers.basemapOn}
             onChange={() => layers.setBasemapOn(!layers.basemapOn)}
           />
-          <span className="layer-name">Base map</span>
+          <span className="layer-toggle-control" aria-hidden="true" />
         </label>
         <div className="layer-desc">
           Roads, land and place names under the overlays. Turn it off to read a historic map or any
           overlay with gaps on its own — this profile only.
         </div>
       </div>
-      {groups.map((group) => (
+      {activeLayers.length > 0 && !searching && (
+        <div className="layers-active">
+          <div className="layers-group">Active</div>
+          {activeLayers.map((meta) => layerRow(meta, `active-${meta.id}`))}
+        </div>
+      )}
+      {visibleGroups.map((group) => (
         <div key={group.name}>
           <div className="layers-group">{group.name}</div>
-          {group.layers.map((meta) => {
-            const on = layers.isOn(meta.id);
-            const opacity = layers.opacityFor(meta.id);
-            return (
-              <div key={meta.id} className="layer-row">
-                <label className="layer-toggle">
-                  <input type="checkbox" checked={on} onChange={() => layers.toggle(meta.id)} />
-                  <span className="layer-name">{meta.title}</span>
-                </label>
-                {on && (
-                  <input
-                    type="range"
-                    className="layer-opacity"
-                    min={10}
-                    max={100}
-                    value={Math.round(opacity * 100)}
-                    onChange={(e) => layers.setOpacity(meta.id, Number(e.target.value) / 100)}
-                    aria-label={`${meta.title} opacity`}
-                    title="Opacity"
-                  />
-                )}
-                <div className="layer-desc">
-                  {meta.description}{' '}
-                  {meta.metadataUrl && (
-                    <a href={meta.metadataUrl} target="_blank" rel="noreferrer">
-                      source
-                    </a>
-                  )}
-                </div>
-                {on &&
-                  meta.options?.map((option) => (
-                    <LayerOptionChips
-                      key={option.key}
-                      layers={layers}
-                      meta={meta}
-                      option={option}
-                    />
-                  ))}
-                {on && <DerivedLegend meta={meta} />}
-                {on && meta.minzoom !== undefined && mapZoom < meta.minzoom && (
-                  <div className="layer-hint">Zoom in to z{meta.minzoom}+ to see this layer.</div>
-                )}
-                {on && meta.coverageNote && <div className="layer-hint">{meta.coverageNote}</div>}
-              </div>
-            );
-          })}
+          {group.layers.map((meta) => layerRow(meta, meta.id))}
         </div>
       ))}
     </section>

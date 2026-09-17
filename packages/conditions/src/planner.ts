@@ -14,7 +14,7 @@ import {
   type ConditionsKind,
   type HuntConditionsProfile,
 } from './conditions.js';
-import { sunPosition } from './sun.js';
+import { sunDay, sunPosition } from './sun.js';
 import type { WeatherForecast, WeatherPoint } from './weather.js';
 
 /** One planner row: a forecast step enriched with sun + (optionally) a conditions score. */
@@ -108,6 +108,55 @@ export interface ConditionsWindow {
   /** The best row inside the window. */
   peakIdx: number;
   peakScore: number;
+}
+
+export interface SunTimelineEvent {
+  kind: 'sunrise' | 'sunset';
+  timeMs: number;
+  /** Position along the supplied planner timeline, from 0 to 1. */
+  at: number;
+  /** Nearest planner row, useful for touch timelines made from discrete cells. */
+  index: number;
+}
+
+/** Sunrise/sunset events that fall inside a planner's visible hourly timeline. */
+export function sunTimelineEvents(
+  hours: readonly PlannerHour[],
+  lat: number,
+  lon: number,
+): SunTimelineEvent[] {
+  if (hours.length < 2) return [];
+  const start = hours[0]!.timeMs;
+  const end = hours.at(-1)!.timeMs;
+  const span = end - start;
+  if (span <= 0) return [];
+  const days = new Set<string>();
+  const events: SunTimelineEvent[] = [];
+  for (const hour of hours) {
+    const date = new Date(hour.timeMs);
+    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    if (days.has(key)) continue;
+    days.add(key);
+    const sun = sunDay(date, lat, lon);
+    for (const [kind, event] of [
+      ['sunrise', sun.sunrise],
+      ['sunset', sun.sunset],
+    ] as const) {
+      const timeMs = event?.getTime();
+      if (timeMs === undefined || timeMs < start || timeMs > end) continue;
+      let index = 0;
+      let distance = Infinity;
+      hours.forEach((candidate, candidateIndex) => {
+        const next = Math.abs(candidate.timeMs - timeMs);
+        if (next < distance) {
+          distance = next;
+          index = candidateIndex;
+        }
+      });
+      events.push({ kind, timeMs, at: (timeMs - start) / span, index });
+    }
+  }
+  return events.sort((a, b) => a.timeMs - b.timeMs);
 }
 
 /**

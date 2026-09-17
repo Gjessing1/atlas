@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { MenuIcon, NavArrowIcon, SearchIcon } from './icons';
 import { useSideInsets } from './insets';
-import { DirectionsIcon } from './modeIcons';
 import { theme } from './theme';
 
 interface MenuClusterProps {
@@ -11,7 +10,6 @@ interface MenuClusterProps {
   /** Hides search + route planning (they make no sense mid-trip). */
   following: boolean;
   onOpenSearch: () => void;
-  onPlanRoute: () => void;
   /** Follow the live position with no destination (nav's `exploring` phase). */
   onExplore: () => void;
 }
@@ -25,7 +23,6 @@ export function MenuCluster({
   onToggleMenu,
   following,
   onOpenSearch,
-  onPlanRoute,
   onExplore,
 }: MenuClusterProps) {
   // Landscape moves the system navigation bar to a side: start inside it.
@@ -44,17 +41,9 @@ export function MenuCluster({
             <SearchIcon />
           </Pressable>
         ) : null}
-        {!following ? (
-          <Pressable style={styles.roundButton} onPress={onPlanRoute} testID="plan-route">
-            <DirectionsIcon color={theme.accent} />
-          </Pressable>
-        ) : null}
-        {/* Follow the live position with no destination. It spent a full row
-          inside the route planner until v0.173.0, under the mode icons, where
-          it read as a routing option and pushed the stops down a sheet with no
-          room to spare — but it plans nothing. Beside "plan a route" it is what
-          it actually is: the other way to start moving. Hidden mid-trip with
-          its neighbours, since it is already running. */}
+        {/* Follow the live position with no destination. Route planning starts
+          from Search or a picked place, so the idle toolbar stays focused on
+          the six persistent map controls. */}
         {!following ? (
           <Pressable
             style={styles.roundButton}

@@ -25,6 +25,7 @@ import {
   type RegionPackJobsController,
   type StorageAvailability,
   type ThemeModeController,
+  type TransitPreferencesController,
 } from '@atlas/app-hooks';
 import type { UpstreamHealth } from '@atlas/core';
 import { formatLogDuration } from '@atlas/navigation';
@@ -1394,6 +1395,7 @@ export function SettingsSheet({
   profilePreferences,
   navPrefs,
   vehicle,
+  transitPreferences,
   navDiagnostics,
   pip,
   regionJobs,
@@ -1421,6 +1423,7 @@ export function SettingsSheet({
   profilePreferences: MapProfilePreferencesController;
   navPrefs: NavPrefsController;
   vehicle: VehicleProfileController;
+  transitPreferences: TransitPreferencesController;
   navDiagnostics: NavigationDiagnosticsController;
   /** Whether guidance continues in a floating mini window when Atlas is left. */
   pip: NavPipController;
@@ -1523,6 +1526,162 @@ export function SettingsSheet({
         ) : null}
         {section === 'navigation' ? (
           <>
+            <Text style={styles.heading}>Public transport</Text>
+            <Text style={styles.muted}>
+              How to reach stops and how cautious connections should be.
+            </Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(
+                [
+                  ['foot', 'Walk'],
+                  ['bicycle', 'Own bike'],
+                  ['bike_rental', 'City bike'],
+                ] as const
+              ).map(([mode, label]) => (
+                <Pressable
+                  key={mode}
+                  style={[
+                    styles.themeOption,
+                    transitPreferences.value.accessMode === mode && styles.themeOptionOn,
+                  ]}
+                  onPress={() => void transitPreferences.patch({ accessMode: mode })}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: transitPreferences.value.accessMode === mode }}
+                  testID={`transit-access-${mode}`}
+                >
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      transitPreferences.value.accessMode === mode && styles.themeOptionTextOn,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.subheading}>Walking pace</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(
+                [
+                  [1, 'Relaxed'],
+                  [1.3, 'Normal'],
+                  [1.6, 'Fast'],
+                ] as const
+              ).map(([speed, label]) => (
+                <Pressable
+                  key={speed}
+                  style={[
+                    styles.themeOption,
+                    transitPreferences.value.walkSpeedMps === speed && styles.themeOptionOn,
+                  ]}
+                  onPress={() => void transitPreferences.patch({ walkSpeedMps: speed })}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: transitPreferences.value.walkSpeedMps === speed }}
+                >
+                  <Text style={styles.themeOptionText}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.subheading}>Transfer buffer</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(
+                [
+                  [0, 'None'],
+                  [120, '2 min'],
+                  [300, '5 min'],
+                ] as const
+              ).map(([seconds, label]) => (
+                <Pressable
+                  key={seconds}
+                  style={[
+                    styles.themeOption,
+                    transitPreferences.value.transferSlackSeconds === seconds &&
+                      styles.themeOptionOn,
+                  ]}
+                  onPress={() => void transitPreferences.patch({ transferSlackSeconds: seconds })}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    checked: transitPreferences.value.transferSlackSeconds === seconds,
+                  }}
+                >
+                  <Text style={styles.themeOptionText}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.subheading}>Walking tolerance</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {(
+                [
+                  [2, 'Flexible'],
+                  [4, 'Less'],
+                  [8, 'Minimal'],
+                ] as const
+              ).map(([reluctance, label]) => (
+                <Pressable
+                  key={reluctance}
+                  style={[
+                    styles.themeOption,
+                    transitPreferences.value.walkReluctance === reluctance && styles.themeOptionOn,
+                  ]}
+                  onPress={() => void transitPreferences.patch({ walkReluctance: reluctance })}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    checked: transitPreferences.value.walkReluctance === reluctance,
+                  }}
+                >
+                  <Text style={styles.themeOptionText}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.subheading}>Maximum transfers</Text>
+            <View style={styles.themeRow} accessibilityRole="radiogroup">
+              {[1, 2, 4].map((count) => (
+                <Pressable
+                  key={count}
+                  style={[
+                    styles.themeOption,
+                    transitPreferences.value.maximumTransfers === count && styles.themeOptionOn,
+                  ]}
+                  onPress={() => void transitPreferences.patch({ maximumTransfers: count })}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    checked: transitPreferences.value.maximumTransfers === count,
+                  }}
+                >
+                  <Text style={styles.themeOptionText}>{count}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {transitPreferences.value.accessMode !== 'foot' ? (
+              <>
+                <Text style={styles.subheading}>Bicycle route to stops</Text>
+                <View style={styles.themeRow} accessibilityRole="radiogroup">
+                  {(
+                    [
+                      ['quick', 'Quick'],
+                      ['safe', 'Safer'],
+                      ['flat', 'Flatter'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <Pressable
+                      key={mode}
+                      style={[
+                        styles.themeOption,
+                        transitPreferences.value.bikeOptimisation === mode && styles.themeOptionOn,
+                      ]}
+                      onPress={() => void transitPreferences.patch({ bikeOptimisation: mode })}
+                      accessibilityRole="radio"
+                      accessibilityState={{
+                        checked: transitPreferences.value.bikeOptimisation === mode,
+                      }}
+                    >
+                      <Text style={styles.themeOptionText}>{label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : null}
             <VehicleSection vehicle={vehicle} />
             <Text style={styles.heading}>Direction arrow</Text>
             <View style={styles.themeRow} accessibilityRole="radiogroup">
@@ -1686,6 +1845,13 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     marginTop: 18,
     marginBottom: 8,
+  },
+  subheading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.text,
+    marginTop: 12,
+    marginBottom: 6,
   },
   rowText: { fontSize: 16, color: theme.text },
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },

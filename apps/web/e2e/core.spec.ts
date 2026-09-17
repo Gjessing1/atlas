@@ -5,6 +5,7 @@ import {
   closePlaceEditor,
   mockRouting,
   mockSearch,
+  openRoutePlannerAt,
   project,
   waitForMap,
 } from './helpers';
@@ -288,7 +289,7 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   await page.goto('/#map=14/59.8553/10.4211');
   await waitForMap(page);
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Lake depth' }).click();
+  await page.getByRole('switch', { name: 'Lake depth' }).click();
   await page.keyboard.press('Escape');
 
   const box = (await page.locator('canvas').first().boundingBox())!;
@@ -302,7 +303,7 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   await expect(identify).toContainText('32.5');
   await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
   // And it is one card: the spot's own facts are still there beside the answer.
-  await expect(card.locator('.place-card-facts')).toContainText('Light');
+  await expect(card.locator('.place-card-facts')).toContainText('Daylight');
 
   // The one under the finger leads and says nothing about distance; the
   // neighbour behind it says how far away it is, and the card admits what it
@@ -384,7 +385,7 @@ test('a satellite tap opens the on-device pass predictor', async ({ page }) => {
   await waitForMap(page);
   await page.getByRole('radio', { name: 'Curiosities' }).click();
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Satellites & ISS' }).click();
+  await page.getByRole('switch', { name: 'Satellites & ISS' }).click();
   await page.keyboard.press('Escape');
 
   await expect
@@ -503,7 +504,7 @@ test('a freshly launched batch is drawn as a purple train', async ({ page }) => 
   await waitForMap(page);
   await page.getByRole('radio', { name: 'Curiosities' }).click();
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Satellites & ISS' }).click();
+  await page.getByRole('switch', { name: 'Satellites & ISS' }).click();
   await page.keyboard.press('Escape');
 
   // Every member purple, in one of the two shades: hue says "train", value
@@ -961,10 +962,8 @@ test('route planning: two map clicks produce a route with stats', async ({ page 
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
-  const [x1, y1] = await project(page, 59.905, 10.74);
+  await openRoutePlannerAt(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
-  await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toContainText('km');
   await expect(page.locator('.route-stats')).toContainText('Surface');
@@ -1079,15 +1078,17 @@ test('transit stop search plans exact stops and starts guided transit', async ({
 
   await page.goto('/#map=13/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
+  await openRoutePlannerAt(page, 59.905, 10.74);
   await page.getByRole('button', { name: /Transit/ }).click();
 
-  const search = page.locator('.route-stop-search');
-  await search.getByRole('searchbox', { name: 'Search for a start' }).fill('Oslo');
-  await expect(search.locator('li').first()).toContainText('Bus · Train · Oslo');
-  await expect(search.getByRole('button', { name: /Oslo S/ })).toHaveCount(1);
-  await search.getByRole('button', { name: /Oslo S/ }).click();
+  await page.locator('.route-wp-tap').click();
+  const editSearch = page.locator('.route-wp-edit');
+  await editSearch.getByRole('searchbox', { name: 'Change this stop' }).fill('Oslo');
+  await expect(editSearch.locator('li').first()).toContainText('Bus · Train · Oslo');
+  await expect(editSearch.getByRole('button', { name: /Oslo S/ })).toHaveCount(1);
+  await editSearch.getByRole('button', { name: /Oslo S/ }).click();
 
+  const search = page.locator('.route-stop-search');
   await search.getByRole('searchbox', { name: 'Search for a destination' }).fill('National');
   await expect(search.locator('li').first()).toContainText('Train · Tram · Oslo');
   await search
@@ -1136,10 +1137,8 @@ test('a planned route saves as a track and reopens as an editable route', async 
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
-  const [x1, y1] = await project(page, 59.905, 10.74);
+  await openRoutePlannerAt(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
-  await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 
@@ -1168,7 +1167,7 @@ test('running and custom trail preferences reach the routing engine', async ({ p
   await mockRouting(page);
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
+  await openRoutePlannerAt(page, 59.905, 10.74);
   await page.getByRole('button', { name: 'Run' }).click();
   // The options are chips behind one button (v0.175.0), which states the
   // constraint itself when only one is set — so the fold is opened by the name
@@ -1192,9 +1191,7 @@ test('running and custom trail preferences reach the routing engine', async ({ p
       body.costing_options.pedestrian['use_tracks'] === 1
     );
   });
-  const [x1, y1] = await project(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
-  await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
 
   await customizedRequest;
@@ -1221,10 +1218,8 @@ test('stops along a route are browsed by category and insert in order', async ({
   });
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
-  const [x1, y1] = await project(page, 59.905, 10.74);
+  await openRoutePlannerAt(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
-  await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 
@@ -1255,10 +1250,8 @@ test('a round trip keeps the stops already planned and rides through them', asyn
   });
   await page.goto('/#map=12/59.91/10.75');
   await waitForMap(page);
-  await page.getByRole('button', { name: 'Route' }).click();
-  const [x1, y1] = await project(page, 59.905, 10.74);
+  await openRoutePlannerAt(page, 59.905, 10.74);
   const [x2, y2] = await project(page, 59.915, 10.76);
-  await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
   await expect(page.locator('.route-stats')).toBeVisible();
 

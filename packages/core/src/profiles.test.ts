@@ -13,6 +13,7 @@ import {
   mapProfileSupportsTerrain,
   preferredLayersForProfile,
   sanitizeMapProfilePreferences,
+  searchLayerGroups,
   type LayerMeta,
 } from './index.js';
 
@@ -112,6 +113,24 @@ describe('map profiles', () => {
     expect(grouped[0]!.layers.map((m) => m.id)).toEqual(['groundwater-wells', 'lake-depth']);
     expect(grouped[1]!.layers.map((m) => m.id)).toEqual(['heritage-sites', 'old-mines']);
     expect(grouped.at(-1)!.contextual).toBe(false);
+  });
+
+  it('searches layer titles and descriptions, dropping emptied headings', () => {
+    const layer = (id: string, group: string, title: string, description: string) =>
+      ({ ...meta(id), group, title, description }) as LayerMeta;
+    const groups = groupLayerCatalog(
+      [
+        layer('radar', 'Weather', 'Precipitation radar', 'Rain and snow from MET'),
+        layer('wind', 'Weather', 'Wind', 'Forecast wind speed'),
+        layer('hillshade', 'Terrain', 'Hillshade', 'Relief shading'),
+      ],
+      'explore',
+    );
+    expect(searchLayerGroups(groups, '  ')).toEqual(groups);
+    const hits = searchLayerGroups(groups, 'SNOW');
+    expect(hits.map((g) => g.name)).toEqual(['Weather']);
+    expect(hits[0]!.layers.map((m) => m.id)).toEqual(['radar']);
+    expect(searchLayerGroups(groups, 'volcano')).toEqual([]);
   });
 
   it('leaves the server order alone for a profile with no tags of its own', () => {

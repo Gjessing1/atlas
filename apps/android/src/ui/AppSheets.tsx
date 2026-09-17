@@ -6,6 +6,7 @@ import type {
   ThemeModeController,
   NavPrefsController,
   VehicleProfileController,
+  TransitPreferencesController,
 } from '@atlas/app-hooks';
 import type { SettingsSectionId } from '@atlas/core';
 import type { TrackRecord } from '@atlas/storage';
@@ -53,6 +54,7 @@ interface AppSheetsProps {
   mapStyleEditor: MapStyleEditorController;
   navPrefs: NavPrefsController;
   vehicle: VehicleProfileController;
+  transitPreferences: TransitPreferencesController;
   navDiagnostics: NavigationDiagnosticsController;
   pip: NavPipController;
   regionJobs: RegionPackJobsController;
@@ -101,6 +103,7 @@ export function AppSheets({
   mapStyleEditor,
   navPrefs,
   vehicle,
+  transitPreferences,
   navDiagnostics,
   pip,
   regionJobs,
@@ -197,6 +200,7 @@ export function AppSheets({
         profilePreferences={profilePreferences}
         navPrefs={navPrefs}
         vehicle={vehicle}
+        transitPreferences={transitPreferences}
         navDiagnostics={navDiagnostics}
         pip={pip}
         regionJobs={regionJobs}

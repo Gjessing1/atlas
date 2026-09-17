@@ -38,6 +38,7 @@ import {
   useNavAddStop,
   useNavPrefs,
   useVehicleProfile,
+  useTransitPreferences,
   useBestSpots,
   useStandBoard,
   type StandBoardRow,
@@ -79,7 +80,6 @@ import {
   CompassIcon,
   CrosshairIcon,
   NavArrowIcon,
-  RouteIcon,
   RulerIcon,
   SettingsIcon,
   StarIcon,
@@ -129,7 +129,6 @@ import { RoutePreview } from './nav/RoutePreview.js';
 import { useTunnelDim } from './nav/useTunnelDim.js';
 import { useWebNavigation } from './nav/useWebNavigation.js';
 import { getMyLocation } from './routing/geolocate.js';
-import { reverseGeocode } from './routing/reverseGeocode.js';
 import { useDirections } from './routing/useDirections.js';
 import { useRoute } from './routing/useRoute.js';
 import { useTransitPlan } from './routing/useTransit.js';
@@ -301,10 +300,11 @@ export function App() {
   // it is read before the planner and handed straight to it.
   const vehicle = useVehicleProfile(userData);
   const route = useRoute(vehicle.vehicle);
+  const transitPreferences = useTransitPreferences(userData);
   // Public transport for the same two endpoints — a travel mode beside the road
   // profiles. The panel lists the journeys; the map draws the selected one, and
   // the road line stands down while it does.
-  const transit = useTransitPlan(route);
+  const transit = useTransitPlan(route, transitPreferences.value);
   const plannedCommute = useMemo(
     () => plannedCommuteFromWaypoints(route.waypoints),
     [route.waypoints],
@@ -1145,6 +1145,7 @@ export function App() {
       <MapView
         initialView={initialView}
         pin={pin}
+        selected={target?.position ?? null}
         places={visiblePlaces}
         onPinChange={onPinChange}
         onSelect={setTarget}
@@ -1234,34 +1235,6 @@ export function App() {
           onClick={() => togglePanel('collections')}
         >
           <StarIcon size={18} />
-        </button>
-        <button
-          type="button"
-          className="sidebar-toggle"
-          aria-label="Route"
-          title="Route"
-          aria-pressed={route.active}
-          onClick={() => {
-            // Starting from a dropped pin routes "from here".
-            if (route.active) {
-              route.stop();
-              return;
-            }
-            // The planner's own panel takes the same corner the drawers do, so
-            // opening it stands them down — stopping it leaves them alone.
-            closePanels();
-            const seeded = route.start(pin ?? undefined);
-            // Label that first stop like any other hand-placed one, so the plan
-            // doesn't open with a row of decimals.
-            if (seeded !== null && pin) {
-              const at = pin;
-              void reverseGeocode(at).then((name) => {
-                if (name) route.nameWaypoint(seeded, name, at);
-              });
-            }
-          }}
-        >
-          <RouteIcon size={18} />
         </button>
         <button
           type="button"
@@ -1635,6 +1608,7 @@ export function App() {
             mapStyle={mapStyleEditor}
             navPrefs={navPrefs}
             vehicle={vehicle}
+            transitPreferences={transitPreferences}
             layers={layers}
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}

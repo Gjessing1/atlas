@@ -20,8 +20,7 @@ test('Explorer mode follows live GPS without creating a route', async ({ page, c
   await page.goto('/#map=13/59.91/10.75');
   await waitForMap(page);
 
-  await page.locator('.topbar button[aria-label="Route"]').click();
-  await page.getByRole('button', { name: 'Hike' }).click();
+  await page.locator('.profile-switch').getByRole('radio', { name: 'Hike' }).click();
   // Follow-position lives in the map controls, not the planner: it plans
   // nothing, and the profile it follows is still the planner's (v0.173.0).
   await page.locator('.map-follow-control').click();
@@ -30,7 +29,10 @@ test('Explorer mode follows live GPS without creating a route', async ({ page, c
   await expect(page.getByText('Hike · Following your position')).toBeVisible();
   await expect(page.getByText('No destination or turn-by-turn guidance')).toBeVisible();
   await expect(page.locator('.nav-puck')).toBeVisible();
-  await expect(page.locator('.nav-widget')).toHaveCount(2);
+  // Speed is its own information cluster (beside any posted limit); altitude
+  // stays an ordinary widget.
+  await expect(page.locator('.nav-speed-cluster')).toContainText('km/h');
+  await expect(page.locator('.nav-widget')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Add a stop' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show route overview' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Mute guidance' })).toHaveCount(0);

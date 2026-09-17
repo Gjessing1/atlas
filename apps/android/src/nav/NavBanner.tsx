@@ -5,9 +5,9 @@ import {
   backToTrack,
   laneGlyphs,
   laneLabel,
+  maneuverActionText,
   remainingAscentM,
   remainingElevationProfile,
-  shortManeuverText,
   type ElevationPoint,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
@@ -269,6 +269,8 @@ export function NavBanner({
         : null;
   const profileLabel = ROUTING_PROFILES.find((candidate) => candidate.id === nav.profile)?.label;
   const shownWidgets: NavWidgetId[] = exploring ? ['speed', 'altitude'] : widgets;
+  const showSpeed = shownWidgets.includes('speed') || speedLimit !== null;
+  const otherWidgets = shownWidgets.filter((widget) => widget !== 'speed');
 
   return (
     <View
@@ -369,8 +371,13 @@ export function NavBanner({
                   style={[styles.maneuver, landscape && styles.maneuverCompact]}
                   numberOfLines={landscape ? 1 : 2}
                 >
-                  {sustain ? sustain.road : shortManeuverText(maneuver.instruction)}
+                  {sustain ? sustain.road : maneuverActionText(maneuver.instruction)}
                 </Text>
+                {!sustain && maneuver.instruction.streetName ? (
+                  <Text style={styles.roadName} numberOfLines={1}>
+                    {maneuver.instruction.streetName}
+                  </Text>
+                ) : null}
                 {!sustain && maneuver.instruction.exitSign ? (
                   <Text style={styles.exitSign} numberOfLines={1}>
                     {formatExitSign(maneuver.instruction.exitSign)}
@@ -383,10 +390,9 @@ export function NavBanner({
             ) : null}
             {thenManeuver ? (
               <View style={[styles.thenRow, landscape && styles.thenRowCompact]}>
-                <Text style={styles.thenLabel}>Then</Text>
                 <TurnIcon instruction={thenManeuver.instruction} size={20} color={theme.icon} />
                 <Text style={styles.thenText} numberOfLines={1}>
-                  {shortManeuverText(thenManeuver.instruction)}
+                  Then {maneuverActionText(thenManeuver.instruction)}
                 </Text>
               </View>
             ) : null}
@@ -603,7 +609,20 @@ export function NavBanner({
       <View style={[styles.actionRow, landscape && styles.actionRowLandscape]}>
         {moving && !canDeclareArrival ? (
           <View style={styles.speedGroup} accessibilityLabel="Navigation widgets">
-            {shownWidgets.map((widget) => {
+            {showSpeed ? (
+              <View style={styles.speedCluster}>
+                <View style={styles.speedReading}>
+                  <Text style={styles.speedValue}>{speedKph(nav.speedMps) ?? 0}</Text>
+                  <Text style={styles.speedUnit}>km/h</Text>
+                </View>
+                {speedLimit != null ? (
+                  <View style={styles.speedLimitSign}>
+                    <Text style={styles.speedLimitValue}>{speedLimit}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {otherWidgets.map((widget) => {
               const display = widgetValue(widget, nav);
               return (
                 <View style={styles.speedDial} key={widget}>
@@ -614,11 +633,6 @@ export function NavBanner({
             })}
             {/* Absent wherever the map data has no limit — an honest gap beats
                 a stale number the driver might trust. */}
-            {speedLimit != null ? (
-              <View style={styles.speedLimitSign}>
-                <Text style={styles.speedLimitValue}>{speedLimit}</Text>
-              </View>
-            ) : null}
           </View>
         ) : (
           <View style={styles.actionSpacer} />
@@ -727,6 +741,7 @@ const styles = StyleSheet.create({
   distanceToCompact: { fontSize: 15, lineHeight: 18 },
   maneuver: { color: theme.text, fontSize: 20, fontWeight: '700', lineHeight: 24 },
   maneuverCompact: { fontSize: 17, lineHeight: 21 },
+  roadName: { color: theme.textMuted, fontSize: 14, fontWeight: '600', lineHeight: 18 },
   exitSign: {
     alignSelf: 'flex-start',
     backgroundColor: '#1f7a3f',
@@ -760,22 +775,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    minHeight: 34,
-    marginTop: 10,
+    minHeight: 24,
+    marginTop: 6,
     marginLeft: 74,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: theme.surfaceMuted,
   },
   thenRowCompact: { minHeight: 28, marginTop: 7, marginLeft: 62, paddingVertical: 3 },
-  thenLabel: {
-    color: theme.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
   thenText: { flex: 1, color: theme.text, fontSize: 13, fontWeight: '600' },
   stateBlock: { gap: 3, paddingHorizontal: 2, paddingVertical: 4 },
   eyebrow: {
@@ -928,6 +932,19 @@ const styles = StyleSheet.create({
   actionSpacer: { flex: 1 },
   actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   speedGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  speedCluster: {
+    minHeight: 52,
+    paddingLeft: 12,
+    paddingRight: 5,
+    paddingVertical: 4,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: theme.surfaceOverlay,
+    elevation: 5,
+  },
+  speedReading: { minWidth: 38, alignItems: 'center' },
   // The driver's own speed: a round dial mirroring the posted-limit sign beside it.
   speedDial: {
     width: 46,
@@ -958,7 +975,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 5,
   },
   speedLimitValue: { color: '#111', fontWeight: '800', fontSize: 17 },
   muteButton: {

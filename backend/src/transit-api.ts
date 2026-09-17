@@ -37,6 +37,7 @@ import {
   ENTUR_STOP_LINES_QUERY,
   MINUTES_PER_DAY,
   RIDE_MODES,
+  parseTransitPreferences,
   SEARCH_WINDOW_RETRY_MINUTES,
   WIDE_SEARCH_WINDOW_MINUTES,
 } from '@atlas/transit';
@@ -51,6 +52,7 @@ import type {
   TransitLineRef,
   TransitLocation,
   TransitMode,
+  TransitPreferences,
   TransitQuery,
   TransitResult,
   TransitTrip,
@@ -195,6 +197,12 @@ function parseQuery(body: unknown): { query: TransitQuery } | { error: string } 
   if (typeof raw.limit === 'number' && Number.isFinite(raw.limit)) query.limit = raw.limit;
   if (typeof raw.walkSpeedMps === 'number' && raw.walkSpeedMps > 0 && raw.walkSpeedMps <= 5) {
     query.walkSpeedMps = raw.walkSpeedMps;
+  }
+  if (raw.preferences !== undefined) {
+    const preferences = parseTransitPreferences(raw.preferences);
+    if (!preferences)
+      return { error: 'preferences must be a valid public transport preference object' };
+    query.preferences = preferences as TransitPreferences;
   }
   // An explicit window means the caller is doing its own paging and does not
   // want the empty-answer retry below second-guessing it. Capped at a day —

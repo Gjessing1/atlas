@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fmtClock,
   fmtCoords,
+  fmtCompactDuration,
   fmtDayClock,
   fmtDayLabel,
   fmtDistanceM,
@@ -96,6 +97,13 @@ describe('distance & coordinate formatting', () => {
     expect(fmtKm(347)).toBe('347 m');
     expect(fmtKm(24_800)).toBe('24.8 km');
     expect(fmtKm(0)).toBe('0 m');
+  });
+});
+
+describe('fmtCompactDuration', () => {
+  it('keeps route-mode comparisons compact', () => {
+    expect(fmtCompactDuration(27 * 3600_000 + 4 * 60_000)).toBe('27h 4m');
+    expect(fmtCompactDuration(42 * 60_000)).toBe('42m');
   });
 });
 

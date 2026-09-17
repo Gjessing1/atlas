@@ -1,5 +1,12 @@
-import { groupLayerCatalog, mapProfile, type LayerMeta, type LayerOption } from '@atlas/core';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  groupLayerCatalog,
+  mapProfile,
+  searchLayerGroups,
+  type LayerMeta,
+  type LayerOption,
+} from '@atlas/core';
+import { useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { OverlaysController } from '../layers/useOverlays';
 import { BottomSheet } from './BottomSheet';
@@ -118,6 +125,8 @@ export function LayersContent({
   /** Omitted by Settings → Map, which has no viewport to keep. */
   keepOffline?: KeepOfflineControls;
 }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const groups = groupLayerCatalog(overlays.catalog, overlays.profileId);
 
   if (overlays.catalog.length === 0) {
@@ -129,9 +138,38 @@ export function LayersContent({
   }
 
   const note = mapProfile(overlays.profileId).note;
+  const searching = query.trim().length > 0;
+  const visibleGroups = searchLayerGroups(groups, query);
+  const activeLayers = overlays.catalog.filter((meta) => overlays.isOn(meta.id));
 
   return (
     <View>
+      <View style={styles.searchHead}>
+        <Text style={styles.searchTitle}>Available to this profile</Text>
+        <Pressable
+          style={styles.searchButton}
+          onPress={() => {
+            setSearchOpen((open) => !open);
+            if (searchOpen) setQuery('');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Search layers"
+          accessibilityState={{ expanded: searchOpen }}
+          testID="layer-search-toggle"
+        >
+          <Text style={styles.searchGlyph}>⌕</Text>
+        </Pressable>
+      </View>
+      {searchOpen ? (
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search layers"
+          autoFocus
+          testID="layer-search"
+        />
+      ) : null}
       {note ? <Text style={styles.profileNote}>{note}</Text> : null}
       {/* The map the overlays are drawn on, above the overlays themselves. Off
           is how a raster with holes in it — a 1826 amtskart sheet, the edge of a
@@ -144,17 +182,36 @@ export function LayersContent({
           onPress={() => overlays.setBasemapOn(!overlays.basemapOn)}
           testID="layer-toggle-basemap"
         >
-          <View style={[styles.checkbox, overlays.basemapOn ? styles.checkboxOn : null]}>
-            {overlays.basemapOn ? <Text style={styles.checkmark}>✓</Text> : null}
-          </View>
           <Text style={styles.layerTitle}>Base map</Text>
+          <View style={[styles.toggle, overlays.basemapOn ? styles.toggleOn : null]}>
+            <View style={[styles.toggleThumb, overlays.basemapOn ? styles.toggleThumbOn : null]} />
+          </View>
         </Pressable>
         <Text style={styles.muted}>
           Roads, land and place names under the overlays. Turn it off to read a historic map or any
           overlay with gaps on its own — this profile only.
         </Text>
       </View>
-      {groups.map((group) => (
+      {activeLayers.length > 0 && !searching ? (
+        <View style={styles.activeSection}>
+          <Text style={styles.groupHeading}>Active</Text>
+          {activeLayers.map((meta) => (
+            <Pressable
+              key={`active-${meta.id}`}
+              style={styles.activeRow}
+              onPress={() => overlays.toggle(meta.id)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: true }}
+            >
+              <Text style={styles.layerTitle}>{meta.title}</Text>
+              <View style={[styles.toggle, styles.toggleOn]}>
+                <View style={[styles.toggleThumb, styles.toggleThumbOn]} />
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {visibleGroups.map((group) => (
         <View key={group.name}>
           <Text style={styles.groupHeading}>{group.name}</Text>
           {group.layers.map((meta) => {
@@ -167,10 +224,10 @@ export function LayersContent({
                   onPress={() => overlays.toggle(meta.id)}
                   testID={`layer-toggle-${meta.id}`}
                 >
-                  <View style={[styles.checkbox, on ? styles.checkboxOn : null]}>
-                    {on ? <Text style={styles.checkmark}>✓</Text> : null}
-                  </View>
                   <Text style={styles.layerTitle}>{meta.title}</Text>
+                  <View style={[styles.toggle, on ? styles.toggleOn : null]}>
+                    <View style={[styles.toggleThumb, on ? styles.toggleThumbOn : null]} />
+                  </View>
                 </Pressable>
                 <Text style={styles.muted}>
                   {meta.description}{' '}
@@ -276,6 +333,33 @@ export function LayersSheet({
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   heading: { fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 4 },
+  searchHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 36,
+  },
+  searchTitle: { fontSize: 12, color: theme.textMuted },
+  searchButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surfaceMuted,
+  },
+  searchGlyph: { fontSize: 20, color: theme.text },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: theme.surface,
+    color: theme.text,
+    fontSize: 14,
+    marginBottom: 6,
+  },
   groupHeading: {
     marginTop: 10,
     fontSize: 12,
@@ -301,19 +385,34 @@ const styles = StyleSheet.create({
   legendSwatch: { width: 16, height: 10, borderRadius: 2 },
   legendLabel: { fontSize: 11, color: theme.textMuted },
   row: { paddingVertical: 8 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
+  activeSection: {
+    marginTop: 6,
+    paddingHorizontal: 9,
+    paddingBottom: 7,
+    borderWidth: 1,
     borderColor: theme.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: theme.surfaceMuted,
   },
-  checkboxOn: { backgroundColor: theme.accent, borderColor: theme.accent },
-  checkmark: { color: theme.onAccent, fontWeight: '800', fontSize: 14, lineHeight: 16 },
-  layerTitle: { fontSize: 15, color: theme.text },
+  activeRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toggle: {
+    width: 34,
+    height: 20,
+    marginLeft: 'auto',
+    padding: 3,
+    borderRadius: 10,
+    backgroundColor: theme.border,
+  },
+  toggleOn: { backgroundColor: theme.accent },
+  toggleThumb: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: theme.surface,
+  },
+  toggleThumbOn: { transform: [{ translateX: 14 }] },
+  layerTitle: { flex: 1, fontSize: 15, color: theme.text },
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   sourceLink: { color: theme.accent, textDecorationLine: 'underline' },
   hint: { fontSize: 12, color: theme.warning, marginTop: 2 },

@@ -400,22 +400,18 @@ async function createFolderAndReadPlace() {
   };
 }
 
-async function addRouteStop(name) {
-  // The newly-mounted controlled stop box can drop its first injected key on
-  // the emulator. A duplicate leading character is harmless to search and
-  // leaves the intended query intact whether that native race occurs or not.
-  await replaceText('route-stop-search', `${name[0]}${name}`, name);
-  await waitForId('route-stop-result-0', true, 20_000);
-  await dismissKeyboard();
-  await tap('route-stop-result-0');
-  await waitForId('route-stop-search');
+// Planning starts where a user starts it: a picked place's card. "Go" on a
+// saved place opens that card, and its Directions plans from the live fix
+// (the emulator's geo fix at ORIGIN) to the place.
+async function openRouteFromSavedPlace(placeId) {
+  await openMenuItem('open-favorites');
+  await tap(`favorite-nav-${placeId}`);
+  await tap('destination-navigate');
+  await waitForId('route-sheet');
 }
 
-async function planRoadRoute(folderId) {
-  await tap('plan-route');
-  await waitForId('route-sheet');
-  await addRouteStop('origin');
-  await addRouteStop('destination');
+async function planRoadRoute(folderId, placeId) {
+  await openRouteFromSavedPlace(placeId);
   // This route-only control is the first stable signal that the detailed road
   // result has landed; the alternatives are asserted later in the navigation
   // preview, where both choices are shown. It needs a computed path to exist,
@@ -465,10 +461,8 @@ async function planRoadRoute(folderId) {
   await waitForId('stop-nav', false);
 }
 
-async function planTransitJourney() {
-  await tap('plan-route');
-  await addRouteStop('origin');
-  await addRouteStop('destination');
+async function planTransitJourney(placeId) {
+  await openRouteFromSavedPlace(placeId);
   await tap('route-profile-transit');
   await waitFor(
     'transit journey result',
@@ -1111,13 +1105,7 @@ async function main() {
 
   shell('am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
   let xml = await waitForAppReady();
-  expectIds(xml, [
-    'search-open',
-    'plan-route',
-    'map-profile-toggle',
-    'layer-quick-toggle',
-    'locate',
-  ]);
+  expectIds(xml, ['search-open', 'map-profile-toggle', 'layer-quick-toggle', 'locate']);
 
   console.log('Android regression: configuring controlled backend');
   await configureFixtureServer();
@@ -1126,9 +1114,9 @@ async function main() {
   const ids = await createFolderAndReadPlace();
   await tap('favorites-close');
   console.log('Android regression: road planning, sheet snaps, and navigation hand-off');
-  await planRoadRoute(ids.folderId);
+  await planRoadRoute(ids.folderId, ids.placeId);
   console.log('Android regression: transit planning and guidance hand-off');
-  await planTransitJourney();
+  await planTransitJourney(ids.placeId);
   console.log('Android regression: persisted settings and saved-data restart');
   await setDarkTheme();
   const trackId = await recordTrackId(ids.folderId);

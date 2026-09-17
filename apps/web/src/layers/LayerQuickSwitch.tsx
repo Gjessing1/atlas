@@ -1,4 +1,4 @@
-import { groupLayerCatalog, type LayerMeta } from '@atlas/core';
+import { groupLayerCatalog, searchLayerGroups, type LayerMeta } from '@atlas/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LayersIcon } from '../icons.js';
 import type { LayerCatalog } from './useLayerCatalog.js';
@@ -39,6 +39,8 @@ function variantLabel(layers: LayerCatalog, meta: LayerMeta): string | null {
  */
 export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
   const [open, setOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Dismiss like a menu: click anywhere else, or Escape.
@@ -62,6 +64,9 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
     () => groupLayerCatalog(layers.catalog, layers.profileId),
     [layers.catalog, layers.profileId],
   );
+  const searching = query.trim().length > 0;
+  const visibleGroups = useMemo(() => searchLayerGroups(groups, query), [groups, query]);
+  const activeLayers = layers.catalog.filter((meta) => layers.isOn(meta.id));
 
   if (layers.catalog.length === 0) return null;
 
@@ -71,7 +76,51 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
     <div className="layer-switch" ref={rootRef}>
       {open && (
         <div className="layer-switch-menu" role="group" aria-label="Map layers">
-          {groups.map((group) => (
+          <div className="layer-switch-menu-head">
+            <strong>Layers</strong>
+            <button
+              type="button"
+              className="layer-search-toggle"
+              aria-label="Search layers"
+              aria-expanded={searchOpen}
+              onClick={() => {
+                setSearchOpen((value) => !value);
+                if (searchOpen) setQuery('');
+              }}
+            >
+              ⌕
+            </button>
+          </div>
+          {searchOpen && (
+            <input
+              className="layer-search"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search layers"
+              aria-label="Search available layers"
+              autoFocus
+            />
+          )}
+          {activeLayers.length > 0 && !searching && (
+            <div className="layer-switch-group layer-switch-active">
+              <div className="layer-switch-heading">Active</div>
+              {activeLayers.map((meta) => (
+                <button
+                  key={`active-${meta.id}`}
+                  type="button"
+                  className="layer-switch-item layer-switch-item-on"
+                  role="switch"
+                  aria-checked="true"
+                  onClick={() => layers.toggle(meta.id)}
+                >
+                  <span className="layer-switch-label">{meta.title}</span>
+                  <span className="layer-switch-control" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          )}
+          {visibleGroups.map((group) => (
             <div key={group.name} className="layer-switch-group">
               <div className="layer-switch-heading">{group.name}</div>
               {group.layers.map((meta) => {
@@ -84,12 +133,10 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
                     key={meta.id}
                     type="button"
                     className={`layer-switch-item${on ? ' layer-switch-item-on' : ''}`}
-                    aria-pressed={on}
+                    role="switch"
+                    aria-checked={on}
                     onClick={() => layers.toggle(meta.id)}
                   >
-                    <span className="layer-switch-check" aria-hidden="true">
-                      {on ? '✓' : ''}
-                    </span>
                     <span className="layer-switch-label">
                       {meta.title}
                       {variant && <span className="layer-switch-variant">{variant}</span>}
@@ -99,6 +146,10 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
                         z{meta.minzoom}+
                       </span>
                     )}
+                    <span
+                      className={`layer-switch-control${on ? ' layer-switch-control-on' : ''}`}
+                      aria-hidden="true"
+                    />
                   </button>
                 );
               })}
@@ -108,14 +159,16 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
             <button
               type="button"
               className={`layer-switch-item${layers.basemapOn ? ' layer-switch-item-on' : ''}`}
-              aria-pressed={layers.basemapOn}
+              role="switch"
+              aria-checked={layers.basemapOn}
               onClick={() => layers.setBasemapOn(!layers.basemapOn)}
               title="Draw the ordinary map under the overlays"
             >
-              <span className="layer-switch-check" aria-hidden="true">
-                {layers.basemapOn ? '✓' : ''}
-              </span>
               <span className="layer-switch-label">Base map</span>
+              <span
+                className={`layer-switch-control${layers.basemapOn ? ' layer-switch-control-on' : ''}`}
+                aria-hidden="true"
+              />
             </button>
           </div>
         </div>

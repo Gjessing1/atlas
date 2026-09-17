@@ -14,6 +14,7 @@ import type {
   TransitPlace,
   TransitProblem,
   TransitProblemCode,
+  TransitPreferences,
   TransitQuery,
   TransitResult,
   TransitSeverity,
@@ -41,8 +42,8 @@ import type {
  */
 
 /** GraphQL document. Kept as one string so the recorded fixtures pin the exact field set. */
-export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[TripViaLocationInput!],$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$modes:Modes,$filters:[TripFilterInput!],$searchWindow:Int,$pageCursor:String){
- trip(from:$from,to:$to,via:$via,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,modes:$modes,filters:$filters,searchWindow:$searchWindow,pageCursor:$pageCursor){
+export const ENTUR_TRIP_QUERY = `query Trip($from:Location!,$to:Location!,$via:[TripViaLocationInput!],$dateTime:DateTime,$arriveBy:Boolean!,$num:Int!,$walkSpeed:Float,$walkReluctance:Float,$transferSlack:Int,$maximumTransfers:Int,$bikePreferences:BikePreferencesInput,$whiteListed:InputWhiteListed,$modes:Modes,$filters:[TripFilterInput!],$searchWindow:Int,$pageCursor:String){
+ trip(from:$from,to:$to,via:$via,dateTime:$dateTime,arriveBy:$arriveBy,numTripPatterns:$num,walkSpeed:$walkSpeed,walkReluctance:$walkReluctance,transferSlack:$transferSlack,maximumTransfers:$maximumTransfers,bikePreferences:$bikePreferences,whiteListed:$whiteListed,modes:$modes,filters:$filters,searchWindow:$searchWindow,pageCursor:$pageCursor){
   nextPageCursor previousPageCursor
   routingErrors{ code inputField }
   tripPatterns{ expectedStartTime expectedEndTime duration walkDistance emission{co2}
@@ -133,14 +134,19 @@ const WIRE_MODE: Partial<Record<TransitMode, string>> = {
  * all" — a filter that can silently return nothing is a trap, and the UI
  * prevents it too by refusing to unselect the last mode.
  */
-function modesArgument(modes: readonly TransitMode[] | undefined): Record<string, unknown> | null {
-  if (!modes || modes.length === 0) return null;
-  const transportModes = expandModeFilter(modes).flatMap((mode) => {
+function modesArgument(
+  modes: readonly TransitMode[] | undefined,
+  preferences: TransitPreferences | undefined,
+): Record<string, unknown> | null {
+  const accessMode = preferences?.accessMode ?? 'foot';
+  if ((!modes || modes.length === 0) && accessMode === 'foot') return null;
+  const requestedModes = modes && modes.length > 0 ? modes : RIDE_MODES;
+  const transportModes = expandModeFilter(requestedModes).flatMap((mode) => {
     const wire = WIRE_MODE[mode];
     return wire ? [{ transportMode: wire }] : [];
   });
   if (transportModes.length === 0) return null;
-  return { accessMode: 'foot', egressMode: 'foot', directMode: 'foot', transportModes };
+  return { accessMode, egressMode: accessMode, directMode: accessMode, transportModes };
 }
 
 /** Prefer an exact NSR stop, retaining coordinates in Atlas for fallback and coverage only. */
@@ -199,8 +205,22 @@ export function buildEnturRequest(query: TransitQuery): {
       dateTime: query.dateTimeMs === undefined ? null : new Date(query.dateTimeMs).toISOString(),
       arriveBy: query.arriveBy ?? false,
       num: limit,
-      walkSpeed: query.walkSpeedMps ?? DEFAULT_WALK_SPEED_MPS,
-      modes: modesArgument(query.modes),
+      walkSpeed: query.preferences?.walkSpeedMps ?? query.walkSpeedMps ?? DEFAULT_WALK_SPEED_MPS,
+      walkReluctance: query.preferences?.walkReluctance ?? null,
+      transferSlack: query.preferences?.transferSlackSeconds ?? null,
+      maximumTransfers: query.preferences?.maximumTransfers ?? null,
+      bikePreferences: query.preferences
+        ? {
+            speed: query.preferences.bikeSpeedMps,
+            reluctance: query.preferences.bikeReluctance,
+            optimisationMethod: query.preferences.bikeOptimisation,
+          }
+        : null,
+      whiteListed:
+        query.preferences && query.preferences.bikeRentalNetworks.length > 0
+          ? { rentalNetworks: [...query.preferences.bikeRentalNetworks] }
+          : null,
+      modes: modesArgument(query.modes, query.preferences),
       filters: filtersArgument(query.lineFilter),
       // Null lets Entur pick its own (dynamic, a few hours). Widened only on a
       // retry — see WIDE_SEARCH_WINDOW_MINUTES.
@@ -262,6 +282,9 @@ const REPLACEMENT_SUBMODES = new Set(['railReplacementBus', 'replacementRailServ
 /** Entur transport modes Atlas renders; anything else degrades to `unknown`. */
 const MODES: Record<string, TransitMode> = {
   foot: 'foot',
+  bicycle: 'bicycle',
+  bike: 'bicycle',
+  bike_rental: 'bike_rental',
   bus: 'bus',
   coach: 'coach',
   tram: 'tram',

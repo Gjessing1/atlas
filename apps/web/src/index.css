@@ -18,6 +18,13 @@
   --success: #1e6b34;
   --info: #1a4d8f;
   --route: #7048c9;
+  /* Shared floating-surface language: map information, actions and
+     configuration use the same geometry but distinct emphasis. */
+  --floating-radius: 12px;
+  --floating-gap: 8px;
+  --floating-margin: 12px;
+  --floating-shadow: 0 4px 16px rgba(28, 39, 51, 0.2);
+  --floating-border: 1px solid rgba(52, 64, 79, 0.12);
   /* The two colours the map paints a fresh launch train in. Light mode reads
      the dim one and dark mode the bright one, so the card's chip is legible
      against its surface while still being, literally, one of the dots'
@@ -198,8 +205,9 @@ button {
   flex-direction: column;
   gap: 8px;
   background: var(--surface);
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  border: var(--floating-border);
+  border-radius: var(--floating-radius);
+  box-shadow: var(--floating-shadow);
   padding: 10px 12px;
   max-height: min(76vh, 620px);
   overflow-y: auto;
@@ -244,8 +252,8 @@ button {
    letting a long light line ragged-edge the whole block. */
 .place-card-facts {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
@@ -253,11 +261,12 @@ button {
 
 .place-card-facts > div {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .place-card-facts dt {
-  flex: 0 0 62px;
+  flex: 0 0 auto;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
@@ -1057,11 +1066,24 @@ button {
   gap: 5px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 9px;
   background: var(--surface-muted);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+.place-card-actions button.icon-only {
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+}
+
+.place-card-actions button.tertiary {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .place-card-actions button:hover {
@@ -1086,6 +1108,16 @@ button {
   width: 40px;
   height: 40px;
   cursor: pointer;
+}
+
+.place-marker-selected .place-marker-scale {
+  transform: scale(calc(var(--marker-scale, 1) * 1.18));
+}
+
+.place-marker-selected .place-marker-badge {
+  box-shadow:
+    0 0 0 6px rgb(26 115 232 / 26%),
+    0 2px 7px rgb(0 0 0 / 48%);
 }
 
 /* Zoom-proportional marker size: --marker-scale is set on the map container
@@ -2030,6 +2062,31 @@ button {
   opacity: 0.5;
 }
 
+.route-wp-handle {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: grab;
+}
+
+.route-add-stop {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 4px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.route-add-stop:hover {
+  background: var(--surface-selected);
+}
+
 .route-wp-label {
   width: 20px;
   height: 20px;
@@ -2160,6 +2217,16 @@ button {
 
 .route-navigate:hover {
   filter: brightness(1.06);
+}
+
+.route-navigate-sticky {
+  position: sticky;
+  bottom: -10px;
+  z-index: 2;
+  width: 100%;
+  margin-top: 2px;
+  border-radius: 10px;
+  box-shadow: 0 -6px 14px var(--surface);
 }
 
 .route-actions {
@@ -3032,10 +3099,53 @@ button.transit-notice-summary {
   max-width: min(260px, calc(100vw - 24px));
   max-height: min(50vh, 420px);
   overflow-y: auto;
-  padding: 4px;
-  border-radius: 8px;
+  padding: 6px;
+  border: var(--floating-border);
+  border-radius: var(--floating-radius);
   background: var(--surface-overlay);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--floating-shadow);
+}
+
+.layer-switch-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 4px 2px 8px;
+  font-size: 13px;
+}
+
+.layer-search-toggle {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.layer-search-toggle:hover {
+  background: var(--surface-muted);
+}
+
+.layer-search {
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+}
+
+.layer-switch-active {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
 
 /* The Fish & Hunt sub-profile: one row above the layer switch, and absent in
@@ -3507,6 +3617,37 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
+.layer-switch-control {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.layer-switch-control::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  transition: transform 120ms ease;
+}
+
+.layer-switch-control-on {
+  background: var(--accent);
+}
+
+.layer-switch-control-on::after {
+  transform: translateX(12px);
+}
+
 .layer-switch-item:hover {
   background: var(--surface-muted);
 }
@@ -3514,12 +3655,6 @@ button.transit-notice-summary {
 .layer-switch-item-on {
   font-weight: 600;
   color: var(--accent);
-}
-
-.layer-switch-check {
-  flex: none;
-  width: 12px;
-  font-size: 12px;
 }
 
 .layer-switch-label {
@@ -4084,12 +4219,17 @@ button.transit-notice-summary {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
-  margin: 10px 0 0 74px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: var(--surface-muted);
-  color: var(--text);
+  min-height: 24px;
+  margin: 6px 0 0 74px;
+  color: var(--text-muted);
+}
+
+.nav-road-name {
+  display: block;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 /* Lane guidance uses vector paths shared with Android. The carriageway stays
@@ -4155,14 +4295,6 @@ button.transit-notice-summary {
 .nav-lane .nav-lane-recommended {
   stroke-width: 2.8px;
   opacity: 1;
-}
-
-.nav-then-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
 }
 
 .nav-then-text {
@@ -4695,6 +4827,38 @@ button.transit-notice-summary {
   line-height: 1;
 }
 
+.nav-speed-cluster {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 52px;
+  padding: 4px 5px 4px 12px;
+  border: var(--floating-border);
+  border-radius: var(--floating-radius);
+  background: var(--surface-overlay);
+  box-shadow: var(--floating-shadow);
+  backdrop-filter: blur(8px);
+}
+
+.nav-speed-reading {
+  display: flex;
+  min-width: 38px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.nav-speed-reading strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.nav-speed-reading small {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .nav-speed strong,
 .nav-widget strong {
   font-size: 18px;
@@ -4740,7 +4904,7 @@ button.transit-notice-summary {
   border-radius: 50%;
   background: #fff;
   border: 5px solid #d81e05;
-  box-shadow: 0 5px 18px rgba(28, 39, 51, 0.2);
+  box-shadow: none;
   color: #111;
   font-size: 17px;
   font-weight: 800;
@@ -4979,6 +5143,20 @@ button.transit-notice-summary {
   margin-bottom: 4px;
 }
 
+.layers-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.layers-active {
+  margin: 4px 0 8px;
+  padding: 0 8px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--floating-radius);
+  background: var(--surface-muted);
+}
+
 /* The profile's standing caveat (MapProfile.note) — sits above the whole list,
    so it reads as being about the activity rather than about one layer. */
 .layers-profile-note {
@@ -5009,10 +5187,51 @@ button.transit-notice-summary {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   cursor: pointer;
 }
 
+.layer-toggle input[type='checkbox'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.layer-toggle-control {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.layer-toggle-control::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  transition: transform 120ms ease;
+}
+
+.layer-toggle input:checked + .layer-toggle-control {
+  background: var(--accent);
+}
+
+.layer-toggle input:checked + .layer-toggle-control::after {
+  transform: translateX(12px);
+}
+
 .layer-name {
+  flex: 1;
   font-size: 14px;
 }
 
@@ -5671,6 +5890,16 @@ button.transit-notice-summary {
   pointer-events: auto;
 }
 
+.weather-map-control {
+  width: 100%;
+  overflow: hidden;
+  border: var(--floating-border);
+  border-radius: var(--floating-radius);
+  background: var(--surface-overlay);
+  box-shadow: var(--floating-shadow);
+  backdrop-filter: blur(8px);
+}
+
 .weather-legend,
 .weather-timeline {
   background: var(--surface-overlay);
@@ -5680,18 +5909,25 @@ button.transit-notice-summary {
 }
 
 .weather-legend {
-  width: min(300px, 100%);
+  width: 100%;
   padding: 6px 12px 4px;
-  border-radius: 12px;
+  border-radius: 0;
 }
 
 .weather-legend-head {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
   margin-bottom: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   font-size: 12px;
+  cursor: pointer;
 }
 
 .weather-legend-head span {
@@ -5750,6 +5986,14 @@ button.transit-notice-summary {
   gap: 10px;
   padding: 6px 8px 6px 6px;
   border-radius: 999px;
+}
+
+.weather-map-control > .weather-timeline {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .weather-timeline-status {
@@ -6089,28 +6333,76 @@ button.transit-notice-summary {
   font-weight: 600;
 }
 
-.weather-sun {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .weather-scrub {
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
 }
 
+.weather-scrub-wrap {
+  position: relative;
+  padding-top: 14px;
+}
+
+.weather-sun-marker {
+  position: absolute;
+  top: -2px;
+  left: calc(var(--at) * 100%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
+  color: #c67b00;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.weather-sun-sunset {
+  color: #9d4f26;
+}
+
+.weather-time-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.weather-time-actions button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.weather-time-actions button.next-best {
+  margin-left: auto;
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+}
+
 /* Conditions timeline: one tick per forecast step, coloured by rating. */
 .weather-strip {
   display: flex;
+  align-items: flex-end;
   gap: 1px;
-  height: 18px;
+  height: 28px;
 }
 
 .weather-tick {
   flex: 1;
   min-width: 0;
+  height: calc(7px + var(--score) * 0.2px);
   padding: 0;
   border: none;
   border-radius: 2px;
@@ -6142,10 +6434,12 @@ button.transit-notice-summary {
 .weather-facts {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 6px 0;
+  gap: 5px;
+  padding: 7px 8px;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
 }
 
 .weather-headline {
@@ -6165,9 +6459,9 @@ button.transit-notice-summary {
 }
 
 .weather-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
   font-size: 12px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -8339,12 +8633,13 @@ button.transit-notice-summary {
 }
 
 .profile-switch-item-on {
-  background: var(--accent);
-  color: #fff;
+  background: var(--surface-selected);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent);
 }
 
 .profile-switch-item-on:hover {
-  background: var(--accent);
+  background: var(--surface-selected);
 }
 
 /* The label rides along only for the active profile; the rest stay icons, so

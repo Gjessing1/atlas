@@ -163,6 +163,26 @@ export function useRouteLayers(
     };
   }, [map, route.active, route.paths, route.selectedPath, hideLine]);
 
+  // A planner is a map viewport constraint, not merely a card painted over the
+  // map. Frame the selected route inside the part that remains visible: beside
+  // the desktop panel, or above the phone sheet.
+  useEffect(() => {
+    if (!map || !route.active || hideLine) return;
+    const path = route.paths?.[route.selectedPath];
+    if (!path || path.points.length < 2) return;
+    const bounds = new maplibregl.LngLatBounds();
+    for (const point of path.points) bounds.extend([point.lng, point.lat]);
+    if (bounds.isEmpty()) return;
+    const compact = window.matchMedia('(max-width: 640px)').matches;
+    map.fitBounds(bounds, {
+      padding: compact
+        ? { top: 48, right: 36, bottom: Math.min(380, window.innerHeight * 0.46), left: 36 }
+        : { top: 48, right: 360, bottom: 48, left: 48 },
+      maxZoom: 15,
+      duration: 650,
+    });
+  }, [map, route.active, route.paths, route.selectedPath, hideLine]);
+
   // ---- route-mode clicks: select an alternative / insert via / add stop ----
   useEffect(() => {
     if (!map) return;

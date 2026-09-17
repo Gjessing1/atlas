@@ -18,33 +18,48 @@ function gradient(row: WeatherLegendRow): string {
     .join(', ')})`;
 }
 
+const LEGEND_STATE_KEY = 'atlas.weather.legend';
+
 /** Where a value sits along a bar whose ends are inset by half a label. */
 const along = (at: number) => `${(at * 100).toFixed(2)}%`;
 
-function WeatherLegend({ title, legend }: { title: string; legend: WeatherMapLegend }) {
+function WeatherLegend({
+  title,
+  legend,
+  open,
+  onToggle,
+}: {
+  title: string;
+  legend: WeatherMapLegend;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
     <div className="weather-legend" aria-label={`${title} colour scale in ${legend.unit}`}>
-      <div className="weather-legend-head">
+      <button type="button" className="weather-legend-head" aria-expanded={open} onClick={onToggle}>
         <strong>{title}</strong>
-        <span>{legend.unit}</span>
-      </div>
-      {legend.rows.map((row, index) => (
-        <div key={row.label ?? index} className="weather-legend-row">
-          {row.label && <span className="weather-legend-row-label">{row.label}</span>}
-          <div className="weather-legend-scale">
-            <div className="weather-legend-bar" style={{ background: gradient(row) }} />
-            {row.ticks.length > 0 && (
-              <div className="weather-legend-ticks" aria-hidden="true">
-                {row.ticks.map((tick) => (
-                  <span key={tick.label} style={{ left: along(tick.at) }}>
-                    {tick.label}
-                  </span>
-                ))}
-              </div>
-            )}
+        <span>
+          {legend.unit} · Legend {open ? '⌃' : '⌄'}
+        </span>
+      </button>
+      {open &&
+        legend.rows.map((row, index) => (
+          <div key={row.label ?? index} className="weather-legend-row">
+            {row.label && <span className="weather-legend-row-label">{row.label}</span>}
+            <div className="weather-legend-scale">
+              <div className="weather-legend-bar" style={{ background: gradient(row) }} />
+              {row.ticks.length > 0 && (
+                <div className="weather-legend-ticks" aria-hidden="true">
+                  {row.ticks.map((tick) => (
+                    <span key={tick.label} style={{ left: along(tick.at) }}>
+                      {tick.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 }
@@ -78,12 +93,28 @@ export function WeatherDock({
   lightningOn,
   auroraOn,
 }: WeatherDockProps) {
+  // Remembered for the browser session only: shown by default so a first
+  // activation explains its colours, collapsible once they are understood.
+  const [legendOpen, setLegendOpen] = useState(() => {
+    try {
+      return window.sessionStorage.getItem(LEGEND_STATE_KEY) !== 'collapsed';
+    } catch {
+      return true;
+    }
+  });
   // Captions say "25 min ago": keep them honest while the dock sits open.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(LEGEND_STATE_KEY, legendOpen ? 'expanded' : 'collapsed');
+    } catch {
+      // Blocked storage only costs the memory, never the dock.
+    }
+  }, [legendOpen]);
 
   const { frames, frame, frameIndex, nowIndex, legend } = maps;
   const last = Math.max(1, frames.length - 1);
@@ -195,8 +226,19 @@ export function WeatherDock({
 
   return (
     <div className={className}>
-      {legend && <WeatherLegend title={title} legend={legend} />}
-      {weatherTimeline}
+      {(legend || weatherTimeline) && (
+        <div className="weather-map-control">
+          {legend && (
+            <WeatherLegend
+              title={title}
+              legend={legend}
+              open={legendOpen}
+              onToggle={() => setLegendOpen((open) => !open)}
+            />
+          )}
+          {weatherTimeline}
+        </div>
+      )}
       {lightningOn && (
         <div
           className="weather-timeline sky-control"

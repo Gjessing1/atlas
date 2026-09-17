@@ -76,8 +76,8 @@ test('sky layers expose lightning windows and aurora validity in the weather doc
   await page.goto('/#map=5/60/10');
   await waitForMap(page);
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await expect(page.getByRole('button', { name: 'Light pollution' })).toBeVisible();
-  await page.getByRole('button', { name: 'Lightning' }).click();
+  await expect(page.getByRole('switch', { name: 'Light pollution' })).toBeVisible();
+  await page.getByRole('switch', { name: 'Lightning' }).click();
 
   const lightning = page.getByRole('group', { name: 'Lightning time window' });
   await expect(lightning.getByRole('button', { name: 'Last hour' })).toHaveAttribute(
@@ -90,7 +90,7 @@ test('sky layers expose lightning windows and aurora validity in the weather doc
 
   // Using the dock closed the layer menu, as any click outside it does.
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Aurora viewing chance' }).click();
+  await page.getByRole('switch', { name: 'Aurora viewing chance' }).click();
   await expect(page.getByLabel('Aurora forecast time')).toContainText(/\d\d:45/);
   await expect(page.getByLabel('Aurora forecast time')).toContainText(
     'darkness · MET clouds · VIIRS light pollution',
@@ -147,7 +147,7 @@ test('lightning is drawn by strike age, and only the newest strike pulses', asyn
   await page.goto('/#map=8/60/10.7');
   await waitForMap(page);
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Lightning' }).click();
+  await page.getByRole('switch', { name: 'Lightning' }).click();
   const key = page.getByLabel('Lightning strike age');
   await expect(key).toContainText('< 1 min');
   await expect(key).toContainText('1 h');

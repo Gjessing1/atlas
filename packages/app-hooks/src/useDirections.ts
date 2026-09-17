@@ -18,8 +18,8 @@ export interface Directions {
  * to the route planner, which is where every travel-mode decision happens —
  * including public transport, which a card cannot offer because it has no
  * journey board. Having the card pick a mode meant two mode pickers with
- * different visual languages, and which one you got depended on whether you
- * arrived from a map pin or from the Route button.
+ * different visual languages, and which one you got depended on how the place
+ * was opened.
  *
  * The place's *name* goes with it — the old transit hand-off dropped it and the
  * planner opened showing bare coordinates for somewhere the user had just

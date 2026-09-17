@@ -4,9 +4,9 @@ import {
   backToTrack,
   laneGlyphs,
   laneLabel,
+  maneuverActionText,
   remainingAscentM,
   remainingElevationProfile,
-  shortManeuverText,
   type ElevationPoint,
   tunnelChipLabel,
 } from '@atlas/navigation';
@@ -232,6 +232,8 @@ export function NavBanner({
   const canContinuePastStop = guiding && nav.nextIntermediateStop !== null;
   const profileLabel = ROUTING_PROFILES.find((candidate) => candidate.id === nav.profile)?.label;
   const shownWidgets: NavWidgetId[] = exploring ? ['speed', 'altitude'] : widgets;
+  const showSpeed = shownWidgets.includes('speed') || speedLimit !== null;
+  const otherWidgets = shownWidgets.filter((widget) => widget !== 'speed');
 
   return (
     <>
@@ -293,8 +295,11 @@ export function NavBanner({
                       : `In ${fmtKm(maneuver.distanceToM)}`}
                   </span>
                   <span className="nav-maneuver">
-                    {sustain ? sustain.road : shortManeuverText(maneuver.instruction)}
+                    {sustain ? sustain.road : maneuverActionText(maneuver.instruction)}
                   </span>
+                  {!sustain && maneuver.instruction.streetName ? (
+                    <span className="nav-road-name">{maneuver.instruction.streetName}</span>
+                  ) : null}
                   {!sustain && maneuver.instruction.exitSign ? (
                     <span className="nav-exit-sign">
                       {formatExitSign(maneuver.instruction.exitSign)}
@@ -305,10 +310,9 @@ export function NavBanner({
               {state?.laneGuidance ? <LaneRow lanes={state.laneGuidance} /> : null}
               {thenManeuver ? (
                 <div className="nav-then-row">
-                  <span className="nav-then-label">Then</span>
                   <TurnIcon instruction={thenManeuver.instruction} size={20} />
                   <span className="nav-then-text">
-                    {shortManeuverText(thenManeuver.instruction)}
+                    Then {maneuverActionText(thenManeuver.instruction)}
                   </span>
                 </div>
               ) : null}
@@ -417,7 +421,20 @@ export function NavBanner({
         <div className={`nav-actions${canDeclareArrival ? ' nav-actions-arrival' : ''}`}>
           {moving ? (
             <div className="nav-widgets" aria-label="Navigation widgets">
-              {shownWidgets.map((widget) => {
+              {showSpeed ? (
+                <span className="nav-speed-cluster">
+                  <span className="nav-speed-reading">
+                    <strong>{speedKph(nav.speedMps) ?? 0}</strong>
+                    <small>km/h</small>
+                  </span>
+                  {speedLimit != null ? (
+                    <span className="nav-speed-limit" title="Speed limit">
+                      {speedLimit}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {otherWidgets.map((widget) => {
                 const display = widgetValue(widget, nav);
                 return (
                   <span className="nav-widget" key={widget}>
@@ -428,11 +445,6 @@ export function NavBanner({
               })}
               {/* Absent wherever the map data has no limit — an honest gap
                   beats a stale number the driver might trust. */}
-              {speedLimit != null ? (
-                <span className="nav-speed-limit" title="Speed limit">
-                  {speedLimit}
-                </span>
-              ) : null}
             </div>
           ) : (
             <span />

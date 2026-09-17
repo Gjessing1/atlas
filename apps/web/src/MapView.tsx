@@ -71,9 +71,9 @@ async function loadStyle(
  * A colour-badged teardrop marker element (Android PlacePin twin): an emoji
  * badge when an icon is given, a plain white dot otherwise (the dropped pin).
  */
-function teardropElement(color: string, icon?: string): HTMLElement {
+function teardropElement(color: string, icon?: string, selected = false): HTMLElement {
   const el = document.createElement('div');
-  el.className = 'place-marker';
+  el.className = `place-marker${selected ? ' place-marker-selected' : ''}`;
   // Inner wrapper scaled by --marker-scale (set per zoom on the map container);
   // MapLibre owns the root element's transform, so scaling must live one level in.
   const scale = document.createElement('div');
@@ -100,6 +100,8 @@ interface MapViewProps {
   /** Initial camera; typically decoded from the URL hash. */
   initialView: MapViewState;
   pin: LatLng | null;
+  /** Currently open place card, highlighted directly on the map. */
+  selected: LatLng | null;
   /** Saved places, drawn as colour-badged emoji markers. */
   places: PlaceRecord[];
   onPinChange: (pin: LatLng | null) => void;
@@ -131,6 +133,7 @@ interface MapViewProps {
 export function MapView({
   initialView,
   pin,
+  selected,
   places,
   onPinChange,
   onSelect,
@@ -318,7 +321,11 @@ export function MapView({
     if (pin) {
       // Same red teardrop as the Android destination pick (#d33939).
       const marker = new maplibregl.Marker({
-        element: teardropElement('#d33939'),
+        element: teardropElement(
+          '#d33939',
+          undefined,
+          selected?.lat === pin.lat && selected.lng === pin.lng,
+        ),
         anchor: 'bottom',
         draggable: true,
       })
@@ -333,7 +340,7 @@ export function MapView({
       });
       markerRef.current = marker;
     }
-  }, [map, pin, onPinChange]);
+  }, [map, pin, selected, onPinChange]);
 
   // Draw saved places as colour-badged emoji markers (favourites are few, so
   // DOM markers render real emoji + colour that vector-tile glyphs can't).
@@ -343,7 +350,11 @@ export function MapView({
     for (const m of placeMarkersRef.current) m.remove();
     placeMarkersRef.current = places.map((place) => {
       const marker = new maplibregl.Marker({
-        element: teardropElement(place.color, place.icon),
+        element: teardropElement(
+          place.color,
+          place.icon,
+          selected?.lat === place.lat && selected.lng === place.lng,
+        ),
         anchor: 'bottom',
       })
         .setLngLat({ lat: place.lat, lng: place.lng })
@@ -364,7 +375,32 @@ export function MapView({
       for (const m of placeMarkersRef.current) m.remove();
       placeMarkersRef.current = [];
     };
-  }, [map, places]);
+  }, [map, places, selected]);
+
+  // Basemap POIs and search hits do not own a DOM marker of their own. Give
+  // the open card a real selected pin so overlapping symbols never leave the
+  // map asking which one was tapped.
+  const selectedMarkerRef = useRef<maplibregl.Marker | null>(null);
+  useEffect(() => {
+    if (!map) return;
+    selectedMarkerRef.current?.remove();
+    selectedMarkerRef.current = null;
+    if (!selected) return;
+    const alreadyMarked =
+      (pin?.lat === selected.lat && pin.lng === selected.lng) ||
+      places.some((place) => place.lat === selected.lat && place.lng === selected.lng);
+    if (alreadyMarked) return;
+    selectedMarkerRef.current = new maplibregl.Marker({
+      element: teardropElement('#d33939', undefined, true),
+      anchor: 'bottom',
+    })
+      .setLngLat(selected)
+      .addTo(map);
+    return () => {
+      selectedMarkerRef.current?.remove();
+      selectedMarkerRef.current = null;
+    };
+  }, [map, selected, pin, places]);
 
   return <div ref={containerRef} style={{ height: '100%' }} />;
 }

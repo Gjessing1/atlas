@@ -4,7 +4,7 @@ import {
   buildPlanner,
   compass16,
   forecastTable,
-  sunDay,
+  sunTimelineEvents,
   symbolEmoji,
   windArrow,
   type ConditionsKind,
@@ -117,13 +117,26 @@ export function WeatherSheet({
     () => (mode === 'fishing' || mode === 'hunting' ? bestWindows(rows) : []),
     [rows, mode],
   );
+  const sunEvents = useMemo(
+    () => (target ? sunTimelineEvents(rows, target.lat, target.lng) : []),
+    [rows, target],
+  );
 
   const idx = Math.min(selected, Math.max(0, rows.length - 1));
   const row = rows[idx];
-  const sun = useMemo(
-    () => (row && target ? sunDay(new Date(row.timeMs), target.lat, target.lng) : null),
-    [row, target],
-  );
+  const goToNow = (): void => {
+    if (rows.length === 0) return;
+    const now = Date.now();
+    let nearest = 0;
+    for (let i = 1; i < rows.length; i++) {
+      if (Math.abs(rows[i]!.timeMs - now) < Math.abs(rows[nearest]!.timeMs - now)) nearest = i;
+    }
+    setSelected(nearest);
+  };
+  const goToNextBest = (): void => {
+    const next = windows.find((window) => window.peakIdx > idx) ?? windows[0];
+    if (next) setSelected(next.peakIdx);
+  };
 
   return (
     <BottomSheet
@@ -187,15 +200,6 @@ export function WeatherSheet({
         <ScrollView style={styles.scroll}>
           <View style={styles.timeRow}>
             <Text style={styles.stepLabel}>{fmtStep(row.timeMs)}</Text>
-            {sun ? (
-              <Text style={styles.sun}>
-                {sun.sunrise && sun.sunset
-                  ? `☀ ${fmtTime(sun.sunrise.getTime())}–${fmtTime(sun.sunset.getTime())}`
-                  : sun.noonAltitude > 0
-                    ? '☀ midnight sun'
-                    : '☀ polar night'}
-              </Text>
-            ) : null}
           </View>
 
           {/* Tappable hour strip — the scrubber. Coloured by rating when scoring. */}
@@ -211,15 +215,37 @@ export function WeatherSheet({
                   ? '#d7dae0'
                   : (RATING_COLOR[r.assessment?.rating ?? ''] ?? '#d7dae0');
               return (
-                <Pressable
-                  key={r.point.time}
-                  onPress={() => setSelected(i)}
-                  style={[
-                    styles.tick,
-                    { backgroundColor: color },
-                    i === idx ? styles.tickSelected : null,
-                  ]}
-                />
+                <View key={r.point.time} style={styles.tickColumn}>
+                  {sunEvents
+                    .filter((event) => event.index === i)
+                    .map((event) => (
+                      <Pressable
+                        key={`${event.kind}-${event.timeMs}`}
+                        onPress={() => setSelected(event.index)}
+                        accessibilityLabel={`${event.kind === 'sunrise' ? 'Sunrise' : 'Sunset'} ${fmtTime(event.timeMs)}`}
+                      >
+                        <Text
+                          style={[
+                            styles.sunMarker,
+                            event.kind === 'sunset' ? styles.sunsetMarker : null,
+                          ]}
+                        >
+                          ☀
+                        </Text>
+                      </Pressable>
+                    ))}
+                  <Pressable
+                    onPress={() => setSelected(i)}
+                    style={[
+                      styles.tick,
+                      {
+                        backgroundColor: color,
+                        height: mode === 'weather' ? 20 : 7 + (r.assessment?.score ?? 0) * 0.2,
+                      },
+                      i === idx ? styles.tickSelected : null,
+                    ]}
+                  />
+                </View>
               );
             })}
           </ScrollView>
@@ -230,15 +256,23 @@ export function WeatherSheet({
               onPress={() => setSelected(Math.max(0, idx - 1))}
               disabled={idx <= 0}
             >
-              <Text style={styles.stepButtonText}>◀ Earlier</Text>
+              <Text style={styles.stepButtonText}>‹ Earlier</Text>
+            </Pressable>
+            <Pressable style={styles.stepButton} onPress={goToNow}>
+              <Text style={styles.stepButtonText}>Now</Text>
             </Pressable>
             <Pressable
               style={styles.stepButton}
               onPress={() => setSelected(Math.min(rows.length - 1, idx + 1))}
               disabled={idx >= rows.length - 1}
             >
-              <Text style={styles.stepButtonText}>Later ▶</Text>
+              <Text style={styles.stepButtonText}>Later ›</Text>
             </Pressable>
+            {mode !== 'weather' && windows.length > 0 ? (
+              <Pressable style={[styles.stepButton, styles.nextBest]} onPress={goToNextBest}>
+                <Text style={[styles.stepButtonText, styles.nextBestText]}>Next best</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           <WeatherFacts row={row} />
@@ -268,7 +302,7 @@ export function WeatherSheet({
                     >
                       <Text style={styles.windowChipText}>
                         {fmtStep(rows[w.startIdx]!.timeMs)}–
-                        {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)}
+                        {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)} · {w.peakScore}
                       </Text>
                     </Pressable>
                   ))}
@@ -314,10 +348,7 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
       : p.precip != null
         ? `${p.precip.toFixed(1)} mm`
         : null;
-  const precip =
-    p.precip != null && p.precip > 0
-      ? `${precipAmount}${p.precipProb != null ? ` · ${Math.round(p.precipProb)}%` : ''}`
-      : 'dry';
+  const precip = precipAmount ?? '0 mm';
   const trend =
     row.pressureTrendHpa != null
       ? ` ${row.pressureTrendHpa > 0 ? '↗' : row.pressureTrendHpa < 0 ? '↘' : '→'}`
@@ -326,21 +357,24 @@ function WeatherFacts({ row }: { row: PlannerHour }): React.JSX.Element {
     <View style={styles.facts}>
       <View style={styles.headline}>
         <Text style={styles.emoji}>{symbolEmoji(p.symbol)}</Text>
-        <Text style={styles.temp}>{Math.round(p.temp)}°</Text>
+        <Text style={styles.temp}>{Math.round(p.temp)}°C</Text>
         <Text style={styles.wind}>
-          {Math.round(p.windSpeed)}
-          {gust} m/s from {compass16(p.windFromDir)}
+          Wind {Math.round(p.windSpeed)}
+          {gust} m/s {compass16(p.windFromDir)}
         </Text>
       </View>
       <View style={styles.detailsRow}>
-        <Text style={styles.detailItem}>☁ {Math.round(p.cloud)}%</Text>
+        <Text style={styles.detailItem}>Cloud {Math.round(p.cloud)}%</Text>
         <Text style={styles.detailItem}>Humidity {Math.round(p.humidity)}%</Text>
-        <Text style={styles.detailItem}>🌧 {precip}</Text>
+        <Text style={styles.detailItem}>
+          Precip {precip}
+          {p.precipProb != null ? ` · ${Math.round(p.precipProb)}% chance` : ''}
+        </Text>
         {p.apparentTemp != null && Math.abs(p.apparentTemp - p.temp) >= 1 ? (
-          <Text style={styles.detailItem}>Feels {Math.round(p.apparentTemp)}°</Text>
+          <Text style={styles.detailItem}>Feels {Math.round(p.apparentTemp)}°C</Text>
         ) : null}
         {p.dewPoint != null ? (
-          <Text style={styles.detailItem}>Dew {Math.round(p.dewPoint)}°</Text>
+          <Text style={styles.detailItem}>Dew {Math.round(p.dewPoint)}°C</Text>
         ) : null}
         {p.uvIndex != null && p.uvIndex >= 1 ? (
           <Text style={styles.detailItem}>UV {p.uvIndex.toFixed(1)}</Text>
@@ -541,37 +575,48 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   stepLabel: { fontSize: 14, fontWeight: '700', color: theme.text },
-  sun: { fontSize: 12, color: theme.textMuted },
 
-  strip: { marginTop: 10, maxHeight: 24 },
-  stripContent: { gap: 2, alignItems: 'center' },
+  strip: { marginTop: 8, maxHeight: 40 },
+  stripContent: { gap: 2, alignItems: 'flex-end' },
+  tickColumn: { width: 8, minHeight: 38, alignItems: 'center', justifyContent: 'flex-end' },
+  sunMarker: { color: '#c67b00', fontSize: 11, lineHeight: 16 },
+  sunsetMarker: { color: '#9d4f26' },
   tick: { width: 6, height: 20, borderRadius: 2 },
   tickSelected: { borderWidth: 2, borderColor: theme.text },
 
   stepButtons: { flexDirection: 'row', gap: 8, marginTop: 10 },
   stepButton: {
-    flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 8,
     backgroundColor: theme.surfaceMuted,
   },
-  stepButtonText: { fontSize: 13, color: theme.text, fontWeight: '600' },
+  stepButtonText: { fontSize: 11, color: theme.textMuted, fontWeight: '600' },
+  nextBest: { marginLeft: 'auto', borderWidth: 1, borderColor: theme.accent },
+  nextBestText: { color: theme.accent, fontWeight: '700' },
 
   facts: {
     marginTop: 14,
-    paddingVertical: 10,
+    padding: 10,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: theme.border,
+    borderRadius: 10,
+    backgroundColor: theme.surfaceMuted,
     gap: 6,
   },
   headline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   emoji: { fontSize: 22 },
   temp: { fontSize: 20, fontWeight: '800', color: theme.text },
   wind: { fontSize: 13, color: theme.text, flexShrink: 1 },
-  detailsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  detailItem: { fontSize: 13, color: theme.textMuted, fontVariant: ['tabular-nums'] },
+  detailsRow: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 5 },
+  detailItem: {
+    width: '50%',
+    fontSize: 12,
+    color: theme.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
 
   assessment: { marginTop: 14, gap: 12 },
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },

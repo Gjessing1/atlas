@@ -11,6 +11,7 @@ import {
   roePhenologyAt,
   sunDay,
   sunPosition,
+  sunTimelineEvents,
   windArrow,
   type ConditionAssessment,
   type PlannerHour,
@@ -277,6 +278,17 @@ describe('buildPlanner', () => {
     });
     expect(scored[5]!.assessment!.score).toBeGreaterThan(0);
     expect(scored[5]!.pressureTrendHpa).toBeLessThan(0);
+  });
+
+  it('places sunrise and sunset on the visible hourly timeline', () => {
+    const rows = buildPlanner(forecast, {
+      now: new Date('2026-07-19T00:00:00Z'),
+      maxHours: 24,
+    });
+    const events = sunTimelineEvents(rows, OSLO.lat, OSLO.lon);
+    expect(events.map((event) => event.kind)).toEqual(['sunrise', 'sunset']);
+    expect(events.every((event) => event.at >= 0 && event.at <= 1)).toBe(true);
+    expect(events[0]!.index).toBeLessThan(events[1]!.index);
   });
 });
 

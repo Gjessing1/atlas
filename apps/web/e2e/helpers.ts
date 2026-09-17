@@ -32,6 +32,13 @@ export async function project(page: Page, lat: number, lng: number): Promise<[nu
   );
 }
 
+/** Open route planning through the user-facing map-pin → Directions flow. */
+export async function openRoutePlannerAt(page: Page, lat: number, lng: number): Promise<void> {
+  const [x, y] = await project(page, lat, lng);
+  await page.mouse.click(x, y, { button: 'right' });
+  await page.getByRole('button', { name: 'Directions' }).click();
+}
+
 /** The map's current { lat, lng, zoom } for camera assertions. */
 export async function cameraState(page: Page): Promise<{ lat: number; lng: number; zoom: number }> {
   return page.evaluate(() => {

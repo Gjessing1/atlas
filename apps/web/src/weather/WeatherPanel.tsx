@@ -4,7 +4,7 @@ import {
   buildPlanner,
   compass16,
   forecastTable,
-  sunDay,
+  sunTimelineEvents,
   symbolEmoji,
   windArrow,
   type ConditionsKind,
@@ -53,10 +53,7 @@ function WeatherFacts({ row }: { row: PlannerHour }) {
       : p.precip != null
         ? `${p.precip.toFixed(1)} mm`
         : null;
-  const precip =
-    p.precip != null && p.precip > 0
-      ? `${precipAmount}${p.precipProb != null ? ` · ${Math.round(p.precipProb)}%` : ''}`
-      : 'dry';
+  const precip = precipAmount ?? '0 mm';
   const trend =
     row.pressureTrendHpa != null
       ? ` ${row.pressureTrendHpa > 0 ? '↗' : row.pressureTrendHpa < 0 ? '↘' : '→'}`
@@ -65,20 +62,23 @@ function WeatherFacts({ row }: { row: PlannerHour }) {
     <div className="weather-facts">
       <div className="weather-headline">
         <span className="weather-emoji">{symbolEmoji(p.symbol)}</span>
-        <span className="weather-temp">{Math.round(p.temp)}°</span>
-        <span>
-          {Math.round(p.windSpeed)}
-          {gust} m/s from {compass16(p.windFromDir)}
+        <span className="weather-temp">{Math.round(p.temp)}°C</span>
+        <span className="weather-wind">
+          Wind {Math.round(p.windSpeed)}
+          {gust} m/s {compass16(p.windFromDir)}
         </span>
       </div>
       <div className="weather-details">
-        <span>☁ {Math.round(p.cloud)}%</span>
+        <span>Cloud {Math.round(p.cloud)}%</span>
         <span>Humidity {Math.round(p.humidity)}%</span>
-        <span>🌧 {precip}</span>
+        <span>
+          Precip {precip}
+          {p.precipProb != null ? ` · ${Math.round(p.precipProb)}% chance` : ''}
+        </span>
         {p.apparentTemp != null && Math.abs(p.apparentTemp - p.temp) >= 1 && (
-          <span>Feels {Math.round(p.apparentTemp)}°</span>
+          <span>Feels {Math.round(p.apparentTemp)}°C</span>
         )}
-        {p.dewPoint != null && <span>Dew {Math.round(p.dewPoint)}°</span>}
+        {p.dewPoint != null && <span>Dew {Math.round(p.dewPoint)}°C</span>}
         {p.uvIndex != null && p.uvIndex >= 1 && <span>UV {p.uvIndex.toFixed(1)}</span>}
         {p.thunderProb != null && p.thunderProb >= 10 && (
           <span>⚡ {Math.round(p.thunderProb)}%</span>
@@ -307,14 +307,27 @@ export function WeatherPanel({
     () => (mode === 'fishing' || mode === 'hunting' ? bestWindows(rows) : []),
     [rows, mode],
   );
+  const sunEvents = useMemo(
+    () => sunTimelineEvents(rows, target.lat, target.lng),
+    [rows, target.lat, target.lng],
+  );
 
   // Keep the selection inside the (re)loaded series.
   const row = rows[Math.min(selected, Math.max(0, rows.length - 1))];
 
-  const sun = useMemo(
-    () => (row ? sunDay(new Date(row.timeMs), target.lat, target.lng) : null),
-    [row, target.lat, target.lng],
-  );
+  const goToNow = () => {
+    if (rows.length === 0) return;
+    const now = Date.now();
+    let nearest = 0;
+    for (let i = 1; i < rows.length; i++) {
+      if (Math.abs(rows[i]!.timeMs - now) < Math.abs(rows[nearest]!.timeMs - now)) nearest = i;
+    }
+    setSelected(nearest);
+  };
+  const goToNextBest = () => {
+    const next = windows.find((window) => window.peakIdx > selected) ?? windows[0];
+    if (next) setSelected(next.peakIdx);
+  };
 
   return (
     <aside className="weather-panel" aria-label="Weather and conditions">
@@ -377,25 +390,50 @@ export function WeatherPanel({
         <>
           <div className="weather-time">
             <span className="weather-step">{fmtStep(row.timeMs)}</span>
-            {sun && (
-              <span className="weather-sun">
-                {sun.sunrise && sun.sunset
-                  ? `☀ ${fmtTime(sun.sunrise.getTime())}–${fmtTime(sun.sunset.getTime())}`
-                  : sun.noonAltitude > 0
-                    ? '☀ midnight sun'
-                    : '☀ polar night'}
-              </span>
+          </div>
+          <div className="weather-scrub-wrap">
+            <input
+              type="range"
+              className="weather-scrub"
+              min={0}
+              max={rows.length - 1}
+              value={Math.min(selected, rows.length - 1)}
+              onChange={(e) => setSelected(Number(e.target.value))}
+              aria-label="Forecast time"
+            />
+            {sunEvents.map((event) => (
+              <button
+                key={`${event.kind}-${event.timeMs}`}
+                type="button"
+                className={`weather-sun-marker weather-sun-${event.kind}`}
+                style={{ '--at': event.at } as React.CSSProperties}
+                title={`${event.kind === 'sunrise' ? 'Sunrise' : 'Sunset'} ${fmtTime(event.timeMs)}`}
+                aria-label={`${event.kind === 'sunrise' ? 'Sunrise' : 'Sunset'} ${fmtTime(event.timeMs)}`}
+                onClick={() => setSelected(event.index)}
+              >
+                ☀
+              </button>
+            ))}
+          </div>
+          <div className="weather-time-actions">
+            <button type="button" onClick={() => setSelected(Math.max(0, selected - 1))}>
+              ‹ Earlier
+            </button>
+            <button type="button" onClick={goToNow}>
+              Now
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(Math.min(rows.length - 1, selected + 1))}
+            >
+              Later ›
+            </button>
+            {mode !== 'weather' && windows.length > 0 && (
+              <button type="button" className="next-best" onClick={goToNextBest}>
+                Next best
+              </button>
             )}
           </div>
-          <input
-            type="range"
-            className="weather-scrub"
-            min={0}
-            max={rows.length - 1}
-            value={Math.min(selected, rows.length - 1)}
-            onChange={(e) => setSelected(Number(e.target.value))}
-            aria-label="Forecast time"
-          />
           {mode !== 'weather' && (
             <div className="weather-strip" aria-hidden="true">
               {rows.map((r, i) => (
@@ -406,6 +444,7 @@ export function WeatherPanel({
                   className={`weather-tick rating-${r.assessment?.rating ?? 'none'}${
                     i === selected ? ' tick-selected' : ''
                   }`}
+                  style={{ '--score': r.assessment?.score ?? 0 } as React.CSSProperties}
                   onClick={() => setSelected(i)}
                   title={`${fmtStep(r.timeMs)} — ${r.assessment?.score ?? ''}`}
                 />
@@ -434,7 +473,7 @@ export function WeatherPanel({
                       title={`Peak score ${w.peakScore}`}
                     >
                       {fmtStep(rows[w.startIdx]!.timeMs)}–
-                      {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)}
+                      {fmtTime(rows[w.endIdx]!.timeMs + 3600_000)} · {w.peakScore}
                     </button>
                   ))}
                 </div>

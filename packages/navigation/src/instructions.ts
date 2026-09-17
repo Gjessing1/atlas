@@ -63,3 +63,12 @@ export function shortManeuverText(instruction: ShortenableInstruction): string {
 
   return text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : '';
 }
+
+/** The action phrase without the road name, which guidance renders on its own line. */
+export function maneuverActionText(instruction: ShortenableInstruction): string {
+  const text = shortManeuverText(instruction);
+  const road = instruction.streetName?.trim();
+  if (!road) return text;
+  const escaped = road.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`\\s+(?:onto|on)\\s+${escaped}$`, 'i'), '').trim() || text;
+}

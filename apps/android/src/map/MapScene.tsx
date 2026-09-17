@@ -22,6 +22,7 @@ import {
   UserLocation,
   ViewAnnotation,
   type CameraRef,
+  type GeoJSONSourceRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
 import { WEATHER_FRAME_FADE } from '@atlas/conditions';
@@ -402,6 +403,7 @@ export function MapScene({
   onDestinationMoved,
 }: MapSceneProps) {
   const mapViewportRef = useRef<View>(null);
+  const exploreSourceRef = useRef<GeoJSONSourceRef>(null);
   const measureMapViewport = useCallback(() => {
     requestAnimationFrame(() => {
       mapViewportRef.current?.measureInWindow((x, y, width, height) => {
@@ -1313,12 +1315,62 @@ export function MapScene({
         ) : null}
         {!inPip && exploreResults.length > 0 ? (
           <GeoJSONSource
+            ref={exploreSourceRef}
             id="atlas-explore-results"
             data={exploreResultsFeatureCollection(exploreResults)}
+            cluster
+            clusterRadius={32}
+            clusterMaxZoom={16}
+            onPress={(event) => {
+              const feature = event.nativeEvent.features[0];
+              const clusterId = feature?.properties?.['cluster_id'];
+              if (typeof clusterId !== 'number' || feature?.geometry.type !== 'Point') return;
+              const coordinates = (feature.geometry as { coordinates: number[] }).coordinates;
+              event.stopPropagation();
+              void exploreSourceRef.current?.getClusterExpansionZoom(clusterId).then((zoom) => {
+                if (coordinates.length < 2) return;
+                cameraRef.current?.easeTo({
+                  center: [coordinates[0]!, coordinates[1]!],
+                  zoom,
+                  duration: 450,
+                });
+              });
+            }}
           >
+            <Layer
+              type="line"
+              id="atlas-explore-results-spider-legs"
+              filter={['==', ['get', 'spiderLeg'], true]}
+              minzoom={17}
+              paint={{ 'line-color': '#64748b', 'line-width': 1.5, 'line-opacity': 0.8 }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-explore-results-cluster"
+              filter={['has', 'point_count']}
+              paint={{
+                'circle-radius': ['step', ['get', 'point_count'], 16, 5, 20, 12, 24],
+                'circle-color': '#0e7490',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-explore-results-cluster-count"
+              filter={['has', 'point_count']}
+              layout={{
+                'text-field': ['get', 'point_count_abbreviated'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12,
+                'text-allow-overlap': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
+            />
             <Layer
               type="circle"
               id="atlas-explore-results-halo"
+              filter={['!', ['has', 'point_count']]}
               paint={{
                 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 13, 14, 18],
                 'circle-color': '#ffffff',
@@ -1328,6 +1380,7 @@ export function MapScene({
             <Layer
               type="circle"
               id={EXPLORE_RESULT_LAYER_ID}
+              filter={['!', ['has', 'point_count']]}
               paint={{
                 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 10.5, 14, 15],
                 'circle-color': '#0e7490',
@@ -1338,6 +1391,7 @@ export function MapScene({
             <Layer
               type="symbol"
               id="atlas-explore-results-number"
+              filter={['!', ['has', 'point_count']]}
               layout={{
                 'text-field': ['get', 'label'],
                 'text-font': ['Noto Sans Bold'],
@@ -1768,7 +1822,7 @@ export function MapScene({
                 onDestinationMoved({ lat, lng });
               }}
             >
-              <PlacePin color="#d33939" />
+              <PlacePin color="#d33939" selected />
             </ViewAnnotation>
           ) : null
         ) : null}
@@ -1807,7 +1861,11 @@ export function MapScene({
           ? visiblePlaces.map((place) => (
               <Marker key={place.id} lngLat={[place.lng, place.lat]} anchor="bottom">
                 <View pointerEvents="none" testID={`place-pin-${place.id}`} style={pinScaleStyle}>
-                  <PlacePin color={place.color} icon={place.icon} />
+                  <PlacePin
+                    color={place.color}
+                    icon={place.icon}
+                    selected={destination?.placeId === place.id}
+                  />
                 </View>
               </Marker>
             ))

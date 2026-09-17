@@ -78,7 +78,11 @@ export {
 } from './camera.js';
 export { maneuverArrowsGeoJSON } from './overlays.js';
 export { laneGlyphs, laneLabel, type LaneGlyph } from './lanes.js';
-export { shortManeuverText, type ShortenableInstruction } from './instructions.js';
+export {
+  maneuverActionText,
+  shortManeuverText,
+  type ShortenableInstruction,
+} from './instructions.js';
 export { roundaboutGlyph, ROUNDABOUT_RING, type RoundaboutGlyph } from './roundabout.js';
 export {
   compactMatchTrace,

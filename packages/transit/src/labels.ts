@@ -55,6 +55,8 @@ import {
 /** Mode names as a traveller would tick them in a filter. */
 export const TRANSIT_MODE_LABEL: Record<TransitMode, string> = {
   foot: 'Walk',
+  bicycle: 'Bicycle',
+  bike_rental: 'City bike',
   bus: 'Bus',
   coach: 'Coach',
   tram: 'Tram',
@@ -81,6 +83,8 @@ export const TRANSIT_MODE_LABEL: Record<TransitMode, string> = {
  */
 export const TRANSIT_MODE_GLYPH: Record<TransitMode, string> = {
   foot: '🚶',
+  bicycle: '🚲',
+  bike_rental: '🚲',
   bus: '🚌',
   coach: '🚌',
   tram: '🚊',

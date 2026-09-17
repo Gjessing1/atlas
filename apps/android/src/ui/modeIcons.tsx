@@ -669,6 +669,8 @@ export const MAP_PROFILE_ICON: Record<string, ModeIcon> = {
  */
 export const TRANSIT_ICON: Record<TransitMode, ModeIcon> = {
   foot: WalkIcon,
+  bicycle: BicycleIcon,
+  bike_rental: BicycleIcon,
   bus: BusIcon,
   coach: BusIcon,
   tram: TramIcon,

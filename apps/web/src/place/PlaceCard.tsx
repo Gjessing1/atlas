@@ -19,7 +19,7 @@ import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
 import type { PlaceRecord } from '@atlas/storage';
 import { useEffect, useRef, useState } from 'react';
-import { PencilIcon, RouteIcon, ShareIcon, SunIcon, TrainIcon } from '../icons.js';
+import { CameraIcon, PencilIcon, RouteIcon, ShareIcon, SunIcon, TrainIcon } from '../icons.js';
 import { PotentialExplain } from '../potential/PotentialExplain.js';
 import { StandBlock } from './StandBlock.js';
 import { useNearbyPhotos, useNearbyPlaces } from './useNearbyPlaces.js';
@@ -171,18 +171,20 @@ function NearbyFeatures({
           type="button"
           className="place-card-nearby-toggle"
           aria-expanded={photosOpen}
+          aria-label="Photos nearby"
           onClick={() => setPhotosOpen((value) => !value)}
         >
-          ◫ Photos nearby
+          <CameraIcon size={15} /> Nearby
         </button>
         <button
           type="button"
           className="place-card-nearby-toggle"
           aria-expanded={placesOpen}
+          aria-label="Nearby places"
           onClick={() => setPlacesOpen((value) => !value)}
         >
           <WikiBadge />
-          Nearby places
+          Nearby
         </button>
       </div>
       {photosOpen && photos.status === 'loading' && !hasPhotos && (
@@ -453,7 +455,7 @@ export function PlaceCard({
         </div>
         {light && (
           <div>
-            <dt>Light</dt>
+            <dt>Daylight</dt>
             <dd>{light}</dd>
           </div>
         )}
@@ -507,9 +509,14 @@ export function PlaceCard({
         {/* Already saved: the useful action is editing *this* place — renaming
             it, filing it, adding a note — not being shown that it exists. */}
         {saved ? (
-          <button type="button" onClick={() => onEdit(saved)}>
+          <button
+            type="button"
+            className="icon-only tertiary"
+            onClick={() => onEdit(saved)}
+            aria-label="Edit"
+            title="Edit"
+          >
             <PencilIcon size={17} />
-            Edit
           </button>
         ) : (
           <button
@@ -521,9 +528,14 @@ export function PlaceCard({
             Save
           </button>
         )}
-        <button type="button" onClick={onWeather}>
+        <button
+          type="button"
+          className="icon-only"
+          onClick={onWeather}
+          aria-label="Weather"
+          title="Weather"
+        >
           <SunIcon size={17} />
-          Weather
         </button>
         {transitCoversPoint(target.position) && (
           <button
@@ -537,11 +549,13 @@ export function PlaceCard({
         )}
         <button
           type="button"
+          className="icon-only"
           aria-expanded={shareOpen}
           onClick={() => setShareOpen((open) => !open)}
+          aria-label={copied ? 'Link copied' : 'Share'}
+          title={copied ? 'Copied' : 'Share'}
         >
           <ShareIcon size={17} />
-          {copied ? 'Copied' : 'Share'}
         </button>
         {target.source === 'pin' && (
           <button type="button" onClick={onRemovePin}>

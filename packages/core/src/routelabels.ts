@@ -8,7 +8,7 @@
  * copies of a label are copies that eventually disagree.
  */
 
-import { fmtDuration, fmtKm } from './format.js';
+import { fmtCompactDuration, fmtDuration, fmtKm } from './format.js';
 import type { LatLng } from './geo.js';
 
 /** Alternative chip: the fastest shows its duration, others their extra minutes. */
@@ -40,7 +40,7 @@ export function routeDeltaLabel(deltaMs: number): string {
 export function modeTimeLabel(t: number | 'none' | undefined): string {
   if (t === undefined) return '…';
   if (t === 'none') return '—';
-  return fmtDuration(t);
+  return fmtCompactDuration(t);
 }
 
 /**

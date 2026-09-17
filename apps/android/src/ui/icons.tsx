@@ -10,9 +10,17 @@ import { theme } from './theme';
  * wrapper is sized to the rotated square's diagonal so the tail tip touches
  * its bottom edge, making it safe to anchor a map Marker at "bottom".
  */
-export function PlacePin({ color, icon }: { color: string; icon?: string }) {
+export function PlacePin({
+  color,
+  icon,
+  selected = false,
+}: {
+  color: string;
+  icon?: string;
+  selected?: boolean;
+}) {
   return (
-    <View style={pinStyles.wrap}>
+    <View style={[pinStyles.wrap, selected ? pinStyles.wrapSelected : null]}>
       <View style={[pinStyles.body, { backgroundColor: color }]}>
         {icon ? <Text style={pinStyles.glyph}>{icon}</Text> : <View style={pinStyles.dot} />}
       </View>
@@ -25,6 +33,11 @@ const PIN_BOX = Math.ceil(PIN_SIZE * Math.SQRT2);
 
 const pinStyles = StyleSheet.create({
   wrap: { width: PIN_BOX, height: PIN_BOX, alignItems: 'center', justifyContent: 'center' },
+  wrapSelected: {
+    borderRadius: PIN_BOX / 2,
+    backgroundColor: 'rgba(79,145,239,0.25)',
+    transform: [{ scale: 1.18 }],
+  },
   body: {
     width: PIN_SIZE,
     height: PIN_SIZE,
@@ -255,6 +268,22 @@ export function PencilIcon({ color = theme.icon }: { color?: string }) {
         strokeWidth={1.5}
         strokeLinecap="round"
       />
+    </Svg>
+  );
+}
+
+/** Camera outline for photo discovery actions. */
+export function CameraIcon({ color = theme.icon }: { color?: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M4 8.5h3l1.3-2h7.4l1.3 2h3v10H4z"
+        fill="none"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={13.5} r={3.1} fill="none" stroke={color} strokeWidth={1.7} />
     </Svg>
   );
 }

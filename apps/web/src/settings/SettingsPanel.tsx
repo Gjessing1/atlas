@@ -11,6 +11,7 @@ import {
   type NavPrefsController,
   type StorageAvailability,
   type ThemeModeController,
+  type TransitPreferencesController,
   type VehicleProfileController,
 } from '@atlas/app-hooks';
 import {
@@ -45,6 +46,7 @@ interface SettingsPanelProps {
   mapStyle: MapStyleEditorController;
   navPrefs: NavPrefsController;
   vehicle: VehicleProfileController;
+  transitPreferences: TransitPreferencesController;
   layers: LayerCatalog;
   mapZoom: number;
   profilePreferences: MapProfilePreferencesController;
@@ -378,6 +380,7 @@ export function SettingsPanel({
   mapStyle,
   navPrefs,
   vehicle,
+  transitPreferences,
   layers,
   mapZoom,
   profilePreferences,
@@ -453,6 +456,135 @@ export function SettingsPanel({
 
         {tab === 'navigation' && (
           <div className="settings-section">
+            <h3>Public transport</h3>
+            <p className="settings-note">
+              How to reach stops and how cautious connections should be.
+            </p>
+            <div
+              className="theme-options"
+              role="radiogroup"
+              aria-label="Access to public transport"
+            >
+              {(
+                [
+                  ['foot', 'Walk'],
+                  ['bicycle', 'Own bike'],
+                  ['bike_rental', 'City bike'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={transitPreferences.value.accessMode === mode}
+                  className={
+                    transitPreferences.value.accessMode === mode
+                      ? 'theme-option theme-option-on'
+                      : 'theme-option'
+                  }
+                  onClick={() => void transitPreferences.patch({ accessMode: mode })}
+                  key={mode}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="style-range">
+              <span>Walking pace</span>
+              <input
+                type="range"
+                min={0.8}
+                max={1.8}
+                step={0.1}
+                value={transitPreferences.value.walkSpeedMps}
+                onChange={(event) =>
+                  void transitPreferences.patch({ walkSpeedMps: Number(event.target.value) })
+                }
+              />
+              <output>{transitPreferences.value.walkSpeedMps.toFixed(1)} m/s</output>
+            </label>
+            <label className="style-range">
+              <span>Transfer buffer</span>
+              <input
+                type="range"
+                min={0}
+                max={600}
+                step={60}
+                value={transitPreferences.value.transferSlackSeconds}
+                onChange={(event) =>
+                  void transitPreferences.patch({
+                    transferSlackSeconds: Number(event.target.value),
+                  })
+                }
+              />
+              <output>{Math.round(transitPreferences.value.transferSlackSeconds / 60)} min</output>
+            </label>
+            <label className="style-range">
+              <span>Walking tolerance</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={transitPreferences.value.walkReluctance}
+                onChange={(event) =>
+                  void transitPreferences.patch({ walkReluctance: Number(event.target.value) })
+                }
+              />
+              <output>
+                {transitPreferences.value.walkReluctance <= 2
+                  ? 'Flexible'
+                  : transitPreferences.value.walkReluctance <= 5
+                    ? 'Less walking'
+                    : 'Minimal'}
+              </output>
+            </label>
+            <label className="style-range">
+              <span>Maximum transfers</span>
+              <input
+                type="range"
+                min={0}
+                max={6}
+                step={1}
+                value={transitPreferences.value.maximumTransfers}
+                onChange={(event) =>
+                  void transitPreferences.patch({ maximumTransfers: Number(event.target.value) })
+                }
+              />
+              <output>{transitPreferences.value.maximumTransfers}</output>
+            </label>
+            {transitPreferences.value.accessMode !== 'foot' && (
+              <>
+                <h3>Bicycle route to stops</h3>
+                <div
+                  className="theme-options"
+                  role="radiogroup"
+                  aria-label="Bicycle route preference"
+                >
+                  {(
+                    [
+                      ['quick', 'Quick'],
+                      ['safe', 'Safer'],
+                      ['flat', 'Flatter'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={transitPreferences.value.bikeOptimisation === mode}
+                      className={
+                        transitPreferences.value.bikeOptimisation === mode
+                          ? 'theme-option theme-option-on'
+                          : 'theme-option'
+                      }
+                      onClick={() => void transitPreferences.patch({ bikeOptimisation: mode })}
+                      key={mode}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <VehicleSection vehicle={vehicle} />
             <h3>Direction arrow</h3>
             <div className="theme-options" role="radiogroup" aria-label="Direction arrow source">

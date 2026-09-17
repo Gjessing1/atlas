@@ -1,6 +1,7 @@
 import {
   altChipLabel,
   fmtDistanceM,
+  fmtCompactDuration,
   fmtDuration,
   fmtEta,
   fmtKm,
@@ -54,6 +55,7 @@ import type { SearchBias } from '../search/geoSearch';
 import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
+import { ReorderableList } from './ReorderableList';
 import { useGeocode } from './useGeocode';
 import {
   CarIcon,
@@ -367,6 +369,8 @@ export function RoutePanel({
   const folders = useMemo(() => flattenFolders(collections), [collections]);
   /** Waypoint id whose search box is open for re-pointing, or null. */
   const [editing, setEditing] = useState<number | null>(null);
+  const [addingStop, setAddingStop] = useState(false);
+  const [reorderingStops, setReorderingStops] = useState(false);
   // What the driving plan is actually being costed for. Read from the merged
   // preferences rather than the setting, so the chip can only ever say what was
   // sent to the engine.
@@ -549,6 +553,7 @@ export function RoutePanel({
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!reorderingStops}
         testID="route-scroll"
       >
         {/* Icon-only, the way every maps app picks a travel mode: five labelled
@@ -595,7 +600,7 @@ export function RoutePanel({
               <TramIcon color={transitMode ? theme.accent : theme.icon} />
               {showModeTimes && transitTimeMs !== undefined ? (
                 <Text style={[styles.modeTime, transitMode && styles.modeTimeSelected]}>
-                  {fmtDuration(transitTimeMs)}
+                  {fmtCompactDuration(transitTimeMs)}
                 </Text>
               ) : null}
             </Pressable>
@@ -605,7 +610,7 @@ export function RoutePanel({
         {/* While a stop is being re-pointed, the add-a-stop box stands down —
           two open search boxes with two different meanings is how you end up
           appending a stop you meant to replace. */}
-        {editing === null ? (
+        {editing === null && (stops.length < 2 || addingStop) ? (
           <StopSearch
             places={places}
             geocode={geocode}
@@ -619,10 +624,21 @@ export function RoutePanel({
                   : 'Destination: address or saved place'
             }
             transit={transitMode}
-            onPick={(position, name, transitStopId) =>
-              route.addWaypoint(position, name, transitStopId)
-            }
+            onPick={(position, name, transitStopId) => {
+              route.addWaypoint(position, name, transitStopId);
+              if (stops.length >= 2) setAddingStop(false);
+            }}
+            onCancel={stops.length >= 2 ? () => setAddingStop(false) : undefined}
           />
+        ) : null}
+        {editing === null && stops.length >= 2 && !addingStop ? (
+          <Pressable
+            style={styles.addStop}
+            onPress={() => setAddingStop(true)}
+            testID="route-add-stop"
+          >
+            <Text style={styles.addStopText}>+ Add stop</Text>
+          </Pressable>
         ) : null}
 
         {/* One row for the two things that are neither a stop nor the answer:
@@ -638,16 +654,18 @@ export function RoutePanel({
           (`routeOptionsSummary`), so a plan under terms never looks like a plan
           under none. Web's twin (apps/web/src/routing/RoutePanel.tsx). */}
         <View style={styles.sourceRow}>
-          <Pressable
-            style={[styles.chip, locating && styles.chipBusy]}
-            disabled={locating}
-            onPress={() => void addMyLocation()}
-            accessibilityRole="button"
-            accessibilityLabel="Use my location as the start"
-            testID="route-my-location"
-          >
-            <Text style={styles.chipText}>{locating ? 'Locating…' : '◎ My location'}</Text>
-          </Pressable>
+          {stops[0]?.name !== 'My location' ? (
+            <Pressable
+              style={[styles.chip, locating && styles.chipBusy]}
+              disabled={locating}
+              onPress={() => void addMyLocation()}
+              accessibilityRole="button"
+              accessibilityLabel="Use my location as the start"
+              testID="route-my-location"
+            >
+              <Text style={styles.chipText}>{locating ? 'Locating…' : '◎ My location'}</Text>
+            </Pressable>
+          ) : null}
           {!transitMode ? (
             <Pressable
               style={[styles.chip, optionsSummary.count > 0 && styles.chipSelected]}
@@ -786,91 +804,79 @@ export function RoutePanel({
 
         {route.waypoints.length > 0 ? (
           <View style={styles.wpList}>
-            {route.waypoints.map((w, i) => (
-              <View key={w.id} style={styles.wpRow}>
-                {stopRole(i, route.waypoints.length, route.roundTrip) ? (
-                  <Text style={styles.wpRole}>
-                    {stopRole(i, route.waypoints.length, route.roundTrip)}
-                  </Text>
-                ) : (
-                  <Text style={styles.wpLabel}>
-                    {waypointLabel(i, route.roundTrip, route.waypoints.length)}
-                  </Text>
-                )}
-                {/* A stop that cannot be changed without deleting it is the
-                  thing every other maps app lets you tap. Editing in place also
-                  keeps the stop's position in the order, which delete-then-add
-                  does not. */}
-                {editing === w.id ? (
-                  <View style={styles.wpEdit}>
-                    <StopSearch
-                      places={places}
-                      geocode={geocode}
-                      placeholder="Change this stop"
-                      initialQuery={w.name ?? ''}
-                      autoFocus
-                      transit={transitMode}
-                      onPick={(position, name, transitStopId) => {
-                        route.replaceWaypoint(w.id, position, name, transitStopId);
-                        setEditing(null);
-                      }}
-                      onCancel={() => setEditing(null)}
-                    />
-                  </View>
-                ) : (
-                  <Pressable
-                    style={styles.wpNameTap}
-                    onPress={() => setEditing(w.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Change ${stopTitle(w)}`}
-                    testID={`route-wp-edit-${w.id}`}
-                  >
-                    <Text style={styles.wpName} numberOfLines={1}>
-                      {stopTitle(w)}
-                    </Text>
-                  </Pressable>
-                )}
-                {/* Loops are reordered like any other plan: their stops are
-                  visited in list order on the way round, so moving one changes
-                  the trip. Only a single-stop loop has no order to change. */}
-                {editing === w.id || route.waypoints.length < 2 ? null : (
-                  <>
-                    <Pressable
-                      style={styles.iconButton}
-                      disabled={i === 0}
-                      onPress={() => route.reorderWaypoint(i, i - 1)}
-                      testID={`route-wp-up-${w.id}`}
-                    >
-                      <Text style={[styles.iconText, i === 0 && styles.iconDisabled]}>▲</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.iconButton}
-                      disabled={i === route.waypoints.length - 1}
-                      onPress={() => route.reorderWaypoint(i, i + 1)}
-                      testID={`route-wp-down-${w.id}`}
-                    >
-                      <Text
-                        style={[
-                          styles.iconText,
-                          i === route.waypoints.length - 1 && styles.iconDisabled,
-                        ]}
-                      >
-                        ▼
+            <ReorderableList
+              items={route.waypoints}
+              keyOf={(waypoint) => String(waypoint.id)}
+              onDragActive={(active) => {
+                setReorderingStops(active);
+                if (active) setEditing(null);
+              }}
+              onMove={(waypoint, target) => {
+                const from = route.waypoints.findIndex((candidate) => candidate.id === waypoint.id);
+                const to = route.waypoints.findIndex((candidate) => candidate.id === target.id);
+                route.reorderWaypoint(from, to);
+              }}
+              renderRow={(w, handle) => {
+                const i = route.waypoints.findIndex((candidate) => candidate.id === w.id);
+                return (
+                  <View style={styles.wpRow}>
+                    {handle}
+                    {stopRole(i, route.waypoints.length, route.roundTrip) ? (
+                      <Text style={styles.wpRole}>
+                        {stopRole(i, route.waypoints.length, route.roundTrip)}
                       </Text>
-                    </Pressable>
-                  </>
-                )}
-                {editing === w.id ? null : (
-                  <Pressable
-                    style={styles.iconButton}
-                    onPress={() => route.removeWaypoint(w.id)}
-                    testID={`route-wp-remove-${w.id}`}
-                  >
-                    <Text style={styles.iconText}>✕</Text>
-                  </Pressable>
-                )}
-              </View>
-            ))}
+                    ) : (
+                      <Text style={styles.wpLabel}>
+                        {waypointLabel(i, route.roundTrip, route.waypoints.length)}
+                      </Text>
+                    )}
+                    {/* A stop that cannot be changed without deleting it is the
+                      thing every other maps app lets you tap. Editing in place also
+                      keeps the stop's position in the order, which delete-then-add
+                      does not. */}
+                    {editing === w.id ? (
+                      <View style={styles.wpEdit}>
+                        <StopSearch
+                          places={places}
+                          geocode={geocode}
+                          placeholder="Change this stop"
+                          initialQuery={w.name ?? ''}
+                          autoFocus
+                          transit={transitMode}
+                          onPick={(position, name, transitStopId) => {
+                            route.replaceWaypoint(w.id, position, name, transitStopId);
+                            setEditing(null);
+                          }}
+                          onCancel={() => setEditing(null)}
+                        />
+                      </View>
+                    ) : (
+                      <Pressable
+                        style={styles.wpNameTap}
+                        onPress={() => setEditing(w.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Change ${stopTitle(w)}`}
+                        testID={`route-wp-edit-${w.id}`}
+                      >
+                        <Text style={styles.wpName} numberOfLines={1}>
+                          {stopTitle(w)}
+                        </Text>
+                      </Pressable>
+                    )}
+                    {editing === w.id ||
+                    (!route.roundTrip && (i === 0 || i === route.waypoints.length - 1)) ? null : (
+                      <Pressable
+                        style={styles.iconButton}
+                        onPress={() => route.removeWaypoint(w.id)}
+                        testID={`route-wp-remove-${w.id}`}
+                      >
+                        <Text style={styles.iconText}>✕</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              }}
+            />
           </View>
         ) : (
           <Text style={styles.muted}>
@@ -951,24 +957,6 @@ export function RoutePanel({
                 cannot give. The visible word is short because the block it sits
                 in already says what is being started; the accessibility label
                 keeps the full sentence. */}
-              <Pressable
-                style={[styles.navigate, !destination && styles.buttonDisabled]}
-                disabled={!destination}
-                accessibilityRole="button"
-                accessibilityLabel="Start navigation"
-                // Guidance replaces the planned origin with the live position,
-                // so the stops between first and last ride along as via points.
-                onPress={() =>
-                  destination &&
-                  onNavigate(
-                    destination,
-                    stops.slice(1, -1).map((w) => w.pos),
-                  )
-                }
-                testID="route-navigate"
-              >
-                <Text style={styles.navigateText}>Start</Text>
-              </Pressable>
             </View>
             {profileData ? (
               <Pressable
@@ -1139,6 +1127,22 @@ export function RoutePanel({
           />
         ) : null}
       </ScrollView>
+      {!transitMode && destination ? (
+        <Pressable
+          style={styles.navigate}
+          accessibilityRole="button"
+          accessibilityLabel="Start navigation"
+          onPress={() =>
+            onNavigate(
+              destination,
+              stops.slice(1, -1).map((w) => w.pos),
+            )
+          }
+          testID="route-navigate"
+        >
+          <Text style={styles.navigateText}>Start</Text>
+        </Pressable>
+      ) : null}
     </BottomSheet>
   );
 }
@@ -1165,6 +1169,15 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   chipText: { fontSize: 13, color: theme.text, fontWeight: '600' },
+  addStop: {
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    paddingHorizontal: 9,
+    justifyContent: 'center',
+    borderRadius: 9,
+    backgroundColor: theme.surfaceMuted,
+  },
+  addStopText: { color: theme.accent, fontSize: 13, fontWeight: '700' },
   /** The route's terms, one chip each — costing, loop and described vehicle. */
   optionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   /* Framed and inset, so an open fold reads as belonging to the button that
@@ -1279,6 +1292,8 @@ const styles = StyleSheet.create({
      one thing that is coloured, not by being the widest. */
   navigate: {
     flexShrink: 0,
+    alignSelf: 'stretch',
+    marginTop: 8,
     backgroundColor: theme.accent,
     borderRadius: 10,
     // Sized down from a full-width band, but not below a thumb: this is the one
@@ -1293,7 +1308,6 @@ const styles = StyleSheet.create({
   navigateText: { color: theme.onAccent, fontWeight: '700', fontSize: 15 },
   iconButton: { paddingHorizontal: 6, paddingVertical: 2 },
   iconText: { fontSize: 16, color: theme.text },
-  iconDisabled: { color: theme.textMuted },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   /* Square glyph buttons at Android's 44dp minimum: these are pressed with a
      thumb, on a sheet, often in a moving vehicle. */

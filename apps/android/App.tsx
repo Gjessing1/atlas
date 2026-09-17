@@ -12,6 +12,7 @@ import {
   useNavAddStop,
   useNavPrefs,
   useVehicleProfile,
+  useTransitPreferences,
   useNavResume,
   usePotential,
   useRoutePlanPersistence,
@@ -230,7 +231,8 @@ function AppInner() {
   // The described vehicle shapes both the planned route and the driven one.
   const vehicle = useVehicleProfile(data);
   const route = useRoute(vehicle.vehicle);
-  const transit = useTransitPlan(route);
+  const transitPreferences = useTransitPreferences(data);
+  const transit = useTransitPlan(route, transitPreferences.value);
   const plannedCommute = useMemo(
     () => plannedCommuteFromWaypoints(route.waypoints),
     [route.waypoints],
@@ -1136,6 +1138,51 @@ function AppInner() {
   // Route planning owns the bottom of the screen and repurposes map taps to add
   // stops, so it can't share the screen with a destination card.
   const planning = route.active;
+  // Keep the selected route in the map that remains above/beside the planner,
+  // instead of fitting it to pixels hidden behind the sheet.
+  useEffect(() => {
+    if (!planning || transit.enabled) return;
+    const path = route.paths?.[route.selectedPath];
+    if (!path || path.points.length < 2) return;
+    let west = Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let north = -Infinity;
+    for (const point of path.points) {
+      west = Math.min(west, point.lng);
+      east = Math.max(east, point.lng);
+      south = Math.min(south, point.lat);
+      north = Math.max(north, point.lat);
+    }
+    if (!Number.isFinite(west) || west === east || south === north) return;
+    cameraRef.current?.fitBounds([west, south, east, north], {
+      padding: landscape
+        ? {
+            top: topInset + 40,
+            right: side.right + 40,
+            bottom: bottomInset + 40,
+            left: side.left + Math.min(430, Math.round(win.width * 0.5)),
+          }
+        : {
+            top: topInset + 40,
+            right: side.right + 36,
+            bottom: bottomInset + Math.min(390, Math.round(win.height * 0.48)),
+            left: side.left + 36,
+          },
+      duration: 650,
+    });
+  }, [
+    planning,
+    transit.enabled,
+    route.paths,
+    route.selectedPath,
+    landscape,
+    topInset,
+    bottomInset,
+    side,
+    win.width,
+    win.height,
+  ]);
   // Idle map actions are one region with one visibility rule. Navigation owns
   // that region from route startup through arrival/error, not only while its
   // follow camera is running.
@@ -1564,7 +1611,6 @@ function AppInner() {
               onToggleMenu={() => setMenuOpen((o) => !o)}
               following={following}
               onOpenSearch={() => setSearchOpen(true)}
-              onPlanRoute={() => route.start()}
               onExplore={startExplorer}
             />
           ) : null}
@@ -1965,6 +2011,7 @@ function AppInner() {
             mapStyleEditor={mapStyleEditor}
             navPrefs={navPrefs}
             vehicle={vehicle}
+            transitPreferences={transitPreferences}
             navDiagnostics={navDiagnostics}
             pip={pip}
             regionJobs={regionJobs}

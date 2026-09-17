@@ -88,6 +88,11 @@ export {
   type TransitPlan,
   type TransitPlanner,
 } from './useTransit.js';
+export {
+  TRANSIT_PREFERENCES_SETTING,
+  useTransitPreferences,
+  type TransitPreferencesController,
+} from './useTransitPreferences.js';
 export { useTransitBoard, type TransitBoard, type TransitTiming } from './useTransitBoard.js';
 export {
   useTransitDepartures,

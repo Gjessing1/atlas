@@ -23,6 +23,7 @@ import { theme } from './theme';
 
 /** Segments a legend bar is drawn with: enough to read as a gradient. */
 const SWATCHES = 36;
+let rememberedLegendOpen = true;
 
 function LegendRow({ row }: { row: WeatherLegendRow }) {
   return (
@@ -95,6 +96,7 @@ export function WeatherDock({
   auroraOn: boolean;
 }) {
   const side = useSideInsets();
+  const [legendOpen, setLegendOpen] = useState(rememberedLegendOpen);
   const [trackWidth, setTrackWidth] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -122,104 +124,127 @@ export function WeatherDock({
       onLayout={(event: LayoutChangeEvent) => onHeight(event.nativeEvent.layout.height)}
       testID="weather-dock"
     >
-      {legend ? (
-        <View style={styles.legend} accessibilityLabel={`${title} colour scale in ${legend.unit}`}>
-          <View style={styles.legendHead}>
-            <Text style={styles.legendTitle}>{title}</Text>
-            <Text style={styles.legendUnit}>{legend.unit}</Text>
-          </View>
-          {legend.rows.map((row, index) => (
-            <LegendRow key={row.label ?? index} row={row} />
-          ))}
-        </View>
-      ) : null}
-      {maps.layerId ? (
-        <View style={styles.timeline}>
-          {!frame ? (
-            <Text style={styles.status}>
-              {maps.status === 'error'
-                ? 'Weather maps are unavailable right now.'
-                : `Loading ${title.toLowerCase()}…`}
-            </Text>
-          ) : (
-            <>
+      {legend || maps.layerId ? (
+        <View style={styles.mapControl}>
+          {legend ? (
+            <View
+              style={styles.legend}
+              accessibilityLabel={`${title} colour scale in ${legend.unit}`}
+            >
               <Pressable
-                style={styles.play}
-                onPress={maps.togglePlaying}
-                accessibilityLabel={maps.playing ? 'Pause' : 'Play'}
-                testID="weather-play"
+                style={styles.legendHead}
+                onPress={() => {
+                  const next = !legendOpen;
+                  rememberedLegendOpen = next;
+                  setLegendOpen(next);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: legendOpen }}
+                testID="weather-legend-toggle"
               >
-                <PlayGlyph playing={maps.playing} />
+                <Text style={styles.legendTitle}>{title}</Text>
+                <Text style={styles.legendUnit}>
+                  {legend.unit} · Legend {legendOpen ? '⌃' : '⌄'}
+                </Text>
               </Pressable>
-              <View style={styles.middle}>
-                {maps.timelineIds.length > 1 ? (
-                  <View style={styles.switch}>
-                    {maps.timelineIds.map((id) => {
-                      const on = maps.timeline?.id === id;
-                      return (
-                        <Pressable
-                          key={id}
-                          style={[styles.switchButton, on ? styles.switchButtonOn : null]}
-                          onPress={() => maps.setTimeline(id)}
-                          testID={`weather-timeline-${id}`}
-                        >
-                          <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
-                            {id === 'radar' ? 'Radar' : 'Forecast'}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
-                <View
-                  style={styles.track}
-                  onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={seek}
-                  onResponderMove={seek}
-                  accessibilityRole="adjustable"
-                  accessibilityLabel={`${title} time`}
-                  accessibilityValue={{ text: weatherFrameLabel(Date.parse(frame.time), nowMs) }}
-                  accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-                  onAccessibilityAction={(event) =>
-                    event.nativeEvent.actionName === 'increment' ? maps.next() : maps.previous()
-                  }
-                  testID="weather-track"
-                >
-                  <View style={styles.rail} pointerEvents="none">
-                    <View style={[styles.railFill, { width: `${(frameIndex / last) * 100}%` }]} />
-                  </View>
-                  {timelineDayMarks(frames, nowMs).map((mark) => (
+              {legendOpen
+                ? legend.rows.map((row, index) => <LegendRow key={row.label ?? index} row={row} />)
+                : null}
+            </View>
+          ) : null}
+          {maps.layerId ? (
+            <View style={[styles.timeline, legend ? styles.timelineJoined : null]}>
+              {!frame ? (
+                <Text style={styles.status}>
+                  {maps.status === 'error'
+                    ? 'Weather maps are unavailable right now.'
+                    : `Loading ${title.toLowerCase()}…`}
+                </Text>
+              ) : (
+                <>
+                  <Pressable
+                    style={styles.play}
+                    onPress={maps.togglePlaying}
+                    accessibilityLabel={maps.playing ? 'Pause' : 'Play'}
+                    testID="weather-play"
+                  >
+                    <PlayGlyph playing={maps.playing} />
+                  </Pressable>
+                  <View style={styles.middle}>
+                    {maps.timelineIds.length > 1 ? (
+                      <View style={styles.switch}>
+                        {maps.timelineIds.map((id) => {
+                          const on = maps.timeline?.id === id;
+                          return (
+                            <Pressable
+                              key={id}
+                              style={[styles.switchButton, on ? styles.switchButtonOn : null]}
+                              onPress={() => maps.setTimeline(id)}
+                              testID={`weather-timeline-${id}`}
+                            >
+                              <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
+                                {id === 'radar' ? 'Radar' : 'Forecast'}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : null}
                     <View
-                      key={mark.at}
-                      pointerEvents="none"
-                      style={[styles.dayMark, { left: `${mark.at * 100}%` }]}
-                    />
-                  ))}
-                  <View
-                    pointerEvents="none"
-                    style={[styles.nowMark, { left: `${(nowIndex / last) * 100}%` }]}
-                  />
-                  <View
-                    pointerEvents="none"
-                    style={[styles.thumb, { left: `${(frameIndex / last) * 100}%` }]}
-                  />
-                </View>
-              </View>
-              <Pressable style={styles.time} onPress={maps.goToNow} testID="weather-now">
-                <Text
-                  style={[styles.timeLabel, maps.followingNow ? null : styles.timeLabelAway]}
-                  numberOfLines={1}
-                >
-                  {weatherFrameLabel(Date.parse(frame.time), nowMs)}
-                </Text>
-                <Text style={styles.timeCaption} numberOfLines={1}>
-                  {weatherFrameCaption(frame, nowMs)}
-                </Text>
-              </Pressable>
-            </>
-          )}
+                      style={styles.track}
+                      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+                      onStartShouldSetResponder={() => true}
+                      onMoveShouldSetResponder={() => true}
+                      onResponderGrant={seek}
+                      onResponderMove={seek}
+                      accessibilityRole="adjustable"
+                      accessibilityLabel={`${title} time`}
+                      accessibilityValue={{
+                        text: weatherFrameLabel(Date.parse(frame.time), nowMs),
+                      }}
+                      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                      onAccessibilityAction={(event) =>
+                        event.nativeEvent.actionName === 'increment' ? maps.next() : maps.previous()
+                      }
+                      testID="weather-track"
+                    >
+                      <View style={styles.rail} pointerEvents="none">
+                        <View
+                          style={[styles.railFill, { width: `${(frameIndex / last) * 100}%` }]}
+                        />
+                      </View>
+                      {timelineDayMarks(frames, nowMs).map((mark) => (
+                        <View
+                          key={mark.at}
+                          pointerEvents="none"
+                          style={[styles.dayMark, { left: `${mark.at * 100}%` }]}
+                        />
+                      ))}
+                      <View
+                        pointerEvents="none"
+                        style={[styles.nowMark, { left: `${(nowIndex / last) * 100}%` }]}
+                      />
+                      <View
+                        pointerEvents="none"
+                        style={[styles.thumb, { left: `${(frameIndex / last) * 100}%` }]}
+                      />
+                    </View>
+                  </View>
+                  <Pressable style={styles.time} onPress={maps.goToNow} testID="weather-now">
+                    <Text
+                      style={[styles.timeLabel, maps.followingNow ? null : styles.timeLabelAway]}
+                      numberOfLines={1}
+                    >
+                      {weatherFrameLabel(Date.parse(frame.time), nowMs)}
+                    </Text>
+                    <Text style={styles.timeCaption} numberOfLines={1}>
+                      {weatherFrameCaption(frame, nowMs)}
+                    </Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          ) : null}
         </View>
       ) : null}
       {lightningOn ? (
@@ -289,15 +314,17 @@ export function WeatherDock({
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', gap: 6 },
+  mapControl: {
+    overflow: 'hidden',
+    borderRadius: 14,
+    backgroundColor: theme.surface,
+    elevation: 4,
+  },
   legend: {
-    alignSelf: 'flex-start',
-    width: 236,
+    alignSelf: 'stretch',
     paddingHorizontal: 10,
     paddingTop: 6,
     paddingBottom: 2,
-    borderRadius: 12,
-    backgroundColor: theme.surface,
-    elevation: 4,
   },
   legendHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
   legendTitle: { fontSize: 12, fontWeight: '700', color: theme.text },
@@ -329,6 +356,12 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     backgroundColor: theme.surface,
     elevation: 4,
+  },
+  timelineJoined: {
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    borderRadius: 0,
+    elevation: 0,
   },
   status: { flex: 1, paddingHorizontal: 10, fontSize: 13, color: theme.textMuted },
   skyTitle: { fontSize: 12, fontWeight: '700', color: theme.text },

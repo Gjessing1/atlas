@@ -46,6 +46,18 @@ describe('explore categories', () => {
     expect(collection.features[1]!.geometry.coordinates).toEqual([11.2, 60.1]);
   });
 
+  it('spiderfies tightly overlapping results with leader lines', () => {
+    const collection = exploreResultsFeatureCollection([
+      { name: 'One', label: '', position: { lat: 59.9, lng: 10.7 } },
+      { name: 'Two', label: '', position: { lat: 59.90002, lng: 10.70002 } },
+    ]);
+    const lines = collection.features.filter((feature) => feature.geometry.type === 'LineString');
+    const points = collection.features.filter((feature) => feature.geometry.type === 'Point');
+    expect(lines).toHaveLength(2);
+    expect(points).toHaveLength(2);
+    expect(points[0]!.geometry.coordinates).not.toEqual([10.7, 59.9]);
+  });
+
   it('keeps only nearby unique results and orders by distance', () => {
     const center = { lat: 59.91, lng: 10.75 };
     const results = rankExploreResults(

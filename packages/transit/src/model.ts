@@ -30,6 +30,8 @@ import type { TransitWeekday } from './clock.js';
  */
 export type TransitMode =
   | 'foot'
+  | 'bicycle'
+  | 'bike_rental'
   | 'bus'
   | 'coach'
   | 'tram'
@@ -43,7 +45,27 @@ export type TransitMode =
 
 /** Modes that are ridden rather than walked — the legs that carry a line and a quay. */
 export function isRideMode(mode: TransitMode): boolean {
-  return mode !== 'foot';
+  return mode !== 'foot' && mode !== 'bicycle' && mode !== 'bike_rental';
+}
+
+/** How the traveller reaches, leaves and transfers around public transport. */
+export type TransitAccessMode = 'foot' | 'bicycle' | 'bike_rental';
+
+/**
+ * Account-synced journey-planner preferences. These are domain values rather
+ * than Entur field names so a second planner can map the same intent later.
+ */
+export interface TransitPreferences {
+  accessMode: TransitAccessMode;
+  walkSpeedMps: number;
+  walkReluctance: number;
+  transferSlackSeconds: number;
+  maximumTransfers: number;
+  bikeSpeedMps: number;
+  bikeReluctance: number;
+  bikeOptimisation: 'quick' | 'safe' | 'flat';
+  /** Empty accepts every city-bike network published by the planner. */
+  bikeRentalNetworks: readonly string[];
 }
 
 /**
@@ -450,6 +472,8 @@ export interface TransitQuery {
    * 1.0 and 1.5 changes which connections are reachable at all.
    */
   walkSpeedMps?: number;
+  /** Walking, transfer and bicycle choices applied to this journey. */
+  preferences?: TransitPreferences;
   /**
    * Ride modes the traveller will accept, e.g. `['bus', 'tram']` — omitted or
    * empty means all of them. `foot` is not listed: walking to and between stops

@@ -104,6 +104,12 @@ export function fmtDuration(ms: number): string {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
+/** A route-mode chip duration, compact enough to compare across a six-mode row. */
+export function fmtCompactDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 /** Arrival clock time for a trip of `durationMs` starting now. */
 export function fmtEta(durationMs: number, now = Date.now()): string {
   return fmtClock(now + durationMs);

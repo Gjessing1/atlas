@@ -24,6 +24,8 @@ import type { TransitPlan } from './useTransit.js';
 /** One glyph per mode — the fastest way to read a board is by shape, not words. */
 const MODE_ICON: Record<TransitMode, string> = {
   foot: '🚶',
+  bicycle: '🚲',
+  bike_rental: '🚲',
   bus: '🚌',
   coach: '🚌',
   tram: '🚊',

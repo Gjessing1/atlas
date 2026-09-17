@@ -1,6 +1,7 @@
 import {
   altChipLabel,
   fmtDistanceM,
+  fmtCompactDuration,
   fmtDuration,
   fmtEta,
   fmtKm,
@@ -279,6 +280,7 @@ export function RoutePanel({
   const [copied, setCopied] = useState(false);
   // Waypoint id whose search box is open for re-pointing, or null.
   const [editing, setEditing] = useState<number | null>(null);
+  const [addingStop, setAddingStop] = useState(false);
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -544,7 +546,7 @@ export function RoutePanel({
                 <TrainIcon size={18} /> Transit
               </span>
               {showModeTimes && transitTimeMs !== undefined && (
-                <span className="mode-time">{fmtDuration(transitTimeMs)}</span>
+                <span className="mode-time">{fmtCompactDuration(transitTimeMs)}</span>
               )}
             </button>
           )}
@@ -570,6 +572,9 @@ export function RoutePanel({
                 >
                   {/* Named ends read as a plan ("From … To …"); a multi-stop road
                     route keeps the lettered markers that match the map pins. */}
+                  <span className="route-wp-handle" aria-hidden="true">
+                    ⠿
+                  </span>
                   <span
                     className={role ? 'route-wp-role' : 'route-wp-label'}
                     aria-hidden={role ? undefined : 'true'}
@@ -607,14 +612,16 @@ export function RoutePanel({
                       >
                         {stopTitle(w)}
                       </button>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        onClick={() => route.removeWaypoint(w.id)}
-                        aria-label={`Remove stop ${waypointLabel(i, route.roundTrip, route.waypoints.length)}`}
-                      >
-                        ✕
-                      </button>
+                      {(route.roundTrip || (i > 0 && i < route.waypoints.length - 1)) && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => route.removeWaypoint(w.id)}
+                          aria-label={`Remove stop ${waypointLabel(i, route.roundTrip, route.waypoints.length)}`}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </>
                   )}
                 </li>
@@ -636,7 +643,7 @@ export function RoutePanel({
           next row. While a stop is being re-pointed it stands down: two open
           search boxes with two different meanings is how you end up appending a
           stop you meant to replace. */}
-        {editing === null && (
+        {editing === null && (stops.length < 2 || addingStop) && (
           <StopSearch
             places={places}
             geocode={geocode}
@@ -657,10 +664,17 @@ export function RoutePanel({
                   : 'Search for a destination'
             }
             transit={transitMode}
-            onPick={(position, name, transitStopId) =>
-              route.addWaypoint(position, name, transitStopId)
-            }
+            onPick={(position, name, transitStopId) => {
+              route.addWaypoint(position, name, transitStopId);
+              if (stops.length >= 2) setAddingStop(false);
+            }}
+            onCancel={stops.length >= 2 ? () => setAddingStop(false) : undefined}
           />
+        )}
+        {editing === null && stops.length >= 2 && !addingStop && (
+          <button type="button" className="route-add-stop" onClick={() => setAddingStop(true)}>
+            + Add stop
+          </button>
         )}
 
         {/* One row for the two things that are neither a stop nor the answer:
@@ -677,15 +691,17 @@ export function RoutePanel({
           under none. */}
         {editing === null && (
           <div className="route-source-row">
-            <button
-              type="button"
-              className="route-chip"
-              disabled={locating}
-              aria-label="Use my location as the start"
-              onClick={() => void addMyLocation()}
-            >
-              <CrosshairIcon size={14} /> {locating ? 'Locating…' : 'My location'}
-            </button>
+            {stops[0]?.name !== 'My location' && (
+              <button
+                type="button"
+                className="route-chip"
+                disabled={locating}
+                aria-label="Use my location as the start"
+                onClick={() => void addMyLocation()}
+              >
+                <CrosshairIcon size={14} /> {locating ? 'Locating…' : 'My location'}
+              </button>
+            )}
             {!transitMode && (
               <button
                 type="button"
@@ -894,23 +910,6 @@ export function RoutePanel({
                 cannot give. The visible word is short because the block it sits
                 in already says what is being started; the accessible name keeps
                 the full sentence. */}
-              {destination && (
-                <button
-                  type="button"
-                  className="route-navigate"
-                  aria-label="Start navigation"
-                  // Guidance replaces the planned origin with the live position,
-                  // so the stops between first and last ride along as via points.
-                  onClick={() =>
-                    onNavigate(
-                      destination,
-                      route.waypoints.slice(1, -1).map((w) => w.pos),
-                    )
-                  }
-                >
-                  Start
-                </button>
-              )}
             </div>
             {/* A ferry is timetabled and, on foot or by bike, the one stretch you
               cannot simply set off along. Non-car routes avoid ferries where a
@@ -1054,6 +1053,21 @@ export function RoutePanel({
             onStartGuidance={onStartTransitGuidance}
             onMakeCommute={onMakeCommute}
           />
+        )}
+        {!transitMode && destination && (
+          <button
+            type="button"
+            className="route-navigate route-navigate-sticky"
+            aria-label="Start navigation"
+            onClick={() =>
+              onNavigate(
+                destination,
+                route.waypoints.slice(1, -1).map((w) => w.pos),
+              )
+            }
+          >
+            Start
+          </button>
         )}
       </div>
     </div>

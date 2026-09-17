@@ -133,9 +133,11 @@ export {
 export {
   bestWindows,
   buildPlanner,
+  sunTimelineEvents,
   type ConditionsWindow,
   type PlannerHour,
   type PlannerOptions,
+  type SunTimelineEvent,
 } from './planner.js';
 export {
   compareStandCells,

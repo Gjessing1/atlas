@@ -47,7 +47,7 @@ describe('modeTimeLabel', () => {
   it('distinguishes "still routing" from "cannot route this"', () => {
     expect(modeTimeLabel(undefined)).toBe('…');
     expect(modeTimeLabel('none')).toBe('—');
-    expect(modeTimeLabel(3_600_000)).toBe('1 h 0 min');
+    expect(modeTimeLabel(3_600_000)).toBe('1h 0m');
   });
 });
 

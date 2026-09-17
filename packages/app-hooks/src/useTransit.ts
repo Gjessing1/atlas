@@ -4,6 +4,7 @@ import type {
   TransitMode,
   TransitProblem,
   TransitQuery,
+  TransitPreferences,
   TransitResult,
   TransitTrip,
 } from '@atlas/transit';
@@ -89,6 +90,7 @@ export function useTransit(
   to: TransitLocation | null,
   active: boolean,
   via: readonly TransitLocation[] = [],
+  preferences?: TransitPreferences,
 ): TransitPlanner {
   const [trips, setTrips] = useState<TransitTrip[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -115,6 +117,7 @@ export function useTransit(
   const fromKey = from ? `${from.lat},${from.lng},${from.stopId ?? ''}` : '';
   const toKey = to ? `${to.lat},${to.lng},${to.stopId ?? ''}` : '';
   const viaKey = via.map((point) => `${point.lat},${point.lng},${point.stopId ?? ''}`).join(';');
+  const preferencesKey = preferences ? JSON.stringify(preferences) : '';
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -136,6 +139,7 @@ export function useTransit(
       if (timeMs !== null) query.dateTimeMs = timeMs;
       if (arriveBy) query.arriveBy = true;
       if (modes.length > 0) query.modes = modes;
+      if (preferences) query.preferences = preferences;
       // A cursor supersedes the time window it came from, so the two are never
       // sent together as competing instructions.
       if (cursor !== null) query.pageCursor = cursor;
@@ -173,7 +177,20 @@ export function useTransit(
     // `from`/`to` enter the deps through their value keys above: callers rebuild
     // the objects each render, and re-asking a national planner on every render
     // would be both wrong and rude.
-  }, [active, covered, fromKey, toKey, viaKey, timeMs, arriveBy, modeKey, cursor, seed, transit]);
+  }, [
+    active,
+    covered,
+    fromKey,
+    toKey,
+    viaKey,
+    timeMs,
+    arriveBy,
+    modeKey,
+    cursor,
+    seed,
+    transit,
+    preferencesKey,
+  ]);
 
   // Every control that changes the question also drops the cursor: paging is
   // only ever relative to the answer currently on screen.
@@ -274,7 +291,11 @@ export interface TransitPlan extends TransitPlanner {
  * fetcher they pass (same-origin vs. an absolute server origin), which is not
  * a reason for either to keep its own copy of this glue.
  */
-export function useTransitPlan(route: RoutePlanner, transit: TransitFn): TransitPlan {
+export function useTransitPlan(
+  route: RoutePlanner,
+  transit: TransitFn,
+  preferences?: TransitPreferences,
+): TransitPlan {
   const [enabled, setEnabled] = useState(false);
   const [selected, select] = useState<number | null>(0);
   const [guidanceTrip, setGuidanceTrip] = useState<TransitTrip | null>(null);
@@ -310,7 +331,7 @@ export function useTransitPlan(route: RoutePlanner, transit: TransitFn): Transit
   // then paints departures already in hand instead of re-asking. `useTransit`
   // itself declines to fetch without both endpoints and coverage, so this
   // costs nothing on a half-built plan.
-  const planner = useTransit(transit, from, to, offered && route.active, via);
+  const planner = useTransit(transit, from, to, offered && route.active, via, preferences);
 
   useEffect(() => {
     if (!offered) setEnabled(false);

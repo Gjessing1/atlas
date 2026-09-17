@@ -1,5 +1,7 @@
 export type {
   TransitMode,
+  TransitAccessMode,
+  TransitPreferences,
   TransitLocation,
   TransitLineRef,
   TransitLineFilter,
@@ -30,6 +32,7 @@ export type {
   TransitCommuteResult,
   TransitCommuteSegmentResult,
 } from './model.js';
+export { DEFAULT_TRANSIT_PREFERENCES, parseTransitPreferences } from './preferences.js';
 export {
   isRideMode,
   legDelayMs,

@@ -787,7 +787,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useRoute',
     web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'route.reorderWaypoint' },
     android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'route.reorderWaypoint' },
-    note: 'Web drags the row; Android moves it with ▲/▼, because a drag inside a scrolling bottom sheet fights the sheet.',
+    note: 'Both clients drag from a dedicated handle; Android freezes the enclosing sheet scroller during the gesture.',
   },
   {
     id: 'planner-alternatives',

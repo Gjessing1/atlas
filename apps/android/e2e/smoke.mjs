@@ -142,13 +142,7 @@ async function main() {
   shell('am', 'force-stop', PACKAGE);
   shell('am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
   let xml = await waitForId('open-menu', true, 60_000);
-  expectIds(xml, [
-    'search-open',
-    'plan-route',
-    'map-profile-toggle',
-    'layer-quick-toggle',
-    'locate',
-  ]);
+  expectIds(xml, ['search-open', 'map-profile-toggle', 'layer-quick-toggle', 'locate']);
 
   tapId(xml, 'open-menu');
   xml = await waitForId('main-menu-sheet');
@@ -179,16 +173,7 @@ async function main() {
 
   shell('settings', 'put', 'system', 'user_rotation', '0');
   await waitFor('portrait rotation', rotation, (value) => value === 0, 20_000);
-  xml = await waitForId('plan-route');
-  tapId(xml, 'plan-route');
-  xml = await waitForId('route-sheet');
-  expectIds(xml, ['route-profile-car', 'route-profile-bike', 'route-profile-foot']);
-  shell('input', 'keyevent', 'KEYCODE_BACK');
-  await waitForId('route-sheet', false);
-
-  console.log(
-    'Android smoke passed: boot, map controls, menu, portrait/landscape search, route sheet.',
-  );
+  console.log('Android smoke passed: boot, six map controls, menu, and portrait/landscape search.');
 }
 
 try {

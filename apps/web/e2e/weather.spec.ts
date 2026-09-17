@@ -116,7 +116,7 @@ test('playing radar never shows the bare map between frames', async ({ page }) =
   await page.goto('/#map=5/62/12');
   await waitForMap(page);
   await page.getByRole('button', { name: /^Map layers/ }).click();
-  await page.getByRole('button', { name: 'Precipitation' }).click();
+  await page.getByRole('switch', { name: 'Precipitation' }).click();
   await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
   // Let the first picture arrive before judging what replaces it.
   await page.waitForFunction(() => {

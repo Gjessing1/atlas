@@ -382,6 +382,25 @@ export function groupLayerCatalog(catalog: readonly LayerMeta[], profileId: stri
 }
 
 /**
+ * A layer picker's search: the grouped catalog narrowed to layers whose title
+ * or description holds the query, dropping headings left empty. Blank queries
+ * return the groups unchanged. It searches what the picker was given — the
+ * active profile's catalog — so a hit is always a layer that can be switched on.
+ */
+export function searchLayerGroups(groups: readonly LayerGroup[], query: string): LayerGroup[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [...groups];
+  return groups
+    .map((group) => ({
+      ...group,
+      layers: group.layers.filter((meta) =>
+        `${meta.title} ${meta.description}`.toLocaleLowerCase().includes(needle),
+      ),
+    }))
+    .filter((group) => group.layers.length > 0);
+}
+
+/**
  * Whether a layer is on by default in this profile (see `defaultLayers`). Used
  * as the fallback when the device has no stored on/off choice for the layer, so
  * a profile can surface its signature overlay without a persisted setting.
