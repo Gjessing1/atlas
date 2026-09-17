@@ -1342,7 +1342,19 @@ export function commuteWidgetV2Board({
     variant: 'v2',
     route: commuteRouteLabel(query),
     selector: {
-      mode: displayedMode,
+      // The *setting this board answers*, echoed back unresolved — never the
+      // direction it resolved to. The widget compares this field against the
+      // selector it has stored and paints nothing when the two disagree, which
+      // is how a tap's stale board is kept from showing under the new chip
+      // (CommuteWidgetV2Provider.answersNow). An installed widget stores `auto`
+      // until someone taps a chip, so answering `auto` with a resolved
+      // "inbound" told every default widget its board was stale and blanked it
+      // down to "Set up your commute".
+      mode: selector,
+      // The resolved direction still travels, as the label and in the focus
+      // line's own direction name. It costs an `auto` widget its lit chip until
+      // someone taps one — the provider lights the chip whose key equals `mode`
+      // — and a board with no rows at all is the worse of the two.
       label: options.find((option) => option.key === displayedMode)?.short ?? 'OUTBOUND',
       options,
       note: resolution.pin ? pinNote(resolution.pin.releasesAtMs, nowMs) : null,

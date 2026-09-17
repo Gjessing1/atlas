@@ -752,6 +752,21 @@ describe('commuteWidgetV2Board', () => {
     expect(answer.selector.releasesAtMs).toBe(hm(16, 0));
   });
 
+  // The widget paints nothing whose `selector.mode` disagrees with the setting
+  // it has stored, so this field answers "which setting is this board for", not
+  // "which direction won". Reporting the resolved direction instead blanked
+  // every widget still on the default `auto` down to "Set up your commute",
+  // rows and focus and all (v0.223.0, caught on the home screen).
+  it('echoes the setting it was asked for, not the direction it resolved to', () => {
+    const auto = board({
+      selector: 'auto',
+      resolution: { directions: ['inbound'], reason: 'time' },
+    });
+    expect(auto.selector.mode).toBe('auto');
+    expect(auto.selector.label).toBe('RETURN');
+    expect(board({ selector: 'inbound' }).selector.mode).toBe('inbound');
+  });
+
   it('asks again on the ladder`s cadence while committed, not the timetable`s', () => {
     const plain = board();
     const committed = board({
