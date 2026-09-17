@@ -77,6 +77,13 @@ before that destination. Also:
   only ever fills a one-stop plan, so adding the second stop yourself retires it.
   `openRouteFromSavedPlace` does both, adding the stop with a map tap above the sheet. The fixture
   routes and plans transit between any two points, so where the tap lands does not matter.
+- **Count `route-wp-edit-*` rows to read the plan's state — never the stop box.** The AVD does
+  sometimes deliver a fix, and then the plan already has both ends; adding a stop anyway makes it a
+  3-point query, and Valhalla offers alternates for 2-point queries only
+  (`packages/routing/src/valhalla.ts`), so the navigation preview comes up with `route-choice-0`
+  alone and `expectIds` fails on `route-choice-1` — 20 minutes in, nowhere near the tap that caused
+  it. The box used to vanish for a complete plan and stood in for this check; since v0.223.0 it
+  stays visible so a third stop is one tap away, which made that guard silently dead.
 
 ### The rest of the traps
 

@@ -261,6 +261,12 @@ async function focusAfterScroll(id, scrollerId, direction = 'up') {
   throw new Error(`Could not focus ${id} inside ${scrollerId}`);
 }
 
+// Every stop in a plan renders its own edit control, so counting them is how
+// the scenario knows whether the plan already has both ends.
+function stopCount(xml) {
+  return new Set([...xml.matchAll(/resource-id="route-wp-edit-([^"]+)"/g)].map((m) => m[1])).size;
+}
+
 function expectIds(xml, ids) {
   const missing = ids.filter((id) => !nodeForId(xml, id));
   if (missing.length > 0) throw new Error(`Missing UI controls: ${missing.join(', ')}`);
@@ -421,8 +427,23 @@ async function openRouteFromSavedPlace(placeId) {
     (xml) => !xml.includes('text="Getting location…"'),
     30_000,
   );
-  if (!visibleNode(settled, 'route-stop-search')) return;
-  const sheet = visibleNode(settled, 'route-sheet')?.bounds;
+  // Count the stops, never the stop box: the box stays on screen even for a
+  // complete plan (a third stop is always one tap away), so its presence says
+  // nothing about whether this plan still needs one. A plan that already has
+  // both ends is routed and holds its alternatives, and a third stop would
+  // retire them — Valhalla offers alternates for 2-point queries only
+  // (packages/routing/src/valhalla.ts), which the navigation preview below
+  // asserts. So tap only to supply a start this AVD's GPS did not.
+  // The origin can land a beat after the lookup settles, so let the plan show
+  // what it has before deciding it is short a stop.
+  let planned = settled;
+  const decideBy = Date.now() + 5_000;
+  while (stopCount(planned) < 2 && Date.now() < decideBy) {
+    await delay(500);
+    planned = hierarchy();
+  }
+  if (stopCount(planned) >= 2) return;
+  const sheet = visibleNode(planned, 'route-sheet')?.bounds;
   if (!sheet) throw new Error('Route sheet has no measurable bounds');
   // Left of centre and halfway down the map left above the sheet: clear of the
   // place's own pin, which the camera centres, and of the status bar.
@@ -432,8 +453,14 @@ async function openRouteFromSavedPlace(placeId) {
     String(Math.round(sheet.left + sheet.width * 0.25)),
     String(Math.round(sheet.top * 0.5)),
   );
-  // Two stops make a plan: the stop box gives way to "+ Add stop".
-  await waitForId('route-add-stop', true, 20_000);
+  // Two stops make a plan. The stop rows are what proves the tap was taken:
+  // nothing disappears from the sheet to mark it any more.
+  await waitFor(
+    'the map-tapped stop to join the plan',
+    hierarchy,
+    (xml) => stopCount(xml) >= 2,
+    20_000,
+  );
 }
 
 async function planRoadRoute(folderId, placeId) {
