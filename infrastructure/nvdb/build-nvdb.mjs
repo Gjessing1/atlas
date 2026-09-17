@@ -41,6 +41,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
 const API_BASE = 'https://nvdbapiles.atlas.vegvesen.no';
 const X_CLIENT = process.env.NVDB_CLIENT ?? 'atlas-offline-pipeline';
@@ -76,10 +77,9 @@ const bbox = positional[1] ?? NORWAY_BBOX;
 
 /**
  * Parse a WKT LINESTRING (with or without a Z ordinate) into `[[lat, lng], …]`.
- * NVDB returns srid=4326 geometry as `lat lng z` triples. Non-LINESTRING
- * geometries (the rare MULTILINESTRING) are skipped by the caller.
+ * NVDB returns srid=4326 geometry as `lat lng z` triples.
  */
-function parseLineString(wkt) {
+export function parseLineString(wkt) {
   const m = /^LINESTRING\s*(?:Z\s*)?\(([^)]*)\)/i.exec(wkt ?? '');
   if (!m) return null;
   const points = [];
@@ -98,7 +98,7 @@ function parseLineString(wkt) {
  * arrive contiguous for a section spanning several road links. Returns null
  * when a junction gap says they are not actually one line.
  */
-function parseMultiLineString(wkt) {
+export function parseMultiLineString(wkt) {
   const m = /^MULTILINESTRING\s*(?:Z\s*)?\((.*)\)\s*$/i.exec(wkt ?? '');
   if (!m) return null;
   const out = [];
@@ -298,7 +298,9 @@ async function importSpeedLimits(db) {
     for (const obj of objects) {
       seen++;
       const limit = egenskap(obj, EGENSKAP_FARTSGRENSE);
-      const points = parseLineString(obj.lokasjon?.geometri?.wkt);
+      const points =
+        parseLineString(obj.lokasjon?.geometri?.wkt) ??
+        parseMultiLineString(obj.lokasjon?.geometri?.wkt);
       if (typeof limit !== 'number' || limit <= 0 || !points) {
         skipped++;
         continue;
@@ -460,7 +462,9 @@ async function main() {
   console.log('==> done');
 }
 
-main().catch((err) => {
-  console.error('NVDB build failed:', err.message);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((err) => {
+    console.error('NVDB build failed:', err.message);
+    process.exit(1);
+  });
+}
