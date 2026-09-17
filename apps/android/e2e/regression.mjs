@@ -401,13 +401,39 @@ async function createFolderAndReadPlace() {
 }
 
 // Planning starts where a user starts it: a picked place's card. "Go" on a
-// saved place opens that card, and its Directions plans from the live fix
-// (the emulator's geo fix at ORIGIN) to the place.
+// saved place opens that card, and its Directions plans from a GPS fix to the
+// place — a fix this AVD often never delivers, even with a `geo fix` set.
+// So wait out the lookup (8 s, then last-known), and if the plan still has
+// only the place, give it a second stop with a map tap, which a plan takes as
+// a stop. Not through the stop box: injected keys are this AVD's least
+// reliable input (a focused field has dropped them on three different screens),
+// and the fixture routes any two points. The added stop also retires a fix
+// that lands later (it only ever fills a one-stop plan), so what follows never
+// depends on GPS timing.
 async function openRouteFromSavedPlace(placeId) {
   await openMenuItem('open-favorites');
   await tap(`favorite-nav-${placeId}`);
   await tap('destination-navigate');
   await waitForId('route-sheet');
+  const settled = await waitFor(
+    'the Directions origin lookup to settle',
+    hierarchy,
+    (xml) => !xml.includes('text="Getting location…"'),
+    30_000,
+  );
+  if (!visibleNode(settled, 'route-stop-search')) return;
+  const sheet = visibleNode(settled, 'route-sheet')?.bounds;
+  if (!sheet) throw new Error('Route sheet has no measurable bounds');
+  // Left of centre and halfway down the map left above the sheet: clear of the
+  // place's own pin, which the camera centres, and of the status bar.
+  shell(
+    'input',
+    'tap',
+    String(Math.round(sheet.left + sheet.width * 0.25)),
+    String(Math.round(sheet.top * 0.5)),
+  );
+  // Two stops make a plan: the stop box gives way to "+ Add stop".
+  await waitForId('route-add-stop', true, 20_000);
 }
 
 async function planRoadRoute(folderId, placeId) {
