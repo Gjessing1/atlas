@@ -24,6 +24,9 @@
 #   valhalla.tar      routing tiles, same engine version the server runs, so
 #                     offline and online routes agree
 #   assets.zip        map glyphs + sprites (offline labels/icons)
+#   imagery.zip       the satellite layer's 10 m mosaic, cut to the box — what
+#                     the app draws under the streamed imagery when there is no
+#                     connection; absent when no catalog layer asks to be packed
 #   pack.json         manifest served by /api/regions — written LAST, after the
 #                     smoke checks, because writing it is publication
 #
@@ -118,6 +121,14 @@ node "$SCRIPT_DIR/build-pack-nvdb.mjs" "$STAGE/nvdb.sqlite" "$PACK_BBOX" ${IN_NV
   < "$WORK/$REGION.geojsonseq"
 rm -f "$WORK/$REGION.geojsonseq" "$WORK/$REGION.nodeidx"
 
+echo "==> [$REGION] cutting the offline satellite slab"
+# The coarse half of the satellite layer — the only half that may be kept, and
+# the only imagery a phone has once it loses signal. Pulled through the running
+# backend's overlay proxy so a pack cannot disagree with what the layer serves
+# online, and so its disk cache absorbs the repeats. Optional like nvdb: the
+# script removes its output and exits 0 when no catalog layer asks to be packed.
+node "$SCRIPT_DIR/build-pack-imagery.mjs" "$STAGE/imagery.zip" "$PACK_BBOX" "$WORK/imagery.json"
+
 echo "==> [$REGION] building Valhalla routing tiles"
 # Reuse the server's timezones and its admin database, so an offline pack counts
 # roundabout exits on the same side as the server. Both are required by every
@@ -170,7 +181,7 @@ echo "==> [$REGION] smoke checks"
 node "$SCRIPT_DIR/smoke-pack.mjs" "$PLAN" "$STAGE"
 
 echo "==> [$REGION] writing pack.json"
-node "$SCRIPT_DIR/write-manifest.mjs" "$PLAN" "$STAGE"
+node "$SCRIPT_DIR/write-manifest.mjs" "$PLAN" "$STAGE" "$WORK/imagery.json"
 
 echo "==> [$REGION] publishing"
 # The swap, mirroring what the device does with a downloaded pack: the previous

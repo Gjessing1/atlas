@@ -245,6 +245,19 @@ export interface LayerMeta {
    */
   exclusive?: string;
   /**
+   * Present when a downloaded region pack carries a coarse slab of this
+   * layer's tiles, and `maxzoom` is the deepest zoom worth baking — for a 10 m
+   * mosaic that is z13, above which the source has no more detail to give and
+   * an archive would only get bigger.
+   *
+   * The producer reads this to know what to cut (and caps it further against
+   * its own size budget, recording what it actually reached); the client reads
+   * it to know which overlay to draw a pack's tiles *beneath*. Neither side
+   * names a layer id, so the day a second layer earns an offline slab it is a
+   * catalog edit.
+   */
+  offlinePack?: { maxzoom: number };
+  /**
    * Present when this layer is a **derived potential surface**:
    * its tiles come from the derive service at `/api/potential/…`, keyed by the
    * layer's `target` option, rather than from the overlay proxy. `overlayTileUrl`

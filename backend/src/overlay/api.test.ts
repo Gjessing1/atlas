@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
 import { StatusRegistry } from '../status.js';
+import { rasterBandAtZoom } from './catalog.js';
 import {
   norwegianLayers,
   registerOverlayApi,
@@ -270,6 +271,9 @@ function compositeImageryLayer(): OverlayLayer {
             template: 'https://detail.example/{z}/{x}/{y}',
             cache: 'upstream',
           },
+          // The same mosaic the landscape band draws, upsampled — what the real
+          // catalog does, so the layer keeps showing ground when detail is out.
+          fallback: { kind: 'xyz', template: 'https://local-mosaic.example/{z}/{x}/{y}' },
         },
       ],
     },
@@ -382,7 +386,13 @@ describe('layer catalog', () => {
     // the two would switch each other off.
     expect(ids).not.toContain(BASEMAP_STATE_ID);
     expect(catalog.find((l) => l.meta.id === 'satellite-2025')).toMatchObject({
-      meta: { rev: 2, maxzoom: 19, exclusive: 'satellite-imagery' },
+      meta: {
+        rev: 3,
+        maxzoom: 19,
+        exclusive: 'satellite-imagery',
+        // What a region pack cuts: the mosaic's own resolution and no deeper.
+        offlinePack: { maxzoom: 13 },
+      },
       upstream: {
         kind: 'composite-raster',
         bands: [
@@ -399,14 +409,43 @@ describe('layer catalog', () => {
             minzoom: 14,
             maxzoom: 19,
             primary: { kind: 'xyz', cache: 'upstream' },
+            // Upsampled mosaic rather than a blank tile when Esri is
+            // unreachable: this layer promises a picture of the ground at every
+            // zoom, and only the detail half is allowed to disappear.
+            fallback: { kind: 'wms', layers: '2025' },
           },
         ],
       },
     });
+    // The pack-able layer must be exactly one, and it must be the one whose
+    // coarse band is redistributable — the producer picks it by this field
+    // alone (build-pack-imagery.mjs), so a second claimant would be a coin toss.
+    expect(catalog.filter((l) => l.meta.offlinePack).map((l) => l.meta.id)).toEqual([
+      'satellite-2025',
+    ]);
+    // The licence invariant, checked structurally rather than trusted: a pack
+    // copies every zoom up to `offlinePack.maxzoom` onto a user's phone, so no
+    // source reachable in that range may be one Atlas is only allowed to pass
+    // through (`cache: 'upstream'` — Esri's terms exclude offline export).
+    for (const layer of catalog.filter((l) => l.meta.offlinePack)) {
+      for (let z = 0; z <= layer.meta.offlinePack!.maxzoom; z++) {
+        const band = rasterBandAtZoom(layer.upstream as Parameters<typeof rasterBandAtZoom>[0], z);
+        expect(band, `${layer.meta.id} has no source at z${z}`).not.toBeNull();
+        for (const source of [band!.primary, band!.fallback]) {
+          expect(
+            source?.kind === 'xyz' ? source.cache : undefined,
+            `${layer.meta.id} would pack a streaming-only source at z${z}`,
+          ).not.toBe('upstream');
+        }
+      }
+    }
     expect(catalog.find((l) => l.meta.id === 'world-imagery')).toMatchObject({
       meta: { rev: 2, maxzoom: 19 },
       upstream: { missingTile: 'arcgis-etag', fallbackMaxzoom: 18 },
     });
+    // Esri alone, and it must stay un-packable: its item terms exclude offline
+    // export, which is the whole reason the other row carries the mosaic.
+    expect(catalog.find((l) => l.meta.id === 'world-imagery')?.meta.offlinePack).toBeUndefined();
     expect(catalog.find((l) => l.meta.id === 'protected-areas')).toMatchObject({
       meta: { profiles: ['fishing', 'hunting'], identify: true },
       upstream: {
@@ -878,8 +917,10 @@ describe('overlay tile proxy', () => {
   });
 
   it('switches composite imagery to uncached online detail at close zoom', async () => {
+    // An opaque tile on purpose: a transparent one is how a source says "no
+    // coverage here", and the detail band now answers that with the mosaic.
     const { app, cacheDir, requests } = await build(
-      () => ({ body: PNG_BYTES, cacheControl: 'public, max-age=3600' }),
+      () => ({ body: quadrantTile(), cacheControl: 'public, max-age=3600' }),
       { layers: [compositeImageryLayer()] },
     );
     track(app, cacheDir);
@@ -895,6 +936,33 @@ describe('overlay tile proxy', () => {
     ]);
     await expect(
       readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', '14', '10', '11.png')),
+    ).rejects.toThrow();
+  });
+
+  it('upsamples the mosaic when close-zoom detail is unreachable, without caching it', async () => {
+    const tile = quadrantTile();
+    const { app, cacheDir, requests } = await build(
+      (url) => {
+        if (url.hostname === 'detail.example') throw new Error('ECONNREFUSED');
+        return { body: tile };
+      },
+      { layers: [compositeImageryLayer()] },
+    );
+    track(app, cacheDir);
+
+    const res = await app.inject({ url: '/api/overlay/hybrid-imagery/16/10/11.png' });
+
+    // A soft picture of the right ground beats the blank tile this used to be.
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload).toEqual(tile);
+    expect(requests.map(String)).toEqual([
+      'https://detail.example/16/10/11',
+      'https://local-mosaic.example/16/10/11',
+    ]);
+    // Not written to disk: the band is `cache: upstream`, so an outage cannot
+    // pin upsampled mosaic where real detail belongs once the source is back.
+    await expect(
+      readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', '16', '10', '11.png')),
     ).rejects.toThrow();
   });
 

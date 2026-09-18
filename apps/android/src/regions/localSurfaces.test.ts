@@ -2,7 +2,13 @@ import type { LayerMeta, RegionPackLayerFile, RegionPackManifest } from '@atlas/
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveOverlay } from '../layers/useOverlays';
-import { localSurfaceTemplate, packWithSurface, withLocalSurfaces } from './localSurfaces';
+import {
+  localImageryBase,
+  localSurfaceTemplate,
+  packWithImagery,
+  packWithSurface,
+  withLocalSurfaces,
+} from './localSurfaces';
 import type { LocalPack } from './packs';
 
 /**
@@ -41,6 +47,31 @@ const pack = (layers: RegionPackLayerFile[], id = 'potential-abc'): LocalPack =>
     builtAt: 0,
     files: { layers },
   } satisfies RegionPackManifest,
+});
+
+const imageryFile = (over: Partial<RegionPackLayerFile> = {}): RegionPackLayerFile => ({
+  path: 'imagery.zip',
+  bytes: 10,
+  kind: 'imagery',
+  layer: 'satellite-2025',
+  minzoom: 0,
+  // Below the layer's own z13: the producer stops where the region's size
+  // budget does, and the client must overzoom from what is really there.
+  maxzoom: 11,
+  ...over,
+});
+
+const imageryOverlay = (over: Partial<ActiveOverlay> = {}): ActiveOverlay => ({
+  meta: {
+    id: 'satellite-2025',
+    maxzoom: 19,
+    offlinePack: { maxzoom: 13 },
+  } as unknown as LayerMeta,
+  opacity: 1,
+  tileUrlTemplate: 'https://atlas.example/api/overlay/satellite-2025/{z}/{x}/{y}.png',
+  options: {},
+  sourceId: 'atlas-overlay-satellite-2025',
+  ...over,
 });
 
 const overlay = (over: Partial<ActiveOverlay> = {}): ActiveOverlay => ({
@@ -94,6 +125,53 @@ describe('localSurfaceTemplate', () => {
 
   it('is null where no pack covers the view', () => {
     expect(localSurfaceTemplate([pack([layerFile()])], 'hunt', 'elg', ELSEWHERE)).toBeNull();
+  });
+});
+
+describe('offline imagery', () => {
+  it('covers the view by the pack bbox, not by cells', () => {
+    const packs = [pack([imageryFile()])];
+    // Inside the pack's rectangle but outside the derive cell list it carries
+    // none of: an imagery slab is cut to the rectangle, so this is covered.
+    expect(packWithImagery(packs, 'satellite-2025', { lat: 60.01, lng: 10.62 })).toBeDefined();
+    expect(packWithImagery(packs, 'satellite-2025', ELSEWHERE)).toBeUndefined();
+  });
+
+  it('ignores a pack that carries only a derived surface', () => {
+    expect(packWithImagery([pack([layerFile()])], 'satellite-2025', IN_CELL)).toBeUndefined();
+  });
+
+  it('hands MapLibre the archive’s own maxzoom, not the catalog’s', () => {
+    const base = localImageryBase([pack([imageryFile()])], 'satellite-2025', IN_CELL);
+    expect(base).toEqual({
+      tileUrlTemplate: 'file:///doc/packs/potential-abc/imagery/{z}/{x}/{y}.png',
+      maxzoom: 11,
+    });
+  });
+
+  it('attaches the slab without touching the live layer', () => {
+    const [out] = withLocalSurfaces([imageryOverlay()], [pack([imageryFile()])], IN_CELL, false);
+    // The layer above keeps streaming: the slab is drawn *under* it, so it only
+    // shows where the live tiles could not load.
+    expect(out!.tileUrlTemplate).toMatch(/^https:/);
+    expect(out!.sourceId).toBe('atlas-overlay-satellite-2025');
+    expect(out!.offlineBase).toEqual({
+      tileUrlTemplate: 'file:///doc/packs/potential-abc/imagery/{z}/{x}/{y}.png',
+      maxzoom: 11,
+    });
+  });
+
+  it('keeps the slab even when the user asked for online tiles', () => {
+    // preferOnline is for a pack the user knows is stale, and it cannot hide
+    // anything: the slab is only ever visible where the live layer failed, so
+    // dropping it there would trade a stale picture for a blank one.
+    const [out] = withLocalSurfaces([imageryOverlay()], [pack([imageryFile()])], IN_CELL, true);
+    expect(out!.offlineBase).toBeDefined();
+  });
+
+  it('leaves the layer alone where no pack reaches', () => {
+    const [out] = withLocalSurfaces([imageryOverlay()], [pack([imageryFile()])], ELSEWHERE, false);
+    expect(out!.offlineBase).toBeUndefined();
   });
 });
 

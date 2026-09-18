@@ -33,6 +33,17 @@ async function fixture(): Promise<{
       search: { path: 'search.sqlite', bytes: 6 },
       routing: { path: 'valhalla.tar', bytes: 7 },
       assets: { path: 'assets.zip', bytes: 6 },
+      layers: [
+        {
+          path: 'imagery.zip',
+          bytes: 7,
+          sha256: createHash('sha256').update('imagery').digest('hex'),
+          kind: 'imagery',
+          layer: 'satellite-2025',
+          minzoom: 0,
+          maxzoom: 12,
+        },
+      ],
     },
   };
   await writeFile(path.join(baseDir, 'pack.json'), JSON.stringify(manifest));
@@ -40,6 +51,7 @@ async function fixture(): Promise<{
   await writeFile(path.join(baseDir, 'search.sqlite'), 'search');
   await writeFile(path.join(baseDir, 'valhalla.tar'), 'routing');
   await writeFile(path.join(baseDir, 'assets.zip'), 'assets');
+  await writeFile(path.join(baseDir, 'imagery.zip'), 'imagery');
   const largerDir = path.join(dataDir, 'packs', 'norway');
   await mkdir(largerDir, { recursive: true });
   await writeFile(
@@ -109,6 +121,15 @@ describe('custom offline-region jobs', () => {
     const digestOf = (s: string) => createHash('sha256').update(s).digest('hex');
     expect(job?.manifest?.files.basemap?.sha256).toBe(digestOf('custom tiles'));
     expect(job?.manifest?.files.routing?.sha256).toBe(digestOf('routing'));
+    // The offline satellite slab is inherited whole, like the routing tiles:
+    // already cut to a superset of this box, and the alternative is a custom
+    // area that quietly has no imagery the moment the phone loses signal.
+    expect(job?.manifest?.files.layers).toEqual([
+      expect.objectContaining({ kind: 'imagery', layer: 'satellite-2025', maxzoom: 12 }),
+    ]);
+    const slab = await app.inject({ url: `/region-jobs/files/${id}/imagery.zip` });
+    expect(slab.statusCode).toBe(200);
+    expect(slab.body).toBe('imagery');
 
     const tiles = await app.inject({ url: `/region-jobs/files/${id}/basemap.pmtiles` });
     expect(tiles.statusCode).toBe(200);

@@ -277,6 +277,34 @@ export interface OverlayLayer {
 const KARTKATALOG = 'https://kartkatalog.geonorge.no/search?text=';
 
 /**
+ * The 10 m landscape mosaics, named once because `satellite-2025` uses each of
+ * them in two places: the Norwegian mosaic is both the zoomed-out picture and
+ * what stands in for Esri when the detail source is unreachable.
+ */
+const SENTINEL2_MOSAIC: WmsUpstream = {
+  kind: 'wms',
+  url: 'https://wms.geonorge.no/skwms1/wms.sentinel2',
+  version: '1.3.0',
+  // Pin the acquisition year. Moving to a future mosaic is an explicit catalog
+  // + rev change, so old CDN and disk tiles cannot bleed through.
+  layers: '2025',
+};
+
+/**
+ * The global stand-in outside Norway, where Kartverket answers with a
+ * transparent tile. The latest EOX mosaics are non-commercial; 2017 is the
+ * newest global layer its own capabilities publish under unrestricted
+ * CC BY 4.0. It is old, but legally cacheable — which is what lets it be cut
+ * into an offline pack — and still the same 10 m Sentinel-2 resolution as the
+ * Norwegian source.
+ */
+const EOX_S2CLOUDLESS: XyzUpstream = {
+  kind: 'xyz',
+  template:
+    'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
+};
+
+/**
  * Species sets behind the wildlife layer's chips. Names are Naturbase's own
  * `norskNavn` values, and the counts (probed 2026-07-25) are why the layer is
  * filtered at all: the full layer is 75 702 areas over 225 species,
@@ -723,10 +751,10 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'satellite-2025',
-        rev: 2,
-        title: 'Satellite imagery (automatic)',
+        rev: 3,
+        title: 'Satellite imagery',
         description:
-          'Cloud-minimized global landscape mosaic that switches to detailed satellite and aerial imagery as you zoom in.',
+          'Detailed aerial imagery wherever there is a connection, over a 10 m mosaic that keeps working offline.',
         group: 'Imagery',
         attribution:
           '© Copernicus Sentinel data / Kartverket · EOxCloudless © EOX IT Services GmbH (modified Copernicus Sentinel data 2017) · Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
@@ -735,8 +763,11 @@ export function norwegianLayers(): OverlayLayer[] {
         defaultOpacity: 1,
         identify: false,
         exclusive: 'satellite-imagery',
+        // The mosaic is z13 at its own resolution: 10 m a pixel is ~9.6 m at
+        // z13 and there is nothing further to bake.
+        offlinePack: { maxzoom: 13 },
         coverageNote:
-          'Norway uses the 2025 Kartverket mosaic and the rest of the world a 2017 EOX mosaic through z13. At z14+ Atlas switches to streaming Esri detail, which needs a connection and is not saved offline. Capture date, resolution, clouds and colour vary by source.',
+          'Zoomed out this is the 2025 Kartverket mosaic in Norway and a 2017 EOX mosaic elsewhere; from z14 in, streamed Esri detail draws on top of it. The mosaic is the half that survives losing signal — it downloads with a region, and Esri detail never does. Capture date, resolution, clouds and colour vary by source.',
       },
       upstream: {
         kind: 'composite-raster',
@@ -744,23 +775,8 @@ export function norwegianLayers(): OverlayLayer[] {
           {
             minzoom: 0,
             maxzoom: 13,
-            primary: {
-              kind: 'wms',
-              url: 'https://wms.geonorge.no/skwms1/wms.sentinel2',
-              version: '1.3.0',
-              // Pin the acquisition year. Moving to a future mosaic is an explicit
-              // catalog + rev change, so old CDN and disk tiles cannot bleed through.
-              layers: '2025',
-            },
-            fallback: {
-              kind: 'xyz',
-              // The latest EOX mosaics are non-commercial; 2017 is the newest
-              // global layer its own capabilities publish under unrestricted
-              // CC BY 4.0. It is old, but legally cacheable and still the same
-              // 10 m Sentinel-2 landscape resolution as the Norwegian source.
-              template:
-                'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
-            },
+            primary: SENTINEL2_MOSAIC,
+            fallback: EOX_S2CLOUDLESS,
           },
           {
             minzoom: 14,
@@ -775,6 +791,14 @@ export function norwegianLayers(): OverlayLayer[] {
               // browser cache grant but never copies it into its permanent store.
               cache: 'upstream',
             },
+            // Upsampled mosaic rather than a hole. Kartverket renders a GetMap
+            // at any scale, so asking it for a z16 box gives a soft but correct
+            // picture of the same ground — which is what this layer promises
+            // when the detail source is unreachable. Note this also opts the
+            // band out of the disk cache (`diskCache` in tiles.ts requires it
+            // of *every* source in the band), so an Esri outage does not leave
+            // upsampled mosaic pinned on disk once Esri is back.
+            fallback: SENTINEL2_MOSAIC,
           },
         ],
       },
@@ -783,8 +807,9 @@ export function norwegianLayers(): OverlayLayer[] {
       meta: {
         id: 'world-imagery',
         rev: 2,
-        title: 'Satellite & aerial (high-res)',
-        description: 'Detailed global satellite and aerial imagery, streamed from Esri.',
+        title: 'Satellite imagery (streaming only)',
+        description:
+          'Esri’s detailed imagery on its own, at every zoom, with no offline mosaic beneath it.',
         group: 'Imagery',
         attribution: 'Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
         metadataUrl: 'https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9',

@@ -79,6 +79,13 @@ export interface ActiveOverlay extends OverlayEntry {
    * remounts the source instead of leaving the old tiles in place.
    */
   sourceId: string;
+  /**
+   * A coarse slab of this layer from a downloaded region pack, drawn *beneath*
+   * it (`withLocalSurfaces`). Present only where a pack covers the view. The
+   * layer above keeps streaming exactly as it would without one; this is what
+   * remains on screen when it cannot.
+   */
+  offlineBase?: { tileUrlTemplate: string; maxzoom: number };
 }
 
 export interface OverlaysController extends OverlayPreferences {

@@ -559,7 +559,31 @@ export function MapScene({
           ? overlays
               // Weather fields are rasters too, but one per time step (below).
               .filter((overlay) => !overlay.meta.vector && !overlay.meta.weather)
-              .map((overlay) => (
+              .flatMap((overlay) => [
+                // The downloaded slab, mounted *before* the live layer so it
+                // sits under it: with a connection it is completely covered,
+                // and with none it is what is left on screen. Its own maxzoom,
+                // not the catalog's — the archive stops where the region's size
+                // budget did, and MapLibre overzooms from there.
+                ...(overlay.offlineBase
+                  ? [
+                      <RasterSource
+                        key={`${overlay.sourceId}--pack`}
+                        id={`${overlay.sourceId}--pack`}
+                        tiles={[overlay.offlineBase.tileUrlTemplate]}
+                        tileSize={256}
+                        maxzoom={overlay.offlineBase.maxzoom}
+                        minzoom={overlay.meta.minzoom ?? 0}
+                        attribution={overlay.meta.attribution}
+                      >
+                        <Layer
+                          type="raster"
+                          id={`${overlay.sourceId}--pack-layer`}
+                          paint={{ 'raster-opacity': overlay.opacity }}
+                        />
+                      </RasterSource>,
+                    ]
+                  : []),
                 <RasterSource
                   // Keyed on the *variant* id, not the layer id: switching species
                   // has to remount the source, or the native source keeps serving
@@ -577,8 +601,8 @@ export function MapScene({
                     id={`${overlay.sourceId}-layer`}
                     paint={{ 'raster-opacity': overlay.opacity }}
                   />
-                </RasterSource>
-              ))
+                </RasterSource>,
+              ])
           : null}
         {/* Where weather frames go. Native MapLibre adds a layer on top of the
           map unless told otherwise, so a frame mounted mid-animation would land

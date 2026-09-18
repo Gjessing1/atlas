@@ -32,22 +32,32 @@ export interface RegionPackFile {
  * so elg and rådyr are two archives of the same layer. Hence an array of
  * self-describing files rather than another named field.
  *
- * `bbox` is the user's rectangle, but a derived surface only exists in whole
- * z11 cells, so `cells` is what the archive actually covers and the only honest
- * answer to "can this view be drawn from disk".
+ * Two kinds exist, and they answer "does this archive cover where I am
+ * looking?" differently, which is why `cells` is optional:
+ *
+ * - `potential` — a derived surface. It exists only in whole z11 cells, so the
+ *   user's rectangle is the *intent* and `cells` is the fact.
+ * - `imagery` — a slab of the satellite mosaic, cut straight to the pack's
+ *   rectangle. There are no cells; the pack's own `bbox` is the coverage.
  */
 export interface RegionPackLayerFile extends RegionPackFile {
-  /** What sort of layer data this is. Only derived potential exists today. */
-  kind: 'potential';
+  /** What sort of layer data this is. */
+  kind: 'potential' | 'imagery';
   /** Catalog layer id — matches `LayerMeta.id`, e.g. `hunt`. */
   layer: string;
-  /** The resolved option variant it was derived for, e.g. `elg`. */
-  target: string;
+  /**
+   * The resolved option variant it was derived for, e.g. `elg`. Absent on an
+   * `imagery` archive, which has no variants — one layer, one slab of ground.
+   */
+  target?: string;
   /** Tile zooms present in the archive; above `maxzoom` a client overzooms. */
   minzoom: number;
   maxzoom: number;
-  /** The derive cells inside, as `z/x/y`. Coverage, as opposed to intent. */
-  cells: string[];
+  /**
+   * The derive cells inside, as `z/x/y` — coverage as opposed to intent.
+   * `potential` only; an `imagery` archive is cut to the pack bbox.
+   */
+  cells?: string[];
 }
 
 /**
@@ -61,7 +71,7 @@ export interface RegionPackLayerFile extends RegionPackFile {
  * download to retry, it is a pack that app must decline — quietly keeping the
  * region it already has rather than replacing it with something unreadable.
  */
-export const PACK_SCHEMA_VERSION = 1;
+export const PACK_SCHEMA_VERSION = 2;
 
 /**
  * What this client can consume. Raised when the app gains the ability to read a
@@ -211,7 +221,12 @@ export function packFileEntries(manifest: RegionPackManifest): RegionPackEntry[]
     entries.push({ kind, file: value as RegionPackFile });
   }
   for (const file of manifest.files.layers ?? []) {
-    entries.push({ kind: `layer:${file.layer}:${file.target}`, file });
+    // `imagery` archives carry no target, and `layer:satellite-2025:undefined`
+    // would be the name the user reads while it downloads.
+    entries.push({
+      kind: file.target ? `layer:${file.layer}:${file.target}` : `layer:${file.layer}`,
+      file,
+    });
   }
   return entries;
 }
@@ -233,7 +248,17 @@ export function packLayerFile(
   target: string,
 ): RegionPackLayerFile | undefined {
   return (manifest.files.layers ?? []).find(
-    (file) => file.layer === layer && file.target === target,
+    (file) => file.kind === 'potential' && file.layer === layer && file.target === target,
+  );
+}
+
+/** This pack's offline imagery slab for a layer, if it carries one. */
+export function packImageryFile(
+  manifest: RegionPackManifest,
+  layer: string,
+): RegionPackLayerFile | undefined {
+  return (manifest.files.layers ?? []).find(
+    (file) => file.kind === 'imagery' && file.layer === layer,
   );
 }
 
