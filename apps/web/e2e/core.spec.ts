@@ -158,7 +158,7 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
   ).toBe(12);
 });
 
-test('outdoor profiles can enter and leave 3D terrain', async ({ page }) => {
+test('every profile can enter and leave 3D terrain', async ({ page }) => {
   await page.route('**/assets/styles/liberty.json', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -186,14 +186,25 @@ test('outdoor profiles can enter and leave 3D terrain', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);
 
-  await page.getByRole('radio', { name: 'Hike' }).click();
+  // Explore, the default — the switch used to be offered only by the outdoor
+  // profiles, which read as the 3D map having disappeared.
   const terrain = page.getByRole('button', { name: 'Switch to 3D terrain' });
   await expect(terrain).toBeVisible();
   await terrain.click();
 
   await expect
     .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
-    .toBe('Atlas Light · hike · 3D');
+    .toBe('Atlas Light · explore · 3D');
+  // It is one choice, not one per profile: switching activity keeps it. (Not
+  // asserted through the style name — on this one-layer fixture Explore and
+  // Drive differ only in `name`, which MapLibre's style diff never applies.)
+  await page.getByRole('radio', { name: 'Drive' }).click();
+  await expect(page.getByRole('radio', { name: 'Drive' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('button', { name: 'Switch to 2D map' })).toBeVisible();
+  expect(await page.evaluate(() => window.__atlasMap!.getStyle().terrain)).toEqual({
+    source: 'atlas-terrain-dem',
+    exaggeration: 1,
+  });
   await expect.poll(() => page.evaluate(() => window.__atlasMap!.getPitch())).toBeGreaterThan(50);
   const style = await page.evaluate(() => window.__atlasMap!.getStyle());
   expect(style.terrain).toEqual({ source: 'atlas-terrain-dem', exaggeration: 1 });

@@ -19,8 +19,6 @@ export interface MapProfile {
   id: string;
   label: string;
   routing: string | null;
-  /** Whether the web map offers DEM-backed 3D terrain for this activity. */
-  terrain?: boolean;
   /**
    * `LayerMeta.profiles` tags this profile surfaces. Kept explicit rather than
    * matching on `id`, because the two vocabularies genuinely differ — the
@@ -60,7 +58,6 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     id: 'hike',
     label: 'Hike',
     routing: 'hike',
-    terrain: true,
     layerTags: ['hiking'],
     defaultLayers: ['trails-hiking', 'topo-footpaths'],
   },
@@ -77,7 +74,6 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     id: 'ski',
     label: 'Ski',
     routing: null,
-    terrain: true,
     layerTags: ['ski'],
     // Groomed ski tracks are what the Ski preset is for, so start them on.
     // `terrain-slope` (the avalanche-steepness surface) stays *offered* but off
@@ -96,7 +92,6 @@ export const MAP_PROFILES: readonly MapProfile[] = [
     id: 'fishhunt',
     label: 'Fish & Hunt',
     routing: null,
-    terrain: true,
     // `potential` surfaces the derived rows and is deliberately a tag of
     // its own rather than reusing `fishing`: a client whose bundle predates the
     // derive service must not list a layer it would request from the wrong
@@ -292,11 +287,6 @@ export function isMapProfile(value: unknown): value is string {
 /** Look up a profile by id, falling back to the default for anything unknown. */
 export function mapProfile(id: string): MapProfile {
   return MAP_PROFILES.find((p) => p.id === id) ?? MAP_PROFILES[0]!;
-}
-
-/** Activities whose ground-reading map benefits from an optional terrain mesh. */
-export function mapProfileSupportsTerrain(id: string): boolean {
-  return mapProfile(id).terrain === true;
 }
 
 /**

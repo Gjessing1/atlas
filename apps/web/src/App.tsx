@@ -8,7 +8,6 @@ import {
   haversineM,
   mapProfile,
   mapProfileForRouting,
-  mapProfileSupportsTerrain,
   placeIsVisible,
   placeTargetTitle,
   resolveInaturOffer,
@@ -339,8 +338,9 @@ export function App() {
     profilePreferences.preferredLayers(profiles.profile.id),
     profilePreferences.customizedLayers(profiles.profile.id),
   );
-  const terrainAvailable = mapProfileSupportsTerrain(profiles.profile.id);
-  const terrain3d = terrainAvailable && terrainPreference.value && layers.basemapOn;
+  // One choice for every activity: a driver reading a mountain pass wants the
+  // relief as much as a hiker does.
+  const terrain3d = terrainPreference.value && layers.basemapOn;
   // Picking an activity also moves the planner's travel mode, when that
   // activity has one (Explore and Ski express no routing opinion). The planner
   // still offers every mode, so this is a default and not a restriction.
@@ -1372,7 +1372,6 @@ export function App() {
           />
           <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
           <TerrainControl
-            available={terrainAvailable}
             enabled={terrain3d}
             basemap={layers.basemapOn}
             onToggle={() => void terrainPreference.setValue((current) => !current)}

@@ -10,7 +10,6 @@ import {
   MAP_PROFILES,
   mapProfile,
   mapProfileForRouting,
-  mapProfileSupportsTerrain,
   preferredLayersForProfile,
   sanitizeMapProfilePreferences,
   searchLayerGroups,
@@ -34,17 +33,6 @@ describe('map profiles', () => {
     expect(mapProfileForRouting('hike')?.id).toBe('hike');
     expect(mapProfileForRouting('run')?.id).toBe('run');
     expect(mapProfileForRouting('foot')?.id).toBe('explore');
-  });
-
-  it('offers terrain only to the outdoor profiles that read the shape of the ground', () => {
-    expect(MAP_PROFILES.filter((profile) => profile.terrain).map((profile) => profile.id)).toEqual([
-      'hike',
-      'ski',
-      'fishhunt',
-    ]);
-    expect(mapProfileSupportsTerrain('hike')).toBe(true);
-    expect(mapProfileSupportsTerrain('explore')).toBe(false);
-    expect(mapProfileSupportsTerrain('unknown')).toBe(false);
   });
 
   it('always offers untagged general-purpose layers', () => {

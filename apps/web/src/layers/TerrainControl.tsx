@@ -1,15 +1,16 @@
 import { TerrainIcon } from '../icons.js';
 
 interface TerrainControlProps {
-  available: boolean;
   enabled: boolean;
   basemap: boolean;
   onToggle: () => void;
 }
 
-/** Web-only DEM terrain switch; MapLibre Native deliberately remains 2D. */
-export function TerrainControl({ available, enabled, basemap, onToggle }: TerrainControlProps) {
-  if (!available) return null;
+/**
+ * Web-only DEM terrain switch, offered in every activity; MapLibre Native
+ * deliberately remains 2D.
+ */
+export function TerrainControl({ enabled, basemap, onToggle }: TerrainControlProps) {
   const label = enabled ? 'Switch to 2D map' : 'Switch to 3D terrain';
   return (
     <button
