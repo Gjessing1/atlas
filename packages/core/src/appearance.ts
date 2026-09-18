@@ -1,3 +1,5 @@
+import type { PoiCategoryId } from './poi.js';
+
 /** A per-device UI preference; `system` follows the operating system live. */
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -38,6 +40,8 @@ export interface MapAppearance {
   basemap?: boolean;
   /** Draw the OSM POI symbols and labels carried by the map sources. */
   poi?: boolean;
+  /** Empty/absent means every POI; otherwise draw only these practical categories. */
+  poiCategories?: readonly PoiCategoryId[];
   /** Web-only for now: draw a DEM mesh and hillshade beneath roads and labels. */
   terrain?: boolean;
   /** Same-origin Terrarium tile template used when `terrain` is on. */
@@ -655,6 +659,130 @@ function matchesAny(property: string, values: string[]): unknown {
   return ['match', ['get', property], values, true, false];
 }
 
+/** OpenMapTiles/Atlas-outdoor predicates behind the user-facing POI pills. */
+function poiCategoryFilter(categories: readonly PoiCategoryId[], outdoor: boolean): unknown | null {
+  if (categories.length === 0) return null;
+  const filters: unknown[] = [];
+  for (const category of categories) {
+    if (outdoor) {
+      const classes: Partial<Record<PoiCategoryId, string[]>> = {
+        nature: ['picnic_site', 'drinking_water'],
+        sights: ['cave_entrance'],
+        camping: ['camp_site'],
+        parking: ['parking'],
+        cabins: ['wilderness_hut', 'alpine_hut', 'chalet', 'shelter'],
+        viewpoints: ['viewpoint'],
+        'boat-access': ['slipway', 'boatyard'],
+      };
+      const values = classes[category];
+      if (values) filters.push(matchesAny('class', values));
+      continue;
+    }
+
+    switch (category) {
+      case 'food':
+        filters.push(
+          matchesAny('class', ['restaurant', 'fast_food', 'bar', 'beer', 'bakery', 'ice_cream']),
+        );
+        break;
+      case 'coffee':
+        filters.push(matchesAny('class', ['cafe']));
+        break;
+      case 'groceries':
+        filters.push([
+          'any',
+          matchesAny('class', ['grocery']),
+          matchesAny('subclass', ['supermarket', 'convenience', 'greengrocer', 'deli']),
+        ]);
+        break;
+      case 'shops':
+        filters.push([
+          'all',
+          matchesAny('class', [
+            'shop',
+            'clothing_store',
+            'alcohol_shop',
+            'bicycle',
+            'car',
+            'florist',
+            'furniture',
+            'hairdresser',
+            'hardware',
+            'laundry',
+            'library',
+            'music',
+            'butcher',
+          ]),
+          ['!', matchesAny('subclass', ['supermarket', 'convenience', 'greengrocer', 'deli'])],
+        ]);
+        break;
+      case 'museums':
+        filters.push(matchesAny('class', ['museum', 'art_gallery']));
+        break;
+      case 'sights':
+        filters.push([
+          'all',
+          matchesAny('class', ['attraction', 'monument', 'castle', 'theatre', 'cinema', 'zoo']),
+          ['!', matchesAny('subclass', ['viewpoint'])],
+        ]);
+        break;
+      case 'nature':
+        filters.push(
+          matchesAny('class', ['park', 'garden', 'picnic_site', 'drinking_water', 'beach']),
+        );
+        break;
+      case 'health':
+        filters.push(
+          matchesAny('class', ['pharmacy', 'hospital', 'doctors', 'dentist', 'veterinary']),
+        );
+        break;
+      case 'banks':
+        filters.push(matchesAny('class', ['bank', 'atm']));
+        break;
+      case 'toilets':
+        filters.push(matchesAny('class', ['toilets']));
+        break;
+      case 'post':
+        filters.push(matchesAny('class', ['post']));
+        break;
+      case 'playgrounds':
+        filters.push(matchesAny('class', ['playground']));
+        break;
+      case 'camping':
+        filters.push(matchesAny('class', ['campsite']));
+        break;
+      case 'fuel':
+        filters.push(matchesAny('class', ['fuel']));
+        break;
+      case 'charging':
+        filters.push(matchesAny('class', ['charging_station']));
+        break;
+      case 'parking':
+        filters.push(matchesAny('class', ['parking', 'bicycle_parking', 'motorcycle_parking']));
+        break;
+      case 'cabins':
+        filters.push([
+          'any',
+          matchesAny('class', ['shelter']),
+          matchesAny('subclass', ['alpine_hut', 'wilderness_hut', 'chalet', 'shelter']),
+        ]);
+        break;
+      case 'viewpoints':
+        filters.push(matchesAny('subclass', ['viewpoint']));
+        break;
+      case 'boat-access':
+        filters.push([
+          'any',
+          matchesAny('class', ['harbor', 'ferry_terminal']),
+          matchesAny('subclass', ['marina', 'slipway', 'boatyard']),
+        ]);
+        break;
+    }
+  }
+  if (filters.length === 0) return ['==', 1, 0];
+  return filters.length === 1 ? filters[0]! : ['any', ...filters];
+}
+
 /**
  * "Exists, but you may not take it" — swap a colour for a muted one wherever
  * the way is access-restricted.
@@ -927,7 +1055,12 @@ function outdoorHutLayer(dark: boolean): StyleLayer {
  * assumed: the basemap has no `wilderness_hut` at all — OpenMapTiles maps only
  * `alpine_hut`, `chalet` and the commercial lodging tags into `class=lodging`.
  */
-function outdoorPoiLayer(template: StyleLayer, dark: boolean, outdoor: boolean): StyleLayer {
+function outdoorPoiLayer(
+  template: StyleLayer,
+  dark: boolean,
+  outdoor: boolean,
+  categories: readonly PoiCategoryId[],
+): StyleLayer {
   const layer = JSON.parse(JSON.stringify(template)) as StyleLayer;
   layer.id = OUTDOOR_POI_LAYER_ID;
   // One zoom earlier than the base layer's z15 — and z14 is as early as the
@@ -952,6 +1085,7 @@ function outdoorPoiLayer(template: StyleLayer, dark: boolean, outdoor: boolean):
   // Replaces the template's filter outright rather than extending it: the base
   // layer's rank window is exactly what we are overriding, and these features
   // must appear whichever rank bucket they fell into.
+  const category = poiCategoryFilter(categories, outdoor);
   layer.filter = [
     'all',
     ['match', ['geometry-type'], ['MultiPoint', 'Point'], true, false],
@@ -961,6 +1095,7 @@ function outdoorPoiLayer(template: StyleLayer, dark: boolean, outdoor: boolean):
     outdoor
       ? matchesAny('class', OUTDOOR_POI_CLASSES)
       : matchesAny('subclass', OUTDOOR_POI_SUBCLASSES),
+    ...(category ? [category] : []),
   ];
   // Set rather than multiplied: a profile that recedes the urban POI layers
   // (Fish & Hunt does) must not drag these down with them — the contrast
@@ -1085,6 +1220,8 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     : 'neutral';
   const wantsBarriers = BARRIER_PROFILES.includes(profile);
   const wantsPoi = appearance.poi !== false;
+  const poiCategories = appearance.poiCategories ?? [];
+  const basePoiCategory = poiCategoryFilter(poiCategories, false);
   const wantsOutdoorPoi = wantsPoi && OUTDOOR_POI_PROFILES.includes(profile);
   const wantsHikeCartography = HIKE_CARTOGRAPHY_PROFILES.includes(profile);
   // Bind the overlay archive only where a layer will actually read it, so Drive
@@ -1316,6 +1453,13 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
       layer.filter = layer.filter ? ['all', layer.filter, notOutdoor] : notOutdoor;
     }
 
+    // Focus mode narrows every Liberty rank bucket (including transit) through
+    // the same class/subclass vocabulary. “All” is represented by no added
+    // predicate, preserving the source style byte-for-byte in that dimension.
+    if (wantsPoi && basePoiCategory && layer['source-layer'] === 'poi') {
+      layer.filter = layer.filter ? ['all', layer.filter, basePoiCategory] : basePoiCategory;
+    }
+
     // Both run after the profile branch: the brunnel pass multiplies the
     // opacity a profile may already have receded a road to, and the surface
     // split then wraps whatever colour the layer settled on — in that order, so
@@ -1342,12 +1486,12 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     }
     if (wantsOutdoorPoi) {
       insertAfterBase.push({
-        layer: outdoorPoiLayer(poiTemplate, dark, useOutdoor),
+        layer: outdoorPoiLayer(poiTemplate, dark, useOutdoor, poiCategories),
         baseId: lastPoiId,
       });
       // Between the icons and the barriers: the ring belongs to the cabin it
       // encircles, and must not sit on top of that cabin's own label.
-      if (useOutdoor) {
+      if (useOutdoor && (poiCategories.length === 0 || poiCategories.includes('cabins'))) {
         insertAfterBase.push({ layer: outdoorHutLayer(dark), baseId: lastPoiId });
       }
     }

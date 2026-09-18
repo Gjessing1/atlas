@@ -7,9 +7,11 @@ import {
   weatherFrameLabel,
   type WeatherLegendRow,
 } from '@atlas/conditions';
+import { POI_CATEGORIES, type PoiCategoryId } from '@atlas/core';
 import { useEffect, useState } from 'react';
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -84,6 +86,10 @@ export function WeatherDock({
   sky,
   lightningOn,
   auroraOn,
+  poiOn,
+  poiCategories,
+  onTogglePoiCategory,
+  onShowAllPois,
 }: {
   maps: WeatherMapsController;
   title: string;
@@ -94,6 +100,10 @@ export function WeatherDock({
   sky: SkyLayersController;
   lightningOn: boolean;
   auroraOn: boolean;
+  poiOn: boolean;
+  poiCategories: readonly PoiCategoryId[];
+  onTogglePoiCategory: (id: PoiCategoryId) => void;
+  onShowAllPois: () => void;
 }) {
   const side = useSideInsets();
   const [legendOpen, setLegendOpen] = useState(rememberedLegendOpen);
@@ -124,6 +134,51 @@ export function WeatherDock({
       onLayout={(event: LayoutChangeEvent) => onHeight(event.nativeEvent.layout.height)}
       testID="weather-dock"
     >
+      {poiOn ? (
+        <View style={styles.poiControl} accessibilityLabel="POI categories">
+          <Text style={styles.poiTitle}>POIs</Text>
+          <ScrollView
+            horizontal
+            style={styles.poiScroller}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.poiScroll}
+          >
+            <Pressable
+              style={[
+                styles.switchButton,
+                poiCategories.length === 0 ? styles.switchButtonOn : null,
+              ]}
+              onPress={onShowAllPois}
+              accessibilityRole="button"
+              accessibilityState={{ selected: poiCategories.length === 0 }}
+              testID="poi-category-all"
+            >
+              <Text
+                style={[styles.switchText, poiCategories.length === 0 ? styles.switchTextOn : null]}
+              >
+                All
+              </Text>
+            </Pressable>
+            {POI_CATEGORIES.map((category) => {
+              const on = poiCategories.includes(category.id);
+              return (
+                <Pressable
+                  key={category.id}
+                  style={[styles.switchButton, on ? styles.switchButtonOn : null]}
+                  onPress={() => onTogglePoiCategory(category.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  testID={`poi-category-${category.id}`}
+                >
+                  <Text style={[styles.switchText, on ? styles.switchTextOn : null]}>
+                    {category.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
       {legend || maps.layerId ? (
         <View style={styles.mapControl}>
           {legend ? (
@@ -314,6 +369,26 @@ export function WeatherDock({
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', gap: 6 },
+  poiControl: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 6,
+    borderRadius: 24,
+    backgroundColor: theme.surface,
+    elevation: 4,
+  },
+  poiTitle: { fontSize: 12, fontWeight: '700', color: theme.text },
+  poiScroller: { flex: 1 },
+  poiScroll: {
+    flexDirection: 'row',
+    padding: 2,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceMuted,
+  },
   mapControl: {
     overflow: 'hidden',
     borderRadius: 14,

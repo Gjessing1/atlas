@@ -11,6 +11,7 @@ import {
   type MapViewState,
   type MapStyleOverrides,
   type PlaceTarget,
+  type PoiCategoryId,
 } from '@atlas/core';
 import type { PlaceRecord } from '@atlas/storage';
 import maplibregl, { type MapMouseEvent, type StyleSpecification } from 'maplibre-gl';
@@ -38,6 +39,7 @@ async function loadStyle(
   custom: MapStyleOverrides,
   basemap: boolean,
   poi: boolean,
+  poiCategories: readonly PoiCategoryId[],
   terrain: boolean,
 ): Promise<string | StyleSpecification> {
   try {
@@ -55,6 +57,7 @@ async function loadStyle(
         custom,
         basemap,
         poi,
+        poiCategories,
         // Unconditional: only the outdoor profiles bind it, and a server with
         // no archive answers empty rather than wrong (see outdoorTilesUrl).
         outdoorTiles: outdoorTilesUrl(origin),
@@ -128,6 +131,8 @@ interface MapViewProps {
   basemap: boolean;
   /** Draw OSM points of interest from the basemap and outdoor supplement. */
   poi: boolean;
+  /** Empty means all POIs; otherwise the active on-map category pills. */
+  poiCategories: readonly PoiCategoryId[];
   /** Web-only DEM mesh; Android intentionally keeps its native 2D renderer. */
   terrain: boolean;
   /** Incremented by the shared control grid to trigger MapLibre geolocation. */
@@ -149,6 +154,7 @@ export function MapView({
   customStyle,
   basemap,
   poi,
+  poiCategories,
   terrain,
   locateRequest,
 }: MapViewProps) {
@@ -298,13 +304,15 @@ export function MapView({
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    void loadStyle(colorScheme, profile, customStyle, basemap, poi, terrain).then((style) => {
-      if (!cancelled) map.setStyle(style);
-    });
+    void loadStyle(colorScheme, profile, customStyle, basemap, poi, poiCategories, terrain).then(
+      (style) => {
+        if (!cancelled) map.setStyle(style);
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [map, colorScheme, profile, customStyle, basemap, poi, terrain]);
+  }, [map, colorScheme, profile, customStyle, basemap, poi, poiCategories, terrain]);
 
   // The mesh exists in a top-down camera too, but reads as an ordinary flat
   // map. Enter/leave with a deliberate camera move so the control has an

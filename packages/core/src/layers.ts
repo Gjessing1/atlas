@@ -903,13 +903,14 @@ export function basemapVisible(state: OverlayStateMap, profileId: string): boole
 }
 
 /**
- * Whether OSM points of interest draw in this profile. Existing maps always
- * drew them, so an absent preference means on; only an explicit choice hides
- * them. The style pass applies this to both Liberty's POI layers and Atlas's
- * outdoor POI supplement.
+ * Whether the focused POI layer draws in this profile. It is opt-in: ordinary
+ * place and road labels remain part of the basemap, while the dense OSM POI
+ * symbols only appear after the user enables them and gets the category dock.
+ * The style pass applies this to both Liberty's POI layers and Atlas's outdoor
+ * POI supplement.
  */
 export function poiVisible(state: OverlayStateMap, profileId: string): boolean {
-  return state[`${profileId}:${POI_STATE_ID}`]?.on ?? true;
+  return state[`${profileId}:${POI_STATE_ID}`]?.on ?? false;
 }
 
 /**

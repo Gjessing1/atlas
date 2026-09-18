@@ -273,6 +273,7 @@ function AppInner() {
       custom: mapStyleEditor.value,
       basemap: overlaysCtl.basemapOn,
       poi: overlaysCtl.poiOn,
+      poiCategories: overlaysCtl.poiCategories,
     }),
     [
       appearance.colorScheme,
@@ -280,6 +281,7 @@ function AppInner() {
       mapStyleEditor.value,
       overlaysCtl.basemapOn,
       overlaysCtl.poiOn,
+      overlaysCtl.poiCategories,
     ],
   );
   const serverOrigin = useServerOrigin();
@@ -716,6 +718,7 @@ function AppInner() {
   const weatherWarnings = useWeatherWarnings(overlays, serverOrigin);
   const weatherTitle = overlays.find((overlay) => overlay.meta.weather)?.meta.title ?? '';
   const timeDockOn = Boolean(weatherLayers.maps.layerId) || lightningOn || auroraOn;
+  const mapDockOn = timeDockOn || overlaysCtl.poiOn;
   const [weatherDockHeight, setWeatherDockHeight] = useState(0);
   const weatherMapsRef = useRef(weatherLayers.maps);
   weatherMapsRef.current = weatherLayers.maps;
@@ -1199,7 +1202,7 @@ function AppInner() {
   // compass step up over the dock.
   const activityRows =
     (potentialTargets.groups.length > 0 ? 1 : 0) + (layerFilters.groups.length > 0 ? 1 : 0);
-  const weatherDockLift = showIdleChrome && timeDockOn ? weatherDockHeight + 52 * activityRows : 0;
+  const weatherDockLift = showIdleChrome && mapDockOn ? weatherDockHeight + 52 * activityRows : 0;
 
   // Route planning and guidance both repurpose map taps, so the measure tool
   // cannot stay open into either: its sheet is hidden there, and a hidden tool
@@ -1622,7 +1625,7 @@ function AppInner() {
             />
           ) : null}
 
-          {showIdleChrome && timeDockOn ? (
+          {showIdleChrome && mapDockOn ? (
             <WeatherDock
               maps={weatherLayers.maps}
               title={weatherTitle}
@@ -1632,6 +1635,10 @@ function AppInner() {
               sky={skyLayers}
               lightningOn={lightningOn}
               auroraOn={auroraOn}
+              poiOn={overlaysCtl.poiOn}
+              poiCategories={overlaysCtl.poiCategories}
+              onTogglePoiCategory={overlaysCtl.togglePoiCategory}
+              onShowAllPois={overlaysCtl.showAllPoiCategories}
             />
           ) : null}
 

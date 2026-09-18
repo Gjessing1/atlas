@@ -6062,6 +6062,29 @@ button.transit-notice-summary {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
+.poi-control {
+  overflow: hidden;
+  border: var(--floating-border);
+  background: var(--surface-overlay);
+  box-shadow: var(--floating-shadow);
+}
+
+.poi-control-title {
+  flex: 0 0 auto;
+  padding-left: 7px;
+  font-size: 13px;
+}
+
+.poi-category-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.poi-category-scroll .weather-timeline-switch {
+  width: max-content;
+}
+
 .sky-control {
   min-height: 50px;
 }

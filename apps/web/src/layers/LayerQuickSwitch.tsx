@@ -80,7 +80,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
 
   if (layers.catalog.length === 0) return null;
 
-  const activeCount = layers.overlays.length;
+  const activeCount = layers.overlays.length + (layers.poiOn ? 1 : 0);
 
   return (
     <div className="layer-switch" ref={rootRef}>
@@ -172,7 +172,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
               role="switch"
               aria-checked={layers.poiOn}
               onClick={() => layers.setPoiOn(!layers.poiOn)}
-              title="Draw points of interest from the map data"
+              title="Show points of interest and category filters"
             >
               <span className="layer-switch-label">Points of interest</span>
               <span

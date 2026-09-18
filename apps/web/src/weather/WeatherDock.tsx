@@ -7,6 +7,7 @@ import {
   type WeatherLegendRow,
   type WeatherMapLegend,
 } from '@atlas/conditions';
+import { POI_CATEGORIES, type PoiCategoryId } from '@atlas/core';
 import { useEffect, useState } from 'react';
 
 import { PauseIcon, PlayIcon } from '../icons.js';
@@ -75,6 +76,10 @@ interface WeatherDockProps {
   sky: SkyLayersController;
   lightningOn: boolean;
   auroraOn: boolean;
+  poiOn: boolean;
+  poiCategories: readonly PoiCategoryId[];
+  onTogglePoiCategory: (id: PoiCategoryId) => void;
+  onShowAllPois: () => void;
 }
 
 /**
@@ -92,6 +97,10 @@ export function WeatherDock({
   sky,
   lightningOn,
   auroraOn,
+  poiOn,
+  poiCategories,
+  onTogglePoiCategory,
+  onShowAllPois,
 }: WeatherDockProps) {
   // Remembered for the browser session only: shown by default so a first
   // activation explains its colours, collapsible once they are understood.
@@ -131,7 +140,7 @@ export function WeatherDock({
     ? Date.parse(sky.aurora.forecast.forecastTime)
     : Number.NaN;
 
-  if (weatherOn && (!frame || frames.length === 0) && !lightningOn && !auroraOn) {
+  if (weatherOn && (!frame || frames.length === 0) && !lightningOn && !auroraOn && !poiOn) {
     return (
       <div className={className}>
         <div role="status" className="weather-timeline weather-timeline-status">
@@ -226,6 +235,32 @@ export function WeatherDock({
 
   return (
     <div className={className}>
+      {poiOn && (
+        <div className="weather-timeline poi-control" role="group" aria-label="POI categories">
+          <strong className="poi-control-title">POIs</strong>
+          <div className="poi-category-scroll">
+            <div className="weather-timeline-switch">
+              <button
+                type="button"
+                aria-pressed={poiCategories.length === 0}
+                onClick={onShowAllPois}
+              >
+                All
+              </button>
+              {POI_CATEGORIES.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  aria-pressed={poiCategories.includes(category.id)}
+                  onClick={() => onTogglePoiCategory(category.id)}
+                >
+                  {category.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {(legend || weatherTimeline) && (
         <div className="weather-map-control">
           {legend && (

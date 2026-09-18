@@ -188,15 +188,21 @@ describe('useOverlayPreferences', () => {
   });
 
   describe('the points-of-interest switch', () => {
-    it('draws until the device says otherwise, per profile', async () => {
+    it('is opt-in and keeps a per-profile category focus', async () => {
       const { result, rerender, saved } = render({ profileId: 'explore' });
       await loaded(result);
-      expect(result.current.poiOn).toBe(true);
-      act(() => result.current.setPoiOn(false));
-      await waitFor(() => expect(result.current.poiOn).toBe(false));
-      expect(saved()).toEqual({ 'explore:points-of-interest': { on: false } });
+      expect(result.current.poiOn).toBe(false);
+      expect(result.current.poiCategories).toEqual([]);
+      act(() => result.current.setPoiOn(true));
+      await waitFor(() => expect(result.current.poiOn).toBe(true));
+      act(() => result.current.togglePoiCategory('groceries'));
+      await waitFor(() => expect(result.current.poiCategories).toEqual(['groceries']));
+      expect(saved()).toEqual({
+        'explore:points-of-interest': { on: true, options: { categories: 'groceries' } },
+      });
       rerender({ profileId: 'hike' });
-      expect(result.current.poiOn).toBe(true);
+      expect(result.current.poiOn).toBe(false);
+      expect(result.current.poiCategories).toEqual([]);
     });
   });
 

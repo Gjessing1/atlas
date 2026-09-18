@@ -39,7 +39,7 @@ test('direction-arrow source is selectable and persists on this device', async (
   await expect(page.getByRole('radio', { name: 'GPS course' })).toBeChecked();
 });
 
-test('points of interest are an explicit per-profile map layer', async ({ page }) => {
+test('points of interest open an on-map category filter per profile', async ({ page }) => {
   await page.route('**/assets/styles/liberty.json', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -75,14 +75,29 @@ test('points of interest are an explicit per-profile map layer', async ({ page }
 
   await expect
     .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
-    .toBe(true);
+    .toBe(false);
   await page.getByRole('button', { name: /^Map layers/ }).click();
   const poi = page.getByRole('switch', { name: 'Points of interest' });
-  await expect(poi).toHaveAttribute('aria-checked', 'true');
+  await expect(poi).toHaveAttribute('aria-checked', 'false');
   await poi.click();
   await expect
     .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
-    .toBe(false);
+    .toBe(true);
+  const categories = page.getByRole('group', { name: 'POI categories' });
+  await expect(categories).toBeVisible();
+  await expect(categories.getByRole('button', { name: 'All' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await categories.getByRole('button', { name: 'Groceries' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => JSON.stringify(window.__atlasMap!.getFilter('poi_r20') ?? null)),
+    )
+    .toContain('grocery');
+  expect(
+    await page.evaluate(() => JSON.stringify(window.__atlasMap!.getFilter('poi_r20') ?? null)),
+  ).toContain('supermarket');
   expect(await page.evaluate(() => Boolean(window.__atlasMap!.getLayer('label_city')))).toBe(true);
 
   // The choice belongs to Explore. Switching profile restores that profile's
@@ -90,7 +105,8 @@ test('points of interest are an explicit per-profile map layer', async ({ page }
   await page.getByRole('radio', { name: 'Hike' }).click();
   await expect
     .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
-    .toBe(true);
+    .toBe(false);
+  await expect(categories).toBeHidden();
 });
 
 test('dark mode themes the UI and basemap, persists, and profiles change map emphasis', async ({

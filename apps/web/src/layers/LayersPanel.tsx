@@ -187,8 +187,8 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
           <span className="layer-toggle-control" aria-hidden="true" />
         </label>
         <div className="layer-desc">
-          Shops, food, services, sights and outdoor places already carried by the map. Labels appear
-          as you zoom in — this profile only.
+          Show OSM places, then filter them from the map with pills for groceries, shops, museums,
+          food, services and outdoor destinations — this profile only.
         </div>
       </div>
       {/* The map the overlays are drawn on, above the overlays themselves.

@@ -24,14 +24,19 @@
 import {
   BASEMAP_STATE_ID,
   basemapVisible,
+  encodePoiCategories,
   layerDefaultsOn,
   layersForProfile,
   normalizeLayerOptions,
   OVERLAY_STATE_SETTING,
+  parsePoiCategories,
+  POI_CATEGORIES_OPTION,
   POI_STATE_ID,
   poiVisible,
+  togglePoiCategory,
   type LayerMeta,
   type OverlayStateMap,
+  type PoiCategoryId,
 } from '@atlas/core';
 import { useCallback, useMemo } from 'react';
 
@@ -104,6 +109,10 @@ export interface OverlayPreferences {
   /** Whether the basemap's OSM POI symbols and labels draw in this profile. */
   poiOn: boolean;
   setPoiOn: (on: boolean) => void;
+  /** Empty means the complete POI layer; otherwise these category pills are active. */
+  poiCategories: PoiCategoryId[];
+  togglePoiCategory: (id: PoiCategoryId) => void;
+  showAllPoiCategories: () => void;
   opacityFor: (id: string) => number;
   /** The layer's resolved variant (see `LayerMeta.options`), defaults filled in. */
   optionsFor: (meta: LayerMeta) => Record<string, string>;
@@ -240,9 +249,14 @@ export function useOverlayPreferences(
     [update, profileId],
   );
 
-  // POIs are built-in map content rather than a catalog overlay, so they use
-  // the same explicit-default rule as the basemap: absent means on.
+  // POIs are built-in map content rather than a catalog overlay. Unlike the
+  // basemap they are opt-in: turning them on also reveals the category dock.
   const poiOn = poiVisible(state, profileId);
+  const poiStateKey = stateKey(profileId, POI_STATE_ID);
+  const poiCategories = useMemo(
+    () => parsePoiCategories(state[poiStateKey]?.options?.[POI_CATEGORIES_OPTION]),
+    [state, poiStateKey],
+  );
   const setPoiOn = useCallback(
     (on: boolean) =>
       update((current) => ({
@@ -254,6 +268,26 @@ export function useOverlayPreferences(
       })),
     [update, profileId],
   );
+  const setPoiCategories = useCallback(
+    (categories: readonly PoiCategoryId[]) =>
+      update((current) => ({
+        ...current,
+        [stateKey(profileId, POI_STATE_ID)]: {
+          ...current[stateKey(profileId, POI_STATE_ID)],
+          on: current[stateKey(profileId, POI_STATE_ID)]?.on ?? true,
+          options: {
+            ...current[stateKey(profileId, POI_STATE_ID)]?.options,
+            [POI_CATEGORIES_OPTION]: encodePoiCategories(categories),
+          },
+        },
+      })),
+    [update, profileId],
+  );
+  const togglePoiCategorySelection = useCallback(
+    (id: PoiCategoryId) => setPoiCategories(togglePoiCategory(poiCategories, id)),
+    [poiCategories, setPoiCategories],
+  );
+  const showAllPoiCategories = useCallback(() => setPoiCategories([]), [setPoiCategories]);
 
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
@@ -334,6 +368,9 @@ export function useOverlayPreferences(
     setBasemapOn,
     poiOn,
     setPoiOn,
+    poiCategories,
+    togglePoiCategory: togglePoiCategorySelection,
+    showAllPoiCategories,
     opacityFor,
     optionsFor,
     setOption,

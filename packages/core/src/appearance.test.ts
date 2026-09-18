@@ -246,6 +246,25 @@ describe('map appearance', () => {
     expect(result.some((layer) => layer.id === 'label_city')).toBe(true);
   });
 
+  it('filters every POI rank bucket to the selected practical categories', () => {
+    const result = layers(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'explore',
+        poi: true,
+        poiCategories: ['groceries', 'museums'],
+      }),
+    );
+    for (const id of ['poi_r1', 'poi_transit']) {
+      const filter = JSON.stringify(result.find((layer) => layer.id === id)?.filter);
+      expect(filter).toContain('grocery');
+      expect(filter).toContain('supermarket');
+      expect(filter).toContain('museum');
+      expect(filter).toContain('art_gallery');
+      expect(filter).not.toContain('restaurant');
+    }
+  });
+
   it('widens driving roads without wrapping native-incompatible width expressions', () => {
     const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'drive' }));
     expect(

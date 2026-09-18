@@ -25,6 +25,7 @@ export * from './packs.js';
 export * from './persisted.js';
 export * from './pack-spec.js';
 export * from './places.js';
+export * from './poi.js';
 export * from './place-content.js';
 export * from './profiles.js';
 export * from './recent-searches.js';

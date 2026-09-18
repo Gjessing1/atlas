@@ -416,6 +416,7 @@ export function App() {
   const skyLayers = useSkyLayers('', auroraOn);
   useLightningLayer(map, overlays, skyLayers.lightning.window);
   const timeDockOn = Boolean(weatherOverlay) || lightningOn || auroraOn;
+  const mapDockOn = timeDockOn || layers.poiOn;
   const weatherMapsRef = useRef(weatherMaps);
   weatherMapsRef.current = weatherMaps;
   // With a weather map up, a tap asks what the weather is there, at the time shown.
@@ -1160,6 +1161,7 @@ export function App() {
         customStyle={mapStyleEditor.value}
         basemap={layers.basemapOn}
         poi={layers.poiOn}
+        poiCategories={layers.poiCategories}
         terrain={terrain3d}
         locateRequest={locateRequest}
       />
@@ -1343,7 +1345,7 @@ export function App() {
       )}
       {/* The weather layer's scale and timeline: present exactly while a
           weather field is switched on, like a layer's own controls. */}
-      {timeDockOn && nav.phase === 'idle' && (
+      {mapDockOn && nav.phase === 'idle' && (
         <WeatherDock
           maps={weatherMaps}
           title={weatherOverlay?.meta.title ?? ''}
@@ -1352,13 +1354,17 @@ export function App() {
           sky={skyLayers}
           lightningOn={lightningOn}
           auroraOn={auroraOn}
+          poiOn={layers.poiOn}
+          poiCategories={layers.poiCategories}
+          onTogglePoiCategory={layers.togglePoiCategory}
+          onShowAllPois={layers.showAllPoiCategories}
         />
       )}
       {/* One real grid for all bottom-right map controls. It owns activity,
           layers, zoom and location so independent absolute offsets cannot
           overlap as catalogs/profile choices change. */}
       {nav.phase === 'idle' && (
-        <div className={`map-control-grid${timeDockOn ? ' map-control-grid-weather' : ''}`}>
+        <div className={`map-control-grid${mapDockOn ? ' map-control-grid-weather' : ''}`}>
           {/* The Fish & Hunt sub-profile, one row above the layers it tunes.
               Renders nothing in the other profiles — their catalogs carry no
               derived surface. */}

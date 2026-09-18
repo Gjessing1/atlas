@@ -131,14 +131,14 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'map-poi-layer',
     surface: 'map',
-    capability: 'Show or hide the map data’s points of interest, per profile',
+    capability: 'Browse and filter the map data’s points of interest, per profile',
     hook: 'useOverlayPreferences',
-    web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'Points of interest' },
+    web: { file: 'apps/web/src/weather/WeatherDock.tsx', contains: 'POI categories' },
     android: {
-      file: 'apps/android/src/ui/MapActivityControls.tsx',
-      contains: 'layer-quick-points-of-interest',
+      file: 'apps/android/src/ui/WeatherDock.tsx',
+      contains: 'poi-category-all',
     },
-    note: 'Both clients expose the POIs already carried by the basemap and outdoor archive as an explicit map-content layer. It defaults on to preserve existing maps, stores its choice per profile beside the basemap switch, and `applyMapAppearance` removes both Liberty and Atlas outdoor POI symbols when it is off.',
+    note: 'Both clients expose the POIs already carried by the basemap and outdoor archive as an opt-in layer. Enabling it opens the same bottom map dock used by weather, where All or a multi-select of practical categories such as Groceries, Shops and Museums filters the vector style. Visibility and focus are stored per profile.',
   },
   {
     id: 'map-basemap-off',

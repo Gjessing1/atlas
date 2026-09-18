@@ -94,7 +94,7 @@ export function MapActivityControls({
   // 64 dp gap that keeps the row clear of the locate button, plus that inset.
   const side = useSideInsets();
   const right = side.right + 64;
-  const activeCount = overlays.overlays.length;
+  const activeCount = overlays.overlays.length + (overlays.poiOn ? 1 : 0);
   const activeProfile = profile.profile;
   const ActiveIcon = MAP_PROFILE_ICON[activeProfile.id]!;
   const quarry = targets.active;

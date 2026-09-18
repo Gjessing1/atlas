@@ -187,6 +187,28 @@ async function tap(id, timeoutMs = 45_000) {
   tapId(xml, id);
 }
 
+async function verifyPoiCategoryDock() {
+  await tap('layer-quick-toggle');
+  await tap('layer-quick-points-of-interest');
+  let xml = await waitForId('poi-category-all');
+  if (!nodeForId(xml, 'poi-category-groceries')) {
+    throw new Error('POI layer did not expose the practical category pills');
+  }
+  await tap('layer-quick-backdrop');
+  await tap('poi-category-groceries');
+  xml = await waitForId('poi-category-groceries');
+  if (!nodeForId(xml, 'poi-category-groceries')?.includes('selected="true"')) {
+    throw new Error('Groceries POI pill did not become selected');
+  }
+
+  // Restore the opt-in layer to off so the dock cannot cover unrelated map
+  // controls later in this long scenario. Its focused category may persist.
+  await tap('layer-quick-toggle');
+  await tap('layer-quick-points-of-interest');
+  await waitForId('poi-category-all', false);
+  await tap('layer-quick-backdrop');
+}
+
 function swipeWithin(bounds, direction) {
   const x = Math.round((bounds.left + bounds.right) / 2);
   const high = Math.round(bounds.top + bounds.height * 0.28);
@@ -1160,6 +1182,8 @@ async function main() {
   let xml = await waitForAppReady();
   expectIds(xml, ['search-open', 'map-profile-toggle', 'layer-quick-toggle', 'locate']);
 
+  console.log('Android regression: POI layer and on-map category pills');
+  await verifyPoiCategoryDock();
   console.log('Android regression: configuring controlled backend');
   await configureFixtureServer();
   console.log('Android regression: creating saved place and folder');

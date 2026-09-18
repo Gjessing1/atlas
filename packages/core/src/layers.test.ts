@@ -184,15 +184,15 @@ describe('basemapVisible', () => {
 });
 
 describe('poiVisible', () => {
-  it('is on until the device says otherwise, and only for the active profile', () => {
-    expect(poiVisible({}, 'explore')).toBe(true);
-    const off = { [`explore:${POI_STATE_ID}`]: { on: false } };
-    expect(poiVisible(off, 'explore')).toBe(false);
-    expect(poiVisible(off, 'hike')).toBe(true);
+  it('is opt-in and only applies to the active profile', () => {
+    expect(poiVisible({}, 'explore')).toBe(false);
+    const on = { [`explore:${POI_STATE_ID}`]: { on: true } };
+    expect(poiVisible(on, 'explore')).toBe(true);
+    expect(poiVisible(on, 'hike')).toBe(false);
   });
 
   it('ignores the legacy bare id', () => {
-    expect(poiVisible({ [POI_STATE_ID]: { on: false } }, 'explore')).toBe(true);
+    expect(poiVisible({ [POI_STATE_ID]: { on: true } }, 'explore')).toBe(false);
   });
 });
 
