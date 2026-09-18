@@ -75,6 +75,10 @@ describe('regional Valhalla builds', () => {
     path.join(repoRoot, 'infrastructure/packs/refresh-outdoor.sh'),
     'utf8',
   );
+  const imageryBuilder = readFileSync(
+    path.join(repoRoot, 'infrastructure/packs/build-imagery-pack.mjs'),
+    'utf8',
+  );
 
   // Roundabout exits are counted on the driving side, so the admin DB decides
   // whether "take the 2nd exit" is the 2nd exit. Measured on the Isle of Man,
@@ -160,6 +164,7 @@ describe('regional Valhalla builds', () => {
     for (const [name, script] of Object.entries({
       packBuilder,
       refreshOutdoor,
+      imageryBuilder,
       basemapBuilder,
       outdoorBuilder,
     })) {
@@ -178,6 +183,14 @@ describe('regional Valhalla builds', () => {
     expect(smoke).toBeGreaterThan(0);
     expect(manifest).toBeGreaterThan(smoke);
     expect(packBuilder).toMatch(/mv "\$STAGE" "\$OUT"/);
+    // The imagery pack follows the same order: smoke, then pack.json, then swap.
+    const imagerySmoke = imageryBuilder.indexOf('smoke: the archive must draw');
+    const imageryManifest = imageryBuilder.indexOf("path.join(stage, 'pack.json')");
+    expect(imagerySmoke).toBeGreaterThan(0);
+    expect(imageryManifest).toBeGreaterThan(imagerySmoke);
+    expect(imageryBuilder.indexOf('renameSync(stage, out)')).toBeGreaterThan(imageryManifest);
+    // …and reads its tool from tools.json like every other producer script.
+    expect(imageryBuilder).toContain('tools.pmtiles.image');
   });
 
   it('specs cover every region the producer is asked to build', () => {

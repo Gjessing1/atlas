@@ -1,0 +1,21 @@
+{
+  "_": "Offline imagery packs: the satellite layer's redistributable stand-in, one archive per entry, built by build-imagery-pack.mjs and listed in the app's Offline regions beside the region packs. Which layer and how deep come from the catalog (LayerMeta.offlinePack); what the archive covers is the source's own footprint inside `bbox` — the builder only descends into ground the source actually draws, so the box is a limit, not a promise.",
+  "packs": [
+    {
+      "id": "satellite-norway",
+      "name": "Satellite imagery · Norway",
+      "_bbox": "Mainland Norway with sea to spare. Kartverket's Sentinel-2 mosaic stops at the border and some kilometres offshore, and does not cover Svalbard or Jan Mayen at all (probed 2026-09-18: transparent there), so this box does not try to reach them.",
+      "bbox": {
+        "sw": { "lat": 57.5, "lng": 2.5 },
+        "ne": { "lat": 71.5, "lng": 31.5 }
+      },
+      "_smoke": "Points that must have a real tile at the deepest zoom: the south, the middle, and the far north-east, so a build that stopped early or lost a whole sheet of the mosaic cannot publish.",
+      "smoke": [
+        { "name": "Oslo", "lat": 59.9139, "lng": 10.7522 },
+        { "name": "Jotunheimen", "lat": 61.6364, "lng": 8.3125 },
+        { "name": "Bodø", "lat": 67.2804, "lng": 14.4049 },
+        { "name": "Kirkenes", "lat": 69.7271, "lng": 30.0451 }
+      ]
+    }
+  ]
+}

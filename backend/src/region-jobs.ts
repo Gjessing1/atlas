@@ -382,24 +382,7 @@ export class RegionJobManager {
           fsConstants.COPYFILE_FICLONE,
         );
       }
-      // Offline imagery is inherited whole for the same reason the routing
-      // tiles are: it is already cut to a superset of this box, and MapLibre
-      // only ever draws the tiles in view. Re-cutting it would mean holding a
-      // few hundred megabytes of archive in the backend to save a download that
-      // is already smaller than the `valhalla.tar` beside it.
-      const imagery = (enclosing.manifest.files.layers ?? []).find(
-        (file) => file.kind === 'imagery',
-      );
-      if (imagery) {
-        await copyFile(
-          path.join(enclosing.dir, imagery.path),
-          path.join(stagingDir, imagery.path),
-          fsConstants.COPYFILE_FICLONE,
-        );
-      }
-      const files: RegionPackManifest['files'] = {
-        ...(imagery ? { layers: [imagery] } : {}),
-      };
+      const files: RegionPackManifest['files'] = {};
       for (const [kind, fileName, reusableSha] of [
         ['basemap', 'basemap.pmtiles', undefined],
         ...reusedKinds.map(

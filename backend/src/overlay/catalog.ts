@@ -190,10 +190,14 @@ export interface XyzUpstream {
    * own long-lived tile store or exported into an offline pack.
    */
   cache?: 'disk' | 'upstream';
-  /** Detect ArcGIS's opaque missing-tile JPEG and turn it transparent. */
+  /**
+   * Detect ArcGIS's opaque missing-tile JPEG (by its ETag) and answer it with
+   * the nearest ancestor tile that does exist, cropped and upscaled to this
+   * tile's quadrant. Esri's depth varies by place — open sea stops at z13,
+   * Svalbard at z17, most of Norway at z18 — and without this every one of
+   * those edges is a blank square on a layer that advertises z19.
+   */
   missingTile?: 'arcgis-etag';
-  /** Parent level used to synthesize correctly aligned missing detail tiles. */
-  fallbackMaxzoom?: number;
   /** Server-side colour treatment for a source whose native imagery is not a usable map. */
   transform?: 'light-pollution-palette';
 }
@@ -204,11 +208,10 @@ export type RasterUpstream = WmsUpstream | XyzUpstream;
  * One zoom band of a composite raster. `fallback` is tried only when the
  * primary source has no image at that tile (or is temporarily unreachable).
  *
- * Satellite imagery is the motivating case: Kartverket's current annual
- * mosaic is the best landscape source inside Norway, EOX fills the rest of the
- * world, and close zooms move to the streaming-only Esri source. Keeping that
- * policy in the catalog makes one user-facing layer behave consistently on
- * both clients without exposing three switches for one job.
+ * Satellite imagery is the motivating case: Esri streams the picture at every
+ * zoom, and Kartverket's mosaic stands in when Esri cannot be reached. Keeping
+ * that policy in the catalog makes one user-facing layer behave the same on
+ * both clients without exposing a switch per source.
  */
 export interface RasterBand {
   minzoom: number;
@@ -267,6 +270,18 @@ export interface OverlayLayer {
   meta: LayerMeta;
   upstream: WmsUpstream | XyzUpstream | CompositeRasterUpstream | ArcGisVectorUpstream;
   /**
+   * The redistributable stand-in an offline imagery pack is cut from, served
+   * at `/api/overlay/:id/offline/:z/:x/:y.png` and nowhere else. Present
+   * exactly when `meta.offlinePack` is.
+   *
+   * A separate source rather than a band of `upstream`, because the two answer
+   * different questions: `upstream` is the best picture a connection can buy
+   * (Esri, whose terms forbid storing it), and this is the best picture Atlas
+   * is allowed to put on a phone. No zoom of it may be `cache: 'upstream'`,
+   * which `api.test.ts` checks structurally.
+   */
+  offline?: RasterUpstream | CompositeRasterUpstream;
+  /**
    * Env var that must be set for this layer to exist (tokened sources).
    * Unset ⇒ the layer silently drops out of the catalog — no broken entries,
    * no leaked endpoint. Reference the value in upstream URLs as ${VAR}.
@@ -277,9 +292,14 @@ export interface OverlayLayer {
 const KARTKATALOG = 'https://kartkatalog.geonorge.no/search?text=';
 
 /**
- * The 10 m landscape mosaics, named once because `satellite-2025` uses each of
- * them in two places: the Norwegian mosaic is both the zoomed-out picture and
- * what stands in for Esri when the detail source is unreachable.
+ * Kartverket's 10 m Sentinel-2 mosaic of mainland Norway, named once because
+ * `satellite-2025` uses it twice: as what stands in for Esri when Esri cannot
+ * be reached, and as the whole of its offline pack.
+ *
+ * It is the finest imagery of Norway Atlas may store. Norge i bilder (the
+ * orthophotos) is closed to anyone outside Norge digitalt, and Esri's terms
+ * exclude offline export; the Copernicus mosaic is open data. Outside mainland
+ * Norway — Svalbard included — it answers with a transparent tile.
  */
 const SENTINEL2_MOSAIC: WmsUpstream = {
   kind: 'wms',
@@ -290,18 +310,16 @@ const SENTINEL2_MOSAIC: WmsUpstream = {
   layers: '2025',
 };
 
-/**
- * The global stand-in outside Norway, where Kartverket answers with a
- * transparent tile. The latest EOX mosaics are non-commercial; 2017 is the
- * newest global layer its own capabilities publish under unrestricted
- * CC BY 4.0. It is old, but legally cacheable — which is what lets it be cut
- * into an offline pack — and still the same 10 m Sentinel-2 resolution as the
- * Norwegian source.
- */
-const EOX_S2CLOUDLESS: XyzUpstream = {
+/** Esri's global imagery: the best picture a connection can buy, and only that. */
+const ESRI_WORLD_IMAGERY: XyzUpstream = {
   kind: 'xyz',
+  // ArcGIS REST orders cached tiles as level/row/column, i.e. z/y/x.
   template:
-    'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  missingTile: 'arcgis-etag',
+  // The item explicitly excludes offline tile export. Atlas forwards Esri's
+  // browser cache grant but never copies a tile into its permanent store.
+  cache: 'upstream',
 };
 
 /**
@@ -750,89 +768,48 @@ export function norwegianLayers(): OverlayLayer[] {
     },
     {
       meta: {
+        // The id predates the layer's current shape (it was the 2025 mosaic on
+        // its own); kept so the choice every device has stored still resolves.
         id: 'satellite-2025',
-        rev: 3,
+        // 4: Esri at every zoom. Bumped so the week-long browser cache of the
+        // mosaic tiles rev 3 drew at z0–13 is not what a reader keeps seeing.
+        rev: 4,
         title: 'Satellite imagery',
         description:
-          'Detailed aerial imagery wherever there is a connection, over a 10 m mosaic that keeps working offline.',
+          'Detailed satellite and aerial imagery, streamed at every zoom. On Android it keeps working offline where Norway’s imagery is downloaded.',
         group: 'Imagery',
         attribution:
-          '© Copernicus Sentinel data / Kartverket · EOxCloudless © EOX IT Services GmbH (modified Copernicus Sentinel data 2017) · Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
-        metadataUrl: 'https://cloudless.eox.at/documentation/usage',
+          'Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community · © Copernicus Sentinel data / Kartverket',
+        metadataUrl: 'https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9',
         maxzoom: 19,
         defaultOpacity: 1,
         identify: false,
-        exclusive: 'satellite-imagery',
-        // The mosaic is z13 at its own resolution: 10 m a pixel is ~9.6 m at
-        // z13 and there is nothing further to bake.
+        // The mosaic's own resolution: 10 m a pixel is ~9.6 m at z13 at 60°N,
+        // and past it an archive only gets bigger, never sharper.
         offlinePack: { maxzoom: 13 },
         coverageNote:
-          'Zoomed out this is the 2025 Kartverket mosaic in Norway and a 2017 EOX mosaic elsewhere; from z14 in, streamed Esri detail draws on top of it. The mosaic is the half that survives losing signal — it downloads with a region, and Esri detail never does. Capture date, resolution, clouds and colour vary by source.',
+          'Online this is Esri’s imagery at every zoom; where Esri has no detail the nearest coarser picture is enlarged. Esri may not be stored, so offline Android draws Kartverket’s 10 m Sentinel-2 mosaic of mainland Norway instead — download it under Settings → Offline regions. Capture date, resolution and cloud cover vary by place.',
       },
       upstream: {
         kind: 'composite-raster',
         bands: [
           {
             minzoom: 0,
-            maxzoom: 13,
-            primary: SENTINEL2_MOSAIC,
-            fallback: EOX_S2CLOUDLESS,
-          },
-          {
-            minzoom: 14,
             maxzoom: 19,
-            primary: {
-              kind: 'xyz',
-              template:
-                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-              missingTile: 'arcgis-etag',
-              fallbackMaxzoom: 18,
-              // Close detail is deliberately online-only. Atlas forwards Esri's
-              // browser cache grant but never copies it into its permanent store.
-              cache: 'upstream',
-            },
-            // Upsampled mosaic rather than a hole. Kartverket renders a GetMap
-            // at any scale, so asking it for a z16 box gives a soft but correct
-            // picture of the same ground — which is what this layer promises
-            // when the detail source is unreachable. Note this also opts the
-            // band out of the disk cache (`diskCache` in tiles.ts requires it
-            // of *every* source in the band), so an Esri outage does not leave
-            // upsampled mosaic pinned on disk once Esri is back.
+            primary: ESRI_WORLD_IMAGERY,
+            // Upsampled mosaic rather than a hole when Esri cannot be reached:
+            // Kartverket renders a GetMap at any scale, so a z16 box is a soft
+            // but correct picture of the same ground. Having a `cache:
+            // upstream` source in the band keeps the band off the disk cache
+            // (`diskCache` in tiles.ts), so an outage never pins mosaic where
+            // Esri belongs once it is back.
             fallback: SENTINEL2_MOSAIC,
           },
         ],
       },
-    },
-    {
-      meta: {
-        id: 'world-imagery',
-        rev: 2,
-        title: 'Satellite imagery (streaming only)',
-        description:
-          'Esri’s detailed imagery on its own, at every zoom, with no offline mosaic beneath it.',
-        group: 'Imagery',
-        attribution: 'Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
-        metadataUrl: 'https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9',
-        maxzoom: 19,
-        defaultOpacity: 1,
-        identify: false,
-        exclusive: 'satellite-imagery',
-        coverageNote:
-          'Streaming only — not included in offline regions. Resolution, capture date and cloud cover vary by location.',
-      },
-      upstream: {
-        kind: 'xyz',
-        // ArcGIS REST orders cached tiles as level/row/column, i.e. z/y/x.
-        template:
-          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        missingTile: 'arcgis-etag',
-        // Norway is consistently covered through z18, while local z19 detail
-        // exists in places such as central Oslo. Missing z19 tiles are cropped
-        // from their z18 parent; real z19 tiles pass through untouched.
-        fallbackMaxzoom: 18,
-        // The item explicitly excludes offline tile export. Do not let the
-        // overlay proxy turn streamed views into Atlas's permanent disk cache.
-        cache: 'upstream',
+      offline: {
+        kind: 'composite-raster',
+        bands: [{ minzoom: 0, maxzoom: 13, primary: SENTINEL2_MOSAIC }],
       },
     },
     {

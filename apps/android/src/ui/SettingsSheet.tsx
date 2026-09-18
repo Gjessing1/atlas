@@ -1,6 +1,7 @@
 import {
   fmtClock,
   fmtDistanceM,
+  isImageryPack,
   layersForProfile,
   MAP_PROFILES,
   MAX_NAV_WIDGETS,
@@ -466,6 +467,69 @@ function RegionsSection({
   // installing. Without this, a user sent here to watch a download would find
   // the screen saying nothing about it.
   const unlistedDownloads = downloads.jobs.filter((job) => !rowsById.has(job.id));
+  // Imagery is its own download — a country of satellite mosaic, with none of
+  // a region's map, search or routing — so it is listed apart from the regions
+  // rather than sorted in among them as if it were one.
+  const imageryRows = rows.filter(isImageryPack);
+  const regionRows = rows.filter((region) => !isImageryPack(region));
+
+  const packRow = (region: RegionPackManifest) => {
+    const totalBytes = packFileEntries(region).reduce((s, { file }) => s + file.bytes, 0);
+    const installed = local.get(region.id);
+    const active = activeDownloads.get(region.id);
+    const action = active ? packJobAction(active) : null;
+    return (
+      <View key={region.id} style={styles.regionRow}>
+        <View style={styles.regionInfo}>
+          <Text style={styles.rowText}>{region.name}</Text>
+          <Text style={active?.phase === 'failed' ? styles.error : styles.muted}>
+            {active
+              ? packJobLabel(active)
+              : `${mb(totalBytes)}${region.custom ? ' · custom' : ''}${
+                  installed
+                    ? installed.manifest.version < region.version
+                      ? ' · update available'
+                      : ' · downloaded'
+                    : ''
+                }`}
+          </Text>
+        </View>
+        {active ? (
+          action === null ? (
+            <ActivityIndicator />
+          ) : (
+            <Pressable
+              style={[styles.button, action === 'cancel' && styles.buttonQuiet]}
+              onPress={() =>
+                action === 'cancel' ? downloads.cancel(region.id) : downloads.start(region)
+              }
+              testID={`region-${action}-${region.id}`}
+            >
+              <Text style={action === 'cancel' ? styles.buttonQuietText : styles.buttonText}>
+                {action === 'cancel' ? 'Cancel' : action === 'resume' ? 'Resume' : 'Retry'}
+              </Text>
+            </Pressable>
+          )
+        ) : installed && installed.manifest.version >= region.version ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() => void remove(region.id)}
+            testID={`region-delete-${region.id}`}
+          >
+            <Text style={styles.buttonQuietText}>Delete</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={styles.button}
+            onPress={() => downloads.start(region)}
+            testID={`region-download-${region.id}`}
+          >
+            <Text style={styles.buttonText}>{installed ? 'Update' : 'Download'}</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
 
   return (
     <View>
@@ -492,6 +556,17 @@ function RegionsSection({
       </Text>
       {regionsError ? <Text style={styles.muted}>{regionsError}</Text> : null}
       {jobs.error ? <Text style={styles.error}>{jobs.error}</Text> : null}
+      <Text style={styles.subheading}>Satellite imagery</Text>
+      <Text style={styles.muted}>
+        Online, the satellite layer streams Esri’s detailed imagery, which may not be stored. For
+        when there is no connection, keep Kartverket’s 10 m Sentinel-2 mosaic of mainland Norway —
+        the sharpest imagery Atlas is allowed to save — and the layer falls back to it by itself.
+      </Text>
+      {imageryRows.map(packRow)}
+      {imageryRows.length === 0 && regions !== null && !regionsError ? (
+        <Text style={styles.muted}>Not published on this server yet.</Text>
+      ) : null}
+      <Text style={styles.subheading}>Regions</Text>
       {pendingJobs.map((job) => (
         <View key={job.id} style={styles.regionRow}>
           <View style={styles.regionInfo}>
@@ -528,66 +603,10 @@ function RegionsSection({
           )}
         </View>
       ))}
-      {rows.length === 0 && pendingJobs.length === 0 && !regionsError ? (
+      {regionRows.length === 0 && pendingJobs.length === 0 && !regionsError ? (
         <Text style={styles.muted}>{regions === null ? 'Loading…' : 'No regions published.'}</Text>
       ) : null}
-      {rows.map((region) => {
-        const totalBytes = packFileEntries(region).reduce((s, { file }) => s + file.bytes, 0);
-        const installed = local.get(region.id);
-        const active = activeDownloads.get(region.id);
-        const action = active ? packJobAction(active) : null;
-        return (
-          <View key={region.id} style={styles.regionRow}>
-            <View style={styles.regionInfo}>
-              <Text style={styles.rowText}>{region.name}</Text>
-              <Text style={active?.phase === 'failed' ? styles.error : styles.muted}>
-                {active
-                  ? packJobLabel(active)
-                  : `${mb(totalBytes)}${region.custom ? ' · custom' : ''}${
-                      installed
-                        ? installed.manifest.version < region.version
-                          ? ' · update available'
-                          : ' · downloaded'
-                        : ''
-                    }`}
-              </Text>
-            </View>
-            {active ? (
-              action === null ? (
-                <ActivityIndicator />
-              ) : (
-                <Pressable
-                  style={[styles.button, action === 'cancel' && styles.buttonQuiet]}
-                  onPress={() =>
-                    action === 'cancel' ? downloads.cancel(region.id) : downloads.start(region)
-                  }
-                  testID={`region-${action}-${region.id}`}
-                >
-                  <Text style={action === 'cancel' ? styles.buttonQuietText : styles.buttonText}>
-                    {action === 'cancel' ? 'Cancel' : action === 'resume' ? 'Resume' : 'Retry'}
-                  </Text>
-                </Pressable>
-              )
-            ) : installed && installed.manifest.version >= region.version ? (
-              <Pressable
-                style={[styles.button, styles.buttonQuiet]}
-                onPress={() => void remove(region.id)}
-                testID={`region-delete-${region.id}`}
-              >
-                <Text style={styles.buttonQuietText}>Delete</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={styles.button}
-                onPress={() => downloads.start(region)}
-                testID={`region-download-${region.id}`}
-              >
-                <Text style={styles.buttonText}>{installed ? 'Update' : 'Download'}</Text>
-              </Pressable>
-            )}
-          </View>
-        );
-      })}
+      {regionRows.map(packRow)}
     </View>
   );
 }

@@ -373,7 +373,9 @@ describe('layer catalog', () => {
     expect(ids).toContain('terrain-slope');
     expect(ids).toContain('terrain-contours');
     expect(ids).toContain('satellite-2025');
-    expect(ids).toContain('world-imagery');
+    // One satellite row. A second, Esri-only one existed beside it and read as
+    // the same switch twice; the offline stand-in is a download, not a layer.
+    expect(ids).not.toContain('world-imagery');
     expect(ids).toContain('light-pollution');
     expect(ids).toContain('ice-weak');
     expect(ids).toContain('protected-areas');
@@ -387,50 +389,48 @@ describe('layer catalog', () => {
     expect(ids).not.toContain(BASEMAP_STATE_ID);
     expect(catalog.find((l) => l.meta.id === 'satellite-2025')).toMatchObject({
       meta: {
-        rev: 3,
+        rev: 4,
         maxzoom: 19,
-        exclusive: 'satellite-imagery',
-        // What a region pack cuts: the mosaic's own resolution and no deeper.
+        // What an imagery pack cuts: the mosaic's own resolution and no deeper.
         offlinePack: { maxzoom: 13 },
       },
       upstream: {
         kind: 'composite-raster',
         bands: [
           {
+            // Esri at every zoom the layer advertises — online, the picture
+            // never changes source as the reader zooms.
             minzoom: 0,
-            maxzoom: 13,
-            primary: { kind: 'wms', layers: '2025' },
-            fallback: {
-              kind: 'xyz',
-              template: expect.stringContaining('s2cloudless-2017_3857'),
-            },
-          },
-          {
-            minzoom: 14,
             maxzoom: 19,
-            primary: { kind: 'xyz', cache: 'upstream' },
+            primary: { kind: 'xyz', cache: 'upstream', missingTile: 'arcgis-etag' },
             // Upsampled mosaic rather than a blank tile when Esri is
-            // unreachable: this layer promises a picture of the ground at every
-            // zoom, and only the detail half is allowed to disappear.
+            // unreachable.
             fallback: { kind: 'wms', layers: '2025' },
           },
         ],
       },
+      offline: {
+        kind: 'composite-raster',
+        bands: [{ minzoom: 0, maxzoom: 13, primary: { kind: 'wms', layers: '2025' } }],
+      },
     });
-    // The pack-able layer must be exactly one, and it must be the one whose
-    // coarse band is redistributable — the producer picks it by this field
-    // alone (build-pack-imagery.mjs), so a second claimant would be a coin toss.
+    // The pack-able layer must be exactly one — the producer picks it by this
+    // field alone (build-imagery-pack.mjs), so a second claimant would be a
+    // coin toss — and the public flag and the server's source come together.
     expect(catalog.filter((l) => l.meta.offlinePack).map((l) => l.meta.id)).toEqual([
       'satellite-2025',
     ]);
+    for (const layer of catalog) {
+      expect(Boolean(layer.offline), layer.meta.id).toBe(Boolean(layer.meta.offlinePack));
+    }
     // The licence invariant, checked structurally rather than trusted: a pack
     // copies every zoom up to `offlinePack.maxzoom` onto a user's phone, so no
     // source reachable in that range may be one Atlas is only allowed to pass
     // through (`cache: 'upstream'` — Esri's terms exclude offline export).
-    for (const layer of catalog.filter((l) => l.meta.offlinePack)) {
+    for (const layer of catalog.filter((l) => l.offline)) {
       for (let z = 0; z <= layer.meta.offlinePack!.maxzoom; z++) {
-        const band = rasterBandAtZoom(layer.upstream as Parameters<typeof rasterBandAtZoom>[0], z);
-        expect(band, `${layer.meta.id} has no source at z${z}`).not.toBeNull();
+        const band = rasterBandAtZoom(layer.offline!, z);
+        expect(band, `${layer.meta.id} has no offline source at z${z}`).not.toBeNull();
         for (const source of [band!.primary, band!.fallback]) {
           expect(
             source?.kind === 'xyz' ? source.cache : undefined,
@@ -439,13 +439,6 @@ describe('layer catalog', () => {
         }
       }
     }
-    expect(catalog.find((l) => l.meta.id === 'world-imagery')).toMatchObject({
-      meta: { rev: 2, maxzoom: 19 },
-      upstream: { missingTile: 'arcgis-etag', fallbackMaxzoom: 18 },
-    });
-    // Esri alone, and it must stay un-packable: its item terms exclude offline
-    // export, which is the whole reason the other row carries the mosaic.
-    expect(catalog.find((l) => l.meta.id === 'world-imagery')?.meta.offlinePack).toBeUndefined();
     expect(catalog.find((l) => l.meta.id === 'protected-areas')).toMatchObject({
       meta: { profiles: ['fishing', 'hunting'], identify: true },
       upstream: {
@@ -966,7 +959,7 @@ describe('overlay tile proxy', () => {
     ).rejects.toThrow();
   });
 
-  it('replaces an ArcGIS missing JPEG with the correctly aligned parent quadrant', async () => {
+  it('replaces an ArcGIS missing JPEG with the nearest real ancestor, aligned', async () => {
     const source = testLayers().find((layer) => layer.meta.id === 'streamed-jpeg')!;
     const layers: OverlayLayer[] = [
       {
@@ -976,7 +969,6 @@ describe('overlay tile proxy', () => {
           template: 'https://imagery.example/tile/{z}/{y}/{x}',
           cache: 'upstream',
           missingTile: 'arcgis-etag',
-          fallbackMaxzoom: 18,
         },
       },
     ];
@@ -985,7 +977,8 @@ describe('overlay tile proxy', () => {
         if (url.pathname.includes('/-1/0/0')) {
           return { body: Buffer.from([0xff, 0xd8]), contentType: 'image/jpeg', etag: '"missing"' };
         }
-        if (url.pathname.includes('/19/11/10')) {
+        // Esri's depth runs out two levels up, the way open sea stops at z13.
+        if (url.pathname.includes('/19/') || url.pathname.includes('/18/')) {
           return { status: 304, cacheControl: 'public, max-age=86400' };
         }
         return { body: quadrantTile(), contentType: 'image/png' };
@@ -994,7 +987,9 @@ describe('overlay tile proxy', () => {
     );
     track(app, cacheDir);
 
-    const res = await app.inject({ url: '/api/overlay/streamed-jpeg/19/10/11.png' });
+    // z19 x=20 y=22 sits in z17 x=5 y=5 as sub-tile (0, 2) of a 4×4 grid:
+    // the left quarter, third quarter down — inside the blue bottom-left one.
+    const res = await app.inject({ url: '/api/overlay/streamed-jpeg/19/20/22.png' });
 
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('image/png');
@@ -1002,15 +997,139 @@ describe('overlay tile proxy', () => {
     const rendered = PNG.sync.read(res.rawPayload);
     expect([rendered.width, rendered.height]).toEqual([256, 256]);
     const center = (128 * rendered.width + 128) * 4;
-    // x=10 is the left half and y=11 the bottom half of parent 18/5/5.
     expect([...rendered.data.subarray(center, center + 4)]).toEqual([0, 0, 255, 255]);
     expect(requests.map(String)).toEqual([
       'https://imagery.example/tile/-1/0/0',
-      'https://imagery.example/tile/19/11/10',
-      'https://imagery.example/tile/18/5/5',
+      'https://imagery.example/tile/19/22/20',
+      'https://imagery.example/tile/18/11/10',
+      'https://imagery.example/tile/17/5/5',
     ]);
-    expect(requestHeaders[1]!.get('if-none-match')).toBe('"missing"');
-    expect(requestHeaders[2]!.get('if-none-match')).toBe('"missing"');
+    for (const headers of requestHeaders.slice(1)) {
+      expect(headers.get('if-none-match')).toBe('"missing"');
+    }
+  });
+
+  it('answers a missing primary tile from its ancestors, not from the fallback', async () => {
+    const layers: OverlayLayer[] = [
+      {
+        ...compositeImageryLayer(),
+        upstream: {
+          kind: 'composite-raster',
+          bands: [
+            {
+              minzoom: 0,
+              maxzoom: 19,
+              primary: {
+                kind: 'xyz',
+                template: 'https://detail.example/{z}/{x}/{y}',
+                cache: 'upstream',
+                missingTile: 'arcgis-etag',
+              },
+              fallback: { kind: 'xyz', template: 'https://local-mosaic.example/{z}/{x}/{y}' },
+            },
+          ],
+        },
+      },
+    ];
+    const { app, cacheDir, requests } = await build(
+      (url) => {
+        if (url.pathname.startsWith('/-1/')) return { body: PNG_BYTES, etag: '"missing"' };
+        if (url.pathname.startsWith('/16/')) return { status: 304 };
+        return { body: quadrantTile() };
+      },
+      { layers },
+    );
+    track(app, cacheDir);
+
+    const res = await app.inject({ url: '/api/overlay/hybrid-imagery/16/10/11.png' });
+
+    // "No detail this deep" is not "source unreachable": the enlarged parent
+    // keeps the picture on one source instead of swapping in another mosaic.
+    expect(res.statusCode).toBe(200);
+    expect(requests.map(String)).toEqual([
+      'https://detail.example/-1/0/0',
+      'https://detail.example/16/10/11',
+      'https://detail.example/15/5/5',
+    ]);
+  });
+
+  it('serves the offline-pack source on its own route and disk-caches it', async () => {
+    const tile = quadrantTile();
+    const layers: OverlayLayer[] = [
+      {
+        ...compositeImageryLayer(),
+        meta: { ...compositeImageryLayer().meta, offlinePack: { maxzoom: 13 } },
+        offline: {
+          kind: 'composite-raster',
+          bands: [
+            {
+              minzoom: 0,
+              maxzoom: 13,
+              primary: { kind: 'xyz', template: 'https://local-mosaic.example/{z}/{x}/{y}' },
+            },
+          ],
+        },
+      },
+      compositeImageryLayer(),
+    ];
+    layers[1]!.meta = { ...layers[1]!.meta, id: 'no-offline' };
+    const { app, cacheDir, requests } = await build(() => ({ body: tile }), { layers });
+    track(app, cacheDir);
+
+    const first = await app.inject({ url: '/api/overlay/hybrid-imagery/offline/12/10/11.png' });
+    const second = await app.inject({ url: '/api/overlay/hybrid-imagery/offline/12/10/11.png' });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.rawPayload).toEqual(tile);
+    // The offline source only, never the live layer's detail, and once.
+    expect(requests.map(String)).toEqual(['https://local-mosaic.example/12/10/11']);
+    await expect(
+      readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', 'offline', '12', '10', '11.png')),
+    ).resolves.toEqual(tile);
+    // Nothing past the pack's depth, and nothing for a layer without a stand-in.
+    expect(
+      (await app.inject({ url: '/api/overlay/hybrid-imagery/offline/14/10/11.png' })).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject({ url: '/api/overlay/no-offline/offline/12/10/11.png' })).statusCode,
+    ).toBe(404);
+  });
+
+  it('asks a WMS offline source for JPEG where the producer knows the tile is opaque', async () => {
+    const depth = testLayers().find((layer) => layer.meta.id === 'depth')!;
+    const layers: OverlayLayer[] = [
+      {
+        ...depth,
+        meta: { ...depth.meta, offlinePack: { maxzoom: 13 } },
+        offline: depth.upstream as Extract<OverlayLayer['upstream'], { kind: 'wms' }>,
+      },
+    ];
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const { app, cacheDir, requests } = await build(
+      (url) =>
+        url.searchParams.get('FORMAT') === 'image/jpeg'
+          ? { body: jpeg, contentType: 'image/jpeg' }
+          : { body: PNG_BYTES },
+      { layers },
+    );
+    track(app, cacheDir);
+
+    const opaque = await app.inject({ url: '/api/overlay/depth/offline/5/10/11.png?opaque=1' });
+    const edge = await app.inject({ url: '/api/overlay/depth/offline/5/10/11.png' });
+
+    expect(opaque.headers['content-type']).toBe('image/jpeg');
+    expect(requests[0]!.searchParams.get('TRANSPARENT')).toBe('FALSE');
+    // Without the hint the tile keeps its alpha: that is how the edge of the
+    // source's coverage stays see-through in the pack.
+    expect(edge.headers['content-type']).toBe('image/png');
+    expect(requests[1]!.searchParams.get('FORMAT')).toBe('image/png');
+    expect(requests[1]!.searchParams.get('TRANSPARENT')).toBe('TRUE');
+    await expect(
+      readFile(path.join(cacheDir, 'depth', 'v1', 'offline-opaque', '5', '10', '11.png')),
+    ).resolves.toEqual(jpeg);
+    await expect(
+      readFile(path.join(cacheDir, 'depth', 'v1', 'offline', '5', '10', '11.png')),
+    ).resolves.toEqual(PNG_BYTES);
   });
 
   it('does not invent a cache grant when a streamed source omits one', async () => {

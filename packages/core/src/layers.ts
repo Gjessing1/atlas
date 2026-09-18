@@ -245,16 +245,17 @@ export interface LayerMeta {
    */
   exclusive?: string;
   /**
-   * Present when a downloaded region pack carries a coarse slab of this
-   * layer's tiles, and `maxzoom` is the deepest zoom worth baking — for a 10 m
-   * mosaic that is z13, above which the source has no more detail to give and
-   * an archive would only get bigger.
+   * Present when this layer has an offline stand-in: a source Atlas may store,
+   * cut into an imagery pack the user downloads from Offline regions, which the
+   * app draws *beneath* the live layer. `maxzoom` is the deepest zoom worth
+   * baking — for a 10 m mosaic z13, past which an archive only gets bigger.
    *
-   * The producer reads this to know what to cut (and caps it further against
-   * its own size budget, recording what it actually reached); the client reads
-   * it to know which overlay to draw a pack's tiles *beneath*. Neither side
-   * names a layer id, so the day a second layer earns an offline slab it is a
-   * catalog edit.
+   * The stand-in is deliberately not the live source: the satellite layer
+   * streams Esri, whose terms forbid storing it, and packs Kartverket's
+   * Sentinel-2 mosaic instead. The producer reads this to know which layer to
+   * cut and how deep; the client, to know which overlay to draw a pack beneath.
+   * Neither names a layer id, so a second layer earning a stand-in is a catalog
+   * edit.
    */
   offlinePack?: { maxzoom: number };
   /**

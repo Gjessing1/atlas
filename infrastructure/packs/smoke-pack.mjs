@@ -99,57 +99,6 @@ if (existsSync(path.join(packDir, 'outdoor.pmtiles'))) {
   );
 }
 
-// ---- offline imagery: the slab must hold real pixels at the region centre ---
-// The archive is the half of the satellite layer that survives losing signal,
-// so "it downloaded" is not the question — "does it draw where the user is"
-// is. Checked at its deepest zoom, which is where a budget-capped cut is most
-// likely to have run out of ground.
-if (existsSync(path.join(packDir, 'imagery.zip'))) {
-  await check('imagery', () => {
-    const zip = path.join(packDir, 'imagery.zip');
-    const names = execFileSync(
-      'python3',
-      [
-        '-c',
-        'import sys, zipfile; print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))',
-        zip,
-      ],
-      { encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean);
-    if (names.length === 0) throw new Error('archive holds no tiles');
-    const maxzoom = Math.max(...names.map((name) => Number(name.split('/')[0])));
-    const { x, y } = tileFor(maxzoom, centre);
-    const entry = `${maxzoom}/${x}/${y}.png`;
-    const bytes = Number(
-      execFileSync(
-        'python3',
-        [
-          '-c',
-          'import sys, zipfile;\n' +
-            'z = zipfile.ZipFile(sys.argv[1]);\n' +
-            'print(len(z.read(sys.argv[2])) if sys.argv[2] in z.namelist() else -1)',
-          zip,
-          entry,
-        ],
-        { encoding: 'utf8' },
-      ).trim(),
-    );
-    // A photographic tile is tens of kilobytes. A few hundred bytes is the
-    // blank the proxy serves outside a source's coverage, which would install
-    // as a grey square over the whole region.
-    if (bytes < 1000) {
-      throw new Error(
-        bytes < 0
-          ? `no tile at ${entry} (region centre, z${maxzoom})`
-          : `tile at ${entry} is ${bytes} B — blank, not imagery`,
-      );
-    }
-    return `${names.length} tiles, z0-${maxzoom}, ${bytes} B at ${entry}`;
-  });
-}
-
 // ---- search: the phone's own query, and the answer must be in the region ----
 await check('search', () => {
   const db = new DatabaseSync(path.join(packDir, 'search.sqlite'), { readOnly: true });

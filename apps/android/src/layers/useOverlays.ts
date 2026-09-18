@@ -16,6 +16,7 @@ import {
 } from '@atlas/core';
 import { useEffect, useMemo, useState } from 'react';
 
+import type { OfflineImageryBase } from '../regions/localSurfaces';
 import { useServerOrigin } from '../serverOrigin';
 import type { UserData } from '../useUserData';
 
@@ -80,12 +81,12 @@ export interface ActiveOverlay extends OverlayEntry {
    */
   sourceId: string;
   /**
-   * A coarse slab of this layer from a downloaded region pack, drawn *beneath*
-   * it (`withLocalSurfaces`). Present only where a pack covers the view. The
-   * layer above keeps streaming exactly as it would without one; this is what
-   * remains on screen when it cannot.
+   * This layer's offline stand-in from a downloaded imagery pack, drawn
+   * *beneath* it (`withLocalSurfaces`). Present only where a pack covers the
+   * view. The layer above keeps streaming exactly as it would without one; this
+   * is what remains on screen when it cannot.
    */
-  offlineBase?: { tileUrlTemplate: string; maxzoom: number };
+  offlineBase?: OfflineImageryBase;
 }
 
 export interface OverlaysController extends OverlayPreferences {

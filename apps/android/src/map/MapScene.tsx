@@ -560,25 +560,31 @@ export function MapScene({
               // Weather fields are rasters too, but one per time step (below).
               .filter((overlay) => !overlay.meta.vector && !overlay.meta.weather)
               .flatMap((overlay) => [
-                // The downloaded slab, mounted *before* the live layer so it
+                // The downloaded stand-in, mounted *before* the live layer so it
                 // sits under it: with a connection it is completely covered,
-                // and with none it is what is left on screen. Its own maxzoom,
-                // not the catalog's — the archive stops where the region's size
-                // budget did, and MapLibre overzooms from there.
+                // and with none it is what is left on screen. Its own zoom
+                // range, not the catalog's — a PMTiles archive states it in its
+                // header, a loose-tile slab in its manifest — so MapLibre
+                // overzooms from the deepest tile that exists. The kind is in
+                // the id because a native source cannot swap `tiles` for `url`.
                 ...(overlay.offlineBase
                   ? [
                       <RasterSource
-                        key={`${overlay.sourceId}--pack`}
-                        id={`${overlay.sourceId}--pack`}
-                        tiles={[overlay.offlineBase.tileUrlTemplate]}
+                        key={`${overlay.sourceId}--pack-${overlay.offlineBase.kind}`}
+                        id={`${overlay.sourceId}--pack-${overlay.offlineBase.kind}`}
+                        {...(overlay.offlineBase.kind === 'pmtiles'
+                          ? { url: overlay.offlineBase.url }
+                          : {
+                              tiles: [overlay.offlineBase.tileUrlTemplate],
+                              maxzoom: overlay.offlineBase.maxzoom,
+                              minzoom: overlay.meta.minzoom ?? 0,
+                            })}
                         tileSize={256}
-                        maxzoom={overlay.offlineBase.maxzoom}
-                        minzoom={overlay.meta.minzoom ?? 0}
                         attribution={overlay.meta.attribution}
                       >
                         <Layer
                           type="raster"
-                          id={`${overlay.sourceId}--pack-layer`}
+                          id={`${overlay.sourceId}--pack-${overlay.offlineBase.kind}-layer`}
                           paint={{ 'raster-opacity': overlay.opacity }}
                         />
                       </RasterSource>,

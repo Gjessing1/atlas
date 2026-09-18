@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isImageryPack,
   packFileEntries,
+  packImageryFile,
   packIncompatibleReason,
   packLayerFile,
   packUnzipDir,
+  PACK_RUNTIME_IMAGERY,
+  PACK_RUNTIME_REGION,
   PACK_RUNTIME_VERSION,
   type RegionPackLayerFile,
   type RegionPackManifest,
@@ -127,5 +131,52 @@ describe('packIncompatibleReason', () => {
     expect(
       packIncompatibleReason(pack({ schema: 1, minRuntime: 0 } as RegionPackManifest['compat']), 1),
     ).toMatch(/invalid minimum runtime/);
+  });
+});
+
+describe('imagery packs', () => {
+  const imagery = layerFile({
+    path: 'imagery.pmtiles',
+    kind: 'imagery',
+    layer: 'satellite-2025',
+    minzoom: 0,
+    maxzoom: 13,
+    target: undefined,
+    cells: undefined,
+  });
+
+  it('tells an imagery download from a region', () => {
+    expect(isImageryPack(manifest({ layers: [imagery] }))).toBe(true);
+    // A region that happens to carry imagery is still a region.
+    expect(
+      isImageryPack(
+        manifest({ basemap: { path: 'basemap.pmtiles', bytes: 10 }, layers: [imagery] }),
+      ),
+    ).toBe(false);
+    expect(isImageryPack(manifest({ layers: [layerFile()] }))).toBe(false);
+  });
+
+  it('finds the imagery for a layer, never a surface', () => {
+    const pack = manifest({ layers: [layerFile(), imagery] });
+    expect(packImageryFile(pack, 'satellite-2025')).toBe(imagery);
+    expect(packImageryFile(pack, 'hunt')).toBeUndefined();
+    expect(packFileEntries(pack).map((entry) => entry.kind)).toEqual([
+      'layer:hunt:elg',
+      'layer:satellite-2025',
+    ]);
+  });
+
+  it('is declined by apps that cannot draw it, while regions stay installable', () => {
+    // An app from before the raster archive would download a country of
+    // imagery and draw none of it.
+    const pack = {
+      ...manifest({ layers: [imagery] }),
+      compat: { schema: 2, minRuntime: PACK_RUNTIME_IMAGERY },
+    };
+    expect(packIncompatibleReason(pack, PACK_RUNTIME_REGION)).toMatch(/newer version/);
+    expect(packIncompatibleReason(pack)).toBeNull();
+    // Raising what this app reads must not raise what a region demands.
+    expect(PACK_RUNTIME_REGION).toBe(1);
+    expect(PACK_RUNTIME_VERSION).toBeGreaterThanOrEqual(PACK_RUNTIME_IMAGERY);
   });
 });

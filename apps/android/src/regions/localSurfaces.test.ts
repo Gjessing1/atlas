@@ -49,17 +49,26 @@ const pack = (layers: RegionPackLayerFile[], id = 'potential-abc'): LocalPack =>
   } satisfies RegionPackManifest,
 });
 
+/** The country-wide download: one raster archive, read in place. */
 const imageryFile = (over: Partial<RegionPackLayerFile> = {}): RegionPackLayerFile => ({
-  path: 'imagery.zip',
+  path: 'imagery.pmtiles',
   bytes: 10,
   kind: 'imagery',
   layer: 'satellite-2025',
   minzoom: 0,
-  // Below the layer's own z13: the producer stops where the region's size
-  // budget does, and the client must overzoom from what is really there.
-  maxzoom: 11,
+  maxzoom: 13,
   ...over,
 });
+
+/** The loose-tile slab a few region packs carried on 18 September 2026. */
+const slabFile = (over: Partial<RegionPackLayerFile> = {}): RegionPackLayerFile =>
+  imageryFile({
+    path: 'imagery.zip',
+    // Below the layer's own z13: that producer stopped where a region's size
+    // budget did, and the client must overzoom from what is really there.
+    maxzoom: 11,
+    ...over,
+  });
 
 const imageryOverlay = (over: Partial<ActiveOverlay> = {}): ActiveOverlay => ({
   meta: {
@@ -141,23 +150,37 @@ describe('offline imagery', () => {
     expect(packWithImagery([pack([layerFile()])], 'satellite-2025', IN_CELL)).toBeUndefined();
   });
 
-  it('hands MapLibre the archive’s own maxzoom, not the catalog’s', () => {
+  it('reads the country archive in place, the way the basemap is read', () => {
     const base = localImageryBase([pack([imageryFile()])], 'satellite-2025', IN_CELL);
     expect(base).toEqual({
+      kind: 'pmtiles',
+      url: 'pmtiles://file:///doc/packs/potential-abc/imagery.pmtiles',
+    });
+  });
+
+  it('still draws a loose-tile slab, from the archive’s own maxzoom', () => {
+    const base = localImageryBase([pack([slabFile()])], 'satellite-2025', IN_CELL);
+    expect(base).toEqual({
+      kind: 'tiles',
       tileUrlTemplate: 'file:///doc/packs/potential-abc/imagery/{z}/{x}/{y}.png',
       maxzoom: 11,
     });
   });
 
-  it('attaches the slab without touching the live layer', () => {
+  it('prefers the country archive where a region slab also reaches', () => {
+    const packs = [pack([slabFile()], 'oslo'), pack([imageryFile()], 'satellite-norway')];
+    expect(packWithImagery(packs, 'satellite-2025', IN_CELL)?.manifest.id).toBe('satellite-norway');
+  });
+
+  it('attaches the stand-in without touching the live layer', () => {
     const [out] = withLocalSurfaces([imageryOverlay()], [pack([imageryFile()])], IN_CELL, false);
-    // The layer above keeps streaming: the slab is drawn *under* it, so it only
-    // shows where the live tiles could not load.
+    // The layer above keeps streaming: the stand-in is drawn *under* it, so it
+    // only shows where the live tiles could not load.
     expect(out!.tileUrlTemplate).toMatch(/^https:/);
     expect(out!.sourceId).toBe('atlas-overlay-satellite-2025');
     expect(out!.offlineBase).toEqual({
-      tileUrlTemplate: 'file:///doc/packs/potential-abc/imagery/{z}/{x}/{y}.png',
-      maxzoom: 11,
+      kind: 'pmtiles',
+      url: 'pmtiles://file:///doc/packs/potential-abc/imagery.pmtiles',
     });
   });
 

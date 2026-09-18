@@ -37,8 +37,10 @@ export interface RegionPackFile {
  *
  * - `potential` — a derived surface. It exists only in whole z11 cells, so the
  *   user's rectangle is the *intent* and `cells` is the fact.
- * - `imagery` — a slab of the satellite mosaic, cut straight to the pack's
- *   rectangle. There are no cells; the pack's own `bbox` is the coverage.
+ * - `imagery` — the satellite layer's offline stand-in, a raster `.pmtiles`
+ *   the app reads in place (see {@link isImageryPack}). There are no cells; the
+ *   pack's own `bbox` is the coverage. (A few region packs briefly carried a
+ *   `.zip` of tiles here instead; clients still draw one if it is installed.)
  */
 export interface RegionPackLayerFile extends RegionPackFile {
   /** What sort of layer data this is. */
@@ -74,10 +76,19 @@ export interface RegionPackLayerFile extends RegionPackFile {
 export const PACK_SCHEMA_VERSION = 2;
 
 /**
+ * The runtime that first reads each kind of pack, so a producer declares the
+ * *lowest* one its artifacts need rather than the newest one it knows — a region
+ * pack built today must stay installable by every app that can read it.
+ */
+export const PACK_RUNTIME_REGION = 1;
+/** A raster PMTiles imagery archive in `layers` (the satellite layer's offline stand-in). */
+export const PACK_RUNTIME_IMAGERY = 2;
+
+/**
  * What this client can consume. Raised when the app gains the ability to read a
  * new artifact format, never when it merely learns a new optional field.
  */
-export const PACK_RUNTIME_VERSION = 1;
+export const PACK_RUNTIME_VERSION = PACK_RUNTIME_IMAGERY;
 
 /** Compatibility contract a built pack publishes about itself. */
 export interface RegionPackCompat {
@@ -252,7 +263,20 @@ export function packLayerFile(
   );
 }
 
-/** This pack's offline imagery slab for a layer, if it carries one. */
+/**
+ * Whether a pack is an offline imagery download rather than a region: imagery
+ * for a layer and none of a region's map, search or routing. The app lists these
+ * apart in Offline regions, and nothing that wants a basemap or a router may
+ * pick one — every such caller already asks for its own file, which an imagery
+ * pack does not have.
+ */
+export function isImageryPack(manifest: RegionPackManifest): boolean {
+  return (
+    !manifest.files.basemap && (manifest.files.layers ?? []).some((file) => file.kind === 'imagery')
+  );
+}
+
+/** This pack's offline imagery for a layer, if it carries any. */
 export function packImageryFile(
   manifest: RegionPackManifest,
   layer: string,

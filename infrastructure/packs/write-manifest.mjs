@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Write a built pack's manifest — the last step, after the smoke checks.
 //
-//   node write-manifest.mjs <plan.json> <pack-dir> [imagery.json]
+//   node write-manifest.mjs <plan.json> <pack-dir>
 //
 // pack.json is what the backend lists and the device reads, so writing it is
 // publication. Besides the files and their digests it now records where the
@@ -14,11 +14,11 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { PACK_RUNTIME_VERSION, PACK_SCHEMA_VERSION } from '@atlas/core';
+import { PACK_RUNTIME_REGION, PACK_SCHEMA_VERSION } from '@atlas/core';
 
-const [planPath, packDir, imageryMetaPath] = process.argv.slice(2);
+const [planPath, packDir] = process.argv.slice(2);
 if (!planPath || !packDir) {
-  console.error('usage: write-manifest.mjs <plan.json> <pack-dir> [imagery.json]');
+  console.error('usage: write-manifest.mjs <plan.json> <pack-dir>');
   process.exit(1);
 }
 const plan = JSON.parse(readFileSync(planPath, 'utf8'));
@@ -54,18 +54,6 @@ if (existsSync(path.join(packDir, 'nvdb.sqlite'))) files.nvdb = await entry('nvd
 if (existsSync(path.join(packDir, 'outdoor.pmtiles')))
   files.outdoor = await entry('outdoor.pmtiles');
 
-// The satellite slab goes in the open-ended `layers` array rather than a fixed
-// slot, beside the derived surfaces: it is one layer's offline artifact, and
-// the zoom range it actually reached is part of the record because the producer
-// caps it against a size budget per region. Both halves are required — a
-// sidecar left over from a crashed run must not describe an archive that is not
-// there.
-const imageryMeta =
-  imageryMetaPath && existsSync(imageryMetaPath) && existsSync(path.join(packDir, 'imagery.zip'))
-    ? JSON.parse(readFileSync(imageryMetaPath, 'utf8'))
-    : null;
-if (imageryMeta) files.layers = [{ ...(await entry('imagery.zip')), ...imageryMeta }];
-
 const builtAt = Date.now();
 const manifest = {
   id: plan.region.id,
@@ -76,7 +64,7 @@ const manifest = {
   // A seconds value after one of those refreshes would look older.
   version: builtAt,
   builtAt,
-  compat: { schema: PACK_SCHEMA_VERSION, minRuntime: PACK_RUNTIME_VERSION },
+  compat: { schema: PACK_SCHEMA_VERSION, minRuntime: PACK_RUNTIME_REGION },
   provenance: {
     spec: { source: plan.source, region: plan.region.id, sha256: plan.spec.sha256 },
     builder: plan.builder,

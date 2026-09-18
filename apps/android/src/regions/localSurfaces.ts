@@ -15,12 +15,13 @@ import type { LocalPack } from './packs';
  *   rest of the app cannot tell the difference. Downloaded wins, because the
  *   user chose to download this ground.
  * - **Offline imagery is drawn *beneath* the live layer, never instead of it.**
- *   The satellite layer is streamed Esri detail over a 10 m mosaic, and only
- *   the mosaic half can be kept (Esri's licence forbids storing it). Stacking
- *   is what makes that degrade by itself: with a connection the live layer
- *   covers the slab completely, and when it cannot load, the slab is what
- *   shows through. No connectivity check anywhere — MapLibre painting a source
- *   that has no tile is the whole mechanism.
+ *   Online, the satellite layer is Esri at every zoom, which may not be stored;
+ *   the downloadable stand-in is Kartverket's 10 m mosaic of mainland Norway
+ *   (Settings → Offline regions). Stacking is what makes that degrade by
+ *   itself: with a connection Esri covers the mosaic completely, and when its
+ *   tiles cannot load, the mosaic is what shows through. No connectivity check
+ *   anywhere — MapLibre painting a source that has no tile is the whole
+ *   mechanism.
  *
  * **A surface's coverage is judged by cell, not by the pack's bbox.** A pack is
  * built from the rectangle a user framed, but a surface exists only in whole
@@ -43,43 +44,63 @@ export function packWithSurface(
   return packs.find((pack) => packLayerFile(pack.manifest, layer, target)?.cells?.includes(here));
 }
 
-/** The pack whose imagery slab covers where the map is looking, if any. */
+/**
+ * How MapLibre reaches a pack's imagery. The Norway download is one raster
+ * PMTiles archive read in place (`pmtiles://`, like the basemap, which also
+ * carries its own zoom range); a region pack built on 18 September 2026 carried
+ * a zip of loose tiles instead, which still draws where it is installed.
+ */
+export type OfflineImageryBase =
+  { kind: 'pmtiles'; url: string } | { kind: 'tiles'; tileUrlTemplate: string; maxzoom: number };
+
+const isArchive = (path: string) => path.endsWith('.pmtiles');
+
+/**
+ * The pack whose imagery covers where the map is looking, if any — the
+ * country-wide archive before a region's loose-tile slab where both reach, since
+ * it is the one kept up to date and as deep as the source goes.
+ */
 export function packWithImagery(
   packs: readonly LocalPack[],
   layer: string,
   center: LatLng | null,
 ): LocalPack | undefined {
   if (!center) return undefined;
-  return packs.find((pack) => {
+  const covering = packs.filter((pack) => {
     if (!packImageryFile(pack.manifest, layer)) return false;
     const { sw, ne } = pack.manifest.bbox;
     return (
       center.lat >= sw.lat && center.lat <= ne.lat && center.lng >= sw.lng && center.lng <= ne.lng
     );
   });
+  return (
+    covering.find((pack) => isArchive(packImageryFile(pack.manifest, layer)!.path)) ?? covering[0]
+  );
 }
 
 /**
- * The offline slab to draw beneath a layer, or null where no pack covers it.
+ * The offline imagery to draw beneath a layer, or null where no pack covers it.
  *
- * `maxzoom` is the archive's own, not the catalog's: the producer stops at
- * whatever depth fits its size budget for the region, so Oslo's slab reaches
- * z13 and Nord-Norge's z11. Handing MapLibre the real number is what makes it
- * overzoom from the deepest tile that exists instead of asking for one that
- * does not.
+ * A loose-tile slab hands MapLibre the archive's own `maxzoom`, not the
+ * catalog's, so it overzooms from the deepest tile that exists instead of
+ * asking for one that does not; a PMTiles archive says so in its own header.
  */
 export function localImageryBase(
   packs: readonly LocalPack[],
   layer: string,
   center: LatLng | null,
-): { tileUrlTemplate: string; maxzoom: number } | null {
+): OfflineImageryBase | null {
   const pack = packWithImagery(packs, layer, center);
   if (!pack) return null;
   const file = packImageryFile(pack.manifest, layer)!;
-  return {
-    tileUrlTemplate: `${pack.dir.replace(/\/+$/, '')}/${packUnzipDir(file)}/{z}/{x}/{y}.png`,
-    maxzoom: file.maxzoom,
-  };
+  const dir = pack.dir.replace(/\/+$/, '');
+  return isArchive(file.path)
+    ? { kind: 'pmtiles', url: `pmtiles://${dir}/${file.path}` }
+    : {
+        kind: 'tiles',
+        tileUrlTemplate: `${dir}/${packUnzipDir(file)}/{z}/{x}/{y}.png`,
+        maxzoom: file.maxzoom,
+      };
 }
 
 /**

@@ -128,11 +128,10 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // Full Kartverket topo at Klympen: dense contours, labels and path detail
   // (85 kB measured 2026-08-14; an empty PNG from the proxy is under 1 kB).
   'topographic-map': { kind: 'tile', lat: 61.9447, lng: 8.8364, z: 14, minBytes: 10_000 },
-  'satellite-2025': { kind: 'tile', lat: 60.05, lng: 10.7, z: 12, minBytes: 2000 },
   // Esri World Imagery over central Oslo: one of Norway's genuine z19 detail
   // tiles, rather than the opaque 2.5 kB missing-image sentinel returned where
   // coverage stops at z18 (14.9 kB measured 2026-08-14).
-  'world-imagery': { kind: 'tile', lat: 59.9139, lng: 10.7522, z: 19, minBytes: 5000 },
+  'satellite-2025': { kind: 'tile', lat: 59.9139, lng: 10.7522, z: 19, minBytes: 5000 },
   'trails-hiking': { kind: 'tile', lat: 60.05, lng: 10.7, z: 13, minBytes: 2000 },
   // NASA's 2016 VIIRS night lights at the layer's deepest zoom over Oslo: 59.4 kB
   // of city glow, against a 0.3 kB blank tile over dark sea (measured 2026-09-16).
