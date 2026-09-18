@@ -10,7 +10,7 @@ import { registerTileRoute } from './tiles.js';
  * Overlay layer registry + WMS/XYZ tile proxy + GetFeatureInfo identify proxy
  * + attribute labels, assembled here from four single-purpose modules:
  *
- * - `catalog.ts`  the curated Norwegian registry (data) and its types
+ * - `catalog.ts`  the curated overlay registry (data) and its types
  * - `wms.ts`      tile math + GetMap/GetFeatureInfo request building
  * - `tiles.ts`    /api/overlay/:id/:z/:x/:y.png and the disk cache
  * - `identify.ts` /api/overlay/:id/identify and the response parsers

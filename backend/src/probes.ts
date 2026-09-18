@@ -1,7 +1,7 @@
 import { normalizeLayerOptions } from '@atlas/core';
 import { buildEnturVehiclesRequest, parseEnturVehiclesResponse } from '@atlas/transit';
 import type { FastifyBaseLogger } from 'fastify';
-import type { OverlayLayer } from './overlay/catalog.js';
+import { rasterBandAtZoom, type OverlayLayer } from './overlay/catalog.js';
 import { optionGetMapParams } from './overlay/options.js';
 import { substituteEnv, tileCoords, wmsBaseParams } from './overlay/wms.js';
 import type { StatusRegistry } from './status.js';
@@ -382,21 +382,29 @@ export function overlayProbe(
     label: layer.meta.title,
     group: 'Overlays',
   };
-  const up = layer.upstream;
+  const configured = layer.upstream;
 
   if (probe.kind === 'count') {
-    if (up.kind !== 'arcgis-vector') {
+    if (configured.kind !== 'arcgis-vector') {
       // A count probe on a raster layer would silently check nothing.
       return {
         ...spec,
         run: async () => ({ ok: false, message: 'count probe on a raster layer' }),
       };
     }
-    return countProbe(spec, up.url, probe.minFeatures);
+    return countProbe(spec, configured.url, probe.minFeatures);
   }
-  if (up.kind === 'arcgis-vector') {
+  if (configured.kind === 'arcgis-vector') {
     return { ...spec, run: async () => ({ ok: false, message: 'tile probe on a vector layer' }) };
   }
+
+  const band = rasterBandAtZoom(configured, probe.z);
+  if (!band) {
+    return { ...spec, run: async () => ({ ok: false, message: 'no raster source at probe zoom' }) };
+  }
+  // Probe the primary, not its geographic fallback: a fallback keeps the map
+  // useful but must not hide that the preferred source has gone stale or died.
+  const up = band.primary;
 
   const { x, y } = tileCoords(probe.lat, probe.lng, probe.z);
   const tile = { z: probe.z, x: Math.floor(x), y: Math.floor(y) };

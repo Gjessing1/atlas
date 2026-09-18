@@ -240,6 +240,42 @@ function testLayers(): OverlayLayer[] {
   ];
 }
 
+function compositeImageryLayer(): OverlayLayer {
+  return {
+    meta: {
+      id: 'hybrid-imagery',
+      rev: 3,
+      title: 'Hybrid imagery',
+      description: 'Test zoom switch and geographic fallback',
+      group: 'Imagery',
+      attribution: '© Test',
+      maxzoom: 19,
+      defaultOpacity: 1,
+      identify: false,
+    },
+    upstream: {
+      kind: 'composite-raster',
+      bands: [
+        {
+          minzoom: 0,
+          maxzoom: 13,
+          primary: { kind: 'xyz', template: 'https://local-mosaic.example/{z}/{x}/{y}' },
+          fallback: { kind: 'xyz', template: 'https://global-mosaic.example/{z}/{x}/{y}' },
+        },
+        {
+          minzoom: 14,
+          maxzoom: 19,
+          primary: {
+            kind: 'xyz',
+            template: 'https://detail.example/{z}/{x}/{y}',
+            cache: 'upstream',
+          },
+        },
+      ],
+    },
+  };
+}
+
 type StubReply = {
   status?: number;
   contentType?: string;
@@ -345,6 +381,28 @@ describe('layer catalog', () => {
     // as layer visibility. A catalog row claiming it would share that entry and
     // the two would switch each other off.
     expect(ids).not.toContain(BASEMAP_STATE_ID);
+    expect(catalog.find((l) => l.meta.id === 'satellite-2025')).toMatchObject({
+      meta: { rev: 2, maxzoom: 19, exclusive: 'satellite-imagery' },
+      upstream: {
+        kind: 'composite-raster',
+        bands: [
+          {
+            minzoom: 0,
+            maxzoom: 13,
+            primary: { kind: 'wms', layers: '2025' },
+            fallback: {
+              kind: 'xyz',
+              template: expect.stringContaining('s2cloudless-2017_3857'),
+            },
+          },
+          {
+            minzoom: 14,
+            maxzoom: 19,
+            primary: { kind: 'xyz', cache: 'upstream' },
+          },
+        ],
+      },
+    });
     expect(catalog.find((l) => l.meta.id === 'world-imagery')).toMatchObject({
       meta: { rev: 2, maxzoom: 19 },
       upstream: { missingTile: 'arcgis-etag', fallbackMaxzoom: 18 },
@@ -773,6 +831,70 @@ describe('overlay tile proxy', () => {
     expect(requests[0]!.toString()).toBe('https://imagery.example/tile/5/11/10');
     await expect(
       readFile(path.join(cacheDir, 'streamed-jpeg', 'v1', '5', '10', '11.png')),
+    ).rejects.toThrow();
+  });
+
+  it('uses and disk-caches the landscape band of composite imagery', async () => {
+    const tile = quadrantTile();
+    const { app, cacheDir, requests } = await build(() => ({ body: tile }), {
+      layers: [compositeImageryLayer()],
+    });
+    track(app, cacheDir);
+
+    await app.inject({ url: '/api/overlay/hybrid-imagery/12/10/11.png' });
+    await app.inject({ url: '/api/overlay/hybrid-imagery/12/10/11.png' });
+
+    expect(requests.map(String)).toEqual(['https://local-mosaic.example/12/10/11']);
+    await expect(
+      readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', '12', '10', '11.png')),
+    ).resolves.toEqual(tile);
+  });
+
+  it('fills holes in the local mosaic from the global cacheable fallback', async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const { app, cacheDir, requests } = await build(
+      (url) =>
+        url.hostname === 'local-mosaic.example'
+          ? { body: PNG_BYTES, contentType: 'image/png' }
+          : { body: jpeg, contentType: 'image/jpeg' },
+      { layers: [compositeImageryLayer()] },
+    );
+    track(app, cacheDir);
+
+    const first = await app.inject({ url: '/api/overlay/hybrid-imagery/12/10/11.png' });
+    const second = await app.inject({ url: '/api/overlay/hybrid-imagery/12/10/11.png' });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['content-type']).toBe('image/jpeg');
+    expect(second.statusCode).toBe(200);
+    expect(second.headers['content-type']).toBe('image/jpeg');
+    expect(requests.map(String)).toEqual([
+      'https://local-mosaic.example/12/10/11',
+      'https://global-mosaic.example/12/10/11',
+    ]);
+    await expect(
+      readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', '12', '10', '11.png')),
+    ).resolves.toEqual(jpeg);
+  });
+
+  it('switches composite imagery to uncached online detail at close zoom', async () => {
+    const { app, cacheDir, requests } = await build(
+      () => ({ body: PNG_BYTES, cacheControl: 'public, max-age=3600' }),
+      { layers: [compositeImageryLayer()] },
+    );
+    track(app, cacheDir);
+
+    const first = await app.inject({ url: '/api/overlay/hybrid-imagery/14/10/11.png' });
+    const second = await app.inject({ url: '/api/overlay/hybrid-imagery/14/10/11.png' });
+
+    expect(first.headers['cache-control']).toBe('public, max-age=3600');
+    expect(second.statusCode).toBe(200);
+    expect(requests.map(String)).toEqual([
+      'https://detail.example/14/10/11',
+      'https://detail.example/14/10/11',
+    ]);
+    await expect(
+      readFile(path.join(cacheDir, 'hybrid-imagery', 'v3', '14', '10', '11.png')),
     ).rejects.toThrow();
   });
 

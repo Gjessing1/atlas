@@ -198,6 +198,44 @@ export interface XyzUpstream {
   transform?: 'light-pollution-palette';
 }
 
+export type RasterUpstream = WmsUpstream | XyzUpstream;
+
+/**
+ * One zoom band of a composite raster. `fallback` is tried only when the
+ * primary source has no image at that tile (or is temporarily unreachable).
+ *
+ * Satellite imagery is the motivating case: Kartverket's current annual
+ * mosaic is the best landscape source inside Norway, EOX fills the rest of the
+ * world, and close zooms move to the streaming-only Esri source. Keeping that
+ * policy in the catalog makes one user-facing layer behave consistently on
+ * both clients without exposing three switches for one job.
+ */
+export interface RasterBand {
+  minzoom: number;
+  maxzoom: number;
+  primary: RasterUpstream;
+  fallback?: RasterUpstream;
+}
+
+export interface CompositeRasterUpstream {
+  kind: 'composite-raster';
+  bands: RasterBand[];
+}
+
+/** The source(s) a composite or ordinary raster uses for one tile zoom. */
+export function rasterBandAtZoom(
+  upstream: RasterUpstream | CompositeRasterUpstream,
+  zoom: number,
+): { primary: RasterUpstream; fallback?: RasterUpstream } | null {
+  if (upstream.kind !== 'composite-raster') return { primary: upstream };
+  const band = upstream.bands.find(
+    (candidate) => zoom >= candidate.minzoom && zoom <= candidate.maxzoom,
+  );
+  return band
+    ? { primary: band.primary, ...(band.fallback ? { fallback: band.fallback } : {}) }
+    : null;
+}
+
 /**
  * A vector overlay drawn from an ArcGIS REST feature layer rather than proxied
  * raster tiles (`LayerMeta.vector`). The backend pulls the whole coverage once
@@ -227,7 +265,7 @@ export interface ArcGisVectorUpstream {
 
 export interface OverlayLayer {
   meta: LayerMeta;
-  upstream: WmsUpstream | XyzUpstream | ArcGisVectorUpstream;
+  upstream: WmsUpstream | XyzUpstream | CompositeRasterUpstream | ArcGisVectorUpstream;
   /**
    * Env var that must be set for this layer to exist (tokened sources).
    * Unset ⇒ the layer silently drops out of the catalog — no broken entries,
@@ -685,25 +723,60 @@ export function norwegianLayers(): OverlayLayer[] {
     {
       meta: {
         id: 'satellite-2025',
-        rev: 1,
-        title: 'Satellite mosaic (2025)',
-        description: 'Cloud-minimized Sentinel-2 summer mosaic of Norway from Copernicus imagery.',
+        rev: 2,
+        title: 'Satellite imagery (automatic)',
+        description:
+          'Cloud-minimized global landscape mosaic that switches to detailed satellite and aerial imagery as you zoom in.',
         group: 'Imagery',
-        attribution: '© Copernicus Sentinel data / Kartverket',
-        metadataUrl: `${KARTKATALOG}sentinel-2`,
-        maxzoom: 15,
+        attribution:
+          '© Copernicus Sentinel data / Kartverket · EOxCloudless © EOX IT Services GmbH (modified Copernicus Sentinel data 2017) · Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+        metadataUrl: 'https://cloudless.eox.at/documentation/usage',
+        maxzoom: 19,
         defaultOpacity: 1,
         identify: false,
+        exclusive: 'satellite-imagery',
         coverageNote:
-          'About 10 m per source pixel. Best for landscape-scale use; isolated clouds, shadows and stitching artefacts can remain.',
+          'Norway uses the 2025 Kartverket mosaic and the rest of the world a 2017 EOX mosaic through z13. At z14+ Atlas switches to streaming Esri detail, which needs a connection and is not saved offline. Capture date, resolution, clouds and colour vary by source.',
       },
       upstream: {
-        kind: 'wms',
-        url: 'https://wms.geonorge.no/skwms1/wms.sentinel2',
-        version: '1.3.0',
-        // Pin the acquisition year. Moving to a future mosaic is an explicit
-        // catalog + rev change, so old CDN and disk tiles cannot bleed through.
-        layers: '2025',
+        kind: 'composite-raster',
+        bands: [
+          {
+            minzoom: 0,
+            maxzoom: 13,
+            primary: {
+              kind: 'wms',
+              url: 'https://wms.geonorge.no/skwms1/wms.sentinel2',
+              version: '1.3.0',
+              // Pin the acquisition year. Moving to a future mosaic is an explicit
+              // catalog + rev change, so old CDN and disk tiles cannot bleed through.
+              layers: '2025',
+            },
+            fallback: {
+              kind: 'xyz',
+              // The latest EOX mosaics are non-commercial; 2017 is the newest
+              // global layer its own capabilities publish under unrestricted
+              // CC BY 4.0. It is old, but legally cacheable and still the same
+              // 10 m Sentinel-2 landscape resolution as the Norwegian source.
+              template:
+                'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2017_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg',
+            },
+          },
+          {
+            minzoom: 14,
+            maxzoom: 19,
+            primary: {
+              kind: 'xyz',
+              template:
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+              missingTile: 'arcgis-etag',
+              fallbackMaxzoom: 18,
+              // Close detail is deliberately online-only. Atlas forwards Esri's
+              // browser cache grant but never copies it into its permanent store.
+              cache: 'upstream',
+            },
+          },
+        ],
       },
     },
     {
@@ -718,6 +791,7 @@ export function norwegianLayers(): OverlayLayer[] {
         maxzoom: 19,
         defaultOpacity: 1,
         identify: false,
+        exclusive: 'satellite-imagery',
         coverageNote:
           'Streaming only — not included in offline regions. Resolution, capture date and cloud cover vary by location.',
       },

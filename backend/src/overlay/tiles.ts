@@ -2,6 +2,7 @@ import { layerOptionSignature } from '@atlas/core';
 import Jimp from 'jimp-compact';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { rasterBandAtZoom, type RasterUpstream } from './catalog.js';
 import type { OverlayContext } from './context.js';
 import { optionGetMapParams, resolveOptions } from './options.js';
 import { substituteEnv, wmsBaseParams } from './wms.js';
@@ -20,6 +21,18 @@ const TRANSPARENT_PNG = Buffer.from(
 );
 
 const TILE_MAX_AGE_S = 7 * 24 * 3600; // upstream data changes on the order of months
+
+/** Content type for a cached image whose upstream headers are no longer present. */
+function imageContentType(data: Buffer): string {
+  if (data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg';
+  if (
+    data.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    data.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return 'image/png';
+}
 
 /** Classic dark-sky map progression, sampled by the VIIRS tile's luminance. */
 const LIGHT_PALETTE = [
@@ -84,6 +97,28 @@ async function overzoomParentTile(
     .resize(256, 256, Jimp.RESIZE_BILINEAR);
   if (contentType === Jimp.MIME_JPEG) cropped.quality(90);
   return { data: await cropped.getBufferAsync(contentType), contentType };
+}
+
+/**
+ * Whether a small image is entirely transparent.
+ *
+ * Kartverket answers requests outside Norway with a valid 334-byte transparent
+ * PNG, not a ServiceException. Only composite sources with a declared fallback
+ * call this, and the size guard means ordinary photographic tiles never pay a
+ * decode cost. A tiny but genuinely inked image remains the primary result.
+ */
+async function isTransparentTile(data: Buffer): Promise<boolean> {
+  if (data.length > 4096) return false;
+  try {
+    const image = await Jimp.read(data);
+    let transparent = true;
+    image.scan(0, 0, image.bitmap.width, image.bitmap.height, (_x, _y, offset) => {
+      if (image.bitmap.data[offset + 3] !== 0) transparent = false;
+    });
+    return transparent;
+  } catch {
+    return false;
+  }
 }
 
 export function registerTileRoute(ctx: OverlayContext): void {
@@ -158,7 +193,11 @@ export function registerTileRoute(ctx: OverlayContext): void {
     // Vector layers (arcgis-vector) have no raster tiles — they answer at
     // `/features`. Clients that honour `LayerMeta.vector` never ask here; this
     // just refuses a hand-typed tile URL rather than mis-reading the upstream.
-    if (layer.upstream.kind !== 'wms' && layer.upstream.kind !== 'xyz') {
+    if (
+      layer.upstream.kind !== 'wms' &&
+      layer.upstream.kind !== 'xyz' &&
+      layer.upstream.kind !== 'composite-raster'
+    ) {
       return reply.code(404).send({ error: 'layer has no raster tiles' });
     }
     const z = Number(request.params.z);
@@ -182,48 +221,91 @@ export function registerTileRoute(ctx: OverlayContext): void {
       cacheControl = `public, max-age=${TILE_MAX_AGE_S}`,
     ) => reply.header('content-type', contentType).header('cache-control', cacheControl).send(data);
 
+    const band = rasterBandAtZoom(layer.upstream, z);
+    if (!band) return reply.code(404).send({ error: 'layer has no raster tiles at this zoom' });
+
     const chosen = resolveOptions(layer, request.query);
     const file = cachePath(layer.meta.id, layer.meta.rev, layerOptionSignature(chosen), z, x, y);
-    const diskCache = layer.upstream.kind !== 'xyz' || layer.upstream.cache !== 'upstream';
+    const sources = [band.primary, ...(band.fallback ? [band.fallback] : [])];
+    const diskCache = sources.every(
+      (source) => source.kind !== 'xyz' || source.cache !== 'upstream',
+    );
     const cached = diskCache ? await readFile(file).catch(() => null) : null;
-    if (cached) return serveImage(cached);
+    if (cached) return serveImage(cached, imageContentType(cached));
 
-    const upstream =
-      layer.upstream.kind === 'wms'
-        ? wmsBaseParams(
-            layer.upstream,
-            z,
-            x,
-            y,
-            256 * Math.max(1, Math.round(layer.upstream.renderScale ?? 1)),
-          )
-        : xyzUrl(layer.upstream.template, z, x, y);
-    if (layer.upstream.kind === 'wms') {
-      upstream.searchParams.set('REQUEST', 'GetMap');
-      for (const [key, value] of Object.entries(layer.upstream.getMapParams ?? {})) {
-        upstream.searchParams.set(key, value);
+    const upstreamUrl = (source: RasterUpstream): URL => {
+      const upstream =
+        source.kind === 'wms'
+          ? wmsBaseParams(source, z, x, y, 256 * Math.max(1, Math.round(source.renderScale ?? 1)))
+          : xyzUrl(source.template, z, x, y);
+      if (source.kind === 'wms') {
+        upstream.searchParams.set('REQUEST', 'GetMap');
+        for (const [key, value] of Object.entries(source.getMapParams ?? {})) {
+          upstream.searchParams.set(key, value);
+        }
+        for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
+          upstream.searchParams.set(key, value);
+        }
       }
-      for (const [key, value] of Object.entries(optionGetMapParams(layer, chosen))) {
-        upstream.searchParams.set(key, value);
-      }
-    }
+      return upstream;
+    };
 
-    try {
+    const fetchSource = async (source: RasterUpstream) => {
       const missingEtag =
-        layer.upstream.kind === 'xyz' && layer.upstream.missingTile === 'arcgis-etag'
-          ? await arcgisMissingEtag(layer.meta.id, layer.upstream.template)
+        source.kind === 'xyz' && source.missingTile === 'arcgis-etag'
+          ? await arcgisMissingEtag(layer.meta.id, source.template)
           : null;
-      const res = await fetchImpl(upstream, {
+      return fetchImpl(upstreamUrl(source), {
         signal: AbortSignal.timeout(15_000),
         ...(missingEtag ? { headers: { 'if-none-match': missingEtag } } : {}),
       });
+    };
+
+    try {
+      let active = band.primary;
+      let res: Response;
+      try {
+        res = await fetchSource(active);
+      } catch (err) {
+        if (!band.fallback) throw err;
+        request.log.warn(
+          { err, layer: layer.meta.id },
+          'overlay primary unreachable, trying geographic fallback',
+        );
+        active = band.fallback;
+        res = await fetchSource(active);
+      }
+
+      let contentType = res.headers.get('content-type') ?? '';
+      let prefetched: Buffer | null = null;
+      if (band.fallback && active === band.primary && res.ok && contentType.startsWith('image/')) {
+        prefetched = Buffer.from(await res.arrayBuffer());
+      }
+      const useFallback =
+        band.fallback &&
+        active === band.primary &&
+        (!res.ok ||
+          (!contentType.startsWith('image/') && res.status !== 304) ||
+          (prefetched !== null && (await isTransparentTile(prefetched))));
+      if (useFallback && band.fallback) {
+        // Outside Norway, Kartverket returns a fully transparent PNG rather
+        // than a WMS ServiceException. Either response is expected coverage
+        // behavior, so try the global EOX mosaic before ordinary error/blank
+        // handling below.
+        if (!prefetched) await res.body?.cancel();
+        active = band.fallback;
+        res = await fetchSource(active);
+        contentType = res.headers.get('content-type') ?? '';
+        prefetched = null;
+      }
+
       if (res.status === 304) {
         // Esri has no tile at this detail level. Synthesize the correctly
         // aligned child from its real parent so the client keeps one raster
         // source: genuine z19 imagery still wins where it exists, while gaps
         // behave exactly like MapLibre overzooming z18.
         ctx.record(layer.meta.id, true);
-        const xyzLayer = layer.upstream.kind === 'xyz' ? layer.upstream : null;
+        const xyzLayer = active.kind === 'xyz' ? active : null;
         const fallbackZoom = xyzLayer?.fallbackMaxzoom;
         if (xyzLayer && fallbackZoom !== undefined && fallbackZoom >= 0 && fallbackZoom < z) {
           const divisions = 2 ** (z - fallbackZoom);
@@ -233,6 +315,10 @@ export function registerTileRoute(ctx: OverlayContext): void {
             Math.floor(x / divisions),
             Math.floor(y / divisions),
           );
+          const missingEtag =
+            xyzLayer.missingTile === 'arcgis-etag'
+              ? await arcgisMissingEtag(layer.meta.id, xyzLayer.template)
+              : null;
           const parent = await fetchImpl(parentUrl, {
             signal: AbortSignal.timeout(15_000),
             ...(missingEtag ? { headers: { 'if-none-match': missingEtag } } : {}),
@@ -260,7 +346,6 @@ export function registerTileRoute(ctx: OverlayContext): void {
         ctx.record(layer.meta.id, false, `HTTP ${res.status}`);
         return reply.code(502).send({ error: 'overlay unavailable' });
       }
-      const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.startsWith('image/')) {
         // A 200 with XML is a ServiceException (out of coverage, bad layer,
         // …): serve a transparent tile so the map shows blank, not broken —
@@ -281,9 +366,9 @@ export function registerTileRoute(ctx: OverlayContext): void {
       }
       // A real image is unambiguous: the upstream is serving this layer.
       ctx.record(layer.meta.id, true);
-      let data: Buffer<ArrayBufferLike> = Buffer.from(await res.arrayBuffer());
+      let data: Buffer<ArrayBufferLike> = prefetched ?? Buffer.from(await res.arrayBuffer());
       let servedType = contentType;
-      if (layer.upstream.kind === 'xyz' && layer.upstream.transform === 'light-pollution-palette') {
+      if (active.kind === 'xyz' && active.transform === 'light-pollution-palette') {
         data = await colorizeLightPollutionTile(data);
         servedType = 'image/png';
       }
