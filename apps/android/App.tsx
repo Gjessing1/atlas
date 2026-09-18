@@ -272,8 +272,15 @@ function AppInner() {
       profile: profiles.profile.id,
       custom: mapStyleEditor.value,
       basemap: overlaysCtl.basemapOn,
+      poi: overlaysCtl.poiOn,
     }),
-    [appearance.colorScheme, profiles.profile.id, mapStyleEditor.value, overlaysCtl.basemapOn],
+    [
+      appearance.colorScheme,
+      profiles.profile.id,
+      mapStyleEditor.value,
+      overlaysCtl.basemapOn,
+      overlaysCtl.poiOn,
+    ],
   );
   const serverOrigin = useServerOrigin();
   const regionJobs = useRegionPackJobs(data, serverOrigin);

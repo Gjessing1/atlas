@@ -39,6 +39,60 @@ test('direction-arrow source is selectable and persists on this device', async (
   await expect(page.getByRole('radio', { name: 'GPS course' })).toBeChecked();
 });
 
+test('points of interest are an explicit per-profile map layer', async ({ page }) => {
+  await page.route('**/assets/styles/liberty.json', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: 8,
+        name: 'POI fixture',
+        sources: {
+          map: { type: 'vector', tiles: ['http://127.0.0.1:3199/e2e/{z}/{x}/{y}.pbf'] },
+        },
+        layers: [
+          { id: 'background', type: 'background', paint: { 'background-color': '#fff' } },
+          {
+            id: 'poi_r20',
+            type: 'symbol',
+            source: 'map',
+            'source-layer': 'poi',
+            layout: { 'text-field': ['get', 'name'] },
+          },
+          {
+            id: 'label_city',
+            type: 'symbol',
+            source: 'map',
+            'source-layer': 'place',
+            layout: { 'text-field': ['get', 'name'] },
+          },
+        ],
+      }),
+    }),
+  );
+  await page.route('**/e2e/**', (route) => route.fulfill({ status: 204 }));
+  await page.goto('/');
+  await waitForMap(page);
+
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
+    .toBe(true);
+  await page.getByRole('button', { name: /^Map layers/ }).click();
+  const poi = page.getByRole('switch', { name: 'Points of interest' });
+  await expect(poi).toHaveAttribute('aria-checked', 'true');
+  await poi.click();
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
+    .toBe(false);
+  expect(await page.evaluate(() => Boolean(window.__atlasMap!.getLayer('label_city')))).toBe(true);
+
+  // The choice belongs to Explore. Switching profile restores that profile's
+  // untouched default instead of globally stripping POIs from every map.
+  await page.getByRole('radio', { name: 'Hike' }).click();
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
+    .toBe(true);
+});
+
 test('dark mode themes the UI and basemap, persists, and profiles change map emphasis', async ({
   page,
 }) => {

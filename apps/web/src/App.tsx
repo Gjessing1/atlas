@@ -1159,6 +1159,7 @@ export function App() {
         profile={profiles.profile.id}
         customStyle={mapStyleEditor.value}
         basemap={layers.basemapOn}
+        poi={layers.poiOn}
         terrain={terrain3d}
         locateRequest={locateRequest}
       />

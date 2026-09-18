@@ -129,6 +129,18 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     note: 'The quarry switch generalized to every other option-bearing layer, and what makes Curiosities readable: alien species is a wall of dots until the risk chip cuts it down, the ore register cannot answer "where is the gold" without the metal chip. Only switched-on layers appear, and a derived surface’s `target` stays with the quarry switch, which owns the one-surface-at-a-time rule. Both triggers read out the chosen values, so the control says what the map is filtered to without being opened.',
   },
   {
+    id: 'map-poi-layer',
+    surface: 'map',
+    capability: 'Show or hide the map data’s points of interest, per profile',
+    hook: 'useOverlayPreferences',
+    web: { file: 'apps/web/src/layers/LayerQuickSwitch.tsx', contains: 'Points of interest' },
+    android: {
+      file: 'apps/android/src/ui/MapActivityControls.tsx',
+      contains: 'layer-quick-points-of-interest',
+    },
+    note: 'Both clients expose the POIs already carried by the basemap and outdoor archive as an explicit map-content layer. It defaults on to preserve existing maps, stores its choice per profile beside the basemap switch, and `applyMapAppearance` removes both Liberty and Atlas outdoor POI symbols when it is off.',
+  },
+  {
     id: 'map-basemap-off',
     surface: 'map',
     capability: 'Turn the basemap off and read the overlays on their own, per profile',

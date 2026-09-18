@@ -3383,9 +3383,9 @@ button.transit-notice-summary {
   color: var(--text-muted);
 }
 
-/* The basemap row, at the foot of the switcher: not an overlay but the map they
-   are drawn on. Sticky, because Curiosities' catalog is nineteen rows deep and a
-   switch nobody can see without scrolling to the end is a switch nobody finds. */
+/* Built-in map content at the foot of the switcher: not fetched overlays, but
+   the POIs and map underneath them. Sticky, because Curiosities' catalog is
+   nineteen rows deep and switches hidden at its end are switches nobody finds. */
 .layer-switch-base {
   position: sticky;
   bottom: -4px;

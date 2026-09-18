@@ -229,6 +229,23 @@ describe('map appearance', () => {
     expect(result.some((layer) => layer.id.startsWith('atlas-hiking-network'))).toBe(false);
   });
 
+  it('lets the POI map-content layer hide ordinary and outdoor POIs without hiding barriers', () => {
+    const result = layers(
+      applyMapAppearance(style, {
+        colorScheme: 'light',
+        profile: 'hike',
+        poi: false,
+        outdoorTiles: 'https://atlas.test/api/tiles/outdoor/{z}/{x}/{y}.pbf',
+      }),
+    );
+    expect(result.some((layer) => layer.id === 'poi_r1')).toBe(false);
+    expect(result.some((layer) => layer.id === 'poi_transit')).toBe(false);
+    expect(result.some((layer) => layer.id === 'atlas-outdoor-poi')).toBe(false);
+    expect(result.some((layer) => layer.id === 'atlas-outdoor-hut')).toBe(false);
+    expect(result.some((layer) => layer.id === 'atlas-barriers')).toBe(true);
+    expect(result.some((layer) => layer.id === 'label_city')).toBe(true);
+  });
+
   it('widens driving roads without wrapping native-incompatible width expressions', () => {
     const result = layers(applyMapAppearance(style, { colorScheme: 'light', profile: 'drive' }));
     expect(

@@ -168,6 +168,20 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
           <div className="layer-switch-group layer-switch-base">
             <button
               type="button"
+              className={`layer-switch-item${layers.poiOn ? ' layer-switch-item-on' : ''}`}
+              role="switch"
+              aria-checked={layers.poiOn}
+              onClick={() => layers.setPoiOn(!layers.poiOn)}
+              title="Draw points of interest from the map data"
+            >
+              <span className="layer-switch-label">Points of interest</span>
+              <span
+                className={`layer-switch-control${layers.poiOn ? ' layer-switch-control-on' : ''}`}
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              type="button"
               className={`layer-switch-item${layers.basemapOn ? ' layer-switch-item-on' : ''}`}
               role="switch"
               aria-checked={layers.basemapOn}

@@ -19,6 +19,8 @@ import {
   roadWeatherIdentify,
   layerOptionSignature,
   normalizeLayerOptions,
+  POI_STATE_ID,
+  poiVisible,
   overlayIdentifyUrl,
   overlayTileUrl,
   resolveStyleTemplate,
@@ -178,6 +180,19 @@ describe('basemapVisible', () => {
     // Only `<profile>:<id>` carries an on/off choice for the basemap. A bare
     // entry (the pre-profile shape, or a hand-edited setting) is not one.
     expect(basemapVisible({ [BASEMAP_STATE_ID]: { on: false } }, 'curiosities')).toBe(true);
+  });
+});
+
+describe('poiVisible', () => {
+  it('is on until the device says otherwise, and only for the active profile', () => {
+    expect(poiVisible({}, 'explore')).toBe(true);
+    const off = { [`explore:${POI_STATE_ID}`]: { on: false } };
+    expect(poiVisible(off, 'explore')).toBe(false);
+    expect(poiVisible(off, 'hike')).toBe(true);
+  });
+
+  it('ignores the legacy bare id', () => {
+    expect(poiVisible({ [POI_STATE_ID]: { on: false } }, 'explore')).toBe(true);
   });
 });
 

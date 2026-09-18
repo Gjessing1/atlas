@@ -36,6 +36,8 @@ export interface MapAppearance {
    * basemap's layers: it is their absence.
    */
   basemap?: boolean;
+  /** Draw the OSM POI symbols and labels carried by the map sources. */
+  poi?: boolean;
   /** Web-only for now: draw a DEM mesh and hillshade beneath roads and labels. */
   terrain?: boolean;
   /** Same-origin Terrarium tile template used when `terrain` is on. */
@@ -1082,7 +1084,8 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
     ? appearance.profile
     : 'neutral';
   const wantsBarriers = BARRIER_PROFILES.includes(profile);
-  const wantsOutdoorPoi = OUTDOOR_POI_PROFILES.includes(profile);
+  const wantsPoi = appearance.poi !== false;
+  const wantsOutdoorPoi = wantsPoi && OUTDOOR_POI_PROFILES.includes(profile);
   const wantsHikeCartography = HIKE_CARTOGRAPHY_PROFILES.includes(profile);
   // Bind the overlay archive only where a layer will actually read it, so Drive
   // and Explore never open a source they have no use for.
@@ -1118,6 +1121,9 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   // exclusion and the new layer would draw nothing.
   const found = style.layers.find((l) => l.type === 'symbol' && l['source-layer'] === 'poi');
   const poiTemplate = found ? (JSON.parse(JSON.stringify(found)) as StyleLayer) : undefined;
+  const basePoiLayerIds = new Set(
+    style.layers.filter((layer) => layer['source-layer'] === 'poi').map((layer) => layer.id),
+  );
   const lastPoiId = [...style.layers].reverse().find((l) => l['source-layer'] === 'poi')?.id;
   const transportationNameTemplate = style.layers.find(
     (l) => l['source-layer'] === 'transportation_name',
@@ -1384,6 +1390,14 @@ export function applyMapAppearance(template: string, appearance: MapAppearance):
   for (const { layer, baseId } of insertAfterBase) {
     const baseIndex = style.layers.findIndex((l) => l.id === baseId);
     style.layers.splice(baseIndex + 1, 0, layer);
+  }
+
+  // POIs are map content, not a fetched overlay. Remove the Liberty POI
+  // layers only after the supplemental layers have used them as insertion
+  // anchors. The id snapshot deliberately leaves gate/barrier clones intact
+  // even when an older basemap is their only source.
+  if (!wantsPoi) {
+    style.layers = style.layers.filter((layer) => !basePoiLayerIds.has(layer.id));
   }
 
   const terrainTiles =

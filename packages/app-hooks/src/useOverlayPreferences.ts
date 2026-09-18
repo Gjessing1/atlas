@@ -5,8 +5,8 @@
  * `apps/web/src/layers/useLayerCatalog.ts` and
  * `apps/android/src/layers/useOverlays.ts` used to implement all of this twice:
  * the same persisted state shape, the same `<profile>:<layer>` keys, the same
- * default resolution, opacity fallback chain, option normalization, basemap
- * special case, active-derived-surface rule and mutation API — down to the
+ * default resolution, opacity fallback chain, option normalization, built-in
+ * map-content switches, active-derived-surface rule and mutation API — down to the
  * comments, which called each other "twins". That is not a similarity to be
  * abstracted away on sight; it is a rule set that has stopped changing shape,
  * and drift in it is worse than drift in presentation, because the two devices
@@ -28,6 +28,8 @@ import {
   layersForProfile,
   normalizeLayerOptions,
   OVERLAY_STATE_SETTING,
+  POI_STATE_ID,
+  poiVisible,
   type LayerMeta,
   type OverlayStateMap,
 } from '@atlas/core';
@@ -99,6 +101,9 @@ export interface OverlayPreferences {
    */
   basemapOn: boolean;
   setBasemapOn: (on: boolean) => void;
+  /** Whether the basemap's OSM POI symbols and labels draw in this profile. */
+  poiOn: boolean;
+  setPoiOn: (on: boolean) => void;
   opacityFor: (id: string) => number;
   /** The layer's resolved variant (see `LayerMeta.options`), defaults filled in. */
   optionsFor: (meta: LayerMeta) => Record<string, string>;
@@ -235,6 +240,21 @@ export function useOverlayPreferences(
     [update, profileId],
   );
 
+  // POIs are built-in map content rather than a catalog overlay, so they use
+  // the same explicit-default rule as the basemap: absent means on.
+  const poiOn = poiVisible(state, profileId);
+  const setPoiOn = useCallback(
+    (on: boolean) =>
+      update((current) => ({
+        ...current,
+        [stateKey(profileId, POI_STATE_ID)]: {
+          ...current[stateKey(profileId, POI_STATE_ID)],
+          on,
+        },
+      })),
+    [update, profileId],
+  );
+
   const setOpacity = useCallback(
     (id: string, opacity: number) =>
       update((current) => ({
@@ -312,6 +332,8 @@ export function useOverlayPreferences(
     isOn,
     basemapOn,
     setBasemapOn,
+    poiOn,
+    setPoiOn,
     opacityFor,
     optionsFor,
     setOption,

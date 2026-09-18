@@ -176,6 +176,21 @@ export function LayersPanel({ layers, mapZoom }: LayersPanelProps) {
         />
       )}
       {note && <p className="layers-profile-note">{note}</p>}
+      <div className="layer-row">
+        <label className="layer-toggle">
+          <span className="layer-name">Points of interest</span>
+          <input
+            type="checkbox"
+            checked={layers.poiOn}
+            onChange={() => layers.setPoiOn(!layers.poiOn)}
+          />
+          <span className="layer-toggle-control" aria-hidden="true" />
+        </label>
+        <div className="layer-desc">
+          Shops, food, services, sights and outdoor places already carried by the map. Labels appear
+          as you zoom in — this profile only.
+        </div>
+      </div>
       {/* The map the overlays are drawn on, above the overlays themselves.
           Switching it off is the honest way to read a raster with holes in it —
           a 1826 amtskart sheet, a bathymetry survey's edge — because today's

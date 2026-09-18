@@ -411,11 +411,27 @@ export function MapActivityControls({
             availableLayerGroups.length === 0 ? (
               <Text style={styles.layerNoMatch}>No layers match.</Text>
             ) : null}
-            {/* The map the overlays are drawn on, at the foot and below a rule.
-                Off is how a scanned 1826 sheet — or any raster with holes — is
-                read honestly; today's coloured land fills the holes. */}
+            {/* Built-in map content sits at the foot below a rule: POIs and the
+                basemap are not remote catalog overlays, but users still need
+                their switches beside the layers they visually compete with. */}
             <Pressable
               style={[styles.layerItem, styles.basemapItem]}
+              onPress={() => overlays.setPoiOn(!overlays.poiOn)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: overlays.poiOn }}
+              accessibilityLabel="Points of interest"
+              testID="layer-quick-points-of-interest"
+            >
+              <Text
+                style={[styles.layerLabel, overlays.poiOn && styles.layerLabelOn]}
+                numberOfLines={1}
+              >
+                Points of interest
+              </Text>
+              <SwitchTrack on={overlays.poiOn} />
+            </Pressable>
+            <Pressable
+              style={styles.layerItem}
               onPress={() => overlays.setBasemapOn(!overlays.basemapOn)}
               accessibilityRole="switch"
               accessibilityState={{ checked: overlays.basemapOn }}

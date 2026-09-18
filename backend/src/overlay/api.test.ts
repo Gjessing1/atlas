@@ -4,7 +4,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES } from '@atlas/core';
+import { BASEMAP_STATE_ID, layerInProfile, MAP_PROFILES, POI_STATE_ID } from '@atlas/core';
 import { iceObservationLayerMeta } from '../ice-observations-api.js';
 import { StatusRegistry } from '../status.js';
 import { rasterBandAtZoom } from './catalog.js';
@@ -387,6 +387,7 @@ describe('layer catalog', () => {
     // as layer visibility. A catalog row claiming it would share that entry and
     // the two would switch each other off.
     expect(ids).not.toContain(BASEMAP_STATE_ID);
+    expect(ids).not.toContain(POI_STATE_ID);
     expect(catalog.find((l) => l.meta.id === 'satellite-2025')).toMatchObject({
       meta: {
         rev: 4,

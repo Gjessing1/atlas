@@ -883,6 +883,14 @@ export type OverlayStateMap = Record<
 export const BASEMAP_STATE_ID = 'basemap';
 
 /**
+ * The reserved `OverlayStateMap` id for the basemap's points-of-interest
+ * symbols. POIs are map content rather than a separately fetched catalog
+ * overlay, but users choose them from the same layer surfaces and expect the
+ * choice to follow the active profile just like the basemap switch.
+ */
+export const POI_STATE_ID = 'points-of-interest';
+
+/**
  * Whether the vector basemap draws in this profile — **on** unless the device
  * has said otherwise, which is why this is a function rather than a lookup: an
  * absent entry means "not asked", and the answer to that is yes.
@@ -892,6 +900,16 @@ export const BASEMAP_STATE_ID = 'basemap';
  */
 export function basemapVisible(state: OverlayStateMap, profileId: string): boolean {
   return state[`${profileId}:${BASEMAP_STATE_ID}`]?.on ?? true;
+}
+
+/**
+ * Whether OSM points of interest draw in this profile. Existing maps always
+ * drew them, so an absent preference means on; only an explicit choice hides
+ * them. The style pass applies this to both Liberty's POI layers and Atlas's
+ * outdoor POI supplement.
+ */
+export function poiVisible(state: OverlayStateMap, profileId: string): boolean {
+  return state[`${profileId}:${POI_STATE_ID}`]?.on ?? true;
 }
 
 /**

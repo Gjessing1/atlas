@@ -187,6 +187,19 @@ describe('useOverlayPreferences', () => {
     });
   });
 
+  describe('the points-of-interest switch', () => {
+    it('draws until the device says otherwise, per profile', async () => {
+      const { result, rerender, saved } = render({ profileId: 'explore' });
+      await loaded(result);
+      expect(result.current.poiOn).toBe(true);
+      act(() => result.current.setPoiOn(false));
+      await waitFor(() => expect(result.current.poiOn).toBe(false));
+      expect(saved()).toEqual({ 'explore:points-of-interest': { on: false } });
+      rerender({ profileId: 'hike' });
+      expect(result.current.poiOn).toBe(true);
+    });
+  });
+
   describe('opacity', () => {
     it('falls back to the catalog default and then to the stored value', async () => {
       const { result, saved } = render({ profileId: 'explore' });

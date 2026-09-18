@@ -37,6 +37,7 @@ async function loadStyle(
   profile: string,
   custom: MapStyleOverrides,
   basemap: boolean,
+  poi: boolean,
   terrain: boolean,
 ): Promise<string | StyleSpecification> {
   try {
@@ -53,6 +54,7 @@ async function loadStyle(
         profile,
         custom,
         basemap,
+        poi,
         // Unconditional: only the outdoor profiles bind it, and a server with
         // no archive answers empty rather than wrong (see outdoorTilesUrl).
         outdoorTiles: outdoorTilesUrl(origin),
@@ -124,6 +126,8 @@ interface MapViewProps {
    * in it is read honestly (see `MapAppearance.basemap`).
    */
   basemap: boolean;
+  /** Draw OSM points of interest from the basemap and outdoor supplement. */
+  poi: boolean;
   /** Web-only DEM mesh; Android intentionally keeps its native 2D renderer. */
   terrain: boolean;
   /** Incremented by the shared control grid to trigger MapLibre geolocation. */
@@ -144,6 +148,7 @@ export function MapView({
   profile,
   customStyle,
   basemap,
+  poi,
   terrain,
   locateRequest,
 }: MapViewProps) {
@@ -293,13 +298,13 @@ export function MapView({
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
-    void loadStyle(colorScheme, profile, customStyle, basemap, terrain).then((style) => {
+    void loadStyle(colorScheme, profile, customStyle, basemap, poi, terrain).then((style) => {
       if (!cancelled) map.setStyle(style);
     });
     return () => {
       cancelled = true;
     };
-  }, [map, colorScheme, profile, customStyle, basemap, terrain]);
+  }, [map, colorScheme, profile, customStyle, basemap, poi, terrain]);
 
   // The mesh exists in a top-down camera too, but reads as an ordinary flat
   // map. Enter/leave with a deliberate camera move so the control has an

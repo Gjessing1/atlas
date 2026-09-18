@@ -245,6 +245,22 @@ export function LayersContent({
         />
       ) : null}
       {note ? <Text style={styles.profileNote}>{note}</Text> : null}
+      <View style={styles.row}>
+        <Pressable
+          style={styles.toggleRow}
+          onPress={() => overlays.setPoiOn(!overlays.poiOn)}
+          testID="layer-toggle-points-of-interest"
+        >
+          <Text style={styles.layerTitle}>Points of interest</Text>
+          <View style={[styles.toggle, overlays.poiOn ? styles.toggleOn : null]}>
+            <View style={[styles.toggleThumb, overlays.poiOn ? styles.toggleThumbOn : null]} />
+          </View>
+        </Pressable>
+        <Text style={styles.muted}>
+          Shops, food, services, sights and outdoor places already carried by the map. Labels appear
+          as you zoom in — this profile only.
+        </Text>
+      </View>
       {/* The map the overlays are drawn on, above the overlays themselves. Off
           is how a raster with holes in it — a 1826 amtskart sheet, the edge of a
           bathymetry survey — is read honestly: today's coloured land fills those
