@@ -9,6 +9,8 @@ import {
   mapProfile,
   mapProfileForRouting,
   placeIsVisible,
+  poiResultTarget,
+  poiViewportUrl,
   placeTargetTitle,
   resolveInaturOffer,
   savedPlaceAt,
@@ -20,6 +22,7 @@ import {
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
   type PlaceTarget,
+  type PoiResult,
   type SearchResult,
   type SettingsSectionId,
   type ShareFormat,
@@ -47,6 +50,7 @@ import {
   usePotential,
   usePotentialExplain,
   usePotentialTarget,
+  usePoiViewport,
   useLayerFilters,
   usePlanningAreas,
   useThemeMode,
@@ -57,6 +61,7 @@ import {
   type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
+  type PoiViewportFetch,
 } from '@atlas/app-hooks';
 import {
   AURORA_FORECAST_ID,
@@ -103,6 +108,7 @@ import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
 import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
 import { useSatellitesLayer } from './map/useSatellitesLayer.js';
 import { useExploreLayer } from './map/useExploreLayer.js';
+import { usePoiLayer } from './map/usePoiLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
 import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
@@ -134,6 +140,7 @@ import { useTransitPlan } from './routing/useTransit.js';
 import { prepareWebTransitAlarms, TransitGuidance } from './transit/TransitGuidance.js';
 import { PlaceCard } from './place/PlaceCard.js';
 import { PlaceEditDialog } from './place/PlaceEditDialog.js';
+import { PoiViewportPanel } from './poi/PoiViewportPanel.js';
 import { SatellitePassCard } from './satellites/SatellitePassCard.js';
 import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
@@ -372,6 +379,17 @@ export function App() {
       map.off('moveend', onMove);
     };
   }, [map]);
+  const fetchPois = useCallback<PoiViewportFetch>(async ({ bbox, categories, signal }) => {
+    const response = await fetch(poiViewportUrl('', bbox, categories), { signal });
+    if (!response.ok) throw new Error(`POIs: HTTP ${response.status}`);
+    return ((await response.json()) as { results: PoiResult[] }).results;
+  }, []);
+  const viewportPois = usePoiViewport({
+    active: layers.poiOn,
+    viewport: mapViewport,
+    categories: layers.poiCategories,
+    fetchPois,
+  });
 
   // Derived potential surfaces: queue the cells under the viewport and
   // say what is happening while they build. `readyKey` rides into the raster
@@ -750,6 +768,32 @@ export function App() {
     },
     [closePanels, followPin],
   );
+  const onPickPoi = useCallback((result: PoiResult) => {
+    const picked = poiResultTarget(result);
+    setTarget(picked);
+    const current = mapRef.current;
+    if (current) current.easeTo({ center: result.position, duration: 350 });
+    if (!picked.address) {
+      const params = new URLSearchParams({
+        lat: String(result.position.lat),
+        lon: String(result.position.lng),
+      });
+      void fetch(`/api/search/reverse?${params}`)
+        .then(async (response) =>
+          response.ok ? ((await response.json()) as { result: SearchResult | null }).result : null,
+        )
+        .then((reverse) => {
+          if (!reverse?.address) return;
+          const address = reverse.address;
+          setTarget((currentTarget) => {
+            if (!currentTarget || currentTarget.osmUrl !== picked.osmUrl) return currentTarget;
+            return { ...currentTarget, address };
+          });
+        })
+        .catch(() => undefined);
+    }
+  }, []);
+  usePoiLayer(map, viewportPois.results, onPickPoi, blockPassiveClicksRef);
   const onPickExplore = useCallback(
     (result: SearchResult) => {
       setExploreSelection(
@@ -1349,7 +1393,13 @@ export function App() {
         <WeatherDock
           maps={weatherMaps}
           title={weatherOverlay?.meta.title ?? ''}
-          shifted={leftPanelOpen || spotsOpen || standBoardOpen || Boolean(target)}
+          shifted={
+            leftPanelOpen ||
+            spotsOpen ||
+            standBoardOpen ||
+            Boolean(target) ||
+            (layers.poiOn && !leftPanelOpen)
+          }
           compactHidden={Boolean(target) || route.active}
           sky={skyLayers}
           lightningOn={lightningOn}
@@ -1495,6 +1545,16 @@ export function App() {
           onRemovePin={() => onPinChange(null)}
           onShowNearby={onShowNearbyPlace}
           onClose={() => setTarget(null)}
+        />
+      )}
+      {layers.poiOn && !leftPanelOpen && !target && !route.active && nav.phase === 'idle' && (
+        <PoiViewportPanel
+          results={viewportPois.results}
+          loading={viewportPois.loading}
+          error={viewportPois.error}
+          tooWide={viewportPois.tooWide}
+          onPick={onPickPoi}
+          onRefresh={viewportPois.refresh}
         />
       )}
       {exploreOpen && nav.phase === 'idle' && (

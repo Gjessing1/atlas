@@ -62,6 +62,10 @@ export interface DestinationTarget {
   placeId?: string;
   /** Exact National Stop Register identity, when picked from Entur stop search. */
   transitStopId?: string;
+  phone?: string;
+  openingHours?: string;
+  website?: string;
+  osmUrl?: string;
   /** False when the basemap already draws the selected POI at this coordinate. */
   showMapMarker?: boolean;
   /**
@@ -184,7 +188,35 @@ export function DestinationCard({
   // then is there anything for "Show more" to do.
   const identifyClipped = identifyCardLines(identify) > 6;
   const at = { lat: target.lat, lng: target.lng };
-  const facts = usePlaceFacts(useServerOrigin(), at);
+  const origin = useServerOrigin();
+  const [reverseAddress, setReverseAddress] = useState<string | undefined>();
+  useEffect(() => {
+    setReverseAddress(undefined);
+    if (target.address || !target.osmUrl) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ lat: String(target.lat), lon: String(target.lng) });
+    void fetch(`${origin}/api/search/reverse?${params}`, { signal: controller.signal })
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as { result?: { address?: string } | null }).result
+          : null,
+      )
+      .then((result) => {
+        if (result?.address) setReverseAddress(result.address);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [origin, target.address, target.lat, target.lng, target.osmUrl]);
+  const address = target.address ?? reverseAddress;
+  const websiteUrl = target.website
+    ? /^https?:\/\//i.test(target.website)
+      ? target.website
+      : `https://${target.website}`
+    : undefined;
+  const hasPoiDetails = Boolean(
+    address || target.phone || target.openingHours || websiteUrl || target.osmUrl,
+  );
+  const facts = usePlaceFacts(origin, at);
   const content = usePlaceContent(packs, target.name, at);
   const [photosOpen, setPhotosOpen] = useState(false);
   // Photos are a deliberate feature beside Nearby places, not eager card
@@ -248,6 +280,7 @@ export function DestinationCard({
         // Elevation is always a row; the light line is usually a second one and
         // wraps to two on a narrow phone.
         (facts.light ? 46 : 22) +
+        (hasPoiDetails ? 132 : 0) +
         // The explain block is several rows of reasoning; without its own
         // allowance it would push the actions off the peeked sheet.
         (potential ? 200 : 0)
@@ -277,6 +310,61 @@ export function DestinationCard({
       </View>
 
       <PlaceFacts {...facts} />
+
+      {hasPoiDetails ? (
+        <View style={styles.poiDetails} testID="destination-poi-details">
+          {address ? (
+            <View style={styles.poiDetailRow}>
+              <Text style={styles.poiDetailLabel}>Address</Text>
+              <Text style={styles.poiDetailValue} selectable>
+                {address}
+              </Text>
+            </View>
+          ) : null}
+          {target.openingHours ? (
+            <View style={styles.poiDetailRow}>
+              <Text style={styles.poiDetailLabel}>Hours</Text>
+              <Text style={styles.poiDetailValue} selectable>
+                {target.openingHours}
+              </Text>
+            </View>
+          ) : null}
+          {target.phone ? (
+            <View style={styles.poiDetailRow}>
+              <Text style={styles.poiDetailLabel}>Phone</Text>
+              <Text
+                style={[styles.poiDetailValue, styles.poiDetailLink]}
+                onPress={() => void Linking.openURL(`tel:${target.phone}`)}
+                selectable
+              >
+                {target.phone}
+              </Text>
+            </View>
+          ) : null}
+          {websiteUrl ? (
+            <View style={styles.poiDetailRow}>
+              <Text style={styles.poiDetailLabel}>Website</Text>
+              <Text
+                style={[styles.poiDetailValue, styles.poiDetailLink]}
+                onPress={() => void Linking.openURL(websiteUrl)}
+              >
+                Open website ↗
+              </Text>
+            </View>
+          ) : null}
+          {target.osmUrl ? (
+            <View style={styles.poiDetailRow}>
+              <Text style={styles.poiDetailLabel}>Source</Text>
+              <Text
+                style={[styles.poiDetailValue, styles.poiDetailLink]}
+                onPress={() => void Linking.openURL(target.osmUrl!)}
+              >
+                OpenStreetMap ↗
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Above the surface's own reading when this pin *is* a stand: the ground
         is context, but which way to face is what the user came back for. */}
@@ -596,6 +684,17 @@ const styles = StyleSheet.create({
   // enough to wrap, and wrapping under a ragged label reads as two columns.
   factLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
   factValue: { fontSize: 12, color: theme.text },
+  poiDetails: {
+    marginTop: 10,
+    gap: 5,
+    padding: 9,
+    borderRadius: 8,
+    backgroundColor: theme.surfaceMuted,
+  },
+  poiDetailRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  poiDetailLabel: { width: 58, fontSize: 12, fontWeight: '600', color: theme.textMuted },
+  poiDetailValue: { flex: 1, fontSize: 12, color: theme.text },
+  poiDetailLink: { color: theme.accent, textDecorationLine: 'underline' },
   identify: { maxHeight: 132, marginTop: 12 },
   // Opened by "Show more" — still bounded, so the card's actions stay on the
   // sheet however much the upstream has to say.

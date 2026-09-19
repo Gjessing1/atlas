@@ -4,11 +4,13 @@ import {
   exploreResultsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  poiResultsFeatureCollection,
   routeDeltaLabel,
   savedStandFeatures,
   waypointLabel,
   type BBox,
   type LatLng,
+  type PoiResult,
   type SearchResult,
 } from '@atlas/core';
 import {
@@ -298,6 +300,8 @@ interface MapSceneProps {
   spots: readonly PotentialSpot[];
   /** Numbered category-browse results, retained while the picked card is open. */
   exploreResults: readonly SearchResult[];
+  /** Explicit category pins queried for the settled viewport. */
+  poiResults: readonly PoiResult[];
   /** The measure tool's ruler/rings while it is open, else null. */
   measure: GeoJSON.FeatureCollection | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
@@ -380,6 +384,7 @@ export function MapScene({
   chromeLift,
   spots,
   exploreResults,
+  poiResults,
   measure,
   trackGeo,
   offlineRegionCorner,
@@ -404,6 +409,7 @@ export function MapScene({
 }: MapSceneProps) {
   const mapViewportRef = useRef<View>(null);
   const exploreSourceRef = useRef<GeoJSONSourceRef>(null);
+  const poiSourceRef = useRef<GeoJSONSourceRef>(null);
   const measureMapViewport = useCallback(() => {
     requestAnimationFrame(() => {
       mapViewportRef.current?.measureInWindow((x, y, width, height) => {
@@ -1340,6 +1346,108 @@ export function MapScene({
                 'text-ignore-placement': true,
               }}
               paint={{ 'text-color': '#ffffff' }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {!inPip && poiResults.length > 0 ? (
+          <GeoJSONSource
+            ref={poiSourceRef}
+            id="atlas-poi-results"
+            data={poiResultsFeatureCollection(poiResults)}
+            cluster
+            clusterRadius={34}
+            clusterMaxZoom={15}
+            onPress={(event) => {
+              const feature = event.nativeEvent.features[0];
+              const clusterId = feature?.properties?.['cluster_id'];
+              if (typeof clusterId !== 'number' || feature?.geometry.type !== 'Point') return;
+              const coordinates = (feature.geometry as { coordinates: number[] }).coordinates;
+              event.stopPropagation();
+              void poiSourceRef.current?.getClusterExpansionZoom(clusterId).then((zoom) => {
+                if (coordinates.length < 2) return;
+                cameraRef.current?.easeTo({
+                  center: [coordinates[0]!, coordinates[1]!],
+                  zoom,
+                  duration: 450,
+                });
+              });
+            }}
+          >
+            <Layer
+              type="circle"
+              id="atlas-poi-results-cluster"
+              filter={['has', 'point_count']}
+              paint={{
+                'circle-radius': ['step', ['get', 'point_count'], 17, 10, 21, 30, 25],
+                'circle-color': '#0e7490',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2.5,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-poi-results-cluster-count"
+              filter={['has', 'point_count']}
+              layout={{
+                'text-field': ['get', 'point_count_abbreviated'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 12,
+                'text-allow-overlap': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-poi-results-halo"
+              filter={['!', ['has', 'point_count']]}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 12, 14, 17],
+                'circle-color': '#ffffff',
+                'circle-opacity': 0.96,
+              }}
+            />
+            <Layer
+              type="circle"
+              id="atlas-poi-results-disc"
+              filter={['!', ['has', 'point_count']]}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 9, 14, 14],
+                'circle-color': '#0e7490',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 1.5,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-poi-results-number"
+              filter={['!', ['has', 'point_count']]}
+              layout={{
+                'text-field': ['get', 'label'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10, 14, 13],
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+              }}
+              paint={{ 'text-color': '#ffffff' }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-poi-results-name"
+              filter={['!', ['has', 'point_count']]}
+              minzoom={15}
+              layout={{
+                'text-field': ['get', 'name'],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 11,
+                'text-anchor': 'top',
+                'text-offset': [0, 1.5],
+                'text-optional': true,
+              }}
+              paint={{
+                'text-color': '#172033',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.5,
+              }}
             />
           </GeoJSONSource>
         ) : null}

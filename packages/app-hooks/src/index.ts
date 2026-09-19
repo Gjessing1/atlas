@@ -188,6 +188,12 @@ export {
   type ExploreQuery,
   type ExploreState,
 } from './useExplore.js';
+export {
+  usePoiViewport,
+  type PoiViewport,
+  type PoiViewportFetch,
+  type PoiViewportState,
+} from './usePoiViewport.js';
 export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
   useWeatherGrid,

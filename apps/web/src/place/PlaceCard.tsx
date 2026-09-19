@@ -431,6 +431,11 @@ export function PlaceCard({
   const title = target.name?.trim() || saved?.name || coords;
   // A bare pin already shows its coordinates as the heading; don't repeat them.
   const showCoords = title !== coords;
+  const websiteUrl = target.website
+    ? /^https?:\/\//i.test(target.website)
+      ? target.website
+      : `https://${target.website}`
+    : undefined;
 
   // Both "what is this spot like" facts from one shared hook, so the two cards
   // cannot end up with different halves of the pair.
@@ -471,6 +476,50 @@ export function PlaceCard({
           </div>
         )}
       </dl>
+      {(target.address || target.phone || target.openingHours || websiteUrl || target.osmUrl) && (
+        <dl className="place-card-poi-details" data-testid="place-card-poi-details">
+          {target.address && (
+            <div>
+              <dt>Address</dt>
+              <dd>{target.address}</dd>
+            </div>
+          )}
+          {target.openingHours && (
+            <div>
+              <dt>Hours</dt>
+              <dd>{target.openingHours}</dd>
+            </div>
+          )}
+          {target.phone && (
+            <div>
+              <dt>Phone</dt>
+              <dd>
+                <a href={`tel:${target.phone}`}>{target.phone}</a>
+              </dd>
+            </div>
+          )}
+          {websiteUrl && (
+            <div>
+              <dt>Website</dt>
+              <dd>
+                <a href={websiteUrl} target="_blank" rel="noreferrer">
+                  Open website ↗
+                </a>
+              </dd>
+            </div>
+          )}
+          {target.osmUrl && (
+            <div>
+              <dt>Source</dt>
+              <dd>
+                <a href={target.osmUrl} target="_blank" rel="noreferrer">
+                  OpenStreetMap ↗
+                </a>
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
       {/* Why the derived surface scores this spot the way it does. Above the
           encyclopaedia content on purpose: the user tapped the water they were
           looking at, and the answer to *that* comes before a Wikipedia article

@@ -146,6 +146,12 @@ export interface PlaceTarget {
   placeId?: string;
   /** Exact National Stop Register identity, when the target came from Entur search. */
   transitStopId?: string;
+  /** Contact and visit details carried by a queried OSM POI when tagged. */
+  phone?: string;
+  openingHours?: string;
+  website?: string;
+  /** Canonical source feature, useful when details need correcting upstream. */
+  osmUrl?: string;
   /**
    * What the visible overlays say sits here (tap-to-identify: a lake's surveyed
    * depth, a parcel's number). Arrives *after* the card opens — the network

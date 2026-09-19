@@ -19,6 +19,7 @@ import { registerAppLinks } from './applinks.js';
 import { registerElevationApi, type ElevationApiOptions } from './elevation-api.js';
 import { registerDiagnosticsApi } from './diagnostics-api.js';
 import { registerExploreApi } from './explore-api.js';
+import { registerPoiApi, type PoiApiOptions } from './poi-api.js';
 import {
   registerOverlayApi,
   speedCameraLayerMeta,
@@ -134,6 +135,8 @@ export interface AppOptions {
   elevationApi?: Pick<ElevationApiOptions, 'fetchImpl' | 'userAgent'>;
   /** Test seam for Wikimedia place summaries. */
   placeContentApi?: PlaceContentApiOptions;
+  /** Test/deployment seams for full-tag OpenStreetMap POI viewport queries. */
+  poiApi?: PoiApiOptions;
   /** Test/deployment seams for custom offline-region extraction. */
   regionJobs?: RegionJobOptions;
   /** Test seams for the derived-potential engine. */
@@ -182,6 +185,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // catalog sources register themselves inside registerOverlayApi/Weather.
   const status = new StatusRegistry();
   status.register('photon', 'Photon (search)', 'Search');
+  status.register('overpass', 'OpenStreetMap places', 'Search');
   status.register(ROUTING_STATUS_ID, 'Valhalla (routing)', 'Routing');
 
   // Rate limiting, registered before any route so per-route `config.rateLimit`
@@ -322,6 +326,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // never talks to it directly (single origin, no CORS, URL stays private).
   const photonUrl = opts.photonUrl ?? process.env.PHOTON_URL ?? 'http://127.0.0.1:2322';
   registerExploreApi(app, photonUrl, status);
+  registerPoiApi(app, opts.poiApi, status);
   registerPlaceContentApi(app, opts.placeContentApi);
   app.get<{
     Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };

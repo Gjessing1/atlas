@@ -18,6 +18,7 @@ import {
   useRoutePlanPersistence,
   usePotentialExplain,
   usePotentialTarget,
+  usePoiViewport,
   useLayerFilters,
   usePlanningAreas,
   useStandBoard,
@@ -28,6 +29,7 @@ import {
   type CommuteFn,
   type StandBoardRow,
   type StopLinesFn,
+  type PoiViewportFetch,
 } from '@atlas/app-hooks';
 import {
   atlasRouteUrl,
@@ -36,6 +38,7 @@ import {
   mapProfile,
   mapProfileForRouting,
   placeIsVisible,
+  poiViewportUrl,
   resolveInaturOffer,
   SATELLITES_ID,
   savedPlaceAt,
@@ -44,6 +47,7 @@ import {
   type LatLng,
   type MapAppearance,
   type NearbyPlaceArticle,
+  type PoiResult,
   type SearchResult,
   type VisibilityFolder,
   type SettingsSectionId,
@@ -547,6 +551,20 @@ function AppInner() {
       ),
     };
   }, [camera.mapViewport]);
+  const fetchPois = useCallback<PoiViewportFetch>(
+    async ({ bbox, categories, signal }) => {
+      const response = await fetch(poiViewportUrl(serverOrigin, bbox, categories), { signal });
+      if (!response.ok) throw new Error(`POIs: HTTP ${response.status}`);
+      return ((await response.json()) as { results: PoiResult[] }).results;
+    },
+    [serverOrigin],
+  );
+  const viewportPois = usePoiViewport({
+    active: overlaysCtl.poiOn,
+    viewport: camera.mapViewport,
+    categories: overlaysCtl.poiCategories,
+    fetchPois,
+  });
   // Stop search for the commute board's ends, biased to where the map is looking.
   const stopGeocode = useGeocode(packs, getBias);
   // The half-built plan survives the app being killed in the background, and a
@@ -901,6 +919,24 @@ function AppInner() {
     },
     [bestSpots.spots, onPickSpot],
   );
+  const onPickPoi = useCallback(
+    (result: PoiResult) => {
+      pickOnMap({
+        lat: result.position.lat,
+        lng: result.position.lng,
+        name: result.name,
+        detail: result.category,
+        address: result.address,
+        phone: result.phone,
+        openingHours: result.openingHours,
+        website: result.website,
+        osmUrl: result.osmUrl,
+        canSave: true,
+        showMapMarker: false,
+      });
+    },
+    [pickOnMap],
+  );
   const onPickExplore = useCallback(
     (result: SearchResult) => {
       setExploreSelection(
@@ -961,6 +997,8 @@ function AppInner() {
     pickSpot: onPickSpotById,
     exploreResults,
     pickExplore: onPickExplore,
+    poiResults: viewportPois.results,
+    pickPoi: onPickPoi,
     leadingIdentify: weatherAtTap,
   });
   const selectOfflineRegionPoint = useCallback((point: LatLng) => {
@@ -1484,6 +1522,7 @@ function AppInner() {
         chromeLift={weatherDockLift}
         spots={spotsOpen ? bestSpots.spots : EMPTY_SPOTS}
         exploreResults={exploreResults}
+        poiResults={viewportPois.results}
         measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}
         offlineRegionCorner={offlineRegion?.corner ?? null}

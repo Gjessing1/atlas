@@ -275,6 +275,37 @@ button {
   min-width: 0;
 }
 
+.place-card-poi-details {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.place-card-poi-details > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.place-card-poi-details dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.place-card-poi-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.place-card-poi-details a {
+  color: var(--accent);
+}
+
 /* --- Satellite pass card -------------------------------------------------
    It occupies the established place-card surface because only one thing can be
    the map's subject at a time, but its rows describe an orbit and an observer
@@ -6085,6 +6116,135 @@ button.transit-notice-summary {
   width: max-content;
 }
 
+/* The numbered pins and this list are one answer: the index on the map is the
+   index here, so even a category with an unfamiliar cartographic symbol stays
+   self-explanatory. */
+.poi-results-panel {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  z-index: 4;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100% - 150px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--floating-border);
+  border-radius: var(--floating-radius);
+  background: var(--surface-overlay);
+  box-shadow: var(--floating-shadow);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+}
+
+.poi-results-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poi-results-head > span:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.poi-results-head small,
+.poi-results-panel > p {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.poi-results-panel > p {
+  margin: 0;
+  padding: 4px 11px 12px;
+}
+
+.poi-results-refresh {
+  align-self: flex-start;
+  margin: 0 11px 9px;
+}
+
+.poi-results-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.poi-results-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.poi-results-list button {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poi-results-list button:hover {
+  background: var(--surface-selected);
+}
+
+.poi-result-number {
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #0e7490;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.poi-result-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.poi-result-copy strong,
+.poi-result-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.poi-result-copy small,
+.poi-result-distance {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.poi-result-distance {
+  flex: 0 0 auto;
+}
+
 .sky-control {
   min-height: 50px;
 }
@@ -8727,7 +8887,8 @@ button.transit-notice-summary {
   .sidebar,
   .settings-panel,
   .commute-panel,
-  .explore-panel {
+  .explore-panel,
+  .poi-results-panel {
     left: 8px;
     right: 8px;
     width: auto;

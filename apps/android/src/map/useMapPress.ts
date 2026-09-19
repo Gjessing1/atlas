@@ -11,6 +11,7 @@ import {
   roadWeatherIdentify,
   type LatLng,
   type OverlayIdentifyGroup,
+  type PoiResult,
   type SearchResult,
 } from '@atlas/core';
 import {
@@ -93,6 +94,9 @@ export interface MapPressOptions {
   /** Numbered Explore markers use the same reliable distance hit-test as spots. */
   exploreResults?: readonly SearchResult[];
   pickExplore?: (result: SearchResult) => void;
+  /** Explicit queried category pins, carrying full OSM details. */
+  poiResults?: readonly PoiResult[];
+  pickPoi?: (result: PoiResult) => void;
   /**
    * Answers that lead the card and come from neither a drawn feature nor an
    * overlay's identify route: the weather at the tapped point, while a weather
@@ -139,6 +143,8 @@ export function useMapPress({
   pickSpot,
   exploreResults,
   pickExplore,
+  poiResults,
+  pickPoi,
   leadingIdentify,
 }: MapPressOptions): MapPressHandlers {
   const leadingRef = useRef(leadingIdentify);
@@ -394,6 +400,21 @@ export function useMapPress({
             return;
           }
         }
+        if (poiResults?.length && pickPoi) {
+          let bestResult: PoiResult | undefined;
+          let bestResultM = Infinity;
+          for (const result of poiResults) {
+            const d = haversineM({ lat, lng }, result.position);
+            if (d < bestResultM) {
+              bestResultM = d;
+              bestResult = result;
+            }
+          }
+          if (bestResult && bestResultM <= toleranceM) {
+            pickPoi(bestResult);
+            return;
+          }
+        }
         const best = tappedPlace(toleranceM);
         if (best) {
           pickDestination({
@@ -427,6 +448,8 @@ export function useMapPress({
       pickSpot,
       exploreResults,
       pickExplore,
+      poiResults,
+      pickPoi,
     ],
   );
 
