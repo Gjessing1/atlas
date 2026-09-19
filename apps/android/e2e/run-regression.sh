@@ -105,6 +105,28 @@ if [[ "$("$adb" shell getprop ro.boot.qemu.avd_name | tr -d '\r')" != "atlas_tes
   exit 1
 fi
 
+# sys.boot_completed can flip before the package service answers — on a cold boot under load
+# (2026-09-19, right after the candidate's Gradle build) the install died with "Failure calling
+# service package: Broken pipe" before the app was ever on the device.
+for _ in $(seq 1 60); do
+  if "$adb" shell pm path android >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
 echo "Installing Android release candidate: $apk"
-"$adb" install -r -d "$apk"
+installed=0
+for attempt in 1 2 3; do
+  if "$adb" install -r -d "$apk"; then
+    installed=1
+    break
+  fi
+  echo "install attempt $attempt failed; retrying in 10 s" >&2
+  sleep 10
+done
+if ((!installed)); then
+  echo "could not install $apk" >&2
+  exit 1
+fi
 node "$app_dir/e2e/regression.mjs"

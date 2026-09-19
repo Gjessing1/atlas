@@ -187,14 +187,60 @@ async function tap(id, timeoutMs = 45_000) {
   tapId(xml, id);
 }
 
+// The quick menu's ScrollView carries no testID, and a dump lists only rows on
+// screen: Points of interest and Base map sit at its foot, below the catalog
+// groups. Swipe inside the visible rows' own bounds until the target shows.
+const QUICK_MENU_CHROME = new Set([
+  'layer-quick-toggle',
+  'layer-quick-backdrop',
+  'layer-quick-search-toggle',
+  'layer-quick-search',
+]);
+
+async function tapQuickLayer(id) {
+  await waitForId('layer-quick-backdrop');
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const xml = hierarchy();
+    const target = visibleNode(xml, id);
+    if (target) {
+      tapBounds(target.bounds);
+      return;
+    }
+    const rows = nodeIds(xml)
+      .filter((rowId) => rowId.startsWith('layer-quick-') && !QUICK_MENU_CHROME.has(rowId))
+      .map((rowId) => visibleNode(xml, rowId)?.bounds)
+      .filter(Boolean);
+    if (rows.length === 0) throw new Error(`Quick layer menu shows no rows to scroll toward ${id}`);
+    const top = Math.min(...rows.map((b) => b.top));
+    const bottom = Math.max(...rows.map((b) => b.bottom));
+    swipeWithin(
+      { left: rows[0].left, right: rows[0].right, top, bottom, height: bottom - top },
+      'up',
+    );
+    await delay(400);
+  }
+  throw new Error(`Could not bring ${id} into view in the quick layer menu`);
+}
+
+// Tapping the backdrop by id taps its centre, which a full menu covers with its
+// own header. Dismiss from near the top of the screen, above the menu and the
+// bottom dock.
+async function closeQuickLayerMenu() {
+  const xml = await waitForId('layer-quick-backdrop');
+  const { bounds } = visibleNode(xml, 'layer-quick-backdrop');
+  const y = bounds.top + 200;
+  tapBounds({ left: bounds.left, right: bounds.right, top: y, bottom: y });
+  await waitForId('layer-quick-backdrop', false);
+}
+
 async function verifyPoiCategoryDock() {
   await tap('layer-quick-toggle');
-  await tap('layer-quick-points-of-interest');
+  await tapQuickLayer('layer-quick-points-of-interest');
   let xml = await waitForId('poi-category-all');
   if (!nodeForId(xml, 'poi-category-groceries')) {
     throw new Error('POI layer did not expose the practical category pills');
   }
-  await tap('layer-quick-backdrop');
+  await closeQuickLayerMenu();
   await tap('poi-category-groceries');
   xml = await waitForId('poi-category-groceries');
   if (!nodeForId(xml, 'poi-category-groceries')?.includes('selected="true"')) {
@@ -204,9 +250,9 @@ async function verifyPoiCategoryDock() {
   // Restore the opt-in layer to off so the dock cannot cover unrelated map
   // controls later in this long scenario. Its focused category may persist.
   await tap('layer-quick-toggle');
-  await tap('layer-quick-points-of-interest');
+  await tapQuickLayer('layer-quick-points-of-interest');
   await waitForId('poi-category-all', false);
-  await tap('layer-quick-backdrop');
+  await closeQuickLayerMenu();
 }
 
 function swipeWithin(bounds, direction) {

@@ -41,6 +41,13 @@ the log). Taps and key events are lost meanwhile. The first victim is usually
   (2026-09-17) — and the regression starts the moment it finishes. For a retry, build once, wait
   for `uptime` to fall, then run with `ATLAS_ANDROID_REGRESSION_APK`.
 
+- **A cold boot straight after the APK build can fail the install itself.** With no
+  `default_boot` snapshot the AVD cold-boots, and on 2026-09-19 (1-minute load 10.5 from the
+  Gradle build) `adb install` died with `Failure calling service package: Broken pipe (32)` —
+  `sys.boot_completed` had already read 1. `run-regression.sh` now waits for `pm path android`
+  and retries the install; if it still fails, the APK is fine — rerun with
+  `ATLAS_ANDROID_REGRESSION_APK` once the load falls.
+
 ### Text input can drop even after the retries
 
 `replaceText` types one key at a time and retries four times, re-focusing the field on each pass
@@ -98,16 +105,25 @@ before that destination. Also:
   too, and the kill is refused ("Operation not permitted"). Worse, the calling shell's own
   command line contains the pattern, so pkill kills the script itself (exit 144) along with
   your server. Kill your own server by its saved PID.
+- **An ad-hoc script must pin portrait itself.** `accelerometer_rotation 0` alone left the AVD in
+  landscape (2026-09-18), where the settings sheet shows two rows and `tapAfterScroll` gives up.
+  Set `user_rotation 0` too, as `regression.mjs` does.
+- **Offline behaviour is tested by stopping the server, not by a network switch.** Point the app
+  at a throwaway backend (`PORT=… ATLAS_DATA_DIR=<scratch> node backend/dist/index.js`, with a pack
+  under `<scratch>/packs/<id>/` — the `/packs/` route is only registered if that directory exists
+  at startup), download what you need, then kill that backend by PID. Overlay and basemap tiles
+  then fail exactly as they do with no signal; `pm clear` first so no streamed tile is cached.
 - **An ad-hoc script must `am force-stop` the app first.** A run that dies with a menu or sheet
   open leaves its backdrop up, and the next run's first tap lands on it instead of the button.
 - **`adb install -r` keeps app data.** The saved server origin, layer state and profile from the
   last run are still there. The regression starts with `pm clear`; an ad-hoc check can use that
   to skip reconfiguring.
 - **Scrolling lists only dump what is on screen.** The layer quick menu's rows below the fold
-  (the Weather group, Base map) are absent from `uiautomator dump`. Scroll using the visible
-  `layer-quick-*` rows' bounds until the target appears.
+  (the Weather group, Points of interest, Base map) are absent from `uiautomator dump`. Use
+  `tapQuickLayer(id)` in `regression.mjs`, which scrolls within the visible `layer-quick-*`
+  rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
-  menu row. Dismiss by tapping near the top of the screen.
+  menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
 - **The AVD draws no MapLibre symbol text.** Place names, wind arrows and temperature numbers are
   invisible here. Rasters, fills, circles and ordinary React Native views render and screenshot
   normally, so verify a symbol layer on a real device or through a temporary `circle` layer on
