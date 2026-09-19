@@ -326,7 +326,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // never talks to it directly (single origin, no CORS, URL stays private).
   const photonUrl = opts.photonUrl ?? process.env.PHOTON_URL ?? 'http://127.0.0.1:2322';
   registerExploreApi(app, photonUrl, status);
-  registerPoiApi(app, opts.poiApi, status);
+  registerPoiApi(app, { dataDir: opts.dataDir, ...opts.poiApi }, status);
   registerPlaceContentApi(app, opts.placeContentApi);
   app.get<{
     Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };

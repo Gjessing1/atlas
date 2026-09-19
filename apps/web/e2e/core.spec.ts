@@ -70,28 +70,38 @@ test('POI categories query the viewport and open a full details card', async ({ 
     }),
   );
   await page.route('**/e2e/**', (route) => route.fulfill({ status: 204 }));
-  await page.route('**/api/pois?**', (route) =>
-    route.fulfill({
+  const market = {
+    id: 'node/42',
+    name: 'Atlas Market',
+    position: { lat: 59.91, lng: 10.75 },
+    categoryId: 'groceries',
+    category: 'Groceries',
+    marker: 'G',
+    address: 'Kartgata 1, 0001 Oslo',
+    phone: '+47 12 34 56 78',
+    openingHours: 'Mo-Sa 08:00-22:00',
+    website: 'https://example.com/market',
+    osmUrl: 'https://www.openstreetmap.org/node/42',
+  };
+  // Answers every asked (tile, category) pair; the market sits in every
+  // groceries pair, and the client merges it to the one place in view.
+  await page.route('**/api/pois?**', (route) => {
+    const url = new URL(route.request().url());
+    const tiles = url.searchParams.get('tiles')?.split(',') ?? [];
+    const categories = url.searchParams.get('categories')?.split(',') ?? ['groceries'];
+    return route.fulfill({
       json: {
-        results: [
-          {
-            id: 'node/42',
-            name: 'Atlas Market',
-            position: { lat: 59.91, lng: 10.75 },
-            categoryId: 'groceries',
-            category: 'Groceries',
-            marker: 'G',
-            address: 'Kartgata 1, 0001 Oslo',
-            phone: '+47 12 34 56 78',
-            openingHours: 'Mo-Sa 08:00-22:00',
-            website: 'https://example.com/market',
-            osmUrl: 'https://www.openstreetmap.org/node/42',
-            distanceM: 12,
-          },
-        ],
+        tiles: tiles.flatMap((tile) =>
+          categories.map((category) => ({
+            tile,
+            category,
+            complete: true,
+            results: category === 'groceries' ? [market] : [],
+          })),
+        ),
       },
-    }),
-  );
+    });
+  });
   await page.goto('/');
   await waitForMap(page);
 

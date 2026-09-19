@@ -38,7 +38,7 @@ import {
   mapProfile,
   mapProfileForRouting,
   placeIsVisible,
-  poiViewportUrl,
+  poiTilesUrl,
   resolveInaturOffer,
   SATELLITES_ID,
   savedPlaceAt,
@@ -48,6 +48,7 @@ import {
   type MapAppearance,
   type NearbyPlaceArticle,
   type PoiResult,
+  type PoiTileResults,
   type SearchResult,
   type VisibilityFolder,
   type SettingsSectionId,
@@ -552,10 +553,10 @@ function AppInner() {
     };
   }, [camera.mapViewport]);
   const fetchPois = useCallback<PoiViewportFetch>(
-    async ({ bbox, categories, signal }) => {
-      const response = await fetch(poiViewportUrl(serverOrigin, bbox, categories), { signal });
+    async ({ tiles, categories, signal }) => {
+      const response = await fetch(poiTilesUrl(serverOrigin, tiles, categories), { signal });
       if (!response.ok) throw new Error(`POIs: HTTP ${response.status}`);
-      return ((await response.json()) as { results: PoiResult[] }).results;
+      return ((await response.json()) as { tiles: PoiTileResults[] }).tiles;
     },
     [serverOrigin],
   );

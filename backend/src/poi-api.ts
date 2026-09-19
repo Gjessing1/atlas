@@ -1,29 +1,41 @@
 import {
   isPoiCategoryId,
-  overpassPoiQuery,
-  overpassPoiResults,
+  mergePoiResults,
+  parsePoiTileKey,
+  poiQueryCategories,
+  poiTileKey,
   poiViewportIsQueryable,
+  poiViewportTiles,
+  POI_MAX_TILES,
   type LngLatBbox,
-  type OverpassPoiElement,
   type PoiCategoryId,
-  type PoiResult,
+  type PoiTile,
 } from '@atlas/core';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { PoiPairDb } from './poi-cache.js';
+import { PoiSource, PoiUpstreamBusyError } from './poi-source.js';
 import type { StatusRegistry } from './status.js';
 
-const DEFAULT_OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const CACHE_TTL_MS = 5 * 60_000;
-const MAX_CACHE_ENTRIES = 80;
+/**
+ * Public Overpass instances, in order. The second is only asked while the first
+ * is backing off (see PoiSource). overpass-api.de refused this host's IPv4 on
+ * 2026-09-19 after the storm poi-source.ts describes.
+ */
+const DEFAULT_OVERPASS_URLS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
 
 export interface PoiApiOptions {
-  overpassUrl?: string;
+  /** Keeps answers in `<dataDir>/poi-cache` across restarts; memory only without it. */
+  dataDir?: string;
+  /** Overrides OVERPASS_URL, a comma-separated list. */
+  overpassUrls?: readonly string[];
   fetchImpl?: typeof fetch;
   userAgent?: string;
-}
-
-interface CacheEntry {
-  expires: number;
-  results: PoiResult[];
+  /** PoiSource tuning, for tests. */
+  minGapMs?: number;
+  now?: () => number;
 }
 
 function parseBbox(value: string | undefined): LngLatBbox | null {
@@ -43,78 +55,109 @@ function parseBbox(value: string | undefined): LngLatBbox | null {
   return values as LngLatBbox;
 }
 
+/** One zoom level, at most POI_MAX_TILES, no duplicates; null when anything is off. */
+function parseTiles(value: string): PoiTile[] | null {
+  const keys = [...new Set(value.split(',').filter(Boolean))];
+  if (!keys.length || keys.length > POI_MAX_TILES) return null;
+  const tiles = keys.map(parsePoiTileKey);
+  if (tiles.some((tile) => tile === null)) return null;
+  return tiles.every((tile) => tile!.z === tiles[0]!.z) ? (tiles as PoiTile[]) : null;
+}
+
 function parseCategories(value: string | undefined): PoiCategoryId[] | null {
   if (!value) return [];
   const values = [...new Set(value.split(',').filter(Boolean))];
   return values.every(isPoiCategoryId) ? values : null;
 }
 
-/** Full-tag, viewport-bounded OSM places for the category-pin layer. */
+/** Aborts when the client hangs up before its answer is sent. */
+function clientGone(reply: FastifyReply): AbortSignal {
+  const controller = new AbortController();
+  reply.raw.on('close', () => {
+    if (!reply.raw.writableFinished) controller.abort();
+  });
+  return controller.signal;
+}
+
+/** Full-tag OSM places for the category-pin layer, by (tile × category). */
 export function registerPoiApi(
   app: FastifyInstance,
   options: PoiApiOptions = {},
   status?: StatusRegistry,
 ): void {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const overpassUrl = options.overpassUrl ?? process.env.OVERPASS_URL ?? DEFAULT_OVERPASS_URL;
-  const userAgent = options.userAgent ?? 'Atlas/1.0 (self-hosted mapping app)';
-  const cache = new Map<string, CacheEntry>();
+  const endpoints =
+    options.overpassUrls ??
+    process.env.OVERPASS_URL?.split(',')
+      .map((url) => url.trim())
+      .filter(Boolean) ??
+    DEFAULT_OVERPASS_URLS;
+  const store = options.dataDir
+    ? PoiPairDb.open(options.dataDir, undefined, undefined, (error) =>
+        app.log.warn({ err: error }, 'POI cache unavailable on disk; keeping answers in memory'),
+      )
+    : null;
+  if (store) app.addHook('onClose', async () => store.close());
+  const source = new PoiSource({
+    store,
+    endpoints: endpoints.length ? endpoints : DEFAULT_OVERPASS_URLS,
+    fetchImpl: options.fetchImpl,
+    userAgent: options.userAgent,
+    status,
+    now: options.now,
+    minGapMs: options.minGapMs,
+    onError: (error, endpoint) =>
+      app.log.warn({ err: error, endpoint }, 'Overpass POI query failed; backing off'),
+  });
 
-  app.get<{ Querystring: { bbox?: string; categories?: string } }>(
+  app.get<{ Querystring: { tiles?: string; bbox?: string; categories?: string } }>(
     '/api/pois',
     async (request, reply) => {
-      const bbox = parseBbox(request.query.bbox);
       const categories = parseCategories(request.query.categories);
-      if (!bbox || categories === null) {
-        return reply.code(400).send({ error: 'valid bbox and categories are required' });
-      }
-      // The backend cannot know the client zoom, but the same geographic cap
-      // closes direct calls that try to turn this into a continent scan.
-      if (!poiViewportIsQueryable(bbox, 9)) {
-        return reply.code(400).send({ error: 'viewport is too large; zoom in' });
-      }
+      if (categories === null) return reply.code(400).send({ error: 'unknown category' });
+      const queried = poiQueryCategories(categories);
 
-      // Keep the requested bounds exact so a cached response never leaks a pin
-      // from just outside a later, nearly identical viewport.
-      const cacheKey = `${bbox.join(',')}|${categories.join(',')}`;
-      const cached = cache.get(cacheKey);
-      if (cached && cached.expires > Date.now()) {
-        reply.header('Cache-Control', 'private, max-age=60');
-        return { results: cached.results };
+      // Bundles up to 0.230.0 send their viewport; it goes through the same
+      // tiles, cache and queue as everything else.
+      let legacyBbox: LngLatBbox | null = null;
+      let tiles: PoiTile[] | null;
+      if (request.query.tiles !== undefined) {
+        tiles = parseTiles(request.query.tiles);
+      } else {
+        legacyBbox = parseBbox(request.query.bbox);
+        // The same geographic cap as the client keeps this from turning into
+        // a continent scan.
+        if (legacyBbox && !poiViewportIsQueryable(legacyBbox, 9)) {
+          return reply.code(400).send({ error: 'viewport is too large; zoom in' });
+        }
+        // A tile about as wide as the view: ~2×2 tiles, like a phone screen.
+        tiles = legacyBbox
+          ? poiViewportTiles(legacyBbox, Math.log2(360 / (legacyBbox[2] - legacyBbox[0])))
+          : null;
       }
+      if (!tiles) return reply.code(400).send({ error: 'valid tiles or bbox are required' });
 
-      const center = {
-        lat: (bbox[1] + bbox[3]) / 2,
-        lng: (bbox[0] + bbox[2]) / 2,
-      };
+      const pairs = tiles.flatMap((tile) => queried.map((category) => ({ tile, category })));
       try {
-        const body = new URLSearchParams({ data: overpassPoiQuery(bbox, categories) });
-        const response = await fetchImpl(overpassUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-            'User-Agent': userAgent,
-          },
-          body,
-          signal: AbortSignal.timeout(20_000),
-        });
-        if (!response.ok) throw new Error(`Overpass HTTP ${response.status}`);
-        const json = (await response.json()) as { elements?: OverpassPoiElement[] };
-        const results = overpassPoiResults(json.elements ?? [], center, categories).filter(
-          (result) =>
-            result.position.lng >= bbox[0] &&
-            result.position.lng <= bbox[2] &&
-            result.position.lat >= bbox[1] &&
-            result.position.lat <= bbox[3],
-        );
-        cache.set(cacheKey, { results, expires: Date.now() + CACHE_TTL_MS });
-        status?.record('overpass', true);
-        while (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-        reply.header('Cache-Control', 'private, max-age=60');
-        return { results };
+        const answers = await source.get(pairs, clientGone(reply));
+        reply.header('Cache-Control', 'private, max-age=300');
+        if (legacyBbox) {
+          return {
+            results: mergePoiResults(
+              answers.map((answer) => answer.results),
+              legacyBbox,
+            ),
+          };
+        }
+        return { tiles: answers };
       } catch (error) {
-        status?.record('overpass', false, 'POI query unavailable');
-        request.log.error({ err: error }, 'POI viewport query failed');
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return reply.code(499).send();
+        }
+        if (error instanceof PoiUpstreamBusyError) {
+          reply.header('Retry-After', String(error.retryAfterS));
+          return reply.code(503).send({ error: 'points of interest are busy; try again shortly' });
+        }
+        request.log.error({ err: error, tiles: tiles.map(poiTileKey) }, 'POI query failed');
         return reply.code(502).send({ error: 'points of interest are unavailable' });
       }
     },

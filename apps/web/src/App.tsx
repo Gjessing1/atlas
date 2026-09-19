@@ -10,7 +10,7 @@ import {
   mapProfileForRouting,
   placeIsVisible,
   poiResultTarget,
-  poiViewportUrl,
+  poiTilesUrl,
   placeTargetTitle,
   resolveInaturOffer,
   savedPlaceAt,
@@ -23,6 +23,7 @@ import {
   type OverlayIdentifyGroup,
   type PlaceTarget,
   type PoiResult,
+  type PoiTileResults,
   type SearchResult,
   type SettingsSectionId,
   type ShareFormat,
@@ -379,10 +380,10 @@ export function App() {
       map.off('moveend', onMove);
     };
   }, [map]);
-  const fetchPois = useCallback<PoiViewportFetch>(async ({ bbox, categories, signal }) => {
-    const response = await fetch(poiViewportUrl('', bbox, categories), { signal });
+  const fetchPois = useCallback<PoiViewportFetch>(async ({ tiles, categories, signal }) => {
+    const response = await fetch(poiTilesUrl('', tiles, categories), { signal });
     if (!response.ok) throw new Error(`POIs: HTTP ${response.status}`);
-    return ((await response.json()) as { results: PoiResult[] }).results;
+    return ((await response.json()) as { tiles: PoiTileResults[] }).tiles;
   }, []);
   const viewportPois = usePoiViewport({
     active: layers.poiOn,
