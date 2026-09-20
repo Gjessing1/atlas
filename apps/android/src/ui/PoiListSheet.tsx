@@ -1,4 +1,4 @@
-import { EXPLORE_REFRESH, type PoiListState } from '@atlas/app-hooks';
+import { POI_LIST_REFRESH, type PoiListState } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
   parseOpeningHours,
@@ -6,20 +6,16 @@ import {
   type PoiCategoryId,
   type PoiResult,
 } from '@atlas/core';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { BottomSheet, type BottomSheetHandle, type SheetSnap } from './BottomSheet';
+import { useSideInsets } from './insets';
 import { PoiCategoryDock } from './PoiCategoryDock';
 import { theme } from './theme';
 
-/**
- * The selector-sized peek: the category row plus the list's own heading. The map
- * chrome above it is positioned from this, so it lives here with the sheet.
- */
-export const POI_SHEET_PEEK = 132;
-/** BottomSheet's drag handle sits above the peeked content (`handleTouch`). */
-export const POI_SHEET_HANDLE = 28;
+/** Drag handle (28) + the unchanged compact category dock (48). */
+export const POI_SHEET_PEEK = 76;
 
 export function PoiListSheet({
   list,
@@ -43,8 +39,10 @@ export function PoiListSheet({
   bottomInset: number;
 }) {
   const sheet = useRef<BottomSheetHandle>(null);
-  const snap = useRef<SheetSnap>('peek');
+  const snapRef = useRef<SheetSnap>('peek');
+  const [snap, setSnap] = useState<SheetSnap>('peek');
   const scroll = useRef<ScrollView>(null);
+  const side = useSideInsets();
   // Read through a ref, not a dependency: restoring the offset is for a sheet
   // that has just remounted behind a card, and reapplying it on every scroll
   // event would fight the user's own fling.
@@ -78,76 +76,94 @@ export function PoiListSheet({
       // sheet *is* the selector and stays for as long as the layer is on, so
       // consuming Back here would leave the map with no way back at all.
       onBack={() => {
-        if (snap.current === 'peek') return false;
+        if (snapRef.current === 'peek') return false;
         sheet.current?.snapTo('peek');
         return true;
       }}
       onSnapChange={(next) => {
-        snap.current = next;
+        snapRef.current = next;
+        setSnap(next);
         if (next !== 'peek') list.open();
       }}
-      contentStyle={styles.content}
+      contentStyle={snap === 'peek' ? styles.peekContent : styles.content}
+      sheetStyle={
+        snap === 'peek'
+          ? [styles.peekSheet, { left: side.left + 12, right: side.right + 12 }]
+          : undefined
+      }
       testID="poi-list-sheet"
     >
       <PoiCategoryDock categories={categories} onToggle={onToggleCategory} onShowAll={onShowAll} />
-      <View style={styles.head}>
-        <View>
-          <Text style={styles.title}>Places in view</Text>
-          <Text style={styles.status}>{status}</Text>
-        </View>
-        {list.stale ? (
-          <Pressable onPress={list.refresh} testID="poi-list-refresh">
-            <Text style={styles.refresh}>↻ {EXPLORE_REFRESH}</Text>
-          </Pressable>
-        ) : error ? (
-          <Pressable onPress={list.refresh}>
-            <Text style={styles.refresh}>Try again</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {!loading && !error && !tooWide && list.results.length === 0 ? (
-        <Text style={styles.empty}>No {noun} in this area. Zoom out for a larger search.</Text>
+      {snap !== 'peek' ? (
+        <>
+          <View style={styles.head}>
+            <View>
+              <Text style={styles.title}>Places in view</Text>
+              <Text style={styles.status}>{status}</Text>
+            </View>
+            {list.stale ? (
+              <Pressable onPress={list.refresh} testID="poi-list-refresh">
+                <Text style={styles.refresh}>↻ {POI_LIST_REFRESH}</Text>
+              </Pressable>
+            ) : error ? (
+              <Pressable onPress={list.refresh}>
+                <Text style={styles.refresh}>Try again</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {!loading && !error && !tooWide && list.results.length === 0 ? (
+            <Text style={styles.empty}>No {noun} in this area. Zoom out for a larger search.</Text>
+          ) : null}
+          <ScrollView
+            ref={scroll}
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            onScroll={(event) => list.setScrollOffset(event.nativeEvent.contentOffset.y)}
+            scrollEventThrottle={100}
+            directionalLockEnabled
+            testID="poi-results-list"
+          >
+            {list.results.map((result) => {
+              const hours = parseOpeningHours(result.openingHours);
+              return (
+                <Pressable
+                  key={result.id}
+                  style={styles.row}
+                  onPress={() => onPick(result)}
+                  testID={`poi-result-${result.id.replace('/', '-')}`}
+                >
+                  <View style={styles.copy}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {result.name}
+                    </Text>
+                    <Text style={styles.detail} numberOfLines={1}>
+                      {[result.category, hours?.statusText, hours?.nextOpenOrClose]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                  {result.distanceM !== undefined ? (
+                    <Text style={styles.distance}>{fmtDistanceM(result.distanceM)}</Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </>
       ) : null}
-      <ScrollView
-        ref={scroll}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        onScroll={(event) => list.setScrollOffset(event.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={100}
-        directionalLockEnabled
-        testID="poi-results-list"
-      >
-        {list.results.map((result) => {
-          const hours = parseOpeningHours(result.openingHours);
-          return (
-            <Pressable
-              key={result.id}
-              style={styles.row}
-              onPress={() => onPick(result)}
-              testID={`poi-result-${result.id.replace('/', '-')}`}
-            >
-              <View style={styles.copy}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {result.name}
-                </Text>
-                <Text style={styles.detail} numberOfLines={1}>
-                  {[result.category, hours?.statusText, hours?.nextOpenOrClose]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Text>
-              </View>
-              {result.distanceM !== undefined ? (
-                <Text style={styles.distance}>{fmtDistanceM(result.distanceM)}</Text>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  peekSheet: {
+    overflow: 'visible',
+    borderRadius: 24,
+    backgroundColor: 'transparent',
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  peekContent: { paddingLeft: 0, paddingRight: 0, paddingBottom: 0 },
   content: { gap: 6 },
   head: {
     flexDirection: 'row',

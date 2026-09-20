@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { exploreAreaIsStale, type ExploreArea } from './useExplore.js';
 import type { PoiViewport } from './usePoiViewport.js';
 
+/** The pins already follow the map; this action replaces only the frozen list. */
+export const POI_LIST_REFRESH = 'Refresh list view';
+
 function areaOf(viewport: PoiViewport | null): ExploreArea | null {
   if (!viewport) return null;
   const center = {

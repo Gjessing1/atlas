@@ -63,6 +63,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 24,
     backgroundColor: theme.surface,
+    elevation: 4,
   },
   title: { fontSize: 12, fontWeight: '700', color: theme.text },
   scroller: { flex: 1 },

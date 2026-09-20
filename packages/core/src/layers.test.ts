@@ -18,6 +18,7 @@ import {
   viewportFeaturesUrl,
   roadWeatherIdentify,
   layerOptionSignature,
+  MAP_PROFILES,
   normalizeLayerOptions,
   POI_STATE_ID,
   poiVisible,
@@ -185,7 +186,7 @@ describe('basemapVisible', () => {
 
 describe('poiVisible', () => {
   it('is opt-in and only applies to the active profile', () => {
-    expect(poiVisible({}, 'explore')).toBe(false);
+    for (const profile of MAP_PROFILES) expect(poiVisible({}, profile.id)).toBe(false);
     const on = { [`explore:${POI_STATE_ID}`]: { on: true } };
     expect(poiVisible(on, 'explore')).toBe(true);
     expect(poiVisible(on, 'hike')).toBe(false);

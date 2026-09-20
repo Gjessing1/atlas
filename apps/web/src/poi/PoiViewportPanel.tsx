@@ -1,4 +1,4 @@
-import { EXPLORE_REFRESH, type PoiListState } from '@atlas/app-hooks';
+import { POI_LIST_REFRESH, type PoiListState } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
   parseOpeningHours,
@@ -107,7 +107,7 @@ export function PoiViewportPanel({
               className="link-button poi-results-refresh"
               onClick={list.refresh}
             >
-              ↻ {EXPLORE_REFRESH}
+              ↻ {POI_LIST_REFRESH}
             </button>
           ) : error ? (
             <button

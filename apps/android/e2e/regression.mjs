@@ -253,10 +253,19 @@ async function closeQuickLayerMenu() {
 
 async function verifyPoiCategoryDock() {
   await tap('layer-quick-toggle');
+  await tap('layer-quick-search-toggle');
+  await replaceText('layer-quick-search', 'point');
+  await waitFor('the layer search keyboard to open', keyboardShown, (shown) => shown);
+  await tap('layer-quick-search-toggle');
+  await waitForId('layer-quick-search', false);
+  await waitFor('closing layer search to hide the keyboard', keyboardShown, (shown) => !shown);
   await tapQuickLayer('layer-quick-points-of-interest');
   let xml = await waitForId('poi-category-all');
   if (!nodeForId(xml, 'poi-category-groceries')) {
     throw new Error('POI layer did not expose the practical category pills');
+  }
+  if (nodeForId(xml, 'poi-results-list')) {
+    throw new Error('Collapsed POI selector exposed the places-in-view list');
   }
   await closeQuickLayerMenu();
   await tap('poi-category-groceries');
@@ -516,10 +525,9 @@ async function searchAndSavePlace() {
   await tap('search-open');
   await replaceText('search-input', 'saved');
   await waitForId('search-result-0', true, 20_000);
-  await dismissKeyboard();
   await tap('search-result-0');
   await waitForId('destination-sheet');
-  await dismissKeyboard();
+  await waitFor('search result selection to hide the keyboard', keyboardShown, (shown) => !shown);
   await tap('destination-save');
   await waitForId('destination-edit');
   await tap('destination-cancel');

@@ -118,7 +118,9 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
     // Leave a narrow strip above a fully-expanded sheet so it still reads as a
     // sheet, not a replacement screen. The top inset keeps it below cut-outs.
     const full = Math.max(240, availableHeight - Math.max(insets.top, 24) - 12);
-    const peek = Math.min(full, Math.max(112, peekHeight));
+    // A compact map dock can intentionally be shorter than an input sheet; 72
+    // still leaves a 44+ dp control below the 28 dp drag affordance.
+    const peek = Math.min(full, Math.max(72, peekHeight));
     const half = Math.min(full, Math.max(peek, Math.round(availableHeight * 0.56)));
     return { peek, half, full };
   }, [availableHeight, insets.top, peekHeight]);

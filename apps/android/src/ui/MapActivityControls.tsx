@@ -4,8 +4,9 @@ import type {
   PotentialTargetSwitch,
 } from '@atlas/app-hooks';
 import { groupLayerCatalog, searchLayerGroups, type LayerMeta, type MapProfile } from '@atlas/core';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -82,10 +83,9 @@ export function MapActivityControls({
   /** Already includes the system navigation-bar inset. */
   bottom: number;
   /**
-   * How far a bottom surface already reaches up (the peeked POI list). The
-   * triggers stay on their own row; only the menus they open start above it, so
-   * an open menu and that surface never share the same pixels — two scrollable
-   * things stacked on one another means neither scrolls predictably.
+   * Extra surfaces above the control's own trigger/activity rows (the peeked
+   * POI list and any weather dock). Only the menus start above them, so two
+   * independently scrollable surfaces never share the same pixels.
    */
   menuLift?: number;
   onPickProfile: (id: string) => void;
@@ -96,6 +96,7 @@ export function MapActivityControls({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [layerSearchOpen, setLayerSearchOpen] = useState(false);
   const [layerQuery, setLayerQuery] = useState('');
+  const layerSearchInput = useRef<TextInput>(null);
   const win = useWindowDimensions();
   // In landscape the system navigation bar sits on a side of the screen: the
   // triggers and the menus they open both start inside it. `right` is the
@@ -138,10 +139,18 @@ export function MapActivityControls({
     }))
     .filter((group) => group.layers.length > 0);
   const menuBottom = bottom + menuLift + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
-  const closeMenus = () => {
+  const dismissLayerKeyboard = () => {
+    layerSearchInput.current?.blur();
+    Keyboard.dismiss();
+  };
+  const closeLayerMenu = () => {
+    dismissLayerKeyboard();
     setLayersOpen(false);
     setLayerSearchOpen(false);
     setLayerQuery('');
+  };
+  const closeMenus = () => {
+    closeLayerMenu();
     setProfilesOpen(false);
     setTargetsOpen(false);
     setFiltersOpen(false);
@@ -342,8 +351,13 @@ export function MapActivityControls({
             <Pressable
               style={styles.layerSearchButton}
               onPress={() => {
-                if (layerSearchOpen) setLayerQuery('');
-                setLayerSearchOpen((open) => !open);
+                if (layerSearchOpen) {
+                  dismissLayerKeyboard();
+                  setLayerQuery('');
+                  setLayerSearchOpen(false);
+                } else {
+                  setLayerSearchOpen(true);
+                }
               }}
               accessibilityRole="button"
               accessibilityLabel="Search layers"
@@ -355,12 +369,15 @@ export function MapActivityControls({
           </View>
           {layerSearchOpen ? (
             <TextInput
+              ref={layerSearchInput}
               style={styles.layerSearchInput}
               value={layerQuery}
               onChangeText={setLayerQuery}
               placeholder="Search layers"
               placeholderTextColor={theme.textMuted}
               autoFocus
+              returnKeyType="done"
+              onSubmitEditing={dismissLayerKeyboard}
               testID="layer-quick-search"
             />
           ) : null}
@@ -376,7 +393,10 @@ export function MapActivityControls({
                   <Pressable
                     key={`active-${meta.id}`}
                     style={styles.layerItem}
-                    onPress={() => overlays.toggle(meta.id)}
+                    onPress={() => {
+                      dismissLayerKeyboard();
+                      overlays.toggle(meta.id);
+                    }}
                     accessibilityRole="switch"
                     accessibilityState={{ checked: true }}
                     accessibilityLabel={meta.title}
@@ -401,7 +421,10 @@ export function MapActivityControls({
                     <Pressable
                       key={meta.id}
                       style={[styles.layerItem, on && styles.layerItemOn]}
-                      onPress={() => overlays.toggle(meta.id)}
+                      onPress={() => {
+                        dismissLayerKeyboard();
+                        overlays.toggle(meta.id);
+                      }}
                       accessibilityRole="switch"
                       accessibilityState={{ checked: on }}
                       accessibilityLabel={variant ? `${meta.title}, ${variant}` : meta.title}
@@ -433,7 +456,10 @@ export function MapActivityControls({
                 their switches beside the layers they visually compete with. */}
             <Pressable
               style={[styles.layerItem, styles.basemapItem]}
-              onPress={() => overlays.setPoiOn(!overlays.poiOn)}
+              onPress={() => {
+                dismissLayerKeyboard();
+                overlays.setPoiOn(!overlays.poiOn);
+              }}
               accessibilityRole="switch"
               accessibilityState={{ checked: overlays.poiOn }}
               accessibilityLabel="Points of interest"
@@ -449,7 +475,10 @@ export function MapActivityControls({
             </Pressable>
             <Pressable
               style={styles.layerItem}
-              onPress={() => overlays.setBasemapOn(!overlays.basemapOn)}
+              onPress={() => {
+                dismissLayerKeyboard();
+                overlays.setBasemapOn(!overlays.basemapOn);
+              }}
               accessibilityRole="switch"
               accessibilityState={{ checked: overlays.basemapOn }}
               accessibilityLabel="Base map"
@@ -474,7 +503,7 @@ export function MapActivityControls({
           <Pressable
             style={[styles.quarryTrigger, targetsOpen && styles.controlSelected]}
             onPress={() => {
-              setLayersOpen(false);
+              closeLayerMenu();
               setProfilesOpen(false);
               setFiltersOpen(false);
               setTargetsOpen((open) => !open);
@@ -507,7 +536,7 @@ export function MapActivityControls({
           <Pressable
             style={[styles.quarryTrigger, filtersOpen && styles.controlSelected]}
             onPress={() => {
-              setLayersOpen(false);
+              closeLayerMenu();
               setProfilesOpen(false);
               setTargetsOpen(false);
               setFiltersOpen((open) => !open);
@@ -531,7 +560,7 @@ export function MapActivityControls({
         <Pressable
           style={[styles.profileTrigger, profilesOpen && styles.controlSelected]}
           onPress={() => {
-            setLayersOpen(false);
+            closeLayerMenu();
             setTargetsOpen(false);
             setFiltersOpen(false);
             setProfilesOpen((open) => !open);
@@ -551,9 +580,8 @@ export function MapActivityControls({
               setProfilesOpen(false);
               setTargetsOpen(false);
               setFiltersOpen(false);
-              setLayerSearchOpen(false);
-              setLayerQuery('');
-              setLayersOpen((open) => !open);
+              if (layersOpen) closeLayerMenu();
+              else setLayersOpen(true);
             }}
             accessibilityRole="button"
             accessibilityLabel={activeCount > 0 ? `Map layers, ${activeCount} on` : 'Map layers'}

@@ -1,6 +1,6 @@
 import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
 import { RECENT_SEARCHES_SETTING, type SearchablePlace, type SearchResult } from '@atlas/core';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
@@ -39,6 +39,7 @@ export function SearchBar({
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => void;
 }) {
+  const input = useRef<TextInput>(null);
   const fetchSearch = useCallback<SearchFn>(
     async ({ text, signal }) => geoSearch(packs, text, getBias, { signal }),
     [packs, getBias],
@@ -60,6 +61,10 @@ export function SearchBar({
   );
 
   const close = useCallback(() => {
+    // Blur the native owner before React removes it. Keyboard.dismiss() alone
+    // can race the unmount and leave Android's IME visible over a map that no
+    // longer has an input.
+    input.current?.blur();
     Keyboard.dismiss();
     search.reset();
     onClose();
@@ -96,6 +101,7 @@ export function SearchBar({
     >
       <View style={styles.inputRow}>
         <TextInput
+          ref={input}
           style={styles.input}
           placeholder="Search places or coordinates"
           value={search.query}

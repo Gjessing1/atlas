@@ -145,8 +145,8 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     surface: 'map',
     capability: 'Pull the POI selector into a stable, refreshable places-in-view list',
     hook: 'usePoiList',
-    web: { file: 'apps/web/src/poi/PoiViewportPanel.tsx', contains: 'EXPLORE_REFRESH' },
-    android: { file: 'apps/android/src/ui/PoiListSheet.tsx', contains: 'EXPLORE_REFRESH' },
+    web: { file: 'apps/web/src/poi/PoiViewportPanel.tsx', contains: 'POI_LIST_REFRESH' },
+    android: { file: 'apps/android/src/ui/PoiListSheet.tsx', contains: 'POI_LIST_REFRESH' },
     note: 'Both clients keep map pins live while the readable list remains a snapshot. Category changes and explicit refreshes replace it; meaningful camera movement adds the shared amber refresh action, and a picked row opens the one existing place card.',
   },
   {

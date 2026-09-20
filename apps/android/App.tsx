@@ -178,7 +178,7 @@ import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
 import { WeatherDock } from './src/ui/WeatherDock';
-import { POI_SHEET_HANDLE, POI_SHEET_PEEK, PoiListSheet } from './src/ui/PoiListSheet';
+import { POI_SHEET_PEEK, PoiListSheet } from './src/ui/PoiListSheet';
 import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
@@ -1326,10 +1326,14 @@ function AppInner() {
   // compass step over whichever reaches higher.
   const poiSheetLift =
     showIdleChrome && overlaysCtl.poiOn
-      ? POI_SHEET_PEEK +
-        POI_SHEET_HANDLE +
-        52 * activityRows +
-        (timeDockOn ? weatherDockHeight + 6 : 0)
+      ? POI_SHEET_PEEK + 52 * activityRows + (timeDockOn ? weatherDockHeight + 6 : 0)
+      : 0;
+  // MapActivityControls already counts its trigger/activity rows. Its menus
+  // need only the extra surfaces stacked above those rows, or those rows are
+  // counted twice and the layer list loses a large part of the screen.
+  const poiMenuLift =
+    showIdleChrome && overlaysCtl.poiOn
+      ? POI_SHEET_PEEK + (timeDockOn ? weatherDockHeight + 6 : 0)
       : 0;
   const weatherDockLift = Math.max(
     showIdleChrome && mapDockOn ? weatherDockHeight + 52 * activityRows : 0,
@@ -1793,7 +1797,7 @@ function AppInner() {
           {showIdleChrome ? (
             <MapActivityControls
               // The POI list stands where these menus would open.
-              menuLift={poiSheetLift}
+              menuLift={poiMenuLift}
               profile={profiles}
               visibleProfiles={profilePreferences.visibleProfiles}
               overlays={overlaysCtl}
