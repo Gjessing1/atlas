@@ -194,6 +194,7 @@ export {
   type PoiViewportFetch,
   type PoiViewportState,
 } from './usePoiViewport.js';
+export { usePoiList, type PoiListState } from './usePoiList.js';
 export { useMeasure, type MeasureController } from './useMeasure.js';
 export {
   useWeatherGrid,

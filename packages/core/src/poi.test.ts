@@ -11,6 +11,7 @@ import {
   poiTileBbox,
   poiTileKey,
   poiTileParent,
+  poiResultsFeatureCollection,
   poiTilesForBbox,
   poiViewportTiles,
   togglePoiCategory,
@@ -235,5 +236,13 @@ describe('mergePoiResults', () => {
     );
     expect(merged.map((result) => result.id)).toEqual(['b', 'a']);
     expect(merged[0]!.distanceM).toBeGreaterThanOrEqual(0);
+  });
+
+  it('puts stable identity and category ids on map features', () => {
+    const collection = poiResultsFeatureCollection([place('node/7', 'food', 59.9)]);
+    expect(collection.features[0]?.properties).toMatchObject({
+      id: 'node/7',
+      categoryId: 'food',
+    });
   });
 });

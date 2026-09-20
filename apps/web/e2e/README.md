@@ -42,6 +42,16 @@ Locator traps (v0.222.0):
   map and Directions on the card: `openRoutePlannerAt(page, lat, lng)` in `helpers.ts`. The
   container has no geolocation, so Directions leaves a one-stop destination and asks for the
   start; the next map click is inserted before that destination.
+- **The place card's title is no longer its only `strong`.** `Opening hours`, `More information`
+  and `Explore nearby` are headings in the same card (v0.233.0), so `card.locator('strong')` is a
+  strict-mode violation. Use `.place-card-titles > strong`.
+- **`More information` starts open for anything that is not a queried POI.** A dropped pin, a
+  search hit or a saved place leads with its map facts (`placeLeadsWithMapFacts`), so clicking that
+  row _hides_ Elevation and Daylight instead of revealing them. Only a business POI starts folded.
+- **Today's opening hours depend on the day the suite runs.** The POI fixture opens `Mo-Sa
+08:00-22:00`, so a Sunday run reads `Today Closed` and `● Closed · Opens tomorrow 08:00`. Assert
+  the week inside the expanded section, or the status line as a pattern — never a literal time as
+  today's.
 - **Current speed lives in `.nav-speed-cluster`** (with the limit sign), not in `.nav-widget`.
 
 - **A style-name assertion cannot see a switch between two styles that differ only in `name`.**

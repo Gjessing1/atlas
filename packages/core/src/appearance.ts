@@ -655,6 +655,58 @@ const OUTDOOR_ICON_IMAGE = [
   'attraction',
 ];
 
+/**
+ * Queried POI category → an icon already present in the OpenFreeMap sprite.
+ *
+ * `viewpoints` deliberately shares `attraction`, matching the outdoor overlay.
+ * EV charging is absent: a fuel pump would be actively misleading, so the map
+ * layer keeps that category's ⚡ marker as text. The final attraction is only
+ * MapLibre's required fallback for malformed feature data.
+ */
+export const POI_ICON_IMAGE = [
+  'match',
+  ['get', 'categoryId'],
+  'food',
+  'restaurant',
+  'coffee',
+  'cafe',
+  'groceries',
+  'grocery',
+  'shops',
+  'shop',
+  'museums',
+  'museum',
+  'sights',
+  'attraction',
+  'nature',
+  'mountain',
+  'health',
+  'pharmacy',
+  'banks',
+  'bank',
+  'toilets',
+  'toilets',
+  'post',
+  'post',
+  'playgrounds',
+  'playground',
+  'camping',
+  'campsite',
+  'fuel',
+  'fuel',
+  'charging',
+  '',
+  'parking',
+  'parking',
+  'cabins',
+  'shelter',
+  'viewpoints',
+  'attraction',
+  'boat-access',
+  'harbor',
+  'attraction',
+] as const;
+
 function matchesAny(property: string, values: string[]): unknown {
   return ['match', ['get', property], values, true, false];
 }

@@ -129,6 +129,24 @@ function boundsForNode(node) {
   return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 
+/** Every node fully inside `bounds`, so an assertion can scope itself to one list. */
+function textsWithin(xml, bounds) {
+  return [...xml.matchAll(/<node[^>]*\/?>/g)]
+    .map((match) => match[0])
+    .filter((node) => {
+      const box = boundsForNode(node);
+      return (
+        box &&
+        box.left >= bounds.left &&
+        box.right <= bounds.right &&
+        box.top >= bounds.top &&
+        box.bottom <= bounds.bottom
+      );
+    })
+    .map((node) => node.match(/text="([^"]*)"/)?.[1] ?? '')
+    .filter(Boolean);
+}
+
 function visibleNode(xml, id) {
   const node = nodeForId(xml, id);
   const bounds = boundsForNode(node);
@@ -246,6 +264,44 @@ async function verifyPoiCategoryDock() {
   if (!nodeForId(xml, 'poi-category-groceries')?.includes('selected="true"')) {
     throw new Error('Groceries POI pill did not become selected');
   }
+
+  // The selector *is* the sheet's handle: tapping it snaps past peek into the
+  // places-in-view list, the same public interaction as dragging it.
+  await tap('poi-list-sheet-handle');
+  const listXml = await waitFor('the places-in-view list to fill', hierarchy, (xml) =>
+    /text="E2E groceries \d+"/.test(xml),
+  );
+  const listBounds = boundsForNode(nodeForId(listXml, 'poi-results-list'));
+  if (!listBounds) throw new Error('The POI list sheet exposed no scrollable list');
+  const rowTexts = textsWithin(listXml, listBounds);
+  if (!rowTexts.some((text) => text.startsWith('Groceries'))) {
+    throw new Error(`POI rows lost their category line: ${rowTexts.join(' | ')}`);
+  }
+  // No position fix is the normal outcome on this AVD, not an error: the row
+  // keeps its name and category and simply leaves the distance out. A fix does
+  // sometimes arrive here (see README, "Location"), so a distance is allowed —
+  // it just has to be a distance and not, say, a raw metre count.
+  const distances = rowTexts.filter((text) => /^\d/.test(text));
+  if (distances.some((text) => !/^\d+(?:[.,]\d+)? (?:m|km)$/.test(text))) {
+    throw new Error(`POI row showed an unformatted distance: ${distances.join(', ')}`);
+  }
+  const rowId = nodeIds(listXml).find((id) => id.startsWith('poi-result-'));
+  if (!rowId) throw new Error('The POI list rendered no tappable row');
+  tapId(listXml, rowId);
+  // One card, reached from the list: the place card's own POI sections, with
+  // the website shown as the domain the user would recognise.
+  const cardXml = await waitForId('destination-opening-hours');
+  const cardTexts = [...cardXml.matchAll(/text="([^"]*)"/g)].map((match) => match[1]);
+  if (!cardTexts.some((text) => text.includes('example.com'))) {
+    throw new Error(`The place card did not shorten the website: ${cardTexts.join(' | ')}`);
+  }
+  if (!cardTexts.some((text) => text.includes('08:00'))) {
+    throw new Error('The place card showed no parsed opening hours');
+  }
+  await tap('destination-cancel');
+  // Closing the card brings the selector back at peek, so the map controls
+  // below it are reachable again.
+  await waitForId('poi-category-all');
 
   // Restore the opt-in layer to off so the dock cannot cover unrelated map
   // controls later in this long scenario. Its focused category may persist.

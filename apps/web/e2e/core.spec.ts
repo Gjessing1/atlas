@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type maplibregl from 'maplibre-gl';
 import {
   cameraState,
@@ -39,7 +39,22 @@ test('direction-arrow source is selectable and persists on this device', async (
   await expect(page.getByRole('radio', { name: 'GPS course' })).toBeChecked();
 });
 
-test('POI categories query the viewport and open a full details card', async ({ page }) => {
+const POI_MARKET = {
+  id: 'node/42',
+  name: 'Atlas Market',
+  position: { lat: 59.91, lng: 10.75 },
+  categoryId: 'groceries',
+  category: 'Groceries',
+  marker: 'G',
+  address: 'Kartgata 1, 0001 Oslo',
+  phone: '+47 12 34 56 78',
+  openingHours: 'Mo-Sa 08:00-22:00',
+  website: 'https://example.com/market',
+  osmUrl: 'https://www.openstreetmap.org/node/42',
+};
+
+/** A one-layer POI basemap plus a POI service that always answers with the market. */
+async function routePoiFixture(page: Page) {
   await page.route('**/assets/styles/liberty.json', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -70,19 +85,6 @@ test('POI categories query the viewport and open a full details card', async ({ 
     }),
   );
   await page.route('**/e2e/**', (route) => route.fulfill({ status: 204 }));
-  const market = {
-    id: 'node/42',
-    name: 'Atlas Market',
-    position: { lat: 59.91, lng: 10.75 },
-    categoryId: 'groceries',
-    category: 'Groceries',
-    marker: 'G',
-    address: 'Kartgata 1, 0001 Oslo',
-    phone: '+47 12 34 56 78',
-    openingHours: 'Mo-Sa 08:00-22:00',
-    website: 'https://example.com/market',
-    osmUrl: 'https://www.openstreetmap.org/node/42',
-  };
   // Answers every asked (tile, category) pair; the market sits in every
   // groceries pair, and the client merges it to the one place in view.
   await page.route('**/api/pois?**', (route) => {
@@ -96,12 +98,16 @@ test('POI categories query the viewport and open a full details card', async ({ 
             tile,
             category,
             complete: true,
-            results: category === 'groceries' ? [market] : [],
+            results: category === 'groceries' ? [POI_MARKET] : [],
           })),
         ),
       },
     });
   });
+}
+
+test('POI categories query the viewport and open a full details card', async ({ page }) => {
+  await routePoiFixture(page);
   await page.goto('/');
   await waitForMap(page);
 
@@ -134,7 +140,7 @@ test('POI categories query the viewport and open a full details card', async ({ 
 
   await page.evaluate(() => window.__atlasMap!.jumpTo({ center: [10.75, 59.91], zoom: 14 }));
   const viewportList = page.getByRole('complementary', { name: 'POIs in map view' });
-  await expect(viewportList).toContainText('1 place in view');
+  await expect(viewportList).toContainText('1 place in this area');
   await expect(viewportList).toContainText('Atlas Market');
   await expect
     .poll(() =>
@@ -147,13 +153,17 @@ test('POI categories query the viewport and open a full details card', async ({ 
   await viewportList.getByRole('button', { name: /Atlas Market/ }).click();
   const card = page.locator('.place-card');
   await expect(card).toContainText('Atlas Market');
-  await expect(card.getByTestId('place-card-poi-details')).toContainText('Kartgata 1, 0001 Oslo');
-  await expect(card.getByTestId('place-card-poi-details')).toContainText('Mo-Sa 08:00-22:00');
+  await expect(card).toContainText('Kartgata 1, 0001 Oslo');
+  // Today's row depends on the day the suite runs — the fixture closes on Sunday
+  // — so the deterministic assertion is the week behind the expanding section.
+  await expect(card).toContainText(/● (?:Open|Closed) · (?:Closes|Opens)/);
+  await card.getByRole('button', { name: /Opening hours/ }).click();
+  await expect(card.locator('.place-card-hours-week')).toContainText('08:00–22:00');
   await expect(card.getByRole('link', { name: '+47 12 34 56 78' })).toHaveAttribute(
     'href',
     'tel:+47 12 34 56 78',
   );
-  await expect(card.getByRole('link', { name: /Open website/ })).toHaveAttribute(
+  await expect(card.getByRole('link', { name: /example\.com/ })).toHaveAttribute(
     'href',
     'https://example.com/market',
   );
@@ -170,6 +180,39 @@ test('POI categories query the viewport and open a full details card', async ({ 
     .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
     .toBe(false);
   await expect(categories).toBeHidden();
+});
+
+// The phone layout is where the selector becomes a sheet; the desktop keeps its
+// panel and its dock chips, so only this width exercises the pull-up.
+test.describe('phone width', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the POI selector pulls up into a list of the places in view', async ({ page }) => {
+    await routePoiFixture(page);
+    await page.goto('/');
+    await waitForMap(page);
+    await page.getByRole('button', { name: /^Map layers/ }).click();
+    await page.getByRole('switch', { name: 'Points of interest' }).click();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.__atlasMap!.jumpTo({ center: [10.75, 59.91], zoom: 14 }));
+
+    // The selector moved into the sheet at this width: one copy of the chips,
+    // reachable, with the pull-up handle above it.
+    const sheet = page.getByRole('complementary', { name: 'POIs in map view' });
+    await expect(sheet.locator('.poi-results-grabber')).toBeVisible();
+    const categories = page.getByRole('group', { name: 'POI categories' });
+    await expect(categories).toHaveCount(1);
+    await expect(sheet.getByRole('group', { name: 'POI categories' })).toBeVisible();
+
+    // Pulled up, it lists the places in view; a row opens the one place card.
+    await expect(sheet).toContainText('1 place in this area');
+    await sheet.getByRole('button', { name: /Places in view/ }).click();
+    const row = sheet.getByRole('button', { name: /Atlas Market/ });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('Groceries');
+    await row.click();
+    await expect(page.locator('.place-card')).toContainText('Atlas Market');
+  });
 });
 
 test('dark mode themes the UI and basemap, persists, and profiles change map emphasis', async ({
@@ -363,7 +406,9 @@ test('right-click drops a pin and opens the place card', async ({ page }) => {
   await expect(page.locator('.place-marker')).toBeVisible();
   // A bare pin is titled by its own coordinates, and offers the shared actions.
   const card = page.locator('.place-card');
-  await expect(card.locator('strong')).toHaveText(/^-?\d+\.\d{5}, -?\d+\.\d{5}$/);
+  await expect(card.locator('.place-card-titles > strong')).toHaveText(
+    /^-?\d+\.\d{5}, -?\d+\.\d{5}$/,
+  );
   await expect(card.getByRole('button', { name: 'Directions' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Save' })).toBeVisible();
   const nearbyActions = card.locator('.place-card-nearby-buttons').getByRole('button');
@@ -451,7 +496,8 @@ test('what the overlays say lands on the place card, not in a popup of its own',
   await expect(identify).toContainText('Lake depth');
   await expect(identify).toContainText('32.5');
   await expect(page.locator('.maplibregl-popup')).toHaveCount(0);
-  // And it is one card: the spot's own facts are still there beside the answer.
+  // And it is one card: the spot's own facts are still there beside the answer —
+  // a dropped pin has no opening hours to lead with, so they are already open.
   await expect(card.locator('.place-card-facts')).toContainText('Daylight');
 
   // The one under the finger leads and says nothing about distance; the

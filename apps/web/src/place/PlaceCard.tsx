@@ -2,12 +2,16 @@ import { usePlaceFacts } from '@atlas/app-hooks';
 import {
   fmtCoords,
   fmtDistanceM,
+  haversineM,
   identifyCardGroups,
   identifyExpandLabel,
   identifyLinkLabel,
   identifyValueUrl,
-  placeTargetSubtitle,
+  openingHoursComment,
+  parseOpeningHours,
+  placeLeadsWithMapFacts,
   shareFormats,
+  websiteDisplayName,
   type LatLng,
   type NearbyPlaceArticle,
   type PlaceContent,
@@ -168,6 +172,7 @@ function NearbyFeatures({
 
   return (
     <section className="place-card-nearby">
+      <strong className="place-card-nearby-heading">Explore nearby</strong>
       <div className="place-card-nearby-buttons">
         <button
           type="button"
@@ -176,7 +181,7 @@ function NearbyFeatures({
           aria-label="Photos nearby"
           onClick={() => setPhotosOpen((value) => !value)}
         >
-          <CameraIcon size={15} /> Nearby
+          <CameraIcon size={15} /> Photos
         </button>
         <button
           type="button"
@@ -185,8 +190,7 @@ function NearbyFeatures({
           aria-label="Nearby places"
           onClick={() => setPlacesOpen((value) => !value)}
         >
-          <WikiBadge />
-          Nearby
+          <WikiBadge /> Wikipedia
         </button>
         <button
           type="button"
@@ -409,6 +413,9 @@ export function PlaceCard({
   const [copied, setCopied] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const factsLead = placeLeadsWithMapFacts(target.poiCategoryId);
+  const [moreOpen, setMoreOpen] = useState(factsLead);
   // Clear the "Copied" confirmation; a second copy restarts the timer.
   useEffect(() => {
     if (!copied) return;
@@ -420,10 +427,13 @@ export function PlaceCard({
   useEffect(() => {
     setShareOpen(false);
     setDeparturesOpen(false);
-  }, [target.position.lat, target.position.lng]);
+    setHoursOpen(false);
+    // A peak leads with its map facts, so they open with the card; a restaurant
+    // leads with its hours and keeps them tucked away.
+    setMoreOpen(factsLead);
+  }, [factsLead, target.position.lat, target.position.lng]);
 
   const coords = fmtCoords(target.position);
-  const subtitle = placeTargetSubtitle(target, userAt);
   // A pin the user saved and named keeps showing its coordinates otherwise: the
   // target is a bare coordinate and knows nothing of the place now standing on
   // it. The card already claims that spot *is* that place — it offers Edit for
@@ -436,76 +446,137 @@ export function PlaceCard({
       ? target.website
       : `https://${target.website}`
     : undefined;
+  const websiteLabel = target.website ? websiteDisplayName(target.website) : undefined;
+  const opening = parseOpeningHours(target.openingHours);
+  const hoursComment = openingHoursComment(target.openingHours);
+  const distance = userAt ? fmtDistanceM(haversineM(userAt, target.position)) : undefined;
 
   // Both "what is this spot like" facts from one shared hook, so the two cards
   // cannot end up with different halves of the pair.
   const { elevation, light } = usePlaceFacts('', target.position);
   const placeContent = usePlaceContent(target.name, target.position);
 
-  return (
-    <div className={`place-card${shifted ? ' place-card-shifted' : ''}`} role="dialog">
-      <div className="place-card-head">
-        <div className="place-card-titles">
-          <strong>{title}</strong>
-          {subtitle && <span className="place-card-sub">{subtitle}</span>}
-          {showCoords && <code className="place-card-coords">{coords}</code>}
-        </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
-          ✕
+  const actions = (
+    <div className="place-card-actions">
+      <button type="button" className="primary" onClick={onDirections}>
+        <RouteIcon size={17} /> Directions
+      </button>
+      {routeActive && (
+        <button type="button" onClick={onAddStop}>
+          Add stop
         </button>
+      )}
+      {/* Already saved: the useful action is editing *this* place — renaming
+          it, filing it, adding a note — not being shown that it exists. */}
+      {saved ? (
+        <button
+          type="button"
+          className="icon-only tertiary"
+          onClick={() => onEdit(saved)}
+          aria-label="Edit"
+          title="Edit"
+        >
+          <PencilIcon size={17} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!saveEnabled}
+          title={saveEnabled ? undefined : 'Opening your collections…'}
+        >
+          Save
+        </button>
+      )}
+      {transitCoversPoint(target.position) && (
+        <button
+          type="button"
+          aria-expanded={departuresOpen}
+          onClick={() => setDeparturesOpen((open) => !open)}
+        >
+          <TrainIcon size={17} /> Departures
+        </button>
+      )}
+      <button
+        type="button"
+        className="icon-only"
+        aria-expanded={shareOpen}
+        onClick={() => setShareOpen((open) => !open)}
+        aria-label={copied ? 'Link copied' : 'Share'}
+        title={copied ? 'Copied' : 'Share'}
+      >
+        <ShareIcon size={17} />
+      </button>
+      {target.source === 'pin' && (
+        <button type="button" onClick={onRemovePin}>
+          Remove pin
+        </button>
+      )}
+    </div>
+  );
+
+  const hoursSection = (opening || hoursComment) && (
+    <section className="place-card-info-section">
+      <button type="button" onClick={() => setHoursOpen((open) => !open)}>
+        <strong>Opening hours</strong>
+        <span>{hoursOpen ? '⌃' : '›'}</span>
+      </button>
+      <div className="place-card-info-summary">
+        <span>Today</span>
+        <strong>{opening?.todayHours ?? hoursComment}</strong>
       </div>
-      {/* What this spot is like, as opposed to what you can do with it. Elevation
-          is fetched and Norway-only, so it states its own absence rather than
-          silently leaving the row short. */}
-      <dl className="place-card-facts">
-        <div>
-          <dt>Elevation</dt>
-          <dd>
-            {elevation.status === 'loading' && '…'}
-            {elevation.status === 'error' && 'unavailable'}
-            {elevation.status === 'ready' &&
-              (elevation.elevationM === null
-                ? 'no data here'
-                : `${Math.round(elevation.elevationM)} m`)}
-          </dd>
+      {hoursOpen && opening && (
+        <div className="place-card-hours-week">
+          {opening.weeklyHours.map((day) => (
+            <div key={day.day} className={day.today ? 'today' : ''}>
+              <span>{day.today ? 'Today' : day.label}</span>
+              <span>{day.hours}</span>
+            </div>
+          ))}
         </div>
-        {light && (
+      )}
+    </section>
+  );
+  const contactSection = (websiteUrl || target.phone) && (
+    <div className="place-card-contact">
+      {websiteUrl && (
+        <a href={websiteUrl} target="_blank" rel="noreferrer">
+          <small>Website</small>
+          <strong>{websiteLabel} ↗</strong>
+        </a>
+      )}
+      {target.phone && (
+        <a href={`tel:${target.phone}`}>
+          <small>Phone</small>
+          <strong>{target.phone}</strong>
+        </a>
+      )}
+    </div>
+  );
+  const moreSection = (
+    <section className="place-card-info-section">
+      <button type="button" onClick={() => setMoreOpen((open) => !open)}>
+        <strong>More information</strong>
+        <span>{moreOpen ? '⌃' : '⌄'}</span>
+      </button>
+      {moreOpen && (
+        <dl className="place-card-facts">
           <div>
-            <dt>Daylight</dt>
-            <dd>{light}</dd>
+            <dt>Elevation</dt>
+            <dd>
+              {elevation.status === 'loading'
+                ? '…'
+                : elevation.status === 'error'
+                  ? 'unavailable'
+                  : elevation.status === 'ready' && elevation.elevationM !== null
+                    ? `${Math.round(elevation.elevationM)} m`
+                    : 'no data here'}
+            </dd>
           </div>
-        )}
-      </dl>
-      {(target.address || target.phone || target.openingHours || websiteUrl || target.osmUrl) && (
-        <dl className="place-card-poi-details" data-testid="place-card-poi-details">
-          {target.address && (
+          {light && (
             <div>
-              <dt>Address</dt>
-              <dd>{target.address}</dd>
-            </div>
-          )}
-          {target.openingHours && (
-            <div>
-              <dt>Hours</dt>
-              <dd>{target.openingHours}</dd>
-            </div>
-          )}
-          {target.phone && (
-            <div>
-              <dt>Phone</dt>
-              <dd>
-                <a href={`tel:${target.phone}`}>{target.phone}</a>
-              </dd>
-            </div>
-          )}
-          {websiteUrl && (
-            <div>
-              <dt>Website</dt>
-              <dd>
-                <a href={websiteUrl} target="_blank" rel="noreferrer">
-                  Open website ↗
-                </a>
-              </dd>
+              <dt>Daylight</dt>
+              <dd>{light}</dd>
             </div>
           )}
           {target.osmUrl && (
@@ -519,6 +590,50 @@ export function PlaceCard({
             </div>
           )}
         </dl>
+      )}
+    </section>
+  );
+
+  return (
+    <div className={`place-card${shifted ? ' place-card-shifted' : ''}`} role="dialog">
+      <div className="place-card-head">
+        <div className="place-card-titles">
+          <strong>{title}</strong>
+          {target.category && <span className="place-card-sub">{target.category}</span>}
+          {opening && (
+            <span className={`place-card-status ${opening.isOpen ? 'open' : 'closed'}`}>
+              ● {opening.statusText}
+              {opening.nextOpenOrClose ? ` · ${opening.nextOpenOrClose}` : ''}
+            </span>
+          )}
+          {(target.address || distance) && (
+            <span className="place-card-address">
+              <span>{target.address}</span>
+              {distance && <span>{distance}</span>}
+            </span>
+          )}
+          {showCoords && <code className="place-card-coords">{coords}</code>}
+        </div>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+      </div>
+      {actions}
+      {/* Ordered by kind, not by category: the one rule in `@atlas/core` says
+          which half of the card a place is here for, and the other half follows
+          it rather than being hidden. */}
+      {factsLead ? (
+        <>
+          {moreSection}
+          {hoursSection}
+          {contactSection}
+        </>
+      ) : (
+        <>
+          {hoursSection}
+          {contactSection}
+          {moreSection}
+        </>
       )}
       {/* Why the derived surface scores this spot the way it does. Above the
           encyclopaedia content on purpose: the user tapped the water they were
@@ -557,64 +672,6 @@ export function PlaceCard({
         onWeather={onWeather}
         onShowNearby={onShowNearby}
       />
-      <div className="place-card-actions">
-        <button type="button" className="primary" onClick={onDirections}>
-          <RouteIcon size={17} />
-          Directions
-        </button>
-        {routeActive && (
-          <button type="button" onClick={onAddStop}>
-            Add stop
-          </button>
-        )}
-        {/* Already saved: the useful action is editing *this* place — renaming
-            it, filing it, adding a note — not being shown that it exists. */}
-        {saved ? (
-          <button
-            type="button"
-            className="icon-only tertiary"
-            onClick={() => onEdit(saved)}
-            aria-label="Edit"
-            title="Edit"
-          >
-            <PencilIcon size={17} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!saveEnabled}
-            title={saveEnabled ? undefined : 'Opening your collections…'}
-          >
-            Save
-          </button>
-        )}
-        {transitCoversPoint(target.position) && (
-          <button
-            type="button"
-            aria-expanded={departuresOpen}
-            onClick={() => setDeparturesOpen((open) => !open)}
-          >
-            <TrainIcon size={17} />
-            Departures
-          </button>
-        )}
-        <button
-          type="button"
-          className="icon-only"
-          aria-expanded={shareOpen}
-          onClick={() => setShareOpen((open) => !open)}
-          aria-label={copied ? 'Link copied' : 'Share'}
-          title={copied ? 'Copied' : 'Share'}
-        >
-          <ShareIcon size={17} />
-        </button>
-        {target.source === 'pin' && (
-          <button type="button" onClick={onRemovePin}>
-            Remove pin
-          </button>
-        )}
-      </div>
       {departuresOpen && (
         <StopDepartures
           location={{

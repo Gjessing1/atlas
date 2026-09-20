@@ -30,6 +30,8 @@ export interface PoiViewportState {
   loading: boolean;
   error: boolean;
   tooWide: boolean;
+  /** Increments only when a complete live viewport answer has settled. */
+  revision: number;
   refresh: () => void;
 }
 
@@ -68,6 +70,7 @@ export function usePoiViewport({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [revision, setRevision] = useState(0);
   const fetchRef = useRef(fetchPois);
   fetchRef.current = fetchPois;
   const cacheRef = useRef(new Map<string, CachedPair>());
@@ -110,6 +113,7 @@ export function usePoiViewport({
     const { groups, missingTiles, missingCategories } = held();
     if (!missingTiles.size) {
       setResults(mergePoiResults(groups, bbox));
+      setRevision((value) => value + 1);
       setLoading(false);
       setError(false);
       return;
@@ -143,6 +147,7 @@ export function usePoiViewport({
             cache.delete(key);
           }
           setResults(mergePoiResults(held().groups, bbox));
+          setRevision((value) => value + 1);
           setLoading(false);
         })
         .catch(() => {
@@ -162,6 +167,7 @@ export function usePoiViewport({
     loading,
     error,
     tooWide,
+    revision,
     refresh: useCallback(() => setGeneration((value) => value + 1), []),
   };
 }

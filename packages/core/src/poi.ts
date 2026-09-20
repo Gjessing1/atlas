@@ -11,6 +11,8 @@ export interface PoiTagSelector {
 export interface PoiCategory {
   id: PoiCategoryId;
   label: string;
+  /** Which facts lead the one shared place card for this kind of place. */
+  hierarchy: 'business' | 'outdoor';
   /** Short, unambiguous marker text; the full label is always present in the list/card. */
   marker: string;
   /** OSM tags queried for this category. Every visible category has a real query. */
@@ -27,20 +29,35 @@ export const POI_CATEGORIES = [
   {
     id: 'food',
     label: 'Restaurants',
+    hierarchy: 'business',
     marker: 'R',
     selectors: [{ key: 'amenity', values: ['restaurant', 'fast_food', 'food_court'] }],
   },
-  { id: 'coffee', label: 'Cafes', marker: 'C', selectors: [{ key: 'amenity', values: ['cafe'] }] },
+  {
+    id: 'coffee',
+    label: 'Cafes',
+    hierarchy: 'business',
+    marker: 'C',
+    selectors: [{ key: 'amenity', values: ['cafe'] }],
+  },
   {
     id: 'groceries',
     label: 'Groceries',
+    hierarchy: 'business',
     marker: 'G',
     selectors: [{ key: 'shop', values: ['supermarket', 'convenience', 'greengrocer', 'deli'] }],
   },
-  { id: 'shops', label: 'Shops', marker: 'S', selectors: [{ key: 'shop' }] },
+  {
+    id: 'shops',
+    label: 'Shops',
+    hierarchy: 'business',
+    marker: 'S',
+    selectors: [{ key: 'shop' }],
+  },
   {
     id: 'museums',
     label: 'Museums',
+    hierarchy: 'business',
     marker: 'M',
     selectors: [
       { key: 'tourism', values: ['museum', 'gallery'] },
@@ -50,12 +67,14 @@ export const POI_CATEGORIES = [
   {
     id: 'sights',
     label: 'Sights',
+    hierarchy: 'outdoor',
     marker: '★',
     selectors: [{ key: 'tourism', values: ['attraction'] }, { key: 'historic' }],
   },
   {
     id: 'nature',
     label: 'Nature',
+    hierarchy: 'outdoor',
     marker: 'N',
     selectors: [
       { key: 'natural', values: ['peak', 'beach', 'cave_entrance'] },
@@ -66,6 +85,7 @@ export const POI_CATEGORIES = [
   {
     id: 'health',
     label: 'Pharmacies',
+    hierarchy: 'business',
     marker: '+',
     // `healthcare=pharmacy` is the newer tag; some pharmacies carry only it.
     selectors: [
@@ -76,6 +96,7 @@ export const POI_CATEGORIES = [
   {
     id: 'banks',
     label: 'Bank / ATM',
+    hierarchy: 'business',
     marker: '$',
     // `atm=yes` is how an ATM inside a bank, shop or fuel station is mapped.
     selectors: [
@@ -86,12 +107,14 @@ export const POI_CATEGORIES = [
   {
     id: 'toilets',
     label: 'Toilets',
+    hierarchy: 'business',
     marker: 'WC',
     selectors: [{ key: 'amenity', values: ['toilets'] }],
   },
   {
     id: 'post',
     label: 'Post / parcels',
+    hierarchy: 'business',
     marker: 'P',
     // Norway's "Post i butikk" counters sit on the host shop as `post_office=post_partner`.
     selectors: [
@@ -102,36 +125,42 @@ export const POI_CATEGORIES = [
   {
     id: 'playgrounds',
     label: 'Playgrounds',
+    hierarchy: 'outdoor',
     marker: '▶',
     selectors: [{ key: 'leisure', values: ['playground'] }],
   },
   {
     id: 'camping',
     label: 'Camping',
+    hierarchy: 'outdoor',
     marker: '△',
     selectors: [{ key: 'tourism', values: ['camp_site', 'caravan_site'] }],
   },
   {
     id: 'fuel',
     label: 'Gas stations',
+    hierarchy: 'business',
     marker: 'F',
     selectors: [{ key: 'amenity', values: ['fuel'] }],
   },
   {
     id: 'charging',
     label: 'EV charging',
+    hierarchy: 'business',
     marker: '⚡',
     selectors: [{ key: 'amenity', values: ['charging_station'] }],
   },
   {
     id: 'parking',
     label: 'Parking',
+    hierarchy: 'business',
     marker: 'P',
     selectors: [{ key: 'amenity', values: ['parking', 'bicycle_parking', 'motorcycle_parking'] }],
   },
   {
     id: 'cabins',
     label: 'Cabins / shelters',
+    hierarchy: 'outdoor',
     marker: 'H',
     selectors: [
       { key: 'tourism', values: ['wilderness_hut', 'alpine_hut', 'chalet'] },
@@ -141,12 +170,14 @@ export const POI_CATEGORIES = [
   {
     id: 'viewpoints',
     label: 'Viewpoints',
+    hierarchy: 'outdoor',
     marker: 'V',
     selectors: [{ key: 'tourism', values: ['viewpoint'] }],
   },
   {
     id: 'boat-access',
     label: 'Boat access',
+    hierarchy: 'outdoor',
     marker: 'B',
     selectors: [
       { key: 'leisure', values: ['slipway', 'marina'] },
@@ -168,6 +199,22 @@ export function isPoiCategoryId(value: unknown): value is PoiCategoryId {
 
 export function poiCategory(id: PoiCategoryId): PoiCategory {
   return CATEGORIES_BY_ID.get(id)!;
+}
+
+/**
+ * Which half of the one shared place card leads, from the category's
+ * `hierarchy` alone — so a restaurant and a viewpoint are ordered by one rule
+ * rather than by a per-category branch in either client.
+ *
+ * A business answers "can I go there now": status, hours, phone, website. An
+ * outdoor place answers "what is it like up there", where elevation and
+ * daylight are the reason the user tapped and opening hours usually do not
+ * exist at all. A target with no queried category — a dropped pin, a search
+ * hit, a saved place — is read the outdoor way, because those map facts are
+ * the only thing it has.
+ */
+export function placeLeadsWithMapFacts(categoryId?: PoiCategoryId): boolean {
+  return categoryId ? poiCategory(categoryId).hierarchy === 'outdoor' : true;
 }
 
 /** Persisted option key within the profile-scoped POI layer state. */
@@ -529,9 +576,16 @@ export function overpassPoiTileResults(
 }
 
 /**
- * The pins and list rows for one view: every pair's places inside the view,
- * nearest the centre first. Past `limit`, the categories take turns, so a
- * dense category cannot push a sparse one off the map.
+ * The pins for one view: every pair's places inside the view, nearest the centre
+ * first. Past `limit`, the categories take turns, so a dense category cannot
+ * push a sparse one off the map.
+ *
+ * Both the order and the cap are measured from the centre of the view on
+ * purpose, never from the user: which places this view contains is a property of
+ * the view. Capping by the user's distance would keep only the places on the
+ * edge nearest them and leave the rest of the screen empty. `distanceM` is
+ * therefore a *view* distance — the reading a person is shown is stamped from
+ * their own position by `usePoiList`, and is simply absent without a fix.
  */
 export function mergePoiResults(
   groups: readonly (readonly PoiResult[])[],
@@ -588,6 +642,7 @@ export function poiResultTarget(result: PoiResult): PlaceTarget {
     position: result.position,
     name: result.name,
     category: result.category,
+    poiCategoryId: result.categoryId,
     address: result.address,
     phone: result.phone,
     openingHours: result.openingHours,
@@ -596,7 +651,7 @@ export function poiResultTarget(result: PoiResult): PlaceTarget {
   };
 }
 
-/** Numbered pins and list rows share the same stable ordering and index. */
+/** Map pins carry stable POI identity; list order may be an older snapshot. */
 export function poiResultsFeatureCollection(results: readonly PoiResult[]) {
   return {
     type: 'FeatureCollection' as const,
@@ -604,6 +659,8 @@ export function poiResultsFeatureCollection(results: readonly PoiResult[]) {
       type: 'Feature' as const,
       properties: {
         index,
+        id: result.id,
+        categoryId: result.categoryId,
         label: String(index + 1),
         marker: result.marker,
         name: result.name,

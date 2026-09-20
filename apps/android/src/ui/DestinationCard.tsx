@@ -1,15 +1,22 @@
 import { usePlaceFacts } from '@atlas/app-hooks';
 import {
   fmtDistanceM,
+  haversineM,
   identifyCardGroups,
   identifyCardLines,
   identifyExpandLabel,
   identifyLinkLabel,
   identifyValueUrl,
+  openingHoursComment,
+  parseOpeningHours,
+  placeLeadsWithMapFacts,
+  websiteDisplayName,
   WIKIMEDIA_USER_AGENT,
   type NearbyPlaceArticle,
   type OverlayIdentifyGroup,
   type PlaceStand,
+  type PoiCategoryId,
+  type LatLng,
 } from '@atlas/core';
 import { transitCoversPoint } from '@atlas/transit';
 import type { PotentialExplainResponse } from '@atlas/potential';
@@ -48,6 +55,7 @@ export interface DestinationTarget {
   name: string;
   /** Secondary line, e.g. a tapped POI's category ("cafe · restaurant"). */
   detail?: string;
+  poiCategoryId?: PoiCategoryId;
   /** Postal/street address for search hits and saved places. */
   address?: string;
   /** Search results / long-press points can be saved as a pin; saved places can't. */
@@ -147,6 +155,7 @@ export function DestinationCard({
   onPickNearby,
   onCancel,
   bottomInset = 0,
+  userAt,
 }: {
   target: DestinationTarget;
   /**
@@ -180,6 +189,8 @@ export function DestinationCard({
   onPickNearby: (place: NearbyPlaceArticle) => void;
   onCancel: () => void;
   bottomInset?: number;
+  /** Ambient fix for POI distance; null is the normal no-fix state. */
+  userAt?: LatLng | null;
 }) {
   // Capped by the shared helper, so a chatty upstream is cut at the same place
   // on both clients rather than at whatever number each card happened to pick.
@@ -213,9 +224,10 @@ export function DestinationCard({
       ? target.website
       : `https://${target.website}`
     : undefined;
-  const hasPoiDetails = Boolean(
-    address || target.phone || target.openingHours || websiteUrl || target.osmUrl,
-  );
+  const websiteLabel = target.website ? websiteDisplayName(target.website) : undefined;
+  const opening = parseOpeningHours(target.openingHours);
+  const hoursComment = openingHoursComment(target.openingHours);
+  const distance = userAt ? fmtDistanceM(haversineM(userAt, at)) : undefined;
   const facts = usePlaceFacts(origin, at);
   const content = usePlaceContent(packs, target.name, at);
   const [photosOpen, setPhotosOpen] = useState(false);
@@ -226,6 +238,9 @@ export function DestinationCard({
   // Whether the overlay answers are opened out of their clipped box.
   const [identifyOpen, setIdentifyOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const factsLead = placeLeadsWithMapFacts(target.poiCategoryId);
+  const [moreOpen, setMoreOpen] = useState(factsLead);
   const nearby = useNearbyPlaces(packs, at, nearbyOpen);
   // Every point is a new question — a list left open from the previous card
   // would describe somewhere the user has already moved on from.
@@ -234,7 +249,11 @@ export function DestinationCard({
     setPhotosOpen(false);
     setDeparturesOpen(false);
     setIdentifyOpen(false);
-  }, [target.lat, target.lng]);
+    setHoursOpen(false);
+    // A peak opens with its elevation and daylight already showing; a cafe
+    // leads with its hours and leaves them folded away.
+    setMoreOpen(factsLead);
+  }, [factsLead, target.lat, target.lng]);
   /**
    * Reading is a bigger sheet than tapping "Directions".
    *
@@ -262,6 +281,135 @@ export function DestinationCard({
     fn();
   };
 
+  const actions = (
+    <View style={styles.actions}>
+      <Pressable
+        style={({ pressed }) => [styles.navigate, pressed && styles.pressed]}
+        onPress={once(onDirections)}
+        testID="destination-navigate"
+      >
+        <DirectionsIcon color={theme.onAccent} size={19} />
+        <Text style={styles.navigateText}>Directions</Text>
+      </Pressable>
+      {target.canSave && onSave ? (
+        <Pressable
+          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          onPress={once(onSave)}
+          testID="destination-save"
+        >
+          <Text style={styles.saveText}>Save</Text>
+        </Pressable>
+      ) : null}
+      {onEdit ? (
+        <Pressable
+          style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
+          onPress={once(onEdit)}
+          accessibilityLabel="Edit saved place"
+          testID="destination-edit"
+        >
+          <PencilIcon />
+        </Pressable>
+      ) : null}
+      {transitCoversPoint(at) ? (
+        <Pressable
+          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          onPress={() => {
+            setDeparturesOpen((open) => !open);
+            sheet.current?.snapTo('full');
+          }}
+          accessibilityState={{ expanded: departuresOpen }}
+          testID="destination-departures"
+        >
+          <BusIcon size={19} />
+          <Text style={styles.saveText}>Departures</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
+        onPress={onShare}
+        accessibilityLabel="Share"
+        testID="destination-share"
+      >
+        <ShareIcon />
+      </Pressable>
+    </View>
+  );
+
+  const hoursSection =
+    opening || hoursComment ? (
+      <View style={styles.infoSection} testID="destination-opening-hours">
+        <Pressable
+          style={styles.infoHead}
+          onPress={() => {
+            setHoursOpen((open) => !open);
+            if (!hoursOpen) expand();
+          }}
+        >
+          <Text style={styles.infoTitle}>Opening hours</Text>
+          <Text style={styles.infoChevron}>{hoursOpen ? '⌃' : '›'}</Text>
+        </Pressable>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Today</Text>
+          <Text style={styles.infoValue}>{opening?.todayHours ?? hoursComment}</Text>
+        </View>
+        {hoursOpen && opening
+          ? opening.weeklyHours.map((day) => (
+              <View key={day.day} style={styles.infoRow}>
+                <Text style={[styles.infoLabel, day.today && styles.today]}>
+                  {day.today ? 'Today' : day.label}
+                </Text>
+                <Text style={[styles.infoValue, day.today && styles.today]}>{day.hours}</Text>
+              </View>
+            ))
+          : null}
+      </View>
+    ) : null;
+  const contactSection =
+    websiteUrl || target.phone ? (
+      <View style={styles.contact}>
+        {websiteUrl ? (
+          <Pressable style={styles.contactRow} onPress={() => void Linking.openURL(websiteUrl)}>
+            <Text style={styles.infoLabel}>Website</Text>
+            <Text style={styles.contactValue}>{websiteLabel} ↗</Text>
+          </Pressable>
+        ) : null}
+        {target.phone ? (
+          <Pressable
+            style={styles.contactRow}
+            onPress={() => void Linking.openURL(`tel:${target.phone}`)}
+          >
+            <Text style={styles.infoLabel}>Phone</Text>
+            <Text style={styles.contactValue}>{target.phone}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    ) : null;
+  const moreSection = (
+    <View style={styles.infoSection}>
+      <Pressable
+        style={styles.infoHead}
+        onPress={() => {
+          setMoreOpen((open) => !open);
+          if (!moreOpen) expand();
+        }}
+      >
+        <Text style={styles.infoTitle}>More information</Text>
+        <Text style={styles.infoChevron}>{moreOpen ? '⌃' : '⌄'}</Text>
+      </Pressable>
+      {moreOpen ? (
+        <>
+          <PlaceFacts {...facts} />
+          {target.osmUrl ? (
+            <Pressable style={styles.infoRow} onPress={() => void Linking.openURL(target.osmUrl!)}>
+              <Text style={styles.infoLabel}>Source</Text>
+              <Text style={styles.contactValue}>OpenStreetMap ↗</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  );
+
   return (
     // The action row can wrap on narrower phones. Reserve three rows so
     // Weather, Save/Edit and Share stay inside the sheet and above Android's
@@ -274,13 +422,25 @@ export function DestinationCard({
       initialSnap="peek"
       // Overlay/article answers need room of their own. Photos no longer affect
       // the initial card height: their peer action expands the sheet on demand.
+      // Every term below is a row this card will actually draw, so the peeked
+      // sheet ends just under the card's own content instead of at a number
+      // that was true of an older layout.
       peekHeight={
         (identify.length > 0 || content.content.length > 0 ? 380 : 218) +
         52 +
-        // Elevation is always a row; the light line is usually a second one and
-        // wraps to two on a narrow phone.
-        (facts.light ? 46 : 22) +
-        (hasPoiDetails ? 132 : 0) +
+        // The header's own two optional lines.
+        (opening ? 18 : 0) +
+        (address || distance ? 18 : 0) +
+        // Opening hours, folded: its heading and today's row.
+        (opening || hoursComment ? 50 : 0) +
+        // Website and phone are one tappable row each.
+        (websiteUrl ? 34 : 0) +
+        (target.phone ? 34 : 0) +
+        // More information: its heading always, its rows only when this kind of
+        // place leads with them. Elevation is always a row; the light line is
+        // usually a second one and wraps to two on a narrow phone.
+        26 +
+        (factsLead ? (facts.light ? 46 : 22) : 0) +
         // The explain block is several rows of reasoning; without its own
         // allowance it would push the actions off the peeked sheet.
         (potential ? 200 : 0)
@@ -298,73 +458,42 @@ export function DestinationCard({
               {target.detail}
             </Text>
           ) : null}
-          {target.address ? (
-            <Text style={styles.detail} numberOfLines={2}>
-              {target.address}
+          {opening ? (
+            <Text style={[styles.status, opening.isOpen ? styles.statusOpen : styles.statusClosed]}>
+              ● {opening.statusText}
+              {opening.nextOpenOrClose ? ` · ${opening.nextOpenOrClose}` : ''}
             </Text>
+          ) : null}
+          {address || distance ? (
+            <View style={styles.addressRow}>
+              <Text style={styles.address} numberOfLines={2}>
+                {address}
+              </Text>
+              {distance ? <Text style={styles.distance}>{distance}</Text> : null}
+            </View>
           ) : null}
         </View>
         <Pressable onPress={onCancel} testID="destination-cancel" hitSlop={10}>
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </View>
-
-      <PlaceFacts {...facts} />
-
-      {hasPoiDetails ? (
-        <View style={styles.poiDetails} testID="destination-poi-details">
-          {address ? (
-            <View style={styles.poiDetailRow}>
-              <Text style={styles.poiDetailLabel}>Address</Text>
-              <Text style={styles.poiDetailValue} selectable>
-                {address}
-              </Text>
-            </View>
-          ) : null}
-          {target.openingHours ? (
-            <View style={styles.poiDetailRow}>
-              <Text style={styles.poiDetailLabel}>Hours</Text>
-              <Text style={styles.poiDetailValue} selectable>
-                {target.openingHours}
-              </Text>
-            </View>
-          ) : null}
-          {target.phone ? (
-            <View style={styles.poiDetailRow}>
-              <Text style={styles.poiDetailLabel}>Phone</Text>
-              <Text
-                style={[styles.poiDetailValue, styles.poiDetailLink]}
-                onPress={() => void Linking.openURL(`tel:${target.phone}`)}
-                selectable
-              >
-                {target.phone}
-              </Text>
-            </View>
-          ) : null}
-          {websiteUrl ? (
-            <View style={styles.poiDetailRow}>
-              <Text style={styles.poiDetailLabel}>Website</Text>
-              <Text
-                style={[styles.poiDetailValue, styles.poiDetailLink]}
-                onPress={() => void Linking.openURL(websiteUrl)}
-              >
-                Open website ↗
-              </Text>
-            </View>
-          ) : null}
-          {target.osmUrl ? (
-            <View style={styles.poiDetailRow}>
-              <Text style={styles.poiDetailLabel}>Source</Text>
-              <Text
-                style={[styles.poiDetailValue, styles.poiDetailLink]}
-                onPress={() => void Linking.openURL(target.osmUrl!)}
-              >
-                OpenStreetMap ↗
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
+      {actions}
+      {/* Ordered by kind, not by category: one rule in `@atlas/core` decides
+        which half of the card this place is here for, and the other half
+        follows below rather than being dropped. */}
+      {factsLead ? (
+        <>
+          {moreSection}
+          {hoursSection}
+          {contactSection}
+        </>
+      ) : (
+        <>
+          {hoursSection}
+          {contactSection}
+          {moreSection}
+        </>
+      )}
 
       {/* Above the surface's own reading when this pin *is* a stand: the ground
         is context, but which way to face is what the user came back for. */}
@@ -473,6 +602,7 @@ export function DestinationCard({
 
       {/* Photos and described places are peer actions. Images no longer load
           into every marker card or displace its primary actions. */}
+      <Text style={styles.exploreHeading}>Explore nearby</Text>
       <View style={styles.nearbyButtons}>
         <Pressable
           style={[styles.nearbyToggle, photosOpen && styles.nearbyToggleOpen]}
@@ -487,7 +617,7 @@ export function DestinationCard({
           testID="destination-photos-toggle"
         >
           <CameraIcon />
-          <Text style={styles.nearbyToggleText}>Nearby</Text>
+          <Text style={styles.nearbyToggleText}>Photos</Text>
         </Pressable>
         <Pressable
           style={[styles.nearbyToggle, nearbyOpen && styles.nearbyToggleOpen]}
@@ -502,7 +632,7 @@ export function DestinationCard({
           testID="destination-nearby-toggle"
         >
           <WikiBadge />
-          <Text style={styles.nearbyToggleText}>Nearby</Text>
+          <Text style={styles.nearbyToggleText}>Wikipedia</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.nearbyWeather, pressed && styles.pressed]}
@@ -608,57 +738,6 @@ export function DestinationCard({
         )
       ) : null}
 
-      <View style={styles.actions}>
-        <Pressable
-          style={({ pressed }) => [styles.navigate, pressed && styles.pressed]}
-          onPress={once(onDirections)}
-          testID="destination-navigate"
-        >
-          <DirectionsIcon color={theme.onAccent} size={19} />
-          <Text style={styles.navigateText}>Directions</Text>
-        </Pressable>
-        {target.canSave && onSave ? (
-          <Pressable
-            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
-            onPress={once(onSave)}
-            testID="destination-save"
-          >
-            <Text style={styles.saveText}>Save</Text>
-          </Pressable>
-        ) : null}
-        {onEdit ? (
-          <Pressable
-            style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
-            onPress={once(onEdit)}
-            accessibilityLabel="Edit saved place"
-            testID="destination-edit"
-          >
-            <PencilIcon />
-          </Pressable>
-        ) : null}
-        {transitCoversPoint(at) ? (
-          <Pressable
-            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
-            onPress={() => {
-              setDeparturesOpen((open) => !open);
-              sheet.current?.snapTo('full');
-            }}
-            accessibilityState={{ expanded: departuresOpen }}
-            testID="destination-departures"
-          >
-            <BusIcon size={19} />
-            <Text style={styles.saveText}>Departures</Text>
-          </Pressable>
-        ) : null}
-        <Pressable
-          style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
-          onPress={onShare}
-          accessibilityLabel="Share"
-          testID="destination-share"
-        >
-          <ShareIcon />
-        </Pressable>
-      </View>
       {departuresOpen ? (
         <StopDepartures
           location={{
@@ -677,6 +756,12 @@ const styles = StyleSheet.create({
   titles: { flexShrink: 1, paddingRight: 12 },
   name: { fontSize: 17, fontWeight: '700', color: theme.text },
   detail: { fontSize: 13, color: theme.textMuted, marginTop: 1 },
+  status: { marginTop: 3, fontSize: 12, fontWeight: '700' },
+  statusOpen: { color: theme.success },
+  statusClosed: { color: theme.danger },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 3 },
+  address: { flex: 1, color: theme.text, fontSize: 12 },
+  distance: { color: theme.textMuted, fontSize: 12 },
   close: { fontSize: 18, color: theme.textMuted, paddingHorizontal: 4 },
   facts: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   factRow: { flexDirection: 'row', gap: 4, alignItems: 'flex-start' },
@@ -684,17 +769,26 @@ const styles = StyleSheet.create({
   // enough to wrap, and wrapping under a ragged label reads as two columns.
   factLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
   factValue: { fontSize: 12, color: theme.text },
-  poiDetails: {
-    marginTop: 10,
-    gap: 5,
-    padding: 9,
-    borderRadius: 8,
-    backgroundColor: theme.surfaceMuted,
+  infoSection: {
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border,
   },
-  poiDetailRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  poiDetailLabel: { width: 58, fontSize: 12, fontWeight: '600', color: theme.textMuted },
-  poiDetailValue: { flex: 1, fontSize: 12, color: theme.text },
-  poiDetailLink: { color: theme.accent, textDecorationLine: 'underline' },
+  infoHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  infoTitle: { color: theme.text, fontSize: 13, fontWeight: '800' },
+  infoChevron: { color: theme.textMuted, fontSize: 15 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingTop: 5 },
+  infoLabel: { color: theme.textMuted, fontSize: 12 },
+  infoValue: { flexShrink: 1, color: theme.text, fontSize: 12, textAlign: 'right' },
+  today: { color: theme.accent, fontWeight: '800' },
+  contact: {
+    marginTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border,
+  },
+  contactRow: { paddingVertical: 7 },
+  contactValue: { color: theme.accent, fontSize: 13, fontWeight: '700', marginTop: 1 },
   identify: { maxHeight: 132, marginTop: 12 },
   // Opened by "Show more" — still bounded, so the card's actions stay on the
   // sheet however much the upstream has to say.
@@ -753,6 +847,7 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
   },
   nearbyButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  exploreHeading: { color: theme.text, fontSize: 12, fontWeight: '800', marginTop: 12 },
   nearbyWeather: {
     width: 34,
     height: 34,

@@ -51,6 +51,7 @@ import {
   usePotential,
   usePotentialExplain,
   usePotentialTarget,
+  usePoiList,
   usePoiViewport,
   useLayerFilters,
   usePlanningAreas,
@@ -390,6 +391,16 @@ export function App() {
     viewport: mapViewport,
     categories: layers.poiCategories,
     fetchPois,
+  });
+  const poiList = usePoiList({
+    active: layers.poiOn,
+    viewport: mapViewport,
+    categories: layers.poiCategories,
+    liveResults: viewportPois.results,
+    loading: viewportPois.loading,
+    liveRevision: viewportPois.revision,
+    origin: userAt,
+    refreshLive: viewportPois.refresh,
   });
 
   // Derived potential surfaces: queue the cells under the viewport and
@@ -769,11 +780,16 @@ export function App() {
     },
     [closePanels, followPin],
   );
-  const onPickPoi = useCallback((result: PoiResult) => {
+  const onPickPoi = useCallback((result: PoiResult, pan: 'always' | 'if-off-screen' = 'always') => {
     const picked = poiResultTarget(result);
     setTarget(picked);
     const current = mapRef.current;
-    if (current) current.easeTo({ center: result.position, duration: 350 });
+    // A pin was tapped where it stands. A row was picked from a snapshot the
+    // map may have been panned away from since, so it is brought into view —
+    // and otherwise the map is left exactly where the user put it.
+    if (current && (pan === 'always' || !current.getBounds().contains(result.position))) {
+      current.easeTo({ center: result.position, duration: 350 });
+    }
     if (!picked.address) {
       const params = new URLSearchParams({
         lat: String(result.position.lat),
@@ -794,6 +810,10 @@ export function App() {
         .catch(() => undefined);
     }
   }, []);
+  const onPickPoiFromList = useCallback(
+    (result: PoiResult) => onPickPoi(result, 'if-off-screen'),
+    [onPickPoi],
+  );
   usePoiLayer(map, viewportPois.results, onPickPoi, blockPassiveClicksRef);
   const onPickExplore = useCallback(
     (result: SearchResult) => {
@@ -1550,12 +1570,14 @@ export function App() {
       )}
       {layers.poiOn && !leftPanelOpen && !target && !route.active && nav.phase === 'idle' && (
         <PoiViewportPanel
-          results={viewportPois.results}
+          list={poiList}
           loading={viewportPois.loading}
           error={viewportPois.error}
           tooWide={viewportPois.tooWide}
-          onPick={onPickPoi}
-          onRefresh={viewportPois.refresh}
+          categories={layers.poiCategories}
+          onToggleCategory={layers.togglePoiCategory}
+          onShowAll={layers.showAllPoiCategories}
+          onPick={onPickPoiFromList}
         />
       )}
       {exploreOpen && nav.phase === 'idle' && (

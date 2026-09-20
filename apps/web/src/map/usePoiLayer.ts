@@ -1,4 +1,4 @@
-import { poiResultsFeatureCollection, type PoiResult } from '@atlas/core';
+import { POI_ICON_IMAGE, poiResultsFeatureCollection, type PoiResult } from '@atlas/core';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -11,7 +11,7 @@ const NUMBER = 'atlas-poi-results-number';
 const NAME = 'atlas-poi-results-name';
 const LAYERS = [CLUSTER, CLUSTER_COUNT, HALO, DISC, NUMBER, NAME];
 
-/** Explicit numbered POI pins; their indexes are the viewport-list indexes. */
+/** Explicit category-icon POI pins, independent of list snapshot ordering. */
 export function usePoiLayer(
   map: maplibregl.Map | null,
   results: readonly PoiResult[],
@@ -101,13 +101,20 @@ export function usePoiLayer(
           'circle-stroke-width': 1.5,
         },
       });
+      // Still `…-results-number`: the id is what the style, the tests and the
+      // click handler agree on, and only what it draws has changed. EV charging
+      // has no honest sprite, so that one category keeps its ⚡ as disc text.
       map.addLayer({
         id: NUMBER,
         type: 'symbol',
         source: SOURCE,
         filter: point,
         layout: {
-          'text-field': ['get', 'label'],
+          'icon-image': POI_ICON_IMAGE as unknown as maplibregl.ExpressionSpecification,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.62, 14, 0.82],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'text-field': ['case', ['==', ['get', 'categoryId'], 'charging'], ['get', 'marker'], ''],
           'text-font': ['Noto Sans Bold'],
           'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10, 14, 13],
           'text-allow-overlap': true,
@@ -115,12 +122,17 @@ export function usePoiLayer(
         },
         paint: { 'text-color': '#ffffff' },
       });
+      // Names start one zoom before clustering stops (15), which the numbered
+      // discs could not afford: the icon says what a place is, so its name is
+      // free to appear as soon as the pins separate. Collisions need no zoom
+      // rule — the layer allows no overlap and `text-optional` drops a label
+      // rather than its disc.
       map.addLayer({
         id: NAME,
         type: 'symbol',
         source: SOURCE,
         filter: point,
-        minzoom: 15,
+        minzoom: 14,
         layout: {
           'text-field': ['get', 'name'],
           'text-font': ['Noto Sans Bold'],
@@ -150,10 +162,10 @@ export function usePoiLayer(
     const onClick = (event: maplibregl.MapMouseEvent) => {
       if (suppressClicks?.current || !map.getLayer(DISC)) return;
       const hit = map.queryRenderedFeatures(event.point, { layers: [DISC, HALO] })[0];
-      const index = hit?.properties?.['index'];
-      if (typeof index === 'number' && resultsRef.current[index]) {
-        pickRef.current(resultsRef.current[index]!);
-      }
+      const id = hit?.properties?.['id'];
+      const result =
+        typeof id === 'string' ? resultsRef.current.find((item) => item.id === id) : undefined;
+      if (result) pickRef.current(result);
     };
     const onClusterClick = (event: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(CLUSTER)) return;

@@ -4,6 +4,7 @@ import {
   exploreResultsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  POI_ICON_IMAGE,
   poiResultsFeatureCollection,
   routeDeltaLabel,
   savedStandFeatures,
@@ -1422,7 +1423,18 @@ export function MapScene({
               id="atlas-poi-results-number"
               filter={['!', ['has', 'point_count']]}
               layout={{
-                'text-field': ['get', 'label'],
+                // Shared readonly expression; MapLibre Native's prop type is
+                // needlessly mutable even though it never mutates layouts.
+                'icon-image': POI_ICON_IMAGE as never,
+                'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.62, 14, 0.82],
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+                'text-field': [
+                  'case',
+                  ['==', ['get', 'categoryId'], 'charging'],
+                  ['get', 'marker'],
+                  '',
+                ],
                 'text-font': ['Noto Sans Bold'],
                 'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10, 14, 13],
                 'text-allow-overlap': true,
@@ -1430,11 +1442,14 @@ export function MapScene({
               }}
               paint={{ 'text-color': '#ffffff' }}
             />
+            {/* One zoom before clustering stops: the icon carries what a place
+                is, so the name may appear as soon as the pins separate, and a
+                colliding label drops itself (`text-optional`). */}
             <Layer
               type="symbol"
               id="atlas-poi-results-name"
               filter={['!', ['has', 'point_count']]}
-              minzoom={15}
+              minzoom={14}
               layout={{
                 'text-field': ['get', 'name'],
                 'text-font': ['Noto Sans Bold'],

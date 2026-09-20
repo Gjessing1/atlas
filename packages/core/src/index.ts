@@ -21,6 +21,7 @@ export * from './layers.js';
 export * from './maphash.js';
 export * from './measure.js';
 export * from './nav-widgets.js';
+export * from './opening-hours.js';
 export * from './packs.js';
 export * from './persisted.js';
 export * from './pack-spec.js';
@@ -41,6 +42,7 @@ export {
   applyMapAppearance,
   DEFAULT_MAP_STYLE_OVERRIDES,
   isThemeMode,
+  POI_ICON_IMAGE,
   sanitizeMapStyleOverrides,
   type ColorScheme,
   type MapAppearance,

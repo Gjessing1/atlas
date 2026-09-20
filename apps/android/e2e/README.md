@@ -124,6 +124,13 @@ before that destination. Also:
   rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
   menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
+- **A sheet handle only ever expands.** `cycleSnap` runs peek → half → full → half, so tapping
+  `…-sheet-handle` can never put a sheet back at peek; only a downward drag does. The POI list is
+  reached by one tap on `poi-list-sheet-handle`, and the regression gets the map controls back by
+  opening a place card (which unmounts the sheet) and closing it, so it remounts at peek.
+- **The fixture answers `/api/pois`** with one place per requested tile×category, placed at that
+  tile's own centre, so a POI row exists wherever the AVD's map happens to be looking — and the
+  row's distance is absent, which is the no-fix path the list has to keep working on.
 - **The AVD draws no MapLibre symbol text.** Place names, wind arrows and temperature numbers are
   invisible here. Rasters, fills, circles and ordinary React Native views render and screenshot
   normally, so verify a symbol layer on a real device or through a temporary `circle` layer on

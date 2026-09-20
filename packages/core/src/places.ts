@@ -4,8 +4,9 @@
  */
 
 import { haversineM, type LatLng } from './geo.js';
-import { fmtCoords, fmtDistanceM } from './format.js';
+import { fmtCoords } from './format.js';
 import type { OverlayIdentifyGroup } from './layers.js';
+import type { PoiCategoryId } from './poi.js';
 
 /**
  * The colour palette offered for places/pins. Stored on each place as the hex
@@ -140,6 +141,8 @@ export interface PlaceTarget {
   name?: string;
   /** Category or address line shown under the name. */
   category?: string;
+  /** Stable queried-POI category, used only to choose the card's fact order. */
+  poiCategoryId?: PoiCategoryId;
   /** Postal/street address, kept distinct from a POI category. */
   address?: string;
   /** Set when the target *is* a saved place — the card then offers Edit, not Save. */
@@ -190,19 +193,6 @@ export function poiCategoryLabel(
 /** What the card shows as its heading: the name, or the coordinates for a bare pin. */
 export function placeTargetTitle(target: PlaceTarget): string {
   return target.name?.trim() || fmtCoords(target.position);
-}
-
-/**
- * The line under the heading: category and distance from a reference point
- * (the user's location, or the map centre), whichever of them exist. Empty
- * string when neither does — the caller can then skip the element entirely.
- */
-export function placeTargetSubtitle(target: PlaceTarget, from?: LatLng | null): string {
-  const parts: string[] = [];
-  if (target.address) parts.push(target.address);
-  if (target.category) parts.push(target.category);
-  if (from) parts.push(`${fmtDistanceM(haversineM(from, target.position))} away`);
-  return parts.join(' · ');
 }
 
 /**

@@ -7,10 +7,11 @@ import {
   type WeatherLegendRow,
   type WeatherMapLegend,
 } from '@atlas/conditions';
-import { POI_CATEGORIES, type PoiCategoryId } from '@atlas/core';
+import { type PoiCategoryId } from '@atlas/core';
 import { useEffect, useState } from 'react';
 
 import { PauseIcon, PlayIcon } from '../icons.js';
+import { PoiCategoryDock } from '../poi/PoiCategoryDock.js';
 
 /** A legend row as a CSS gradient; stops sharing a position make a hard edge. */
 function gradient(row: WeatherLegendRow): string {
@@ -236,30 +237,11 @@ export function WeatherDock({
   return (
     <div className={className}>
       {poiOn && (
-        <div className="weather-timeline poi-control" role="group" aria-label="POI categories">
-          <strong className="poi-control-title">POIs</strong>
-          <div className="poi-category-scroll">
-            <div className="weather-timeline-switch">
-              <button
-                type="button"
-                aria-pressed={poiCategories.length === 0}
-                onClick={onShowAllPois}
-              >
-                All
-              </button>
-              {POI_CATEGORIES.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  aria-pressed={poiCategories.includes(category.id)}
-                  onClick={() => onTogglePoiCategory(category.id)}
-                >
-                  {category.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <PoiCategoryDock
+          categories={poiCategories}
+          onToggle={onTogglePoiCategory}
+          onShowAll={onShowAllPois}
+        />
       )}
       {(legend || weatherTimeline) && (
         <div className="weather-map-control">

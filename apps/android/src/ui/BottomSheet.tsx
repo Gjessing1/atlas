@@ -46,6 +46,7 @@ export interface BottomSheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   sheetStyle?: StyleProp<ViewStyle>;
   testID?: string;
+  onSnapChange?: (snap: SheetSnap) => void;
 }
 
 export interface BottomSheetHandle {
@@ -80,6 +81,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
     contentStyle,
     sheetStyle,
     testID,
+    onSnapChange,
   },
   ref,
 ) {
@@ -121,8 +123,10 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const snapsRef = useRef(snaps);
   const visibleRef = useRef(false);
   const onCloseRef = useRef(onClose);
+  const onSnapChangeRef = useRef(onSnapChange);
   snapsRef.current = snaps;
   onCloseRef.current = onClose;
+  onSnapChangeRef.current = onSnapChange;
 
   // Map-mode sheets are intentionally not React Native Modals, so Android
   // does not send them through Modal.onRequestClose. Consume Back here before
@@ -140,6 +144,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const animateTo = (snap: SheetSnap) => {
     const target = snapsRef.current[snap];
     currentSnap.current = snap;
+    onSnapChangeRef.current?.(snap);
     Animated.spring(animatedHeight, {
       toValue: target,
       damping: 24,
@@ -169,7 +174,8 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dy) > 4,
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
         onPanResponderGrant: () => {
           animatedHeight.stopAnimation((value) => {
             dragStart.current = value;

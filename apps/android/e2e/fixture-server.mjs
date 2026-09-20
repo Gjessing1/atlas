@@ -30,6 +30,43 @@ const COMMUTE_STOPS = [
   { match: 'oslo', name: 'Oslo E2E', position: DESTINATION, stopId: 'NSR:StopPlace:58404' },
 ];
 
+/**
+ * One POI per requested tile×category, placed at the tile's own centre so the
+ * row exists wherever the AVD's map happens to be looking. Real values on the
+ * card's new fields: an address, a phone, a website with a path to shorten and
+ * opening hours the shared parser can actually read.
+ */
+function poiTileResults(tiles, categories) {
+  const wanted = categories.length ? categories : ['groceries'];
+  return tiles.flatMap((tile) => {
+    const [z, x, y] = tile.split('/').map(Number);
+    const span = 2 ** z;
+    const lng = ((x + 0.5) / span) * 360 - 180;
+    const n = Math.PI - (2 * Math.PI * (y + 0.5)) / span;
+    const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    return wanted.map((category) => ({
+      tile,
+      category,
+      complete: true,
+      results: [
+        {
+          id: `node/${z}${x}${y}-${category}`,
+          name: `E2E ${category} ${x}`,
+          position: { lat, lng },
+          categoryId: category,
+          category: 'Groceries',
+          marker: 'G',
+          address: 'Kartgata 1, 0001 Oslo',
+          phone: '+47 12 34 56 78',
+          openingHours: 'Mo-Sa 08:00-22:00',
+          website: 'https://www.example.com/market/today/',
+          osmUrl: 'https://www.openstreetmap.org/node/42',
+        },
+      ],
+    }));
+  });
+}
+
 const json = (response, body, status = 200) => {
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -307,6 +344,11 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/api/layers') return json(response, { layers: [] });
     if (url.pathname === '/api/regions') return json(response, { regions: [] });
     if (url.pathname === '/api/app/version') return json(response, null, 404);
+    if (url.pathname === '/api/pois') {
+      const tiles = (url.searchParams.get('tiles') ?? '').split(',').filter(Boolean);
+      const categories = (url.searchParams.get('categories') ?? '').split(',').filter(Boolean);
+      return json(response, { tiles: poiTileResults(tiles, categories) });
+    }
     if (url.pathname === '/api/search') {
       return json(response, { results: searchResults(url.searchParams.get('q') ?? '') });
     }

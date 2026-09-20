@@ -10,7 +10,7 @@ test('a saved place can be hidden from and restored to the map', async ({ page }
     button: 'right',
   });
   const card = page.locator('.place-card');
-  const name = (await card.locator('strong').textContent())!;
+  const name = (await card.locator('.place-card-titles > strong').textContent())!;
   await card.getByRole('button', { name: 'Save', exact: true }).click();
   // Saving a coordinate-named pin opens its editor to be named; this journey is
   // about visibility, so close it and keep the coordinates as the name.

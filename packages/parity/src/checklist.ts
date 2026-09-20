@@ -133,12 +133,21 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     surface: 'map',
     capability: 'Browse and filter the map data’s points of interest, per profile',
     hook: 'useOverlayPreferences',
-    web: { file: 'apps/web/src/weather/WeatherDock.tsx', contains: 'POI categories' },
+    web: { file: 'apps/web/src/poi/PoiCategoryDock.tsx', contains: 'POI categories' },
     android: {
-      file: 'apps/android/src/ui/WeatherDock.tsx',
+      file: 'apps/android/src/ui/PoiCategoryDock.tsx',
       contains: 'poi-category-all',
     },
     note: 'Both clients expose the POIs already carried by the basemap and outdoor archive as an opt-in layer. Enabling it opens the same bottom map dock used by weather, where All or a multi-select of practical categories such as Groceries, Shops and Museums filters the vector style. Visibility and focus are stored per profile.',
+  },
+  {
+    id: 'map-poi-list',
+    surface: 'map',
+    capability: 'Pull the POI selector into a stable, refreshable places-in-view list',
+    hook: 'usePoiList',
+    web: { file: 'apps/web/src/poi/PoiViewportPanel.tsx', contains: 'EXPLORE_REFRESH' },
+    android: { file: 'apps/android/src/ui/PoiListSheet.tsx', contains: 'EXPLORE_REFRESH' },
+    note: 'Both clients keep map pins live while the readable list remains a snapshot. Category changes and explicit refreshes replace it; meaningful camera movement adds the shared amber refresh action, and a picked row opens the one existing place card.',
   },
   {
     id: 'map-basemap-off',

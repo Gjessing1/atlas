@@ -18,6 +18,7 @@ import {
   useRoutePlanPersistence,
   usePotentialExplain,
   usePotentialTarget,
+  usePoiList,
   usePoiViewport,
   useLayerFilters,
   usePlanningAreas,
@@ -33,6 +34,7 @@ import {
 } from '@atlas/app-hooks';
 import {
   atlasRouteUrl,
+  bboxContains,
   clampExploreRadiusM,
   haversineM,
   mapProfile,
@@ -176,6 +178,7 @@ import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
 import { WeatherDock } from './src/ui/WeatherDock';
+import { POI_SHEET_HANDLE, POI_SHEET_PEEK, PoiListSheet } from './src/ui/PoiListSheet';
 import { OfflineRegionDrawControls } from './src/ui/OfflineRegionDrawControls';
 import { PromptModal } from './src/ui/PromptModal';
 import { RoutePanel } from './src/ui/RoutePanel';
@@ -560,11 +563,57 @@ function AppInner() {
     },
     [serverOrigin],
   );
+  // POI distance is ambient, not navigation state: one fix when the layer opens
+  // and another when the user refreshes the list, so the numbers are as old as
+  // the list they sit in and no watcher runs for a card nobody opened.
+  //
+  // It never asks for the permission itself. Turning a layer on is not where a
+  // person expects a location prompt; the locate button and navigation are, and
+  // once either has been granted this reads the fix they already produced. No
+  // permission and no fix are the same ordinary outcome — the rows keep their
+  // names and show no distance (the test AVD is always in that state).
+  const [poiOrigin, setPoiOrigin] = useState<LatLng | null>(null);
+  const readPoiOrigin = useCallback(async () => {
+    try {
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (!permission.granted) return;
+      const cached = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60_000 });
+      const position =
+        cached ??
+        (await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+        ]));
+      if (position) {
+        setPoiOrigin({ lat: position.coords.latitude, lng: position.coords.longitude });
+      }
+    } catch {
+      // A missing provider or a timed-out fix both simply mean no distance.
+    }
+  }, []);
+  useEffect(() => {
+    if (overlaysCtl.poiOn) void readPoiOrigin();
+  }, [overlaysCtl.poiOn, readPoiOrigin]);
   const viewportPois = usePoiViewport({
     active: overlaysCtl.poiOn,
     viewport: camera.mapViewport,
     categories: overlaysCtl.poiCategories,
     fetchPois,
+  });
+  // Refreshing the list is also the moment to re-ask where the user is.
+  const refreshPoiList = useCallback(() => {
+    void readPoiOrigin();
+    viewportPois.refresh();
+  }, [readPoiOrigin, viewportPois]);
+  const poiList = usePoiList({
+    active: overlaysCtl.poiOn,
+    viewport: camera.mapViewport,
+    categories: overlaysCtl.poiCategories,
+    liveResults: viewportPois.results,
+    loading: viewportPois.loading,
+    liveRevision: viewportPois.revision,
+    origin: poiOrigin,
+    refreshLive: refreshPoiList,
   });
   // Stop search for the commute board's ends, biased to where the map is looking.
   const stopGeocode = useGeocode(packs, getBias);
@@ -927,6 +976,7 @@ function AppInner() {
         lng: result.position.lng,
         name: result.name,
         detail: result.category,
+        poiCategoryId: result.categoryId,
         address: result.address,
         phone: result.phone,
         openingHours: result.openingHours,
@@ -937,6 +987,36 @@ function AppInner() {
       });
     },
     [pickOnMap],
+  );
+  const onPickPoiFromList = useCallback(
+    (result: PoiResult) => {
+      // The list is a snapshot, so the map may have been panned away from the
+      // row the user just picked; bring it into view only then, and otherwise
+      // leave the map exactly where they left it.
+      const bbox = camera.mapViewport?.bbox;
+      const inView =
+        bbox &&
+        bboxContains(
+          { sw: { lng: bbox[0], lat: bbox[1] }, ne: { lng: bbox[2], lat: bbox[3] } },
+          result.position,
+        );
+      if (!inView) flyTo(result.position);
+      dest.pick({
+        lat: result.position.lat,
+        lng: result.position.lng,
+        name: result.name,
+        detail: result.category,
+        poiCategoryId: result.categoryId,
+        address: result.address,
+        phone: result.phone,
+        openingHours: result.openingHours,
+        website: result.website,
+        osmUrl: result.osmUrl,
+        canSave: true,
+        showMapMarker: false,
+      });
+    },
+    [camera.mapViewport, dest, flyTo],
   );
   const onPickExplore = useCallback(
     (result: SearchResult) => {
@@ -1241,7 +1321,20 @@ function AppInner() {
   // compass step up over the dock.
   const activityRows =
     (potentialTargets.groups.length > 0 ? 1 : 0) + (layerFilters.groups.length > 0 ? 1 : 0);
-  const weatherDockLift = showIdleChrome && mapDockOn ? weatherDockHeight + 52 * activityRows : 0;
+  // The POI selector is the peeked list sheet, which stands on the same rows the
+  // weather dock does — and above the dock when both are up. The scale bar and
+  // compass step over whichever reaches higher.
+  const poiSheetLift =
+    showIdleChrome && overlaysCtl.poiOn
+      ? POI_SHEET_PEEK +
+        POI_SHEET_HANDLE +
+        52 * activityRows +
+        (timeDockOn ? weatherDockHeight + 6 : 0)
+      : 0;
+  const weatherDockLift = Math.max(
+    showIdleChrome && mapDockOn ? weatherDockHeight + 52 * activityRows : 0,
+    poiSheetLift,
+  );
 
   // Route planning and guidance both repurpose map taps, so the measure tool
   // cannot stay open into either: its sheet is hidden there, and a hidden tool
@@ -1665,7 +1758,7 @@ function AppInner() {
             />
           ) : null}
 
-          {showIdleChrome && mapDockOn ? (
+          {showIdleChrome && timeDockOn ? (
             <WeatherDock
               maps={weatherLayers.maps}
               title={weatherTitle}
@@ -1675,10 +1768,25 @@ function AppInner() {
               sky={skyLayers}
               lightningOn={lightningOn}
               auroraOn={auroraOn}
-              poiOn={overlaysCtl.poiOn}
-              poiCategories={overlaysCtl.poiCategories}
-              onTogglePoiCategory={overlaysCtl.togglePoiCategory}
-              onShowAllPois={overlaysCtl.showAllPoiCategories}
+            />
+          ) : null}
+
+          {showIdleChrome && overlaysCtl.poiOn ? (
+            <PoiListSheet
+              list={poiList}
+              categories={overlaysCtl.poiCategories}
+              loading={viewportPois.loading}
+              error={viewportPois.error}
+              tooWide={viewportPois.tooWide}
+              onToggleCategory={overlaysCtl.togglePoiCategory}
+              onShowAll={overlaysCtl.showAllPoiCategories}
+              onPick={onPickPoiFromList}
+              bottomInset={
+                bottomInset +
+                24 +
+                52 * (1 + activityRows) +
+                (timeDockOn ? weatherDockHeight + 6 : 0)
+              }
             />
           ) : null}
 
@@ -1947,6 +2055,7 @@ function AppInner() {
           {destination && !planning && !navActive ? (
             <DestinationCard
               target={destination}
+              userAt={poiOrigin}
               packs={packs}
               potential={potentialExplain.data}
               potentialTarget={potentialTargetLabel}

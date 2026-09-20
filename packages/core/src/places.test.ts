@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   collectionIsVisible,
   placeIsVisible,
-  placeTargetSubtitle,
   placeTargetTitle,
   poiCategoryLabel,
   savedPlaceAt,
@@ -64,13 +63,6 @@ describe('place card model', () => {
     expect(placeTargetTitle({ ...pin, name: 'Home' })).toBe('Home');
     // A whitespace-only name is not a name.
     expect(placeTargetTitle({ ...pin, name: '  ' })).toBe('59.91000, 10.75000');
-  });
-
-  it('joins category and distance into the subtitle, skipping what is missing', () => {
-    const target: PlaceTarget = { source: 'poi', position: oslo, category: 'Cafe' };
-    expect(placeTargetSubtitle(target, { lat: 59.92, lng: 10.75 })).toBe('Cafe · 1.1 km away');
-    expect(placeTargetSubtitle(target, null)).toBe('Cafe');
-    expect(placeTargetSubtitle({ source: 'pin', position: oslo }, null)).toBe('');
   });
 
   it('finds the nearest already-saved place within the match radius', () => {

@@ -79,6 +79,11 @@ export const PARITY_SURFACE_HOMES: Readonly<Record<string, string>> = {
   'apps/android/src/ui/SettingsSheet.tsx': 'Settings',
   'apps/web/src/routing/RoutePanel.tsx': 'Route planner',
   'apps/android/src/ui/RoutePanel.tsx': 'Route planner',
+  // One surface under two file names: web keeps its desktop panel while the
+  // phone pulls the same list out of the POI selector, which is also Android's
+  // only form of it.
+  'apps/web/src/poi/PoiViewportPanel.tsx': 'Places in view',
+  'apps/android/src/ui/PoiListSheet.tsx': 'Places in view',
   'apps/web/src/potential/StandBoardPanel.tsx': 'Stand board',
   'apps/android/src/ui/StandBoardSheet.tsx': 'Stand board',
   'apps/web/src/satellites/SatellitePassCard.tsx': 'Satellite pass predictor',

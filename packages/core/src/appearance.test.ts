@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { applyMapAppearance, isThemeMode } from './appearance.js';
+import { applyMapAppearance, isThemeMode, POI_ICON_IMAGE } from './appearance.js';
+import { POI_CATEGORIES } from './poi.js';
+
+it('maps every queried POI category to an existing sprite or the explicit charging glyph', () => {
+  const pairs = POI_ICON_IMAGE.slice(2, -1);
+  const icons = new Map<string, string>();
+  for (let index = 0; index < pairs.length; index += 2) {
+    icons.set(pairs[index] as string, pairs[index + 1] as string);
+  }
+  expect([...icons.keys()]).toEqual(POI_CATEGORIES.map((category) => category.id));
+  expect(icons.get('viewpoints')).toBe('attraction');
+  expect(icons.get('charging')).toBe('');
+  expect([...icons.values()].filter(Boolean)).toHaveLength(18);
+});
 
 const style = JSON.stringify({
   version: 8,
