@@ -285,9 +285,23 @@ async function verifyPoiCategoryDock() {
   if (distances.some((text) => !/^\d+(?:[.,]\d+)? (?:m|km)$/.test(text))) {
     throw new Error(`POI row showed an unformatted distance: ${distances.join(', ')}`);
   }
-  const rowId = nodeIds(listXml).find((id) => id.startsWith('poi-result-'));
+  // Back collapses a pulled-up list and is not swallowed at peek: this sheet *is*
+  // the selector and never closes, so consuming Back would leave the map with no
+  // way back at all (v0.233.0).
+  const expandedSheet = boundsForNode(nodeForId(listXml, 'poi-list-sheet'));
+  shell('input', 'keyevent', 'KEYCODE_BACK');
+  await waitFor('the POI list to collapse on Back', hierarchy, (xml) => {
+    const next = boundsForNode(nodeForId(xml, 'poi-list-sheet'));
+    return Boolean(expandedSheet && next && next.height < expandedSheet.height - 60);
+  });
+
+  await tap('poi-list-sheet-handle');
+  const rowsXml = await waitFor('the places-in-view list to return', hierarchy, (xml) =>
+    /text="E2E groceries \d+"/.test(xml),
+  );
+  const rowId = nodeIds(rowsXml).find((id) => id.startsWith('poi-result-'));
   if (!rowId) throw new Error('The POI list rendered no tappable row');
-  tapId(listXml, rowId);
+  tapId(rowsXml, rowId);
   // One card, reached from the list: the place card's own POI sections, with
   // the website shown as the domain the user would recognise.
   const cardXml = await waitForId('destination-opening-hours');

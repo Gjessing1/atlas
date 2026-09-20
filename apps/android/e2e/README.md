@@ -124,6 +124,9 @@ before that destination. Also:
   rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
   menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
+- **A `mode="map"` sheet swallows hardware Back** (`onClose`, return true). A sheet that is
+  visible for as long as its layer is on therefore has to decline the press: `onBack` returning
+  false hands Back back to the app, which is how the POI list avoids trapping the map (v0.233.0).
 - **A sheet handle only ever expands.** `cycleSnap` runs peek → half → full → half, so tapping
   `…-sheet-handle` can never put a sheet back at peek; only a downward drag does. The POI list is
   reached by one tap on `poi-list-sheet-handle`, and the regression gets the map controls back by

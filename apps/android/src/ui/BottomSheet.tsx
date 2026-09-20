@@ -47,6 +47,12 @@ export interface BottomSheetProps {
   sheetStyle?: StyleProp<ViewStyle>;
   testID?: string;
   onSnapChange?: (snap: SheetSnap) => void;
+  /**
+   * Hardware Back, for a sheet that is not dismissable. Return false to leave the
+   * press to the app — a sheet that lives for as long as its layer is on has no
+   * "closed" to go to, and consuming Back anyway traps it on the map.
+   */
+  onBack?: () => boolean;
 }
 
 export interface BottomSheetHandle {
@@ -82,6 +88,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
     sheetStyle,
     testID,
     onSnapChange,
+    onBack,
   },
   ref,
 ) {
@@ -124,9 +131,11 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const visibleRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const onSnapChangeRef = useRef(onSnapChange);
+  const onBackRef = useRef(onBack);
   snapsRef.current = snaps;
   onCloseRef.current = onClose;
   onSnapChangeRef.current = onSnapChange;
+  onBackRef.current = onBack;
 
   // Map-mode sheets are intentionally not React Native Modals, so Android
   // does not send them through Modal.onRequestClose. Consume Back here before
@@ -135,6 +144,8 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   useEffect(() => {
     if (!visible || mode !== 'map') return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const back = onBackRef.current;
+      if (back) return back();
       onCloseRef.current();
       return true;
     });

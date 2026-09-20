@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
+import { BottomSheet, type BottomSheetHandle, type SheetSnap } from './BottomSheet';
 import { PoiCategoryDock } from './PoiCategoryDock';
 import { theme } from './theme';
 
@@ -43,6 +43,7 @@ export function PoiListSheet({
   bottomInset: number;
 }) {
   const sheet = useRef<BottomSheetHandle>(null);
+  const snap = useRef<SheetSnap>('peek');
   const scroll = useRef<ScrollView>(null);
   // Read through a ref, not a dependency: restoring the offset is for a sheet
   // that has just remounted behind a card, and reapplying it on every scroll
@@ -73,8 +74,17 @@ export function PoiListSheet({
       // map for as long as the layer is on. A downward drag from peek therefore
       // settles back onto it instead of dismissing the selector with it.
       onClose={() => sheet.current?.snapTo('peek')}
-      onSnapChange={(snap) => {
-        if (snap !== 'peek') list.open();
+      // Back collapses a pulled-up list, and at peek belongs to the app: this
+      // sheet *is* the selector and stays for as long as the layer is on, so
+      // consuming Back here would leave the map with no way back at all.
+      onBack={() => {
+        if (snap.current === 'peek') return false;
+        sheet.current?.snapTo('peek');
+        return true;
+      }}
+      onSnapChange={(next) => {
+        snap.current = next;
+        if (next !== 'peek') list.open();
       }}
       contentStyle={styles.content}
       testID="poi-list-sheet"
