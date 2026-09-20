@@ -3,6 +3,7 @@ import {
   mergePoiResults,
   parsePoiTileKey,
   poiQueryCategories,
+  poiPairKey,
   poiTileKey,
   poiViewportIsQueryable,
   poiViewportTiles,
@@ -13,6 +14,7 @@ import {
 } from '@atlas/core';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { PoiPairDb } from './poi-cache.js';
+import { LocalPoiSource } from './poi-local-source.js';
 import { PoiSource, PoiUpstreamBusyError } from './poi-source.js';
 import type { StatusRegistry } from './status.js';
 
@@ -84,7 +86,7 @@ export function registerPoiApi(
   app: FastifyInstance,
   options: PoiApiOptions = {},
   status?: StatusRegistry,
-): void {
+): () => void {
   const endpoints =
     options.overpassUrls ??
     process.env.OVERPASS_URL?.split(',')
@@ -108,6 +110,12 @@ export function registerPoiApi(
     onError: (error, endpoint) =>
       app.log.warn({ err: error, endpoint }, 'Overpass POI query failed; backing off'),
   });
+  const local = options.dataDir
+    ? new LocalPoiSource(options.dataDir, status, options.now, (error) =>
+        app.log.warn({ err: error }, 'local POI database unavailable; using Overpass fallback'),
+      )
+    : null;
+  if (local) app.addHook('onClose', async () => local.close());
 
   app.get<{ Querystring: { tiles?: string; bbox?: string; categories?: string } }>(
     '/api/pois',
@@ -138,7 +146,25 @@ export function registerPoiApi(
 
       const pairs = tiles.flatMap((tile) => queried.map((category) => ({ tile, category })));
       try {
-        const answers = await source.get(pairs, clientGone(reply));
+        const signal = clientGone(reply);
+        const partition = local?.partition(pairs) ?? { local: [], remote: pairs };
+        const [localAnswers, remoteAnswers] = await Promise.all([
+          partition.local.length
+            ? Promise.resolve(local!.get(partition.local, signal))
+            : Promise.resolve([]),
+          partition.remote.length ? source.get(partition.remote, signal) : Promise.resolve([]),
+        ]);
+        // Preserve the request order. Callers normally key answers by tile and
+        // category, but legacy bundles relied on stable order as well.
+        const byPair = new Map(
+          [...localAnswers, ...remoteAnswers].map((answer) => [
+            poiPairKey(answer.tile, answer.category),
+            answer,
+          ]),
+        );
+        const answers = pairs.map((pair) =>
+          byPair.get(poiPairKey(poiTileKey(pair.tile), pair.category))!,
+        );
         reply.header('Cache-Control', 'private, max-age=300');
         if (legacyBbox) {
           return {
@@ -162,4 +188,5 @@ export function registerPoiApi(
       }
     },
   );
+  return () => local?.refreshStatus();
 }

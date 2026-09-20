@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 DATA="$DATA_DIR/valhalla"
 WORK="${ATLAS_TILE_WORK:-$DATA_DIR/valhalla-build}"
+LOCK_DIR="$DATA_DIR/valhalla-build"
 SOURCE="$WORK/graph-source.osm.pbf"
 GEOFABRIK=https://download.geofabrik.de/europe
 MEM="${TILE_BUILD_MEM:-9g}"
@@ -49,7 +50,14 @@ mapfile -t AREAS < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$SCRIPT_DIR/covera
   exit 1
 }
 
-mkdir -p "$WORK"
+mkdir -p "$WORK" "$LOCK_DIR"
+# Keep the lock at a stable shared path even when a recovery run overrides its
+# work directory; the POI builder takes this same lock before allocating RAM.
+exec 9>"$LOCK_DIR/.build.lock"
+if ! flock -n 9; then
+  echo "another Valhalla or POI build is running — refusing to start" >&2
+  exit 1
+fi
 
 PBFS=()
 for area in "${AREAS[@]}"; do

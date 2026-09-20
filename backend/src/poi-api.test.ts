@@ -1,5 +1,9 @@
 import type { OverpassPoiElement } from '@atlas/core';
 import Fastify from 'fastify';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { registerPoiApi } from './poi-api.js';
 
@@ -46,6 +50,44 @@ async function app(fetchImpl: typeof fetch) {
   return server;
 }
 
+async function createLocalDb(dataDir: string): Promise<void> {
+  const dir = path.join(dataDir, 'poi');
+  await mkdir(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, 'europe.sqlite'));
+  db.exec(`
+    CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO metadata VALUES ('format_version', '1');
+    INSERT INTO metadata VALUES ('source_timestamp', '2026-09-06T20:21:35Z');
+    INSERT INTO metadata VALUES ('feature_count', '1');
+    INSERT INTO metadata VALUES ('coverage', '{"outers":[[[0,50],[20,50],[20,70],[0,70],[0,50]]],"holes":[]}');
+    CREATE TABLE pois (
+      id INTEGER PRIMARY KEY, osm_type TEXT NOT NULL, osm_id TEXT NOT NULL,
+      lat REAL NOT NULL, lng REAL NOT NULL, name TEXT NOT NULL, tags TEXT NOT NULL
+    );
+    CREATE TABLE poi_categories (
+      poi_id INTEGER NOT NULL, category_id TEXT NOT NULL,
+      PRIMARY KEY (poi_id, category_id)
+    );
+    CREATE VIRTUAL TABLE poi_rtree USING rtree(id, min_lng, max_lng, min_lat, max_lat);
+  `);
+  db.prepare('INSERT INTO pois VALUES (1, ?, ?, ?, ?, ?, ?)').run(
+    'node',
+    '42',
+    cafe.lat,
+    cafe.lon,
+    cafe.tags!.name,
+    JSON.stringify(cafe.tags),
+  );
+  db.prepare('INSERT INTO poi_categories VALUES (1, ?)').run('coffee');
+  db.prepare('INSERT INTO poi_rtree VALUES (1, ?, ?, ?, ?)').run(
+    cafe.lon,
+    cafe.lon,
+    cafe.lat,
+    cafe.lat,
+  );
+  db.close();
+}
+
 describe('POI API', () => {
   it('answers tiles × categories with contact-aware places, once per pair', async () => {
     const fetchImpl = overpass(() => [cafe]);
@@ -85,6 +127,51 @@ describe('POI API', () => {
       expect.objectContaining({ id: 'node/42', distanceM: expect.any(Number) }),
     ]);
     await server.close();
+  });
+
+  it('falls back safely while the local database has not been built yet', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-poi-api-'));
+    const fetchImpl = overpass(() => [cafe]);
+    const server = Fastify();
+    registerPoiApi(server, {
+      dataDir,
+      fetchImpl,
+      overpassUrls: ['https://a.test/api/interpreter'],
+      minGapMs: 0,
+    });
+    const response = await server.inject({
+      url: '/api/pois?tiles=14/8681/4766&categories=coffee',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().tiles[0].results[0].name).toBe('Atlas coffee');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    await server.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('serves Europe from the local database without asking Overpass', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-poi-api-'));
+    await createLocalDb(dataDir);
+    const fetchImpl = vi.fn();
+    const server = Fastify();
+    registerPoiApi(server, {
+      dataDir,
+      fetchImpl,
+      overpassUrls: ['https://a.test/api/interpreter'],
+      minGapMs: 0,
+    });
+    const response = await server.inject({
+      url: '/api/pois?tiles=14/8681/4766&categories=coffee',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().tiles[0].results[0]).toMatchObject({
+      id: 'node/42',
+      name: 'Atlas coffee',
+      phone: '+47 12345678',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await server.close();
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   it('rejects malformed requests without an upstream call', async () => {

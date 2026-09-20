@@ -30,16 +30,20 @@ set -euo pipefail
 
 DATA_DIR="${ATLAS_DATA_DIR:-/mnt/data/atlas}"
 WORK="${ATLAS_ADMIN_WORK:-$DATA_DIR/admin-build}"
+OSM_DIR="$DATA_DIR/osm"
 # The GWDG mirror rather than Geofabrik itself: Geofabrik throttles a sustained
 # 32 GB transfer down to a few hundred kB/s partway through (measured, and it
 # turns a 30-minute download into a six-hour one), while the mirror holds ~20
 # MB/s throughout. Both are the same weekly build, and the md5 check below
 # catches the case where the mirror is mid-update.
 SOURCE_URL="${ADMIN_SOURCE_URL:-https://ftp5.gwdg.de/pub/misc/openstreetmap/download.geofabrik.de/europe-latest.osm.pbf}"
-SOURCE_PBF="$WORK/$(basename "$SOURCE_URL")"
+SOURCE_PBF="$OSM_DIR/$(basename "$SOURCE_URL")"
+SOURCE_MD5_FILE="$OSM_DIR/$(basename "$SOURCE_URL").md5"
 BOUNDARIES="$WORK/boundaries.osm.pbf"
 OUT="$DATA_DIR/valhalla/admins.sqlite"
-VALHALLA_IMAGE="ghcr.io/valhalla/valhalla:3.8.2"
+TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools.json"
+OSMIUM_IMAGE="$(jq -er '.osmium.image' "$TOOLS")"
+VALHALLA_IMAGE="$(jq -er '.valhalla.image' "$TOOLS")"
 
 # Same discipline as the other builds on this host: hard caps so the worst case
 # is an OOM-killed build container, never a wedged host. Both heavy steps are
@@ -54,7 +58,12 @@ LIMITS=(--memory 6g --memory-swap 6g --cpus 2)
 LEFT_ISO=('GB' 'IE' 'IM' 'JE' 'GG' 'MT' 'CY')
 RIGHT_ISO=('NO' 'SE' 'DK' 'DE' 'NL' 'BE' 'FR' 'ES' 'IT' 'PL' 'FI')
 
-mkdir -p "$WORK" "$DATA_DIR/valhalla"
+mkdir -p "$WORK" "$OSM_DIR" "$DATA_DIR/valhalla" "$DATA_DIR/valhalla-build"
+exec 9>"$DATA_DIR/valhalla-build/.build.lock"
+if ! flock -n 9; then
+  echo "another Valhalla or POI build is running — refusing to start" >&2
+  exit 1
+fi
 
 if [[ ! -f "$SOURCE_PBF" ]]; then
   echo "==> downloading $SOURCE_URL (~32 GB, deletable afterwards)"
@@ -75,10 +84,10 @@ else
 # reads the blocks that are there and the admin build simply comes out missing
 # whichever countries fell off the end, which is precisely the silent, plausible
 # wrongness the verification step below exists to catch. Cheaper to catch here.
-if curl -fsL --retry 3 -o "$WORK/source.md5" "$SOURCE_URL.md5"; then
+if curl -fsL --retry 3 -o "$SOURCE_MD5_FILE" "$SOURCE_URL.md5"; then
   echo "==> verifying $(basename "$SOURCE_PBF") against published md5"
   (cd "$(dirname "$SOURCE_PBF")" && md5sum -c --status \
-    <(awk -v f="$(basename "$SOURCE_PBF")" '{print $1 "  " f}' "$WORK/source.md5")) || {
+    <(awk -v f="$(basename "$SOURCE_PBF")" '{print $1 "  " f}' "$SOURCE_MD5_FILE")) || {
     echo "md5 mismatch — the download is corrupt or the mirror was mid-update." >&2
     echo "delete $SOURCE_PBF and rerun." >&2
     exit 1
@@ -87,24 +96,15 @@ else
   echo "==> no published md5 for this source; skipping integrity check"
 fi
 
-# osmium-tool isn't packaged in the Valhalla image and there is no public
-# osmium image to pull, so build a one-line Debian wrapper for it.
-echo "==> preparing osmium"
-docker build -q -t atlas-osmium - > /dev/null <<'DOCKERFILE'
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends osmium-tool \
-  && rm -rf /var/lib/apt/lists/*
-DOCKERFILE
-
 echo "==> filtering boundary relations out of $(basename "$SOURCE_PBF")"
 # tags-filter carries the ways and nodes those relations reference along by
 # default (-R would omit them), and that is the whole point: those members are
 # what lets the rings close, and dropping them is exactly what the clipped
 # country extracts do. It tracks the referenced ids in bitmaps rather than a
 # node cache, so this stays well inside the memory cap even on the continent.
-docker run --rm "${LIMITS[@]}" -v "$WORK:/work" atlas-osmium \
-  osmium tags-filter \
-  "/work/$(basename "$SOURCE_PBF")" r/boundary=administrative \
+docker run --rm "${LIMITS[@]}" -v "$WORK:/work" -v "$OSM_DIR:/osm:ro" "$OSMIUM_IMAGE" \
+  tags-filter \
+  "/osm/$(basename "$SOURCE_PBF")" r/boundary=administrative \
   -o /work/boundaries.osm.pbf --overwrite
 ls -lh "$BOUNDARIES" | awk '{print "    boundaries: " $5}'
 fi
@@ -144,7 +144,8 @@ for iso in "$@"; do
   fi
 done
 RING
-docker run --rm "${LIMITS[@]}" -v "$WORK:/work" atlas-osmium   bash /work/ring-check.sh "${LEFT_ISO[@]}" "${RIGHT_ISO[@]}" > "$WORK/rings.txt"
+docker run --rm "${LIMITS[@]}" -v "$WORK:/work" --entrypoint bash "$OSMIUM_IMAGE" \
+  /work/ring-check.sh "${LEFT_ISO[@]}" "${RIGHT_ISO[@]}" > "$WORK/rings.txt"
 
 PATCH_SOURCES=()
 while read -r iso state relid short; do
@@ -154,13 +155,16 @@ while read -r iso state relid short; do
   fi
   echo "  $iso: ring short by $short way(s) — refetching relation $relid"
   curl -fsSL --retry 3 -o "$WORK/rel-$relid.osm"     "https://api.openstreetmap.org/api/0.6/relation/$relid/full"
-  docker run --rm "${LIMITS[@]}" -v "$WORK:/work" atlas-osmium     osmium sort "/work/rel-$relid.osm" -o "/work/rel-$relid.osm.pbf" --overwrite
+  docker run --rm "${LIMITS[@]}" -v "$WORK:/work" "$OSMIUM_IMAGE" \
+    sort "/work/rel-$relid.osm" -o "/work/rel-$relid.osm.pbf" --overwrite
   PATCH_SOURCES+=("/work/rel-$relid.osm.pbf")
 done < "$WORK/rings.txt"
 
 if ((${#PATCH_SOURCES[@]})); then
   echo "==> merging ${#PATCH_SOURCES[@]} refetched relation(s) into the boundaries"
-  docker run --rm "${LIMITS[@]}" -v "$WORK:/work" atlas-osmium     osmium merge /work/boundaries.osm.pbf "${PATCH_SOURCES[@]}"     -o /work/boundaries-patched.osm.pbf --overwrite
+  docker run --rm "${LIMITS[@]}" -v "$WORK:/work" "$OSMIUM_IMAGE" \
+    merge /work/boundaries.osm.pbf "${PATCH_SOURCES[@]}" \
+    -o /work/boundaries-patched.osm.pbf --overwrite
   ADMIN_INPUT=/work/boundaries-patched.osm.pbf
 else
   echo "    every checked country ring is complete"
@@ -223,4 +227,4 @@ mv "$WORK/admins.sqlite" "$OUT"
 echo "==> installed $OUT ($(du -h "$OUT" | cut -f1))"
 echo "    Rebuild the routing tiles to apply it:"
 echo "      rm /mnt/data/atlas/valhalla/tiles.tar && docker compose restart valhalla"
-echo "    The $(basename "$SOURCE_PBF") in $WORK is only needed to rebuild this DB; safe to delete."
+echo "    The shared source remains at $SOURCE_PBF for POI and future continent-wide builds."

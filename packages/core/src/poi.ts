@@ -257,7 +257,7 @@ function unnamedLabel(tags: Record<string, string>, category: PoiCategory): stri
 }
 
 /** One full-tag Overpass element as a display-ready, contact-aware POI. */
-function poiResultFromElement(
+export function poiResultFromElement(
   element: OverpassPoiElement,
   category: PoiCategory,
 ): PoiResult | null {

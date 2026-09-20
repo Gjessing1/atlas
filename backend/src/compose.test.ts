@@ -170,6 +170,8 @@ describe('regional Valhalla builds', () => {
     })) {
       expect(script, `${name} pins its images`).not.toMatch(/[a-z0-9/.-]+:latest/);
     }
+    expect(adminBuilder).toContain("jq -er '.osmium.image'");
+    expect(adminBuilder).toContain('$DATA_DIR/osm');
   });
 
   it('publish a pack only after its artifacts answer for themselves', () => {

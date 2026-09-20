@@ -185,7 +185,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // catalog sources register themselves inside registerOverlayApi/Weather.
   const status = new StatusRegistry();
   status.register('photon', 'Photon (search)', 'Search');
-  status.register('overpass', 'OpenStreetMap places', 'Search');
+  status.register('overpass', 'Overpass (outside-Europe fallback)', 'Search');
   status.register(ROUTING_STATUS_ID, 'Valhalla (routing)', 'Routing');
 
   // Rate limiting, registered before any route so per-route `config.rateLimit`
@@ -271,6 +271,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // the revision the two images stamp (see routing-revision.ts).
   const reportRoutingRevision = createRoutingRevisionReporter(opts.dataDir);
 
+  // Europe POIs are a local versioned SQLite file. Its reporter notices an
+  // atomic replacement and refreshes the source-age line without a restart.
+  const reportPois = registerPoiApi(app, { dataDir: opts.dataDir, ...opts.poiApi }, status);
+
   /** Local, free checks: basemap freshness, the derived cells, a Postgres ping. */
   const refreshLocalStatus = async (): Promise<void> => {
     const detail = await basemapDetail(path.join(opts.dataDir, 'tiles'));
@@ -280,6 +284,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (detail) status.record('basemap', true);
     await reportCells(status);
     await reportRoutingRevision(status);
+    reportPois();
     if (syncStores) {
       try {
         await syncStores.ping();
@@ -326,7 +331,6 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // never talks to it directly (single origin, no CORS, URL stays private).
   const photonUrl = opts.photonUrl ?? process.env.PHOTON_URL ?? 'http://127.0.0.1:2322';
   registerExploreApi(app, photonUrl, status);
-  registerPoiApi(app, { dataDir: opts.dataDir, ...opts.poiApi }, status);
   registerPlaceContentApi(app, opts.placeContentApi);
   app.get<{
     Querystring: { q?: string; limit?: string; lat?: string; lon?: string; bbox?: string };
