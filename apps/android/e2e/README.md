@@ -134,6 +134,11 @@ before that destination. Also:
 - **A `mode="map"` sheet swallows hardware Back** (`onClose`, return true). A sheet that is
   visible for as long as its layer is on therefore has to decline the press: `onBack` returning
   false hands Back back to the app, which is how the POI list avoids trapping the map (v0.233.0).
+- **A floating bottom menu must follow the IME's screen boundary.** Edge-to-edge Android did not
+  resize the React window consistently when the quick-layer search took focus, so a menu positioned
+  only from the bottom control rows disappeared behind the keyboard—including the button needed to
+  close that search. Use `window.height - keyboard.endCoordinates.screenY` as an overlap (zero on
+  devices that already resized) and lift the menu above the larger boundary (v0.234.0).
 - **A sheet handle only ever expands.** `cycleSnap` runs peek → half → full → half, so tapping
   `…-sheet-handle` can never put a sheet back at peek; only a downward drag does. The POI list is
   reached by one tap on `poi-list-sheet-handle`, and the regression gets the map controls back by

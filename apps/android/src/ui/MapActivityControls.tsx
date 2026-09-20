@@ -4,7 +4,7 @@ import type {
   PotentialTargetSwitch,
 } from '@atlas/app-hooks';
 import { groupLayerCatalog, searchLayerGroups, type LayerMeta, type MapProfile } from '@atlas/core';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Pressable,
@@ -96,6 +96,7 @@ export function MapActivityControls({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [layerSearchOpen, setLayerSearchOpen] = useState(false);
   const [layerQuery, setLayerQuery] = useState('');
+  const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
   const layerSearchInput = useRef<TextInput>(null);
   const win = useWindowDimensions();
   // In landscape the system navigation bar sits on a side of the screen: the
@@ -103,6 +104,16 @@ export function MapActivityControls({
   // 64 dp gap that keeps the row clear of the locate button, plus that inset.
   const side = useSideInsets();
   const right = side.right + 64;
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardTop(event.endCoordinates.screenY);
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardTop(null));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
   const activeCount = overlays.overlays.length + (overlays.poiOn ? 1 : 0);
   const activeProfile = profile.profile;
   const ActiveIcon = MAP_PROFILE_ICON[activeProfile.id]!;
@@ -138,7 +149,14 @@ export function MapActivityControls({
       layers: group.layers.filter((meta) => !overlays.isOn(meta.id)),
     }))
     .filter((group) => group.layers.length > 0);
-  const menuBottom = bottom + menuLift + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
+  const controlsBottom = bottom + menuLift + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
+  // Edge-to-edge Android inconsistently resizes the React window for the IME.
+  // `window.height - screenY` is therefore the keyboard overlap when it does
+  // not resize, and zero when it does. Keep the floating menu above whichever
+  // boundary is higher so its field and close button never disappear behind
+  // the keyboard.
+  const keyboardBottom = keyboardTop === null ? 0 : Math.max(0, win.height - keyboardTop + 8);
+  const menuBottom = Math.max(controlsBottom, keyboardBottom);
   const dismissLayerKeyboard = () => {
     layerSearchInput.current?.blur();
     Keyboard.dismiss();
