@@ -268,23 +268,21 @@ async function verifyPoiCategoryDock() {
   // The selector *is* the sheet's handle: tapping it snaps past peek into the
   // places-in-view list, the same public interaction as dragging it.
   await tap('poi-list-sheet-handle');
-  const listXml = await waitFor('the places-in-view list to fill', hierarchy, (xml) =>
-    /text="E2E groceries \d+"/.test(xml),
-  );
+  const listXml = await waitFor('the places-in-view list to fill', hierarchy, (xml) => {
+    const bounds = boundsForNode(nodeForId(xml, 'poi-results-list'));
+    return Boolean(bounds && textsWithin(xml, bounds).some((t) => t.startsWith('Groceries')));
+  });
   const listBounds = boundsForNode(nodeForId(listXml, 'poi-results-list'));
-  if (!listBounds) throw new Error('The POI list sheet exposed no scrollable list');
   const rowTexts = textsWithin(listXml, listBounds);
-  if (!rowTexts.some((text) => text.startsWith('Groceries'))) {
-    throw new Error(`POI rows lost their category line: ${rowTexts.join(' | ')}`);
-  }
   // No position fix is the normal outcome on this AVD, not an error: the row
   // keeps its name and category and simply leaves the distance out. A fix does
   // sometimes arrive here (see README, "Location"), so a distance is allowed —
-  // it just has to be a distance and not, say, a raw metre count.
+  // it just has to read as one and not as a raw metre count.
   const distances = rowTexts.filter((text) => /^\d/.test(text));
   if (distances.some((text) => !/^\d+(?:[.,]\d+)? (?:m|km)$/.test(text))) {
     throw new Error(`POI row showed an unformatted distance: ${distances.join(', ')}`);
   }
+
   // Back collapses a pulled-up list and is not swallowed at peek: this sheet *is*
   // the selector and never closes, so consuming Back would leave the map with no
   // way back at all (v0.233.0).
@@ -295,22 +293,36 @@ async function verifyPoiCategoryDock() {
     return Boolean(expandedSheet && next && next.height < expandedSheet.height - 60);
   });
 
+  // A row whose own line carries an opening status is a place whose hours the
+  // shared parser read, so its card must be able to show them — which keeps this
+  // assertion honest on whatever the live backend happens to hold here.
   await tap('poi-list-sheet-handle');
-  const rowsXml = await waitFor('the places-in-view list to return', hierarchy, (xml) =>
-    /text="E2E groceries \d+"/.test(xml),
+  const rowsXml = await waitFor('a POI row with a read opening status', hierarchy, (xml) =>
+    nodeIds(xml).some((id) => {
+      if (!id.startsWith('poi-result-')) return false;
+      const bounds = boundsForNode(nodeForId(xml, id));
+      return Boolean(bounds && textsWithin(xml, bounds).some((t) => / · (?:Open|Closed)/.test(t)));
+    }),
   );
-  const rowId = nodeIds(rowsXml).find((id) => id.startsWith('poi-result-'));
-  if (!rowId) throw new Error('The POI list rendered no tappable row');
+  const rowId = nodeIds(rowsXml).find((id) => {
+    if (!id.startsWith('poi-result-')) return false;
+    const bounds = boundsForNode(nodeForId(rowsXml, id));
+    return Boolean(
+      bounds && textsWithin(rowsXml, bounds).some((t) => / · (?:Open|Closed)/.test(t)),
+    );
+  });
   tapId(rowsXml, rowId);
-  // One card, reached from the list: the place card's own POI sections, with
-  // the website shown as the domain the user would recognise.
   const cardXml = await waitForId('destination-opening-hours');
   const cardTexts = [...cardXml.matchAll(/text="([^"]*)"/g)].map((match) => match[1]);
-  if (!cardTexts.some((text) => text.includes('example.com'))) {
-    throw new Error(`The place card did not shorten the website: ${cardTexts.join(' | ')}`);
+  if (!cardTexts.some((text) => /\d{2}:\d{2}–\d{2}:\d{2}|^Closed$|^Open 24 hours$/.test(text))) {
+    throw new Error(`The place card showed no parsed opening hours: ${cardTexts.join(' | ')}`);
   }
-  if (!cardTexts.some((text) => text.includes('08:00'))) {
-    throw new Error('The place card showed no parsed opening hours');
+  // A website, when this place has one, is the domain and never a raw URL.
+  const website = cardTexts.find(
+    (text) => text.endsWith(' ↗') && !text.startsWith('OpenStreetMap'),
+  );
+  if (website && /:\/\/|^www\./i.test(website)) {
+    throw new Error(`The place card did not shorten the website: ${website}`);
   }
   await tap('destination-cancel');
   // Closing the card brings the selector back at peek, so the map controls
@@ -1298,7 +1310,11 @@ async function main() {
   let xml = await waitForAppReady();
   expectIds(xml, ['search-open', 'map-profile-toggle', 'layer-quick-toggle', 'locate']);
 
-  console.log('Android regression: POI layer and on-map category pills');
+  // Before the fixture, which serves an empty layer catalog: the Layers button
+  // only exists while the catalog does, so the built-in POI switch is out of
+  // reach afterwards. This step therefore reads the live backend's own places,
+  // and asserts the shapes the app is responsible for rather than any one name.
+  console.log('Android regression: POI layer, category pills and places in view');
   await verifyPoiCategoryDock();
   console.log('Android regression: configuring controlled backend');
   await configureFixtureServer();

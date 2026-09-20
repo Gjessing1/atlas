@@ -124,6 +124,13 @@ before that destination. Also:
   rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
   menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
+- **The Layers button does not exist after `configureFixtureServer()`.** The fixture answers
+  `/api/layers` with `[]`, and Android renders `layer-quick-toggle` only while the overlay catalog
+  is non-empty — so the built-in Points-of-interest and Base map switches live _behind_ it and are
+  out of reach for the rest of the run. Anything that needs the quick layer menu has to run before
+  the fixture, which also means it reads the **live** backend: the POI list filled with 94 real
+  Oslo groceries and their real opening hours (2026-09-20), so assert the shapes the app owns — a
+  row's category line, a formatted distance, a card that can show hours it parsed — never a name.
 - **A `mode="map"` sheet swallows hardware Back** (`onClose`, return true). A sheet that is
   visible for as long as its layer is on therefore has to decline the press: `onBack` returning
   false hands Back back to the app, which is how the POI list avoids trapping the map (v0.233.0).
@@ -131,9 +138,6 @@ before that destination. Also:
   `…-sheet-handle` can never put a sheet back at peek; only a downward drag does. The POI list is
   reached by one tap on `poi-list-sheet-handle`, and the regression gets the map controls back by
   opening a place card (which unmounts the sheet) and closing it, so it remounts at peek.
-- **The fixture answers `/api/pois`** with one place per requested tile×category, placed at that
-  tile's own centre, so a POI row exists wherever the AVD's map happens to be looking — and the
-  row's distance is absent, which is the no-fix path the list has to keep working on.
 - **The AVD draws no MapLibre symbol text.** Place names, wind arrows and temperature numbers are
   invisible here. Rasters, fills, circles and ordinary React Native views render and screenshot
   normally, so verify a symbol layer on a real device or through a temporary `circle` layer on
