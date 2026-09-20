@@ -1792,6 +1792,8 @@ function AppInner() {
 
           {showIdleChrome ? (
             <MapActivityControls
+              // The POI list stands where these menus would open.
+              menuLift={poiSheetLift}
               profile={profiles}
               visibleProfiles={profilePreferences.visibleProfiles}
               overlays={overlaysCtl}

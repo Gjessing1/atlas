@@ -60,6 +60,7 @@ export function MapActivityControls({
   filters,
   mapZoom,
   bottom,
+  menuLift = 0,
   onPickProfile,
 }: {
   profile: MapProfileController;
@@ -80,6 +81,13 @@ export function MapActivityControls({
   mapZoom: number;
   /** Already includes the system navigation-bar inset. */
   bottom: number;
+  /**
+   * How far a bottom surface already reaches up (the peeked POI list). The
+   * triggers stay on their own row; only the menus they open start above it, so
+   * an open menu and that surface never share the same pixels — two scrollable
+   * things stacked on one another means neither scrolls predictably.
+   */
+  menuLift?: number;
   onPickProfile: (id: string) => void;
 }) {
   const [layersOpen, setLayersOpen] = useState(false);
@@ -129,7 +137,7 @@ export function MapActivityControls({
       layers: group.layers.filter((meta) => !overlays.isOn(meta.id)),
     }))
     .filter((group) => group.layers.length > 0);
-  const menuBottom = bottom + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
+  const menuBottom = bottom + menuLift + 52 + (quarryRow ? 52 : 0) + (filterRow ? 52 : 0);
   const closeMenus = () => {
     setLayersOpen(false);
     setLayerSearchOpen(false);
@@ -191,7 +199,10 @@ export function MapActivityControls({
             {
               bottom: menuBottom,
               right,
-              maxHeight: Math.max(88, Math.min(win.height * 0.52, 420, win.height - bottom - 64)),
+              maxHeight: Math.max(
+                88,
+                Math.min(win.height * 0.52, 420, win.height - menuBottom - 64),
+              ),
             },
           ]}
           accessibilityLabel="Fish & game"
@@ -255,7 +266,10 @@ export function MapActivityControls({
             {
               bottom: menuBottom,
               right,
-              maxHeight: Math.max(88, Math.min(win.height * 0.52, 440, win.height - bottom - 64)),
+              maxHeight: Math.max(
+                88,
+                Math.min(win.height * 0.52, 440, win.height - menuBottom - 64),
+              ),
             },
           ]}
           accessibilityLabel="Layer filters"
@@ -311,7 +325,10 @@ export function MapActivityControls({
               right,
               // In landscape the system inset + offline controls can consume
               // half the short edge; cap the menu to the room actually left.
-              maxHeight: Math.max(88, Math.min(win.height * 0.48, 380, win.height - bottom - 64)),
+              maxHeight: Math.max(
+                88,
+                Math.min(win.height * 0.48, 380, win.height - menuBottom - 64),
+              ),
             },
           ]}
           accessibilityLabel="Map layers"

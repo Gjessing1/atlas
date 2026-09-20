@@ -27,10 +27,10 @@ export interface PoiListState {
  * The readable POI list: a snapshot, while the map pins underneath it stay live.
  *
  * The freeze exists so rows do not reorder under a reading finger, so it lasts
- * exactly as long as someone is reading. Until the list is first opened it simply
- * follows the live view, which is what keeps a selector that was switched on over
- * a whole country from insisting there are no places once the user zooms into a
- * town. From the first open it is frozen: a category choice or the explicit
+ * exactly as long as there is something to read. Until the list is first opened —
+ * and for as long as it is empty — it simply follows the live view, which is what
+ * keeps a selector switched on over a whole country from insisting there are no
+ * places once the user zooms into a town. From the first open it is frozen: a category choice or the explicit
  * refresh replaces it, the map moving only offers to, and opening it again at a
  * view that has meaningfully moved takes the new snapshot the user just asked
  * for. It outlives its own sheet unmounting, so a place card opened from a row
@@ -109,15 +109,19 @@ export function usePoiList({
     setAwaiting(false);
   }, [active, awaiting, capture, liveRevision, loading]);
 
-  // Not being read yet: follow the live view, once per settled live answer. The
-  // revision guard is what stops this re-capturing on every render, since
-  // `capture` closes over results that change with the map.
+  // Not being read yet — or read but empty, which has nothing to keep still:
+  // follow the live view, once per settled live answer. Without the empty case a
+  // panel that came up over a zoomed-out view sits beside a map full of pins
+  // insisting there is nothing here. The revision guard is what stops this
+  // re-capturing on every render, since `capture` closes over results that
+  // change with the map.
   useEffect(() => {
-    if (!active || opened || loading || !currentArea) return;
+    if (!active || loading || !currentArea) return;
+    if (opened && snapshot.length > 0) return;
     if (followedRevision.current === liveRevision && snapshotArea) return;
     followedRevision.current = liveRevision;
     capture();
-  }, [active, capture, currentArea, liveRevision, loading, opened, snapshotArea]);
+  }, [active, capture, currentArea, liveRevision, loading, opened, snapshot.length, snapshotArea]);
 
   const stale = Boolean(
     snapshotArea && currentArea && exploreAreaIsStale(snapshotArea, currentArea),

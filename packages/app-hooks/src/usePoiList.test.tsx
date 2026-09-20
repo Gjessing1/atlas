@@ -58,6 +58,30 @@ describe('usePoiList', () => {
     expect(result.current.stale).toBe(false);
   });
 
+  it('keeps following the live view while it has nothing to keep still', async () => {
+    const a = poi('a', 'food', 59.9);
+    const { result, rerender } = renderHook(
+      ({ liveResults }) =>
+        usePoiList({
+          active: true,
+          viewport: firstView,
+          categories: ['food'],
+          liveResults,
+          loading: false,
+          liveRevision: liveResults.length,
+          origin: null,
+          refreshLive: vi.fn(),
+        }),
+      { initialProps: { liveResults: [] as PoiResult[] } },
+    );
+    // A panel that comes up over an empty view is "read" from its first frame,
+    // and must not then insist there is nothing here once places arrive.
+    act(() => result.current.open());
+    rerender({ liveResults: [a] });
+    await waitFor(() => expect(result.current.results.map((item) => item.id)).toEqual(['a']));
+    expect(result.current.stale).toBe(false);
+  });
+
   it('re-snapshots when the list is opened again at a view that has moved', async () => {
     const a = poi('a', 'food', 59.9);
     const b = poi('b', 'food', 60);
