@@ -1326,7 +1326,9 @@ test('transit stop search plans exact stops and starts guided transit', async ({
   await page.getByRole('button', { name: 'Make this my commute' }).click();
   const commute = page.locator('.commute-panel');
   await expect(commute).toContainText('Oslo S → Nationaltheatret');
-  await commute.getByRole('button', { name: 'Full journey' }).first().click();
+  // The card opens to its itinerary first; the planner is the step past it.
+  await commute.getByRole('button', { name: 'Details' }).first().click();
+  await commute.getByRole('button', { name: 'Open in planner' }).first().click();
   await expect(page.locator('.transit-results')).toBeVisible();
 
   await page.context().grantPermissions(['notifications']);

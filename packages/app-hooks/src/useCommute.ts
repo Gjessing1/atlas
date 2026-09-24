@@ -1,6 +1,14 @@
-import { TransitError } from '@atlas/transit';
+import {
+  TransitError,
+  commuteCommitId,
+  commuteCommitKey,
+  commuteJourney,
+  commuteJourneyList,
+  commuteOrigins,
+} from '@atlas/transit';
 import type {
   CommuteEmptyReason,
+  TransitTrip,
   TransitWidgetV2Commit,
   TransitCommuteDirection,
   TransitCommutePlace,
@@ -91,6 +99,84 @@ export const COMMUTE_COMMIT_SETTING = jsonSetting<StoredCommuteCommit | null>({
 
 /** The key, for the callers (and the widget) that hold only a string. */
 export const COMMUTE_COMMIT_SETTING_KEY = COMMUTE_COMMIT_SETTING.key;
+
+/**
+ * The tracked journey itself, as last fetched — what lets the board open on it.
+ *
+ * The commitment above names a journey; it cannot draw one. Without this, every
+ * opening of the board spent a round trip to Entur showing "Checking upcoming
+ * journeys…" before it could say which platform the traveller was heading for —
+ * on a train's Wi-Fi, in a tunnel, at exactly the moment they looked. So the
+ * trip is kept beside the commitment and drawn at once, stale-while-revalidate:
+ * the next answer replaces it, a failed refresh leaves it standing, and
+ * `updatedMs` travels with it so the card can say how old its live times are.
+ *
+ * Its own `local.` key rather than more fields on the commitment: the
+ * commitment is the {@link TransitWidgetV2Commit} shape the app and the Android
+ * widget hand each other, and a journey's worth of legs has no business in the
+ * value two surfaces race to update.
+ */
+interface StoredTrackedJourney {
+  commuteId: string;
+  /** {@link commuteCommitKey} of the commitment this trip answers. */
+  commitKey: string;
+  trip: TransitTrip;
+  /** When this trip's live times were fetched. */
+  updatedMs: number;
+}
+
+export const COMMUTE_TRACKED_SETTING = jsonSetting<StoredTrackedJourney | null>({
+  key: 'local.transit.tracked',
+  scope: 'local',
+  defaultValue: null,
+  parse: (value) => {
+    if (!isRecord(value) || !isRecord(value.trip)) return null;
+    const { commuteId, commitKey, updatedMs, trip } = value;
+    if (typeof commuteId !== 'string' || typeof commitKey !== 'string') return null;
+    if (typeof updatedMs !== 'number' || !Number.isFinite(updatedMs)) return null;
+    // Shape-checked only as far as drawing needs: this value is only ever
+    // written by this hook from an answer the transit client already parsed.
+    if (!Array.isArray(trip.legs) || typeof trip.startMs !== 'number') return null;
+    return { commuteId, commitKey, trip: trip as unknown as TransitTrip, updatedMs };
+  },
+});
+
+/**
+ * The trip a commitment names in an answer, or null when the answer does not
+ * hold it.
+ *
+ * The backend's own re-read comes first: it is asked *around the commitment's
+ * departure*, so it is the only source that still contains the journey once it
+ * has left. Before that, the list the commitment was *made* from answers with
+ * the same journey — which is not always one on screen: a commitment made from
+ * the interchange by an older bundle (§13 before v0.191.0) names a journey in
+ * that hop's own answer.
+ */
+export function committedTrip(
+  result: TransitCommuteResult | null,
+  query: TransitCommuteQuery | null,
+  commit: TransitWidgetV2Commit,
+): TransitTrip | null {
+  if (!result) return null;
+  if (result.committed?.trip) return result.committed.trip;
+  const key = commuteCommitKey(commit);
+  const origin = query
+    ? commuteOrigins(query, commit.direction).find(
+        (option) => option.id === (commit.origin ?? 'door'),
+      )
+    : undefined;
+  const source = origin?.segmentId
+    ? result.segments?.find((entry) => entry.id === origin.segmentId)?.result
+    : result[commit.direction];
+  // The clock only feeds a journey's day note, which the id never reads.
+  const now = Date.now();
+  return (
+    commuteJourneyList(
+      (source?.trips ?? []).map((trip, index) => commuteJourney(trip, now, index)),
+    ).find((journey) => commuteCommitId(commit.direction, journey, commit.origin ?? 'door') === key)
+      ?.trip ?? null
+  );
+}
 
 /** Read a stored commitment, ignoring anything that is not one. */
 export function parseCommuteCommit(value: string | null): TransitWidgetV2Commit | null {
@@ -217,6 +303,14 @@ export interface CommuteController {
    * the point: the tracked journey has to come back even once it has left.
    */
   setCommit: (commit: TransitWidgetV2Commit | null) => void;
+  /**
+   * The journey {@link commit} names, from the latest answer that held it —
+   * the current one, or the copy kept on this device from an earlier one. So it
+   * is there the moment the board opens, before any request has returned, and
+   * it survives a refresh that fails. `updatedMs` is when *its* live times were
+   * fetched, which may be older than {@link updatedMs}.
+   */
+  tracked: { trip: TransitTrip; updatedMs: number } | null;
 }
 
 export interface PlannedCommute {
@@ -530,6 +624,7 @@ export function useCommute(
   const [updatedMs, setUpdatedMs] = useState<number | null>(null);
   const [seed, setSeed] = useState(0);
   const [storedCommit, setStoredCommit] = useState<StoredCommuteCommit | null>(null);
+  const [storedTracked, setStoredTracked] = useState<StoredTrackedJourney | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Both settings before `ready`, not each on its own promise. Two reasons, and
@@ -544,7 +639,8 @@ export function useCommute(
     void Promise.all([
       getSetting(COMMUTE_SETTING.key),
       getSetting(COMMUTE_COMMIT_SETTING.key),
-    ]).then(([saved, savedCommit]) => {
+      getSetting(COMMUTE_TRACKED_SETTING.key),
+    ]).then(([saved, savedCommit, savedTracked]) => {
       if (!current) return;
       const next = readSetting(COMMUTE_SETTING, saved);
       const nextCommit = readSetting(COMMUTE_COMMIT_SETTING, savedCommit);
@@ -552,6 +648,7 @@ export function useCommute(
       setStoredCommit(
         nextCommit ? { ...nextCommit, commuteId: nextCommit.commuteId || next.activeId } : null,
       );
+      setStoredTracked(readSetting(COMMUTE_TRACKED_SETTING, savedTracked));
       // Write back only to finish a migration. A first run writes nothing: an
       // empty commute is not worth a synced row on every device.
       if (saved && isLegacyCommuteSetting(saved)) {
@@ -586,11 +683,19 @@ export function useCommute(
 
   useEffect(() => {
     abortRef.current?.abort();
-    if (!active || !loaded || !query) {
+    if (!loaded || !query) {
       setResult(null);
       setLoading(false);
       setError(null);
       setUpdatedMs(null);
+      return;
+    }
+    // Closed, but the last answer is kept: reopening draws it at once (its age
+    // on the footer) while the next request runs, rather than a blank board.
+    // The list itself drops departures that have gone, so an old answer shows
+    // less, never something wrong.
+    if (!active) {
+      setLoading(false);
       return;
     }
     const controller = new AbortController();
@@ -605,8 +710,9 @@ export function useCommute(
         setUpdatedMs(Date.now());
       } catch (err) {
         if (controller.signal.aborted) return;
-        setResult(null);
-        setUpdatedMs(null);
+        // Stale-while-revalidate: a refresh that failed leaves the last answer
+        // standing, and `updatedMs` still says how old it is. Clearing it turned
+        // one dropped request on a train into a board with nothing on it.
         setError(
           err instanceof TransitError
             ? err.message
@@ -754,6 +860,57 @@ export function useCommute(
     },
     [activeCommute.id, saveSetting],
   );
+  // The tracked journey in the answer in hand — derived in the same render as
+  // the commitment, never an effect later. The board releases a commitment it
+  // cannot find a journey for, so a journey that arrived one render after the
+  // Track tap was a commitment released the instant it was made.
+  const freshTrip = useMemo(
+    () => (commit && updatedMs !== null ? committedTrip(result, query, commit) : null),
+    [commit, query, result, updatedMs],
+  );
+  const trackedKey = commit ? commuteCommitKey(commit) : null;
+
+  // …written through to storage so a cold start draws it too. An answer that
+  // does *not* hold it leaves the copy alone: the journey has not stopped
+  // existing because one request asked from a moment it had already left.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!trackedKey) {
+      if (storedTracked) {
+        setStoredTracked(null);
+        void saveSetting(COMMUTE_TRACKED_SETTING.key, '');
+      }
+      return;
+    }
+    if (!freshTrip || updatedMs === null) return;
+    if (
+      storedTracked?.commitKey === trackedKey &&
+      storedTracked.commuteId === activeCommute.id &&
+      storedTracked.updatedMs === updatedMs
+    ) {
+      return;
+    }
+    const next: StoredTrackedJourney = {
+      commuteId: activeCommute.id,
+      commitKey: trackedKey,
+      trip: freshTrip,
+      updatedMs,
+    };
+    setStoredTracked(next);
+    void saveSetting(COMMUTE_TRACKED_SETTING.key, COMMUTE_TRACKED_SETTING.encode(next));
+    // `storedTracked` is compared, not reacted to: this effect is what writes it.
+  }, [activeCommute.id, trackedKey, freshTrip, loaded, saveSetting, updatedMs]);
+
+  const tracked = useMemo(() => {
+    if (!trackedKey) return null;
+    if (freshTrip && updatedMs !== null) return { trip: freshTrip, updatedMs };
+    return storedTracked &&
+      storedTracked.commuteId === activeCommute.id &&
+      storedTracked.commitKey === trackedKey
+      ? { trip: storedTracked.trip, updatedMs: storedTracked.updatedMs }
+      : null;
+  }, [activeCommute.id, trackedKey, freshTrip, storedTracked, updatedMs]);
+
   const refresh = useCallback(() => setSeed((value) => value + 1), []);
   const emptyReason = useCallback(
     (direction: TransitCommuteDirection): CommuteEmptyReason => {
@@ -817,5 +974,6 @@ export function useCommute(
     emptyReason,
     commit,
     setCommit,
+    tracked,
   };
 }

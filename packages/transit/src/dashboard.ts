@@ -163,11 +163,31 @@ export const COMMUTE_DISRUPTION_LABEL: Record<CommuteDisruptionKind, string> = {
   incident: 'Disruption',
 };
 
+/**
+ * How loudly a notice is drawn.
+ *
+ * `active` is something happening to *this* departure — it is cancelled, a bus
+ * replaces the train, or an operator reports an incident on it that is more
+ * than informational. `notice` is everything a traveller reads once and
+ * remembers: engineering work announced weeks ahead, an information notice, a
+ * change that starts next month. Both are attached to the service by Entur, so
+ * neither is dropped; the difference is whether it may compete with the
+ * departure time for attention. A planned notice the operator itself rates
+ * severe is active — "buses replace trains this weekend" is planned *and* about
+ * the train you are looking at.
+ *
+ * Validity windows would sharpen this ("starts 3 November" is plainly future),
+ * but the journey planner does not carry them to the leg; the report type and
+ * severity are what the wire says.
+ */
+export type CommuteDisruptionProminence = 'active' | 'notice';
+
 /** One disruption notice, classified and ready to paint under its own service. */
 export interface CommuteDisruption {
   /** Stable within a journey, so a list key never collides across legs. */
   key: string;
   kind: CommuteDisruptionKind;
+  prominence: CommuteDisruptionProminence;
   /** {@link COMMUTE_DISRUPTION_LABEL} — the heading, e.g. "Planned disruption". */
   kindLabel: string;
   severity: TransitSeverity;
@@ -196,9 +216,15 @@ function commuteDisruption(
       : situation.planned
         ? 'planned'
         : 'incident';
+  const active =
+    kind === 'cancellation' ||
+    kind === 'replacement' ||
+    situation.severity === 'severe' ||
+    (kind === 'incident' && situation.severity !== 'info');
   return {
     key: situation.id ?? `${index}`,
     kind,
+    prominence: active ? 'active' : 'notice',
     kindLabel: COMMUTE_DISRUPTION_LABEL[kind],
     severity: situation.severity,
     summary: situation.summary,
@@ -221,6 +247,18 @@ function commuteDisruption(
  * operator prose worth showing; the measurement itself is carried by
  * `state` and `commuteEstimateLabel`, which is where a number belongs.
  */
+
+/**
+ * Active notices first, in the order the operator gave them. A collapsed card
+ * shows each notice as one line, so the order is the order of attention: what is
+ * happening to this departure, then what is worth knowing about the line.
+ */
+function byProminence(disruptions: CommuteDisruption[]): CommuteDisruption[] {
+  return [
+    ...disruptions.filter((disruption) => disruption.prominence === 'active'),
+    ...disruptions.filter((disruption) => disruption.prominence === 'notice'),
+  ];
+}
 
 function serviceState(leg: TransitLeg, parts: LegTimeParts): CommuteServiceState {
   if (leg.cancelled) return 'cancelled';
@@ -321,7 +359,6 @@ export interface CommuteConnection {
   waitMs: number;
   /** `"9 min"`. */
   label: string;
-  tight: boolean;
   /** Metres on foot between the two platforms, when the planner walked you. */
   walkM: number;
   /** `"250 m walk"`, or null when the change is a platform step. */
@@ -329,16 +366,76 @@ export interface CommuteConnection {
   /** `"9 min at Asker stasjon"` — the change as the collapsed leg strip states it. */
   chip: string;
   /**
-   * `"Change at Asker stasjon · 9 min · 250 m walk · tight"` — the whole line an
-   * expanded journey shows between two vehicles. Composed here so the two
-   * clients cannot describe one change with two different sentences; `tight`
-   * stays a flag beside it because the *colour* is a paint decision.
+   * `"Asker stasjon · 9 min"` — the change as a collapsed journey card states
+   * it: where, and how long, and nothing the itinerary says better.
+   */
+  brief: string;
+  /**
+   * `"Asker stasjon · 9 min connection · 250 m walk"` — the one element an
+   * expanded journey draws *between* its two vehicles. Platforms are not in it:
+   * each stays on the arrival or departure it belongs to, so the change reads
+   * as the relationship between two legs rather than a third copy of them.
+   * Composed here so two clients cannot describe one change with two sentences;
+   * the warning stays a flag beside it because its *colour* is a paint decision.
    */
   summary: string;
+  /**
+   * The wait on live times — the arriving vehicle's expected (or recorded)
+   * arrival to the departing one's expected departure — or null when neither
+   * vehicle has a live feed and the timetable is all there is to go on.
+   */
+  liveWaitMs: number | null;
+  /**
+   * `"2 min est."` when the live wait differs from the timetable's by a minute
+   * or more, else null. Beside {@link label}, never instead of it (§3): a delay
+   * can be made up again, and the planned slack is the reference it is read
+   * against.
+   */
+  liveLabel: string | null;
+  /**
+   * Too little slack to rely on — judged on the live wait when there is one, so
+   * a comfortable nine-minute change that a late bus has cut to two turns into
+   * a warning without anyone refreshing a timetable in their head.
+   */
+  tight: boolean;
+  /**
+   * Not yet tight, but live data has put it in doubt: the operator says its own
+   * estimate is unreliable, or a delay has eaten into the slack.
+   */
+  uncertain: boolean;
+  /** {@link tight} or {@link uncertain} — whether the change is drawn as a warning. */
+  warn: boolean;
+  /**
+   * What tapping the change opens: arrival and departure with their platforms,
+   * the walk, the live wait and why it is flagged, one line each. The collapsed
+   * element says where and how long; this is for the traveller about to make it.
+   */
+  details: string[];
 }
 
 /** A connection under this is worth naming as tight. Two minutes is a platform change. */
 const TIGHT_CONNECTION_MS = 4 * 60_000;
+
+/**
+ * Below this, a connection that live data has *shortened* is flagged as
+ * uncertain. A change cut from fifteen minutes to twelve is still comfortable;
+ * one cut from nine to six is the one to watch on the next refresh.
+ */
+const UNCERTAIN_CONNECTION_MS = 8 * 60_000;
+
+/**
+ * A walk at either end of the journey — to the first stop, from the last one.
+ *
+ * The itinerary's first and last lines. `aimed` is when the walk starts, which
+ * for the walk to the stop is the moment to leave the door: a bus at 08:36 four
+ * minutes' walk away is an 08:32 departure from home.
+ */
+export interface CommuteWalk {
+  /** `"08:32"` — scheduled start of the walk. */
+  aimed: string;
+  /** `"4 min walk · 300 m"`. */
+  label: string;
+}
 
 /**
  * Metres between two platforms, phrased only when they are worth walking.
@@ -349,9 +446,28 @@ const TIGHT_CONNECTION_MS = 4 * 60_000;
  * actually has.
  */
 function changeWalkLabel(walkM: number): string | null {
+  const distance = walkDistanceLabel(walkM);
+  return distance ? `${distance} walk` : null;
+}
+
+/** `"300 m"` / `"1.2 km"`, or null under twenty metres — see {@link changeWalkLabel}. */
+function walkDistanceLabel(walkM: number): string | null {
   if (walkM < 20) return null;
-  if (walkM < 1000) return `${Math.round(walkM / 10) * 10} m walk`;
-  return `${(walkM / 1000).toFixed(1)} km walk`;
+  if (walkM < 1000) return `${Math.round(walkM / 10) * 10} m`;
+  return `${(walkM / 1000).toFixed(1)} km`;
+}
+
+/** The walk made of these legs, or null when it is under a minute. */
+function commuteWalk(legs: readonly TransitLeg[]): CommuteWalk | null {
+  const first = legs[0];
+  if (!first) return null;
+  const minutes = Math.round(legs.reduce((total, leg) => total + leg.durationMs, 0) / 60_000);
+  if (minutes < 1) return null;
+  const distance = walkDistanceLabel(legs.reduce((total, leg) => total + leg.distanceM, 0));
+  return {
+    aimed: norwayClock(first.aimedStartMs),
+    label: `${minutes} min walk${distance ? ` · ${distance}` : ''}`,
+  };
 }
 
 /**
@@ -424,6 +540,10 @@ export interface CommuteJourney {
   connections: CommuteConnection[];
   /** `"6 min walk"` across the whole journey, or null when there is none worth saying. */
   walk: string | null;
+  /** The walk to the first stop — the itinerary's first line — or null. */
+  walkIn: CommuteWalk | null;
+  /** The walk from the last stop — the itinerary's last line — or null. */
+  walkOut: CommuteWalk | null;
   state: CommuteServiceState;
   /** Every notice on the journey, deduped — the collapsed row's warning. */
   disruptions: CommuteDisruption[];
@@ -512,8 +632,10 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
     const arrival = arrivalParts(leg);
     const key = `${leg.aimedStartMs}:${leg.line?.id ?? leg.mode}:${rideIndex}`;
     const stops = leg.intermediateStops.length;
-    const notices = leg.situations.map((situation, situationIndex) =>
-      commuteDisruption(situation, situationIndex, leg),
+    const notices = byProminence(
+      leg.situations.map((situation, situationIndex) =>
+        commuteDisruption(situation, situationIndex, leg),
+      ),
     );
     return {
       key,
@@ -546,19 +668,58 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
   const connections: CommuteConnection[] = rides.slice(1).map((ride, changeIndex) => {
     const before = rideLegs[changeIndex]!;
     const after = rideLegs[changeIndex + 1]!;
+    const arriving = rides[changeIndex]!;
     const waitMs = Math.max(0, after.aimedStartMs - before.aimedEndMs);
-    const walkM = trip.legs
-      .filter(
-        (leg) =>
-          !isRideMode(leg.mode) &&
-          leg.aimedStartMs >= before.aimedEndMs &&
-          leg.aimedEndMs <= after.aimedStartMs,
-      )
-      .reduce((total, leg) => total + leg.distanceM, 0);
+    const walkLegs = trip.legs.filter(
+      (leg) =>
+        !isRideMode(leg.mode) &&
+        leg.aimedStartMs >= before.aimedEndMs &&
+        leg.aimedEndMs <= after.aimedStartMs,
+    );
+    const walkM = walkLegs.reduce((total, leg) => total + leg.distanceM, 0);
+    const walkMin = Math.round(walkLegs.reduce((total, leg) => total + leg.durationMs, 0) / 60_000);
     const at = before.to.name || after.from.name;
     const label = commuteDurationLabel(waitMs);
-    const tight = waitMs < TIGHT_CONNECTION_MS;
     const walk = changeWalkLabel(walkM);
+
+    // Live only when a feed speaks for at least one of the two vehicles: two
+    // timetable estimates subtracted are the timetable's own wait again, and
+    // calling that "live" would be a claim the data never made. A recorded
+    // arrival beats an estimate, as it does for the connection break.
+    const liveWaitMs =
+      before.realtime || after.realtime
+        ? Math.max(
+            0,
+            (after.actualStartMs ?? after.expectedStartMs) -
+              (before.actualEndMs ?? before.expectedEndMs),
+          )
+        : null;
+    const liveMoved = liveWaitMs !== null && Math.abs(liveWaitMs - waitMs) >= 60_000;
+    const effectiveMs = liveWaitMs ?? waitMs;
+    const tight = effectiveMs < TIGHT_CONNECTION_MS;
+    const uncertain =
+      !tight &&
+      (before.endPredictionInaccurate === true ||
+        after.startPredictionInaccurate === true ||
+        (liveMoved && liveWaitMs! < waitMs && liveWaitMs! < UNCERTAIN_CONNECTION_MS));
+    const liveLabel = liveMoved ? expectedTimeLabel(commuteDurationLabel(liveWaitMs!)) : null;
+
+    const timed = (verb: string, parts: LegTimeParts, quay: string | null) =>
+      [`${verb} ${parts.aimed}`, quay, parts.delay ? expectedTimeLabel(parts.expected) : null]
+        .filter(Boolean)
+        .join(' · ');
+    const details = [
+      timed('Arrive', arriving.arrival, arriving.toQuay),
+      timed('Leave', ride.departure, ride.fromQuay),
+      walk ? `${walk}${walkMin >= 1 ? `, about ${walkMin} min` : ''}` : null,
+      liveMoved ? `Live: ${commuteDurationLabel(liveWaitMs!)} to change` : null,
+      tight
+        ? 'Short connection — little slack if the first vehicle runs late'
+        : uncertain
+          ? 'Live times put this connection in doubt'
+          : null,
+    ].filter((line): line is string => Boolean(line));
+
     return {
       key: `${ride.key}:change`,
       at,
@@ -566,11 +727,17 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
       depart: norwayClock(after.aimedStartMs),
       waitMs,
       label,
-      tight,
       walkM: Math.round(walkM),
       walk,
       chip: `${label} at ${at}`,
-      summary: [`Change at ${at}`, label, walk, tight ? 'tight' : null].filter(Boolean).join(' · '),
+      brief: `${at} · ${label}`,
+      summary: [at, `${label} connection`, walk].filter(Boolean).join(' · '),
+      liveWaitMs,
+      liveLabel,
+      tight,
+      uncertain,
+      warn: tight || uncertain,
+      details,
     };
   });
 
@@ -598,15 +765,17 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
   const duration = commuteDurationLabel(endMs - startMs);
 
   const seen = new Set<string>();
-  const disruptions = rides
-    .flatMap((ride) => ride.disruptions)
-    .filter((disruption) => {
-      // One situation is attached to every leg it affects; a journey that rides
-      // two legs of the same delayed line must not warn about it twice.
-      if (seen.has(disruption.key)) return false;
-      seen.add(disruption.key);
-      return true;
-    });
+  const disruptions = byProminence(
+    rides
+      .flatMap((ride) => ride.disruptions)
+      .filter((disruption) => {
+        // One situation is attached to every leg it affects; a journey that rides
+        // two legs of the same delayed line must not warn about it twice.
+        if (seen.has(disruption.key)) return false;
+        seen.add(disruption.key);
+        return true;
+      }),
+  );
 
   return {
     key: `${startMs}:${index}`,
@@ -624,6 +793,12 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
     rides,
     connections,
     walk: walkLabel(trip),
+    // An all-walk answer is one walk, and it is the way *in* — there is no
+    // vehicle for it to lead to or away from.
+    walkIn: commuteWalk(
+      rideLegs.length ? trip.legs.slice(0, trip.legs.indexOf(first!)) : trip.legs,
+    ),
+    walkOut: rideLegs.length ? commuteWalk(trip.legs.slice(trip.legs.indexOf(last!) + 1)) : null,
     state: worstState(rides.map((ride) => ride.state)),
     disruptions,
     dayNote: norwayDayNote(nowMs, startMs),
@@ -1040,8 +1215,10 @@ export function commuteBoardRows(
       .map(({ trip, ride, lastRide }, index) => {
         const departure = departureParts(ride);
         const cancelled = ride.cancelled === true;
-        const notices = ride.situations.map((situation, situationIndex) =>
-          commuteDisruption(situation, situationIndex, ride),
+        const notices = byProminence(
+          ride.situations.map((situation, situationIndex) =>
+            commuteDisruption(situation, situationIndex, ride),
+          ),
         );
         return {
           key: `${ride.aimedStartMs}:${ride.line?.id ?? ride.mode}:${index}`,
@@ -1174,6 +1351,34 @@ export function commuteLeaveNow(
   return { next: upcoming[0] ?? null, later: upcoming.slice(1) };
 }
 
+// ------------------------------------------------------------- freshness ---
+
+/**
+ * How old the board's live times are — the tracked card and the board's footer,
+ * both served stale while they revalidate, and saying so.
+ *
+ * The card opens on the last journey it knew rather than on a spinner: a
+ * traveller glancing at it on a platform needs the platform number now, not
+ * after a round trip to Entur on a train's Wi-Fi. That is only honest while the
+ * card states how old its live times are, so an answer from 08:32 is never read
+ * as one from 08:41 — and a refresh that failed says it failed instead of
+ * leaving the old time to look current.
+ */
+export function commuteFreshnessLabel(state: {
+  /** When the journey's live times were last fetched, or null if never. */
+  updatedMs: number | null;
+  /** A refresh is in flight. */
+  loading: boolean;
+  /** The last refresh failed; what is shown is the answer before it. */
+  failed: boolean;
+}): string {
+  if (state.updatedMs === null) return state.loading ? 'Checking live times…' : 'No live times yet';
+  const checked = `checked ${norwayClock(state.updatedMs)}`;
+  if (state.loading) return `Updating · last ${checked}`;
+  if (state.failed) return `Couldn’t update · last ${checked}`;
+  return `Live times ${checked}`;
+}
+
 // ---------------------------------------------------------------- header ---
 
 /** `"Tuesday 25 August · 08:32"` — where the dashboard says when it is. */
@@ -1235,7 +1440,7 @@ export type CommuteRibbonPart = CommuteRibbonSpan &
         kind: 'change';
         /** `"6m"` — the wait, short enough to sit inside the gap. */
         label: string;
-        /** Planned, but with little enough slack to be worth flagging. */
+        /** Short or uncertain enough to be worth flagging — `CommuteConnection.warn`. */
         tight: boolean;
         /**
          * The numbers say this change no longer holds
@@ -1287,7 +1492,11 @@ export function commuteRibbon(
         // Minutes without the unit: this label sits inside a gap that is often
         // 20 px wide, and "6 min" does not fit where "6m" does.
         label: `${Math.round(change.waitMs / 60_000)}m`,
-        tight: change.tight,
+        // Painted from the warning, not the timetable's slack alone: the gap
+        // is where the eye goes first, and a nine-minute change a late bus has
+        // cut to two must look like one here too. The label stays the planned
+        // minutes, because the widths it sits between are planned.
+        tight: change.warn,
         broken: options.brokenIndex === index,
       });
     }

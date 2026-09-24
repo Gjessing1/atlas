@@ -18,6 +18,7 @@ import {
   commuteCommitId,
   commuteCommitKey,
   commuteConnectionBreak,
+  commuteFreshnessLabel,
   commuteHere,
   commuteInterchangeHops,
   commuteJourney,
@@ -28,7 +29,6 @@ import {
   commuteModeTitle,
   commuteNowLabel,
   commuteOffDayNote,
-  commuteOrigins,
   commuteRibbon,
   commuteSharedDisruptions,
   defaultCommuteDirection,
@@ -77,6 +77,13 @@ export interface CommuteDashboardRow {
   broken: CommuteConnectionBreak | null;
   /** This journey's own notices — the corridor-wide ones are hoisted out. */
   disruptions: CommuteDisruption[];
+  /**
+   * The same notices placed on the leg they concern, one list per ride, for the
+   * expanded itinerary — again without the corridor-wide ones already said once
+   * above the list. The collapsed card says *that* the journey is affected; the
+   * itinerary says *where*, and neither repeats the other.
+   */
+  rideDisruptions: CommuteDisruption[][];
   /** This is the journey being tracked (TRANSIT.md §7). */
   tracked: boolean;
 }
@@ -197,6 +204,13 @@ export interface CommuteDashboard {
   toggle: (key: string) => void;
   /** A weekday this commute is not saved for, said plainly rather than as "nothing runs". */
   offDayNote: string | null;
+  /** How old the board's live times are, and whether a refresh is running or failed. */
+  freshness: string;
+  /**
+   * The same for the tracked card, which may be older than the list: the card
+   * is drawn from the copy kept on the device until an answer holds its journey.
+   */
+  hereFreshness: string | null;
 }
 
 /**
@@ -282,40 +296,15 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
   const commitKey = commit ? commuteCommitKey(commit) : null;
 
   /**
-   * The journey being tracked, preferring the backend's own re-read of it.
-   *
-   * The order matters and is not a fallback chain for tidiness: `committed`
-   * comes from a call asked *around the commitment's own departure*, so it is
-   * the only source that still contains the journey once it has left — which is
-   * exactly when this block is worth having. The board's own list answers
-   * before it departs, and answers with the same journey.
+   * The journey being tracked — `useCommute` keeps it from the latest answer
+   * that held it, including one fetched before this board was even opened, so
+   * the card is drawn before any request returns (stale-while-revalidate).
    */
-  const trackedJourney = useMemo<CommuteJourney | null>(() => {
-    if (!commit || !commitKey) return null;
-    const committed = result?.committed?.trip;
-    if (committed) return commuteJourney(committed, nowMs);
-    // The fallback searches the list the commitment was *made* from, which is
-    // not always one on screen: a commitment made from the interchange by a
-    // bundle old enough to have offered that (§13 before v0.191.0) names a
-    // journey in that hop's own answer, and looking for it in the door-to-door
-    // one would release a commitment that is perfectly alive.
-    const committedOrigin = commute.query
-      ? (commuteOrigins(commute.query, commit.direction).find(
-          (option) => option.id === (commit.origin ?? 'door'),
-        ) ?? null)
-      : null;
-    const source = committedOrigin?.segmentId
-      ? (result?.segments ?? []).find((entry) => entry.id === committedOrigin.segmentId)?.result
-      : result?.[commit.direction];
-    return (
-      commuteJourneyList(
-        (source?.trips ?? []).map((trip, index) => commuteJourney(trip, nowMs, index)),
-      ).find(
-        (journey) =>
-          commuteCommitId(commit.direction, journey, commit.origin ?? 'door') === commitKey,
-      ) ?? null
-    );
-  }, [commit, commitKey, commute.query, result, nowMs]);
+  const trackedTrip = commute.tracked?.trip ?? null;
+  const trackedJourney = useMemo<CommuteJourney | null>(
+    () => (commit && trackedTrip ? commuteJourney(trackedTrip, nowMs) : null),
+    [commit, trackedTrip, nowMs],
+  );
 
   // A commitment releases itself once the journey it names has finished, rather
   // than waiting to be dismissed: nobody stops tracking a bus they got off, and
@@ -325,7 +314,9 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     if (!commit) return;
     if (trackedJourney && commuteCommitHolds(trackedJourney, nowMs)) return;
     // Only when the answer is loaded: an unresolved commitment during the
-    // moment before the first result arrives is unknown, not finished.
+    // moment before the first result arrives is unknown, not finished. A kept
+    // copy of the journey is judged on its own times above, so a request that
+    // fails mid-journey cannot release a commitment that still holds.
     if (!result) return;
     setCommit(null);
   }, [commit, nowMs, result, setCommit, trackedJourney]);
@@ -394,6 +385,19 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
     offDayNote: commute.query
       ? commuteOffDayNote(commute.query.days, norwayTime(nowMs).weekday)
       : null,
+    freshness: commuteFreshnessLabel({
+      updatedMs: commute.updatedMs,
+      loading: commute.loading,
+      failed: commute.error !== null,
+    }),
+    hereFreshness:
+      here && commute.tracked
+        ? commuteFreshnessLabel({
+            updatedMs: commute.tracked.updatedMs,
+            loading: commute.loading,
+            failed: commute.error !== null,
+          })
+        : null,
   };
 }
 
@@ -453,6 +457,9 @@ function buildSection(
       parts: commuteRibbon(journey, { brokenIndex: broken?.index ?? null }),
       broken,
       disruptions: journey.disruptions.filter((disruption) => !hoisted.has(disruption.key)),
+      rideDisruptions: journey.rides.map((ride) =>
+        ride.disruptions.filter((disruption) => !hoisted.has(disruption.key)),
+      ),
       // No origin: a journey listed here is the commute door to door, and
       // `commuteCommitId` defaults to exactly that. A commitment made from the
       // interchange by an older bundle therefore matches no row in this list,

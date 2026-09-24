@@ -1,9 +1,12 @@
 import type { PlaceRecord } from '@atlas/storage';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { TransitTrip } from '@atlas/transit';
+
 import {
   COMMUTE_COMMIT_SETTING_KEY,
   COMMUTE_SETTING_KEY,
+  COMMUTE_TRACKED_SETTING,
   commuteQueryFrom,
   EMPTY_COMMUTE_CONFIG,
   EMPTY_COMMUTE_LIBRARY,
@@ -18,6 +21,7 @@ import {
   useCommute,
   type CommuteSettings,
 } from './useCommute.js';
+import { useCommuteDashboard } from './useCommuteDashboard.js';
 
 function saved(id: string, name: string): PlaceRecord {
   return {
@@ -485,6 +489,178 @@ describe('useCommute', () => {
       expect(COMMUTE_COMMIT_SETTING_KEY.startsWith('local.')).toBe(true);
     });
 
+    /**
+     * Stale-while-revalidate for the one journey that matters: the card is
+     * drawn from the kept copy the moment the saved state is read, before a
+     * request has returned — or while one never does, on a train's Wi-Fi.
+     */
+    it('keeps the tracked journey and draws it before any answer arrives', async () => {
+      const ridden: TransitTrip = {
+        startMs: commit.departureMs,
+        endMs: commit.departureMs + 30 * 60_000,
+        durationMs: 30 * 60_000,
+        walkDistanceM: 0,
+        legs: [],
+      };
+      const config = serializeCommuteConfig({
+        ...EMPTY_COMMUTE_CONFIG,
+        from: ENGELSRUD,
+        to: NATIONALTHEATRET,
+      });
+      const setSetting = vi.fn();
+      const first = renderHook(() =>
+        useCommute(
+          settings(
+            (key) =>
+              Promise.resolve(
+                key === COMMUTE_COMMIT_SETTING_KEY
+                  ? JSON.stringify(commit)
+                  : key === COMMUTE_SETTING_KEY
+                    ? config
+                    : null,
+              ),
+            setSetting,
+          ),
+          [],
+          vi.fn().mockResolvedValue({
+            outbound: { trips: [], problems: [] },
+            inbound: { trips: [], problems: [] },
+            committed: { trip: ridden, replaced: null },
+          }),
+          true,
+        ),
+      );
+      await waitFor(() => expect(first.result.current.tracked?.trip).toEqual(ridden));
+      const written = setSetting.mock.calls.find(([key]) => key === COMMUTE_TRACKED_SETTING.key);
+      expect(COMMUTE_TRACKED_SETTING.key.startsWith('local.')).toBe(true);
+      first.unmount();
+
+      // A cold start whose request never comes back.
+      const second = renderHook(() =>
+        useCommute(
+          settings((key) =>
+            Promise.resolve(
+              key === COMMUTE_COMMIT_SETTING_KEY
+                ? JSON.stringify(commit)
+                : key === COMMUTE_SETTING_KEY
+                  ? config
+                  : String(written?.[1]),
+            ),
+          ),
+          [],
+          () => new Promise(() => {}),
+          true,
+        ),
+      );
+      await waitFor(() => expect(second.result.current.ready).toBe(true));
+      expect(second.result.current.result).toBeNull();
+      expect(second.result.current.tracked?.trip).toEqual(ridden);
+      second.unmount();
+    });
+
+    /**
+     * The board releases a commitment it cannot find a journey for. A journey
+     * that arrived one render after the Track tap was therefore a commitment
+     * released the instant it was made — the tracked card never appeared.
+     */
+    it('hands over the tracked journey in the same render as the commitment', async () => {
+      // In the future of the real clock: the board releases a commitment whose
+      // journey has finished, and this one must be judged as live.
+      const departs = Math.ceil((Date.now() + 30 * 60_000) / 60_000) * 60_000;
+      const bus: TransitTrip = {
+        startMs: departs,
+        endMs: departs + 20 * 60_000,
+        durationMs: 20 * 60_000,
+        walkDistanceM: 0,
+        legs: [
+          {
+            mode: 'bus',
+            distanceM: 5_000,
+            durationMs: 20 * 60_000,
+            aimedStartMs: departs,
+            expectedStartMs: departs,
+            aimedEndMs: departs + 20 * 60_000,
+            expectedEndMs: departs + 20 * 60_000,
+            realtime: false,
+            from: { name: 'Engelsrud', position: { lat: 59.8, lng: 10.3 } },
+            to: { name: 'Nationaltheatret', position: { lat: 59.9, lng: 10.7 } },
+            line: { id: 'RUT:Line:280', publicCode: '280' },
+            intermediateStops: [],
+            points: [],
+            situations: [],
+          },
+        ],
+      };
+      const { result } = renderHook(() => {
+        const commute = useCommute(
+          settings((key) =>
+            Promise.resolve(
+              key === COMMUTE_SETTING_KEY
+                ? serializeCommuteConfig({
+                    ...EMPTY_COMMUTE_CONFIG,
+                    from: ENGELSRUD,
+                    to: NATIONALTHEATRET,
+                  })
+                : null,
+            ),
+          ),
+          [],
+          vi.fn().mockResolvedValue({
+            outbound: { trips: [bus], problems: [] },
+            inbound: { trips: [], problems: [] },
+          }),
+          true,
+        );
+        return { commute, dashboard: useCommuteDashboard(commute) };
+      });
+      await waitFor(() => expect(result.current.commute.result).not.toBeNull());
+      act(() =>
+        result.current.commute.setCommit({
+          direction: 'outbound',
+          departureMs: departs,
+          line: '280',
+        }),
+      );
+      expect(result.current.commute.commit).not.toBeNull();
+      expect(result.current.commute.tracked?.trip).toBe(bus);
+      expect(result.current.dashboard.here).not.toBeNull();
+    });
+
+    it('lets the kept journey go with the commitment', async () => {
+      const setSetting = vi.fn();
+      const { result } = renderHook(() =>
+        useCommute(
+          settings(
+            (key) =>
+              Promise.resolve(
+                key === COMMUTE_COMMIT_SETTING_KEY
+                  ? JSON.stringify(commit)
+                  : key === COMMUTE_SETTING_KEY
+                    ? serializeCommuteConfig({
+                        ...EMPTY_COMMUTE_CONFIG,
+                        from: ENGELSRUD,
+                        to: NATIONALTHEATRET,
+                      })
+                    : JSON.stringify({
+                        commuteId: 'commute',
+                        commitKey: `outbound:${commit.departureMs}:280`,
+                        trip: { startMs: 1, endMs: 2, durationMs: 1, walkDistanceM: 0, legs: [] },
+                        updatedMs: 1,
+                      }),
+              ),
+            setSetting,
+          ),
+          [],
+          () => new Promise(() => {}),
+          false,
+        ),
+      );
+      await waitFor(() => expect(result.current.tracked).not.toBeNull());
+      act(() => result.current.setCommit(null));
+      expect(result.current.tracked).toBeNull();
+      expect(setSetting).toHaveBeenCalledWith(COMMUTE_TRACKED_SETTING.key, '');
+    });
+
     it('ignores a stored value that is not a commitment', () => {
       expect(parseCommuteCommit(null)).toBeNull();
       expect(parseCommuteCommit('')).toBeNull();
@@ -492,6 +668,48 @@ describe('useCommute', () => {
       expect(parseCommuteCommit('{"direction":"outbound","line":"280"}')).toBeNull();
       expect(parseCommuteCommit(JSON.stringify(commit))).toMatchObject(commit);
     });
+  });
+
+  /**
+   * A failed refresh or a closed board used to empty the board, so the next
+   * glance began from nothing. The last answer stays, and its age is what the
+   * board states.
+   */
+  it('keeps the last answer through a failed refresh and a closed board', async () => {
+    const answer = {
+      outbound: { trips: [], problems: [] },
+      inbound: { trips: [], problems: [] },
+    };
+    const fetchCommute = vi
+      .fn()
+      .mockResolvedValueOnce(answer)
+      .mockRejectedValueOnce(new Error('offline'));
+    const { result, rerender } = renderHook(
+      ({ open }) =>
+        useCommute(
+          settings(() =>
+            Promise.resolve(
+              serializeCommuteConfig({
+                ...EMPTY_COMMUTE_CONFIG,
+                from: ENGELSRUD,
+                to: NATIONALTHEATRET,
+              }),
+            ),
+          ),
+          [],
+          fetchCommute,
+          open,
+        ),
+      { initialProps: { open: true } },
+    );
+    await waitFor(() => expect(result.current.result).toBe(answer));
+    const checked = result.current.updatedMs;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.result).toBe(answer);
+    expect(result.current.updatedMs).toBe(checked);
+    rerender({ open: false });
+    expect(result.current.result).toBe(answer);
   });
 
   it('switches named commutes without repointing the widget', async () => {

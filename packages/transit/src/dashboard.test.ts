@@ -22,6 +22,7 @@ import {
   commuteRibbonProgress,
   commuteSegments,
   commuteSharedDisruptions,
+  commuteFreshnessLabel,
 } from './dashboard.js';
 import { legTimeParts } from './labels.js';
 import type {
@@ -162,7 +163,8 @@ describe('commuteJourney', () => {
     ]);
     // And the change between them, phrased once for both clients.
     expect(journey.connections[0]!.chip).toBe('9 min at Asker stasjon');
-    expect(journey.connections[0]!.summary).toBe('Change at Asker stasjon · 9 min · 120 m walk');
+    expect(journey.connections[0]!.summary).toBe('Asker stasjon · 9 min connection · 120 m walk');
+    expect(journey.connections[0]!.brief).toBe('Asker stasjon · 9 min');
     expect(journey.connections[0]!.walk).toBe('120 m walk');
   });
 
@@ -192,7 +194,7 @@ describe('commuteJourney', () => {
       NOW,
     );
     expect(journey.connections[0]!.walk).toBeNull();
-    expect(journey.connections[0]!.summary).toBe('Change at Asker stasjon · 9 min');
+    expect(journey.connections[0]!.summary).toBe('Asker stasjon · 9 min connection');
   });
 
   it('flags a connection with no slack rather than presenting it as ordinary', () => {
@@ -204,6 +206,106 @@ describe('commuteJourney', () => {
       label: '2 min',
       tight: true,
     });
+  });
+
+  /**
+   * The warning has to follow the morning, not the timetable: a nine-minute
+   * change is ordinary until the bus into it runs seven late, and then it is the
+   * one thing on the card worth reading.
+   */
+  it('flags a connection that live times have cut short, keeping the planned wait', () => {
+    const late = trip(
+      ride({
+        line: '270',
+        from: 'A',
+        to: 'Asker stasjon',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+        expectedStartMs: hm(8, 43),
+        expectedEndMs: hm(9, 9),
+        realtime: true,
+      }),
+      ride({
+        line: 'L1',
+        from: 'Asker stasjon',
+        to: 'C',
+        aimedStartMs: hm(9, 11),
+        aimedEndMs: hm(9, 24),
+      }),
+    );
+    const change = commuteJourney(late, NOW).connections[0]!;
+    expect(change).toMatchObject({
+      label: '9 min',
+      liveWaitMs: 2 * 60_000,
+      liveLabel: '2 min est.',
+      tight: true,
+      warn: true,
+    });
+    // The detail the tap opens says the two times and why it is flagged.
+    expect(change.details).toContain('Arrive 09:02 · 09:09 est.');
+    expect(change.details).toContain('Live: 2 min to change');
+    // The ribbon's gap turns with it, while its label stays the planned minutes.
+    const gap = commuteRibbon(commuteJourney(late, NOW)).find((part) => part.kind === 'change');
+    expect(gap).toMatchObject({ label: '9m', tight: true });
+  });
+
+  it('calls a shortened but still workable connection uncertain, not tight', () => {
+    const late = trip(
+      ride({
+        line: '270',
+        from: 'A',
+        to: 'B',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+        expectedEndMs: hm(9, 7),
+        realtime: true,
+      }),
+      ride({ line: 'L1', from: 'B', to: 'C', aimedStartMs: hm(9, 13), aimedEndMs: hm(9, 24) }),
+    );
+    expect(commuteJourney(late, NOW).connections[0]).toMatchObject({
+      label: '11 min',
+      liveLabel: '6 min est.',
+      tight: false,
+      uncertain: true,
+      warn: true,
+    });
+  });
+
+  it('leaves an ordinary connection neutral, live feed or not', () => {
+    const onTime = trip(
+      ride({
+        line: '270',
+        from: 'A',
+        to: 'B',
+        aimedStartMs: hm(8, 36),
+        aimedEndMs: hm(9, 2),
+        realtime: true,
+      }),
+      ride({ line: 'L1', from: 'B', to: 'C', aimedStartMs: hm(9, 12), aimedEndMs: hm(9, 24) }),
+    );
+    expect(commuteJourney(onTime, NOW).connections[0]).toMatchObject({
+      liveWaitMs: 10 * 60_000,
+      liveLabel: null,
+      warn: false,
+    });
+  });
+
+  it('opens and closes the itinerary with the walks to and from the vehicles', () => {
+    const door = walk(hm(8, 31), hm(8, 36));
+    door.distanceM = 340;
+    const home = walk(hm(9, 24), hm(9, 27));
+    home.distanceM = 210;
+    const journey = commuteJourney(
+      trip(
+        door,
+        ride({ line: '270', from: 'A', to: 'B', aimedStartMs: hm(8, 36), aimedEndMs: hm(9, 24) }),
+        home,
+      ),
+      NOW,
+    );
+    expect(journey.walkIn).toEqual({ aimed: '08:31', label: '5 min walk · 340 m' });
+    expect(journey.walkOut).toEqual({ aimed: '09:24', label: '3 min walk · 210 m' });
+    expect(commuteJourney(specJourney(), NOW).walkIn).toBeNull();
   });
 
   it('keeps the scheduled time primary when a live feed corrects it (§3)', () => {
@@ -281,6 +383,37 @@ describe('commuteJourney', () => {
     // Leg facts beat prose: an operator publishing a cancellation as a `general`
     // report is still a cancellation.
     expect(kind({ cancelled: true }, { planned: true })).toBe('cancellation');
+  });
+
+  /**
+   * Engineering work announced weeks ago and a cancelled train are both notices
+   * on the leg; only one of them may compete with the departure time.
+   */
+  it('draws what is happening to this departure louder than a general notice', () => {
+    const journey = commuteJourney(
+      trip(
+        ride({
+          line: 'L1',
+          from: 'A',
+          to: 'B',
+          aimedStartMs: hm(8, 41),
+          aimedEndMs: hm(9, 2),
+          situations: [
+            { id: 'plan', summary: 'Sporarbeid i november', severity: 'warning', planned: true },
+            { id: 'info', summary: 'Ny rutetabell', severity: 'info' },
+            { id: 'now', summary: 'Signalfeil ved Sandvika', severity: 'warning' },
+            { id: 'bus', summary: 'Buss for tog i helgen', severity: 'severe', planned: true },
+          ],
+        }),
+      ),
+      NOW,
+    );
+    expect(journey.disruptions.map((item) => `${item.key}:${item.prominence}`)).toEqual([
+      'now:active',
+      'bus:active',
+      'plan:notice',
+      'info:notice',
+    ]);
   });
 
   it('warns once about a situation attached to two legs of the same line', () => {
@@ -1053,5 +1186,23 @@ describe('commuteSharedDisruptions', () => {
 
   it('lifts nothing out of a single journey, which has no “every” to speak of', () => {
     expect(commuteSharedDisruptions([withNotice('S1', hm(8, 36))])).toEqual([]);
+  });
+});
+
+describe('commuteFreshnessLabel', () => {
+  it('says how old the live times are, and never lets a failed refresh look current', () => {
+    const checked = hm(8, 32);
+    expect(commuteFreshnessLabel({ updatedMs: null, loading: true, failed: false })).toBe(
+      'Checking live times…',
+    );
+    expect(commuteFreshnessLabel({ updatedMs: checked, loading: false, failed: false })).toBe(
+      'Live times checked 08:32',
+    );
+    expect(commuteFreshnessLabel({ updatedMs: checked, loading: true, failed: false })).toBe(
+      'Updating · last checked 08:32',
+    );
+    expect(commuteFreshnessLabel({ updatedMs: checked, loading: false, failed: true })).toBe(
+      'Couldn’t update · last checked 08:32',
+    );
   });
 });

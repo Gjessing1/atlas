@@ -906,7 +906,10 @@ async function setCommuteEnd(field, query, name) {
  * this can be driven without pinning the test to one launcher build.
  */
 async function pinWidget(testId) {
-  await tapAfterScroll(testId, 'commute-sheet');
+  // Both offers are rows of the board's ⋮ menu, which folds out under the
+  // sheet's fixed header — never inside the scrolling board.
+  await tap('commute-menu');
+  await tap(testId);
   const labels = ['Add automatically', 'ADD AUTOMATICALLY', 'Add to home screen', 'Add', 'ADD'];
   const dialog = await waitFor(
     'the launcher to offer to place the widget',
@@ -986,8 +989,9 @@ async function saveCommuteAndReadBoard() {
   await tapAfterScroll('commute-days-weekdays', 'commute-sheet');
   await waitForId('commute-day-7');
   await tapAfterScroll('commute-days-every-day', 'commute-sheet');
-  // "Done": the board is what the reader came for, the editor is not.
-  await tapAfterScroll('commute-edit', 'commute-sheet', 'down');
+  // "Done", in the sheet's header while the editor is open: the board is what
+  // the reader came for, the editor is not.
+  await tap('commute-edit');
   const board = await waitFor(
     'the commute board to answer',
     hierarchy,
@@ -1054,7 +1058,9 @@ async function saveCommuteAndReadBoard() {
     (xml) => windowStrings(xml).some((value) => value.includes('plat. 3')),
     20_000,
   );
-  expectStrings(opened, ['plat. B4', 'plat. 3', 'Total '], 'the opened journey');
+  // …with the change drawn once, *between* the two legs, as its own element —
+  // not the collapsed card's line left standing above the itinerary.
+  expectStrings(opened, ['plat. B4', 'plat. 3', 'min connection'], 'the opened journey');
 
   // TRANSIT.md §13's middle mode: the change as a stop, drawn as the departures
   // *leaving* it in both directions — the train in and the bus home, which is
@@ -1078,15 +1084,20 @@ async function saveCommuteAndReadBoard() {
 
 /** Multiple commute identities, and the saved-place marker they contribute. */
 async function verifyMultipleCommutes(placeId) {
-  await tapAfterScroll('commute-rename', 'commute-sheet', 'up');
+  // Naming, adding and switching are configuration, so they are rows of the
+  // header's ⋮ menu rather than buttons above the board.
+  await tap('commute-menu');
+  await tap('commute-rename');
   await replaceText('commute-name', 'Work E2E');
   await tap('commute-name-save');
+  await tap('commute-menu');
   await tap('commute-add');
   // A new commute is selected and genuinely empty; it must not inherit the
   // corridor that remains assigned to the home-screen widget.
   await waitForId('commute-end-from', true, 20_000);
   await tap('commute-end-from');
   await tap(`commute-place-from-${placeId}`);
+  await tap('commute-menu');
   await tap('commute-rename');
   await replaceText('commute-name', 'Cabin E2E');
   await tap('commute-name-save');

@@ -152,10 +152,12 @@ export {
   commuteRibbonProgress,
   commuteSegments,
   commuteSharedDisruptions,
+  commuteFreshnessLabel,
   type CommuteBoardRow,
   type CommuteConnection,
   type CommuteDisruption,
   type CommuteDisruptionKind,
+  type CommuteDisruptionProminence,
   type CommuteJourney,
   type CommuteJourneyLive,
   type CommuteLeaveNow,
@@ -168,6 +170,7 @@ export {
   type CommuteRide,
   type CommuteSegment,
   type CommuteServiceState,
+  type CommuteWalk,
 } from './dashboard.js';
 /**
  * TRANSIT.md §7's "you are here" — the committed journey stated on the board, built

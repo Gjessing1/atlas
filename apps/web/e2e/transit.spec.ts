@@ -240,10 +240,19 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   await expect(ribbon.last()).toContainText('R14');
   await expect(lead).toContainText(`${clock(0)}`);
   await expect(lead).toContainText(`${clock(1_800_000)}`);
-  // The change states the two numbers a traveller would otherwise subtract.
-  await expect(panel.locator('.commute-change').first()).toContainText(
-    `${clock(900_000)} → ${clock(1_200_000)}`,
-  );
+  // The collapsed card names the change and its wait — the two things the
+  // ribbon's gap cannot spell out. The clock times belong to the itinerary,
+  // which states them against their platforms.
+  const change = lead.locator('.commute-change').first();
+  await expect(change).toContainText('Asker');
+  await expect(change).toContainText('5 min');
+  await lead.getByRole('button', { name: 'Details' }).click();
+  const interchange = lead.locator('.commute-interchange');
+  await expect(interchange).toContainText('5 min connection');
+  await expect(lead.locator('.commute-change')).toHaveCount(0);
+  await expect(lead.locator('.commute-legs')).toContainText(clock(900_000));
+  await expect(lead.locator('.commute-legs')).toContainText(clock(1_200_000));
+  await lead.getByRole('button', { name: 'Hide details' }).click();
 
   // §3 applied to the travel time itself: the printed window is the
   // timetable's 30 minutes, and the live line beside it says the journey is
@@ -295,15 +304,23 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
 
   // Several named commutes share one library. Adding another opens its empty
   // editor, while switching back restores this board rather than overwriting it.
+  // All of it is configuration, so all of it is behind the header's ⋮ — and
+  // one saved commute has no picker at all.
+  await expect(panel.getByRole('combobox', { name: 'Saved commute' })).toHaveCount(0);
+  const settings = () => panel.getByRole('button', { name: 'Commute settings' }).click();
+  await settings();
   await panel.getByRole('button', { name: 'Rename commute' }).click();
   const nameInput = panel.getByRole('textbox', { name: 'Commute name' });
   await nameInput.fill('Work');
   await nameInput.press('Enter');
+  await settings();
   await panel.getByRole('button', { name: 'Add commute' }).click();
   await expect(panel.getByRole('button', { name: 'Choose a From stop…' })).toBeVisible();
+  await settings();
   await panel.getByRole('button', { name: 'Rename commute' }).click();
   await panel.getByRole('textbox', { name: 'Commute name' }).fill('Cabin');
   await panel.getByRole('textbox', { name: 'Commute name' }).press('Enter');
+  await settings();
   await panel.getByRole('button', { name: 'Use this commute on the Android home screen' }).click();
   await panel.getByRole('combobox', { name: 'Saved commute' }).selectOption({ label: 'Work' });
   await expect(panel.locator('.commute-header')).toContainText('Nationaltheatret → Engelsrud');

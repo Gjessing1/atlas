@@ -12,21 +12,22 @@ import {
   commuteCountdown,
   commuteModeChip,
   fetchTransitStopLines,
-  liveTimetableLabel,
   transitModeGlyph,
   type CommuteBoardRow,
+  type CommuteConnection,
   type CommuteDisruption,
   type CommuteHere,
   type CommuteJourney,
   type CommuteLineBadge,
   type CommuteRibbonPart,
   type CommuteServiceState,
+  type CommuteWalk,
   type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
-import { CheckIcon, PencilIcon } from '../icons.js';
+import { CheckIcon, MoreIcon } from '../icons.js';
 import { useGeocode } from '../routing/useGeocode.js';
 import { CommuteEditorForm } from './CommuteEditor.js';
 
@@ -41,9 +42,10 @@ import { CommuteEditorForm } from './CommuteEditor.js';
  * So the order is inverted and the emphasis with it. Reading down: where you
  * are in the journey you are tracking, if you are tracking one; what leaving
  * *now* actually gets you; then the complete journey options as one scannable
- * line and one ribbon each, expandable to their legs. Configuration is one
- * button, opened on demand — or by itself when there is not yet enough saved to
- * ask a question at all.
+ * card each, expandable to a chronological itinerary. Configuration — editing,
+ * renaming, adding, deleting, the widget — lives behind the header's ⋮, and the
+ * editor opens by itself only when there is not yet enough saved to ask a
+ * question at all.
  *
  * The middle mode reads differently on purpose (§13): standing at the change
  * you are not planning a journey, so it draws the two departure boards leaving
@@ -88,60 +90,48 @@ const badgeStyle = (badge: CommuteLineBadge) => ({
 });
 
 /**
- * Disruptions under the service they affect (§4).
+ * Disruptions under the service they affect (§4) — one line each until clicked.
  *
- * `brief` is the collapsed form, and it is not a nicety. Driven against the live
- * board, the full form put two amber boxes and five lines of Norwegian operator
- * prose between the first journey's scan line and the second's — on the one
- * screen §12 says must show three journeys at a glance. So a collapsed row gets
- * the headline and the expanded legs get the whole notice, which is where
- * someone who has chosen a journey is actually reading.
+ * Every notice starts as its operator headline on a single line, wherever it
+ * appears: on a collapsed card, above the list, on a leg of the itinerary. The
+ * full form put two amber boxes and five lines of Norwegian operator prose
+ * between the first journey's scan line and the second's, on the one screen
+ * §12 says must show three journeys at a glance; the headline says enough to
+ * know something is up, and a click opens the whole notice in place.
  *
- * But a clamped headline is a *cut* sentence, and the cut usually falls exactly
- * where the operator was about to say which stops are affected. So a brief
- * notice opens on its own tap, independently of the journey row it sits in:
- * scannable by default, complete on demand, and never at the price of burying
- * the next departure.
+ * Two weights, from `prominence`: what is happening to *this* departure (it is
+ * cancelled, a bus replaces it, an incident on it) is drawn in the state
+ * colours; engineering work announced last month and information notices are
+ * drawn muted, so they are there to be read without competing with the time.
  */
-function Disruptions({
-  items,
-  brief = false,
-}: {
-  items: readonly CommuteDisruption[];
-  brief?: boolean;
-}) {
+function Disruptions({ items }: { items: readonly CommuteDisruption[] }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   if (items.length === 0) return null;
   return (
-    <ul className={`commute-disruptions${brief ? ' brief' : ''}`}>
+    <ul className="commute-disruptions">
       {items.map((item) => {
-        const open = !brief || openKey === item.key;
-        const body = (
-          <>
-            <strong>
-              {item.severity === 'info' ? 'ⓘ' : '⚠'} {item.kindLabel}
-            </strong>
-            <span>{item.summary}</span>
-            {open && item.detail && <em>{item.detail}</em>}
-          </>
-        );
+        const open = openKey === item.key;
+        const active = item.prominence === 'active';
         return (
           <li
             key={item.key}
-            className={`commute-disruption sev-${item.severity}${open ? ' open' : ''}`}
+            className={`commute-disruption sev-${item.severity} prom-${item.prominence}${
+              open ? ' open' : ''
+            }`}
           >
-            {brief ? (
-              <button
-                type="button"
-                className="commute-disruption-toggle"
-                aria-expanded={open}
-                onClick={() => setOpenKey((current) => (current === item.key ? null : item.key))}
-              >
-                {body}
-              </button>
-            ) : (
-              body
-            )}
+            <button
+              type="button"
+              className="commute-disruption-toggle"
+              aria-expanded={open}
+              aria-label={open ? undefined : `${item.kindLabel}: ${item.summary}`}
+              onClick={() => setOpenKey((current) => (current === item.key ? null : item.key))}
+            >
+              {open && <strong>{item.kindLabel}</strong>}
+              <span>
+                <i aria-hidden="true">{active ? '⚠' : 'ⓘ'}</i> {item.summary}
+              </span>
+              {open && item.detail && <em>{item.detail}</em>}
+            </button>
             {open && item.url && (
               <a href={item.url} target="_blank" rel="noreferrer noopener">
                 Operator’s notice
@@ -258,8 +248,17 @@ function Live({ journey }: { journey: CommuteJourney }) {
   );
 }
 
-/** The change, in the two numbers the traveller would otherwise subtract (§2). */
-function Changes({ row }: { row: CommuteDashboardRow }) {
+/**
+ * The change on a collapsed card: where, and how long — the two things the
+ * ribbon's gap cannot spell out — plus the warning when there is one (§2).
+ *
+ * Not the arrival and departure times: those belong to the legs, and the
+ * itinerary states them against their platforms. A collapsed card that also
+ * printed them was the near-copy of the itinerary a reader scrolled past twice.
+ * The live wait sits after the planned one it corrects (§3), so a nine-minute
+ * change a late bus has cut to two reads `9 min · ⚠ 2 min est.`.
+ */
+function Overview({ row }: { row: CommuteDashboardRow }) {
   return (
     <>
       {row.journey.connections.map((change, index) => {
@@ -267,15 +266,17 @@ function Changes({ row }: { row: CommuteDashboardRow }) {
         return (
           <p
             key={change.key}
-            className={`commute-change${broken ? ' broken' : change.tight ? ' tight' : ''}`}
+            className={`commute-change${broken ? ' broken' : change.warn ? ' tight' : ''}`}
           >
             <i aria-hidden="true">⇄</i>
             <span>{change.at}</span>
             {broken ? (
-              <b className="detail">{row.broken?.detail}</b>
+              <b className="detail">⚠ {row.broken?.detail}</b>
             ) : (
               <b>
-                {change.arrive} → {change.depart}
+                {change.warn && !change.liveLabel && '⚠ '}
+                {change.label}
+                {change.liveLabel && ` · ${change.warn ? '⚠ ' : ''}${change.liveLabel}`}
               </b>
             )}
           </p>
@@ -286,16 +287,66 @@ function Changes({ row }: { row: CommuteDashboardRow }) {
 }
 
 /**
- * The vehicles of a journey, stop by stop: each leg's platform, its departure
- * and its arrival, with the live estimate under whichever of the two moved.
- *
- * Shared by the expanded journey row and the tracked card, which is the point.
- * The tracked card used to be the one place on the board that could *not* tell
- * you which platform to stand on — the journey it is about has left the list
- * the legs would otherwise have been read from.
+ * The interchange as one element between the leg that arrives and the leg that
+ * leaves: `Asker stasjon · 9 min connection · 150 m walk`. Clicking it opens the
+ * transfer itself — both times with their platforms, the walk, the live wait and
+ * why it is flagged — for the traveller about to make it.
  */
-function Legs({
+function Interchange({ change, broken }: { change: CommuteConnection; broken: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li
+      className={`commute-interchange${broken ? ' broken' : change.warn ? ' tight' : ''}${
+        open ? ' open' : ''
+      }`}
+    >
+      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span>
+          {change.warn || broken ? '⚠ ' : '⇄ '}
+          {change.summary}
+        </span>
+        {change.liveLabel && !broken && <b>{change.liveLabel}</b>}
+      </button>
+      {broken && <p>{broken}</p>}
+      {open && change.details.map((line) => <p key={line}>{line}</p>)}
+    </li>
+  );
+}
+
+/** A walk at either end of the itinerary, timed like a leg. */
+function WalkLine({ walk }: { walk: CommuteWalk }) {
+  return (
+    <li className="commute-walk">
+      <div className="commute-leg">
+        <span className="commute-leg-time">
+          <em>{walk.aimed}</em>
+        </span>
+        <span className="commute-leg-body">
+          <span>🚶 {walk.label}</span>
+        </span>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The journey as a chronological itinerary: the walk to the stop, each leg's
+ * departure and arrival with its platform and live estimate, the interchange
+ * between legs, the notices on the leg they concern, the walk at the end.
+ *
+ * Only what the collapsed card cannot say. There is no closing "Total 48 min"
+ * line — the card's head states the whole journey, and the itinerary is read
+ * from it — and nothing about a disruption is repeated from the card: the card
+ * says *that* the journey is affected, the itinerary says *which leg*.
+ *
+ * Shared by the expanded journey and the tracked card, which is the point: the
+ * tracked card used to be the one place on the board that could *not* tell you
+ * which platform to stand on.
+ */
+function Itinerary({
   journey,
+  notices,
+  broken = null,
   /**
    * The ride the traveller is on or about to board, from the phase ladder.
    * Legs before it are dimmed rather than dropped: a journey is read as a
@@ -304,66 +355,78 @@ function Legs({
   activeIndex = null,
 }: {
   journey: CommuteJourney;
+  /** Per-ride notices; the rides' own by default. */
+  notices?: readonly (readonly CommuteDisruption[])[];
+  broken?: CommuteDashboardRow['broken'];
   activeIndex?: number | null;
 }) {
   return (
     <ol className="commute-legs">
+      {journey.walkIn && <WalkLine walk={journey.walkIn} />}
       {journey.rides.map((ride, index) => {
         const connection = journey.connections[index - 1];
         const mark =
           activeIndex === null
-            ? ''
+            ? undefined
             : index === activeIndex
-              ? ' now'
+              ? 'now'
               : index < activeIndex
-                ? ' past'
-                : '';
+                ? 'past'
+                : undefined;
         return (
-          <li key={ride.key} className={mark.trim() || undefined}>
+          <Fragment key={ride.key}>
             {connection && (
-              <p className={`commute-connection${connection.tight ? ' tight' : ''}`}>
-                {connection.summary}
-              </p>
+              <Interchange
+                change={connection}
+                broken={broken?.index === index ? broken.detail : null}
+              />
             )}
-            <div className="commute-leg">
-              <span className="commute-leg-time">
-                <strong>{ride.departure.aimed}</strong>
-                {ride.departure.delay && <em>{ride.departure.expected} est.</em>}
-              </span>
-              <span className="commute-leg-body">
-                <strong>
-                  <span className="commute-badge" style={badgeStyle(ride.badge)}>
-                    {glyph(ride.mode)} {ride.line}
+            <li className={mark}>
+              <div className="commute-leg">
+                <span className="commute-leg-time">
+                  <strong>{ride.departure.aimed}</strong>
+                  {ride.departure.delay && <em>{ride.departure.expected} est.</em>}
+                </span>
+                <span className="commute-leg-body">
+                  <strong>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</strong>
+                  <span className="commute-leg-line">
+                    <span className="commute-badge" style={badgeStyle(ride.badge)}>
+                      {glyph(ride.mode)} {ride.line}
+                    </span>
+                    {ride.towards ? ` → ${ride.towards}` : ''}
                   </span>
-                  {ride.towards ? ` → ${ride.towards}` : ''}
-                </strong>
-                <span>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</span>
-                <span className="commute-leg-ride">{ride.ride}</span>
-              </span>
-            </div>
-            <div className="commute-leg">
-              <span className="commute-leg-time">
-                <strong>{ride.arrival.aimed}</strong>
-                {ride.arrival.delay && <em>{ride.arrival.expected} est.</em>}
-              </span>
-              <span className="commute-leg-body">
-                <span>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</span>
-              </span>
-            </div>
-            <Disruptions items={ride.disruptions} />
-          </li>
+                  <span className="commute-leg-ride">{ride.ride}</span>
+                  <Disruptions items={notices?.[index] ?? ride.disruptions} />
+                </span>
+              </div>
+              <div className="commute-leg">
+                <span className="commute-leg-time">
+                  <strong>{ride.arrival.aimed}</strong>
+                  {ride.arrival.delay && <em>{ride.arrival.expected} est.</em>}
+                </span>
+                <span className="commute-leg-body">
+                  <strong>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</strong>
+                </span>
+              </div>
+            </li>
+          </Fragment>
         );
       })}
-      <li className="commute-legs-total">
-        Total {journey.duration}
-        {journey.walk ? ` · ${journey.walk}` : ''}
-      </li>
+      {journey.walkOut && <WalkLine walk={journey.walkOut} />}
     </ol>
   );
 }
 
 /**
- * One journey, collapsed to its scan line and ribbon, expandable to its legs.
+ * One journey, collapsed to what a quick check needs, expandable to its
+ * itinerary.
+ *
+ * Collapsed, it answers the commute at a glance: when it leaves and arrives on
+ * the timetable, the live times beside them when they moved, the vehicles in
+ * proportion, where the change is and how long it is (flagged when short or put
+ * in doubt), and one line per disruption. Expanded, the overview's interchange
+ * line and notices give way to the itinerary that says the same things in their
+ * place — never both at once.
  *
  * Tracking lives inside the expansion rather than on the collapsed row. A
  * button per row was four more bordered boxes on a list whose whole job is to
@@ -404,21 +467,26 @@ function JourneyRow({
         <Live journey={journey} />
         <Ribbon parts={row.parts} />
       </button>
-      <Changes row={row} />
-      {!open && <Disruptions items={row.disruptions} brief />}
-      {open && (
+      {open ? (
         <>
-          <Legs journey={journey} />
-          <button type="button" className="commute-track" onClick={onTrack}>
-            {row.tracked ? 'Stop tracking' : 'Track this journey'}
-          </button>
-          <button
-            type="button"
-            className="commute-track"
-            onClick={() => onOpenJourney(journey.trip)}
-          >
-            Full journey
-          </button>
+          <Itinerary journey={journey} notices={row.rideDisruptions} broken={row.broken} />
+          <div className="commute-actions">
+            <button type="button" className="commute-track" onClick={onTrack}>
+              {row.tracked ? 'Stop tracking' : 'Track this journey'}
+            </button>
+            <button
+              type="button"
+              className="commute-track quiet"
+              onClick={() => onOpenJourney(journey.trip)}
+            >
+              Open in planner
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <Overview row={row} />
+          <Disruptions items={row.disruptions} />
         </>
       )}
     </li>
@@ -432,16 +500,22 @@ function JourneyRow({
  * screen: the phase ladder, the connection break and the commitment all shipped
  * for the home-screen widget, so the widget knew which leg you were on and the
  * board did not.
+ *
+ * Drawn from the journey kept on the device the moment the panel opens, and
+ * refreshed behind it: `freshness` says how old its live times are, so a card
+ * that could not be updated never passes for one that was.
  */
 function HereCard({
   here,
   journey,
+  freshness,
   onStop,
   onOpenJourney,
 }: {
   here: CommuteHere;
-  /** The tracked journey whole, for the leg detail below the ribbon. */
+  /** The tracked journey whole, for the itinerary below the ribbon. */
   journey: CommuteJourney | null;
+  freshness: string | null;
   onStop: () => void;
   onOpenJourney: (trip: TransitTrip) => void;
 }) {
@@ -450,6 +524,7 @@ function HereCard({
       <p className="commute-eyebrow">
         {here.heading} <b>{here.phaseLabel}</b>
       </p>
+      {freshness && <p className="commute-freshness">{freshness}</p>}
       <Ribbon parts={here.parts} progress={here.progress} tall />
       {/* Under the ribbon and directly above the connection block, because the
           two are one instruction: which vehicle to be on, and what it puts you
@@ -482,15 +557,21 @@ function HereCard({
       {/* The detail the ribbon compresses: which platform, and the two clock
           times per leg. Below the connection block on purpose — that block is
           the decision, this is the reference you check once you have made it. */}
-      {journey && <Legs journey={journey} activeIndex={here.rideIndex} />}
-      {journey && (
-        <button type="button" className="commute-track" onClick={() => onOpenJourney(journey.trip)}>
-          Full journey
+      {journey && <Itinerary journey={journey} activeIndex={here.rideIndex} />}
+      <div className="commute-actions">
+        <button type="button" className="commute-track" onClick={onStop}>
+          Stop tracking
         </button>
-      )}
-      <button type="button" className="commute-track" onClick={onStop}>
-        Stop tracking
-      </button>
+        {journey && (
+          <button
+            type="button"
+            className="commute-track quiet"
+            onClick={() => onOpenJourney(journey.trip)}
+          >
+            Open in planner
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -503,6 +584,10 @@ function HereCard({
  * weaker form; the list starts there now (`laterJourneys`), so the card states
  * one answer completely and the comparison happens where comparisons are
  * scannable.
+ *
+ * The same two states as a journey row — the overview, or the itinerary in its
+ * place — behind a Details control, because this card is the one most often
+ * read whole and its itinerary is what used to be missing from it.
  */
 function LeaveNow({
   row,
@@ -510,6 +595,8 @@ function LeaveNow({
   nowMs,
   primary,
   showTrack,
+  open,
+  onToggle,
   onTrack,
   onOpenJourney,
 }: {
@@ -527,6 +614,8 @@ function LeaveNow({
    * "Stop tracking" buttons for one commitment is two controls for one state.
    */
   showTrack: boolean;
+  open: boolean;
+  onToggle: () => void;
   onTrack: () => void;
   onOpenJourney: (trip: TransitTrip) => void;
 }) {
@@ -544,20 +633,38 @@ function LeaveNow({
       />
       <Live journey={row.journey} />
       <Ribbon parts={row.parts} tall />
-      <Changes row={row} />
-      <Disruptions items={row.disruptions} />
-      {showTrack && (
-        <button type="button" className="commute-track wide" onClick={onTrack}>
-          {row.tracked ? 'Stop tracking' : 'Track this journey'}
-        </button>
+      {open ? (
+        <Itinerary journey={row.journey} notices={row.rideDisruptions} broken={row.broken} />
+      ) : (
+        <>
+          <Overview row={row} />
+          <Disruptions items={row.disruptions} />
+        </>
       )}
-      <button
-        type="button"
-        className="commute-track wide"
-        onClick={() => onOpenJourney(row.journey.trip)}
-      >
-        Full journey
-      </button>
+      <div className="commute-actions">
+        {showTrack && (
+          <button type="button" className="commute-track" onClick={onTrack}>
+            {row.tracked ? 'Stop tracking' : 'Track this journey'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="commute-track quiet"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {open ? 'Hide details' : 'Details'}
+        </button>
+        {open && (
+          <button
+            type="button"
+            className="commute-track quiet"
+            onClick={() => onOpenJourney(row.journey.trip)}
+          >
+            Open in planner
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -587,7 +694,7 @@ function BoardRow({ row }: { row: CommuteBoardRow }) {
       </span>
       {/* A board row has nothing to expand into, so it carries the headline —
           enough to know something is up, not enough to bury the next row. */}
-      <Disruptions items={row.disruptions} brief />
+      <Disruptions items={row.disruptions} />
     </li>
   );
 }
@@ -647,6 +754,8 @@ function Journeys({
           nowMs={dashboard.nowMs}
           primary={!dashboard.here}
           showTrack={!lead.tracked || !dashboard.here}
+          open={dashboard.expanded === lead.key}
+          onToggle={() => dashboard.toggle(lead.key)}
           onTrack={() => section.track(lead.tracked ? null : lead.journey)}
           onOpenJourney={onOpenJourney}
         />
@@ -688,99 +797,132 @@ function Journeys({
   );
 }
 
-function CommutePicker({ commute }: { commute: CommuteController }) {
+/**
+ * Everything that configures the board rather than reads it: edit, rename,
+ * which commute the Android widget shows, add and delete.
+ *
+ * These were a row of buttons above the mode tabs, so every glance at the board
+ * began by reading past "☆ Widget · Rename · ＋ · Delete" to reach a departure
+ * time. Each is used once in a while and the board is read every weekday, so
+ * they fold under the header's ⋮ — rows in the panel rather than a floating
+ * popover, like the route panel's own overflow, so nothing covers the board.
+ */
+function CommuteMenu({
+  commute,
+  editing,
+  onEdit,
+  onRename,
+  onClose,
+}: {
+  commute: CommuteController;
+  editing: boolean;
+  onEdit: () => void;
+  onRename: () => void;
+  onClose: () => void;
+}) {
   const active = commute.commutes.find((item) => item.id === commute.activeId)!;
-  const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [name, setName] = useState(active.name);
-  useEffect(() => {
-    setName(active.name);
-    setRenaming(false);
-    setConfirmingDelete(false);
-  }, [active.id, active.name]);
-  const saveName = () => {
-    commute.renameCommute(active.id, name);
-    setRenaming(false);
+  const onWidget = active.id === commute.widgetCommuteId;
+  const run = (action: () => void) => () => {
+    onClose();
+    action();
   };
   return (
-    <div className="commute-picker">
-      {renaming ? (
-        <input
-          autoFocus
-          value={name}
-          maxLength={80}
-          aria-label="Commute name"
-          onChange={(event) => setName(event.target.value)}
-          onBlur={saveName}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') saveName();
-            if (event.key === 'Escape') {
-              setName(active.name);
-              setRenaming(false);
-            }
-          }}
-        />
-      ) : (
-        <select
-          value={commute.activeId}
-          aria-label="Saved commute"
-          onChange={(event) => commute.selectCommute(event.target.value)}
-        >
-          {commute.commutes.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-              {item.id === commute.widgetCommuteId ? ' · home screen' : ''}
-            </option>
-          ))}
-        </select>
+    <div className="commute-menu" role="group" aria-label="Commute settings">
+      {!editing && (
+        <button type="button" onClick={run(onEdit)}>
+          Edit commute
+        </button>
       )}
+      <button type="button" onClick={run(onRename)}>
+        Rename commute
+      </button>
       <button
         type="button"
-        className={active.id === commute.widgetCommuteId ? 'on' : ''}
-        aria-pressed={active.id === commute.widgetCommuteId}
+        aria-pressed={onWidget}
         aria-label="Use this commute on the Android home screen"
-        title="Use this commute on the Android home screen"
-        onClick={() => commute.setWidgetCommute(active.id)}
+        disabled={onWidget}
+        onClick={run(() => commute.setWidgetCommute(active.id))}
       >
-        {active.id === commute.widgetCommuteId ? '★ Widget' : '☆ Widget'}
+        {onWidget ? '★ Shown on the Android widget' : '☆ Show on the Android widget'}
       </button>
-      <button
-        type="button"
-        title="Rename commute"
-        aria-label="Rename commute"
-        onClick={() => setRenaming(true)}
-      >
-        Rename
-      </button>
-      <button
-        type="button"
-        title="Add commute"
-        aria-label="Add commute"
-        disabled={!commute.canAddCommute}
-        onClick={commute.addCommute}
-      >
-        ＋
+      <button type="button" disabled={!commute.canAddCommute} onClick={run(commute.addCommute)}>
+        Add commute
       </button>
       {confirmingDelete ? (
-        <>
-          <button type="button" className="danger" onClick={() => commute.deleteCommute(active.id)}>
+        <div className="commute-menu-confirm">
+          <button
+            type="button"
+            className="danger"
+            onClick={run(() => commute.deleteCommute(active.id))}
+          >
             Delete “{active.name}”
           </button>
           <button type="button" onClick={() => setConfirmingDelete(false)}>
             Cancel
           </button>
-        </>
+        </div>
       ) : (
         <button
           type="button"
-          title="Delete commute"
-          aria-label="Delete commute"
+          className="danger"
           disabled={commute.commutes.length <= 1}
           onClick={() => setConfirmingDelete(true)}
         >
-          Delete
+          Delete commute
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Which saved commute the board reads — shown only when there is a choice to
+ * make. One commute has nothing to pick between, and a select naming it above
+ * the board is a row spent on the header's own title.
+ */
+function CommuteChoices({ commute }: { commute: CommuteController }) {
+  if (commute.commutes.length <= 1) return null;
+  return (
+    <div className="commute-picker">
+      <select
+        value={commute.activeId}
+        aria-label="Saved commute"
+        onChange={(event) => commute.selectCommute(event.target.value)}
+      >
+        {commute.commutes.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+            {item.id === commute.widgetCommuteId ? ' · home screen' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** The name field the menu's Rename opens, at the top of the board. */
+function RenameCommute({ commute, onDone }: { commute: CommuteController; onDone: () => void }) {
+  const active = commute.commutes.find((item) => item.id === commute.activeId)!;
+  const [name, setName] = useState(active.name);
+  const save = () => {
+    commute.renameCommute(active.id, name);
+    onDone();
+  };
+  return (
+    <div className="commute-picker">
+      <input
+        autoFocus
+        value={name}
+        maxLength={80}
+        aria-label="Commute name"
+        onChange={(event) => setName(event.target.value)}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') save();
+          if (event.key === 'Escape') onDone();
+        }}
+      />
     </div>
   );
 }
@@ -808,13 +950,22 @@ export function CommutePanel({
   });
   const dashboard = useCommuteDashboard(commute);
   const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // The name field and the editor both open at the top of the board, which the
+  // reader may have scrolled well past to reach the menu.
+  const toTop = () => bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   // The editor opens by itself only when the board *cannot* ask a
   // question. Keyed on `ready` so it fires once the saved commute has loaded
   // rather than during the moment every launch spends looking unconfigured.
   useEffect(() => {
     if (commute.ready && !commute.query) setEditing(true);
   }, [commute.ready, commute.query]);
-  useEffect(() => setEditing(!commute.query), [commute.activeId]);
+  useEffect(() => {
+    setEditing(!commute.query);
+    setRenaming(false);
+  }, [commute.activeId]);
   const stale = commute.staleEnds.filter((item) => item.commuteId === commute.activeId);
 
   return (
@@ -824,13 +975,54 @@ export function CommutePanel({
           <strong>{dashboard.routeLabel}</strong>
           <span>{dashboard.nowLabel}</span>
         </div>
+        {/* Editing has one way out, and it is where the eye already is. */}
+        {editing && (
+          <button
+            type="button"
+            className="commute-done"
+            aria-label="Done editing commute"
+            onClick={() => setEditing(false)}
+          >
+            <CheckIcon size={16} /> Done
+          </button>
+        )}
+        {commute.ready && (
+          <button
+            type="button"
+            className={`icon-button commute-more${menuOpen ? ' on' : ''}`}
+            aria-expanded={menuOpen}
+            aria-label="Commute settings"
+            title="Commute settings"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <MoreIcon size={18} />
+          </button>
+        )}
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close panel">
           ✕
         </button>
       </div>
-      <div className="commute-body">
+      {menuOpen && commute.ready && (
+        <CommuteMenu
+          commute={commute}
+          editing={editing}
+          onEdit={() => {
+            setEditing(true);
+            toTop();
+          }}
+          onRename={() => {
+            setRenaming(true);
+            toTop();
+          }}
+          onClose={() => setMenuOpen(false)}
+        />
+      )}
+      <div className="commute-body" ref={bodyRef}>
         {!commute.ready && <p className="commute-state">Loading saved commute…</p>}
-        {commute.ready && <CommutePicker commute={commute} />}
+        {commute.ready && renaming && (
+          <RenameCommute commute={commute} onDone={() => setRenaming(false)} />
+        )}
+        {commute.ready && <CommuteChoices commute={commute} />}
         {stale.map((item) => (
           <p className="commute-state commute-warning" key={`${item.commuteId}:${item.end}`}>
             {item.end === 'from' ? 'From' : item.end === 'to' ? 'To' : 'Via'} uses the last copy of
@@ -840,35 +1032,20 @@ export function CommutePanel({
         {/* TRANSIT.md §13's three modes, and the only control over what is shown.
             Out, back, and the middle ground — the third is not a direction at
             all but the change, drawn as the departures leaving it in both
-            directions. A Journeys/Departures switch under this made nine
-            states out of three; six of them answered nothing anyone asked. */}
-        <div className="commute-toolbar">
-          <div className="commute-modes" role="tablist" aria-label="Commute mode">
-            {dashboard.modes.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="tab"
-                aria-selected={dashboard.mode === mode}
-                onClick={() => dashboard.setMode(mode)}
-              >
-                {commuteModeChip(mode)}
-              </button>
-            ))}
-          </div>
-          {/* The commute is edited once and read every weekday, so the way in
-              is a glyph beside the tabs rather than a labelled button wide
-              enough to crowd them. */}
-          <button
-            type="button"
-            className={`commute-edit${editing ? ' on' : ''}`}
-            aria-expanded={editing}
-            aria-label={editing ? 'Done editing commute' : 'Edit commute'}
-            title={editing ? 'Done' : 'Edit commute'}
-            onClick={() => setEditing((open) => !open)}
-          >
-            {editing ? <CheckIcon size={18} /> : <PencilIcon size={18} />}
-          </button>
+            directions. Nothing configures the board from this row any more:
+            it is the everyday control, and configuration is behind ⋮. */}
+        <div className="commute-modes" role="tablist" aria-label="Commute mode">
+          {dashboard.modes.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={dashboard.mode === mode}
+              onClick={() => dashboard.setMode(mode)}
+            >
+              {commuteModeChip(mode)}
+            </button>
+          ))}
         </div>
         {/* …and the offer to have one at all. A commute is saved door to door,
             so the corridor that changes at Asker on every single journey had no
@@ -890,8 +1067,15 @@ export function CommutePanel({
         )}
         {editing && <CommuteEditorForm editor={editor} places={places} />}
         {dashboard.offDayNote && <p className="commute-state">{dashboard.offDayNote}</p>}
-        {commute.loading && <p className="commute-state">Checking upcoming journeys…</p>}
-        {commute.error && <p className="commute-state commute-error">{commute.error}</p>}
+        {/* Only while there is nothing to show: a refresh behind a board that
+            already has an answer is said on the footer, not by pushing the
+            answer down the panel. */}
+        {commute.loading && !commute.result && (
+          <p className="commute-state">Checking upcoming journeys…</p>
+        )}
+        {commute.error && !commute.result && (
+          <p className="commute-state commute-error">{commute.error}</p>
+        )}
         {/* Above the list rather than inside it: a commitment outlives the
             list its journey came from — a mode switch included — and the card
             is what the traveller stops it on. */}
@@ -899,6 +1083,7 @@ export function CommutePanel({
           <HereCard
             here={dashboard.here}
             journey={dashboard.hereJourney}
+            freshness={dashboard.hereFreshness}
             onStop={dashboard.stopTracking}
             onOpenJourney={onOpenJourney}
           />
@@ -919,7 +1104,9 @@ export function CommutePanel({
           <Board board={board} key={board.segment.id} />
         ))}
         <div className="commute-live">
-          <span>Entur · {liveTimetableLabel(commute.updatedMs)}</span>
+          <span className={commute.error && commute.result ? 'commute-stale' : undefined}>
+            Entur · {dashboard.freshness}
+          </span>
           <button
             type="button"
             onClick={commute.refresh}

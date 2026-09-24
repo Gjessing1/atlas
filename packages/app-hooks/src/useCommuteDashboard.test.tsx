@@ -9,7 +9,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCommuteDashboard, type CommuteDashboard } from './useCommuteDashboard.js';
-import type { CommuteController } from './useCommute.js';
+import { committedTrip, type CommuteController } from './useCommute.js';
 
 /** Tuesday 25 August 2026, 08:32 Norwegian summer time. */
 const NOW = norwayInstant(2026, 7, 25, 8 * 60 + 32);
@@ -73,7 +73,7 @@ const result: TransitCommuteResult = {
 };
 
 function controller(over: Partial<CommuteController> = {}): CommuteController {
-  return {
+  const base = {
     ready: true,
     config: {
       from: null,
@@ -97,6 +97,18 @@ function controller(over: Partial<CommuteController> = {}): CommuteController {
     commit: null,
     setCommit: () => {},
     ...over,
+  } as CommuteController;
+  // What `useCommute` hands the board: the trip the commitment names in the
+  // answer, unless a test supplies the kept copy itself.
+  const trip = base.commit ? committedTrip(base.result, base.query, base.commit) : null;
+  return {
+    ...base,
+    tracked:
+      over.tracked !== undefined
+        ? over.tracked
+        : trip
+          ? { trip, updatedMs: base.updatedMs ?? NOW }
+          : null,
   };
 }
 
