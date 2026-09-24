@@ -53,6 +53,11 @@ Locator traps (v0.222.0):
   the week inside the expanded section, or the status line as a pattern — never a literal time as
   today's.
 - **Current speed lives in `.nav-speed-cluster`** (with the limit sign), not in `.nav-widget`.
+- **Commute configuration is behind the header's ⋮** (v0.235.0): click `Commute settings` before
+  `Rename commute`, `Add commute`, `Edit commute` or the Android-widget choice, and again for each
+  one (every row closes the menu). The `Saved commute` select only exists with two or more
+  commutes. A journey card's clock times and platforms are in its itinerary, behind `Details` on
+  the lead card (a row opens on its head); the planner hand-off is `Open in planner`, inside it.
 
 - **A style-name assertion cannot see a switch between two styles that differ only in `name`.**
   MapLibre's style diff has no operation for `name`, so `setStyle` of an otherwise identical style
