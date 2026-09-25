@@ -60,8 +60,11 @@ before on the same code.
 
 - **Check `free -m` as well as `uptime` before a run.** A quiet CPU is not a quiet host: with swap
   full, the guest stalls in ways the load average does not show.
-- **A system ANR loop at the first field, identical on every retry, is the host — not the app.**
-  Stop retrying; the input it fails on is dispatched by `system_server`, which Atlas does not own.
+- **It is a host flake, not the app — but not one load predicts.** That day six runs of the same
+  code: four failed this way (one at a 1-minute load of 0.5), two passed (at 2.5 and 1.8), both with
+  a reused APK on a host that had cooled after its own Gradle build. Don't change the app over it;
+  rerun with `ATLAS_ANDROID_REGRESSION_APK` once the build's heat has gone, and read `failure.png`
+  each time — the Layers menu with an unfocused `Search layers` box is this shape.
 
 ### Text input can drop even after the retries
 
