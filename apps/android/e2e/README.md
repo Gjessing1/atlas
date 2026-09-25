@@ -48,6 +48,21 @@ the log). Taps and key events are lost meanwhile. The first victim is usually
   and retries the install; if it still fails, the APK is fine — rerun with
   `ATLAS_ANDROID_REGRESSION_APK` once the load falls.
 
+### A full host swap wedges the AVD even with an idle CPU
+
+On 2026-09-25 three runs of one APK failed identically at the very first text field
+(`layer-quick-search to take focus`, in the POI step before the fixture), the third on a host at
+load 0.5. Driven by hand, the AVD answered "Process system isn't responding" in a loop — `am_anr`
+for SystemUI's KeyguardService at boot, then `Input dispatching timed out … Waited 5011ms for
+FocusEvent` — so no field could take focus in any app. The host's swap was 100 % full (4095/4095 MB)
+with ~2 GB available beside the 3 GB guest (qemu RSS 4.2 GB). The same step had passed the night
+before on the same code.
+
+- **Check `free -m` as well as `uptime` before a run.** A quiet CPU is not a quiet host: with swap
+  full, the guest stalls in ways the load average does not show.
+- **A system ANR loop at the first field, identical on every retry, is the host — not the app.**
+  Stop retrying; the input it fails on is dispatched by `system_server`, which Atlas does not own.
+
 ### Text input can drop even after the retries
 
 `replaceText` types one key at a time and retries four times, re-focusing the field on each pass
