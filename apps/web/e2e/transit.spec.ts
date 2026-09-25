@@ -250,8 +250,17 @@ test('saved commute uses favorite endpoints, Asker via, and exact filters', asyn
   const interchange = lead.locator('.commute-interchange');
   await expect(interchange).toContainText('5 min connection');
   await expect(lead.locator('.commute-change')).toHaveCount(0);
+  // …and the strip, whose legs and change the rail now draws.
+  await expect(lead.locator('.commute-seg')).toHaveCount(0);
   await expect(lead.locator('.commute-legs')).toContainText(clock(900_000));
   await expect(lead.locator('.commute-legs')).toContainText(clock(1_200_000));
+  // One rail: a departure and an arrival node per leg, each leg's stretch in
+  // its line's colour, the change dotted between them — and the change does
+  // not repeat the stop its two nodes already name.
+  await expect(lead.locator('.commute-rail b.stop')).toHaveCount(4);
+  await expect(lead.locator('.commute-rail i.full.ride')).toHaveCount(2);
+  await expect(lead.locator('.commute-interchange .commute-rail i.foot')).toHaveCount(1);
+  await expect(interchange).not.toContainText('Asker');
   await lead.getByRole('button', { name: 'Hide details' }).click();
 
   // §3 applied to the travel time itself: the printed window is the

@@ -19,13 +19,13 @@ import {
   type CommuteJourney,
   type CommuteLineBadge,
   type CommuteRibbonPart,
+  type CommuteRide,
   type CommuteServiceState,
-  type CommuteWalk,
   type TransitMode,
   type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
   Linking,
@@ -34,6 +34,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -360,58 +361,189 @@ function Overview({ row }: { row: CommuteDashboardRow }) {
 }
 
 /**
- * The interchange as one element between the leg that arrives and the leg that
- * leaves: `Asker stasjon · 9 min connection · 150 m walk`. Tapping it opens the
- * transfer itself — both times with their platforms, the walk, the live wait and
- * why it is flagged — for the traveller about to make it.
+ * What the itinerary's rail is drawn as between two of its nodes: a ride in its
+ * line's colour, solid, or a dotted stretch on foot — the change between two
+ * vehicles (warning-toned when §17 flags it), or a walk at either end.
+ *
+ * Solid from a leg's departure to its arrival is the whole point of the rail:
+ * `08:22 ● Engelsrud` and `08:33 ● Asker stasjon` read as one leg because one
+ * line in the 280's colour joins them, and the dotted stretch after it reads
+ * as the gap to the next.
  */
-function Interchange({
-  change,
-  broken,
-}: {
-  change: CommuteConnection;
-  /** `commuteConnectionBreak`'s sentence, when the numbers say it no longer holds. */
-  broken: string | null;
-}) {
-  const [open, setOpen] = useState(false);
-  const tone = broken ? styles.changeBroken : change.warn ? styles.changeTight : null;
+type Rail =
+  { kind: 'ride'; fill: string; now: boolean } | { kind: 'foot'; tone: 'tight' | 'broken' | null };
+
+/** Row padding above the first text line; a node sits half a line below it. */
+const RAIL_PAD = 4;
+/** The line height of a row's first line — the time and the place beside it. */
+const RAIL_LINE = 18;
+/**
+ * More dashes than any stretch of rail is tall, clipped to the stretch. Android
+ * draws a dashed border only on a view bordered on all four sides, and a
+ * one-sided rule is what this needs, so the dashes are drawn as views.
+ */
+const RAIL_DOTS = Array.from({ length: 60 }, (_, index) => index);
+
+/** One piece of rail, `top` to `bottom` of its row (either may be omitted for a node's half). */
+function RailPiece({ rail, top, height }: { rail: Rail; top: number; height?: number }) {
+  const box = { top, ...(height === undefined ? { bottom: 0 } : { height }) };
+  if (rail.kind === 'ride') {
+    return (
+      <View
+        style={[
+          styles.railRide,
+          rail.now && styles.railRideNow,
+          box,
+          { backgroundColor: rail.fill },
+        ]}
+      />
+    );
+  }
+  const color =
+    rail.tone === 'broken' ? theme.danger : rail.tone === 'tight' ? theme.warning : theme.textMuted;
   return (
-    <Pressable
-      style={[
-        styles.interchange,
-        change.warn && styles.interchangeWarn,
-        broken !== null && styles.interchangeBroken,
-      ]}
-      onPress={() => setOpen((value) => !value)}
-      accessibilityRole="button"
-      accessibilityState={{ expanded: open }}
-      testID="commute-interchange"
-    >
-      <View style={styles.interchangeHead}>
-        <Text style={[styles.interchangeText, tone]}>
-          {change.warn || broken ? '⚠ ' : '⇄ '}
-          {change.summary}
-        </Text>
-        {change.liveLabel && !broken ? (
-          <Text style={[styles.interchangeLive, tone]}>{change.liveLabel}</Text>
-        ) : null}
-      </View>
-      {broken ? <Text style={[styles.interchangeDetail, tone]}>{broken}</Text> : null}
-      {open
-        ? change.details.map((line) => (
-            <Text key={line} style={styles.interchangeDetail}>
-              {line}
-            </Text>
-          ))
-        : null}
-    </Pressable>
+    <View style={[styles.railFoot, box]}>
+      {RAIL_DOTS.map((dot) => (
+        <View key={dot} style={[styles.railDot, { backgroundColor: color }]} />
+      ))}
+    </View>
   );
 }
 
 /**
- * The journey as a chronological itinerary: the walk to the stop, each leg's
- * departure and arrival with its platform and live estimate, the interchange
- * between legs, the notices on the leg they concern, the walk at the end.
+ * One row of the itinerary: the time, the rail, what happens there.
+ *
+ * A row with a `node` is a place in time — a departure, an arrival, a walk's
+ * start — and draws the rail arriving at its node from `above` and leaving it
+ * `below`, each in its own style, so the node is where a solid leg turns into
+ * a dotted change. A row without one is the stretch between two nodes (the
+ * vehicle, the change) and carries its rail the whole height.
+ *
+ * The node follows the system font scale: the first line it sits on is
+ * `RAIL_LINE` tall only at 100 %, and a phone set larger would otherwise put
+ * every node above its own time.
+ */
+function RailRow({
+  node,
+  above = null,
+  below = null,
+  time,
+  dim = false,
+  children,
+}: {
+  node?: 'stop' | 'walk';
+  above?: Rail | null;
+  below?: Rail | null;
+  time?: ReactNode;
+  dim?: boolean;
+  children: ReactNode;
+}) {
+  const { fontScale } = useWindowDimensions();
+  const nodeY = RAIL_PAD + (RAIL_LINE * fontScale) / 2;
+  const nodeRail = below ?? above;
+  const size = node === 'walk' ? 7 : 10;
+  return (
+    <View style={[styles.railRow, dim && styles.legPast]}>
+      {/* One width for every row, or the rail would kink where a row's time is wider. */}
+      <View style={[styles.legTime, { width: Math.ceil(50 * fontScale) }]}>{time}</View>
+      <View style={styles.rail}>
+        {node ? (
+          <>
+            {above ? <RailPiece rail={above} top={0} height={nodeY} /> : null}
+            {below ? <RailPiece rail={below} top={nodeY} /> : null}
+            <View
+              style={[
+                styles.railNode,
+                node === 'walk' && styles.railNodeWalk,
+                {
+                  top: nodeY - size / 2,
+                  width: size,
+                  height: size,
+                  marginLeft: -size / 2,
+                  borderRadius: size / 2,
+                },
+                node === 'stop' && nodeRail?.kind === 'ride' && { borderColor: nodeRail.fill },
+              ]}
+            />
+          </>
+        ) : above ? (
+          <RailPiece rail={above} top={0} />
+        ) : null}
+      </View>
+      <View style={styles.legBody}>{children}</View>
+    </View>
+  );
+}
+
+/**
+ * The interchange as the dotted stretch between the node where one vehicle
+ * arrives and the node where the next leaves: `6 min connection · 150 m walk`.
+ * Where is not repeated — the two nodes either side of it name the stop and
+ * the platforms. Tapping it opens the transfer itself — both times with their
+ * platforms, the walk, the live wait and why it is flagged — for the traveller
+ * about to make it.
+ */
+function Interchange({
+  change,
+  broken,
+  rail,
+}: {
+  change: CommuteConnection;
+  /** `commuteConnectionBreak`'s sentence, when the numbers say it no longer holds. */
+  broken: string | null;
+  rail: Rail;
+}) {
+  const [open, setOpen] = useState(false);
+  const tone = broken ? styles.changeBroken : change.warn ? styles.changeTight : null;
+  return (
+    <RailRow above={rail}>
+      <Pressable
+        style={styles.interchange}
+        onPress={() => setOpen((value) => !value)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        testID="commute-interchange"
+      >
+        <Text style={[styles.interchangeText, tone]}>
+          {change.warn || broken ? '⚠ ' : ''}
+          {change.summary}
+          {/* Beside the planned wait it corrects (§3), not across the card. */}
+          {change.liveLabel && !broken ? (
+            <Text style={styles.interchangeLive}> · {change.liveLabel}</Text>
+          ) : null}
+        </Text>
+        {broken ? <Text style={[styles.interchangeDetail, tone]}>{broken}</Text> : null}
+        {open
+          ? change.details.map((line) => (
+              <Text key={line} style={styles.interchangeDetail}>
+                {line}
+              </Text>
+            ))
+          : null}
+      </Pressable>
+    </RailRow>
+  );
+}
+
+/** A clock face in the itinerary's time column, with its live estimate under it. */
+function RailTime({ parts }: { parts: CommuteRide['departure'] }) {
+  return (
+    <>
+      <Text style={styles.legTimeText}>{parts.aimed}</Text>
+      {parts.delay ? (
+        <Text style={styles.legEstimate} numberOfLines={1}>
+          {parts.expected} est.
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The journey as a chronological itinerary on one rail: the walk to the stop,
+ * each leg as a departure node and an arrival node joined by a solid line in
+ * the vehicle's colour, the change as a dotted stretch between legs, the notices
+ * on the leg they concern, the walk at the end.
  *
  * Only what the collapsed card cannot say. There is no closing "Total 48 min"
  * line — the card's head states the whole journey, and the itinerary is read
@@ -429,7 +561,9 @@ function Itinerary({
   /**
    * The ride the traveller is on or about to board, from the phase ladder.
    * Legs before it are dimmed rather than dropped: a journey is read as a
-   * shape, and removing its first half moves everything that is left.
+   * shape, and removing its first half moves everything that is left. The
+   * current one's rail is drawn heavier — position and weight mark it, never
+   * colour, which is spent on the line and on service state.
    */
   activeIndex = null,
 }: {
@@ -439,80 +573,92 @@ function Itinerary({
   broken?: CommuteDashboardRow['broken'];
   activeIndex?: number | null;
 }) {
+  const walk: Rail = { kind: 'foot', tone: null };
+  const changeRail = (index: number): Rail | null => {
+    const change = journey.connections[index - 1];
+    if (!change) return null;
+    const tone = broken?.index === index ? 'broken' : change.warn ? 'tight' : null;
+    return { kind: 'foot', tone };
+  };
+  const last = journey.rides.length - 1;
   return (
     <View style={styles.legs}>
-      {journey.walkIn ? <WalkLine walk={journey.walkIn} /> : null}
+      {journey.walkIn ? (
+        <RailRow
+          node="walk"
+          below={walk}
+          time={<Text style={styles.legWalkTime}>{journey.walkIn.aimed}</Text>}
+        >
+          <Text style={styles.legPlace}>🚶 {journey.walkIn.label}</Text>
+        </RailRow>
+      ) : null}
       {journey.rides.map((ride, index) => {
         const connection = journey.connections[index - 1];
+        const into = index === 0 ? (journey.walkIn ? walk : null) : changeRail(index);
+        const onward = index === last ? (journey.walkOut ? walk : null) : changeRail(index + 1);
+        const rail: Rail = { kind: 'ride', fill: ride.badge.fill, now: index === activeIndex };
+        const past = activeIndex !== null && index < activeIndex;
         return (
           <View key={ride.key}>
             {connection ? (
               <Interchange
                 change={connection}
                 broken={broken?.index === index ? broken.detail : null}
+                rail={into!}
               />
             ) : null}
-            <View
-              style={[
-                activeIndex !== null && index === activeIndex && styles.legNow,
-                activeIndex !== null && index < activeIndex && styles.legPast,
-              ]}
+            <RailRow
+              node="stop"
+              above={into}
+              below={rail}
+              time={<RailTime parts={ride.departure} />}
+              dim={past}
             >
-              <View style={styles.leg}>
-                <View style={styles.legTime}>
-                  <Text style={styles.legTimeText}>{ride.departure.aimed}</Text>
-                  {ride.departure.delay ? (
-                    <Text style={styles.legEstimate}>{ride.departure.expected} est.</Text>
+              <Text style={styles.legPlaceStrong}>
+                {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
+              </Text>
+            </RailRow>
+            <RailRow above={rail} dim={past}>
+              <View style={styles.legSpan}>
+                {/* One line beside the stretch it describes: the vehicle, where
+                    it is headed, and what riding it costs at the far edge. */}
+                <View style={styles.legSpanHead}>
+                  <Badge badge={ride.badge} mode={ride.mode} line={ride.line} />
+                  {ride.towards ? (
+                    <Text style={styles.legTowards} numberOfLines={1}>
+                      → {ride.towards}
+                    </Text>
                   ) : null}
-                </View>
-                <View style={styles.legBody}>
-                  <Text style={styles.legPlaceStrong}>
-                    {[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}
-                  </Text>
-                  <View style={styles.legLineRow}>
-                    <Badge badge={ride.badge} mode={ride.mode} line={ride.line} />
-                    {ride.towards ? (
-                      <Text style={styles.legLine} numberOfLines={1}>
-                        → {ride.towards}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.legRide}>{ride.ride}</Text>
-                  <Disruptions items={notices?.[index] ?? ride.disruptions} />
-                </View>
-              </View>
-              <View style={styles.leg}>
-                <View style={styles.legTime}>
-                  <Text style={styles.legTimeText}>{ride.arrival.aimed}</Text>
-                  {ride.arrival.delay ? (
-                    <Text style={styles.legEstimate}>{ride.arrival.expected} est.</Text>
-                  ) : null}
-                </View>
-                <View style={styles.legBody}>
-                  <Text style={styles.legPlaceStrong}>
-                    {[ride.to, ride.toQuay].filter(Boolean).join(' · ')}
+                  <Text style={styles.legRide} numberOfLines={1}>
+                    {ride.ride}
                   </Text>
                 </View>
+                <Disruptions items={notices?.[index] ?? ride.disruptions} />
               </View>
-            </View>
+            </RailRow>
+            <RailRow
+              node="stop"
+              above={rail}
+              below={onward}
+              time={<RailTime parts={ride.arrival} />}
+              dim={past}
+            >
+              <Text style={styles.legPlaceStrong}>
+                {[ride.to, ride.toQuay].filter(Boolean).join(' · ')}
+              </Text>
+            </RailRow>
           </View>
         );
       })}
-      {journey.walkOut ? <WalkLine walk={journey.walkOut} /> : null}
-    </View>
-  );
-}
-
-/** A walk at either end of the itinerary, timed like a leg. */
-function WalkLine({ walk }: { walk: CommuteWalk }) {
-  return (
-    <View style={styles.leg}>
-      <View style={styles.legTime}>
-        <Text style={styles.legWalkTime}>{walk.aimed}</Text>
-      </View>
-      <View style={styles.legBody}>
-        <Text style={styles.legPlace}>🚶 {walk.label}</Text>
-      </View>
+      {journey.walkOut ? (
+        <RailRow
+          node="walk"
+          above={walk}
+          time={<Text style={styles.legWalkTime}>{journey.walkOut.aimed}</Text>}
+        >
+          <Text style={styles.legPlace}>🚶 {journey.walkOut.label}</Text>
+        </RailRow>
+      ) : null}
     </View>
   );
 }
@@ -566,24 +712,32 @@ function JourneyRow({
       >
         <ScanLine journey={journey} />
         <Live journey={journey} />
-        <Ribbon parts={row.parts} />
+        {/* Expanded, the itinerary draws the same legs and change on its rail,
+            better; the strip above it would say it twice. */}
+        {open ? null : <Ribbon parts={row.parts} />}
       </Pressable>
       {open ? (
         <>
           <Itinerary journey={journey} notices={row.rideDisruptions} broken={row.broken} />
           <View style={styles.actions}>
-            <Pressable style={styles.track} onPress={onTrack} testID="commute-track-row">
-              <Text style={styles.trackText}>
+            <Pressable
+              style={[styles.track, !row.tracked && styles.trackFilled]}
+              onPress={onTrack}
+              testID="commute-track-row"
+            >
+              <Text style={[styles.trackText, !row.tracked && styles.trackFilledText]}>
                 {row.tracked ? 'Stop tracking' : 'Track this journey'}
               </Text>
             </Pressable>
-            <Pressable
-              style={styles.trackQuiet}
-              onPress={() => onOpenJourney(journey.trip)}
-              testID="commute-open-journey-row"
-            >
-              <Text style={styles.trackQuietText}>Open in planner</Text>
-            </Pressable>
+            <View style={styles.actionsMore}>
+              <Pressable
+                style={styles.trackQuiet}
+                onPress={() => onOpenJourney(journey.trip)}
+                testID="commute-open-journey-row"
+              >
+                <Text style={styles.trackQuietText}>Open in planner</Text>
+              </Pressable>
+            </View>
           </View>
         </>
       ) : (
@@ -676,13 +830,15 @@ function HereCard({
           <Text style={styles.trackText}>Stop tracking</Text>
         </Pressable>
         {journey ? (
-          <Pressable
-            style={styles.trackQuiet}
-            onPress={() => onOpenJourney(journey.trip)}
-            testID="commute-open-journey-here"
-          >
-            <Text style={styles.trackQuietText}>Open in planner</Text>
-          </Pressable>
+          <View style={styles.actionsMore}>
+            <Pressable
+              style={styles.trackQuiet}
+              onPress={() => onOpenJourney(journey.trip)}
+              testID="commute-open-journey-here"
+            >
+              <Text style={styles.trackQuietText}>Open in planner</Text>
+            </Pressable>
+          </View>
         ) : null}
       </View>
     </View>
@@ -749,7 +905,7 @@ function LeaveNow({
           countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
         />
         <Live journey={row.journey} />
-        <Ribbon parts={row.parts} tall />
+        {open ? null : <Ribbon parts={row.parts} tall />}
       </Pressable>
       {open ? (
         <Itinerary journey={row.journey} notices={row.rideDisruptions} broken={row.broken} />
@@ -761,29 +917,35 @@ function LeaveNow({
       )}
       <View style={styles.actions}>
         {showTrack ? (
-          <Pressable style={styles.track} onPress={onTrack} testID="commute-track">
-            <Text style={styles.trackText}>
+          <Pressable
+            style={[styles.track, !row.tracked && styles.trackFilled]}
+            onPress={onTrack}
+            testID="commute-track"
+          >
+            <Text style={[styles.trackText, !row.tracked && styles.trackFilledText]}>
               {row.tracked ? 'Stop tracking' : 'Track this journey'}
             </Text>
           </Pressable>
         ) : null}
-        <Pressable
-          style={styles.trackQuiet}
-          onPress={onToggle}
-          accessibilityState={{ expanded: open }}
-          testID="commute-details"
-        >
-          <Text style={styles.trackQuietText}>{open ? 'Hide details' : 'Details'}</Text>
-        </Pressable>
-        {open ? (
+        <View style={styles.actionsMore}>
           <Pressable
             style={styles.trackQuiet}
-            onPress={() => onOpenJourney(row.journey.trip)}
-            testID="commute-open-journey"
+            onPress={onToggle}
+            accessibilityState={{ expanded: open }}
+            testID="commute-details"
           >
-            <Text style={styles.trackQuietText}>Open in planner</Text>
+            <Text style={styles.trackQuietText}>{open ? 'Hide details' : 'Details'}</Text>
           </Pressable>
-        ) : null}
+          {open ? (
+            <Pressable
+              style={styles.trackQuiet}
+              onPress={() => onOpenJourney(row.journey.trip)}
+              testID="commute-open-journey"
+            >
+              <Text style={styles.trackQuietText}>Open in planner</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -1657,8 +1819,22 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
   },
   trackText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
-  trackQuiet: { paddingHorizontal: 8, paddingVertical: 7 },
+  // Tracking is the primary action: filled to start, outlined to stop, one
+  // size either way. The secondary actions share one treatment and the same
+  // height (a transparent border), grouped at the far edge by `actionsMore`.
+  trackFilled: { backgroundColor: theme.accent },
+  trackFilledText: { color: theme.onAccent },
+  trackQuiet: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
   trackQuietText: { color: theme.accent, fontSize: 12, fontWeight: '600' },
+  // The secondary actions wrap as one group, still at the far edge, rather
+  // than one of them dropping under the primary on its own.
+  actionsMore: { flexDirection: 'row', gap: 2, marginLeft: 'auto' },
   // How old the tracked card's live times are — small, but always there.
   freshness: { marginTop: 2, color: theme.textMuted, fontSize: 10, opacity: 0.8 },
 
@@ -1674,39 +1850,58 @@ const styles = StyleSheet.create({
   journeyCancelled: { borderColor: theme.danger },
   legLineRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 
-  legs: { marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.border },
-  leg: { flexDirection: 'row', gap: 9, paddingTop: 6 },
-  legTime: { minWidth: 46 },
-  legTimeText: { color: theme.text, fontSize: 13, fontWeight: '700' },
-  legEstimate: { color: theme.textMuted, fontSize: 10 },
-  legBody: { flex: 1 },
-  legLine: { color: theme.text, fontSize: 12, fontWeight: '700' },
-  legPlace: { color: theme.textMuted, fontSize: 11 },
-  legPlaceStrong: { color: theme.text, fontSize: 12, fontWeight: '600', marginBottom: 2 },
-  legWalkTime: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
-  legRide: { color: theme.textMuted, fontSize: 10 },
-  // The tracked card's two marks. Position and weight only — every colour
-  // channel on this board is already spent saying what a service *is*, and a
-  // leg that is merely the current one is not a service state.
-  legNow: { marginLeft: -11, paddingLeft: 8, borderLeftWidth: 3, borderLeftColor: theme.accent },
+  legs: { marginTop: 9, paddingTop: 4, borderTopWidth: 1, borderTopColor: theme.border },
+  // The itinerary's rows: time · rail · text. The rail column stretches each
+  // row's full height so consecutive rows join into one line; a node sits on
+  // the first text line, RAIL_PAD + half of RAIL_LINE down.
+  railRow: { flexDirection: 'row', gap: 8 },
+  legTime: { paddingVertical: RAIL_PAD },
+  legTimeText: { color: theme.text, fontSize: 13, lineHeight: RAIL_LINE, fontWeight: '700' },
+  legEstimate: { color: theme.textMuted, fontSize: 10, lineHeight: 13 },
+  legBody: { flex: 1, paddingVertical: RAIL_PAD },
+  // The stretch a vehicle is ridden: its line, its stops, its notices.
+  legSpan: { paddingVertical: 1 },
+  // Stops and minutes after the line and its heading, so the leg reads as one
+  // unit; they wrap under it when a large font leaves no room beside it.
+  legSpanHead: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 6,
+    rowGap: 2,
+  },
+  legTowards: { flexShrink: 1, color: theme.text, fontSize: 12, fontWeight: '700' },
+  legPlace: { color: theme.textMuted, fontSize: 11, lineHeight: RAIL_LINE },
+  legPlaceStrong: { color: theme.text, fontSize: 12, lineHeight: RAIL_LINE, fontWeight: '600' },
+  legWalkTime: { color: theme.textMuted, fontSize: 12, lineHeight: RAIL_LINE, fontWeight: '600' },
+  legRide: { marginLeft: 6, color: theme.textMuted, fontSize: 11 },
+  // Legs already ridden, in the tracked card. The current one is marked by its
+  // rail's weight — every colour channel on this board is already spent saying
+  // what a service *is*, and a leg that is merely current is not a state.
   legPast: { opacity: 0.5 },
-  // The change between two legs, as one element of its own (§2). Indented to
-  // the legs' text column so it reads as the gap between them, not a third leg.
-  interchange: {
-    marginTop: 8,
-    marginLeft: 55,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    borderLeftWidth: 2,
-    borderLeftColor: 'rgba(128,138,148,0.55)',
+  rail: { width: 14, alignSelf: 'stretch' },
+  // A ride in its line's colour — the fill channel, the line's identity (the
+  // same colour as its badge and its ribbon segment).
+  railRide: { position: 'absolute', left: 5.5, width: 3 },
+  railRideNow: { left: 4.5, width: 5 },
+  // On foot: the change between vehicles and the walks at either end.
+  railFoot: { position: 'absolute', left: 6, width: 2, overflow: 'hidden' },
+  railDot: { width: 2, height: 3, borderRadius: 1, marginBottom: 2 },
+  // A stop: a ring in the line's colour sitting on the line, as a metro map
+  // draws one. Size and position come from RailRow.
+  railNode: {
+    position: 'absolute',
+    left: 7,
+    borderWidth: 2,
+    borderColor: theme.textMuted,
     backgroundColor: theme.surface,
   },
-  interchangeWarn: { borderLeftColor: theme.warning },
-  interchangeBroken: { borderLeftColor: theme.danger },
-  interchangeHead: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  interchangeText: { flexShrink: 1, color: theme.text, fontSize: 11, fontWeight: '600' },
-  interchangeLive: { marginLeft: 'auto', color: theme.textMuted, fontSize: 11, fontWeight: '700' },
+  railNodeWalk: { borderWidth: 1.5 },
+  // The change between two legs (§17), on the dotted stretch between them —
+  // how long and how far to walk; the nodes either side name the stop.
+  interchange: { paddingVertical: 4 },
+  interchangeText: { flexShrink: 1, color: theme.textMuted, fontSize: 11, fontWeight: '600' },
+  interchangeLive: { fontWeight: '700' },
   interchangeDetail: { color: theme.textMuted, fontSize: 11, lineHeight: 15, marginTop: 2 },
 
   board: { marginBottom: 6 },

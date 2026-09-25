@@ -163,7 +163,7 @@ describe('commuteJourney', () => {
     ]);
     // And the change between them, phrased once for both clients.
     expect(journey.connections[0]!.chip).toBe('9 min at Asker stasjon');
-    expect(journey.connections[0]!.summary).toBe('Asker stasjon · 9 min connection · 120 m walk');
+    expect(journey.connections[0]!.summary).toBe('9 min connection · 120 m walk');
     expect(journey.connections[0]!.brief).toBe('Asker stasjon · 9 min');
     expect(journey.connections[0]!.walk).toBe('120 m walk');
   });
@@ -194,7 +194,7 @@ describe('commuteJourney', () => {
       NOW,
     );
     expect(journey.connections[0]!.walk).toBeNull();
-    expect(journey.connections[0]!.summary).toBe('Asker stasjon · 9 min connection');
+    expect(journey.connections[0]!.summary).toBe('9 min connection');
   });
 
   it('flags a connection with no slack rather than presenting it as ordinary', () => {

@@ -8046,27 +8046,50 @@ button.transit-notice-summary {
   cursor: pointer;
 }
 
-/* A card's actions on one row: the everyday one outlined, the others as quiet
-   text beside it, so a card never ends in a stack of full-width boxes. */
+/* A card's actions on one row. Tracking is the primary action and leads —
+   filled to start, outlined to stop, the same size either way; Details and
+   Open in planner are secondary, one treatment for both, grouped at the far
+   edge. Every button shares one height, so the row lines up whatever it
+   holds. */
 .commute-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  margin-top: 9px;
+  gap: 6px 4px;
+  margin-top: 10px;
 }
 
 .commute-actions .commute-track {
   margin-top: 0;
+  font-size: 12px;
+}
+
+.commute-track.filled {
+  background: var(--accent);
+  color: #fff;
+}
+
+.commute-track.filled:hover {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
 }
 
 .commute-track.quiet {
+  padding-inline: 8px;
   border-color: transparent;
   font-weight: 600;
 }
 
 .commute-track.quiet:hover {
-  text-decoration: underline;
+  background: var(--surface-selected);
+}
+
+/* The secondary actions wrap as one group, still at the far edge, rather
+   than one of them dropping under the primary on its own. */
+.commute-actions-more {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
 }
 
 /* How old the tracked card's live times are — small, but always there. */
@@ -8080,26 +8103,31 @@ button.transit-notice-summary {
   color: var(--warning);
 }
 
-/* --- Expanded legs (§1, §2) --- */
+/* --- Expanded legs (§1, §2, §16) --- */
 
+/* The itinerary on one rail. Each row is time · rail · text; the rail column
+   stretches the row's full height so consecutive rows join into one line.
+   A node sits on the first text line (row padding 4px + half an 18px line). */
 .commute-legs {
-  padding: 0;
+  --node-y: 13px;
+  padding: 4px 0 0;
   margin: 8px 0 0;
   list-style: none;
   border-top: 1px solid var(--border);
 }
 
-.commute-leg {
-  display: flex;
-  gap: 9px;
-  padding-top: 7px;
+.commute-row {
+  display: grid;
+  grid-template-columns: 50px 14px minmax(0, 1fr);
+  column-gap: 8px;
 }
 
 .commute-leg-time {
   display: flex;
   flex-direction: column;
-  min-width: 44px;
+  padding: 4px 0;
   font-variant-numeric: tabular-nums;
+  line-height: 18px;
 }
 
 .commute-leg-time strong {
@@ -8113,15 +8141,19 @@ button.transit-notice-summary {
   font-style: normal;
 }
 
+.commute-leg-time em {
+  line-height: 13px;
+  white-space: nowrap;
+}
+
 .commute-leg-body {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 12px;
-}
-
-.commute-leg-body {
   min-width: 0;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .commute-leg-body > span {
@@ -8130,39 +8162,129 @@ button.transit-notice-summary {
 }
 
 .commute-leg-body > span.commute-leg-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
   color: var(--text);
   font-size: 12px;
 }
 
+.commute-leg-towards {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stops and minutes after the line and its heading, so the leg reads as one
+   unit; wraps under it when the panel is too narrow for both. */
 .commute-leg-ride {
-  font-size: 10px !important;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.commute-walk .commute-leg-time em {
-  font-size: 12px;
+/* The stretch a vehicle is ridden: its line, its stops, its notices —
+   centred between its two nodes rather than hung under the first. */
+.commute-leg-span .commute-leg-body {
+  padding: 5px 0;
 }
 
-/* The change between two legs, as one element of its own (§2): where, how
-   long, how far to walk. Indented to the legs' text column so it reads as the
-   gap between them rather than a third leg; clicked, it opens the transfer. */
-.commute-interchange {
-  margin: 7px 0 0 53px;
-  padding: 4px 8px;
-  border-left: 2px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface-muted);
+.commute-rail {
+  position: relative;
+}
+
+.commute-rail i {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  transform: translateX(-50%);
+}
+
+.commute-rail i.up {
+  top: 0;
+  height: var(--node-y);
+}
+
+.commute-rail i.down {
+  top: var(--node-y);
+  bottom: 0;
+}
+
+.commute-rail i.full {
+  top: 0;
+  bottom: 0;
+}
+
+/* A ride in its line's colour — the fill channel, the line's identity (the
+   same colour as its badge and its ribbon segment). */
+.commute-rail i.ride {
+  border-left: 3px solid var(--rail);
+}
+
+/* The leg being ridden or boarded next: heavier, not recoloured. */
+.commute-rail i.ride.now {
+  border-left-width: 5px;
+}
+
+/* On foot: the change between vehicles and the walks at either end. */
+.commute-rail i.foot {
+  --foot: var(--text-muted);
+
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, var(--foot) 0 3px, transparent 3px 5px);
+}
+
+.commute-rail i.foot.tight {
+  --foot: var(--warning);
+}
+
+.commute-rail i.foot.broken {
+  --foot: var(--danger);
+}
+
+.commute-rail b {
+  position: absolute;
+  top: var(--node-y);
+  left: 50%;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--surface);
+  transform: translate(-50%, -50%);
+}
+
+/* A stop: a ring in the line's colour sitting on the line, as a metro map
+   draws one. */
+.commute-rail b.stop {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--rail, var(--text-muted));
+}
+
+.commute-rail b.walk {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--text-muted);
+}
+
+/* The change between two legs (§17): how long, how far to walk, on the
+   dotted stretch between the node the first vehicle arrives at and the node
+   the next leaves from — which name the stop, so this line does not.
+   Clicked, it opens the transfer. */
+.commute-interchange .commute-leg-body {
+  padding: 8px 0;
   font-size: 11px;
 }
 
 .commute-interchange button {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  width: 100%;
+  display: block;
   padding: 0;
   border: 0;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   font: inherit;
   font-weight: 600;
   text-align: left;
@@ -8170,9 +8292,6 @@ button.transit-notice-summary {
 }
 
 .commute-interchange button b {
-  flex: none;
-  margin-left: auto;
-  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -8181,17 +8300,9 @@ button.transit-notice-summary {
   color: var(--text-muted);
 }
 
-.commute-interchange.tight {
-  border-left-color: var(--warning);
-}
-
 .commute-interchange.tight button,
 .commute-interchange.tight button b {
   color: var(--warning);
-}
-
-.commute-interchange.broken {
-  border-left-color: var(--danger);
 }
 
 .commute-interchange.broken button,
@@ -8199,16 +8310,8 @@ button.transit-notice-summary {
   color: var(--danger);
 }
 
-/* The same list inside the tracked card, where the phase ladder can say which
-   leg is being ridden. Position only marks it — the colour channels are spent
-   on service state everywhere else on this board, and a leg that is merely
-   *current* is not a state. */
-.commute-legs > li.now {
-  margin-left: -11px;
-  padding-left: 8px;
-  border-left: 3px solid var(--accent);
-}
-
+/* Legs already ridden, in the tracked card, where the phase ladder can say
+   which leg is current. */
 .commute-legs > li.past {
   opacity: 0.5;
 }

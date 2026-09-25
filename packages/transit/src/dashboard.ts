@@ -371,12 +371,13 @@ export interface CommuteConnection {
    */
   brief: string;
   /**
-   * `"Asker stasjon · 9 min connection · 250 m walk"` — the one element an
-   * expanded journey draws *between* its two vehicles. Platforms are not in it:
-   * each stays on the arrival or departure it belongs to, so the change reads
-   * as the relationship between two legs rather than a third copy of them.
-   * Composed here so two clients cannot describe one change with two sentences;
-   * the warning stays a flag beside it because its *colour* is a paint decision.
+   * `"9 min connection · 250 m walk"` — the one element an expanded journey
+   * draws *between* its two vehicles, on the stretch of rail joining the node
+   * one arrives at to the node the next leaves from. Neither the stop nor the
+   * platforms are in it: those two nodes name them, so the change reads as the
+   * relationship between two legs rather than a third copy of them. Composed
+   * here so two clients cannot describe one change with two sentences; the
+   * warning stays a flag beside it because its *colour* is a paint decision.
    */
   summary: string;
   /**
@@ -731,7 +732,7 @@ export function commuteJourney(trip: TransitTrip, nowMs: number, index = 0): Com
       walk,
       chip: `${label} at ${at}`,
       brief: `${at} · ${label}`,
-      summary: [at, `${label} connection`, walk].filter(Boolean).join(' · '),
+      summary: [`${label} connection`, walk].filter(Boolean).join(' · '),
       liveWaitMs,
       liveLabel,
       tight,

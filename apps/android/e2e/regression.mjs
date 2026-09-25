@@ -1061,6 +1061,17 @@ async function saveCommuteAndReadBoard() {
   // …with the change drawn once, *between* the two legs, as its own element —
   // not the collapsed card's line left standing above the itinerary.
   expectStrings(opened, ['plat. B4', 'plat. 3', 'min connection'], 'the opened journey');
+  // Kept on a passing run too: the itinerary's rail is drawn, not text, and a
+  // window dump cannot say whether its nodes and dotted change line up.
+  try {
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(
+      join(artifactsDir, 'commute-itinerary.png'),
+      command(['exec-out', 'screencap', '-p'], { encoding: null }),
+    );
+  } catch {
+    // A missing picture is not a failed regression.
+  }
 
   // TRANSIT.md §13's middle mode: the change as a stop, drawn as the departures
   // *leaving* it in both directions — the train in and the bus home, which is

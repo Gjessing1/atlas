@@ -20,12 +20,12 @@ import {
   type CommuteJourney,
   type CommuteLineBadge,
   type CommuteRibbonPart,
+  type CommuteRide,
   type CommuteServiceState,
-  type CommuteWalk,
   type TransitTrip,
 } from '@atlas/transit';
 import type { PlaceRecord } from '@atlas/storage';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import { CheckIcon, MoreIcon } from '../icons.js';
 import { useGeocode } from '../routing/useGeocode.js';
@@ -287,52 +287,129 @@ function Overview({ row }: { row: CommuteDashboardRow }) {
 }
 
 /**
- * The interchange as one element between the leg that arrives and the leg that
- * leaves: `Asker stasjon · 9 min connection · 150 m walk`. Clicking it opens the
- * transfer itself — both times with their platforms, the walk, the live wait and
- * why it is flagged — for the traveller about to make it.
+ * What the itinerary's rail is drawn as between two of its nodes: a ride in its
+ * line's colour, solid, or a dotted stretch on foot — the change between two
+ * vehicles (warning-toned when §17 flags it), or a walk at either end.
+ *
+ * Solid from a leg's departure to its arrival is the whole point of the rail:
+ * `08:22 ● Engelsrud` and `08:33 ● Asker stasjon` read as one leg because one
+ * line in the 280's colour joins them, and the dotted stretch after it reads
+ * as the gap to the next.
  */
-function Interchange({ change, broken }: { change: CommuteConnection; broken: string | null }) {
+type Rail =
+  { kind: 'ride'; fill: string; now: boolean } | { kind: 'foot'; tone: 'tight' | 'broken' | null };
+
+const railClass = (rail: Rail) =>
+  rail.kind === 'ride'
+    ? `ride${rail.now ? ' now' : ''}`
+    : `foot${rail.tone ? ` ${rail.tone}` : ''}`;
+
+const railStyle = (rail: Rail) =>
+  rail.kind === 'ride' ? ({ '--rail': rail.fill } as CSSProperties) : undefined;
+
+/**
+ * One row of the itinerary: the time, the rail, what happens there.
+ *
+ * A row with a `node` is a place in time — a departure, an arrival, a walk's
+ * start — and draws the rail arriving at its node from `above` and leaving it
+ * `below`, each in its own style, so the node is where a solid leg turns into
+ * a dotted change. A row without one is the stretch between two nodes (the
+ * vehicle, the change) and carries its rail the whole height.
+ */
+function RailRow({
+  node,
+  above = null,
+  below = null,
+  time,
+  className,
+  children,
+}: {
+  node?: 'stop' | 'walk';
+  above?: Rail | null;
+  below?: Rail | null;
+  time?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const nodeRail = below ?? above;
+  return (
+    <li className={`commute-row${className ? ` ${className}` : ''}`}>
+      <span className="commute-leg-time">{time}</span>
+      <span className="commute-rail" aria-hidden="true">
+        {node ? (
+          <>
+            {above && <i className={`up ${railClass(above)}`} style={railStyle(above)} />}
+            {below && <i className={`down ${railClass(below)}`} style={railStyle(below)} />}
+            <b
+              className={node}
+              style={
+                node === 'stop' && nodeRail?.kind === 'ride'
+                  ? ({ '--rail': nodeRail.fill } as CSSProperties)
+                  : undefined
+              }
+            />
+          </>
+        ) : (
+          above && <i className={`full ${railClass(above)}`} style={railStyle(above)} />
+        )}
+      </span>
+      <span className="commute-leg-body">{children}</span>
+    </li>
+  );
+}
+
+/** A clock face in the itinerary's time column, with its live estimate under it. */
+function RailTime({ parts }: { parts: CommuteRide['departure'] }) {
+  return (
+    <>
+      <strong>{parts.aimed}</strong>
+      {parts.delay && <em>{parts.expected} est.</em>}
+    </>
+  );
+}
+
+/**
+ * The interchange as the dotted stretch between the node where one vehicle
+ * arrives and the node where the next leaves: `6 min connection · 150 m walk`.
+ * Where is not repeated — the two nodes either side of it name the stop and
+ * the platforms. Clicking it opens the transfer itself — both times with their
+ * platforms, the walk, the live wait and why it is flagged — for the traveller
+ * about to make it.
+ */
+function Interchange({
+  change,
+  broken,
+  rail,
+}: {
+  change: CommuteConnection;
+  broken: string | null;
+  rail: Rail;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <li
+    <RailRow
+      above={rail}
       className={`commute-interchange${broken ? ' broken' : change.warn ? ' tight' : ''}${
         open ? ' open' : ''
       }`}
     >
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span>
-          {change.warn || broken ? '⚠ ' : '⇄ '}
-          {change.summary}
-        </span>
-        {change.liveLabel && !broken && <b>{change.liveLabel}</b>}
+        {change.warn || broken ? '⚠ ' : ''}
+        {change.summary}
+        {/* Beside the planned wait it corrects (§3), not across the card. */}
+        {change.liveLabel && !broken && <b> · {change.liveLabel}</b>}
       </button>
       {broken && <p>{broken}</p>}
       {open && change.details.map((line) => <p key={line}>{line}</p>)}
-    </li>
-  );
-}
-
-/** A walk at either end of the itinerary, timed like a leg. */
-function WalkLine({ walk }: { walk: CommuteWalk }) {
-  return (
-    <li className="commute-walk">
-      <div className="commute-leg">
-        <span className="commute-leg-time">
-          <em>{walk.aimed}</em>
-        </span>
-        <span className="commute-leg-body">
-          <span>🚶 {walk.label}</span>
-        </span>
-      </div>
-    </li>
+    </RailRow>
   );
 }
 
 /**
- * The journey as a chronological itinerary: the walk to the stop, each leg's
- * departure and arrival with its platform and live estimate, the interchange
- * between legs, the notices on the leg they concern, the walk at the end.
+ * The journey as a chronological itinerary on one rail: the walk to the stop,
+ * each leg as a departure node and an arrival node joined by a solid line in
+ * the vehicle's colour, the change as a dotted stretch between legs, the notices
+ * on the leg they concern, the walk at the end.
  *
  * Only what the collapsed card cannot say. There is no closing "Total 48 min"
  * line — the card's head states the whole journey, and the itinerary is read
@@ -350,7 +427,9 @@ function Itinerary({
   /**
    * The ride the traveller is on or about to board, from the phase ladder.
    * Legs before it are dimmed rather than dropped: a journey is read as a
-   * shape, and removing its first half moves everything that is left.
+   * shape, and removing its first half moves everything that is left. The
+   * current one's rail is drawn heavier — position and weight mark it, never
+   * colour, which is spent on the line and on service state.
    */
   activeIndex = null,
 }: {
@@ -360,59 +439,74 @@ function Itinerary({
   broken?: CommuteDashboardRow['broken'];
   activeIndex?: number | null;
 }) {
+  const walk: Rail = { kind: 'foot', tone: null };
+  const changeRail = (index: number): Rail | null => {
+    const change = journey.connections[index - 1];
+    if (!change) return null;
+    const tone = broken?.index === index ? 'broken' : change.warn ? 'tight' : null;
+    return { kind: 'foot', tone };
+  };
+  const last = journey.rides.length - 1;
   return (
     <ol className="commute-legs">
-      {journey.walkIn && <WalkLine walk={journey.walkIn} />}
+      {journey.walkIn && (
+        <RailRow node="walk" below={walk} time={<em>{journey.walkIn.aimed}</em>}>
+          <span>🚶 {journey.walkIn.label}</span>
+        </RailRow>
+      )}
       {journey.rides.map((ride, index) => {
         const connection = journey.connections[index - 1];
-        const mark =
-          activeIndex === null
-            ? undefined
-            : index === activeIndex
-              ? 'now'
-              : index < activeIndex
-                ? 'past'
-                : undefined;
+        const into = index === 0 ? (journey.walkIn ? walk : null) : changeRail(index);
+        const onward = index === last ? (journey.walkOut ? walk : null) : changeRail(index + 1);
+        const rail: Rail = { kind: 'ride', fill: ride.badge.fill, now: index === activeIndex };
+        const past = activeIndex !== null && index < activeIndex ? 'past' : undefined;
         return (
           <Fragment key={ride.key}>
             {connection && (
               <Interchange
                 change={connection}
                 broken={broken?.index === index ? broken.detail : null}
+                rail={into!}
               />
             )}
-            <li className={mark}>
-              <div className="commute-leg">
-                <span className="commute-leg-time">
-                  <strong>{ride.departure.aimed}</strong>
-                  {ride.departure.delay && <em>{ride.departure.expected} est.</em>}
+            <RailRow
+              node="stop"
+              above={into}
+              below={rail}
+              time={<RailTime parts={ride.departure} />}
+              className={past}
+            >
+              <strong>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</strong>
+            </RailRow>
+            <RailRow above={rail} className={`commute-leg-span${past ? ` ${past}` : ''}`}>
+              {/* One line beside the stretch it describes: the vehicle, where it
+                  is headed, and what riding it costs at the far edge. */}
+              <span className="commute-leg-line">
+                <span className="commute-badge" style={badgeStyle(ride.badge)}>
+                  {glyph(ride.mode)} {ride.line}
                 </span>
-                <span className="commute-leg-body">
-                  <strong>{[ride.from, ride.fromQuay].filter(Boolean).join(' · ')}</strong>
-                  <span className="commute-leg-line">
-                    <span className="commute-badge" style={badgeStyle(ride.badge)}>
-                      {glyph(ride.mode)} {ride.line}
-                    </span>
-                    {ride.towards ? ` → ${ride.towards}` : ''}
-                  </span>
-                  <span className="commute-leg-ride">{ride.ride}</span>
-                  <Disruptions items={notices?.[index] ?? ride.disruptions} />
-                </span>
-              </div>
-              <div className="commute-leg">
-                <span className="commute-leg-time">
-                  <strong>{ride.arrival.aimed}</strong>
-                  {ride.arrival.delay && <em>{ride.arrival.expected} est.</em>}
-                </span>
-                <span className="commute-leg-body">
-                  <strong>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</strong>
-                </span>
-              </div>
-            </li>
+                {ride.towards && <span className="commute-leg-towards">→ {ride.towards}</span>}
+                <span className="commute-leg-ride">{ride.ride}</span>
+              </span>
+              <Disruptions items={notices?.[index] ?? ride.disruptions} />
+            </RailRow>
+            <RailRow
+              node="stop"
+              above={rail}
+              below={onward}
+              time={<RailTime parts={ride.arrival} />}
+              className={past}
+            >
+              <strong>{[ride.to, ride.toQuay].filter(Boolean).join(' · ')}</strong>
+            </RailRow>
           </Fragment>
         );
       })}
-      {journey.walkOut && <WalkLine walk={journey.walkOut} />}
+      {journey.walkOut && (
+        <RailRow node="walk" above={walk} time={<em>{journey.walkOut.aimed}</em>}>
+          <span>🚶 {journey.walkOut.label}</span>
+        </RailRow>
+      )}
     </ol>
   );
 }
@@ -465,22 +559,30 @@ function JourneyRow({
       >
         <ScanLine journey={journey} />
         <Live journey={journey} />
-        <Ribbon parts={row.parts} />
+        {/* Expanded, the itinerary draws the same legs and change on its rail,
+            better; the strip above it would say it twice. */}
+        {!open && <Ribbon parts={row.parts} />}
       </button>
       {open ? (
         <>
           <Itinerary journey={journey} notices={row.rideDisruptions} broken={row.broken} />
           <div className="commute-actions">
-            <button type="button" className="commute-track" onClick={onTrack}>
-              {row.tracked ? 'Stop tracking' : 'Track this journey'}
-            </button>
             <button
               type="button"
-              className="commute-track quiet"
-              onClick={() => onOpenJourney(journey.trip)}
+              className={`commute-track${row.tracked ? '' : ' filled'}`}
+              onClick={onTrack}
             >
-              Open in planner
+              {row.tracked ? 'Stop tracking' : 'Track this journey'}
             </button>
+            <span className="commute-actions-more">
+              <button
+                type="button"
+                className="commute-track quiet"
+                onClick={() => onOpenJourney(journey.trip)}
+              >
+                Open in planner
+              </button>
+            </span>
           </div>
         </>
       ) : (
@@ -563,13 +665,15 @@ function HereCard({
           Stop tracking
         </button>
         {journey && (
-          <button
-            type="button"
-            className="commute-track quiet"
-            onClick={() => onOpenJourney(journey.trip)}
-          >
-            Open in planner
-          </button>
+          <span className="commute-actions-more">
+            <button
+              type="button"
+              className="commute-track quiet"
+              onClick={() => onOpenJourney(journey.trip)}
+            >
+              Open in planner
+            </button>
+          </span>
         )}
       </div>
     </section>
@@ -632,7 +736,7 @@ function LeaveNow({
         countdown={commuteCountdown(row.journey.trip.startMs, nowMs)}
       />
       <Live journey={row.journey} />
-      <Ribbon parts={row.parts} tall />
+      {!open && <Ribbon parts={row.parts} tall />}
       {open ? (
         <Itinerary journey={row.journey} notices={row.rideDisruptions} broken={row.broken} />
       ) : (
@@ -643,27 +747,33 @@ function LeaveNow({
       )}
       <div className="commute-actions">
         {showTrack && (
-          <button type="button" className="commute-track" onClick={onTrack}>
+          <button
+            type="button"
+            className={`commute-track${row.tracked ? '' : ' filled'}`}
+            onClick={onTrack}
+          >
             {row.tracked ? 'Stop tracking' : 'Track this journey'}
           </button>
         )}
-        <button
-          type="button"
-          className="commute-track quiet"
-          aria-expanded={open}
-          onClick={onToggle}
-        >
-          {open ? 'Hide details' : 'Details'}
-        </button>
-        {open && (
+        <span className="commute-actions-more">
           <button
             type="button"
             className="commute-track quiet"
-            onClick={() => onOpenJourney(row.journey.trip)}
+            aria-expanded={open}
+            onClick={onToggle}
           >
-            Open in planner
+            {open ? 'Hide details' : 'Details'}
           </button>
-        )}
+          {open && (
+            <button
+              type="button"
+              className="commute-track quiet"
+              onClick={() => onOpenJourney(row.journey.trip)}
+            >
+              Open in planner
+            </button>
+          )}
+        </span>
       </div>
     </section>
   );
