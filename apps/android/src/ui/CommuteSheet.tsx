@@ -440,7 +440,9 @@ function RailRow({
 }) {
   const { fontScale } = useWindowDimensions();
   const nodeY = RAIL_PAD + (RAIL_LINE * fontScale) / 2;
-  const nodeRail = below ?? above;
+  // A stop is ringed in its ride's colour — an arrival's ride is the rail
+  // above it, a departure's the one below; the change beside either has none.
+  const nodeRail = [below, above].find((rail) => rail?.kind === 'ride') ?? null;
   const size = node === 'walk' ? 7 : 10;
   return (
     <View style={[styles.railRow, dim && styles.legPast]}>

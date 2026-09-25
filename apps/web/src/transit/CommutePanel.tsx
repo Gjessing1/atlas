@@ -331,7 +331,9 @@ function RailRow({
   className?: string;
   children: ReactNode;
 }) {
-  const nodeRail = below ?? above;
+  // A stop is ringed in its ride's colour — an arrival's ride is the rail
+  // above it, a departure's the one below; the change beside either has none.
+  const nodeRail = [below, above].find((rail) => rail?.kind === 'ride') ?? null;
   return (
     <li className={`commute-row${className ? ` ${className}` : ''}`}>
       <span className="commute-leg-time">{time}</span>
