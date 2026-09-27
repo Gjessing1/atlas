@@ -1,7 +1,11 @@
 # --- Personal planning docs (kept local, not committed) ---
+# Exception: docs/ROADMAP.md is tracked — its history (planned / shipped / dropped)
+# is worth keeping. `docs/*`, not `docs/`: git cannot re-include a file inside an
+# ignored directory.
 CLAUDE.md
 .claude/
-docs/
+docs/*
+!docs/ROADMAP.md
 AGENTS.md
 
 # --- Dependencies ---
