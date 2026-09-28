@@ -69,4 +69,9 @@ COPY --from=build /valhalla-revision ./backend/valhalla-revision
 COPY --from=build /app/apps/web/dist ./backend/public
 WORKDIR /app/backend
 EXPOSE 3100
+# Uid 1000, the same as the host user that owns /mnt/data/atlas, so files the app
+# writes there stay editable and backup-able without sudo. Without ATLAS_DATA_DIR
+# (CI's smoke test) it falls back to ./data, which node must be able to create in.
+RUN mkdir data && chown node:node data
+USER node
 CMD ["node", "dist/index.js"]
