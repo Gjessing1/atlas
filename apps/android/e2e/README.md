@@ -65,6 +65,13 @@ before on the same code.
   a reused APK on a host that had cooled after its own Gradle build. Don't change the app over it;
   rerun with `ATLAS_ANDROID_REGRESSION_APK` once the build's heat has gone, and read `failure.png`
   each time — the Layers menu with an unfocused `Search layers` box is this shape.
+- **Its second shape: the keyboard never closes after a search pick.** On 2026-09-28 (swap
+  4095/4095 MB), three runs of one v0.238.0 APK, the last two reused at 1-minute loads of
+  1.7, failed identically at `search result selection to hide the keyboard`. The destination sheet
+  was open, the IME still showed over a blank map, and logcat had no ANR, no JS error and no IME
+  timeout. The same step had passed about two hours earlier for v0.237.0, and the only app change
+  between them was one line in `useStandBoard`. Three reruns do not clear this; free the swap
+  first (a root `swapoff -a && swapon -a` once enough RAM is free), or wait for a quieter host.
 
 ### Text input can drop even after the retries
 
