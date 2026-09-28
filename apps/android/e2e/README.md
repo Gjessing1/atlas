@@ -171,6 +171,13 @@ before that destination. Also:
 - **The route sheet's Start sits below `route-scroll`, not inside it** (it is a sticky footer since
   v0.222.0). `tapAfterScroll('route-navigate', 'route-scroll', …)` still works because it taps a
   node that is already visible before scrolling; a helper that only scrolls would not find it.
+- **An auto-focused text field may be clipped after the keyboard opens.** The route sheet's inline
+  Save track form can leave `route-save-name` focused while its bounds shrink to 3 pixels behind
+  the sticky Start footer. `replaceText` must type into that focused field without waiting for a
+  tappable box or tapping it again. The 2026-09-28 regression failed at "route-save-name to be
+  visible" with the field focused and present in `window.xml`; its screenshot showed Track name
+  above the footer and the input below it. This was a harness visibility assumption, not a route
+  or keyboard data error.
 - **Pointing the app at a local backend:** Settings → Server → `http://10.0.2.2:<port>` (the host
   from inside the emulator). Plain HTTP is allowed (`usesCleartextTraffic`).
 

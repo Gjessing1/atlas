@@ -464,11 +464,18 @@ async function replaceText(id, text, expectedText = text) {
   // The soft keyboard can keep what was typed as *composing* text: it stands in
   // the IME's suggestion strip while the field the app reads is still empty, so
   // closing it is part of each attempt. Dismissing an IME may also drop the
-  // input connection altogether on a loaded emulator, so every retry re-taps
-  // and proves focus instead of assuming the previous connection survived.
+  // input connection altogether on a loaded emulator, so every retry
+  // re-establishes focus when needed instead of assuming it survived.
+  // An auto-focused field can be clipped by the keyboard and a sticky sheet
+  // footer while still retaining focus; typing into it needs no second tap.
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const xml = await waitForId(id);
-    tapId(xml, id);
+    const xml = await waitFor(
+      `${id} to be visible or focused`,
+      hierarchy,
+      (next) => Boolean(visibleNode(next, id)) || /focused="true"/.test(nodeForId(next, id) ?? ''),
+      10_000,
+    );
+    if (!/focused="true"/.test(nodeForId(xml, id) ?? '')) tapId(xml, id);
     await waitFor(
       `${id} to take focus`,
       hierarchy,
