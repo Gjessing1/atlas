@@ -34,15 +34,15 @@ const git = (args) => {
 };
 
 // Everything this working tree would push: committed-but-unpushed, staged,
-// unstaged, and untracked. Falls back to the last commit when there is no
-// upstream yet (fresh clone, detached CI checkout).
+// unstaged, and untracked. With no upstream (fresh clone, a new branch, detached
+// checkout) nothing is known to be pushed, so every tracked file counts. The old
+// `HEAD~1` fallback saw only the last commit, and on a repo's single first
+// commit saw nothing, skipping the docker build on exactly the first push.
 const baseRef =
   since ?? git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']) ?? '';
 const changed = new Set(
   [
-    baseRef
-      ? git(['diff', '--name-only', `${baseRef}...HEAD`])
-      : git(['diff', '--name-only', 'HEAD~1']),
+    baseRef ? git(['diff', '--name-only', `${baseRef}...HEAD`]) : git(['ls-files']),
     git(['diff', '--name-only', 'HEAD']),
     git(['ls-files', '--others', '--exclude-standard']),
   ]
@@ -84,7 +84,7 @@ const stages = [
     : []),
 ];
 
-console.log(`gate: ${changed.size} changed file(s) vs ${baseRef || 'HEAD~1'}`);
+console.log(`gate: ${changed.size} changed file(s) vs ${baseRef || 'no upstream (whole tree)'}`);
 console.log(
   runSlow
     ? `gate: slow tests INCLUDED (${slowRisk.slice(0, 3).join(', ')}${slowRisk.length > 3 ? ', …' : ''})`
