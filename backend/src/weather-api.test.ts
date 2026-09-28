@@ -68,7 +68,11 @@ async function build(replies: (url: URL, init?: RequestInit) => StubReply) {
     });
   }) as typeof fetch;
   app = Fastify();
-  registerWeatherApi(app, { fetchImpl, userAgent: 'test-agent test@example.com' });
+  registerWeatherApi(app, {
+    fetchImpl,
+    userAgent: 'test-agent test@example.com',
+    upstream: { minGapMs: 0 },
+  });
   await app.ready();
   return { app, requests };
 }
@@ -182,6 +186,69 @@ describe('/api/weather', () => {
     const { app } = await build(() => ({ status: 503 }));
     const res = await app.inject('/api/weather?lat=59.91&lon=10.75');
     expect(res.statusCode).toBe(502);
+  });
+
+  it('does not ask again while resting after a failure, even for a stale location', async () => {
+    let call = 0;
+    const { app, requests } = await build(() => {
+      call++;
+      if (call === 1)
+        return {
+          headers: { expires: new Date(Date.now() - 1000).toUTCString() },
+          json: metPayload(8),
+        };
+      return { status: 429 };
+    });
+    await app.inject('/api/weather?lat=59.91&lon=10.75');
+    await app.inject('/api/weather?lat=59.91&lon=10.75'); // 429 → rest
+    const again = await app.inject('/api/weather?lat=59.91&lon=10.75');
+    expect(again.statusCode).toBe(200);
+    expect(again.json().series[0].temp).toBe(8);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('answers a location without a forecast 503 + Retry-After while resting', async () => {
+    const { app, requests } = await build(() => ({
+      status: 429,
+      headers: { 'retry-after': '120' },
+    }));
+    expect((await app.inject('/api/weather?lat=59.91&lon=10.75')).statusCode).toBe(502);
+    const busy = await app.inject('/api/weather?lat=60.39&lon=5.32');
+    expect(busy.statusCode).toBe(503);
+    expect(Number(busy.headers['retry-after'])).toBeGreaterThanOrEqual(119);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('does not cache a 200 that carries no time series', async () => {
+    const { app, requests } = await build(() => ({
+      headers: { expires: futureExpires() },
+      json: { properties: { timeseries: [] } },
+    }));
+    expect((await app.inject('/api/weather?lat=59.91&lon=10.75')).statusCode).toBe(502);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('keeps at most four met.no requests in flight', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchImpl = (async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+      return new Response(JSON.stringify(metPayload()), {
+        status: 200,
+        headers: { expires: futureExpires() },
+      });
+    }) as typeof fetch;
+    app = Fastify();
+    registerWeatherApi(app, { fetchImpl, userAgent: 'test', upstream: { minGapMs: 0 } });
+    await app.ready();
+    const answers = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => app!.inject(`/api/weather?lat=${59 + i / 10}&lon=10`)),
+    );
+    expect(answers.every((res) => res.statusCode === 200)).toBe(true);
+    expect(peak).toBe(4);
   });
 
   it('dedupes concurrent requests for the same location', async () => {

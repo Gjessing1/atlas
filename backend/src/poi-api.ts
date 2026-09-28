@@ -17,6 +17,7 @@ import { PoiPairDb } from './poi-cache.js';
 import { LocalPoiSource } from './poi-local-source.js';
 import { PoiSource, PoiUpstreamBusyError } from './poi-source.js';
 import type { StatusRegistry } from './status.js';
+import { sendBusy } from './upstream.js';
 
 /**
  * Public Overpass instances, in order. The second is only asked while the first
@@ -180,8 +181,7 @@ export function registerPoiApi(
           return reply.code(499).send();
         }
         if (error instanceof PoiUpstreamBusyError) {
-          reply.header('Retry-After', String(error.retryAfterS));
-          return reply.code(503).send({ error: 'points of interest are busy; try again shortly' });
+          return sendBusy(reply, error, 'points of interest are busy; try again shortly');
         }
         request.log.error({ err: error, tiles: tiles.map(poiTileKey) }, 'POI query failed');
         return reply.code(502).send({ error: 'points of interest are unavailable' });

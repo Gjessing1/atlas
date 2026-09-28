@@ -239,4 +239,18 @@ describe('useStandBoard', () => {
     rerender({ places: [place('a')] });
     expect(fetchMock.mock.calls.length).toBe(before);
   });
+
+  // The stands are kept in distance order, so a pan reorders them.
+  it('does not refetch when panning only reorders the same stands', async () => {
+    const stands = [place('a', { lat: 59.86 }), place('b', { lat: 59.96 })];
+    const { result, rerender } = renderHook(
+      ({ near }) => useStandBoard('', stands, { enabled: true, now: AFTERNOON, near }),
+      { initialProps: { near: { lat: 59.86, lng: 10.42 } } },
+    );
+    await waitFor(() => expect(result.current.rows).toHaveLength(2));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const before = fetchMock.mock.calls.length;
+    rerender({ near: { lat: 59.96, lng: 10.42 } });
+    expect(fetchMock.mock.calls.length).toBe(before);
+  });
 });

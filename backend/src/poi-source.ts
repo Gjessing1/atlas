@@ -11,6 +11,12 @@ import {
 } from '@atlas/core';
 import type { PoiPairEntry, PoiPairStore } from './poi-cache.js';
 import type { StatusRegistry } from './status.js';
+import {
+  restAfterFailure,
+  retryAfterSeconds,
+  UpstreamBusyError,
+  UpstreamHttpError,
+} from './upstream.js';
 
 /**
  * Overpass for the POI layer, as a well-behaved client of a shared public
@@ -63,29 +69,10 @@ export interface PoiSourceOptions {
 }
 
 /** Every endpoint is backing off; retry after `retryAfterS`. */
-export class PoiUpstreamBusyError extends Error {
-  constructor(readonly retryAfterS: number) {
-    super('points of interest are busy upstream');
+export class PoiUpstreamBusyError extends UpstreamBusyError {
+  constructor(retryAfterS: number) {
+    super(retryAfterS, 'points of interest are busy upstream');
   }
-}
-
-/** An upstream answer that was not a usable one; `retryAfterS` when it said when to come back. */
-class OverpassHttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly retryAfterS?: number,
-  ) {
-    super(message);
-  }
-}
-
-/** A refused connection is how overpass-api.de enforces a ban. */
-function refused(error: unknown): boolean {
-  const cause = (error as { cause?: { code?: string; errors?: { code?: string }[] } })?.cause;
-  return (
-    cause?.code === 'ECONNREFUSED' || !!cause?.errors?.some((item) => item.code === 'ECONNREFUSED')
-  );
 }
 
 interface Job {
@@ -340,18 +327,16 @@ export class PoiSource {
   }
 
   /**
-   * How long an endpoint rests after a failure. Every failure counts — the
-   * operator of overpass-api.de bans clients that keep drawing 429s, and a
-   * malformed query repeated per request is the same load — and a 429 waits at
-   * least 30 s, as they ask. A refused connection is a ban already, so it gets
-   * the longest rest straight away rather than a probe every 30 s.
+   * How long an endpoint rests after a failure (see `restAfterFailure`). The
+   * operator of overpass-api.de asks for at least 30 s after a 429. A refused
+   * connection means a ban is already in place, so it gets the longest rest at
+   * once rather than a probe every 30 s.
    */
   private backoffMs(endpoint: Endpoint, error: unknown): number {
-    if (refused(error)) return this.maxBackoffMs;
-    const doubling = this.baseBackoffMs * 2 ** (endpoint.failures - 1);
-    const asked = error instanceof OverpassHttpError ? (error.retryAfterS ?? 0) * 1000 : 0;
-    const floor = error instanceof OverpassHttpError && error.status === 429 ? 30_000 : 0;
-    return Math.min(this.maxBackoffMs, Math.max(doubling, asked, floor));
+    return restAfterFailure(endpoint.failures, error, {
+      baseMs: this.baseBackoffMs,
+      maxMs: this.maxBackoffMs,
+    });
   }
 
   /**
@@ -398,7 +383,6 @@ export class PoiSource {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {
-      const retryAfter = Number(response.headers.get('retry-after'));
       // A 400 is our query's fault; its body says why, so keep a readable slice.
       const detail =
         response.status === 400
@@ -407,10 +391,10 @@ export class PoiSource {
               .replace(/\s+/g, ' ')
               .slice(0, 300)}`
           : '';
-      throw new OverpassHttpError(
+      throw new UpstreamHttpError(
         response.status,
         `HTTP ${response.status}${detail}`,
-        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+        retryAfterSeconds(response.headers.get('retry-after'), this.now()),
       );
     }
     const json = (await response.json()) as { elements?: OverpassPoiElement[]; remark?: string };

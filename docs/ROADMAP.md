@@ -330,14 +330,15 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
 
 ### 5.2 Performance
 
-- [ ] **Audit every upstream proxy for request storms, and give them one well-behaved client.**
+- [~] **Audit every upstream proxy for request storms, and give them one well-behaved client.**
       The POI layer's Overpass proxy (2026-09-19) sent a fresh upstream query for every settled
       pan, keyed its cache on the exact bbox so nothing ever hit, never aborted the upstream call
       when the client gave up, and kept firing through 429s. Overpass allows 2 slots per IP; we
       ran 5–8 at once, got 429/504, and then overpass-api.de refused this host's IPv4 outright.
-      The POI path now has a paced single-flight queue with per-endpoint backoff and failover, and
-      caches fixed (tile × category) pairs on both ends. Check every other proxy for the same shape
-      and fix what the audit finds. That covers ~20 files: weather, weather-maps/archive, traffic,
+      Done: POI (Overpass), and weather (met.no point forecast, audited 2026-09-28; findings
+      in DATA-SOURCES.md). The shared parts (`LruMap`, `SingleFlight`, `UpstreamGate` with
+      pacing, rest and fail-fast 503, `restAfterFailure`) now live in `backend/src/upstream.ts`.
+      Use them rather than copying. Remaining, in this order: weather-maps/archive, traffic,
       transit (Entur), tiles/overlay tiles, satellites, terrain/elevation, place-content,
       explore, iNatur, ice observations, overlay identify/features/labels, potential
       inputs/spots, and the Photon calls in `app.ts`. For each, answer:
@@ -351,10 +352,8 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
         exists? Is a partial or error answer ever cached as "no data"?
       - Does the client debounce settled-view changes, keep what it shows while refetching, and
         ask only for what it does not already hold?
-      Extract the shared parts (single-flight, paced queue, endpoint backoff, bounded TTL cache)
-      from `backend/src/poi-source.ts` into one backend helper rather than copying it per
-      proxy. Record each provider's published rate limit in DATA-SOURCES.md, and have the
-      status page flag an upstream that is backing off.
+      Record each provider's published rate limit in DATA-SOURCES.md, and have the proxy's
+      status row say when it is backing off (weather writes `…; backing off N s`).
 
 - [ ] **DR5 — Move large library transfers behind a bounded asynchronous background seam.** Move
       GPX/KML/KMZ parsing, statistics, backup recognition, archive expansion/construction, and

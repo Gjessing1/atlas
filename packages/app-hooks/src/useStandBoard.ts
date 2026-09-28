@@ -158,9 +158,12 @@ export function useStandBoard(
   const dropped = stands.length - shown.length;
 
   // The *request*, as a string: the effect below must not re-run because a new
-  // array arrived carrying the same stands.
+  // array arrived carrying the same stands. Sorted, because `shown` is in
+  // distance order: panning the map reorders the same stands, and that is not a
+  // reason to ask for every forecast again.
   const key = shown
     .map((row) => `${row.placeId}:${row.position.lat.toFixed(3)},${row.position.lng.toFixed(3)}`)
+    .sort()
     .join('|');
   // Read through a ref so the fetch can use the objects without depending on
   // their identity — the render/request loop this avoids has bitten before.
