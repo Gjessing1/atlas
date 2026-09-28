@@ -27,8 +27,8 @@ export function cumulativeDistances(points: LatLng[]): number[] {
  * This is deliberately not a real-world distance. Mercator stretches the map
  * toward the poles, so `cumulativeDistances(points) / total` does not identify
  * the same rendered point on a route that travels north or south. Keeping the
- * renderer's metric beside the honest metre metric lets the route colour
- * boundary land at the puck without contaminating guidance calculations.
+ * renderer's metric beside the honest metre metric locates the displayed puck
+ * on the rendered line without contaminating guidance calculations.
  */
 export function cumulativeLineMetrics(points: LatLng[]): number[] {
   if (points.length === 0) return [];

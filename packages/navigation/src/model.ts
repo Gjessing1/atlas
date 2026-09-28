@@ -116,16 +116,19 @@ export interface NavState {
   offRouteM: number;
   /** Distance (m) already covered along the route. */
   traveledM: number;
+  /**
+   * End of the grey route trail in metres along the current path. Usually the
+   * matched travel distance; when the puck is shown at a raw fix behind that
+   * match, the trail stops at the puck's nearest route point instead.
+   */
+  trailM: number;
   /** Fraction of the route completed, 0..1 (`traveledM / total`; 1 on arrival). */
   routeProgress: number;
   /**
-   * MapLibre `line-progress` fraction at which the rendered
-   * travelled/untravelled colour boundary should sit. This deliberately uses
-   * MapLibre's spherical-Mercator line metric rather than `routeProgress`'s
-   * real-world metres: the two fractions diverge on north/south routes. It
-   * follows the latency-compensated puck while that puck is on-route, or the
-   * nearest geometric projection when it is raw. Guidance and trip progress
-   * remain truthful in `traveledM` / `routeProgress`.
+   * MapLibre spherical-Mercator fraction at the displayed puck. This describes
+   * the projected display position; the grey route trail instead ends at
+   * `trailM`, so a puck projected ahead for camera latency leaves blue road
+   * behind it until that road is actually travelled.
    */
   displayRouteProgress: number;
   /** Distance (m) still to travel to the destination. */
@@ -218,12 +221,11 @@ export interface NavState {
 }
 
 /**
- * Exact progress value for the map's travelled-route colour boundary.
+ * Exact MapLibre line metric at the displayed puck.
  *
- * Keep this shared so neither client reintroduces percentage rounding or
- * substitutes metre-based `routeProgress`: either can put the grey trail
- * hundreds of metres ahead of the puck. Clamping is defensive only;
- * session-produced values are already 0..1.
+ * Kept for diagnostics and potential marker effects. Route trail colouring
+ * uses `trailM`; a projected puck must not paint untravelled road grey.
+ * Clamping is defensive only; session-produced values are already 0..1.
  */
 export function navLineProgress(
   state: Pick<NavState, 'displayRouteProgress'> | null | undefined,

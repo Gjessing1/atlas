@@ -29,7 +29,7 @@ import {
   type MapRef,
 } from '@maplibre/maplibre-react-native';
 import { WEATHER_FRAME_FADE } from '@atlas/conditions';
-import { maneuverArrowsGeoJSON, navLineProgress } from '@atlas/navigation';
+import { cumulativeDistances, maneuverArrowsGeoJSON, subPolyline } from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -436,12 +436,23 @@ export function MapScene({
     () => (nav.activePath ? maneuverArrowsGeoJSON(nav.activePath) : null),
     [nav.activePath],
   );
-  // Arrow filters can move in coarse metre steps. The route colour boundary
-  // cannot: rounding or using the guidance layer's real-metre fraction can
-  // move it far ahead on long/northbound trips. The core instead supplies the
-  // exact MapLibre line metric at its puck, so grey ends underneath it.
+  // Arrow filters can move in coarse metre steps. The travelled stretch uses
+  // its exact matched distance and ends behind the latency-compensated puck.
   const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
-  const routeProgress = navLineProgress(nav.state);
+  const routeDistances = useMemo(
+    () => (nav.activePath ? cumulativeDistances(nav.activePath.points) : []),
+    [nav.activePath],
+  );
+  const trailPoints = useMemo(
+    () =>
+      nav.activePath
+        ? subPolyline(nav.activePath.points, routeDistances, 0, nav.state?.trailM ?? 0).map((p) => [
+            p.lng,
+            p.lat,
+          ])
+        : [],
+    [nav.activePath, nav.state?.trailM, routeDistances],
+  );
 
   const planning = route.active;
   // The map itself stays edge-to-edge under the system bars, but the controls
@@ -1648,16 +1659,16 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {nav.routeCoords.length > 1 ? (
-          <GeoJSONSource id="atlas-route" data={lineStringFeature(nav.routeCoords)} lineMetrics>
-            {/* Google-style solid blue with a darker casing; the line-gradient
-              greys out the stretch already driven behind the car. */}
+          <GeoJSONSource id="atlas-route" data={lineStringFeature(nav.routeCoords)}>
+            {/* Keep the full active route solid blue so a gradient shader cannot
+              erase individual E18 tiles while the car is still on the line. */}
             <Layer
               type="line"
               id="atlas-route-casing"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
                 'line-width': inPip ? 7 : 11,
-                'line-gradient': ['step', ['line-progress'], '#7d8590', routeProgress, '#1557b0'],
+                'line-color': '#1557b0',
               }}
             />
             <Layer
@@ -1666,8 +1677,24 @@ export function MapScene({
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
                 'line-width': inPip ? 4 : 7,
-                'line-gradient': ['step', ['line-progress'], '#aab2bd', routeProgress, '#4285f4'],
+                'line-color': '#4285f4',
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {trailPoints.length > 1 ? (
+          <GeoJSONSource id="atlas-route-trail" data={lineStringFeature(trailPoints)}>
+            <Layer
+              type="line"
+              id="atlas-route-trail-casing"
+              layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
+              paint={{ 'line-width': inPip ? 7 : 11, 'line-color': '#7d8590' }}
+            />
+            <Layer
+              type="line"
+              id="atlas-route-trail-line"
+              layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
+              paint={{ 'line-width': inPip ? 4 : 7, 'line-color': '#aab2bd' }}
             />
           </GeoJSONSource>
         ) : null}

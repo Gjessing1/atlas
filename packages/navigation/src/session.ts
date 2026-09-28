@@ -563,6 +563,7 @@ export class NavigationSession {
         status: 'arrived',
         routeProgress: 1,
         displayRouteProgress: 1,
+        trailM: this.totalM,
         trafficDelayMs: 0,
         upcoming: null,
         then: null,
@@ -888,6 +889,7 @@ export class NavigationSession {
     let shown: LatLng;
     let shownCourse: number | null;
     let displayRouteProgress = this.arrived ? 1 : this.renderedProgress(alongM);
+    let trailM = this.arrived ? this.totalM : alongM;
     const displayOnRoute = snap.crossTrackM <= snapDisplayM && accurate;
     // Arming extrapolation asks a different question from snapping the display:
     // not "is this fix good enough to draw on the road" but "is the car
@@ -933,6 +935,7 @@ export class NavigationSession {
       // point's plain geometric projection instead.
       const shownSnap = snapToRoute(shown, this.points, this.cum);
       displayRouteProgress = this.arrived ? 1 : this.renderedProgress(shownSnap.alongM);
+      if (!this.arrived) trailM = Math.min(alongM, shownSnap.alongM);
       // A pedestrian profile may deliberately draw the precise fix even while
       // it is on-route. Keep the stable route course there for the walking
       // compass blend; only a genuinely off-line puck should use the raw GPS
@@ -947,6 +950,7 @@ export class NavigationSession {
       raw: { lat: position.lat, lng: position.lng },
       offRouteM: snap.crossTrackM,
       traveledM: alongM,
+      trailM,
       routeProgress: this.arrived ? 1 : this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
       displayRouteProgress,
       distanceRemainingM,
@@ -1094,6 +1098,9 @@ export class NavigationSession {
         // extrapolate, show the measured coordinate itself rather than
         // preserving any point manufactured on the route.
         snapped: coasted ? base.snapped : measured.raw,
+        trailM: coasted
+          ? base.trailM
+          : Math.min(base.traveledM, snapToRoute(measured.raw, this.points, this.cum).alongM),
         displayRouteProgress: coasted
           ? base.displayRouteProgress
           : this.renderedProgress(snapToRoute(measured.raw, this.points, this.cum).alongM),
@@ -1166,6 +1173,7 @@ export class NavigationSession {
       raw: this.lastMeasuredState?.raw ?? last.raw,
       offRouteM: this.lastMeasuredState?.offRouteM ?? last.offRouteM,
       traveledM: alongM,
+      trailM: alongM,
       routeProgress: this.totalM > 0 ? Math.min(1, alongM / this.totalM) : 0,
       displayRouteProgress: this.renderedProgress(alongM),
       distanceRemainingM,
@@ -1246,6 +1254,7 @@ export class NavigationSession {
       raw: { lat: position.lat, lng: position.lng },
       offRouteM: 0,
       traveledM: 0,
+      trailM: 0,
       routeProgress: 0,
       displayRouteProgress: 0,
       distanceRemainingM: this.totalM,

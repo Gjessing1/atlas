@@ -86,6 +86,9 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.topbar')).toBeHidden();
   expect(pageErrors).toEqual([]);
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav')));
+  expect(
+    await page.evaluate(() => window.__atlasMap!.getPaintProperty('atlas-nav-line', 'line-color')),
+  ).toBe('#4285f4');
   await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav-alternatives')));
   expect(
     await page.evaluate(() => ({
@@ -101,6 +104,18 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
   await expect(page.locator('.nav-speed-limit')).toHaveText('60');
   // So does the speed-camera warning, from its own NVDB dataset fetch.
   await expect(page.locator('.nav-camera-chip')).toHaveText(/Speed camera · \d+ m/);
+
+  // Movement adds a separate grey trail while the complete blue route stays
+  // present underneath. The puck projects ahead, but the trail follows only
+  // matched travel and therefore never greys the road ahead of it.
+  await context.setGeolocation({ latitude: 59.915, longitude: 10.755 });
+  await page.waitForFunction(() => Boolean(window.__atlasMap!.getSource('atlas-nav-trail')));
+  expect(
+    await page.evaluate(() => ({
+      blue: window.__atlasMap!.getPaintProperty('atlas-nav-line', 'line-color'),
+      grey: window.__atlasMap!.getPaintProperty('atlas-nav-trail-line', 'line-color'),
+    })),
+  ).toEqual({ blue: '#4285f4', grey: '#aab2bd' });
 
   // Pause is a real trip state, not End under another name: the line and puck
   // stay visible while live guidance/ETA disappear, and Resume returns to the

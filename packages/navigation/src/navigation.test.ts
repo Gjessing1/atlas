@@ -596,6 +596,8 @@ describe('NavigationSession snapped state', () => {
       8,
     );
     expect(state.displayRouteProgress).toBeLessThan(0.5);
+    expect(state.trailM).toBeCloseTo(nearest.alongM, 3);
+    expect(state.trailM).toBeLessThan(state.traveledM);
   });
 
   it('projects the shown position ahead at speed, leaving guidance math honest', () => {
@@ -608,6 +610,8 @@ describe('NavigationSession snapped state', () => {
     const expected = pointAtAlong(displayAlongM);
     expect(state.snapped.lng).toBeCloseTo(expected.lng, 5);
     expect(state.traveledM).toBeCloseTo(200, 0);
+    expect(state.trailM).toBeCloseTo(200, 0);
+    expect(state.trailM).toBeLessThan(displayAlongM);
     expect(state.routeProgress).toBeCloseTo(200 / routeTotal, 5);
     expect(state.displayRouteProgress).toBeCloseTo(displayAlongM / routeTotal, 5);
     const still = new NavigationSession(route(), { startDeparted: true });

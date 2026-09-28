@@ -46,6 +46,7 @@ function state(overrides: Partial<NavState> = {}): NavState {
     raw: { lat: 59.9127311234567, lng: 10.7524519876543 },
     offRouteM: 3.14159,
     traveledM: 1234.5678,
+    trailM: 1234.5678,
     routeProgress: 0.5,
     displayRouteProgress: 0.5,
     distanceRemainingM: 4321.8765,

@@ -2,11 +2,12 @@ import type { NavController } from '@atlas/app-hooks';
 import { lineStringFeature, routeDeltaLabel } from '@atlas/core';
 import {
   FOLLOW_CAMERA_EASE_MS,
+  cumulativeDistances,
   followZoom,
   maneuverArrowsGeoJSON,
   navCameraStyle,
-  navLineProgress,
   remainingRouteBounds,
+  subPolyline,
 } from '@atlas/navigation';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -15,6 +16,10 @@ const SOURCE_ID = 'atlas-nav';
 const CASING = 'atlas-nav-casing';
 const LINE = 'atlas-nav-line';
 const NAV_LAYERS = [CASING, LINE];
+const TRAIL_SOURCE = 'atlas-nav-trail';
+const TRAIL_CASING = 'atlas-nav-trail-casing';
+const TRAIL_LINE = 'atlas-nav-trail-line';
+const TRAIL_LAYERS = [TRAIL_CASING, TRAIL_LINE];
 
 const ALT_SOURCE = 'atlas-nav-alternatives';
 const ALT_CASING = 'atlas-nav-alternatives-casing';
@@ -201,13 +206,27 @@ export function useNavLayers(
   }, [map, alternativeData, selectRouteAlternative]);
 
   // ---- route line (style-swap resilient, like useRouteLayers) ----
-  // This must stay exact and in MapLibre's spherical-Mercator line metric:
-  // rounding or using the guidance layer's real-metre fraction can move the
-  // colour boundary far ahead on long/northbound trips. The core's display
-  // progress follows its latency-compensated puck, so grey ends at the marker.
-  const routeProgress = navLineProgress(nav.state);
-  const routeProgressRef = useRef(routeProgress);
-  routeProgressRef.current = routeProgress;
+  // The complete blue line is stable; only the short grey trail source changes
+  // with progress. A native gradient can leave route tiles unpainted, so both
+  // clients use solid line layers for the route.
+  const routeDistances = useMemo(
+    () => (nav.activePath ? cumulativeDistances(nav.activePath.points) : []),
+    [nav.activePath],
+  );
+  const trailCoords = useMemo(
+    () =>
+      nav.activePath
+        ? subPolyline(nav.activePath.points, routeDistances, 0, nav.state?.trailM ?? 0).map((p) => [
+            p.lng,
+            p.lat,
+          ])
+        : [],
+    [nav.activePath, nav.state?.trailM, routeDistances],
+  );
+  const trailSourceDataRef = useRef<{
+    source: maplibregl.GeoJSONSource;
+    coords: number[][];
+  } | null>(null);
   const traveledM = Math.round((nav.state?.traveledM ?? 0) / 10) * 10;
   useEffect(() => {
     if (!map) return;
@@ -226,13 +245,11 @@ export function useNavLayers(
       if (source) {
         source.setData(data);
       } else {
-        // lineMetrics feeds the line-gradient that greys the driven stretch.
-        map.addSource(SOURCE_ID, { type: 'geojson', data, lineMetrics: true });
+        map.addSource(SOURCE_ID, { type: 'geojson', data });
       }
       if (!map.getLayer(CASING)) {
         const line = { 'line-cap': 'round', 'line-join': 'round' } as const;
-        // Google-style solid blue with a darker casing (Android parity); the
-        // gradient step moves with routeProgress via setPaintProperty below.
+        // Solid blue with a darker casing; the grey trail is drawn above it.
         map.addLayer({
           id: CASING,
           type: 'line',
@@ -240,13 +257,7 @@ export function useNavLayers(
           layout: line,
           paint: {
             'line-width': 10,
-            'line-gradient': [
-              'step',
-              ['line-progress'],
-              '#7d8590',
-              routeProgressRef.current,
-              '#1557b0',
-            ],
+            'line-color': '#1557b0',
           },
         });
         map.addLayer({
@@ -256,13 +267,7 @@ export function useNavLayers(
           layout: line,
           paint: {
             'line-width': 6,
-            'line-gradient': [
-              'step',
-              ['line-progress'],
-              '#aab2bd',
-              routeProgressRef.current,
-              '#4285f4',
-            ],
+            'line-color': '#4285f4',
           },
         });
       }
@@ -278,24 +283,60 @@ export function useNavLayers(
     };
   }, [map, active, nav.routeCoords]);
 
-  // Advance the driven-stretch dimming with progress (cheap paint update).
+  // The trail ends at matched travel, or sooner when a raw puck is behind it.
+  // Its flat end cap prevents grey paint extending in front of that boundary.
   useEffect(() => {
-    if (!map || !active) return;
-    for (const [id, dim, lit] of [
-      [CASING, '#7d8590', '#1557b0'],
-      [LINE, '#aab2bd', '#4285f4'],
-    ] as const) {
-      if (map.getLayer(id)) {
-        map.setPaintProperty(id, 'line-gradient', [
-          'step',
-          ['line-progress'],
-          dim,
-          routeProgress,
-          lit,
-        ]);
+    if (!map) return;
+    let cancelled = false;
+    const sync = () => {
+      if (cancelled || !map.isStyleLoaded()) return;
+      if (!active || trailCoords.length < 2) {
+        for (const id of TRAIL_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(TRAIL_SOURCE)) map.removeSource(TRAIL_SOURCE);
+        return;
       }
-    }
-  }, [map, active, routeProgress]);
+      const data = lineStringFeature(trailCoords);
+      const source = map.getSource(TRAIL_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (source) {
+        const applied = trailSourceDataRef.current;
+        if (!applied || applied.source !== source || applied.coords !== trailCoords) {
+          source.setData(data);
+          trailSourceDataRef.current = { source, coords: trailCoords };
+        }
+      } else {
+        map.addSource(TRAIL_SOURCE, { type: 'geojson', data });
+        trailSourceDataRef.current = {
+          source: map.getSource(TRAIL_SOURCE) as maplibregl.GeoJSONSource,
+          coords: trailCoords,
+        };
+      }
+      if (!map.getLayer(TRAIL_CASING)) {
+        const layout = { 'line-cap': 'butt', 'line-join': 'round' } as const;
+        map.addLayer({
+          id: TRAIL_CASING,
+          type: 'line',
+          source: TRAIL_SOURCE,
+          layout,
+          paint: { 'line-width': 10, 'line-color': '#7d8590' },
+        });
+        map.addLayer({
+          id: TRAIL_LINE,
+          type: 'line',
+          source: TRAIL_SOURCE,
+          layout,
+          paint: { 'line-width': 6, 'line-color': '#aab2bd' },
+        });
+      }
+    };
+    sync();
+    map.on('style.load', sync);
+    map.on('idle', sync);
+    return () => {
+      cancelled = true;
+      map.off('style.load', sync);
+      map.off('idle', sync);
+    };
+  }, [map, active, trailCoords]);
 
   // ---- on-map turn arrows (shared geometry, Android parity) ----
   const arrows = useMemo(
