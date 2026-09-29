@@ -21,6 +21,9 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libpulse\.so\.0'; then
   export LD_LIBRARY_PATH="$lib_root:$lib_root/pulseaudio${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
+# Never load or save a snapshot: a prior run can leave a poisoned default_boot
+# image whose system_server already ANRed. A cold boot costs less than rerunning
+# a full regression against that image.
 # -no-snapshot-save is what keeps a bad run from becoming a permanent one. The
 # emulator saves `default_boot` on exit by default, so a run whose system_server
 # ANRed saved *that* — and the next run loaded the wedged system back, hit the
@@ -42,6 +45,7 @@ exec "$emulator" \
   -no-window \
   -no-audio \
   -no-boot-anim \
+  -no-snapshot-load \
   -no-snapshot-save \
   -gpu swiftshader_indirect \
   "$@"

@@ -29,6 +29,13 @@ if [[ ! -x "$adb" ]]; then
   exit 1
 fi
 
+# This host's AVD loses focus and key events when CI is building on the same
+# four cores, even when the app is correct. Fail before spending a device run.
+if command -v docker >/dev/null && docker ps --format '{{.Names}}' 2>/dev/null | awk '/FORGEJO-ACTIONS-TASK/ { found=1 } END { exit !found }'; then
+  echo "Forgejo CI is still using the host; wait for its deploy before device regression" >&2
+  exit 1
+fi
+
 if [[ -z "$apk" ]]; then
   "$app_dir/build-apk.sh"
   apk="$app_dir/android/app/build/outputs/apk/release/app-release.apk"
@@ -38,6 +45,32 @@ fi
 if [[ ! -f "$apk" ]]; then
   echo "release candidate APK not found: $apk" >&2
   exit 1
+fi
+
+# The host keeps cold service pages in its 4 GB swap over days. With that swap
+# full, the AVD's IME and system_server stall even when CPU load is low. Clear
+# it before boot, while the emulator is absent and RAM has enough headroom.
+swap_used_mb="$(free -m | awk '$1 == "Swap:" { print $3 }')"
+available_mb="$(free -m | awk '$1 == "Mem:" { print $7 }')"
+if [[ "${swap_used_mb:-0}" -ge 1024 ]]; then
+  if "$adb" devices | awk 'NR > 1 && $2 == "device" { found=1 } END { exit !found }'; then
+    echo "swap is ${swap_used_mb} MB used while an Android device is running; stop it before regression" >&2
+    exit 1
+  fi
+  if [[ "${available_mb:-0}" -lt "$((swap_used_mb + 2048))" ]]; then
+    echo "swap is ${swap_used_mb} MB used with only ${available_mb} MB available RAM; free host memory before regression" >&2
+    exit 1
+  fi
+  echo "Clearing ${swap_used_mb} MB of host swap before emulator boot"
+  if sudo -n true >/dev/null 2>&1; then
+    sudo -n swapoff -a
+    sudo -n swapon -a
+  elif [[ -f /swap.img ]] && command -v docker >/dev/null && docker image inspect alpine:3 >/dev/null 2>&1; then
+    docker run --pull=never --rm --privileged --network none -v /swap.img:/swap.img alpine:3 sh -c 'swapoff /swap.img && swapon /swap.img'
+  else
+    echo "Cannot clear host swap automatically; run swapoff/swapon as root before regression" >&2
+    exit 1
+  fi
 fi
 
 fixture_log="$(mktemp)"

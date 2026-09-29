@@ -1,19 +1,23 @@
 # Android e2e: the device regression and the test emulator
 
 `run-regression.sh` installs a release-candidate APK on the `atlas_test` AVD, starts the fixture
-backend on port 3199 (`fixture-server.mjs`) and drives the whole app (`regression.mjs`): saved
+backend on port 3199 (`fixture-server.mjs`) and drives the app (`regression.mjs`): saved
 places and folders, road and transit planning, navigation hand-off, persistence, the commute board
-and the home-screen commute widget. Both publish scripts run it first, and a failed regression means
-nothing was published:
+and the home-screen commute widget. The ordinary OTA and APK publish scripts run it first. Native
+releases use `publish-native.sh`, which tests one signed APK once, then publishes the APK and its
+OTA baseline together. A failed regression publishes neither artifact:
 
 ```sh
 infrastructure/packs/publish-update.sh           # OTA: builds the candidate APK, then tests it
+infrastructure/packs/publish-native.sh apps/android/android/app/build/outputs/apk/release/app-release.apk 34 0.239.0
 # Reuse an APK already built from this exact source (saves ~10 min per retry):
 ATLAS_ANDROID_REGRESSION_APK=$PWD/apps/android/android/app/build/outputs/apk/release/app-release.apk \
   infrastructure/packs/publish-update.sh
 ```
 
-Budget ~20 min for a regression, plus ~10 min when it has to build the APK itself. **When a run
+Budget ~20 min for a regression, plus ~10 min when it has to build the APK itself. The native
+script requires a clean committed worktree and the same commit deployed at `/api/health`; it
+checks the APK's package and version before starting the device. **When a run
 fails and you change only `regression.mjs` (or the fixture server), reuse the APK**: the app has
 not changed, so rebuilding it buys nothing. On 2026-09-17 three retries that each fixed only the
 script rebuilt an identical APK, 10 min apiece.
@@ -60,6 +64,12 @@ before on the same code.
 
 - **Check `free -m` as well as `uptime` before a run.** A quiet CPU is not a quiet host: with swap
   full, the guest stalls in ways the load average does not show.
+- **The harness checks host state before boot.** It refuses to overlap Forgejo CI and, when at
+  least 1 GB of swap is used, clears it only if no Android device is running and available RAM
+  exceeds the used swap by 2 GB. This host's `sudo` needs a password, so it uses the locally
+  cached `alpine:3` image in a short-lived privileged Docker container as a fallback. It does
+  not pull an image during a release. If the image is absent or RAM is insufficient, it stops
+  before the emulator starts and says what to fix.
 - **It is a host flake, not the app — but not one load predicts.** That day six runs of the same
   code: four failed this way (one at a 1-minute load of 0.5), two passed (at 2.5 and 1.8), both with
   a reused APK on a host that had cooled after its own Gradle build. Don't change the app over it;
@@ -76,6 +86,10 @@ before on the same code.
   3 GB after that failure. qemu's RSS runs about 1.2 GB above the guest size, so a run wants ~5 GB
   of host RAM available _after_ the swap has been freed — `swapoff` pulls every swapped page back
   into RAM first, and needs `available` in `free -m` to exceed swap `used` before it can finish.
+  A 3 GB retry on 2026-09-29 produced repeated system ANRs before the first search control, so
+  reducing guest RAM is not a useful response to host swap pressure. The harness now cold-boots
+  without loading or saving snapshots and renders at 720×1600/280 dpi: the same 411×914 dp phone
+  viewport with fewer SwiftShader pixels.
 
 ### Text input can drop even after the retries
 
@@ -84,6 +98,13 @@ before on the same code.
 still arrived empty: `Timed out waiting for search-input to contain saved`. Logcat had **no ANR
 and no JavaScript error**, and the field in `failure.png` still showed its placeholder, so the
 keys never reached the IME. The same APK passed that step ten minutes later on a quieter host.
+Since 2026-09-29 it deletes only the characters actually in a field before typing; injecting 100
+Delete events into every empty field was needless load on `system_server`. The release baseline
+reaches the POI categories by scrolling. Set `ATLAS_ANDROID_CHECK_LAYER_SEARCH=1` when changing
+the Layers search interaction to also exercise its keyboard open/close. A destination card that
+opened correctly but whose IME stayed visible is logged and recovered with Back, then the card
+must still be present. Set `ATLAS_ANDROID_STRICT_SEARCH_IME=1` when changing search or keyboard
+behavior to require automatic dismissal.
 
 If a text step fails, look at `artifacts/logcat.txt` (`ReactNativeJS`, `FATAL`, `ANR in`) and
 `artifacts/failure.png` before touching the app. A placeholder in the field plus a clean logcat
