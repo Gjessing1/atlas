@@ -10,11 +10,8 @@ import org.json.JSONObject
 /**
  * Fetches one **v2** instance's board and stores it verbatim.
  *
- * The sibling of `CommuteWidgetWorker` (v1), and deliberately a separate class
- * rather than a flag on that one: the request it sends is a different question —
- * a selector, a commitment and a cached place, where v1 sends "which board" —
- * and the two widgets must be able to fail independently. See
- * `CommuteWidgetV2Provider` for which widget is which.
+ * The V2 class name and wire variant stay stable for installed widgets. Its
+ * request sends a selector, a commitment and a cached place for the whole commute.
  *
  * There is no formatting here. `POST /api/transit/widget` with `variant: "v2"`
  * returns a board that is ready to paint; this worker moves bytes, and makes

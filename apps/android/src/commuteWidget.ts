@@ -2,30 +2,18 @@ import { parseCommuteCommit } from '@atlas/app-hooks';
 import type { LatLng } from '@atlas/core';
 import {
   commutePlaceAt,
-  commuteSegments,
   type TransitCommuteQuery,
   type TransitWidgetV2Commit,
 } from '@atlas/transit';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
- * Two home-screen commute widgets ship side by side — docs/TRANSIT.md §W1–§W7 — and this
- * file speaks to both:
- *
- *  - **v1 — "Atlas commute"**: `configureCommuteWidget`, `commuteWidgetSupport`,
- *    `addCommuteWidget`. One instance answers one board.
- *  - **v2 — "Atlas commute (live)"**: `configureCommuteWidgetV2`,
- *    `commuteWidgetV2Support`, `addCommuteWidgetV2`, `reportCommutePlace`,
- *    `setCommuteWidgetCommit`, `readCommuteWidgetCommit`. One instance holds the
- *    whole commute, both directions, following the leg you are on.
- *
- * v1 stays the fallback and the reference until v2 has survived real commuting
- * (§W7), so the two never share a store and never share a call.
+ * The Android home-screen commute widget — docs/TRANSIT.md §W1–§W7.
+ * Native function names retain V2 because installed widgets keep their native
+ * store across updates. One instance holds both directions and follows the
+ * journey the traveller committed to.
  */
 interface CommuteWidgetModule {
-  configure(baseUrl: string, queryJson: string | null, segmentsJson: string | null): Promise<void>;
-  support(): Promise<CommuteWidgetSupport>;
-  requestPin(): Promise<boolean>;
   configureV2(baseUrl: string, queryJson: string | null): Promise<void>;
   setCommitV2(commitJson: string | null): Promise<void>;
   commitV2(): Promise<string | null>;
@@ -47,67 +35,8 @@ const NONE: CommuteWidgetSupport = { pinnable: false, count: 0 };
 const native = requireOptionalNativeModule<CommuteWidgetModule>('AtlasCommuteWidget');
 
 /**
- * Keep the **v1** home-screen widget's private configuration aligned with Atlas
- * storage.
- *
- * The hops travel with the commute rather than being worked out in Kotlin: the
- * ⚙ screen offers a board per leg (TRANSIT.md §5), and what a corridor's legs
- * are — and what each is called — is `commuteSegments`' answer, given once here
- * so the widget cannot come to a second one.
- */
-export async function configureCommuteWidget(
-  baseUrl: string,
-  query: TransitCommuteQuery | null,
-): Promise<void> {
-  const segments = query
-    ? commuteSegments(query).map((segment) => ({ id: segment.id, label: segment.label }))
-    : [];
-  try {
-    await native?.configure(
-      baseUrl,
-      query ? JSON.stringify(query) : null,
-      segments.length > 0 ? JSON.stringify(segments) : null,
-    );
-  } catch {
-    // Guarded for the same reason as everything below: a bundle can outrun the
-    // APK it runs on. Keeping the widget's previous configuration is the right
-    // failure — it goes on answering from the commute it already knows, which is
-    // the whole point of a home-screen widget.
-  }
-}
-
-/**
- * Every call here is guarded, and not only for the web: a JS bundle reaches a
- * device by OTA, so this code routinely runs on an APK built before it — one
- * whose native module has `configure` and nothing else. A missing widget button
- * is a shrug; an unhandled rejection on the commute sheet is not.
- */
-export async function commuteWidgetSupport(): Promise<CommuteWidgetSupport> {
-  try {
-    return (await native?.support()) ?? NONE;
-  } catch {
-    return NONE;
-  }
-}
-
-/** Ask the launcher to place a v1 widget. False = it declined, or cannot. */
-export async function addCommuteWidget(): Promise<boolean> {
-  try {
-    return (await native?.requestPin()) ?? false;
-  } catch {
-    return false;
-  }
-}
-
-// ------------------------------------------------------------------ v2 ---
-
-/**
- * Keep the **v2** widget's private configuration aligned with Atlas storage —
+ * Keep the widget's private configuration aligned with Atlas storage —
  * docs/TRANSIT.md §W1–§W7.
- *
- * No hop list, unlike v1: a v2 instance is never pointed at one hop of the
- * corridor. It holds the whole commute and shows the leg you are on, which is
- * the difference the two widgets exist to try against each other.
  */
 export async function configureCommuteWidgetV2(
   baseUrl: string,

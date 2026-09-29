@@ -1,26 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application>
-    <receiver
-      android:name=".CommuteWidgetProvider"
-      android:exported="false"
-      android:label="@string/atlas_commute_widget_name">
-      <intent-filter>
-        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-      </intent-filter>
-      <meta-data
-        android:name="android.appwidget.provider"
-        android:resource="@xml/atlas_commute_widget_info" />
-    </receiver>
-    <!--
-      docs/TRANSIT.md §W1–§W7 — the **v2** widget, a second provider beside the one above
-      rather than a replacement for it. Both appear in the launcher's picker
-      ("Atlas commute" and "Atlas commute (live)") and both can be placed at
-      once, which is the point: v1 stays the fallback and the reference until v2
-      has survived real commuting.
-
-      No `android:configure`: v2's direction selector lives on the widget itself,
-      so there is no question left for a configuration screen to ask.
-    -->
+    <!-- The live commute is the sole launcher widget. Its selector needs no configuration screen. -->
     <receiver
       android:name=".v2.CommuteWidgetV2Provider"
       android:exported="false"
@@ -32,20 +12,5 @@
         android:name="android.appwidget.provider"
         android:resource="@xml/atlas_commute_v2_widget_info" />
     </receiver>
-    <!--
-      Exported because the launcher starts it: it is the `android:configure`
-      target the widget picker and the widget's own ⚙ open. It writes nothing but
-      this instance's chosen direction.
-    -->
-    <activity
-      android:name=".CommuteWidgetConfigureActivity"
-      android:exported="true"
-      android:excludeFromRecents="true"
-      android:label="@string/atlas_commute_widget_name"
-      android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar">
-      <intent-filter>
-        <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-      </intent-filter>
-    </activity>
   </application>
 </manifest>

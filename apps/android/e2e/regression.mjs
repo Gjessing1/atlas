@@ -750,7 +750,7 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
 }
 
 /**
- * The commute board and both home-screen widgets.
+ * The commute board and its home-screen widget.
  *
  * Twice running, the only real bugs in a release were on this surface, and both
  * were found by a human looking at a home screen: v0.176.0's `optString`
@@ -1133,7 +1133,7 @@ async function verifyMultipleCommutes(placeId) {
 }
 
 /**
- * The **v2** widget — "Atlas commute (live)" — pinned, painted, and committed to.
+ * The commute widget — pinned, painted, and committed to.
  *
  * The commitment is the half no unit test can reach: tapping a row is what buys
  * the whole state ladder (TRANSIT.md §W2), and the fixture's timetable deliberately
@@ -1141,7 +1141,7 @@ async function verifyMultipleCommutes(placeId) {
  * off a home screen rather than eyeballed on the one morning it matters.
  */
 async function verifyLiveWidget() {
-  await pinWidget('commute-add-widget-v2');
+  await pinWidget('commute-add-widget');
   const served = await waitFor(
     'the pinned live widget to ask for its board',
     () => servedWidgetBoard('v2'),
@@ -1150,16 +1150,17 @@ async function verifyLiveWidget() {
   );
   const rows = served.board.blocks.flatMap((block) => block.rows);
   if (rows.length === 0) throw new Error('the fixture rendered a live widget board with no rows');
+  const rowDescription = (row) => [row.text, row.connectionAlert].filter(Boolean).join(' · ');
   const painted = await waitForHomeScreen(
     'the pinned live widget to paint the rows it was sent',
-    (xml) => rows.some((row) => nodeForDesc(xml, row.text)),
+    (xml) => rows.some((row) => nodeForDesc(xml, rowDescription(row))),
   );
   // Painted from the board, part by part — the columns v0.176.0 filled with the
   // string "null" and v0.181.0 filled with a unit-less delay. `duration` and
   // `platform` are deliberately not asserted: a narrow instance drops both
   // columns on purpose (`NARROW_DP`), and how wide the launcher placed this one
   // is not something a test should decide.
-  const shown = rows.filter((row) => nodeForDesc(painted, row.text));
+  const shown = rows.filter((row) => nodeForDesc(painted, rowDescription(row)));
   const strings = windowStrings(painted);
   for (const row of shown) {
     const parts = [row.time, row.arrival, row.lines, row.delayLabel];
@@ -1175,18 +1176,28 @@ async function verifyLiveWidget() {
   }
   expectStrings(painted, [served.board.focus.action], 'the live widget');
 
+  // A departure with a broken transfer must warn before it is tapped. The
+  // fixture computes the broken ids from the trip independently of the board.
+  const brokenId = served.broken[0];
+  const broken = rows.find((row) => row.id === brokenId);
+  if (!broken?.connectionAlert) {
+    throw new Error(`the broken journey ${brokenId} has no row warning`);
+  }
+  const marked = await waitForHomeScreen('the broken connection row marker', (xml) =>
+    Boolean(nodeForDesc(xml, rowDescription(broken))),
+  );
+  expectStrings(marked, ['⚠'], 'the broken connection row');
+
   // TRANSIT.md §W4: commit to the journey whose connection this timetable breaks, and
   // the widget must say the change no longer holds.
-  const brokenId = served.broken[0];
-  const broken = shown.find((row) => row.id === brokenId);
-  if (!broken) {
+  if (!shown.some((row) => row.id === brokenId)) {
     throw new Error(
       `the broken journey ${brokenId} is not among the painted rows: ${shown
         .map((row) => row.id)
         .join(', ')}`,
     );
   }
-  tapBounds(boundsForNode(nodeForDesc(painted, broken.text)));
+  tapBounds(boundsForNode(nodeForDesc(marked, rowDescription(broken))));
   const committed = await waitFor(
     'the widget to take the commitment and re-ask',
     () => servedWidgetBoard('v2'),
@@ -1225,48 +1236,6 @@ async function verifyLiveWidget() {
 async function verifyCommitReachedTheBoard(row) {
   await waitForIdAfterScroll('commute-here', 'commute-sheet', 'down', 45_000);
   await scrollToString(row.time, 'the adopted journey’s departure', 'commute-sheet');
-}
-
-/** The **v1** widget — "Atlas commute" — one board, pinned, painted from the same route. */
-async function verifySimpleWidget() {
-  await pinWidget('commute-add-widget');
-  const served = await waitFor(
-    'the pinned simple widget to ask for its board',
-    () => servedWidgetBoard('v1'),
-    (value) => Boolean(value.board),
-    120_000,
-  );
-  const rows = served.board.directions.flatMap((direction) => direction.rows);
-  if (rows.length === 0) throw new Error('the fixture rendered a simple widget board with no rows');
-  const painted = await waitForHomeScreen(
-    'the pinned simple widget to paint the rows it was sent',
-    (xml) => rows.some((row) => nodeForDesc(xml, row.text)),
-  );
-  const strings = windowStrings(painted);
-  if (strings.includes('null')) {
-    throw new Error('the simple widget painted the string "null" where a value belongs');
-  }
-  // v1 paints the leg strip a line per vehicle rather than one `lines` column,
-  // so this is where v0.181.0's four faults are actually visible: the delay with
-  // its unit beside the time it corrects, a mode icon per vehicle, and each
-  // leg's own window — the row-level platform is the *first* ride's, which on a
-  // bus→train commute is a bus stop. `quay`, `duration` and `platform` are left
-  // out on purpose: all three are dropped below `NARROW_DP`, and how wide the
-  // launcher placed this instance is not something a test should decide.
-  for (const row of rows.filter((entry) => nodeForDesc(painted, entry.text))) {
-    const parts = [
-      row.time,
-      row.arrival,
-      row.delayLabel,
-      ...row.legs.flatMap((leg) => [leg.icon, leg.line, leg.window]),
-    ];
-    const missing = parts.filter((part) => part && !strings.includes(part));
-    if (missing.length > 0) {
-      throw new Error(
-        `the simple widget's row "${row.text}" is missing ${missing.join(', ')} on the home screen`,
-      );
-    }
-  }
 }
 
 function saveArtifacts(error) {
@@ -1367,15 +1336,13 @@ async function main() {
   await setDarkTheme();
   const trackId = await recordTrackId(ids.folderId);
   await verifyPersistence({ ...ids, trackId });
-  console.log('Android regression: commute board, then both widgets on the home screen');
+  console.log('Android regression: commute board, then its widget on the home screen');
   await saveCommuteAndReadBoard();
   await verifyMultipleCommutes(ids.placeId);
   const committedRow = await verifyLiveWidget();
   await returnToApp();
   await openCommuteSheet();
   await verifyCommitReachedTheBoard(committedRow);
-  await verifySimpleWidget();
-  await returnToApp();
   await closeCommuteSheet();
 
   await tap('search-open');
@@ -1389,7 +1356,7 @@ async function main() {
   await tap('search-close');
 
   console.log(
-    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, the commute board and both home-screen widgets, sheet snaps, Back-compatible surfaces, and rotation.',
+    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, the commute board and its home-screen widget, sheet snaps, Back-compatible surfaces, and rotation.',
   );
 }
 

@@ -660,6 +660,22 @@ describe('commuteWidgetV2Board', () => {
     expect(answer.blocks[0]?.rows[0]?.committed).toBe(false);
   });
 
+  it('warns about a broken connection before any journey is committed', () => {
+    const answer = board({
+      results: [
+        {
+          key: 'outbound',
+          result: result(twoLegTrip({ delayMs: 12 * 60_000 })),
+          emptyReason: 'none',
+        },
+      ],
+      nowMs: hm(7, 0),
+    });
+    expect(answer.commitId).toBeNull();
+    expect(answer.blocks[0]?.rows[0]?.connectionAlert).toBe('Connection missed at Asker stasjon');
+    expect(board().blocks[0]?.rows[0]?.connectionAlert).toBeNull();
+  });
+
   it('follows the committed journey through the ladder', () => {
     const committedTrip = twoLegTrip();
     const commit: TransitWidgetV2Commit = {

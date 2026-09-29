@@ -4,11 +4,8 @@
   so the picker draws a populated v2 board instead of the empty card a fresh
   instance wears.
 
-  That matters more here than it did for v1, because the two widgets sit next to
-  each other in the same picker under near-identical names. The preview pictures
-  the mid-journey case — "Change to 🚆 R14 · 07:41" — which is the moment v2
-  exists for and the one v1 cannot answer, so the difference is *seen* rather
-  than read.
+  The preview pictures the mid-journey case — "Change to 🚆 R14 · 07:41" — so
+  the picker shows how a committed journey appears before the widget is placed.
 
   No `configuration_optional` here, because there is no configuration activity to
   make optional: v2's selector is on the widget.

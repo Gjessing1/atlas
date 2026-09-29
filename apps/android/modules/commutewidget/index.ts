@@ -1,33 +1,10 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
- * Two home-screen commute widgets ship side by side (docs/TRANSIT.md §W1–§W7), and they are
- * different products rather than two versions of one:
- *
- *  - **v1 — "Atlas commute"** (`configure` / `support` / `requestPin`). One
- *    instance answers one board: a direction, both, or one hop, chosen in its ⚙.
- *  - **v2 — "Atlas commute (live)"** (`configureV2` / `supportV2` /
- *    `requestPinV2` / `setPlace` / `setCommitV2` / `commitV2`). One instance
- *    holds the whole commute.
- *
- * They keep separate native stores, which is why the surface is two sets of
- * functions and not one with a flag: configuring one must never touch the
- * other's state, and v1 stays the fallback until v2 has been commuted with.
+ * The Android commute widget. Native V2 names remain so an installed widget
+ * keeps its stored selector and commitment across an APK update.
  */
 export interface CommuteWidgetNativeModule {
-  // ---------------------------------------------------------------- v1 ---
-  configure(
-    baseUrl: string,
-    queryJson: string | null,
-    /** The corridor's hops as `[{"id","label"}, …]`, for the ⚙ screen's leg boards. */
-    segmentsJson: string | null,
-  ): Promise<void>;
-  /** Whether this launcher takes pin requests, and how many v1 instances exist. */
-  support(): Promise<{ pinnable: boolean; count: number }>;
-  /** Ask the launcher to place a v1 widget; it shows its own confirmation. */
-  requestPin(): Promise<boolean>;
-
-  // ---------------------------------------------------------------- v2 ---
   /** The saved commute, for v2. No hop list — a v2 instance holds the whole commute. */
   configureV2(baseUrl: string, queryJson: string | null): Promise<void>;
   /**

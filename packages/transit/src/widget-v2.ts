@@ -1,28 +1,16 @@
 /**
- * The **v2** home-screen widget's board — docs/TRANSIT.md §W1–§W7.
- *
- * ---
- * **Which widget is this?** Atlas ships two home-screen commute widgets side by
- * side, and they are different products rather than two versions of one file:
- *
- *  - **v1 — "Atlas commute"** — {@link file://./widget.ts}, painted by
- *    `CommuteWidgetProvider`. One instance answers *one board*: a direction,
- *    both directions, or one hop, chosen in its ⚙ and fixed until changed.
- *  - **v2 — "Atlas commute (live)" (this file)**, painted by
- *    `CommuteWidgetV2Provider`. One instance holds *the whole commute*.
- *
- * v1 stays the fallback and the reference until v2 has been commuted with
- * (TRANSIT.md §W7), so nothing there is bent to suit this file. What helps is reused by
- * importing it — `TransitWidgetRow` and `tripWidgetRow` build the rows,
+ * The home-screen commute widget's board — docs/TRANSIT.md §W1–§W7.
+ * `CommuteWidgetV2Provider` retains its name and store so pinned live widgets
+ * survive the retirement of the one-board provider. The old row model in
+ * `widget.ts` remains useful here: `TransitWidgetRow` and `tripWidgetRow` build rows,
  * `commuteRefreshAtMs` and `windowOpensAtMs` schedule the asking, and
  * `commuteJourney` is still the one derivation of what a journey costs.
- * ---
  *
- * **What v2 is for.** v1 answers one board well and cannot follow you: an
+ * **What the live widget is for.** The old provider answered one board and could not follow you: an
  * instance is pointed at a direction or a hop and stays there, so the way out
  * and the way home are two pinned widgets, and the one reading
  * "Engelsrud → Asker" at 08:55 is showing the leg you are already sitting on.
- * The unit worth pinning is the *commute*, so a v2 instance carries both
+ * The unit worth pinning is the *commute*, so an instance carries both
  * directions behind a compact selector and shows the part of it you are in.
  *
  * **How it knows where you are, and what it deliberately does not do.** TRANSIT.md §W2
@@ -927,6 +915,8 @@ export interface TransitWidgetV2Row extends TransitWidgetRow {
   id: string;
   /** Whether this is the journey currently committed to. */
   committed: boolean;
+  /** A broken change on this journey, stated by the shared timetable model. */
+  connectionAlert: string | null;
 }
 
 /** One direction's departures. */
@@ -1270,7 +1260,13 @@ export function commuteWidgetV2Board({
     const journeys = directionJourneys(result, nowMs, maxRows);
     const rows: TransitWidgetV2Row[] = journeys.map((journey) => {
       const id = commuteCommitId(key, journey);
-      return { ...tripWidgetRow(journey.trip, nowMs), id, committed: id === commitKey };
+      const broken = commuteConnectionBreak(journey, nowMs);
+      return {
+        ...tripWidgetRow(journey.trip, nowMs),
+        id,
+        committed: id === commitKey,
+        connectionAlert: broken ? `${broken.label} at ${broken.at}` : null,
+      };
     });
     return {
       journeys,

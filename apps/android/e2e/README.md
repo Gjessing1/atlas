@@ -3,7 +3,7 @@
 `run-regression.sh` installs a release-candidate APK on the `atlas_test` AVD, starts the fixture
 backend on port 3199 (`fixture-server.mjs`) and drives the whole app (`regression.mjs`): saved
 places and folders, road and transit planning, navigation hand-off, persistence, the commute board
-and both home-screen widgets. Both publish scripts run it first, and a failed regression means
+and the home-screen commute widget. Both publish scripts run it first, and a failed regression means
 nothing was published:
 
 ```sh

@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The **v2** commute widget — docs/TRANSIT.md §W1–§W7. A second widget beside
-  `atlas_commute_widget.xml`, not a new version of it: v1 pins a *board*, v2 pins
-  the *commute*, and v1 stays the fallback until this one has been commuted with.
+  The live commute widget — docs/TRANSIT.md §W1–§W7. Its v2 resource name stays
+  stable for existing placements after it becomes the sole registered provider.
 
   Read top to bottom, it is §W6's information hierarchy in the order the spec
   states it — direction/context, then the current or next action, then the time

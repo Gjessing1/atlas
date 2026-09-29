@@ -1,25 +1,8 @@
 /**
- * The **v1** home-screen widget's rows, rendered here.
- *
- * ---
- * **Which widget is this?** Atlas ships two home-screen commute widgets side by
- * side, and they are different products, not two versions of one file:
- *
- *  - **v1 — "Atlas commute" (this file).** One instance answers *one board*: a
- *    direction, both directions, or one hop of the corridor, chosen in its ⚙ and
- *    fixed until someone changes it. A timetable on the home screen. Painted by
- *    `CommuteWidgetProvider`.
- *  - **v2 — "Atlas commute (live)"** — {@link file://./widget-v2.ts}, board built
- *    by `commuteWidgetV2Board`, painted by `CommuteWidgetV2Provider`. One
- *    instance holds the *whole commute*: both directions behind a compact
- *    selector, and content that follows where you are in the journey rather than
- *    where you configured it (docs/TRANSIT.md §W1–§W7).
- *
- * v1 is the fallback and the reference until v2 has survived real commuting
- * (TRANSIT.md §W7), so **nothing here may be changed to suit v2**. v2 reuses what helps
- * — `TransitWidgetRow`, `tripWidgetRow`, `commuteRefreshAtMs`, the row layouts —
- * by importing it, never by bending it.
- * ---
+ * The former one-board widget's row model. Its Android provider is retired, but
+ * the live commute widget still imports `TransitWidgetRow`, `tripWidgetRow`,
+ * `commuteRefreshAtMs` and `commuteJourney` from here. The backend keeps the
+ * v1 wire answer for devices running an older APK (docs/TRANSIT.md §W7).
  *
  * The widget used to format its own: `CommuteWidgetWorker.tripRows` built
  * `"HH:mm–HH:mm  line → line"` with `SimpleDateFormat`, a second

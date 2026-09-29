@@ -7,20 +7,9 @@ import org.json.JSONObject
  * What the **v2** widget knows — docs/TRANSIT.md §W1–§W7.
  *
  * ---
- * **Which widget is this?** Two commute widgets ship side by side and they are
- * different products, not two versions of one:
- *
- *  - **v1 — "Atlas commute"**, `io.gjessing.atlas.commutewidget`. One instance
- *    answers one board, chosen in its ⚙ and fixed until changed.
- *  - **v2 — "Atlas commute (live)"**, this package. One instance holds the whole
- *    commute: both directions behind a compact selector, and content that
- *    follows where you are in the journey.
- *
- * v1 stays the fallback and the reference until v2 has been commuted with (§W7),
- * so nothing here writes into v1's `SharedPreferences` and nothing there reads
- * these keys. That separation is the whole reason this is its own store: a
- * shared file would make "uninstall v2" or "reset v2" impossible to do without
- * touching the widget that still works.
+ * The live widget is the sole registered commute provider. Its V2 store stays
+ * separate from the retired one-board provider's store so existing live-widget
+ * placements retain their selector and commitment (§W7).
  * ---
  *
  * App-owned (one copy): the server origin, the saved commute, and the coarse

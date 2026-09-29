@@ -29,13 +29,10 @@ import org.json.JSONObject
  * Paints the **v2** commute widget — docs/TRANSIT.md §W1–§W7.
  *
  * ---
- * **Which widget is this?** `CommuteWidgetProvider`, one package up, is **v1**:
- * one instance answers one board, chosen in its ⚙ and fixed. This is **v2**: one
- * instance holds the whole commute — both directions behind a compact selector,
- * and content that follows where you are in the journey. They coexist on the
- * same home screen deliberately, and v1 remains the fallback and the reference
- * until v2 has been commuted with (§W7). Nothing here writes into v1's store, and
- * nothing there reads these keys.
+ * This is the sole registered commute widget. It keeps its original V2 component
+ * and store names so existing placements retain their state across the upgrade.
+ * One instance holds both directions behind a compact selector and follows the
+ * journey the traveller committed to (§W7).
  * ---
  *
  * Three rules inherited from v1, because they were right:
@@ -674,6 +671,12 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
         R.id.atlas_v2_row_mark,
         if (committed) View.VISIBLE else View.GONE,
       )
+      val connectionAlert = row.string("connectionAlert")
+      views.setViewVisibility(
+        R.id.atlas_v2_row_connection_alert,
+        if (connectionAlert.isBlank()) View.GONE else View.VISIBLE,
+      )
+      views.setContentDescription(R.id.atlas_v2_row_connection_alert, connectionAlert)
       val time = row.string("time")
       views.setTextViewText(
         R.id.atlas_v2_row_time,
@@ -721,7 +724,10 @@ class CommuteWidgetV2Provider : AppWidgetProvider() {
         R.id.atlas_v2_row_platform,
         if (widthDp < NARROW_DP) "" else row.string("platform"),
       )
-      views.setContentDescription(R.id.atlas_v2_row_root, row.string("text"))
+      views.setContentDescription(
+        R.id.atlas_v2_row_root,
+        listOf(row.string("text"), connectionAlert).filter { it.isNotBlank() }.joinToString(" · "),
+      )
       if (id.isNotBlank()) {
         views.setOnClickPendingIntent(
           R.id.atlas_v2_row_root,

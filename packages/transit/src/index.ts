@@ -193,9 +193,8 @@ export {
   type TransitWeekday,
 } from './clock.js';
 /**
- * The **v2** home-screen widget (docs/TRANSIT.md §W1–§W7) — a second widget beside the one
- * above, not a replacement for it. See the header of `widget-v2.ts` for which is
- * which; the short of it is that v1 pins a *board* and v2 pins the *commute*.
+ * The live home-screen commute widget (docs/TRANSIT.md §W1–§W7). Its V2 wire
+ * variant remains stable for installed widgets and older APKs.
  */
 export {
   COMMUTE_PHASE_LABEL,

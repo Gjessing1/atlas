@@ -152,7 +152,6 @@ import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
 import {
-  configureCommuteWidget,
   configureCommuteWidgetV2,
   readCommuteWidgetCommit,
   reportCommutePlace,
@@ -380,11 +379,6 @@ function AppInner() {
   // the app, so it must never be reset by the app merely starting.
   useEffect(() => {
     if (!commute.ready) return;
-    // Both widgets, from the one saved commute: v1 ("Atlas commute") and v2
-    // ("Atlas commute (live)", docs/TRANSIT.md §W1–§W7) coexist on the home screen while v2
-    // is being commuted with, and each keeps its own native store — so each is
-    // told separately rather than through one call with a flag.
-    void configureCommuteWidget(serverOrigin, commute.widgetQuery);
     void configureCommuteWidgetV2(serverOrigin, commute.widgetQuery);
   }, [commute.widgetQuery, commute.ready, serverOrigin]);
   const widgetCommuteRef = useRef<string | null>(null);

@@ -39,9 +39,7 @@ import {
 } from 'react-native';
 
 import {
-  addCommuteWidget,
   addCommuteWidgetV2,
-  commuteWidgetSupport,
   commuteWidgetV2Support,
   type CommuteWidgetSupport,
 } from '../commuteWidget';
@@ -1087,16 +1085,12 @@ function Journeys({
 }
 
 /**
- * The way onto the home screen, from inside the app — for **both** widgets, as
- * two rows of the board's menu.
+ * The way onto the home screen, from inside the app.
  *
  * Android takes a pin request directly (8.0+), so ask — but only when the
  * launcher actually accepts one: a button that silently does nothing is worse
- * than a sentence. Two offers, because two widgets ship (docs/TRANSIT.md
- * §W1–§W7) and they answer different questions: the live widget holds the whole
- * commute and follows the leg you are on; the simple one pins one board. The
- * live one leads; the simple one stays offered, because it is the fallback until
- * the live one has survived real commuting (§W7).
+ * than a sentence. The widget holds the whole commute and follows the leg you
+ * are on (docs/TRANSIT.md §W1–§W7).
  *
  * In the menu rather than at the foot of the board: placing a widget is done
  * once, and two paragraphs of it under every morning's departures was
@@ -1104,23 +1098,16 @@ function Journeys({
  */
 function useWidgetSupport() {
   const [support, setSupport] = useState<CommuteWidgetSupport | null>(null);
-  const [supportV2, setSupportV2] = useState<CommuteWidgetSupport | null>(null);
   useEffect(() => {
     let alive = true;
-    void commuteWidgetSupport().then((next) => {
-      if (alive) setSupport(next);
-    });
     void commuteWidgetV2Support().then((next) => {
-      if (alive) setSupportV2(next);
+      if (alive) setSupport(next);
     });
     return () => {
       alive = false;
     };
   }, []);
-  // An APK built before v2 answers `pinnable: false, count: 0` for it — the
-  // module simply has no `supportV2` — which is exactly the state that should
-  // hide the offer rather than show a button that cannot work.
-  return { v1: support, v2: supportV2 ?? { pinnable: false, count: 0 } };
+  return support ?? { pinnable: false, count: 0 };
 }
 
 /** One row of the board's menu. */
@@ -1213,20 +1200,13 @@ function CommuteMenu({
         )}
         testID="commute-delete"
       />
-      {widgets.v2.pinnable || widgets.v1?.pinnable ? <View style={styles.menuRule} /> : null}
-      {widgets.v2.pinnable ? (
+      {widgets.pinnable ? <View style={styles.menuRule} /> : null}
+      {widgets.pinnable ? (
         <MenuItem
           label={
-            widgets.v2.count > 0 ? 'Add another live widget' : 'Add live widget to home screen'
+            widgets.count > 0 ? 'Add another commute widget' : 'Add commute widget to home screen'
           }
           onPress={run(() => void addCommuteWidgetV2())}
-          testID="commute-add-widget-v2"
-        />
-      ) : null}
-      {widgets.v1?.pinnable ? (
-        <MenuItem
-          label={widgets.v1.count > 0 ? 'Add another simple widget' : 'Add simple widget'}
-          onPress={run(() => void addCommuteWidget())}
           testID="commute-add-widget"
         />
       ) : null}

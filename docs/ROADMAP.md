@@ -41,12 +41,8 @@ widget work below.
 
 ### 1.1 Home-screen commute widgets
 
-v1 shows one board (a direction or a single hop); v2 (“Atlas commute (live)”) pins the whole
-commute and follows a tracked journey — [TRANSIT.md §W1–§W7](./TRANSIT.md). The native half of the
-work below waits on the APK batch under *Host and release chores*.
-
-- [ ] **v2 replaces the v1 shipped widget** its stable enough now
-
+The live “Atlas commute” widget pins the whole commute and follows a tracked journey —
+[TRANSIT.md §W1–§W7](./TRANSIT.md).
 
 - [ ] **Add a stop departure-board widget.** The server already supports the cheaper stop-board
       query; add a launcher configuration flow for a stop and optional line picker alongside the
@@ -428,13 +424,6 @@ Work done on the host or in the release pipeline rather than in the code.
       backend tests. After the updated backend is deployed, change the Homepage **Atlas APK** tile
       from its version-pinned URL to `https://atlas.gjessing.io/api/app/download` and verify the
       link downloads the currently published APK.
-
-- [ ] **Batch the native work into one APK.** Two things wait on the same `versionCode` +1 /
-      `runtimeVersion` +1: the widget's marker for a row whose connection is broken (the Kotlin
-      half of TRANSIT.md §2 — the board already draws it) and v1's retirement under
-      *Home-screen commute widgets*.
-      `build-apk.sh` → `publish-apk.sh` → one `publish-update.sh` so the new runtime has an OTA
-      baseline.
 
 - [~] **DR7 — Rebuild the offline packs so every one is reproducible and self-describing.** The
       code is shipped (committed specs, pinned tool digests, pre-flight validation, smoke checks
