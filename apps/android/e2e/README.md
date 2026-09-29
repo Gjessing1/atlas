@@ -72,6 +72,10 @@ before on the same code.
   timeout. The same step had passed about two hours earlier for v0.237.0, and the only app change
   between them was one line in `useStandBoard`. Three reruns do not clear this; free the swap
   first (a root `swapoff -a && swapon -a` once enough RAM is free), or wait for a quieter host.
+- **The guest has 4 GB since 2026-09-29** (`start-emulator.sh`, `ATLAS_EMULATOR_MEMORY_MB`), up from
+  3 GB after that failure. qemu's RSS runs about 1.2 GB above the guest size, so a run wants ~5 GB
+  of host RAM available _after_ the swap has been freed — `swapoff` pulls every swapped page back
+  into RAM first, and needs `available` in `free -m` to exceed swap `used` before it can finish.
 
 ### Text input can drop even after the retries
 

@@ -28,15 +28,17 @@ fi
 # publishes died that way before the snapshot was deleted by hand. A cold boot
 # costs ~40 s; a release gate that can poison itself costs far more.
 #
-# -memory 3072 rather than the AVD's own 2 GB: at 2 GB the guest sat 565 MB into
+# -memory 4096 rather than the AVD's own 2 GB: at 2 GB the guest sat 565 MB into
 # its compressed swap with 150 MB free, so qemu burned 200–260 % CPU while idle and
-# system_server ANRed through the first steps of two publishes (2026-09-24). Set
-# here, not in the AVD's config.ini, so it survives recreating the AVD. Not more:
-# the host has ~15 GB, its swap is already full, and the APK build that precedes a
-# regression has exited by the time this starts.
+# system_server ANRed through the first steps of two publishes (2026-09-24). 3 GB
+# cleared that, but the v0.238.0 publish still stalled three times at one step
+# (IME stuck up, no focus events) on 2026-09-28, so the guest got another GB. Set
+# here, not in the AVD's config.ini, so it survives recreating the AVD. The host
+# has ~15 GB and its swap fills up over days: check `free -m` before a run, and
+# free the swap (root `swapoff -a && swapon -a`) when it is full.
 exec "$emulator" \
   -avd "$avd_name" \
-  -memory "${ATLAS_EMULATOR_MEMORY_MB:-3072}" \
+  -memory "${ATLAS_EMULATOR_MEMORY_MB:-4096}" \
   -no-window \
   -no-audio \
   -no-boot-anim \
