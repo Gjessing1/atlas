@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { norwegianLayers } from './catalog.js';
-import { nvdbPoint } from './features.js';
+import { norwegianLayers, type PointFeedUpstream } from './catalog.js';
+import { fetchPointFeed, nvdbPoint, type ContentDates } from './features.js';
 import { registerOverlayApi, type OverlayLayer } from './index.js';
 
 /** One arcgis-vector layer plus one WMS layer (to prove /features 404s on it). */
@@ -191,9 +191,59 @@ describe('point-feed features route (public toilets)', () => {
     properties: { navn, objekttype: 'Toalett', toalettype: 1, sluttdato },
   });
 
-  it('merges both registers into one normalised point collection', async () => {
-    const { app, cacheDir, requests } = await build((url) =>
-      url.hostname === 'nvdbapiles.atlas.vegvesen.no'
+  /**
+   * Bergen's My Maps export, trimmed: one pin with a `<Point>`, one placed
+   * only by spreadsheet columns, one not placed at all. `photo` stands in for
+   * the image URL Google re-signs on every export.
+   */
+  const bergenKml = (photo = 'a', price = '10') => `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Folder><name>Public toilets</name>
+    <Placemark><name>Gartnerboligen</name>
+      <description><![CDATA[<img src="https://mymaps.example/${photo}"/>]]></description>
+      <ExtendedData>
+        <Data name="Price (NOK)"><value>${price}</value></Data>
+        <Data name="tid_hverdag"><value>08-21</value></Data>
+        <Data name="tid_lordag"><value>08-21</value></Data>
+        <Data name="tid_sondag"><value>08-21</value></Data>
+        <Data name="gx_media_links"><value>https://mymaps.example/${photo}</value></Data>
+      </ExtendedData>
+      <Point><coordinates>5.3270388,60.3829056,0</coordinates></Point>
+    </Placemark>
+    <Placemark><name>Citizen Service Centre</name>
+      <ExtendedData>
+        <Data name="latitude"><value>60.3913793</value></Data>
+        <Data name="longitude"><value>5.3290558</value></Data>
+      </ExtendedData>
+    </Placemark>
+    <Placemark><name>Fløyen</name></Placemark>
+  </Folder>
+</Document></kml>`;
+  const stavangerGeoJson = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [5.730182, 58.970154] },
+        properties: {
+          plassering: 'Strandkaien',
+          pris: '5',
+          aapningstider_hverdag: 'Døgnåpent',
+          aapningstider_loerdag: 'Døgnåpent',
+          aapningstider_soendag: 'Døgnåpent',
+          rullestol: 'JA',
+          stellerom: 'JA',
+        },
+      },
+    ],
+  };
+
+  /** Every register answering, with `override` replacing one host's answer. */
+  const registers =
+    (override: Partial<Record<string, ReturnType<Stub>>> = {}, kml = bergenKml()): Stub =>
+    (url) =>
+      override[url.hostname] ??
+      (url.hostname === 'nvdbapiles.atlas.vegvesen.no'
         ? {
             body: {
               objekter: [
@@ -204,27 +254,40 @@ describe('point-feed features route (public toilets)', () => {
               metadata: { returnert: 2, neste: { start: 'x' } },
             },
           }
-        : {
-            body: {
-              type: 'FeatureCollection',
-              features: [
-                osloToilet('Sognsvann', 2556057600000),
-                osloToilet('Ulsrudvann', 1732752000000),
-              ],
-            },
-          },
-    );
+        : url.hostname === 'www.google.com'
+          ? { body: kml }
+          : url.hostname === 'opencom.no'
+            ? url.pathname.startsWith('/api/')
+              ? { body: { result: { last_modified: '2024-07-09T09:46:18.733815' } } }
+              : { body: stavangerGeoJson }
+            : {
+                body: {
+                  type: 'FeatureCollection',
+                  features: [
+                    osloToilet('Sognsvann', 2556057600000),
+                    osloToilet('Ulsrudvann', 1732752000000),
+                  ],
+                },
+              });
+
+  type Body = {
+    features: { geometry: { coordinates: number[] }; properties: Record<string, unknown> }[];
+  };
+
+  it('merges every register into one normalised point collection', async () => {
+    const { app, cacheDir, requests } = await build(registers());
     track(app, cacheDir);
     const res = await app.inject({ url: '/api/overlay/public-toilets/features' });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as {
-      features: { geometry: { coordinates: number[] }; properties: Record<string, unknown> }[];
-    };
-    // NVDB first (catalog order), closed Ulsrudvann dropped.
+    const body = res.json() as Body;
+    // Catalog order; closed Ulsrudvann and unplaced Fløyen dropped.
     expect(body.features.map((f) => f.geometry.coordinates)).toEqual([
       [6.79971101, 61.75542451],
       [8.2, 60.5],
       [10.7, 59.95],
+      [5.3270388, 60.3829056],
+      [5.3290558, 60.3913793],
+      [5.730182, 58.970154],
     ]);
     expect(body.features[0]!.properties).toEqual({
       source: 'nvdb',
@@ -237,6 +300,25 @@ describe('point-feed features route (public toilets)', () => {
       name: 'Sognsvann',
       accessible: 'yes',
     });
+    // Bergen has no published date: the first sighting is the catalog's.
+    expect(body.features[3]!.properties).toEqual({
+      source: 'bergen',
+      name: 'Gartnerboligen',
+      hours: 'Daily 08:00–21:00',
+      price: '10 kr',
+      asOf: '2026-09-30',
+    });
+    // Stavanger's date is the publisher's own upload date.
+    expect(body.features[5]!.properties).toEqual({
+      source: 'stavanger',
+      name: 'Strandkaien',
+      operator: 'Stavanger kommune',
+      accessible: 'yes',
+      hours: 'Open 24 hours',
+      price: '5 kr',
+      babyChange: true,
+      asOf: '2024-07-09',
+    });
     const nvdb = requests.find((u) => u.hostname === 'nvdbapiles.atlas.vegvesen.no')!;
     expect(nvdb.pathname).toBe('/vegobjekter/api/v4/vegobjekter/243');
     expect(nvdb.searchParams.get('srid')).toBe('4326');
@@ -245,17 +327,48 @@ describe('point-feed features route (public toilets)', () => {
   });
 
   it('fails the whole pull when one register fails, rather than serve half', async () => {
-    const { app, cacheDir } = await build((url) =>
-      url.hostname === 'nvdbapiles.atlas.vegvesen.no'
-        ? { status: 500, body: 'down' }
-        : {
-            body: { type: 'FeatureCollection', features: [osloToilet('Sognsvann', 2556057600000)] },
-          },
-    );
-    track(app, cacheDir);
-    expect((await app.inject({ url: '/api/overlay/public-toilets/features' })).statusCode).toBe(
-      502,
-    );
+    for (const host of ['nvdbapiles.atlas.vegvesen.no', 'www.google.com', 'opencom.no']) {
+      const { app, cacheDir } = await build(registers({ [host]: { status: 500, body: 'down' } }));
+      track(app, cacheDir);
+      const res = await app.inject({ url: '/api/overlay/public-toilets/features' });
+      expect(res.statusCode, host).toBe(502);
+    }
+  });
+
+  it('moves a content-dated list’s date only when its toilets change', async () => {
+    const up = norwegianLayers().find((l) => l.meta.id === 'public-toilets')!
+      .upstream as PointFeedUpstream;
+    let saved: Record<string, { fingerprint: string; since: string }> = {};
+    const store: ContentDates = {
+      read: async () => structuredClone(saved),
+      write: async (state) => {
+        saved = state;
+      },
+    };
+    const pull = async (kml: string, today: string, dates: ContentDates | null = store) => {
+      const fetchImpl = (async (input: URL | RequestInfo) => {
+        const { status, body } = registers({}, kml)(new URL(String(input)));
+        return new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+          status: status ?? 200,
+        });
+      }) as typeof fetch;
+      const { collection } = await fetchPointFeed(
+        up,
+        fetchImpl,
+        dates ? { store: dates, today } : undefined,
+      );
+      return collection.features.find((f) => f.properties?.['source'] === 'bergen')!.properties![
+        'asOf'
+      ];
+    };
+    expect(await pull(bergenKml('a'), '2026-10-01')).toBe('2026-09-30');
+    // A re-signed photo URL is not a change to the list.
+    expect(await pull(bergenKml('b'), '2027-03-01')).toBe('2026-09-30');
+    // A new price is.
+    expect(await pull(bergenKml('b', '15'), '2027-06-01')).toBe('2027-06-01');
+    expect(await pull(bergenKml('c', '15'), '2028-06-01')).toBe('2027-06-01');
+    // No store (the health probe): no date rather than a made-up one.
+    expect(await pull(bergenKml('c', '15'), '2028-06-01', null)).toBeUndefined();
   });
 
   it('reads NVDB WKT latitude-first, and refuses a point outside Norway', () => {

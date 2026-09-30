@@ -18,6 +18,7 @@ const ARRAY_TAGS = new Set([
   'Track', // gx:Track (namespace prefixes are stripped)
   'when',
   'coord',
+  'Data',
 ]);
 
 function makeParser(): XMLParser {
@@ -220,6 +221,57 @@ export function parseKml(xml: string): TrackData {
   const data: TrackData = { segments: [], waypoints: [] };
   collectKml(kml as Node, data);
   return data;
+}
+
+/**
+ * One KML placemark read as a record rather than a track: its `ExtendedData`
+ * fields, which `parseKml` ignores, are where a register published as a
+ * Google My Maps layer keeps its attributes.
+ */
+export interface KmlPlacemark {
+  /** The innermost enclosing `<Folder>`'s name — a My Maps layer. */
+  folder?: string;
+  name?: string;
+  /** `<Data name>` → value, names and values trimmed, blank values left out. */
+  data: Record<string, string>;
+  /** The first `<Point>`, if the placemark has one. */
+  point?: { lat: number; lng: number };
+}
+
+function collectPlacemarks(node: Node, folder: string | undefined, out: KmlPlacemark[]): void {
+  for (const doc of asNodes(node['Document'])) collectPlacemarks(doc, folder, out);
+  for (const sub of asNodes(node['Folder'])) {
+    collectPlacemarks(sub, text(sub['name']) ?? folder, out);
+  }
+  for (const placemark of asNodes(node['Placemark'])) {
+    const pm: KmlPlacemark = { data: {} };
+    if (folder !== undefined) pm.folder = folder;
+    const name = text(placemark['name']);
+    if (name !== undefined) pm.name = name;
+    const extended = asNodes(placemark['ExtendedData'])[0];
+    for (const field of asNodes(extended?.['Data'])) {
+      const key = text(field['@_name']);
+      const value = text(field['value']);
+      if (key !== undefined && value !== undefined) pm.data[key] = value;
+    }
+    const point = asNodes(placemark['Point'])
+      .map((p) => parseKmlCoordinates(p['coordinates'])[0])
+      .find((p) => p !== undefined);
+    if (point) pm.point = { lat: point.lat, lng: point.lng };
+    out.push(pm);
+  }
+}
+
+/** Every placemark of a KML document, in document order. Throws on non-KML. */
+export function parseKmlPlacemarks(xml: string): KmlPlacemark[] {
+  const root = makeParser().parse(xml) as Node;
+  const kml = root['kml'];
+  if (typeof kml !== 'object' || kml === null) {
+    throw new Error('Not a KML file (missing <kml> root element)');
+  }
+  const out: KmlPlacemark[] = [];
+  collectPlacemarks(kml as Node, undefined, out);
+  return out;
 }
 
 /** Parse a KMZ archive (zipped KML): extracts and parses the first .kml entry. */

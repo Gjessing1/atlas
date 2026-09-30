@@ -257,9 +257,10 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // floor — the two are never close, and the risk this guards is a sheet index
   // that stops resolving rather than a thin drawing.
   'historic-maps': { kind: 'tile', lat: 59.91, lng: 10.75, z: 11, minBytes: 20000 },
-  // 721 NVDB road-side toilets + 82 open Oslo ones (2026-09-30). The probe
-  // pulls the real merge, so it also proves each register still parses into
-  // points; a floor well under the total, since rest areas open and close.
+  // 721 NVDB road-side toilets + 82 open Oslo + 54 placed Bergen + 37
+  // Stavanger (2026-09-30). The probe pulls the real merge, so it also proves
+  // each register still parses into points (and warns on any that yields
+  // none); a floor well under the total, since rest areas open and close.
   'public-toilets': { kind: 'count', minFeatures: 500 },
 };
 

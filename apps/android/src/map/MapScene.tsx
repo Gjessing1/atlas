@@ -276,7 +276,7 @@ interface MapSceneProps {
   overlayLabels: OverlayLabelData;
   /** Statskog hunting-fields coverage to draw (null = overlay off / not loaded). */
   huntingFields: HuntingFields | null;
-  /** Road-side + Oslo public toilets (null = overlay off / not loaded). */
+  /** Road-side + Oslo/Bergen/Stavanger public toilets (null = overlay off / not loaded). */
   publicToilets: VectorOverlayData | null;
   /** Rolling Regobs markers for the current viewport. */
   iceObservations: VectorOverlayData | null;

@@ -1,7 +1,15 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseKmlPlacemarks } from '@atlas/gpx';
 import type { FastifyReply } from 'fastify';
-import type { ArcGisVectorUpstream, NvdbPointSource, PointFeedUpstream } from './catalog.js';
+import type {
+  ArcGisVectorUpstream,
+  NvdbPointSource,
+  PointFeedSource,
+  PointFeedUpstream,
+  SourceDating,
+} from './catalog.js';
 import type { OverlayContext } from './context.js';
 
 /**
@@ -173,29 +181,161 @@ async function fetchNvdbPoints(
   return out;
 }
 
+/** A generous Norway box, as `nvdbPoint` uses: anything outside is a data error. */
+function inNorway(lng: number, lat: number): boolean {
+  return lat >= 57 && lat <= 81.5 && lng >= 3 && lng <= 34;
+}
+
+async function fetchText(url: string, fetchImpl: typeof fetch, what: string): Promise<string> {
+  const res = await fetchImpl(new URL(url), { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`${what} upstream ${res.status}`);
+  return res.text();
+}
+
+/**
+ * Every placemark of a KML source as `[lng, lat]` + record. A placemark
+ * imported into My Maps from a spreadsheet can keep its position only in
+ * `latitude`/`longitude` columns, with no `<Point>` (9 of Bergen's 58); one
+ * with neither is not on the map, and is skipped.
+ */
+async function fetchKmlPoints(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<{ coordinates: unknown; record: Record<string, unknown> }[]> {
+  const placemarks = parseKmlPlacemarks(await fetchText(url, fetchImpl, 'kml'));
+  const out: { coordinates: unknown; record: Record<string, unknown> }[] = [];
+  for (const pm of placemarks) {
+    const lng = pm.point?.lng ?? Number(pm.data['longitude']);
+    const lat = pm.point?.lat ?? Number(pm.data['latitude']);
+    if (!inNorway(lng, lat)) continue;
+    out.push({
+      coordinates: [lng, lat],
+      record: { ...pm.data, placemark: pm.name, folder: pm.folder },
+    });
+  }
+  return out;
+}
+
+async function fetchGeoJsonPoints(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<{ coordinates: unknown; record: Record<string, unknown> }[]> {
+  const body = JSON.parse(await fetchText(url, fetchImpl, 'geojson')) as FeatureCollection;
+  if (body.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
+    throw new Error('geojson: unexpected payload');
+  }
+  return body.features
+    .filter((f) => f.geometry?.type === 'Point')
+    .map((f) => ({ coordinates: f.geometry!.coordinates, record: f.properties ?? {} }));
+}
+
+async function sourcePoints(
+  source: PointFeedSource,
+  fetchImpl: typeof fetch,
+): Promise<{ coordinates: unknown; record: Record<string, unknown> }[]> {
+  const from = source.from;
+  switch (from.kind) {
+    case 'nvdb':
+      return (await fetchNvdbPoints(from, fetchImpl)).map(({ at, record }) => ({
+        coordinates: at,
+        record,
+      }));
+    case 'kml':
+      return fetchKmlPoints(from.url, fetchImpl);
+    case 'geojson':
+      return fetchGeoJsonPoints(from.url, fetchImpl);
+    case 'arcgis-vector':
+      return (await fetchArcGisVector(from, fetchImpl)).features
+        .filter((f) => f.geometry?.type === 'Point')
+        .map((f) => ({ coordinates: f.geometry!.coordinates, record: f.properties ?? {} }));
+  }
+}
+
+/**
+ * Where a `content`-dated source's last-change day is remembered between
+ * pulls: source URL → fingerprint of its translated features + the day that
+ * fingerprint was first seen. Without one (the health probe), such a source
+ * gets no `asOf` at all rather than a made-up one.
+ */
+export interface ContentDates {
+  read(): Promise<Record<string, { fingerprint: string; since: string }>>;
+  write(state: Record<string, { fingerprint: string; since: string }>): Promise<void>;
+}
+
+/** A `ContentDates` kept as one JSON file, written temp-file + rename. */
+export function fileContentDates(file: string): ContentDates {
+  return {
+    async read() {
+      try {
+        return JSON.parse(await readFile(file, 'utf8')) as Record<
+          string,
+          { fingerprint: string; since: string }
+        >;
+      } catch {
+        return {};
+      }
+    },
+    async write(state) {
+      await mkdir(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+      await writeFile(tmp, JSON.stringify(state, null, 1));
+      await rename(tmp, file);
+    },
+  };
+}
+
+/** A CKAN resource's `last_modified` (the publisher's upload date) as `YYYY-MM-DD`. */
+async function ckanResourceDate(url: string, fetchImpl: typeof fetch): Promise<string> {
+  const body = JSON.parse(await fetchText(url, fetchImpl, 'ckan')) as {
+    result?: { last_modified?: string | null; metadata_modified?: string | null };
+  };
+  const stamp = body.result?.last_modified ?? body.result?.metadata_modified;
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(stamp ?? '')?.[0];
+  if (!day) throw new Error('ckan: resource has no modification date');
+  return day;
+}
+
 /**
  * Pull every source of a `point-feed` layer and merge them into one
  * FeatureCollection of points in the layer's shared property set. Also returns
  * how many points each source contributed, which is what the health probe
  * checks: a source collapsing to zero is invisible in the merged total.
+ *
+ * A source with `dating` gets `asOf` stamped on each of its features. For
+ * `content` dating the fingerprint covers the *translated* features — a
+ * source's raw bytes can churn with nothing changed (My Maps re-signs its
+ * photo URLs on every export), and churn would make a dead list look fresh.
  */
 export async function fetchPointFeed(
   up: PointFeedUpstream,
   fetchImpl: typeof fetch,
+  dates?: { store: ContentDates; today: string },
 ): Promise<{ collection: FeatureCollection; perSource: number[] }> {
+  const state = dates ? await dates.store.read() : {};
+  let stateChanged = false;
+
+  const asOf = async (
+    dating: SourceDating,
+    key: string,
+    mine: GeoJsonFeature[],
+  ): Promise<string | undefined> => {
+    if (dating.kind === 'ckan-resource') return ckanResourceDate(dating.url, fetchImpl);
+    if (!dates) return undefined;
+    const fingerprint = createHash('sha256').update(JSON.stringify(mine)).digest('hex');
+    const known = state[key];
+    if (known?.fingerprint === fingerprint) return known.since;
+    // A first sighting takes the catalog's `firstSeen`, never today: with the
+    // state lost, the honest claim is "at least this old".
+    const since = known ? dates.today : dating.firstSeen;
+    state[key] = { fingerprint, since };
+    stateChanged = true;
+    return since;
+  };
+
   const bySource = await Promise.all(
     up.sources.map(async (source) => {
-      const raw =
-        source.from.kind === 'nvdb'
-          ? (await fetchNvdbPoints(source.from, fetchImpl)).map(({ at, record }) => ({
-              coordinates: at as unknown,
-              record,
-            }))
-          : (await fetchArcGisVector(source.from, fetchImpl)).features
-              .filter((f) => f.geometry?.type === 'Point')
-              .map((f) => ({ coordinates: f.geometry!.coordinates, record: f.properties ?? {} }));
       const mine: GeoJsonFeature[] = [];
-      for (const { coordinates, record } of raw) {
+      for (const { coordinates, record } of await sourcePoints(source, fetchImpl)) {
         const properties = source.properties(record);
         if (!properties) continue;
         mine.push({
@@ -204,9 +344,15 @@ export async function fetchPointFeed(
           properties: properties as Record<string, unknown>,
         });
       }
+      if (source.dating && mine.length > 0) {
+        const key = source.from.kind === 'nvdb' ? `nvdb:${source.from.typeId}` : source.from.url;
+        const day = await asOf(source.dating, key, mine);
+        if (day) for (const f of mine) f.properties = { ...f.properties, asOf: day };
+      }
       return mine;
     }),
   );
+  if (dates && stateChanged) await dates.store.write(state);
   // Flattened in catalog order, not arrival order, so the cached file (and a
   // client's draw order) is the same on every refetch.
   return {
@@ -226,6 +372,8 @@ export function registerFeaturesRoute(ctx: OverlayContext): void {
   const { app, byId, fetchImpl } = ctx;
   const cachePath = (id: string, rev: number) =>
     path.join(ctx.cacheDir, 'features', `${id}-v${rev}.geojson`);
+  // Not per-rev: when a list last changed outlives a change to how it is drawn.
+  const datesPath = (id: string) => path.join(ctx.cacheDir, 'features', `${id}-dates.json`);
 
   // De-dupe concurrent cold fetches: a national pull is slow, and the first
   // load of an on-by-default layer fans out from every open client at once.
@@ -251,7 +399,12 @@ export function registerFeaturesRoute(ctx: OverlayContext): void {
     const load = async (): Promise<string> => {
       const fc =
         up.kind === 'point-feed'
-          ? (await fetchPointFeed(up, fetchImpl)).collection
+          ? (
+              await fetchPointFeed(up, fetchImpl, {
+                store: fileContentDates(datesPath(layer.meta.id)),
+                today: new Date().toISOString().slice(0, 10),
+              })
+            ).collection
           : await fetchArcGisVector(up, fetchImpl);
       const json = JSON.stringify(fc);
       // Temp-file + rename so a concurrent reader never sees a half-written file.

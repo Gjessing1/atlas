@@ -18,8 +18,9 @@ const TOILET_COLOR = '#1d4ed8';
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
- * The public-toilets overlay (Curiosities): NVDB's road-side toilets and Oslo
- * kommune's own, merged server-side into one ~800-point GeoJSON. A blue disc
+ * The public-toilets overlay (Curiosities): NVDB's road-side toilets and the
+ * Oslo, Bergen and Stavanger city lists, merged server-side into one
+ * ~900-point GeoJSON. A blue disc
  * carrying the basemap sprite's `toilets` icon — the same glyph the Toilets
  * search category draws — and the name from z14 where the register has one.
  * What a tap says is `publicToiletIdentify` in @atlas/core.

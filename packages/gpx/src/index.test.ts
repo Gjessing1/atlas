@@ -8,6 +8,7 @@ import {
   computeTrackStats,
   parseGpx,
   parseKml,
+  parseKmlPlacemarks,
   parseKmz,
   parseTrackFile,
   trackBounds,
@@ -219,6 +220,39 @@ describe('parseKml', () => {
 
   it('rejects non-KML XML', () => {
     expect(() => parseKml('<foo/>')).toThrow(/kml/i);
+  });
+});
+
+describe('parseKmlPlacemarks', () => {
+  it('reads a My Maps layer’s placemarks with their ExtendedData and folder', () => {
+    // The shape Google My Maps exports (`/maps/d/kml?forcekml=1`), trimmed.
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Toilets</name>
+  <Folder><name>Public toilets</name>
+    <Placemark><name>Skur 8\u00a0</name>
+      <ExtendedData>
+        <Data name="Price (NOK) "><value>10</value></Data>
+        <Data name="Comment"><value/></Data>
+      </ExtendedData>
+      <Point><coordinates>5.3207818,60.3978994,0</coordinates></Point>
+    </Placemark>
+    <Placemark><name>No geometry</name></Placemark>
+  </Folder>
+  <Folder><name>BOF toilets</name>
+    <Placemark><name>Kvarven</name><Point><coordinates>5.24,60.39,0</coordinates></Point></Placemark>
+  </Folder>
+</Document></kml>`;
+    expect(parseKmlPlacemarks(xml)).toEqual([
+      {
+        folder: 'Public toilets',
+        name: 'Skur 8',
+        data: { 'Price (NOK)': '10' },
+        point: { lat: 60.3978994, lng: 5.3207818 },
+      },
+      { folder: 'Public toilets', name: 'No geometry', data: {} },
+      { folder: 'BOF toilets', name: 'Kvarven', data: {}, point: { lat: 60.39, lng: 5.24 } },
+    ]);
+    expect(() => parseKmlPlacemarks('<foo/>')).toThrow(/kml/i);
   });
 });
 

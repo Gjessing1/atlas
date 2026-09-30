@@ -1,4 +1,10 @@
-import { toiletFromNvdb, toiletFromOslo, type LayerMeta } from '@atlas/core';
+import {
+  toiletFromBergen,
+  toiletFromNvdb,
+  toiletFromOslo,
+  toiletFromStavanger,
+  type LayerMeta,
+} from '@atlas/core';
 import type { IdentifyFormat } from './identify.js';
 
 /**
@@ -273,19 +279,47 @@ export interface NvdbPointSource {
   typeId: number;
 }
 
+/** A plain GeoJSON FeatureCollection file in WGS84 — a city's open-data download. */
+export interface GeoJsonFileSource {
+  kind: 'geojson';
+  url: string;
+}
+
+/** A KML document of placemarks — in practice a Google My Maps export. */
+export interface KmlSource {
+  kind: 'kml';
+  url: string;
+}
+
+/**
+ * How a source's features learn the date their list last changed (stamped as
+ * the `asOf` property), for a list that can go stale without anyone saying so:
+ *
+ * - `ckan-resource`: the publisher's own date — `last_modified` from a CKAN
+ *   `resource_show` URL.
+ * - `content`: no date is published, so the backend keeps one — a fingerprint
+ *   of the source's translated features, and the day it last changed. A state
+ *   file that is lost falls back to `firstSeen`, the day the source was added,
+ *   so a wiped cache makes the list look older, never fresher.
+ */
+export type SourceDating =
+  { kind: 'ckan-resource'; url: string } | { kind: 'content'; firstSeen: string };
+
 /**
  * One register behind a `point-feed` layer, with its own translation into the
  * layer's shared property set. `properties` returning null drops the feature
  * (a closed toilet the register still carries).
  *
- * An ArcGIS source is handed its attributes as-is; an NVDB one gets its
- * `egenskaper` flattened to `navn → verdi`, plus `vegsystem` ("Fv5724") and
- * `adresse` from the object's location, so the translation never has to know
- * NVDB's JSON shape.
+ * An ArcGIS or GeoJSON source is handed its attributes as-is; an NVDB one gets
+ * its `egenskaper` flattened to `navn → verdi`, plus `vegsystem` ("Fv5724")
+ * and `adresse` from the object's location; a KML one gets its placemark's
+ * `ExtendedData` plus `placemark` (the title) and `folder` — so no
+ * translation ever has to know a wire format.
  */
 export interface PointFeedSource {
-  from: ArcGisVectorUpstream | NvdbPointSource;
+  from: ArcGisVectorUpstream | NvdbPointSource | GeoJsonFileSource | KmlSource;
   properties: (raw: Record<string, unknown>) => object | null;
+  dating?: SourceDating;
 }
 
 /**
@@ -3268,34 +3302,37 @@ export function norwegianLayers(): OverlayLayer[] {
     },
     {
       // Public toilets — the practical question every day out ends on, and one
-      // no Norwegian register answers whole. Two partial ones do, and this row
-      // is their union (see `PointFeedUpstream` and core's toilets.ts):
-      // Statens vegvesen's road-side toilets across the country, and Oslo
-      // kommune's own in the city, where NVDB has none at all.
+      // no Norwegian register answers whole. Partial ones do, and this row is
+      // their union (see `PointFeedUpstream` and core's toilets.ts): Statens
+      // vegvesen's road-side toilets across the country, where NVDB has none
+      // inside the cities, and the city lists of Oslo, Bergen and Stavanger.
       //
-      // Vector rather than a WMS pair: the two registers are served by two
-      // unrelated servers in two symbologies, 800-odd points nationally is
-      // exactly the size the whole-coverage pattern was built for, and a
-      // client-side tap can say whether the building is shut for winter — the
-      // one fact that decides a detour in October.
+      // Vector rather than a WMS pair: the registers are served by unrelated
+      // servers in unrelated formats, 900-odd points nationally is exactly the
+      // size the whole-coverage pattern was built for, and a client-side tap
+      // can say whether the building is shut for winter — the one fact that
+      // decides a detour in October.
       meta: {
         id: 'public-toilets',
-        rev: 1,
+        // 2: Bergen + Stavanger, and the hours/price/`asOf` properties.
+        rev: 2,
         title: 'Public toilets',
         description:
-          'Road-side toilets at rest areas and ferry quays across Norway, plus Oslo’s public ' +
-          'toilets. Tap for wheelchair access and whether it is closed for winter.',
+          'Road-side toilets at rest areas and ferry quays across Norway, plus the public ' +
+          'toilets of Oslo, Bergen and Stavanger. Tap for wheelchair access, opening hours and ' +
+          'whether it is closed for winter.',
         group: 'Amenities',
-        attribution: '© Statens vegvesen (NVDB), Oslo kommune',
+        attribution: '© Statens vegvesen (NVDB), Oslo kommune, Bergen kommune, Stavanger kommune',
         metadataUrl:
           'https://data.norge.no/en/datasets/034299ab-51a4-41f2-9301-35c994000ea6/offentlige-toalett',
         maxzoom: 18,
         defaultOpacity: 1,
         identify: false,
         coverageNote:
-          'No national toilet register exists. Outside Oslo this is the road authority’s rest ' +
-          'areas only — toilets in other towns, cafés and stations are not in it. Opening hours ' +
-          'are not recorded.',
+          'No national toilet register exists. Outside Oslo, Bergen and Stavanger this is the ' +
+          'road authority’s rest areas only — toilets in other towns, cafés and stations are ' +
+          'not in it. Only Bergen and Stavanger record opening hours, and their cards say how ' +
+          'old the list is.',
         profiles: ['curiosities'],
         vector: true,
       },
@@ -3315,6 +3352,31 @@ export function norwegianLayers(): OverlayLayer[] {
             // Wrapped, not passed: `Array#map`-style callers must never feed
             // the index into `now`.
             properties: (raw) => toiletFromOslo(raw),
+          },
+          {
+            // The map Bergen kommune's own toilet page links as its overview.
+            // The city's NLOD dataset is a 2017 snapshot of 14 toilets whose
+            // 2019 update is gone (404); this map is what the city keeps
+            // current, so it wins despite being a hand-kept My Maps layer.
+            // Its photos' URLs change on every export, which is why dating
+            // fingerprints the translated features and not the file.
+            from: {
+              kind: 'kml',
+              url: 'https://www.google.com/maps/d/kml?mid=1_7EnYjTqgSpg1vdDqjfyXsKMd3JHOcob&forcekml=1',
+            },
+            properties: toiletFromBergen,
+            dating: { kind: 'content', firstSeen: '2026-09-30' },
+          },
+          {
+            from: {
+              kind: 'geojson',
+              url: 'https://opencom.no/dataset/ad9335f3-a405-4811-86a2-e7cb34254e11/resource/e94d2f1b-5cfe-4367-97f8-3694d41d43fa/download/offentligetolettstavanger.geojson',
+            },
+            properties: toiletFromStavanger,
+            dating: {
+              kind: 'ckan-resource',
+              url: 'https://opencom.no/api/3/action/resource_show?id=e94d2f1b-5cfe-4367-97f8-3694d41d43fa',
+            },
           },
         ],
       },
