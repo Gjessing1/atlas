@@ -1,16 +1,17 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyReply } from 'fastify';
-import type { ArcGisVectorUpstream } from './catalog.js';
+import type { ArcGisVectorUpstream, NvdbPointSource, PointFeedUpstream } from './catalog.js';
 import type { OverlayContext } from './context.js';
 
 /**
- * Vector overlays sourced from ArcGIS REST (`arcgis-vector`): the whole
- * coverage pulled once as GeoJSON, disk-cached, and served at
- * `/api/overlay/:id/features`. The client renders + hit-tests it directly (the
- * speed-camera pattern, generalized). The speed-camera layer keeps its own
- * `/features` route on the NVDB data; this handles every catalog layer whose
- * upstream is `arcgis-vector`, and 404s for anything else.
+ * Vector overlays sourced from ArcGIS REST (`arcgis-vector`) or merged from
+ * several registers (`point-feed`): the whole coverage pulled once as GeoJSON,
+ * disk-cached, and served at `/api/overlay/:id/features`. The client renders +
+ * hit-tests it directly (the speed-camera pattern, generalized). The
+ * speed-camera layer keeps its own `/features` route on the NVDB data; this
+ * handles every catalog layer with one of these two upstreams, and 404s for
+ * anything else.
  *
  * The upstream is asked to generalize server-side (`maxAllowableOffset`) so a
  * national polygon set arrives at a few MB instead of tens; the merged result
@@ -86,6 +87,134 @@ export async function fetchArcGisVector(
   return { type: 'FeatureCollection', features };
 }
 
+const NVDB_API = 'https://nvdbapiles.atlas.vegvesen.no/vegobjekter/api/v4/vegobjekter';
+/** NVDB's page cap; a type bigger than MAX_PAGES of these is not a point overlay. */
+const NVDB_PAGE_SIZE = 1000;
+
+interface NvdbObject {
+  egenskaper?: { navn?: string; verdi?: unknown }[];
+  geometri?: { wkt?: string };
+  lokasjon?: {
+    geometri?: { wkt?: string };
+    adresser?: { navn?: string }[];
+    vegsystemreferanser?: { vegsystem?: { vegkategori?: string; nummer?: number } }[];
+  };
+}
+
+/**
+ * `POINT Z (lat lng z)` → `[lng, lat]`. NVDB writes srid=4326 WKT in the CRS's
+ * *axis* order, latitude first — the opposite of GeoJSON, and of what every
+ * other WKT source here does. Anything outside a generous Norway box is
+ * treated as unparseable rather than drawn in the sea off Africa.
+ */
+export function nvdbPoint(wkt: string | undefined): [number, number] | null {
+  const m = /^POINT(?: Z)?\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)/.exec(wkt ?? '');
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!(lat >= 57 && lat <= 81.5 && lng >= 3 && lng <= 34)) return null;
+  return [lng, lat];
+}
+
+/** "E6", "Fv5724", "Rv3" — the vegkategori letter is E/R/F/K/P/S. */
+function roadRef(obj: NvdbObject): string | undefined {
+  const vs = obj.lokasjon?.vegsystemreferanser?.[0]?.vegsystem;
+  if (!vs?.vegkategori || typeof vs.nummer !== 'number') return undefined;
+  return vs.vegkategori === 'E' ? `E${vs.nummer}` : `${vs.vegkategori}v${vs.nummer}`;
+}
+
+/** The flattened record a `PointFeedSource.properties` receives for an NVDB object. */
+export function nvdbRecord(obj: NvdbObject): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const e of obj.egenskaper ?? []) if (e.navn) out[e.navn] = e.verdi;
+  const road = roadRef(obj);
+  if (road) out['vegsystem'] = road;
+  const street = obj.lokasjon?.adresser?.[0]?.navn;
+  if (street) out['adresse'] = street;
+  return out;
+}
+
+/**
+ * Every object of one NVDB type as `[lng, lat]` + flattened record. Objects
+ * placed only by reference to the road network carry no `geometri` of their
+ * own (99 of 721 toilets), so the location's derived point stands in.
+ */
+async function fetchNvdbPoints(
+  src: NvdbPointSource,
+  fetchImpl: typeof fetch,
+): Promise<{ at: [number, number]; record: Record<string, unknown> }[]> {
+  const out: { at: [number, number]; record: Record<string, unknown> }[] = [];
+  let start: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL(`${NVDB_API}/${src.typeId}`);
+    url.searchParams.set('inkluder', 'egenskaper,lokasjon,geometri');
+    url.searchParams.set('srid', '4326');
+    url.searchParams.set('antall', String(NVDB_PAGE_SIZE));
+    if (start) url.searchParams.set('start', start);
+    const res = await fetchImpl(url, {
+      headers: { 'X-Client': 'atlas', Accept: 'application/json' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`nvdb upstream ${res.status}`);
+    const body = (await res.json()) as {
+      objekter?: NvdbObject[];
+      metadata?: { returnert?: number; neste?: { start?: string } };
+    };
+    if (!Array.isArray(body.objekter)) throw new Error('nvdb: unexpected payload');
+    for (const obj of body.objekter) {
+      const at = nvdbPoint(obj.geometri?.wkt) ?? nvdbPoint(obj.lokasjon?.geometri?.wkt);
+      if (at) out.push({ at, record: nvdbRecord(obj) });
+    }
+    // NVDB always offers a `neste` cursor, even past the end; a short page is
+    // what actually says there is no more.
+    start = body.metadata?.neste?.start;
+    if (!start || body.objekter.length < NVDB_PAGE_SIZE) break;
+  }
+  return out;
+}
+
+/**
+ * Pull every source of a `point-feed` layer and merge them into one
+ * FeatureCollection of points in the layer's shared property set. Also returns
+ * how many points each source contributed, which is what the health probe
+ * checks: a source collapsing to zero is invisible in the merged total.
+ */
+export async function fetchPointFeed(
+  up: PointFeedUpstream,
+  fetchImpl: typeof fetch,
+): Promise<{ collection: FeatureCollection; perSource: number[] }> {
+  const bySource = await Promise.all(
+    up.sources.map(async (source) => {
+      const raw =
+        source.from.kind === 'nvdb'
+          ? (await fetchNvdbPoints(source.from, fetchImpl)).map(({ at, record }) => ({
+              coordinates: at as unknown,
+              record,
+            }))
+          : (await fetchArcGisVector(source.from, fetchImpl)).features
+              .filter((f) => f.geometry?.type === 'Point')
+              .map((f) => ({ coordinates: f.geometry!.coordinates, record: f.properties ?? {} }));
+      const mine: GeoJsonFeature[] = [];
+      for (const { coordinates, record } of raw) {
+        const properties = source.properties(record);
+        if (!properties) continue;
+        mine.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates },
+          properties: properties as Record<string, unknown>,
+        });
+      }
+      return mine;
+    }),
+  );
+  // Flattened in catalog order, not arrival order, so the cached file (and a
+  // client's draw order) is the same on every refetch.
+  return {
+    collection: { type: 'FeatureCollection', features: bySource.flat() },
+    perSource: bySource.map((mine) => mine.length),
+  };
+}
+
 function serve(reply: FastifyReply, body: string) {
   return reply
     .header('content-type', 'application/json; charset=utf-8')
@@ -104,7 +233,10 @@ export function registerFeaturesRoute(ctx: OverlayContext): void {
 
   app.get<{ Params: { id: string } }>('/api/overlay/:id/features', async (request, reply) => {
     const layer = byId.get(request.params.id);
-    const up = layer?.upstream.kind === 'arcgis-vector' ? layer.upstream : undefined;
+    const up =
+      layer?.upstream.kind === 'arcgis-vector' || layer?.upstream.kind === 'point-feed'
+        ? layer.upstream
+        : undefined;
     if (!layer || !up) return reply.code(404).send({ error: 'layer has no features' });
 
     const file = cachePath(layer.meta.id, layer.meta.rev);
@@ -117,7 +249,10 @@ export function registerFeaturesRoute(ctx: OverlayContext): void {
     }
 
     const load = async (): Promise<string> => {
-      const fc = await fetchArcGisVector(up, fetchImpl);
+      const fc =
+        up.kind === 'point-feed'
+          ? (await fetchPointFeed(up, fetchImpl)).collection
+          : await fetchArcGisVector(up, fetchImpl);
       const json = JSON.stringify(fc);
       // Temp-file + rename so a concurrent reader never sees a half-written file.
       try {

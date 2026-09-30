@@ -1,4 +1,4 @@
-import type { LayerMeta } from '@atlas/core';
+import { toiletFromNvdb, toiletFromOslo, type LayerMeta } from '@atlas/core';
 import type { IdentifyFormat } from './identify.js';
 
 /**
@@ -266,9 +266,46 @@ export interface ArcGisVectorUpstream {
   where?: string;
 }
 
+/** A whole NVDB object type pulled as points (`nvdbapiles` v4, WGS84 out). */
+export interface NvdbPointSource {
+  kind: 'nvdb';
+  /** Vegobjekttype id, e.g. 243 Toalettanlegg. */
+  typeId: number;
+}
+
+/**
+ * One register behind a `point-feed` layer, with its own translation into the
+ * layer's shared property set. `properties` returning null drops the feature
+ * (a closed toilet the register still carries).
+ *
+ * An ArcGIS source is handed its attributes as-is; an NVDB one gets its
+ * `egenskaper` flattened to `navn → verdi`, plus `vegsystem` ("Fv5724") and
+ * `adresse` from the object's location, so the translation never has to know
+ * NVDB's JSON shape.
+ */
+export interface PointFeedSource {
+  from: ArcGisVectorUpstream | NvdbPointSource;
+  properties: (raw: Record<string, unknown>) => object | null;
+}
+
+/**
+ * A point overlay merged from several registers into one GeoJSON coverage,
+ * served at `/api/overlay/:id/features` exactly like `arcgis-vector`.
+ *
+ * For a subject no single register covers: public toilets are the case — NVDB
+ * has the country's road-side toilets and none in Oslo, Oslo kommune has the
+ * city's own. One source failing fails the pull (the disk cache then serves
+ * yesterday's merge), rather than quietly serving half the country.
+ */
+export interface PointFeedUpstream {
+  kind: 'point-feed';
+  sources: PointFeedSource[];
+}
+
 export interface OverlayLayer {
   meta: LayerMeta;
-  upstream: WmsUpstream | XyzUpstream | CompositeRasterUpstream | ArcGisVectorUpstream;
+  upstream:
+    WmsUpstream | XyzUpstream | CompositeRasterUpstream | ArcGisVectorUpstream | PointFeedUpstream;
   /**
    * The redistributable stand-in an offline imagery pack is cut from, served
    * at `/api/overlay/:id/offline/:z/:x/:y.png` and nowhere else. Present
@@ -3227,6 +3264,59 @@ export function norwegianLayers(): OverlayLayer[] {
         // returns *one* named sheet by id, so it has nothing to draw without
         // one. `amt1` is the whole series, mosaicked.
         layers: 'amt1',
+      },
+    },
+    {
+      // Public toilets — the practical question every day out ends on, and one
+      // no Norwegian register answers whole. Two partial ones do, and this row
+      // is their union (see `PointFeedUpstream` and core's toilets.ts):
+      // Statens vegvesen's road-side toilets across the country, and Oslo
+      // kommune's own in the city, where NVDB has none at all.
+      //
+      // Vector rather than a WMS pair: the two registers are served by two
+      // unrelated servers in two symbologies, 800-odd points nationally is
+      // exactly the size the whole-coverage pattern was built for, and a
+      // client-side tap can say whether the building is shut for winter — the
+      // one fact that decides a detour in October.
+      meta: {
+        id: 'public-toilets',
+        rev: 1,
+        title: 'Public toilets',
+        description:
+          'Road-side toilets at rest areas and ferry quays across Norway, plus Oslo’s public ' +
+          'toilets. Tap for wheelchair access and whether it is closed for winter.',
+        group: 'Amenities',
+        attribution: '© Statens vegvesen (NVDB), Oslo kommune',
+        metadataUrl:
+          'https://data.norge.no/en/datasets/034299ab-51a4-41f2-9301-35c994000ea6/offentlige-toalett',
+        maxzoom: 18,
+        defaultOpacity: 1,
+        identify: false,
+        coverageNote:
+          'No national toilet register exists. Outside Oslo this is the road authority’s rest ' +
+          'areas only — toilets in other towns, cafés and stations are not in it. Opening hours ' +
+          'are not recorded.',
+        profiles: ['curiosities'],
+        vector: true,
+      },
+      upstream: {
+        kind: 'point-feed',
+        sources: [
+          { from: { kind: 'nvdb', typeId: 243 }, properties: toiletFromNvdb },
+          {
+            from: {
+              kind: 'arcgis-vector',
+              url: 'https://geodata.bymoslo.no/arcgis/rest/services/geodata/Temadata_Publikum/MapServer/4/query',
+              outFields:
+                'navn,objekttype,toalettype,tilgjengelighetsvurdering,adresse,forvalter,kommentar,startdato,sluttdato',
+              // Points: nothing to generalise, but the parameter is always sent.
+              simplifyDeg: 0,
+            },
+            // Wrapped, not passed: `Array#map`-style callers must never feed
+            // the index into `now`.
+            properties: (raw) => toiletFromOslo(raw),
+          },
+        ],
       },
     },
   ];

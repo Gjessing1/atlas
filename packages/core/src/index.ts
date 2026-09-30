@@ -36,6 +36,7 @@ export * from './settings.js';
 export * from './share.js';
 export * from './stands.js';
 export * from './terrain.js';
+export * from './toilets.js';
 export * from './wiki-language.js';
 
 export {

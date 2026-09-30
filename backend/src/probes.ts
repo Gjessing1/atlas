@@ -1,7 +1,8 @@
 import { normalizeLayerOptions } from '@atlas/core';
 import { buildEnturVehiclesRequest, parseEnturVehiclesResponse } from '@atlas/transit';
 import type { FastifyBaseLogger } from 'fastify';
-import { rasterBandAtZoom, type OverlayLayer } from './overlay/catalog.js';
+import { rasterBandAtZoom, type OverlayLayer, type PointFeedUpstream } from './overlay/catalog.js';
+import { fetchPointFeed } from './overlay/features.js';
 import { optionGetMapParams } from './overlay/options.js';
 import { substituteEnv, tileCoords, wmsBaseParams } from './overlay/wms.js';
 import type { StatusRegistry } from './status.js';
@@ -256,6 +257,10 @@ export const OVERLAY_PROBES: Record<string, LayerProbe> = {
   // floor — the two are never close, and the risk this guards is a sheet index
   // that stops resolving rather than a thin drawing.
   'historic-maps': { kind: 'tile', lat: 59.91, lng: 10.75, z: 11, minBytes: 20000 },
+  // 721 NVDB road-side toilets + 82 open Oslo ones (2026-09-30). The probe
+  // pulls the real merge, so it also proves each register still parses into
+  // points; a floor well under the total, since rest areas open and close.
+  'public-toilets': { kind: 'count', minFeatures: 500 },
 };
 
 /** ArcGIS answers errors with HTTP 200 and an `error` object — unwrap both. */
@@ -327,6 +332,41 @@ function countProbe(
   };
 }
 
+/**
+ * Count probe for a merged point layer. There is no count endpoint for a
+ * merge, so this pulls the real thing (a few hundred points per source), and
+ * judges each source separately: one register going dark would only dent the
+ * total, and "the Oslo half is gone" is exactly what a total hides.
+ */
+function pointFeedProbe(
+  spec: Omit<ProbeSpec, 'run'>,
+  up: PointFeedUpstream,
+  minFeatures: number,
+): ProbeSpec {
+  const name = (i: number): string => {
+    const from = up.sources[i]!.from;
+    return from.kind === 'nvdb' ? `NVDB ${from.typeId}` : new URL(from.url).hostname;
+  };
+  return {
+    ...spec,
+    async run(fetchImpl) {
+      const { perSource } = await fetchPointFeed(up, fetchImpl);
+      const total = perSource.reduce((a, b) => a + b, 0);
+      const empty = perSource.flatMap((n, i) => (n === 0 ? [name(i)] : []));
+      return {
+        ok: true,
+        detail: perSource.map((n, i) => `${groupDigits(n)} ${name(i)}`).join(' + '),
+        warning:
+          empty.length > 0
+            ? `no points from ${empty.join(', ')}`
+            : total < minFeatures
+              ? `only ${groupDigits(total)} points — expected at least ${groupDigits(minFeatures)}`
+              : null,
+      };
+    },
+  };
+}
+
 /** Bytes → "12.0 kB", for the detail line. */
 const kb = (bytes: number): string => `${(bytes / 1000).toFixed(1)} kB`;
 
@@ -384,6 +424,9 @@ export function overlayProbe(
   const configured = layer.upstream;
 
   if (probe.kind === 'count') {
+    if (configured.kind === 'point-feed') {
+      return pointFeedProbe(spec, configured, probe.minFeatures);
+    }
     if (configured.kind !== 'arcgis-vector') {
       // A count probe on a raster layer would silently check nothing.
       return {
@@ -393,7 +436,7 @@ export function overlayProbe(
     }
     return countProbe(spec, configured.url, probe.minFeatures);
   }
-  if (configured.kind === 'arcgis-vector') {
+  if (configured.kind === 'arcgis-vector' || configured.kind === 'point-feed') {
     return { ...spec, run: async () => ({ ok: false, message: 'tile probe on a vector layer' }) };
   }
 

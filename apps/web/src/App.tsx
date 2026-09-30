@@ -107,6 +107,7 @@ import { useCameraPersistence } from './map/useCameraPersistence.js';
 import { useNavLayers } from './map/useNavLayers.js';
 import { useOverlayIdentify, useOverlayLabels, useOverlayLayers } from './map/useOverlayLayers.js';
 import { useHuntingFieldsLayer } from './map/useHuntingFieldsLayer.js';
+import { usePublicToiletsLayer } from './map/usePublicToiletsLayer.js';
 import { useIceObservationsLayer } from './map/useIceObservationsLayer.js';
 import { useSatellitesLayer } from './map/useSatellitesLayer.js';
 import { useExploreLayer } from './map/useExploreLayer.js';
@@ -536,6 +537,7 @@ export function App() {
   useTransitVehicleLayer(map, overlays, mapViewport);
   useHuntingFieldsLayer(map, overlays);
   useIceObservationsLayer(map, overlays);
+  usePublicToiletsLayer(map, overlays);
   // Curiosities' two sky layers. Separate rows so the Starlink constellation's
   // eleven thousand objects stay opt-in beside the couple of hundred that make
   // up the stations and the naked-eye set.

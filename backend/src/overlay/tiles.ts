@@ -424,11 +424,11 @@ export function registerTileRoute(ctx: OverlayContext): void {
   }>('/api/overlay/:id/:z/:x/:y.png', async (request, reply) => {
     const layer = byId.get(request.params.id);
     if (!layer) return reply.code(404).send({ error: 'unknown layer' });
-    // Vector layers (arcgis-vector) have no raster tiles — they answer at
+    // Vector layers (arcgis-vector, point-feed) have no raster tiles — they answer at
     // `/features`. Clients that honour `LayerMeta.vector` never ask here; this
     // just refuses a hand-typed tile URL rather than mis-reading the upstream.
     const upstream = layer.upstream;
-    if (upstream.kind === 'arcgis-vector') {
+    if (upstream.kind === 'arcgis-vector' || upstream.kind === 'point-feed') {
       return reply.code(404).send({ error: 'layer has no raster tiles' });
     }
     const tile = tileCoordinates(request.params, layer.meta.maxzoom);

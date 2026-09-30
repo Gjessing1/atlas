@@ -4,6 +4,7 @@ import {
   identifyOverlays,
   layerOptionSignature,
   overlayTileUrl,
+  publicToiletIdentify,
   snapLabelBbox,
   speedCameraIdentify,
   trafficFlowIdentify,
@@ -19,6 +20,7 @@ import type maplibregl from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 import { HUNTING_FIELDS_FILL_LAYER } from './useHuntingFieldsLayer.js';
 import { ICE_OBSERVATION_IDENTIFY_LAYERS } from './useIceObservationsLayer.js';
+import { PUBLIC_TOILET_IDENTIFY_LAYERS } from './usePublicToiletsLayer.js';
 import { satelliteIdentifyLayers } from './useSatellitesLayer.js';
 import { SPEED_CAMERA_IDENTIFY_LAYERS } from './useSpeedCameraLayer.js';
 import { TRAFFIC_FLOW_IDENTIFY_LAYERS } from './useTrafficFlowLayer.js';
@@ -405,6 +407,7 @@ export function useOverlayIdentify(
         // the same road, so the tapped one has to be chosen rather than taken.
         trafficFlowIdentify(tappedFlowProperties(at, hits(TRAFFIC_FLOW_IDENTIFY_LAYERS))),
         huntingFieldIdentify(drawn([HUNTING_FIELDS_FILL_LAYER])),
+        publicToiletIdentify(drawn(PUBLIC_TOILET_IDENTIFY_LAYERS)),
         weatherWarningIdentify(drawn(WEATHER_WARNING_IDENTIFY_LAYERS)),
         lightningIdentify(drawn(LIGHTNING_IDENTIFY_LAYERS)),
       ].filter((group): group is OverlayIdentifyGroup => group !== null);

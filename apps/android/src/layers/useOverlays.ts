@@ -8,6 +8,7 @@ import {
   jsonSetting,
   layerOptionSignature,
   overlayTileUrl,
+  PUBLIC_TOILETS_ID,
   readSetting,
   SATELLITES_ID,
   STARLINK_ID,
@@ -27,6 +28,7 @@ import type { UserData } from '../useUserData';
 // means (hunting-field polygons vs. camera dots and average-speed lines).
 const RENDERABLE_VECTOR_IDS = new Set([
   'statskog-jaktfelt',
+  PUBLIC_TOILETS_ID,
   'speed-cameras',
   'ice-observations',
   'traffic',

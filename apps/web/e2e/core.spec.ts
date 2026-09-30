@@ -737,6 +737,85 @@ test('a freshly launched batch is drawn as a purple train', async ({ page }) => 
   await expect(card).toContainText(/one every \d+ s/);
 });
 
+test('Curiosities draws public toilets and says whether one is shut for winter', async ({
+  page,
+}) => {
+  await page.route('**/api/layers**', (route) =>
+    route.fulfill({
+      json: {
+        layers: [
+          {
+            id: 'public-toilets',
+            rev: 1,
+            title: 'Public toilets',
+            description: 'Road-side toilets and Oslo’s public toilets',
+            group: 'Amenities',
+            attribution: '© Statens vegvesen (NVDB), Oslo kommune',
+            maxzoom: 18,
+            defaultOpacity: 1,
+            identify: false,
+            profiles: ['curiosities'],
+            vector: true,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/overlay/public-toilets/features**', (route) =>
+    route.fulfill({
+      json: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [10, 60] },
+            properties: {
+              source: 'nvdb',
+              accessible: 'yes',
+              winter: 'Closed 15 Oct – 15 Mar',
+              kind: 'Flush toilet',
+              count: 2,
+              road: 'Fv5724 (Oldedalsvegen)',
+              operator: 'County council',
+            },
+          },
+        ],
+      },
+    }),
+  );
+
+  await page.goto('/#map=12/60/10');
+  await waitForMap(page);
+  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await page.getByRole('button', { name: /^Map layers/ }).click();
+  await page.getByRole('switch', { name: 'Public toilets' }).click();
+  await page.keyboard.press('Escape');
+
+  const marker = await project(page, 60, 10);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ([x, y]) =>
+          window.__atlasMap!.queryRenderedFeatures(
+            [
+              [x! - 10, y! - 10],
+              [x! + 10, y! + 10],
+            ],
+            { layers: ['atlas-public-toilets-disc'] },
+          ).length,
+        marker,
+      ),
+    )
+    .toBe(1);
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  await page.mouse.click(canvas.x + marker[0], canvas.y + marker[1]);
+  const identify = page.getByTestId('place-card-identify');
+  await expect(identify).toContainText('Roadside toilet');
+  await expect(identify).toContainText('Closed 15 Oct – 15 Mar');
+  await expect(identify).toContainText('2 flush toilets');
+  await expect(identify).toContainText('Fv5724 (Oldedalsvegen)');
+});
+
 test('Fish & Hunt shows live ice times and saves a permit as a filled area', async ({ page }) => {
   await page.route('**/api/layers**', (route) =>
     route.fulfill({

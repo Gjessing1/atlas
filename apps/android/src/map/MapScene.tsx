@@ -97,6 +97,9 @@ export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
 /** Fill layer of the Statskog jaktfelt overlay — tapped for the field's identify card. */
 export const HUNT_FIELDS_FILL_LAYER_ID = 'atlas-jaktfelt-fill';
 
+/** The public-toilets overlay's icon and disc — tapped for the toilet's card. */
+export const PUBLIC_TOILET_LAYER_IDS = ['atlas-public-toilets-icon', 'atlas-public-toilets-disc'];
+
 /**
  * Layers of the ATK speed-camera overlay a tap can land on — the dot and the
  * average-speed line (its white casing is the wider target, so it is listed
@@ -273,6 +276,8 @@ interface MapSceneProps {
   overlayLabels: OverlayLabelData;
   /** Statskog hunting-fields coverage to draw (null = overlay off / not loaded). */
   huntingFields: HuntingFields | null;
+  /** Road-side + Oslo public toilets (null = overlay off / not loaded). */
+  publicToilets: VectorOverlayData | null;
   /** Rolling Regobs markers for the current viewport. */
   iceObservations: VectorOverlayData | null;
   /** Rolling Frost lightning strikes for the current viewport. */
@@ -371,6 +376,7 @@ export function MapScene({
   overlays,
   overlayLabels,
   huntingFields,
+  publicToilets,
   iceObservations,
   lightning,
   satellites,
@@ -880,6 +886,56 @@ export function MapScene({
                 'text-halo-color': '#ffffff',
                 'text-halo-width': 1.4,
                 'text-opacity': huntingFields.opacity,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Public toilets: blue disc with the basemap sprite's toilets glyph
+          (the one the Toilets search category draws), name from z14. A tap
+          opens the shared card (useMapPress → PUBLIC_TOILET_LAYER_IDS). */}
+        {!inPip && publicToilets ? (
+          <GeoJSONSource id="atlas-public-toilets" data={publicToilets.data}>
+            <Layer
+              type="circle"
+              id="atlas-public-toilets-disc"
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 10, 8, 14, 12],
+                'circle-color': '#1d4ed8',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1, 10, 1.5],
+                'circle-opacity': publicToilets.opacity,
+                'circle-stroke-opacity': publicToilets.opacity,
+              }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-public-toilets-icon"
+              minzoom={10}
+              layout={{
+                'icon-image': 'toilets',
+                'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.55, 14, 0.8],
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+              }}
+              paint={{ 'icon-opacity': publicToilets.opacity }}
+            />
+            <Layer
+              type="symbol"
+              id="atlas-public-toilets-name"
+              minzoom={14}
+              layout={{
+                'text-field': ['coalesce', ['get', 'name'], ''],
+                'text-font': ['Noto Sans Bold'],
+                'text-size': 11,
+                'text-anchor': 'top',
+                'text-offset': [0, 1.3],
+                'text-optional': true,
+              }}
+              paint={{
+                'text-color': '#172033',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1.5,
+                'text-opacity': publicToilets.opacity,
               }}
             />
           </GeoJSONSource>

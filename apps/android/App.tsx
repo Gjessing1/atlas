@@ -41,6 +41,7 @@ import {
   mapProfileForRouting,
   placeIsVisible,
   poiTilesUrl,
+  PUBLIC_TOILETS_ID,
   resolveInaturOffer,
   SATELLITES_ID,
   savedPlaceAt,
@@ -107,6 +108,7 @@ import { DEFAULT_VIEW, MapScene } from './src/map/MapScene';
 import { useBootCamera } from './src/map/useBootCamera';
 import { useMapPress } from './src/map/useMapPress';
 import { useHuntingFields } from './src/layers/useHuntingFields';
+import { useVectorOverlay } from './src/layers/useVectorOverlay';
 import { useIceObservations } from './src/layers/useIceObservations';
 import { useLightning } from './src/layers/useLightning';
 import { useSatellites } from './src/layers/useSatellites';
@@ -720,6 +722,7 @@ function AppInner() {
     };
   }, [overlaysCtl.derived, camera.mapViewport, keeping, keptOffline]);
   const huntingFields = useHuntingFields(overlays, serverOrigin);
+  const publicToilets = useVectorOverlay(overlays, serverOrigin, PUBLIC_TOILETS_ID);
   const iceObservations = useIceObservations(overlays, serverOrigin, camera.mapViewport);
   const lightningOn = overlays.some((overlay) => overlay.meta.id === LIGHTNING_OBSERVATIONS_ID);
   const auroraOn = overlays.some((overlay) => overlay.meta.id === AURORA_FORECAST_ID);
@@ -1600,6 +1603,7 @@ function AppInner() {
         overlays={overlays}
         overlayLabels={overlayLabels}
         huntingFields={huntingFields}
+        publicToilets={publicToilets}
         iceObservations={iceObservations}
         lightning={lightning}
         satellites={satellites}
