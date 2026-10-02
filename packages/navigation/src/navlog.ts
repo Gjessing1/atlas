@@ -361,6 +361,21 @@ function applyRecord(trip: TripBuilder, parsed: NavDiagnosticRecord, atMs: numbe
       );
       return;
     }
+    case 'map-route-layers': {
+      const active = text(parsed.activeDigest) ?? '?';
+      const drawn = text(parsed.lineDigest) ?? '?';
+      const alternatives = Array.isArray(parsed.alternatives)
+        ? parsed.alternatives
+            .map((value) => text(record(value)?.digest))
+            .filter((digest): digest is string => digest !== null)
+        : [];
+      trip.add(
+        atMs,
+        'map-route-layers',
+        `active ${active} · drawn ${drawn} · grey ${alternatives.length ? alternatives.join(', ') : 'none'}`,
+      );
+      return;
+    }
     case 'route-repriced': {
       const delta = num(parsed.deltaMs);
       trip.add(

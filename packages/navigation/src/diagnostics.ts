@@ -210,6 +210,8 @@ export interface CompactNavState {
   raw: [number, number] | null;
   offRouteM: number | null;
   traveledM: number | null;
+  /** End of the grey travelled trail, which can differ from matched progress. */
+  trailM: number | null;
   remainingM: number | null;
   remainingMs: number;
   trafficMs: number;
@@ -244,6 +246,7 @@ export function compactNavState(state: NavState): CompactNavState {
     raw: coord(state.raw),
     offRouteM: round(state.offRouteM, 1),
     traveledM: round(state.traveledM, 1),
+    trailM: round(state.trailM, 1),
     remainingM: round(state.distanceRemainingM, 1),
     remainingMs: Math.round(state.timeRemainingMs),
     trafficMs: Math.round(state.trafficDelayMs),

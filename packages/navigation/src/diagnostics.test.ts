@@ -239,6 +239,12 @@ describe('NavTripStats', () => {
     expect(logged.snapped).toBe(live.snapped);
     expect(logged.offRouteM).toBeCloseTo(live.offRouteM, 0);
   });
+
+  it('records the rendered trail boundary separately from matched progress', () => {
+    const logged = compactNavState(state({ traveledM: 125.6, trailM: 98.4 }));
+    expect(logged.traveledM).toBe(125.6);
+    expect(logged.trailM).toBe(98.4);
+  });
 });
 
 /** One line of a log, the way the app writes it. */
@@ -272,6 +278,13 @@ describe('analyzeNavLog', () => {
         reason: 'departure',
         bankedM: 0,
         route: { digest: 'aaaa1111', distanceM: 34200, timeMs: 1_800_000, maneuvers: 42 },
+      }),
+      line(startMs + 3500, {
+        event: 'map-route-layers',
+        trip: 'abc',
+        activeDigest: 'aaaa1111',
+        lineDigest: 'aaaa1111',
+        alternatives: [{ digest: 'bbbb2222', start: { lat: 59.9, lng: 10.7 } }],
       }),
     ];
     for (let i = 0; i < 5; i++) {
@@ -360,6 +373,7 @@ describe('analyzeNavLog', () => {
     const kinds = (trip?.incidents ?? []).map((incident) => incident.kind);
     expect(kinds).toContain('route');
     expect(kinds).toContain('route-adopted');
+    expect(kinds).toContain('map-route-layers');
     expect(kinds).toContain('off-route');
     expect(kinds).toContain('corridor');
     expect(kinds).toContain('marker');
@@ -374,6 +388,9 @@ describe('analyzeNavLog', () => {
     const marker = trip?.incidents.find((incident) => incident.kind === 'marker');
     expect(marker?.detail).toBe('wrong roundabout exit');
     expect(marker?.offsetMs).toBe(10_000);
+    expect(trip?.incidents.find((incident) => incident.kind === 'map-route-layers')?.detail).toBe(
+      'active aaaa1111 · drawn aaaa1111 · grey bbbb2222',
+    );
   });
 
   it('rebuilds the summary from the records, beside the one the app wrote', () => {

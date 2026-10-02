@@ -29,9 +29,14 @@ import {
   type MapRef,
 } from '@maplibre/maplibre-react-native';
 import { WEATHER_FRAME_FADE } from '@atlas/conditions';
-import { cumulativeDistances, maneuverArrowsGeoJSON, subPolyline } from '@atlas/navigation';
+import {
+  cumulativeDistances,
+  maneuverArrowsGeoJSON,
+  routeDigest,
+  subPolyline,
+} from '@atlas/navigation';
 import type { PlaceRecord } from '@atlas/storage';
-import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { HuntingFields } from '../layers/useHuntingFields';
@@ -57,6 +62,7 @@ import { useSideInsets } from '../ui/insets';
 import { MapCompass } from './MapCompass';
 import { ScaleBar } from './ScaleBar';
 import type { TrackGeometry } from '../useTrackGeometry';
+import { logNavigationDiagnostic } from '../nav/diagnostics';
 
 /** Dashed rectangles showing what the downloaded offline packs cover. */
 function packOutlinesGeoJSON(packs: LocalPack[]) {
@@ -459,6 +465,22 @@ export function MapScene({
         : [],
     [nav.activePath, nav.state?.trailM, routeDistances],
   );
+  useEffect(() => {
+    if (!nav.activePath) return;
+    // Route geometry is logged for the active path, but the map can also draw
+    // alternatives over the same road. Record which lines the map received so
+    // a screenshot of a grey road can be distinguished from a travelled trail.
+    void logNavigationDiagnostic({
+      event: 'map-route-layers',
+      activeDigest: routeDigest(nav.activePath.points),
+      lineDigest: routeDigest(nav.routeCoords.map(([lng, lat]) => ({ lat, lng }))),
+      alternatives: nav.routeAlternatives.map((alternative) => ({
+        digest: routeDigest(alternative.path.points),
+        start: alternative.path.points[0] ?? null,
+        labelAt: alternative.labelAt,
+      })),
+    });
+  }, [nav.activePath, nav.routeAlternatives, nav.routeCoords]);
 
   const planning = route.active;
   // The map itself stays edge-to-edge under the system bars, but the controls
@@ -1684,6 +1706,9 @@ export function MapScene({
             <Layer
               type="line"
               id="atlas-nav-alternatives-casing"
+              // Conditional sources can mount after the active route. Native
+              // MapLibre otherwise puts this grey casing on top of the blue line.
+              beforeId="atlas-route-casing"
               filter={['==', ['get', 'kind'], 'line']}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{ 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 }}
@@ -1691,6 +1716,7 @@ export function MapScene({
             <Layer
               type="line"
               id="atlas-nav-alternatives-line"
+              beforeId="atlas-route-casing"
               filter={['==', ['get', 'kind'], 'line']}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{ 'line-color': '#7d8590', 'line-width': 5, 'line-opacity': 0.95 }}
