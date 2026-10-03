@@ -36,32 +36,26 @@ class CommuteWidgetWorker(
     if (ids.isEmpty()) return Result.success()
 
     val baseUrl = CommuteWidgetStore.baseUrl(applicationContext)
-    // Parsed once, and defensively: the stored commute is written by the app, but
-    // a truncated or half-migrated value must read as "no commute set up" rather
-    // than throw out of the worker and leave every instance stuck on its last
-    // rows with no way to recover.
-    val query = CommuteWidgetStore.query(applicationContext)?.let {
-      runCatching { JSONObject(it) }.getOrNull()
-    }
-    if (query == null || baseUrl == null) {
-      ids.forEach {
-        CommuteWidgetStore.setState(applicationContext, it, CommuteWidgetStore.STATE_SETUP)
-      }
-      CommuteWidgetProvider.renderAll(applicationContext)
-      return Result.success()
-    }
+      ?: "https://atlas.gjessing.io"
 
     var failed = false
     for (id in ids) {
+      val stop = CommuteWidgetStore.stop(applicationContext, id)?.let {
+        runCatching { JSONObject(it) }.getOrNull()
+      }
+      if (stop == null) {
+        CommuteWidgetStore.setState(applicationContext, id, CommuteWidgetStore.STATE_SETUP)
+        continue
+      }
       val rows = CommuteWidgetProvider.rowsWanted(applicationContext, id)
       val body = JSONObject()
-        .put("kind", "commute")
-        .put("commute", query)
-        .put("direction", CommuteWidgetStore.direction(applicationContext, id))
+        .put("kind", "stop")
+        .put("stop", stop)
+        .put("label", stop.optString("name"))
         .put("maxRows", rows)
-        .toString()
+      CommuteWidgetStore.lines(applicationContext, id)?.let { body.put("lines", org.json.JSONArray().put(it)) }
       try {
-        val board = post("$baseUrl/api/transit/widget", body)
+        val board = post("$baseUrl/api/transit/widget", body.toString())
         CommuteWidgetStore.saveBoard(applicationContext, id, board)
         CommuteWidgetStore.setRowsAsked(applicationContext, id, rows)
         // How many rows fit depends on how many legs the journeys have, which is

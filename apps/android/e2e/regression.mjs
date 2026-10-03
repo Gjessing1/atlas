@@ -955,6 +955,66 @@ async function pinWidget(testId) {
   await delay(1_500);
 }
 
+/** Configure the separate stop widget through the launcher's native flow. */
+async function verifyStopWidget() {
+  await tap('commute-menu');
+  await tap('commute-add-stop-widget');
+  const labels = ['Add automatically', 'ADD AUTOMATICALLY', 'Add to home screen', 'Add', 'ADD'];
+  const dialog = await waitFor(
+    'the launcher to offer the stop widget',
+    hierarchy,
+    (xml) => labels.some((label) => nodeForText(xml, label)),
+    30_000,
+  );
+  const label = labels.find((value) => nodeForText(dialog, value));
+  tapBounds(boundsForNode(nodeForText(dialog, label)));
+  shell('input', 'keyevent', 'KEYCODE_HOME');
+  const setup = await waitForHomeScreen('the stop widget setup control', (next) =>
+    Boolean(nodeForDesc(next, 'Choose stop and line')),
+  );
+  tapBounds(boundsForNode(nodeForDesc(setup, 'Choose stop and line')));
+  let xml = await waitFor(
+    'the stop widget configuration',
+    hierarchy,
+    (next) => Boolean(nodeForText(next, 'Choose a departure stop')),
+    30_000,
+  );
+  tapBounds(boundsForNode(nodeForDesc(xml, 'Stop search')));
+  shell('input', 'text', 'asker');
+  xml = await waitFor('the stop search to contain asker', hierarchy, (next) =>
+    /text="asker"/i.test(nodeForDesc(next, 'Stop search') ?? ''),
+  );
+  tapBounds(boundsForNode(nodeForText(xml, 'Search stops')));
+  xml = await waitFor(
+    'Asker stop result',
+    hierarchy,
+    (next) => Boolean(nodeForText(next, 'Asker E2E  ·  Fixture, Norway')),
+    20_000,
+  );
+  await dismissKeyboard();
+  xml = hierarchy();
+  tapBounds(boundsForNode(nodeForText(xml, 'Asker E2E  ·  Fixture, Norway')));
+  xml = await waitFor(
+    'the 280 line at the configured stop',
+    hierarchy,
+    (next) => Boolean(nodeForText(next, '280  ·  Asker – Engelsrud')),
+    20_000,
+  );
+  tapBounds(boundsForNode(nodeForText(xml, '280  ·  Asker – Engelsrud')));
+  shell('input', 'keyevent', 'KEYCODE_HOME');
+  const served = await waitFor(
+    'the stop widget to ask for its line-filtered board',
+    () => servedWidgetBoard('stop'),
+    (value) => Boolean(value.board?.directions?.[0]?.rows?.length),
+    120_000,
+  );
+  const row = served.board.directions[0].rows[0];
+  const painted = await waitForHomeScreen('the stop widget to paint its first departure', (next) =>
+    Boolean(nodeForDesc(next, row.text)),
+  );
+  expectStrings(painted, ['Asker E2E · 280', row.time, row.lines], 'the stop widget');
+}
+
 /**
  * Back into Atlas from the launcher, with the commute sheet left as it was.
  *
@@ -1380,6 +1440,9 @@ async function main() {
   await returnToApp();
   await openCommuteSheet();
   await verifyCommitReachedTheBoard(committedRow);
+  console.log('Android regression: stop departure widget configuration and launcher board');
+  await verifyStopWidget();
+  await returnToApp();
   await closeCommuteSheet();
 
   await tap('search-open');
@@ -1393,7 +1456,7 @@ async function main() {
   await tap('search-close');
 
   console.log(
-    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, the commute board and its home-screen widget, sheet snaps, Back-compatible surfaces, and rotation.',
+    'Android regression passed: candidate install, controlled backend, saved-data persistence, road and transit planning, navigation hand-off, commute and stop home-screen widgets, sheet snaps, Back-compatible surfaces, and rotation.',
   );
 }
 

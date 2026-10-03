@@ -30,27 +30,7 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 
 ---
 
-## 1. Transit and commute
-
-Entur is a timetable-bound, online-only, Norway-only travel mode
-([ARCHITECTURE.md](./ARCHITECTURE.md#public-transport)); the commute board and its widgets follow
-the rules in [TRANSIT.md](./TRANSIT.md). The planner and Commute hand off to each other (v0.221.0)
-and journey preferences — walking, transfers, own bike or city bike — are one synced setting
-(v0.222.0, rules in [ARCHITECTURE.md](./ARCHITECTURE.md#public-transport)); what remains is the
-widget work below.
-
-### 1.1 Home-screen commute widgets
-
-The live “Atlas commute” widget pins the whole commute and follows a tracked journey —
-[TRANSIT.md §W1–§W7](./TRANSIT.md).
-
-- [ ] **Add a stop departure-board widget.** The server already supports the cheaper stop-board
-      query; add a launcher configuration flow for a stop and optional line picker alongside the
-      existing commute directions.
-
----
-
-## 2. Saved data and collections
+## 1. Saved data and collections
 
 Saved places, tracks and folders should be quick to edit and findable from anywhere — and, like
 everything in Atlas, exportable.
@@ -70,7 +50,7 @@ everything in Atlas, exportable.
 
 ---
 
-## 3. Map profiles — per-activity cartography and layers
+## 2. Map profiles — per-activity cartography and layers
 
 The map profiles (Explore, Drive, Cycle, Hike, Run, Ski, Fish & Hunt) are the one-tap "what am I
 doing now" switch: each sets the default travel mode, appearance, offered overlays and defaults.
@@ -78,7 +58,7 @@ Implementation patterns and upstream constraints live in [ARCHITECTURE.md](./ARC
 [DATA-SOURCES.md](./DATA-SOURCES.md); Norway-only layers follow ARCHITECTURE.md's *Norway-only
 data* rule. The Fish & Hunt surfaces are tracked under N5 below.
 
-### 3.1 Explore — urban signature
+### 2.1 Explore — urban signature
 
 - [ ] **Expand and make Explore categories configurable.** Groceries currently exists only for
       Drive while Explore receives a broad Shops row and only six fixed categories. Add the
@@ -92,7 +72,7 @@ data* rule. The Fish & Hunt surfaces are tracked under N5 below.
       performance and navigation-label occlusion on both clients. Consider a Norwegian height
       source only if OSM coverage proves insufficient.
 
-### 3.2 Curiosities — the register profile
+### 2.2 Curiosities — the register profile
 
 The register profile answers "what is out here that I would never have known to look for?"
 
@@ -118,20 +98,20 @@ The register profile answers "what is out here that I would never have known to 
       is the correct and common outcome: show the orbital facts alone rather than a near-miss
       article, and keep the pass/altitude/illumination detail readable with no network.
 
-### 3.3 Ski — winter cartography
+### 2.3 Ski — winter cartography
 
 - [ ] Add the NVE **Varsom** avalanche danger-level forecast, distinct from steepness.
 
 - [ ] **Live grooming status.** Colour `piste:type=nordic` tracks by time since grooming (for
       example under 2 h, under 24 h), if Skisporet.no offers an accessible API — not yet checked.
 
-### 3.4 Hike — trail cartography
+### 2.4 Hike — trail cartography
 
 - [ ] **A tuft pattern for marshes (myr), in Hike and Fish & Hunt**, so wet ground reads at a
       glance: a small repeating SVG `fill-pattern`. Wetland is only a colour today — the appearance
       code strips the base style's fill patterns.
 
-### 3.5 Fish & Hunt — field cartography
+### 2.5 Fish & Hunt — field cartography
 
 - [ ] **Clear-cuts and forest edges.** Distinguish clear-cuts (`natural=clearcut` /
       `landuse=logging` in the original sketch — OSM coverage unmeasured) from dense conifer and open
@@ -144,7 +124,7 @@ The register profile answers "what is out here that I would never have known to 
       them (a `GraphicStroke` silently renders a plain line — DATA-SOURCES.md), so this needs OSM
       waterway geometry, drawn in way direction.
 
-### 3.6 Drive — road data and costs
+### 2.6 Drive — road data and costs
 
 Statens vegvesen sources, Norway-only under ARCHITECTURE.md's *Norway-only data* rule. Record what
 each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
@@ -207,7 +187,7 @@ each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
 
 ---
 
-## 4. Data layers, weather and activities (nodemap-inspired)
+## 3. Data layers, weather and activities (nodemap-inspired)
 
 Atlas borrows nodemap's useful sources and domain calibration, not its infrastructure or UI
 architecture. Endpoint details, exact layer names and gotchas live in
@@ -310,13 +290,13 @@ The Norway-only ranked surfaces and their visible reasoning are specified in
 
 ---
 
-## 5. Engineering health
+## 4. Engineering health
 
 Runs alongside the product tracks, not after them. `DR` labels come from the
 [2026-08-31 architectural review](./reviews/2026-08-31-dan-abramov.md); what it found must be
 preserved is in ARCHITECTURE.md → *What stays as it is*.
 
-### 5.1 Data safety & offline reliability
+### 4.1 Data safety & offline reliability
 
 - [ ] **Stream tiles through uncovered parts of an installed offline area's rectangle.** Region
       packs use square bounds while country data follows the real border; currently the pack's
@@ -324,7 +304,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       offline tile as a cache miss and fall back to the online basemap when connected, rather
       than letting rectangular pack coverage suppress streaming.
 
-### 5.2 Performance
+### 4.2 Performance
 
 - [~] **Audit every upstream proxy for request storms, and give them one well-behaved client.**
       The POI layer's Overpass proxy (2026-09-19) sent a fresh upstream query for every settled
@@ -368,7 +348,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Remove synchronous zip primitives and file-format parsing from `useUserData`.
       - [ ] Change coarse full-list refreshes only where profiling proves they are material.
 
-### 5.3 Accessibility & web UX
+### 4.3 Accessibility & web UX
 
 - [ ] **Set an interaction-accessibility baseline for both web and Android.** At 390×844, most web
       controls are below comfortable touch sizes. Standardise 44 CSS px / 48 dp hit areas,
@@ -379,7 +359,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       is now the most-used place without a non-drag alternative — give `ReorderableList` rows
       TalkBack move-up/move-down `accessibilityActions` and the web rows a keyboard equivalent.
 
-### 5.4 Test & release infrastructure
+### 4.4 Test & release infrastructure
 
 - [ ] **Make a failed CI build impossible to miss.** Add a loud post-deploy smoke step that checks
       the container's `/api/health` `gitSha` against the pushed commit and calls every route added by
@@ -392,7 +372,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       PostGIS service to CI and make those integration tests required; keep memory tests for the
       fast path.
 
-### 5.5 Code structure
+### 4.5 Code structure
 
 - [ ] **DR6 — Give Android one primary-surface state instead of independent sheet booleans.**
       Define a platform-specific `PrimarySurface` union with payload-bearing variants for menu,
@@ -406,14 +386,14 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Android regression coverage proves switching between every primary surface leaves
             exactly one visible.
 
-### 5.6 System health / status (N7)
+### 4.6 System health / status (N7)
 
 - [ ] **Alert rather than wait to be asked.** The sweep now finds a dead upstream within 6 h, but
       only Settings exposes it. After two consecutive failures, send an Android notification or
       show a persistent Settings badge. Include the `potential-cells` census warning from
       `backend/src/potential/health.ts` in the same path.
 
-### 5.7 Host and release chores
+### 4.7 Host and release chores
 
 Work done on the host or in the release pipeline rather than in the code.
 
@@ -438,7 +418,7 @@ Work done on the host or in the release pipeline rather than in the code.
 
 ---
 
-## 6. Later
+## 5. Later
 
 - [ ] i18n (English + Norwegian). DATEX message texts may not be translated under NLOD, so some
       strings remain Norwegian; see [DATA-SOURCES.md](./DATA-SOURCES.md).

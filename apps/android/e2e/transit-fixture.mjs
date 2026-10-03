@@ -47,6 +47,7 @@ import {
   commuteWidgetBoard,
   commuteWidgetV2Board,
   defaultCommuteDirection,
+  departureWidgetRow,
   findCommittedTrip,
   resolveCommuteV2Directions,
 } from '@atlas/transit';
@@ -338,6 +339,36 @@ function brokenRowIds(board) {
  * rendered by the same package functions.
  */
 export function widgetFixtureResponse(body, nowMs) {
+  if (body?.kind === 'stop') {
+    const name = body.stop?.name ?? 'Engelsrud terrasse';
+    const requestedLines = Array.isArray(body.lines) ? body.lines : [];
+    const codes = requestedLines.length > 0 ? ['280'] : ['280', 'R14'];
+    const rows = codes.map((code, index) =>
+      departureWidgetRow({
+        id: `stop-${code}-${index}`,
+        mode: code === '280' ? 'bus' : 'rail',
+        aimedDepartureMs: nowMs + (index + 1) * 12 * MINUTE,
+        expectedDepartureMs: nowMs + (index + 1) * 12 * MINUTE,
+        realtime: true,
+        cancelled: false,
+        destination: code === '280' ? 'Asker' : 'Oslo S',
+        line: { id: code === '280' ? 'RUT:Line:280' : 'VYG:Line:R14', publicCode: code },
+        quay: { id: 'NSR:Quay:1', publicCode: '1' },
+        situations: [],
+      }),
+    );
+    const board = {
+      route: name,
+      directions: [{ key: 'outbound', label: name, rows, note: null }],
+      checkedMs: nowMs,
+      source: 'Entur live',
+      checked: 'just now',
+      status: 'Entur live · checked just now',
+      nextRefreshMs: nowMs + 5 * MINUTE,
+    };
+    served.set('stop', { board, broken: [] });
+    return board;
+  }
   const query = body?.commute;
   if (!query) return { error: 'commute is required' };
   const maxRows = Number.isFinite(body?.maxRows) ? Math.min(Math.max(body.maxRows, 1), 6) : 3;

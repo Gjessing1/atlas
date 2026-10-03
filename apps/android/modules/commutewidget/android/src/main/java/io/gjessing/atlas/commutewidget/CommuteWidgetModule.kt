@@ -21,6 +21,8 @@ class CommuteWidgetModule : Module() {
      */
     AsyncFunction("configureV2") { baseUrl: String, queryJson: String? ->
       val context = appContext.reactContext ?: return@AsyncFunction
+      CommuteWidgetStore.setBaseUrl(context, baseUrl)
+      CommuteWidgetProvider.refresh(context, null)
       CommuteWidgetV2Store.configure(context, baseUrl, queryJson)
       if (queryJson == null) {
         for (id in CommuteWidgetV2Provider.widgetIds(context)) {
@@ -130,6 +132,18 @@ class CommuteWidgetModule : Module() {
       manager.requestPinAppWidget(
         ComponentName(context, CommuteWidgetV2Provider::class.java),
         extras,
+        null,
+      )
+    }
+
+    AsyncFunction("requestPinStop") {
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@AsyncFunction false
+      val manager = AppWidgetManager.getInstance(context)
+      if (!manager.isRequestPinAppWidgetSupported) return@AsyncFunction false
+      manager.requestPinAppWidget(
+        ComponentName(context, CommuteWidgetProvider::class.java),
+        null,
         null,
       )
     }

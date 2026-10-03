@@ -20,6 +20,7 @@ interface CommuteWidgetModule {
   setPlace(place: string): Promise<void>;
   supportV2(): Promise<CommuteWidgetSupport>;
   requestPinV2(): Promise<boolean>;
+  requestPinStop(): Promise<boolean>;
 }
 
 /** What the commute sheet needs to decide whether to offer "Add to home screen". */
@@ -129,6 +130,15 @@ export async function commuteWidgetV2Support(): Promise<CommuteWidgetSupport> {
 export async function addCommuteWidgetV2(): Promise<boolean> {
   try {
     return (await native?.requestPinV2()) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** Ask the launcher to place a stop board; its configuration picks stop and line. */
+export async function addStopDepartureWidget(): Promise<boolean> {
+  try {
+    return (await native?.requestPinStop()) ?? false;
   } catch {
     return false;
   }

@@ -25,6 +25,9 @@ internal object CommuteWidgetStore {
   private const val BASE_URL = "base_url"
   private const val QUERY = "query"
   private const val SEGMENTS = "segments"
+  private const val STOP = "stop_"
+  private const val LINES = "lines_"
+  private const val LINE_LABEL = "line_label_"
 
   /** The default: outbound before the outbound time, the way home after it. */
   const val DIRECTION_AUTO = "auto"
@@ -49,6 +52,29 @@ internal object CommuteWidgetStore {
   }
 
   fun baseUrl(context: Context): String? = prefs(context).getString(BASE_URL, null)
+
+  fun setBaseUrl(context: Context, baseUrl: String) {
+    prefs(context).edit().putString(BASE_URL, baseUrl.trimEnd('/')).apply()
+  }
+
+  /** Exact NSR stop and its display name belong to the widget instance. */
+  fun stop(context: Context, widgetId: Int): String? =
+    prefs(context).getString("$STOP$widgetId", null)
+
+  fun lines(context: Context, widgetId: Int): String? =
+    prefs(context).getString("$LINES$widgetId", null)
+
+  fun lineLabel(context: Context, widgetId: Int): String? =
+    prefs(context).getString("$LINE_LABEL$widgetId", null)
+
+  fun setStop(context: Context, widgetId: Int, stop: String, lineId: String?, lineLabel: String?) {
+    prefs(context).edit()
+      .putString("$STOP$widgetId", stop)
+      .apply { if (lineId == null) remove("$LINES$widgetId") else putString("$LINES$widgetId", lineId) }
+      .apply { if (lineLabel == null) remove("$LINE_LABEL$widgetId") else putString("$LINE_LABEL$widgetId", lineLabel) }
+      .remove("board_$widgetId")
+      .apply()
+  }
 
   fun query(context: Context): String? = prefs(context).getString(QUERY, null)
 
@@ -117,6 +143,9 @@ internal object CommuteWidgetStore {
   fun forget(context: Context, widgetId: Int) {
     prefs(context).edit()
       .remove("direction_$widgetId")
+      .remove("$STOP$widgetId")
+      .remove("$LINES$widgetId")
+      .remove("$LINE_LABEL$widgetId")
       .remove("board_$widgetId")
       .remove("state_$widgetId")
       .remove("state_at_$widgetId")

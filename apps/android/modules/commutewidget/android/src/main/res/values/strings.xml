@@ -5,8 +5,8 @@
   re-states any of it.
 -->
 <resources>
-  <string name="atlas_commute_widget_name">Atlas commute</string>
-  <string name="atlas_commute_widget_description">Live departures for your saved commute, with delays and platforms</string>
+  <string name="atlas_commute_widget_name">Atlas departures</string>
+  <string name="atlas_commute_widget_description">Live departures for a stop and optional line</string>
 
   <!-- The arrow between a departure and its arrival, and the mark before a
        change. Drawn by the layout so no row string is ever composed in Kotlin. -->
@@ -14,11 +14,11 @@
   <string name="atlas_commute_widget_change">⇄</string>
 
   <string name="atlas_commute_widget_refresh">Refresh departures</string>
-  <string name="atlas_commute_widget_configure">Choose direction</string>
-  <string name="atlas_commute_widget_open">Open the commute board in Atlas</string>
+  <string name="atlas_commute_widget_configure">Choose stop and line</string>
+  <string name="atlas_commute_widget_open">Open Atlas</string>
 
-  <string name="atlas_commute_widget_setup_route">Choose your stops in Atlas</string>
-  <string name="atlas_commute_widget_setup_status">Open Atlas to set up your commute</string>
+  <string name="atlas_commute_widget_setup_route">Choose a stop</string>
+  <string name="atlas_commute_widget_setup_status">Tap ⚙ to choose a stop and line</string>
   <string name="atlas_commute_widget_refreshing">Refreshing…</string>
   <string name="atlas_commute_widget_failed">Couldn\'t refresh — tap to try again</string>
   <!-- %1$s is the board's own "checked 07:04", rendered by @atlas/transit. -->

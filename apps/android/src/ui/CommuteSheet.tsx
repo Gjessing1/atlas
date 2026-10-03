@@ -40,6 +40,7 @@ import {
 
 import {
   addCommuteWidgetV2,
+  addStopDepartureWidget,
   commuteWidgetV2Support,
   type CommuteWidgetSupport,
 } from '../commuteWidget';
@@ -1208,6 +1209,13 @@ function CommuteMenu({
           }
           onPress={run(() => void addCommuteWidgetV2())}
           testID="commute-add-widget"
+        />
+      ) : null}
+      {widgets.pinnable ? (
+        <MenuItem
+          label="Add stop departures widget"
+          onPress={run(() => void addStopDepartureWidget())}
+          testID="commute-add-stop-widget"
         />
       ) : null}
     </View>

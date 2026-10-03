@@ -200,7 +200,7 @@ class CommuteWidgetProvider : AppWidgetProvider() {
      * package cannot resolve, and the tap would do nothing at all. The scheme is
      * registered unconditionally.
      */
-    private val BOARD_URI: Uri = Uri.parse("atlas://panel=commute")
+    private val BOARD_URI: Uri = Uri.parse("atlas://")
 
     private fun work(widgetId: Int) = "atlas-commute-widget-$widgetId"
 
@@ -391,8 +391,12 @@ class CommuteWidgetProvider : AppWidgetProvider() {
       val single = if (blocks == 1) directions.optJSONObject(0)?.string("label") else null
       val title = single?.takeUnless { it.isBlank() }
         ?: board?.string("route")?.takeUnless { it.isBlank() }
+        ?: CommuteWidgetStore.stop(context, widgetId)?.let {
+          runCatching { JSONObject(it).optString("name") }.getOrNull()
+        }
         ?: res.getString(R.string.atlas_commute_widget_setup_route)
-      views.setTextViewText(R.id.atlas_commute_route, title)
+      val lineLabel = CommuteWidgetStore.lineLabel(context, widgetId)
+      views.setTextViewText(R.id.atlas_commute_route, if (lineLabel == null) title else "$title · $lineLabel")
 
       val status = statusLine(res, context, widgetId, board, nowMs, widthDp)
       views.setTextViewText(R.id.atlas_commute_status, status.first)
