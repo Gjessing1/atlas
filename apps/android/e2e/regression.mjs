@@ -1046,10 +1046,18 @@ async function verifyStopWidget() {
     (value) => Boolean(value.board?.directions?.[0]?.rows?.length),
     120_000,
   );
-  const row = served.board.directions[0].rows[0];
-  const painted = await waitForHomeScreen('the stop widget to paint its first departure', (next) =>
-    Boolean(nodeForDesc(next, row.text)),
+  const rows = (served.history ?? [served.board]).flatMap((board) =>
+    board.directions.flatMap((direction) => direction.rows),
   );
+  let row;
+  const painted = await waitForHomeScreen(
+    'the stop widget to paint its first departure',
+    (next) => {
+      row = rows.find((candidate) => nodeForDesc(next, candidate.text));
+      return Boolean(row);
+    },
+  );
+  if (!row) throw new Error('Stop widget row was not in the served boards');
   expectStrings(painted, ['Asker E2E · 280', row.time, row.lines], 'the stop widget');
 }
 

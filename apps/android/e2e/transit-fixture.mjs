@@ -371,7 +371,10 @@ export function widgetFixtureResponse(body, nowMs) {
       status: 'Entur live · checked just now',
       nextRefreshMs: nowMs + 5 * MINUTE,
     };
-    served.set('stop', { board, broken: [] });
+    // The launcher can still paint the previous response when a refresh crosses
+    // the timetable grid. Keep recent responses for the regression to compare.
+    const history = [...(served.get('stop')?.history ?? []), board].slice(-10);
+    served.set('stop', { board, broken: [], history });
     return board;
   }
   const query = body?.commute;

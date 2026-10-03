@@ -158,6 +158,12 @@ before that destination. Also:
   step failed this way twice, identically. `fixture-server.log` held only its startup line and the
   port stayed up throughout, so it looked like an OOM kill and was first rerun as a host flake.
   The `/api/e2e/*` reads answer `connection: close`; give any new test-only endpoint the same.
+- **A stop widget can paint a previously served board after a fixture refresh.** The stop fixture
+  advances departures on a 12-minute timetable grid. In v0.246.0, the launcher visibly showed
+  a correct first departure while the regression compared it with the fixture's newer board and
+  timed out. The fixture now keeps recent served boards and the check matches the visible row to
+  one of them before asserting its time and line. Read `failure.png` and `window.xml` before
+  treating this timeout as a widget bug.
 - **Never `pkill -f 'node backend/dist/index.js'`.** The production container's backend matches
   too, and the kill is refused ("Operation not permitted"). Worse, the calling shell's own
   command line contains the pattern, so pkill kills the script itself (exit 144) along with
