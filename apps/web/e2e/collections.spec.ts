@@ -252,3 +252,71 @@ test('only one panel is open at a time', async ({ page }) => {
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
   await expect(page.locator('.sidebar')).toHaveCount(0);
 });
+
+test('a folder or a tag can label its pins on the map', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  const dialog = page.locator('.place-edit-dialog');
+  const savePin = async (dx: number, name: string, tags = '') => {
+    await page.mouse.click(canvas.x + canvas.width / 2 + dx, canvas.y + canvas.height / 2, {
+      button: 'right',
+    });
+    await page.locator('.place-card').getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Name').fill(name);
+    if (tags) await dialog.getByLabel('Tags').fill(tags);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  };
+  // The names the label source currently carries, or null while it is absent.
+  const labelled = () =>
+    page.evaluate(() => {
+      const map = window.__atlasMap!;
+      const source = map.getSource('atlas-pin-labels') as
+        { serialize: () => { data: GeoJSON.FeatureCollection } } | undefined;
+      if (!source || !map.getLayer('atlas-pin-labels')) return null;
+      return source
+        .serialize()
+        .data.features.map((f) => String(f.properties?.['name']))
+        .sort();
+    });
+
+  await savePin(-120, 'Mormor');
+  await savePin(120, 'Elgpost nord', 'stand');
+  expect(await labelled()).toBeNull();
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByPlaceholder('New folder name').fill('Family');
+  await page.getByPlaceholder('New folder name').press('Enter');
+  await page.getByRole('button', { name: 'Edit Mormor' }).click();
+  // Filed into the (collapsed) folder, the row and its editor leave the root.
+  await page.getByRole('combobox', { name: /^Folder/ }).selectOption({ label: 'Family' });
+
+  // The folder's switch names its pins, and only them.
+  const folderSwitch = page.getByRole('button', { name: 'Names of Family on the map' });
+  await expect(folderSwitch).toHaveAttribute('aria-pressed', 'false');
+  await folderSwitch.click();
+  await expect(folderSwitch).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(labelled).toEqual(['Mormor']);
+
+  // A whole #tag in the filter offers the same switch for that tag.
+  const filter = page.getByLabel('Filter collections');
+  await filter.fill('#sta');
+  await expect(page.getByRole('button', { name: /^Names of #/ })).toHaveCount(0);
+  await filter.fill('#Stand');
+  await page.getByRole('button', { name: 'Names of #stand on the map' }).click();
+  await expect.poll(labelled).toEqual(['Elgpost nord', 'Mormor']);
+
+  // A hidden folder takes its names with it; switching both off removes the layer.
+  await page.getByRole('button', { name: 'Clear filter' }).click();
+  await page.getByRole('button', { name: 'Hide collection Family from map' }).click();
+  await expect.poll(labelled).toEqual(['Elgpost nord']);
+  await folderSwitch.click();
+  await filter.fill('#stand');
+  await page.getByRole('button', { name: 'Names of #stand on the map' }).click();
+  await expect.poll(labelled).toBeNull();
+});

@@ -2,14 +2,16 @@ import {
   ancestorFolderIds,
   collectionTagSuggestions,
   filterCollectionRecords,
+  parseCollectionQuery,
   promoteParentId,
+  type PinLabelsController,
   tagQuery,
   useCollectionTree,
 } from '@atlas/app-hooks';
-import { trackSummary } from '@atlas/core';
+import { folderHasPinLabels, tagHasPinLabels, trackSummary } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EyeIcon, FolderIcon } from './icons.js';
+import { EyeIcon, FolderIcon, PinLabelIcon } from './icons.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
@@ -18,6 +20,8 @@ import type { ImportOptions, ImportResult, UserData } from './storage/useUserDat
 
 interface SidebarProps {
   data: UserData;
+  /** Which folders and tags draw their pins' names on the map. */
+  pinLabels: PinLabelsController;
   selectedTrackId: string | null;
   /** Commutes that use each saved place as an end. */
   placeCommutes?: ReadonlyMap<string, readonly string[]>;
@@ -133,8 +137,37 @@ function TagChips({ tags, onPick }: { tags: readonly string[]; onPick: (query: s
   );
 }
 
+/**
+ * The "names on the map" switch, on a folder row and beside a `#tag` filter.
+ * Quiet while off, like the row tools; in the accent colour while on, so a
+ * labelled folder can be told apart without hovering it.
+ */
+function PinLabelToggle({
+  on,
+  what,
+  onToggle,
+}: {
+  on: boolean;
+  what: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`icon-button label-toggle${on ? ' on' : ''}`}
+      title={on ? `Hide names of ${what} on the map` : `Show names of ${what} on the map`}
+      aria-label={`Names of ${what} on the map`}
+      aria-pressed={on}
+      onClick={onToggle}
+    >
+      <PinLabelIcon size={18} />
+    </button>
+  );
+}
+
 export function Sidebar({
   data,
+  pinLabels,
   selectedTrackId,
   placeCommutes = new Map(),
   revealPlaceId = null,
@@ -192,6 +225,14 @@ export function Sidebar({
     () => collectionTagSuggestions([...data.places, ...data.tracks]),
     [data.places, data.tracks],
   );
+  // A `#tag` filter naming a whole tag the user has is the place to switch that
+  // tag's labels: the rows on screen are exactly the pins it would name. A
+  // partial `#sta` names no tag yet, so it offers nothing.
+  const filterTag = useMemo(() => {
+    const query = parseCollectionQuery(filter);
+    if (!query.tagOnly || !query.text) return null;
+    return tagSuggestions.find((tag) => tag.toLocaleLowerCase() === query.text) ?? null;
+  }, [filter, tagSuggestions]);
   // The shared tree derivation: one orphan policy for both apps (a folder whose
   // parent is gone shows at the root instead of vanishing with its subtree).
   const tree = useCollectionTree({
@@ -635,6 +676,11 @@ export function Sidebar({
                     ✕
                   </button>
                 </span>
+                <PinLabelToggle
+                  on={folderHasPinLabels(pinLabels.prefs, folder.id)}
+                  what={folder.name}
+                  onToggle={() => void pinLabels.toggleFolder(folder.id)}
+                />
                 <button
                   type="button"
                   className="icon-button visibility-toggle"
@@ -730,6 +776,13 @@ export function Sidebar({
             placeholder="Filter by name, #tag or notes"
             aria-label="Filter collections"
           />
+          {filterTag !== null && (
+            <PinLabelToggle
+              on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+              what={`#${filterTag}`}
+              onToggle={() => void pinLabels.toggleTag(filterTag)}
+            />
+          )}
           {filtered.active && (
             <button
               type="button"

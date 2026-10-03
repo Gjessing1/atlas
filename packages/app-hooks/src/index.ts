@@ -93,6 +93,7 @@ export {
   useTransitPreferences,
   type TransitPreferencesController,
 } from './useTransitPreferences.js';
+export { usePinLabels, type PinLabelsController } from './usePinLabels.js';
 export { useTransitBoard, type TransitBoard, type TransitTiming } from './useTransitBoard.js';
 export {
   useTransitDepartures,

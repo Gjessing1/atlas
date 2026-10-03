@@ -41,6 +41,7 @@ import {
   useNavAddStop,
   useNavPrefs,
   useVehicleProfile,
+  usePinLabels,
   useTransitPreferences,
   useBestSpots,
   useStandBoard,
@@ -125,6 +126,7 @@ import { useWeatherMapLayer } from './map/useWeatherMapLayer.js';
 import { useWeatherWarningsLayer } from './map/useWeatherWarningsLayer.js';
 import { useLightningLayer } from './map/useLightningLayer.js';
 import { useTransitVehicleLayer } from './map/useTransitVehicleLayer.js';
+import { usePinLabelLayer } from './map/usePinLabelLayer.js';
 import { useSavedStandLayer } from './map/useSavedStandLayer.js';
 import { useSpotLayer } from './map/useSpotLayer.js';
 import { useRouteLayers } from './map/useRouteLayers.js';
@@ -711,6 +713,9 @@ export function App() {
   // A saved stand draws its own rose, so which way it faces is visible on the
   // map that planned it — and it follows the same visibility rules as its pin.
   useSavedStandLayer(map, visiblePlaces);
+  // Names under the pins of folders and tags the user switched labels on for.
+  const pinLabels = usePinLabels(userData, visiblePlaces, userData.collections);
+  usePinLabelLayer(map, pinLabels.features);
 
   const routePath = route.active ? route.paths?.[route.selectedPath] : undefined;
   const routeTrackData = useMemo(
@@ -1677,6 +1682,7 @@ export function App() {
         {sidebarOpen && (
           <Sidebar
             data={userData}
+            pinLabels={pinLabels}
             selectedTrackId={selectedTrack?.track.id ?? null}
             placeCommutes={commute.placeCommutes}
             revealPlaceId={revealPlaceId}

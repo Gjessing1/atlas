@@ -4,6 +4,9 @@ import {
   exploreResultsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
+  PIN_LABEL_LAYOUT,
+  PIN_LABEL_MINZOOM,
+  PIN_LABEL_PAINT,
   POI_ICON_IMAGE,
   poiResultsFeatureCollection,
   routeDeltaLabel,
@@ -11,6 +14,7 @@ import {
   waypointLabel,
   type BBox,
   type LatLng,
+  type PinLabelFeature,
   type PoiResult,
   type SearchResult,
 } from '@atlas/core';
@@ -328,6 +332,8 @@ interface MapSceneProps {
   /** Picked destination awaiting the travel-mode card (red pin). */
   destination: DestinationTarget | null;
   visiblePlaces: PlaceRecord[];
+  /** Names for the pins of labelled folders/tags (`usePinLabels`), drawn as a colliding symbol layer. */
+  pinLabels: { type: 'FeatureCollection'; features: PinLabelFeature[] };
   showPuck: boolean;
   /** App is drawing its own nav puck — hide the native one. */
   suppressPuck: boolean;
@@ -407,6 +413,7 @@ export function MapScene({
   transit,
   destination,
   visiblePlaces,
+  pinLabels,
   showPuck,
   suppressPuck,
   navDot,
@@ -2112,6 +2119,21 @@ export function MapScene({
                 'line-opacity': 0.55,
                 'line-dasharray': [2, 1.5],
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {/* Names under labelled pins. A symbol layer rather than text inside
+          the marker views, because only a layer goes through MapLibre's
+          collision pass: a dense folder thins its names out zooming out
+          instead of stacking them. Same layout as web (@atlas/core). */}
+        {!inPip && pinLabels.features.length > 0 ? (
+          <GeoJSONSource id="atlas-pin-labels" data={pinLabels}>
+            <Layer
+              type="symbol"
+              id="atlas-pin-labels"
+              minzoom={PIN_LABEL_MINZOOM}
+              layout={PIN_LABEL_LAYOUT}
+              paint={PIN_LABEL_PAINT}
             />
           </GeoJSONSource>
         ) : null}

@@ -35,10 +35,6 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 Saved places, tracks and folders should be quick to edit and findable from anywhere — and, like
 everything in Atlas, exportable.
 
-- [ ] **Add optional pin labels per folder or tag.** Toggle names from Collections so a group such
-      as Family can be labelled in one action; design collision and density behaviour at low
-      zooms.
-
 - [ ] **Search tracks and folders from the main search box.** Global search currently returns
       saved places only. Add track and folder result kinds that reveal the object in Collections
       on both clients.

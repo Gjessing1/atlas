@@ -3,13 +3,15 @@ import {
   collectionTagSuggestions,
   filterCollectionRecords,
   importedCount,
+  parseCollectionQuery,
   promoteParentId,
   tagQuery,
+  type PinLabelsController,
   useCollectionTree,
   type CollectionDragItem,
   type CollectionDropZone,
 } from '@atlas/app-hooks';
-import { trackSummary } from '@atlas/core';
+import { folderHasPinLabels, tagHasPinLabels, trackSummary } from '@atlas/core';
 import type {
   CollectionRecord,
   PlacePatch,
@@ -33,6 +35,7 @@ import { BottomSheet } from './BottomSheet';
 import { flattenFolders } from './folders';
 import { confirmDelete, ItemEditor } from './ItemEditor';
 import { ReorderableList } from './ReorderableList';
+import { PinLabelIcon } from './icons';
 import { theme } from './theme';
 
 export type EditablePlacePatch = Pick<
@@ -147,6 +150,36 @@ const eyeStyles = StyleSheet.create({
     transform: [{ rotate: '45deg' }],
   },
 });
+
+/**
+ * The "names on the map" switch, on a folder row and beside a `#tag` filter:
+ * faint while off like the eye's off state, accent-coloured while on so a
+ * labelled folder can be told apart at a glance.
+ */
+function PinLabelToggle({
+  on,
+  what,
+  onToggle,
+  testID,
+}: {
+  on: boolean;
+  what: string;
+  onToggle: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      style={styles.eyeButton}
+      onPress={onToggle}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel={`Names of ${what} on the map`}
+      testID={testID}
+    >
+      <PinLabelIcon color={on ? theme.accent : '#b0bac4'} />
+    </Pressable>
+  );
+}
 
 /**
  * A row's tags, as chips that filter the list to them.
@@ -386,6 +419,7 @@ export function FavoritesSheet({
   placeCommutes = new Map(),
   tracks,
   collections,
+  pinLabels,
   onFlyTo,
   onNavigate,
   onPatch,
@@ -414,6 +448,8 @@ export function FavoritesSheet({
   placeCommutes?: ReadonlyMap<string, readonly string[]>;
   tracks: TrackRecord[];
   collections: CollectionRecord[];
+  /** Which folders and tags draw their pins' names on the map. */
+  pinLabels: PinLabelsController;
   onFlyTo: (place: PlaceRecord) => void;
   onNavigate: (place: PlaceRecord) => void;
   /** Patch a place (the editor batches its fields behind an explicit Save). */
@@ -528,6 +564,14 @@ export function FavoritesSheet({
     () => collectionTagSuggestions([...places, ...tracks]),
     [places, tracks],
   );
+  // A `#tag` filter naming a whole tag the user has is where that tag's labels
+  // are switched: the rows on screen are exactly the pins it would name. A
+  // partial `#sta` names no tag yet, so it offers nothing.
+  const filterTag = useMemo(() => {
+    const query = parseCollectionQuery(filter);
+    if (!query.tagOnly || !query.text) return null;
+    return tagSuggestions.find((tag) => tag.toLocaleLowerCase() === query.text) ?? null;
+  }, [filter, tagSuggestions]);
 
   // While a filter is up every folder left standing is part of the answer, so
   // it opens: the point is to see the matches, not which folders they are in.
@@ -877,6 +921,12 @@ export function FavoritesSheet({
                 >
                   <Text style={styles.subButtonText}>＋</Text>
                 </Pressable>
+                <PinLabelToggle
+                  on={folderHasPinLabels(pinLabels.prefs, folder.id)}
+                  what={folder.name}
+                  onToggle={() => void pinLabels.toggleFolder(folder.id)}
+                  testID={`folder-labels-${folder.id}`}
+                />
                 {/* The eye sits just left of the actions on folder and place rows alike. */}
                 <Pressable
                   style={styles.eyeButton}
@@ -969,6 +1019,14 @@ export function FavoritesSheet({
           accessibilityLabel="Filter collections"
           testID="collections-filter"
         />
+        {filterTag !== null ? (
+          <PinLabelToggle
+            on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+            what={`#${filterTag}`}
+            onToggle={() => void pinLabels.toggleTag(filterTag)}
+            testID="collections-filter-labels"
+          />
+        ) : null}
         {filtered.active ? (
           <Pressable
             style={[styles.button, styles.buttonQuiet]}

@@ -25,6 +25,7 @@ export * from './opening-hours.js';
 export * from './packs.js';
 export * from './persisted.js';
 export * from './pack-spec.js';
+export * from './pin-labels.js';
 export * from './places.js';
 export * from './poi.js';
 export * from './place-content.js';

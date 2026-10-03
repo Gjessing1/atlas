@@ -288,6 +288,20 @@ export function CameraIcon({ color = theme.icon }: { color?: string }) {
   );
 }
 
+/**
+ * "Names on the map": a pin head with a name line under it — the label switch
+ * on folder rows and the tag filter. Same shape as web's `PinLabelIcon`.
+ */
+export function PinLabelIcon({ color = theme.icon }: { color?: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Circle cx={12} cy={7.5} r={3.6} fill="none" stroke={color} strokeWidth={1.7} />
+      <Path d="M12 11.1v2.4" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+      <Path d="M5 17.5h14M8 21h8" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 /** Done — the same button, once it has been opened. */
 export function CheckIcon({ color = theme.icon }: { color?: string }) {
   return (

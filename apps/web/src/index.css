@@ -1513,6 +1513,26 @@ button {
   margin-left: 2px;
 }
 
+/* Pin labels: receding like the row tools while off, accent-coloured while on
+   so a labelled folder or tag reads at a glance. */
+.label-toggle {
+  flex: none;
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.item-line:hover .label-toggle,
+.sidebar-filter .label-toggle,
+.label-toggle:focus-visible,
+.label-toggle.on {
+  opacity: 1;
+}
+
+.label-toggle.on,
+.label-toggle.on:hover {
+  color: var(--accent);
+}
+
 /* Row tools (rename, subfolder, delete) recede until the row is hovered or
    keyboard-focused. They stay clickable throughout — hiding them outright
    would strand touch users, who never generate a hover. */

@@ -7,6 +7,7 @@ import type {
   NavPrefsController,
   VehicleProfileController,
   TransitPreferencesController,
+  PinLabelsController,
 } from '@atlas/app-hooks';
 import type { SettingsSectionId } from '@atlas/core';
 import type { TrackRecord } from '@atlas/storage';
@@ -55,6 +56,8 @@ interface AppSheetsProps {
   navPrefs: NavPrefsController;
   vehicle: VehicleProfileController;
   transitPreferences: TransitPreferencesController;
+  /** Which folders and tags draw their pins' names (Collections owns the switches). */
+  pinLabels: PinLabelsController;
   navDiagnostics: NavigationDiagnosticsController;
   pip: NavPipController;
   regionJobs: RegionPackJobsController;
@@ -104,6 +107,7 @@ export function AppSheets({
   navPrefs,
   vehicle,
   transitPreferences,
+  pinLabels,
   navDiagnostics,
   pip,
   regionJobs,
@@ -126,6 +130,7 @@ export function AppSheets({
         placeCommutes={placeCommutes}
         tracks={data.tracks}
         collections={data.collections}
+        pinLabels={pinLabels}
         onFlyTo={(place) =>
           onPickDestination({
             lat: place.lat,

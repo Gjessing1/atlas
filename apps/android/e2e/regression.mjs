@@ -586,14 +586,27 @@ async function createFolderAndReadPlace() {
       nodeIds(value).some((id) => /^folder-row-[0-9a-f-]+$/i.test(id)) &&
       nodeIds(value).some((id) => /^favorite-(?!style-|visible-|edit-|nav-)[0-9a-f-]+$/i.test(id)),
   );
+  const folderId = dynamicId(xml, /^folder-row-[0-9a-f-]+$/i, 'folder row').slice(
+    'folder-row-'.length,
+  );
+  // Pin labels: a tap, not typing — the switch is a synced setting, and
+  // verifyPersistence reads it back after a process restart.
+  await tap(`folder-labels-${folderId}`);
+  await waitFor('folder pin labels switched on', hierarchy, (value) =>
+    isChecked(nodeForId(value, `folder-labels-${folderId}`)),
+  );
   return {
-    folderId: dynamicId(xml, /^folder-row-[0-9a-f-]+$/i, 'folder row').slice('folder-row-'.length),
+    folderId,
     placeId: dynamicId(
       xml,
       /^favorite-(?!style-|visible-|edit-|nav-)[0-9a-f-]+$/i,
       'saved place row',
     ).slice('favorite-'.length),
   };
+}
+
+function isChecked(node) {
+  return Boolean(node?.includes('checked="true"') || node?.includes('selected="true"'));
 }
 
 // Planning starts where a user starts it: a picked place's card. "Go" on a
@@ -771,6 +784,11 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
     xml = await waitForId(`track-${trackId}`);
   }
   expectIds(xml, [`favorite-${placeId}`, `track-${trackId}`, `folder-row-${folderId}`]);
+  if (!isChecked(nodeForId(xml, `folder-labels-${folderId}`))) {
+    throw new Error(
+      `Folder pin labels did not persist: ${nodeForId(xml, `folder-labels-${folderId}`)}`,
+    );
+  }
   await tap('favorites-close');
 }
 

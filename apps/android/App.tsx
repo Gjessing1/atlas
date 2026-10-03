@@ -12,6 +12,7 @@ import {
   useNavAddStop,
   useNavPrefs,
   useVehicleProfile,
+  usePinLabels,
   useTransitPreferences,
   useNavResume,
   usePotential,
@@ -233,6 +234,8 @@ function AppInner() {
     );
     return data.places.filter((p) => placeIsVisible(p, folders));
   }, [data.places, data.collections]);
+  // Names under the pins of folders and tags the user switched labels on for.
+  const pinLabels = usePinLabels(data, visiblePlaces, data.collections);
   const sync = useSync(data.storage, data.refreshAll, data.places);
   const navDiagnostics = useNavigationDiagnostics(data, sync.email, sync.status);
   const nav = useNavigation();
@@ -1628,6 +1631,7 @@ function AppInner() {
         transit={transit}
         destination={destination}
         visiblePlaces={visiblePlaces}
+        pinLabels={pinLabels.features}
         showPuck={showPuck}
         suppressPuck={navPuck.suppressNative}
         // NavChrome owns the screen-fixed chevron full-screen, but that whole
@@ -2179,6 +2183,7 @@ function AppInner() {
             navPrefs={navPrefs}
             vehicle={vehicle}
             transitPreferences={transitPreferences}
+            pinLabels={pinLabels}
             navDiagnostics={navDiagnostics}
             pip={pip}
             regionJobs={regionJobs}

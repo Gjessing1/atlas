@@ -392,6 +392,20 @@ export function EyeIcon({ off = false, ...props }: IconProps & { off?: boolean }
   );
 }
 
+/**
+ * "Names on the map": a pin head with a name line under it — the label switch
+ * on folder rows and the tag filter. Android draws the same shape.
+ */
+export function PinLabelIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="12" cy="7.5" r="3.6" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 11.1v2.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M5 17.5h14M8 21h8" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </IconFrame>
+  );
+}
+
 /*
  * The route planner's toolbar, as glyphs.
  *
