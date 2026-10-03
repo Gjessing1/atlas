@@ -1,4 +1,5 @@
 import {
+  ancestorFolderIds,
   collectionDropZone,
   collectionTagSuggestions,
   filterCollectionRecords,
@@ -505,22 +506,6 @@ export function FavoritesSheet({
   const revealRowRef = useRef<View>(null);
   const scrollY = useRef(0);
   useEffect(() => {
-    if (!visible || !revealItem) return;
-    const item =
-      revealItem.kind === 'track'
-        ? tracks.find((track) => track.id === revealItem.id)
-        : revealItem.kind === 'folder'
-          ? collections.find((folder) => folder.id === revealItem.id)
-          : places.find((place) => place.id === revealItem.id);
-    if (item) {
-      // Filtering opens every matching branch and places the requested row in
-      // the short list, including a track buried in a collapsed subfolder.
-      setFilter(item.name);
-      setHighlighted(`${revealItem.kind}:${revealItem.id}`);
-    }
-    onRevealed?.();
-  }, [visible, revealItem, tracks, collections, places, onRevealed]);
-  useEffect(() => {
     if (!highlighted) return;
     const frame = requestAnimationFrame(() => {
       revealRowRef.current?.measureInWindow((_x, rowY) => {
@@ -603,6 +588,31 @@ export function FavoritesSheet({
     places: filtered.places,
     tracks: filtered.tracks,
   });
+  const allTree = useCollectionTree({ collections, places, tracks });
+  useEffect(() => {
+    if (!visible || !revealItem) return;
+    const item =
+      revealItem.kind === 'track'
+        ? tracks.find((track) => track.id === revealItem.id)
+        : revealItem.kind === 'folder'
+          ? collections.find((folder) => folder.id === revealItem.id)
+          : places.find((place) => place.id === revealItem.id);
+    if (item) {
+      // A search pick should open the exact row without leaving a filter that
+      // hides other saved data the next time Collections is opened.
+      setFilter('');
+      const parentId = 'parentId' in item ? item.parentId : item.collectionId;
+      const ancestors = ancestorFolderIds(allTree, parentId);
+      setExpanded((current) => {
+        if (ancestors.every((id) => current.has(id))) return current;
+        const next = new Set(current);
+        for (const id of ancestors) next.add(id);
+        return next;
+      });
+      setHighlighted(`${revealItem.kind}:${revealItem.id}`);
+    }
+    onRevealed?.();
+  }, [visible, revealItem, tracks, collections, places, allTree, onRevealed]);
   // Pickers (move-to-folder, import destination) offer *every* folder: a filter
   // narrows what you are looking at, never where you are allowed to put things.
   const flatFolders = useMemo(() => flattenFolders(collections), [collections]);

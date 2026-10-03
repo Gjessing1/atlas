@@ -803,6 +803,9 @@ async function verifySavedCollectionSearch({ folderId, trackId }) {
     await tap('search-result-0');
     await waitForId('favorites-sheet');
     await waitForId(rowId);
+    await waitFor('search reveal to leave Collections unfiltered', hierarchy, (xml) =>
+      nodeForId(xml, 'collections-filter')?.includes('text=""'),
+    );
     await tap('favorites-close');
   }
 }
