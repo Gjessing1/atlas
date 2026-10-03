@@ -151,6 +151,13 @@ before that destination. Also:
 - **Long jobs need `setsid` anyway.** Under memory pressure (a Gradle build holds ~2 GB) the
   agent harness kills its background tasks, but a `setsid` process survives. Watch it with a
   cheap polling loop, not a blocking one.
+- **`TypeError: fetch failed` from a fixture read is a stale keep-alive socket, not a dead
+  server.** `regression.mjs` drives adb through synchronous child processes, so its event loop
+  can stay blocked past the fixture server's 5 s keep-alive timeout; the next `fetch` then reuses
+  a socket the server already closed (`UND_ERR_SOCKET other side closed`). v0.243.0's stop-widget
+  step failed this way twice, identically. `fixture-server.log` held only its startup line and the
+  port stayed up throughout, so it looked like an OOM kill and was first rerun as a host flake.
+  The `/api/e2e/*` reads answer `connection: close`; give any new test-only endpoint the same.
 - **Never `pkill -f 'node backend/dist/index.js'`.** The production container's backend matches
   too, and the kill is refused ("Operation not permitted"). Worse, the calling shell's own
   command line contains the pattern, so pkill kills the script itself (exit 144) along with

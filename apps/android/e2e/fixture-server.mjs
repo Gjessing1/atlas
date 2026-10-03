@@ -337,7 +337,14 @@ const server = createServer(async (request, response) => {
     // What the widget was last *told* to paint. The regression asserts the home
     // screen against this rather than against a copy of the expected rows kept
     // in the test, which would be a second thing to keep true.
+    //
+    // Answered with `connection: close`. The regression drives adb through
+    // synchronous child processes, so its event loop can sit blocked past this
+    // server's 5 s keep-alive timeout; the next fetch then reuses a socket the
+    // server already closed and fails with `UND_ERR_SOCKET other side closed`
+    // — which failed v0.243.0's stop-widget step twice, identically.
     if (url.pathname === '/api/e2e/widget-board') {
+      response.setHeader('connection', 'close');
       return json(response, lastWidgetBoard(url.searchParams.get('variant') ?? 'v2'));
     }
     if (url.pathname === '/api/transit/stop-lines') {
