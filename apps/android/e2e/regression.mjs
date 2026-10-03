@@ -803,9 +803,11 @@ async function verifySavedCollectionSearch({ folderId, trackId }) {
     await tap('search-result-0');
     await waitForId('favorites-sheet');
     await waitForId(rowId);
-    await waitFor('search reveal to leave Collections unfiltered', hierarchy, (xml) =>
-      nodeForId(xml, 'collections-filter')?.includes('text=""'),
-    );
+    await waitFor('search reveal to leave Collections unfiltered', hierarchy, (xml) => {
+      const field = nodeForId(xml, 'collections-filter');
+      // UiAutomator reports a blank TextInput's placeholder as its text.
+      return Boolean(field && /text="(?:|Filter by name, #tag or notes)"/.test(field));
+    });
     await tap('favorites-close');
   }
 }

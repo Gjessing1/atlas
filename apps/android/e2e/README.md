@@ -195,7 +195,10 @@ before that destination. Also:
   folder and track correctly, but left the track name in the Collections filter after closing it.
   The later saved-place commute marker was therefore hidden, and the scroll helper could never
   reach it. A search reveal now expands and scrolls to the row without retaining a filter; the
-  regression asserts the filter is empty immediately after each pick.
+  regression asserts the filter is empty immediately after each pick. On this AVD, UiAutomator
+  reports an empty `TextInput`'s placeholder as its `text` attribute, so the assertion accepts
+  either empty text or the filter placeholder (the first candidate retry's strict `text=""`
+  assertion failed on a correct app).
 - **A floating bottom menu must follow the IME's screen boundary.** Edge-to-edge Android did not
   resize the React window consistently when the quick-layer search took focus, so a menu positioned
   only from the bottom control rows disappeared behind the keyboard—including the button needed to
