@@ -2,6 +2,11 @@
 # Multi-stage build for the Atlas backend + web app (served same-origin).
 FROM protomaps/go-pmtiles:v1.31.1 AS pmtiles
 
+FROM python:3.12-slim-bookworm AS garmin-python
+COPY backend/garmin /tmp/garmin
+RUN python -m venv /opt/garmin-venv && /opt/garmin-venv/bin/pip install --no-cache-dir -r /tmp/garmin/requirements.txt \
+  && cd /tmp/garmin && /opt/garmin-venv/bin/python -m unittest -q test_bridge.py
+
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
@@ -43,6 +48,8 @@ ENV NODE_ENV=production
 ARG GIT_SHA=
 ENV GIT_SHA=$GIT_SHA
 COPY --from=pmtiles /go-pmtiles /usr/local/bin/pmtiles
+COPY --from=garmin-python /usr/local /usr/local
+COPY --from=garmin-python /opt/garmin-venv /opt/garmin-venv
 COPY --from=build /app/node_modules ./node_modules
 # Every workspace package, wholesale (dist + manifest for all of them). The root
 # node_modules copy carries an @atlas/* symlink for each package; if a package
@@ -57,6 +64,7 @@ COPY --from=build /app/backend/package.json ./backend/
 # root node_modules copy alone loses them and the server crashes on import.
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
+COPY --from=build /app/backend/garmin ./backend/garmin
 # Completes one upstream's broken TLS chain (kart.miljodirektoratet.no ships its
 # leaf twice and omits the signing intermediate). See backend/certs/upstream-cas.pem
 # for why this is safe and what the N7 status probe watches for.

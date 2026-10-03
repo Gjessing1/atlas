@@ -1,9 +1,11 @@
 import fastifyJwt from '@fastify/jwt';
 import { Type, type Static } from '@sinclair/typebox';
 import type { SyncChange } from '@atlas/storage';
+import { parseGpx } from '@atlas/gpx';
 import { clampFutureStamps } from '@atlas/sync';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { hashPassword, verifyPassword } from './passwords.js';
+import type { GarminActivity, GarminDevice, GarminProfile } from './garmin-bridge.js';
 import type { Stores } from './stores.js';
 
 declare module '@fastify/jwt' {
@@ -25,6 +27,22 @@ export interface SyncApiOptions {
   inviteCode?: string;
   /** Auth attempts per IP per window. Test seam; false disables limiting. */
   authRateLimit?: false | { max: number; timeWindow: string | number };
+  garmin?: {
+    status(userId: string): Promise<boolean>;
+    connect(userId: string, email: string, password: string): Promise<'connected' | 'mfa'>;
+    completeMfa(userId: string, code: string): Promise<void>;
+    disconnect(userId: string): Promise<void>;
+    uploadCourse(
+      userId: string,
+      name: string,
+      profile: GarminProfile,
+      gpx: string,
+      deviceId?: string,
+    ): Promise<{ id: number; url: string; queued: boolean }>;
+    devices(userId: string): Promise<GarminDevice[]>;
+    activities(userId: string, start: number): Promise<GarminActivity[]>;
+    activityGpx(userId: string, id: string): Promise<string>;
+  };
 }
 
 /**
@@ -117,6 +135,30 @@ const PullQuerySchema = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_CHANGES_PER_PUSH })),
 });
 type PullQuery = Static<typeof PullQuerySchema>;
+
+const GarminConnectSchema = Type.Object({
+  email: Type.String({ minLength: 3, maxLength: 254 }),
+  password: Type.String({ minLength: 1, maxLength: 1024 }),
+});
+type GarminConnectBody = Static<typeof GarminConnectSchema>;
+const GarminMfaSchema = Type.Object({ code: Type.String({ minLength: 1, maxLength: 32 }) });
+type GarminMfaBody = Static<typeof GarminMfaSchema>;
+const GarminCourseSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 100 }),
+  profile: Type.Union([
+    Type.Literal('run'),
+    Type.Literal('bike'),
+    Type.Literal('hike'),
+    Type.Literal('foot'),
+  ]),
+  gpx: Type.String({ minLength: 20, maxLength: 4_000_000 }),
+  deviceId: Type.Optional(Type.String({ pattern: '^\\d{1,20}$' })),
+});
+type GarminCourseBody = Static<typeof GarminCourseSchema>;
+const GarminActivitiesQuery = Type.Object({
+  start: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000 })),
+});
+type GarminActivitiesQuery = Static<typeof GarminActivitiesQuery>;
 
 /**
  * Account + sync endpoints (Phase 5): JWT auth over the user store, plain REST
@@ -261,6 +303,9 @@ export async function registerSyncApi(
       if (!user || !(await verifyPassword(request.body.password, user.passwordHash))) {
         return reply.code(401).send({ error: 'wrong password' });
       }
+      // Garmin refresh tokens grant access independently of Atlas's JWT.
+      // Account deletion must remove the per-user token file as well.
+      if (opts.garmin) await opts.garmin.disconnect(user.id);
       await stores.users.deleteUser(user.id);
       return { deleted: true };
     },
@@ -306,4 +351,150 @@ export async function registerSyncApi(
       return stores.sync.changesSince(request.user.sub, since, device, limit);
     },
   );
+
+  if (opts.garmin) {
+    const garmin = opts.garmin;
+    const upstreamError = (reply: FastifyReply) =>
+      reply.code(502).send({ error: 'Garmin Connect is unavailable or needs reconnecting' });
+
+    app.get('/api/garmin/status', { preHandler: requireAuth }, async (request, reply) => {
+      try {
+        return { connected: await garmin.status(request.user.sub) };
+      } catch {
+        return upstreamError(reply);
+      }
+    });
+
+    app.post<{ Body: GarminConnectBody }>(
+      '/api/garmin/connect',
+      {
+        preHandler: requireAuth,
+        schema: { body: GarminConnectSchema },
+        attachValidation: true,
+        config: { rateLimit: { max: 5, timeWindow: '5 minutes' } },
+      },
+      async (request, reply) => {
+        if (request.validationError) return reply.code(400).send({ error: 'invalid credentials' });
+        try {
+          const state = await garmin.connect(
+            request.user.sub,
+            request.body.email,
+            request.body.password,
+          );
+          return { connected: state === 'connected', mfaRequired: state === 'mfa' };
+        } catch {
+          return reply.code(401).send({ error: 'Garmin sign-in failed' });
+        }
+      },
+    );
+
+    app.post<{ Body: GarminMfaBody }>(
+      '/api/garmin/mfa',
+      {
+        preHandler: requireAuth,
+        schema: { body: GarminMfaSchema },
+        attachValidation: true,
+        config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+      },
+      async (request, reply) => {
+        if (request.validationError) return reply.code(400).send({ error: 'invalid code' });
+        try {
+          await garmin.completeMfa(request.user.sub, request.body.code);
+          return { connected: true };
+        } catch {
+          return reply.code(401).send({ error: 'Garmin code was rejected or sign-in expired' });
+        }
+      },
+    );
+
+    app.post('/api/garmin/disconnect', { preHandler: requireAuth }, async (request, reply) => {
+      try {
+        await garmin.disconnect(request.user.sub);
+        return { connected: false };
+      } catch {
+        return upstreamError(reply);
+      }
+    });
+
+    app.post<{ Body: GarminCourseBody }>(
+      '/api/garmin/course',
+      {
+        preHandler: requireAuth,
+        bodyLimit: 4_200_000,
+        schema: { body: GarminCourseSchema },
+        attachValidation: true,
+      },
+      async (request, reply) => {
+        if (
+          request.validationError ||
+          !request.body.name.trim() ||
+          /<!DOCTYPE|<!ENTITY/i.test(request.body.gpx)
+        ) {
+          return reply.code(400).send({ error: 'invalid GPX course' });
+        }
+        try {
+          const data = parseGpx(request.body.gpx);
+          if (data.segments.every((segment) => segment.length < 2)) {
+            return reply.code(400).send({ error: 'GPX course needs at least two points' });
+          }
+        } catch {
+          return reply.code(400).send({ error: 'invalid GPX course' });
+        }
+        try {
+          return await garmin.uploadCourse(
+            request.user.sub,
+            request.body.name.trim(),
+            request.body.profile,
+            request.body.gpx,
+            request.body.deviceId,
+          );
+        } catch {
+          return upstreamError(reply);
+        }
+      },
+    );
+
+    app.get('/api/garmin/devices', { preHandler: requireAuth }, async (request, reply) => {
+      try {
+        return { devices: await garmin.devices(request.user.sub) };
+      } catch {
+        return upstreamError(reply);
+      }
+    });
+
+    app.get<{ Querystring: GarminActivitiesQuery }>(
+      '/api/garmin/activities',
+      {
+        preHandler: requireAuth,
+        schema: { querystring: GarminActivitiesQuery },
+        attachValidation: true,
+      },
+      async (request, reply) => {
+        if (request.validationError)
+          return reply.code(400).send({ error: 'invalid activity offset' });
+        try {
+          return {
+            activities: await garmin.activities(request.user.sub, request.query.start ?? 0),
+          };
+        } catch {
+          return upstreamError(reply);
+        }
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      '/api/garmin/activities/:id/gpx',
+      { preHandler: requireAuth },
+      async (request, reply) => {
+        if (!/^\d{1,20}$/.test(request.params.id)) {
+          return reply.code(400).send({ error: 'invalid activity id' });
+        }
+        try {
+          return { gpx: await garmin.activityGpx(request.user.sub, request.params.id) };
+        } catch {
+          return upstreamError(reply);
+        }
+      },
+    );
+  }
 }

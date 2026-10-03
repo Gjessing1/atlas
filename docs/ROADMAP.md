@@ -35,10 +35,13 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 Saved places, tracks and folders should be quick to edit and findable from anywhere — and, like
 everything in Atlas, exportable.
 
-- [ ] **Garmin Connect integration.** The server runs the python-garminconnect API
-      (https://github.com/cyberjunky/python-garminconnect) to upload routes that sync to the
-      watch (running/cycling); route weights beyond distance (prefer trails). Related: pull
-      activity history with routes into a dedicated folder.
+- [~] **Garmin Connect integration.** Planned walking, running, hiking and cycling routes can be
+      uploaded as Garmin courses through the server's python-garminconnect session plus Garmin's
+      course import endpoint and queued to a selected Garmin device. GPS activities import into a
+      dedicated folder, 30 at a time, with a saved cursor for older history. Atlas already offers
+      "Prefer trails" routing. Remaining: verify sign-in, course delivery and activity import
+      against a live Garmin account and watch. The private endpoints may need repair when Garmin
+      changes them.
 
 ---
 

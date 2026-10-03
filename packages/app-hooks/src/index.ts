@@ -5,6 +5,7 @@ export {
   type SyncState,
   type SyncStatus,
 } from './useSync.js';
+export { useGarmin, type GarminState } from './useGarmin.js';
 export {
   useRoute,
   routePlanState,

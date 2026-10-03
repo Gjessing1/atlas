@@ -20,6 +20,7 @@ import {
   type StopGeocodeFn,
 } from '@atlas/app-hooks';
 import { buildGpx, type TrackData } from '@atlas/gpx';
+import type { GarminState } from '@atlas/app-hooks';
 import {
   pathViaLabels,
   ROUTING_PROFILES,
@@ -245,6 +246,8 @@ export function RoutePanel({
   onStartTransitGuidance,
   onMakeCommute,
   onSaveTrack,
+  garmin,
+  onOpenGarminSettings,
 }: {
   route: RoutePlanner;
   /** Public transport for the same plan — a travel mode beside the road profiles. */
@@ -275,9 +278,14 @@ export function RoutePanel({
   /** Save this planner corridor and hand it to the commute board. */
   onMakeCommute?: () => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
+  garmin: GarminState;
+  onOpenGarminSettings: () => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [garminOpen, setGarminOpen] = useState(false);
+  const [garminName, setGarminName] = useState('');
+  const [garminDevice, setGarminDevice] = useState('');
   // Waypoint id whose search box is open for re-pointing, or null.
   const [editing, setEditing] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
@@ -419,6 +427,7 @@ export function RoutePanel({
     alongRoute: Boolean(path) && !transitMode && !route.roundTrip && stops.length >= 2,
     saveTrack: Boolean(path) && !transitMode,
     exportGpx: Boolean(path) && !transitMode,
+    sendGarmin: Boolean(path) && !transitMode && route.profile !== 'car',
     // Reverse works in transit mode too — swapping the ends is the commonest
     // thing anyone does to a journey ("now get me home"), and unlike Optimize
     // it means something to a timetable, which ignores via points entirely.
@@ -463,6 +472,16 @@ export function RoutePanel({
         setSaveOpen((open) => !open);
       },
       exportGpx: exportGpx,
+      sendGarmin: () => {
+        if (!garmin.connected) onOpenGarminSettings();
+        else {
+          garmin.clearCourseResult();
+          setGarminName(`Atlas ${route.profile} route`);
+          setGarminDevice('');
+          void garmin.loadDevices();
+          setGarminOpen((open) => !open);
+        }
+      },
       reverse: route.reverse,
       optimize: route.optimize,
       clear: route.clear,
@@ -977,6 +996,64 @@ export function RoutePanel({
             fetchNearby={fetchNearby}
             onPicked={() => setAlongOpen(false)}
           />
+        )}
+
+        {garminOpen && path && !transitMode && (
+          <div className="route-save-track">
+            <label>
+              Garmin course name
+              <input
+                value={garminName}
+                onChange={(event) => setGarminName(event.currentTarget.value)}
+              />
+            </label>
+            {garmin.devices.length > 0 && (
+              <label>
+                Device
+                <select
+                  value={garminDevice}
+                  onChange={(event) => setGarminDevice(event.currentTarget.value)}
+                >
+                  <option value="">Save in Garmin Connect only</option>
+                  {garmin.devices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              className="primary"
+              disabled={garmin.busy || !garminName.trim()}
+              onClick={() =>
+                void garmin.uploadCourse(
+                  path,
+                  garminName.trim(),
+                  route.profile,
+                  garminDevice || undefined,
+                )
+              }
+            >
+              {garmin.busy ? 'Sending…' : 'Send course'}
+            </button>
+            {garmin.error && <p role="alert">{garmin.error}</p>}
+            {garmin.lastCourseUrl && garminDevice && (
+              <p role="status">
+                {garmin.lastCourseQueued
+                  ? 'Queued for your device. Sync it in Garmin Connect.'
+                  : 'Course saved, but device delivery was not confirmed. Send it from Garmin Connect.'}
+              </p>
+            )}
+            {garmin.lastCourseUrl && (
+              <p>
+                <a href={garmin.lastCourseUrl} target="_blank" rel="noreferrer">
+                  Open course in Garmin Connect
+                </a>
+              </p>
+            )}
+          </div>
         )}
 
         {saveOpen && path && !transitMode && (

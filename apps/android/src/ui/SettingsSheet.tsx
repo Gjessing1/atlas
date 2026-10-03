@@ -55,6 +55,7 @@ import type { PackDownloadsController } from '../regions/usePackDownloads';
 import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
+import type { GarminState } from '@atlas/app-hooks';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
@@ -1398,10 +1399,133 @@ function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
 
 const SETTINGS_SECTIONS = settingsSectionsFor('android');
 
+function GarminSection({ garmin }: { garmin: GarminState }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  return (
+    <View>
+      <Text style={styles.heading}>Garmin Connect</Text>
+      <Text style={styles.muted}>
+        Send planned courses to Garmin Connect and queue them for a selected device. Import GPS
+        activity history into the Garmin activities folder in batches of 30.
+      </Text>
+      {garmin.connected ? (
+        <View>
+          <View style={styles.buttonRow}>
+            <Pressable
+              style={styles.button}
+              disabled={garmin.busy}
+              onPress={() => void garmin.importActivities()}
+              testID="garmin-import"
+            >
+              <Text style={styles.buttonText}>
+                {garmin.busy
+                  ? 'Working…'
+                  : garmin.nextActivityOffset > 0
+                    ? 'Import older'
+                    : 'Import recent'}
+              </Text>
+            </Pressable>
+            {garmin.nextActivityOffset > 0 ? (
+              <Pressable
+                style={[styles.button, styles.buttonQuiet]}
+                disabled={garmin.busy}
+                onPress={() => void garmin.restartActivityImport()}
+                testID="garmin-check-newest"
+              >
+                <Text style={styles.buttonQuietText}>Check newest</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            disabled={garmin.busy}
+            onPress={() => void garmin.disconnect()}
+            testID="garmin-disconnect"
+          >
+            <Text style={styles.buttonQuietText}>Disconnect</Text>
+          </Pressable>
+          <Text style={styles.muted}>
+            Disconnect removes Atlas’s stored sign-in. Revoke access from your Garmin account if
+            needed.
+          </Text>
+        </View>
+      ) : garmin.mfaRequired ? (
+        <View>
+          <TextInput
+            style={styles.input}
+            placeholder="Garmin verification code"
+            value={code}
+            onChangeText={setCode}
+            autoComplete="one-time-code"
+            testID="garmin-code"
+          />
+          <Pressable
+            style={styles.button}
+            disabled={garmin.busy || !code.trim()}
+            onPress={() => {
+              void garmin.completeMfa(code.trim());
+              setCode('');
+            }}
+            testID="garmin-verify"
+          >
+            <Text style={styles.buttonText}>Verify</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View>
+          <TextInput
+            style={styles.input}
+            placeholder="Garmin email"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            testID="garmin-email"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Garmin password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoComplete="password"
+            testID="garmin-password"
+          />
+          <Pressable
+            style={styles.button}
+            disabled={garmin.busy || !email.trim() || !password}
+            onPress={() => {
+              void garmin.connect(email.trim(), password);
+              setPassword('');
+            }}
+            testID="garmin-connect"
+          >
+            <Text style={styles.buttonText}>Connect Garmin</Text>
+          </Pressable>
+        </View>
+      )}
+      {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
+      {garmin.lastImport ? (
+        <Text style={styles.muted}>
+          Imported {garmin.lastImport.imported}; skipped {garmin.lastImport.skipped};{' '}
+          {garmin.lastImport.errors} failed.
+          {garmin.nextActivityOffset > 0
+            ? ` Next batch starts at activity ${garmin.nextActivityOffset + 1}.`
+            : ' All available activity pages checked.'}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function SettingsSheet({
   visible,
   onClose,
   sync,
+  garmin,
   packs,
   onPacksChanged,
   storage,
@@ -1427,6 +1551,7 @@ export function SettingsSheet({
   visible: boolean;
   onClose: () => void;
   sync: SyncState;
+  garmin: GarminState;
   packs: LocalPack[];
   onPacksChanged: () => void;
   storage: AtlasStorage | null;
@@ -1805,6 +1930,7 @@ export function SettingsSheet({
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
             <AccountSection sync={sync} storage={storageState} />
+            {sync.email ? <GarminSection garmin={garmin} /> : null}
             <Text style={styles.heading}>Your data</Text>
             <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
             <View style={styles.buttonRow}>

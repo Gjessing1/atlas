@@ -3,6 +3,7 @@ import type {
   MapProfilePreferencesController,
   RegionPackJobsController,
   SyncState,
+  GarminState,
   ThemeModeController,
   NavPrefsController,
   VehicleProfileController,
@@ -29,6 +30,7 @@ interface AppSheetsProps {
   data: UserData;
   placeCommutes?: ReadonlyMap<string, readonly string[]>;
   sync: SyncState;
+  garmin: GarminState;
   packs: LocalPack[];
   onPacksChanged: () => void;
   bottomInset: number;
@@ -88,6 +90,7 @@ export function AppSheets({
   data,
   placeCommutes,
   sync,
+  garmin,
   packs,
   onPacksChanged,
   bottomInset,
@@ -199,6 +202,7 @@ export function AppSheets({
         section={settingsSection}
         onClose={onCloseSettings}
         sync={sync}
+        garmin={garmin}
         packs={packs}
         onPacksChanged={onPacksChanged}
         storage={data.storage}

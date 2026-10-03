@@ -20,6 +20,7 @@ import {
   type StopGeocodeFn,
 } from '@atlas/app-hooks';
 import type { TrackData } from '@atlas/gpx';
+import type { GarminState } from '@atlas/app-hooks';
 import {
   pathViaLabels,
   routeActionsFor,
@@ -40,6 +41,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Keyboard,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -266,6 +268,8 @@ export function RoutePanel({
   onExport,
   onShareLink,
   onSaveTrack,
+  garmin,
+  onOpenGarminSettings,
   onNavigate,
   onOpenVehicleSettings,
   onShowTransitTrip,
@@ -296,6 +300,8 @@ export function RoutePanel({
    */
   onShareLink: () => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
+  garmin: GarminState;
+  onOpenGarminSettings: () => void;
   /**
    * Start turn-by-turn to the last stop in the current profile, via the plan's
    * intermediate stops. This panel is the only place a travel mode is chosen,
@@ -342,6 +348,9 @@ export function RoutePanel({
   const vias = useMemo(() => (route.paths ? pathViaLabels(route.paths) : []), [route.paths]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [garminOpen, setGarminOpen] = useState(false);
+  const [garminName, setGarminName] = useState('');
+  const [garminDevice, setGarminDevice] = useState('');
   // The mode-dependent toolbar's fold, and the category browser one of its
   // buttons opens. Both live here rather than in their own components so the
   // toolbar can own what it shows.
@@ -460,6 +469,7 @@ export function RoutePanel({
     alongRoute: Boolean(path) && !transitMode && !route.roundTrip && stops.length >= 2,
     saveTrack: Boolean(path) && !transitMode,
     exportGpx: Boolean(path) && !transitMode,
+    sendGarmin: Boolean(path) && !transitMode && route.profile !== 'car',
     // Reverse works in transit mode too — swapping the ends is the commonest
     // thing anyone does to a journey ("now get me home"), and unlike Optimize
     // it means something to a timetable.
@@ -489,6 +499,16 @@ export function RoutePanel({
         setSaveOpen((open) => !open);
       },
       exportGpx: () => path && onExport(path),
+      sendGarmin: () => {
+        if (!garmin.connected) onOpenGarminSettings();
+        else {
+          garmin.clearCourseResult();
+          setGarminName(`Atlas ${route.profile} route`);
+          setGarminDevice('');
+          void garmin.loadDevices();
+          setGarminOpen((open) => !open);
+        }
+      },
       reverse: route.reverse,
       optimize: route.optimize,
       clear: route.clear,
@@ -1035,6 +1055,69 @@ export function RoutePanel({
           />
         ) : null}
 
+        {garminOpen && path && !transitMode ? (
+          <View style={styles.saveTrack}>
+            <Text style={styles.fieldLabel}>Garmin course name</Text>
+            <TextInput
+              style={styles.saveInput}
+              value={garminName}
+              onChangeText={setGarminName}
+              testID="garmin-course-name"
+            />
+            {garmin.devices.length > 0 ? (
+              <View style={styles.chipRow}>
+                <Pressable
+                  style={[styles.chip, !garminDevice && styles.chipSelected]}
+                  onPress={() => setGarminDevice('')}
+                >
+                  <Text style={styles.chipText}>Connect only</Text>
+                </Pressable>
+                {garmin.devices.map((device) => (
+                  <Pressable
+                    key={device.id}
+                    style={[styles.chip, garminDevice === device.id && styles.chipSelected]}
+                    onPress={() => setGarminDevice(device.id)}
+                    testID={`garmin-device-${device.id}`}
+                  >
+                    <Text style={styles.chipText}>{device.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            <Pressable
+              style={styles.button}
+              disabled={garmin.busy || !garminName.trim()}
+              onPress={() =>
+                void garmin.uploadCourse(
+                  path,
+                  garminName.trim(),
+                  route.profile,
+                  garminDevice || undefined,
+                )
+              }
+              testID="garmin-course-send"
+            >
+              <Text style={styles.buttonText}>{garmin.busy ? 'Sending…' : 'Send course'}</Text>
+            </Pressable>
+            {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
+            {garmin.lastCourseUrl && garminDevice ? (
+              <Text style={styles.fieldLabel}>
+                {garmin.lastCourseQueued
+                  ? 'Queued for your device. Sync it in Garmin Connect.'
+                  : 'Course saved, but device delivery was not confirmed. Send it from Garmin Connect.'}
+              </Text>
+            ) : null}
+            {garmin.lastCourseUrl ? (
+              <Pressable
+                onPress={() => void Linking.openURL(garmin.lastCourseUrl!)}
+                testID="garmin-course-open"
+              >
+                <Text style={styles.linkAction}>Open course in Garmin Connect</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {saveOpen && path && !transitMode ? (
           <View style={styles.saveTrack}>
             <Text style={styles.fieldLabel}>Track name</Text>
@@ -1344,6 +1427,7 @@ const styles = StyleSheet.create({
     borderLeftColor: theme.accentFaint,
   },
   error: { fontSize: 13, color: theme.danger },
+  linkAction: { fontSize: 14, color: theme.accent, fontWeight: '600' },
   surfaceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
   surfaceTitle: { fontSize: 12, color: theme.text, fontWeight: '700' },
   surfaceText: { fontSize: 12, color: theme.textMuted },

@@ -1,5 +1,6 @@
 import {
   useBestSpots,
+  useGarmin,
   useMapProfile,
   useMapProfilePreferences,
   useRegionPackJobs,
@@ -239,6 +240,7 @@ function AppInner() {
   // Names under the pins of folders and tags the user switched labels on for.
   const pinLabels = usePinLabels(data, visiblePlaces, data.collections);
   const sync = useSync(data.storage, data.refreshAll, data.places);
+  const garmin = useGarmin(sync, data);
   const navDiagnostics = useNavigationDiagnostics(data, sync.email, sync.status);
   const nav = useNavigation();
   useNavigationDiagnosticState(nav);
@@ -2177,6 +2179,7 @@ function AppInner() {
             data={data}
             placeCommutes={commute.placeCommutes}
             sync={sync}
+            garmin={garmin}
             packs={packs}
             onPacksChanged={refreshPacks}
             bottomInset={bottomInset}
@@ -2278,6 +2281,8 @@ function AppInner() {
               }
               onNavigate={startNavigation}
               onOpenVehicleSettings={openVehicleSettings}
+              garmin={garmin}
+              onOpenGarminSettings={() => openSettings('account')}
               onShowTransitTrip={showTransitTrip}
               onStartTransitGuidance={startTransitGuidance}
               onMakeCommute={

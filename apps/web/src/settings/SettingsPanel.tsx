@@ -10,6 +10,7 @@ import {
   type MapStyleEditorController,
   type NavPrefsController,
   type StorageAvailability,
+  type GarminState,
   type ThemeModeController,
   type TransitPreferencesController,
   type VehicleProfileController,
@@ -29,6 +30,7 @@ import { mapProfileIcon } from '../icons.js';
 import { LayersPanel } from '../layers/LayersPanel.js';
 import type { LayerCatalog } from '../layers/useLayerCatalog.js';
 import { AccountPanel } from '../sync/AccountPanel.js';
+import { GarminPanel } from './GarminPanel.js';
 import type { SyncState } from '../sync/useSync.js';
 
 interface SettingsPanelProps {
@@ -40,6 +42,7 @@ interface SettingsPanelProps {
    */
   section?: SettingsSectionId;
   sync: SyncState;
+  garmin: GarminState;
   /** Whether the local database is open — sign-in cannot work without it. */
   storage: StorageAvailability;
   appearance: ThemeModeController;
@@ -375,6 +378,7 @@ function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
 export function SettingsPanel({
   section,
   sync,
+  garmin,
   storage,
   appearance,
   mapStyle,
@@ -645,6 +649,7 @@ export function SettingsPanel({
           <div className="settings-section">
             <h3>Account &amp; sync</h3>
             <AccountPanel sync={sync} storage={storage} />
+            {sync.email && <GarminPanel garmin={garmin} />}
             {/* Also on the Collections header. Two homes on purpose: Android
                 keeps it here, and a user who learned it there should find it
                 here too (rule 5 is about the data, not one route to it). */}

@@ -67,6 +67,7 @@ import {
   type WeatherMapsApiOptions,
 } from './weather-maps-api.js';
 import { createPgStores } from './pg.js';
+import { GarminBridge } from './garmin-bridge.js';
 import {
   parseRegistrationMode,
   registerSyncApi,
@@ -230,6 +231,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const syncApiOptions: SyncApiOptions = {
     registration: parseRegistrationMode(process.env.REGISTRATION),
     inviteCode: process.env.REGISTRATION_INVITE_CODE,
+    garmin: new GarminBridge(opts.dataDir),
     ...opts.syncApi,
   };
   if (stores) {

@@ -153,6 +153,7 @@ import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
 import { type ImportOptions, type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
+import { useGarmin } from '@atlas/app-hooks';
 import { useWeather } from './weather/useWeather.js';
 import { useWeatherTarget } from './weather/useWeatherTarget.js';
 
@@ -280,6 +281,10 @@ export function App() {
     setSettingsSection('navigation');
     setPanel('settings');
   }, []);
+  const openGarminSettings = useCallback(() => {
+    setSettingsSection('account');
+    setPanel('settings');
+  }, []);
   // The ordinary opener. Resets the tab, so a Settings opened from the sidebar
   // never inherits the section a previous deep link asked for.
   const toggleSettings = useCallback(() => {
@@ -299,6 +304,7 @@ export function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userData = useUserData();
   const sync = useSync(userData);
+  const garmin = useGarmin(sync, userData);
   const commute = useCommute(userData, userData.places, fetchCommute, commuteOpen);
   const appearance = useThemeMode(userData, useSystemColorScheme());
   const mapStyleEditor = useMapStyleEditor(userData);
@@ -1677,6 +1683,8 @@ export function App() {
             fetchNearby={fetchNearbyStops}
             onNavigate={onStartNavigation}
             onOpenVehicleSettings={openVehicleSettings}
+            garmin={garmin}
+            onOpenGarminSettings={openGarminSettings}
             onStartTransitGuidance={startTransitGuidance}
             onMakeCommute={
               plannedCommute &&
@@ -1715,6 +1723,7 @@ export function App() {
           <SettingsPanel
             section={settingsSection}
             sync={sync}
+            garmin={garmin}
             storage={userData}
             appearance={appearance}
             mapStyle={mapStyleEditor}

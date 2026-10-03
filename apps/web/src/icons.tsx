@@ -655,6 +655,7 @@ export const ROUTE_ACTION_ICON: Record<RouteActionKey, IconComponent> = {
   alongRoute: PinPlusIcon,
   saveTrack: BookmarkIcon,
   exportGpx: DownloadIcon,
+  sendGarmin: ShareIcon,
   reverse: SwapIcon,
   optimize: SparkleIcon,
   clear: TrashIcon,

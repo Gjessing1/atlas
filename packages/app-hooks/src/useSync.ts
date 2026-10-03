@@ -103,6 +103,8 @@ export interface SyncState {
   /** Deletes the server account (local data stays); signs out on success. */
   deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => void;
+  /** Request an account-scoped API without exposing the bearer token to screens. */
+  accountRequest: <T>(path: `/api/${string}`, body?: unknown) => Promise<T>;
 }
 
 /**
@@ -358,6 +360,31 @@ export function useSync(
     [baseUrl, fetchImpl],
   );
 
+  const accountRequest = useCallback(
+    async <T>(path: `/api/${string}`, body?: unknown): Promise<T> => {
+      const token = sessionRef.current?.token;
+      if (!token) throw new Error('Sign in to your Atlas account first.');
+      let res: Response;
+      try {
+        res = await fetchImpl(`${baseUrl}${path}`, {
+          method: body === undefined ? 'GET' : 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          signal: AbortSignal.timeout(path.startsWith('/api/garmin/') ? 90_000 : AUTH_TIMEOUT_MS),
+        });
+      } catch {
+        throw new Error('Server unreachable.');
+      }
+      const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(parsed.error ?? `Request failed (${res.status}).`);
+      return parsed as T;
+    },
+    [baseUrl, fetchImpl],
+  );
+
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
       if (!storage) return 'Storage is not ready.';
@@ -453,5 +480,6 @@ export function useSync(
     changePassword,
     deleteAccount,
     syncNow: doSync,
+    accountRequest,
   };
 }

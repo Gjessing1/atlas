@@ -586,7 +586,14 @@ export function routeOptionsSummary(
  * changes is which actions a mode shows without being asked.
  */
 export type RouteActionKey =
-  'alongRoute' | 'saveTrack' | 'exportGpx' | 'reverse' | 'optimize' | 'clear' | 'share';
+  | 'alongRoute'
+  | 'saveTrack'
+  | 'exportGpx'
+  | 'sendGarmin'
+  | 'reverse'
+  | 'optimize'
+  | 'clear'
+  | 'share';
 
 export interface RouteActionInfo {
   readonly key: RouteActionKey;
@@ -625,6 +632,7 @@ export const ROUTE_ACTIONS: readonly RouteActionInfo[] = [
   // The reason a bike or hiking route is planned on a desktop at all: it has
   // to reach the device that will be carried.
   { key: 'exportGpx', label: 'Export GPX', primary: ['bike', ...ON_FOOT] },
+  { key: 'sendGarmin', label: 'Send to Garmin', primary: [] },
   // "Now get me home" — the commonest edit to a drive, and to a ride out.
   { key: 'reverse', label: 'Reverse', primary: ['car', 'bike'] },
   // Only ever offered on a four-stop tour, which is rare in every mode.
