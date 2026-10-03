@@ -343,12 +343,17 @@ export function widgetFixtureResponse(body, nowMs) {
     const name = body.stop?.name ?? 'Engelsrud terrasse';
     const requestedLines = Array.isArray(body.lines) ? body.lines : [];
     const codes = requestedLines.length > 0 ? ['280'] : ['280', 'R14'];
+    // On the timetable's grid, not `now + 12 min`: the widget re-asks more than
+    // once after it is configured, and the regression compares the launcher
+    // against the *last* board served. Times that moved with every request made
+    // those two differ by a minute and failed v0.243.0's stop-widget step.
+    const firstMs = GRID_MS + Math.ceil((nowMs + LEAD_MS - GRID_MS) / HEADWAY_MS) * HEADWAY_MS;
     const rows = codes.map((code, index) =>
       departureWidgetRow({
         id: `stop-${code}-${index}`,
         mode: code === '280' ? 'bus' : 'rail',
-        aimedDepartureMs: nowMs + (index + 1) * 12 * MINUTE,
-        expectedDepartureMs: nowMs + (index + 1) * 12 * MINUTE,
+        aimedDepartureMs: firstMs + index * HEADWAY_MS,
+        expectedDepartureMs: firstMs + index * HEADWAY_MS,
         realtime: true,
         cancelled: false,
         destination: code === '280' ? 'Asker' : 'Oslo S',
