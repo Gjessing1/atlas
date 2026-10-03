@@ -4,11 +4,33 @@ import {
   matchPlacesByName,
   parseAddressQuery,
   savedPlaceResults,
+  savedCollectionResults,
   parseCoordinateQuery,
   photonFeatureToSearchResult,
   photonSearchResults,
   type PhotonFeature,
 } from './index.js';
+
+describe('savedCollectionResults', () => {
+  const tracks = [
+    { id: 'a', name: 'Ridge walk', notes: 'sunrise route', tags: ['hike'] },
+    { id: 'b', name: 'Ridge walk', notes: '', tags: [] },
+  ];
+  const folders = [{ id: 'f', name: 'Ridge trips' }];
+
+  it('returns distinct track and folder targets even when names repeat', () => {
+    expect(savedCollectionResults(tracks, folders, 'ridge')).toEqual([
+      { name: 'Ridge walk', label: 'Saved track', collectionTarget: { kind: 'track', id: 'a' } },
+      { name: 'Ridge walk', label: 'Saved track', collectionTarget: { kind: 'track', id: 'b' } },
+      { name: 'Ridge trips', label: 'Saved folder', collectionTarget: { kind: 'folder', id: 'f' } },
+    ]);
+  });
+
+  it('finds tracks by tags and notes after names', () => {
+    expect(savedCollectionResults(tracks, folders, 'sunrise')[0]?.collectionTarget.id).toBe('a');
+    expect(savedCollectionResults(tracks, folders, 'hike')[0]?.collectionTarget.id).toBe('a');
+  });
+});
 
 describe('photonFeatureToSearchResult', () => {
   const feature: PhotonFeature = {

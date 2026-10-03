@@ -792,6 +792,21 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
   await tap('favorites-close');
 }
 
+async function verifySavedCollectionSearch({ folderId, trackId }) {
+  for (const [query, rowId] of [
+    ['regression folder', `folder-row-${folderId}`],
+    ['regression track', `track-${trackId}`],
+  ]) {
+    await tap('search-open');
+    await replaceText('search-input', query);
+    await waitForId('search-result-0', true, 20_000);
+    await tap('search-result-0');
+    await waitForId('favorites-sheet');
+    await waitForId(rowId);
+    await tap('favorites-close');
+  }
+}
+
 /**
  * The commute board and its home-screen widget.
  *
@@ -1451,6 +1466,8 @@ async function main() {
   await setDarkTheme();
   const trackId = await recordTrackId(ids.folderId);
   await verifyPersistence({ ...ids, trackId });
+  console.log('Android regression: main search reveals saved folder and track');
+  await verifySavedCollectionSearch({ folderId: ids.folderId, trackId });
   console.log('Android regression: commute board, then its widget on the home screen');
   await saveCommuteAndReadBoard();
   await verifyMultipleCommutes(ids.placeId);

@@ -35,10 +35,6 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 Saved places, tracks and folders should be quick to edit and findable from anywhere — and, like
 everything in Atlas, exportable.
 
-- [ ] **Search tracks and folders from the main search box.** Global search currently returns
-      saved places only. Add track and folder result kinds that reveal the object in Collections
-      on both clients.
-
 - [ ] **Garmin Connect integration.** The server runs the python-garminconnect API
       (https://github.com/cyberjunky/python-garminconnect) to upload routes that sync to the
       watch (running/cycling); route weights beyond distance (prefer trails). Related: pull

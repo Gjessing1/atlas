@@ -10,8 +10,12 @@
 import {
   coordinateSearchResult,
   parseCoordinateQuery,
+  savedCollectionResults,
   savedPlaceResults,
+  type MainSearchResult,
+  type SearchableFolder,
   type SearchablePlace,
+  type SearchableTrack,
   type SearchResult,
 } from '@atlas/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -204,27 +208,45 @@ export function mergeSearchResults(local: SearchResult[], remote: SearchResult[]
   ];
 }
 
-export type SearchState = LocalFirstSearch<SearchResult>;
+export type SearchState = LocalFirstSearch<MainSearchResult>;
 
 /** Main place search: coordinates and saved data now precede every network call. */
 export function useSearch({
   search,
   places,
+  tracks = [],
+  folders = [],
   debounceMs = 250,
 }: {
   search: SearchFn;
   places: SearchablePlace[];
+  tracks?: SearchableTrack[];
+  folders?: SearchableFolder[];
   debounceMs?: number;
 }): SearchState {
   const placesRef = useLatest(places);
-  return useLocalFirstSearch<SearchResult>({
+  const tracksRef = useLatest(tracks);
+  const foldersRef = useLatest(folders);
+  return useLocalFirstSearch<MainSearchResult>({
     debounceMs,
     local: (text) => {
       const coordinate = parseCoordinateQuery(text);
       if (coordinate) return { results: [coordinateSearchResult(coordinate)], complete: true };
-      return { results: savedPlaceResults(placesRef.current, text) };
+      return {
+        results: [
+          ...savedPlaceResults(placesRef.current, text),
+          ...savedCollectionResults(tracksRef.current, foldersRef.current, text),
+        ],
+      };
     },
     remote: search,
-    merge: mergeSearchResults,
+    merge: (local, remote) => {
+      const positional = local.filter((hit): hit is SearchResult => 'position' in hit);
+      const merged = mergeSearchResults(
+        positional,
+        remote.filter((hit): hit is SearchResult => 'position' in hit),
+      );
+      return [...local, ...merged.slice(positional.length)];
+    },
   });
 }

@@ -20,6 +20,25 @@ async function debounce(ms = 300): Promise<void> {
 }
 
 describe('useSearch', () => {
+  it('offers saved tracks and folders before the remote search, and keeps them offline', async () => {
+    const search = vi.fn<SearchFn>().mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() =>
+      useSearch({
+        search,
+        places: [],
+        tracks: [{ id: 'track-1', name: 'Autumn ridge' }],
+        folders: [{ id: 'folder-1', name: 'Autumn hikes' }],
+      }),
+    );
+
+    act(() => result.current.setQuery('Autumn'));
+    expect(result.current.results.map((row) => row.label)).toEqual(['Saved track', 'Saved folder']);
+    await debounce();
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.results).toHaveLength(2);
+    expect(result.current.statusText).toBe('Saved results · online search unavailable');
+  });
+
   it('shows saved matches immediately while the remote answer is loading', async () => {
     const search = vi.fn<SearchFn>().mockResolvedValue(answer([hit('Homely cafe')]));
     const { result } = renderHook(() => useSearch({ search, places: [HOME] }));

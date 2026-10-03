@@ -8,7 +8,12 @@ import {
   tagQuery,
   useCollectionTree,
 } from '@atlas/app-hooks';
-import { folderHasPinLabels, tagHasPinLabels, trackSummary } from '@atlas/core';
+import {
+  folderHasPinLabels,
+  tagHasPinLabels,
+  trackSummary,
+  type CollectionRevealTarget,
+} from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon, PinLabelIcon } from './icons.js';
@@ -29,7 +34,7 @@ interface SidebarProps {
    * A place to bring into view as the sidebar opens: its folders are expanded
    * and the row is scrolled to and highlighted. Null when nothing asked.
    */
-  revealPlaceId?: string | null;
+  revealItem?: CollectionRevealTarget | null;
   /** The reveal has been carried out; the caller can drop its request. */
   onRevealed?: () => void;
   onShowPlace: (place: PlaceRecord) => void;
@@ -170,7 +175,7 @@ export function Sidebar({
   pinLabels,
   selectedTrackId,
   placeCommutes = new Map(),
-  revealPlaceId = null,
+  revealItem = null,
   onRevealed,
   onShowPlace,
   onShowTrack,
@@ -255,16 +260,22 @@ export function Sidebar({
    * (once `revealRowRef` is attached) does the scrolling and reports back.
    */
   useEffect(() => {
-    if (!revealPlaceId) return;
-    const place = data.places.find((p) => p.id === revealPlaceId);
-    if (!place) {
+    if (!revealItem) return;
+    const item =
+      revealItem.kind === 'place'
+        ? data.places.find((p) => p.id === revealItem.id)
+        : revealItem.kind === 'track'
+          ? data.tracks.find((t) => t.id === revealItem.id)
+          : data.collections.find((c) => c.id === revealItem.id);
+    if (!item) {
       onRevealed?.();
       return;
     }
     // A filter left over from a moment ago can hide the very row we were asked
     // to show, so revealing clears it — the request is more specific than it is.
     setFilter('');
-    const ancestors = ancestorFolderIds(tree, place.collectionId);
+    const parentId = 'parentId' in item ? item.parentId : item.collectionId;
+    const ancestors = ancestorFolderIds(tree, parentId);
     setExpandedFolders((current) => {
       if (ancestors.every((id) => current.has(id))) return current;
       const next = new Set(current);
@@ -276,9 +287,9 @@ export function Sidebar({
     row.scrollIntoView({ block: 'center', behavior: 'smooth' });
     // Scrolling a row into a list of near-identical rows does not say *which*
     // one was meant; the highlight does, and then gets out of the way.
-    setHighlighted(revealPlaceId);
+    setHighlighted(`${revealItem.kind}:${revealItem.id}`);
     onRevealed?.();
-  }, [revealPlaceId, data.places, tree, expandedFolders, onRevealed]);
+  }, [revealItem, data.places, data.tracks, data.collections, tree, expandedFolders, onRevealed]);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -375,8 +386,8 @@ export function Sidebar({
         key={key}
         // Only the row being revealed takes the ref; the effect scrolls to
         // whatever it finds attached.
-        ref={place.id === revealPlaceId ? revealRowRef : undefined}
-        className={`item-row${place.visible ? '' : ' hidden'}${place.id === highlighted ? ' revealed' : ''}`}
+        ref={revealItem?.kind === 'place' && place.id === revealItem.id ? revealRowRef : undefined}
+        className={`item-row${place.visible ? '' : ' hidden'}${key === highlighted ? ' revealed' : ''}`}
       >
         <div
           className={`item-line${dropClass(key)}${drag?.id === place.id ? ' dragging' : ''}`}
@@ -464,7 +475,11 @@ export function Sidebar({
   const trackRow = (track: TrackRecord) => {
     const key = `track:${track.id}`;
     return (
-      <li key={key} className={`item-row${selectedTrackId === track.id ? ' selected' : ''}`}>
+      <li
+        key={key}
+        ref={revealItem?.kind === 'track' && track.id === revealItem.id ? revealRowRef : undefined}
+        className={`item-row${selectedTrackId === track.id ? ' selected' : ''}${key === highlighted ? ' revealed' : ''}`}
+      >
         <div className="item-line">
           <span className="row-indent" aria-hidden="true" />
           <span className="item-icon track-icon" aria-hidden="true">
@@ -584,7 +599,15 @@ export function Sidebar({
           // be told which folders they are in.
           const open = expandedFolders.has(folder.id) || filtered.active;
           return (
-            <li key={folder.id} className={`folder-row${folder.visible ? '' : ' hidden'}`}>
+            <li
+              key={folder.id}
+              ref={
+                revealItem?.kind === 'folder' && folder.id === revealItem.id
+                  ? revealRowRef
+                  : undefined
+              }
+              className={`folder-row${folder.visible ? '' : ' hidden'}${`folder:${folder.id}` === highlighted ? ' revealed' : ''}`}
+            >
               <div
                 className={`item-line${dropClass(`folder:${folder.id}`)}${drag?.id === folder.id ? ' dragging' : ''}`}
                 {...dragProps(

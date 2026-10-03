@@ -54,6 +54,8 @@ import {
   type PoiResult,
   type PoiTileResults,
   type SearchResult,
+  type MainSearchResult,
+  type CollectionRevealTarget,
   type VisibilityFolder,
   type SettingsSectionId,
 } from '@atlas/core';
@@ -324,6 +326,9 @@ function AppInner() {
   const [commuteOpen, setCommuteOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [revealCollectionItem, setRevealCollectionItem] = useState<CollectionRevealTarget | null>(
+    null,
+  );
   // Place whose focused editor should open (map pin → Edit).
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
   // The track whose elevation profile is open, with the geometry the row tap
@@ -1724,8 +1729,18 @@ function AppInner() {
             <SearchBar
               packs={packs}
               places={data.places}
+              tracks={data.tracks}
+              folders={data.collections}
               getBias={getBias}
-              onPick={dest.pickResult}
+              onPick={(result: MainSearchResult) => {
+                if ('collectionTarget' in result) {
+                  setRevealCollectionItem(result.collectionTarget);
+                  setFavoritesOpen(true);
+                  dest.clear();
+                } else {
+                  dest.pickResult(result);
+                }
+              }}
               onClose={() => setSearchOpen(false)}
               bottomInset={bottomInset}
               getSetting={data.getSetting}
@@ -2166,6 +2181,8 @@ function AppInner() {
             onPacksChanged={refreshPacks}
             bottomInset={bottomInset}
             favoritesOpen={favoritesOpen}
+            revealCollectionItem={revealCollectionItem}
+            onRevealedCollectionItem={() => setRevealCollectionItem(null)}
             onCloseFavorites={() => setFavoritesOpen(false)}
             editPlaceId={editPlaceId}
             onCloseEditPlace={() => setEditPlaceId(null)}

@@ -1,5 +1,12 @@
 import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
-import { RECENT_SEARCHES_SETTING, type SearchablePlace, type SearchResult } from '@atlas/core';
+import {
+  RECENT_SEARCHES_SETTING,
+  isCollectionSearchResult,
+  type MainSearchResult,
+  type SearchableFolder,
+  type SearchablePlace,
+  type SearchableTrack,
+} from '@atlas/core';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -19,6 +26,8 @@ import { geoSearch, type SearchBias } from './geoSearch';
 export function SearchBar({
   packs,
   places,
+  tracks,
+  folders,
   getBias,
   onPick,
   onClose,
@@ -29,9 +38,11 @@ export function SearchBar({
   packs: LocalPack[];
   /** The user's saved places, matched locally and offered above geocoder hits. */
   places: SearchablePlace[];
+  tracks: SearchableTrack[];
+  folders: SearchableFolder[];
   /** Current map centre, to bias results towards the viewport (web parity). */
   getBias: SearchBias;
-  onPick: (result: SearchResult) => void;
+  onPick: (result: MainSearchResult) => void;
   onClose: () => void;
   /** System nav-bar inset — supplied with Atlas's zero-inset fallback. */
   bottomInset?: number;
@@ -44,7 +55,7 @@ export function SearchBar({
     async ({ text, signal }) => geoSearch(packs, text, getBias, { signal }),
     [packs, getBias],
   );
-  const search = useSearch({ search: fetchSearch, places, debounceMs: 300 });
+  const search = useSearch({ search: fetchSearch, places, tracks, folders, debounceMs: 300 });
 
   const {
     recent,
@@ -71,8 +82,8 @@ export function SearchBar({
   }, [search, onClose]);
 
   const pick = useCallback(
-    (result: SearchResult) => {
-      remember(result);
+    (result: MainSearchResult) => {
+      if (!isCollectionSearchResult(result)) remember(result);
       close();
       onPick(result);
     },
@@ -103,7 +114,7 @@ export function SearchBar({
         <TextInput
           ref={input}
           style={styles.input}
-          placeholder="Search places or coordinates"
+          placeholder="Search places, tracks or folders"
           value={search.query}
           onChangeText={search.setQuery}
           autoCorrect={false}

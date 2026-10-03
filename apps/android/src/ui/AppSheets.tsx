@@ -9,7 +9,7 @@ import type {
   TransitPreferencesController,
   PinLabelsController,
 } from '@atlas/app-hooks';
-import type { SettingsSectionId } from '@atlas/core';
+import type { CollectionRevealTarget, SettingsSectionId } from '@atlas/core';
 import type { TrackRecord } from '@atlas/storage';
 
 import type { OverlaysController } from '../layers/useOverlays';
@@ -34,6 +34,8 @@ interface AppSheetsProps {
   bottomInset: number;
 
   favoritesOpen: boolean;
+  revealCollectionItem: CollectionRevealTarget | null;
+  onRevealedCollectionItem: () => void;
   onCloseFavorites: () => void;
   /** Place whose focused editor should open (map pin → Edit). */
   editPlaceId: string | null;
@@ -90,6 +92,8 @@ export function AppSheets({
   onPacksChanged,
   bottomInset,
   favoritesOpen,
+  revealCollectionItem,
+  onRevealedCollectionItem,
   onCloseFavorites,
   editPlaceId,
   onCloseEditPlace,
@@ -125,6 +129,8 @@ export function AppSheets({
     <>
       <FavoritesSheet
         visible={favoritesOpen}
+        revealItem={revealCollectionItem}
+        onRevealed={onRevealedCollectionItem}
         onClose={onCloseFavorites}
         places={data.places}
         placeCommutes={placeCommutes}

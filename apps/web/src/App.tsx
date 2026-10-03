@@ -25,6 +25,8 @@ import {
   type PoiResult,
   type PoiTileResults,
   type SearchResult,
+  type MainSearchResult,
+  type CollectionRevealTarget,
   type SettingsSectionId,
   type ShareFormat,
   type VisibilityFolder,
@@ -259,7 +261,7 @@ export function App() {
   // should reveal — both by id, so a rename or a delete elsewhere is followed
   // rather than leaving a stale copy of the record on screen.
   const [editPlaceId, setEditPlaceId] = useState<string | null>(null);
-  const [revealPlaceId, setRevealPlaceId] = useState<string | null>(null);
+  const [revealItem, setRevealItem] = useState<CollectionRevealTarget | null>(null);
   // Which drawer is open — see {@link PanelId}. The named booleans below are
   // read-only views of it, so the render tree still says which panel it means.
   const [panel, setPanel] = useState<PanelId | null>(linkedPanel === 'commute' ? 'commute' : null);
@@ -768,7 +770,14 @@ export function App() {
 
   // A picked search result becomes a pin plus the same card a POI tap opens.
   const onSearchSelect = useCallback(
-    (result: SearchResult) => {
+    (result: MainSearchResult) => {
+      if ('collectionTarget' in result) {
+        setRevealItem(result.collectionTarget);
+        setPanel('collections');
+        setPin(null);
+        setTarget(null);
+        return;
+      }
       closePanels();
       setPin(result.position);
       setTarget({
@@ -1091,7 +1100,7 @@ export function App() {
 
   // Identity-stable: it sits in the Sidebar's reveal effect deps, where a fresh
   // arrow per render would re-run that effect on every render.
-  const onRevealed = useCallback(() => setRevealPlaceId(null), []);
+  const onRevealed = useCallback(() => setRevealItem(null), []);
 
   // Resolved from the live list rather than held as a record: deleting the
   // place — here, or on another device mid-edit — closes the editor instead of
@@ -1273,7 +1282,13 @@ export function App() {
       <div
         className={`topbar${nav.phase !== 'idle' && nav.phase !== 'preview' ? ' topbar-nav-hidden' : ''}`}
       >
-        <SearchBox onSelect={onSearchSelect} getBias={getBias} places={userData.places} />
+        <SearchBox
+          onSelect={onSearchSelect}
+          getBias={getBias}
+          places={userData.places}
+          tracks={userData.tracks}
+          folders={userData.collections}
+        />
         <button
           type="button"
           className="sidebar-toggle"
@@ -1614,7 +1629,7 @@ export function App() {
           onDelete={() => void userData.deletePlace(editPlace.id)}
           onShowInCollections={() => {
             setEditPlaceId(null);
-            setRevealPlaceId(editPlace.id);
+            setRevealItem({ kind: 'place', id: editPlace.id });
             setPanel('collections');
           }}
           onClose={() => setEditPlaceId(null)}
@@ -1685,7 +1700,7 @@ export function App() {
             pinLabels={pinLabels}
             selectedTrackId={selectedTrack?.track.id ?? null}
             placeCommutes={commute.placeCommutes}
-            revealPlaceId={revealPlaceId}
+            revealItem={revealItem}
             onRevealed={onRevealed}
             onShowPlace={showPlace}
             onShowTrack={showTrack}

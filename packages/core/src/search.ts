@@ -25,6 +25,26 @@ export interface SearchResult {
   transitStopId?: string;
 }
 
+/** A saved item with no single map position; picking it opens Collections. */
+export interface CollectionRevealTarget {
+  kind: 'place' | 'track' | 'folder';
+  id: string;
+}
+
+export interface CollectionSearchResult {
+  name: string;
+  label: string;
+  collectionTarget: CollectionRevealTarget;
+}
+
+export type MainSearchResult = SearchResult | CollectionSearchResult;
+
+export function isCollectionSearchResult(
+  result: MainSearchResult,
+): result is CollectionSearchResult {
+  return 'collectionTarget' in result;
+}
+
 /**
  * Parse a search query that is nothing but a coordinate pair, in decimal
  * degrees: "59.9139, 10.7522", "59.9139 10.7522", optional hemisphere letters
@@ -346,6 +366,48 @@ export function savedPlaceResults<T extends SearchablePlace>(
     ...(p.address ? { address: p.address } : {}),
     position: { lat: p.lat, lng: p.lng },
   }));
+}
+
+export interface SearchableTrack {
+  id: string;
+  name: string;
+  notes?: string;
+  tags?: readonly string[];
+}
+
+export interface SearchableFolder {
+  id: string;
+  name: string;
+}
+
+/** Match saved, non-positional records locally so they remain findable offline. */
+export function savedCollectionResults(
+  tracks: readonly SearchableTrack[],
+  folders: readonly SearchableFolder[],
+  query: string,
+  limit = 4,
+): CollectionSearchResult[] {
+  const q = query.trim().toLocaleLowerCase();
+  if (!q) return [];
+  const namedTracks = matchPlacesByName([...tracks], q, limit);
+  const seen = new Set(namedTracks.map((track) => track.id));
+  const otherTracks = tracks.filter(
+    (track) =>
+      !seen.has(track.id) &&
+      (track.tags?.some((tag) => tag.toLocaleLowerCase().includes(q)) ||
+        track.notes?.toLocaleLowerCase().includes(q)),
+  );
+  const trackHits = [...namedTracks, ...otherTracks].slice(0, limit).map((track) => ({
+    name: track.name,
+    label: 'Saved track',
+    collectionTarget: { kind: 'track' as const, id: track.id },
+  }));
+  const folderHits = matchPlacesByName([...folders], q, limit).map((folder) => ({
+    name: folder.name,
+    label: 'Saved folder',
+    collectionTarget: { kind: 'folder' as const, id: folder.id },
+  }));
+  return [...trackHits, ...folderHits];
 }
 
 /**

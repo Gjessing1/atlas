@@ -1,14 +1,24 @@
 import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
-import { type LatLng, type SearchablePlace, type SearchResult } from '@atlas/core';
+import {
+  isCollectionSearchResult,
+  type LatLng,
+  type MainSearchResult,
+  type SearchableFolder,
+  type SearchablePlace,
+  type SearchableTrack,
+  type SearchResult,
+} from '@atlas/core';
 import { useCallback, useMemo, useState } from 'react';
 
 interface SearchBoxProps {
   /** Called when the user picks a result. */
-  onSelect: (result: SearchResult) => void;
+  onSelect: (result: MainSearchResult) => void;
   /** Current map center, used to bias results towards the viewport. */
   getBias: () => LatLng | null;
   /** The user's saved places, matched locally and offered above geocoder hits. */
   places: SearchablePlace[];
+  tracks: SearchableTrack[];
+  folders: SearchableFolder[];
 }
 
 /**
@@ -19,7 +29,7 @@ interface SearchBoxProps {
  */
 const RECENT_KEY = 'atlas.search.recent';
 
-export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
+export function SearchBox({ onSelect, getBias, places, tracks, folders }: SearchBoxProps) {
   const fetchSearch = useCallback<SearchFn>(
     async ({ text, signal }) => {
       const params = new URLSearchParams({ q: text });
@@ -37,7 +47,7 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
     },
     [getBias],
   );
-  const search = useSearch({ search: fetchSearch, places });
+  const search = useSearch({ search: fetchSearch, places, tracks, folders });
   const {
     recent,
     remember,
@@ -58,8 +68,8 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
   const showingRecent = search.query.trim().length < 2;
   const shown = showingRecent ? recent : search.results;
 
-  const pick = (result: SearchResult) => {
-    remember(result);
+  const pick = (result: MainSearchResult) => {
+    if (!isCollectionSearchResult(result)) remember(result);
     search.settle(result.name);
     setOpen(false);
     onSelect(result);
@@ -92,7 +102,7 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
     <div className="searchbox">
       <input
         type="search"
-        placeholder="Search places or coordinates…"
+        placeholder="Search places, tracks, folders or coordinates…"
         value={search.query}
         onChange={(e) => {
           search.setQuery(e.target.value);
@@ -127,7 +137,11 @@ export function SearchBox({ onSelect, getBias, places }: SearchBoxProps) {
           )}
           {shown.map((result, i) => (
             <li
-              key={`${result.position.lat}/${result.position.lng}/${result.name}`}
+              key={
+                isCollectionSearchResult(result)
+                  ? `${result.collectionTarget.kind}/${result.collectionTarget.id}`
+                  : `${result.position.lat}/${result.position.lng}/${result.name}`
+              }
               role="option"
               aria-selected={i === highlighted}
               className={i === highlighted ? 'highlighted' : undefined}

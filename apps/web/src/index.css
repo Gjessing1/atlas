@@ -1453,7 +1453,8 @@ button {
 
 /* A row the app just scrolled to ("Show in collections"). Scrolling alone does
    not say which of a dozen similar rows was meant; this does, then fades. */
-.item-row.revealed > .item-line {
+.item-row.revealed > .item-line,
+.folder-row.revealed > .item-line {
   border-radius: 6px;
   animation: reveal-row 2.5s ease-out forwards;
 }
@@ -1471,7 +1472,8 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .item-row.revealed > .item-line {
+  .item-row.revealed > .item-line,
+  .folder-row.revealed > .item-line {
     animation: none;
     background: var(--surface-selected);
   }

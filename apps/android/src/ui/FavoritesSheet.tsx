@@ -11,7 +11,12 @@ import {
   type CollectionDragItem,
   type CollectionDropZone,
 } from '@atlas/app-hooks';
-import { folderHasPinLabels, tagHasPinLabels, trackSummary } from '@atlas/core';
+import {
+  folderHasPinLabels,
+  tagHasPinLabels,
+  trackSummary,
+  type CollectionRevealTarget,
+} from '@atlas/core';
 import type {
   CollectionRecord,
   PlacePatch,
@@ -19,7 +24,7 @@ import type {
   TrackPatch,
   TrackRecord,
 } from '@atlas/storage';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -414,6 +419,8 @@ function ImportControls({
  */
 export function FavoritesSheet({
   visible,
+  revealItem,
+  onRevealed,
   onClose,
   places,
   placeCommutes = new Map(),
@@ -442,6 +449,8 @@ export function FavoritesSheet({
   bottomInset = 0,
 }: {
   visible: boolean;
+  revealItem?: CollectionRevealTarget | null;
+  onRevealed?: () => void;
   onClose: () => void;
   places: PlaceRecord[];
   /** Commutes that use each saved place as an end. */
@@ -491,6 +500,44 @@ export function FavoritesSheet({
   // What the list is narrowed to. Session-only, like the expansion state: a
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const revealRowRef = useRef<View>(null);
+  const scrollY = useRef(0);
+  useEffect(() => {
+    if (!visible || !revealItem) return;
+    const item =
+      revealItem.kind === 'track'
+        ? tracks.find((track) => track.id === revealItem.id)
+        : revealItem.kind === 'folder'
+          ? collections.find((folder) => folder.id === revealItem.id)
+          : places.find((place) => place.id === revealItem.id);
+    if (item) {
+      // Filtering opens every matching branch and places the requested row in
+      // the short list, including a track buried in a collapsed subfolder.
+      setFilter(item.name);
+      setHighlighted(`${revealItem.kind}:${revealItem.id}`);
+    }
+    onRevealed?.();
+  }, [visible, revealItem, tracks, collections, places, onRevealed]);
+  useEffect(() => {
+    if (!highlighted) return;
+    const frame = requestAnimationFrame(() => {
+      revealRowRef.current?.measureInWindow((_x, rowY) => {
+        scrollRef.current?.getNativeScrollRef()?.measureInWindow((_sx, sheetY) => {
+          scrollRef.current?.scrollTo({
+            y: Math.max(0, scrollY.current + rowY - sheetY - 32),
+            animated: true,
+          });
+        });
+      });
+    });
+    const timer = setTimeout(() => setHighlighted(null), 2500);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [highlighted]);
   const [newFolder, setNewFolder] = useState('');
   // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
   const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
@@ -633,7 +680,14 @@ export function FavoritesSheet({
     const key = `place:${place.id}`;
     return (
       <View>
-        <View style={[styles.row, place.visible ? null : styles.rowHidden]}>
+        <View
+          ref={highlighted === key ? revealRowRef : undefined}
+          style={[
+            styles.row,
+            place.visible ? null : styles.rowHidden,
+            highlighted === key ? styles.rowRevealed : null,
+          ]}
+        >
           {handle}
           <Pressable
             style={[styles.badge, { backgroundColor: place.color }]}
@@ -721,7 +775,14 @@ export function FavoritesSheet({
     const key = `track:${track.id}`;
     return (
       <View key={key}>
-        <View style={[styles.row, track.visible ? null : styles.rowHidden]}>
+        <View
+          ref={highlighted === key ? revealRowRef : undefined}
+          style={[
+            styles.row,
+            track.visible ? null : styles.rowHidden,
+            highlighted === key ? styles.rowRevealed : null,
+          ]}
+        >
           <View style={styles.trackIconBox}>
             <Text style={styles.trackIcon}>〰</Text>
           </View>
@@ -849,9 +910,14 @@ export function FavoritesSheet({
                 ref={(node) => {
                   if (node) folderRefs.current.set(folder.id, node);
                   else folderRefs.current.delete(folder.id);
+                  if (highlighted === `folder:${folder.id}`) revealRowRef.current = node;
                 }}
                 onLayout={() => measureFolder(folder.id)}
-                style={[styles.row, folder.visible ? null : styles.rowHidden]}
+                style={[
+                  styles.row,
+                  folder.visible ? null : styles.rowHidden,
+                  highlighted === `folder:${folder.id}` ? styles.rowRevealed : null,
+                ]}
                 testID={`folder-row-${folder.id}`}
               >
                 {handle}
@@ -1039,7 +1105,15 @@ export function FavoritesSheet({
         ) : null}
       </View>
 
-      <ScrollView style={styles.scroll} scrollEnabled={!dragActive}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        scrollEnabled={!dragActive}
+        onScroll={(event) => {
+          scrollY.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+      >
         {/* A filter that matched nothing is not an empty collection: saying
             "nothing saved yet" to someone whose pins are all still there reads
             as data loss. */}
@@ -1174,6 +1248,7 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
   commuteBadge: { color: theme.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  rowRevealed: { backgroundColor: theme.accentFaint, borderRadius: 8 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
   subButtonText: { fontSize: 16, color: theme.textMuted, fontWeight: '700' },

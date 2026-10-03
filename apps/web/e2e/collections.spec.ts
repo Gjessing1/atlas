@@ -1,6 +1,45 @@
 import { expect, test } from '@playwright/test';
 import { closePlaceEditor, waitForMap } from './helpers';
 
+test('main search reveals nested saved folders and tracks in Collections', async ({ page }) => {
+  await page.route('**/api/search**', (route) => route.fulfill({ json: { results: [] } }));
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByPlaceholder('New folder name').fill('Autumn trips');
+  await page.getByPlaceholder('New folder name').press('Enter');
+  await page.getByRole('button', { name: 'New folder inside Autumn trips' }).click();
+  await page.getByPlaceholder('New folder name').fill('Ridge plans');
+  await page.getByPlaceholder('New folder name').press('Enter');
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
+  await page.getByLabel('Import into').selectOption({ label: 'Ridge plans' });
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'Ridge route.gpx',
+    mimeType: 'application/gpx+xml',
+    buffer: Buffer.from(
+      '<?xml version="1.0"?><gpx version="1.1" creator="Atlas"><trk><name>Ridge route</name><trkseg><trkpt lat="59.9" lon="10.7"/><trkpt lat="59.91" lon="10.71"/></trkseg></trk></gpx>',
+    ),
+  });
+  await expect(page.getByRole('button', { name: 'Import', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Close panel' }).click();
+
+  const search = page.getByPlaceholder('Search places');
+  await search.fill('Ridge plans');
+  await expect(page.getByRole('option', { name: /Ridge plans Saved folder/ })).toBeVisible();
+  await page.getByRole('option', { name: /Ridge plans Saved folder/ }).click();
+  await expect(page.locator('.sidebar .folder-row.revealed .folder-name')).toHaveText(
+    'Ridge plans',
+  );
+  await page.getByRole('button', { name: 'Close panel' }).click();
+
+  await search.fill('Ridge route');
+  await expect(page.getByRole('option', { name: /Ridge route Saved track/ })).toBeVisible();
+  await page.getByRole('option', { name: /Ridge route Saved track/ }).click();
+  await expect(page.locator('.sidebar .item-row.revealed .item-name')).toHaveText('Ridge route');
+  await expect(page.getByRole('button', { name: 'Collapse Autumn trips' })).toBeVisible();
+});
+
 test('a saved place can be hidden from and restored to the map', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);
