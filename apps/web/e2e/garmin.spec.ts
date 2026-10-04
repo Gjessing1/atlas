@@ -49,6 +49,47 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   await expect(page.getByRole('status')).toContainText('Imported 1; skipped 0; 0 failed.');
 
   await page.getByRole('button', { name: 'Close panel' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window
+            .__atlasMap!.getStyle()
+            .layers?.find(
+              (layer) => layer.id.startsWith('atlas-track-') && layer.id.endsWith('-line'),
+            )?.id,
+      ),
+    )
+    .toBeTruthy();
+  const lineId = await page.evaluate(
+    () =>
+      window
+        .__atlasMap!.getStyle()
+        .layers!.find((layer) => layer.id.startsWith('atlas-track-') && layer.id.endsWith('-line'))!
+        .id,
+  );
+  const mapColor = () =>
+    page.evaluate((id) => window.__atlasMap!.getPaintProperty(id, 'line-color'), lineId);
+  expect(await mapColor()).toBe('#2a78d6');
+  const [trackX, trackY] = await project(page, 59.905, 10.705);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ([x, y, id]) =>
+          window.__atlasMap!.queryRenderedFeatures([x!, y!], { layers: [id!] }).length,
+        [trackX, trackY, lineId] as const,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.mouse.click(trackX, trackY);
+  const profile = page.locator('.elevation-panel');
+  await expect(profile).toContainText('Morning run');
+  await expect(profile).toContainText('Activity: Running');
+  await expect(profile).toContainText(/Total distance: 1\.\d km/);
+  await expect.poll(mapColor).toBe('#a855f7');
+  await profile.getByRole('button', { name: 'Close profile' }).click();
+  await expect.poll(mapColor).toBe('#2a78d6');
+
   await openRoutePlannerAt(page, 59.905, 10.74);
   const [x, y] = await project(page, 59.915, 10.76);
   await page.mouse.click(x, y);

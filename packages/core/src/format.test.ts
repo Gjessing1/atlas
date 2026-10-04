@@ -10,6 +10,7 @@ import {
   fmtEta,
   fmtKm,
   fmtWhenClock,
+  garminActivityLabel,
   trackSummary,
 } from './index.js';
 
@@ -31,6 +32,15 @@ describe('fmtClock', () => {
     for (let h = 0; h < 24; h++) {
       expect(fmtClock(at(h, 30))).toMatch(/^\d{2}:30$/);
     }
+  });
+});
+
+describe('Garmin activity labels', () => {
+  it('shows the imported activity kind without exposing the Garmin id tag', () => {
+    expect(garminActivityLabel(['garmin:123', 'trail_running'])).toBe('Trail running');
+    expect(garminActivityLabel(['garmin:124', 'backcountry_skiing'])).toBe('Backcountry skiing');
+    expect(garminActivityLabel(['garmin:125'])).toBeNull();
+    expect(garminActivityLabel(['trail_running'])).toBeNull();
   });
 });
 

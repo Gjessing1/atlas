@@ -1,5 +1,5 @@
-import { trackSummary } from '@atlas/core';
-import type { TrackData } from '@atlas/gpx';
+import { fmtDuration, fmtKm, garminActivityLabel } from '@atlas/core';
+import { computeTrackStats, type TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -28,6 +28,10 @@ export function TrackProfileSheet({
   onClose: () => void;
   bottomInset?: number;
 }) {
+  const activity = track ? garminActivityLabel(track.tags) : null;
+  const distanceM = track?.stats['distanceM'] ?? (data ? computeTrackStats(data).distanceM : null);
+  const durationMs = track?.stats['durationMs'];
+  const ascentM = track?.stats['ascentM'];
   return (
     <BottomSheet
       visible={track !== null}
@@ -46,7 +50,22 @@ export function TrackProfileSheet({
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </View>
-      {track ? <Text style={styles.muted}>{trackSummary(track.stats)}</Text> : null}
+      {activity ? <Text style={styles.muted}>Activity: {activity}</Text> : null}
+      {track ? (
+        <Text style={styles.muted} testID="track-profile-distance">
+          Total distance: {distanceM === null ? 'Unavailable' : fmtKm(distanceM)}
+        </Text>
+      ) : null}
+      {track && ((durationMs !== undefined && durationMs > 0) || (ascentM ?? 0) > 0) ? (
+        <Text style={styles.muted}>
+          {[
+            durationMs !== undefined && durationMs > 0 ? fmtDuration(durationMs) : null,
+            ascentM !== undefined && ascentM > 0 ? `↗ ${Math.round(ascentM)} m` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      ) : null}
       {data ? (
         <ElevationChart data={data} />
       ) : (

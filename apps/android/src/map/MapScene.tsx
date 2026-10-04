@@ -322,6 +322,8 @@ interface MapSceneProps {
   measure: GeoJSON.FeatureCollection | null;
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
+  selectedTrackId: string | null;
+  onSelectTrack: (id: string) => void;
   /** First corner and completed rectangle while drawing a custom offline region. */
   offlineRegionCorner: LatLng | null;
   offlineRegionBbox: BBox | null;
@@ -406,6 +408,8 @@ export function MapScene({
   poiResults,
   measure,
   trackGeo,
+  selectedTrackId,
+  onSelectTrack,
   offlineRegionCorner,
   offlineRegionBbox,
   nav,
@@ -1686,20 +1690,50 @@ export function MapScene({
         ) : null}
         {/* Saved/imported tracks (visible ones), drawn under the routes. */}
         {!inPip && trackGeo.features.length > 0 ? (
-          <GeoJSONSource id="atlas-tracks" data={trackGeo}>
+          <GeoJSONSource
+            id="atlas-tracks"
+            data={trackGeo}
+            onPress={(event) => {
+              if (planning || nav.phase !== 'idle') return;
+              const trackId = event.nativeEvent.features[0]?.properties?.['trackId'];
+              if (typeof trackId !== 'string') return;
+              event.stopPropagation();
+              onSelectTrack(trackId);
+            }}
+          >
             <Layer
               type="fill"
               id="atlas-track-areas-fill"
               filter={['==', ['get', 'featureKind'], 'area']}
-              paint={{ 'fill-color': '#c2410c', 'fill-opacity': 0.16 }}
+              paint={{
+                'fill-color': [
+                  'case',
+                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
+                  '#a855f7',
+                  '#c2410c',
+                ],
+                'fill-opacity': [
+                  'case',
+                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
+                  0.25,
+                  0.16,
+                ],
+              }}
             />
             <Layer
               type="line"
               id="atlas-tracks-line"
               filter={['==', ['get', 'featureKind'], 'line']}
               paint={{
-                'line-color': ['case', ['==', ['get', 'recordKind'], 'area'], '#c2410c', '#2a78d6'],
-                'line-width': 4,
+                'line-color': [
+                  'case',
+                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
+                  '#a855f7',
+                  ['==', ['get', 'recordKind'], 'area'],
+                  '#c2410c',
+                  '#2a78d6',
+                ],
+                'line-width': ['case', ['==', ['get', 'trackId'], selectedTrackId ?? ''], 6, 4],
                 'line-opacity': 0.9,
               }}
             />

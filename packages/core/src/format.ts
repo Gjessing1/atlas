@@ -134,3 +134,22 @@ export function trackSummary(stats: Record<string, number>): string {
   if (typeof ascentM === 'number' && ascentM > 0) parts.push(`↗ ${Math.round(ascentM)} m`);
   return parts.join(' · ') || 'no stats';
 }
+
+/** Human-readable Garmin activity from the raw type tag kept with an imported GPX. */
+export function garminActivityLabel(tags: readonly string[]): string | null {
+  if (!tags.some((tag) => tag.startsWith('garmin:'))) return null;
+  const type = tags.find((tag) => tag !== '' && !tag.startsWith('garmin:'));
+  if (!type) return null;
+  const names: Record<string, string> = {
+    running: 'Running',
+    trail_running: 'Trail running',
+    cycling: 'Cycling',
+    mountain_biking: 'Mountain biking',
+    gravel_cycling: 'Gravel cycling',
+    hiking: 'Hiking',
+    walking: 'Walking',
+  };
+  return (
+    names[type] ?? type.replace(/[_-]+/g, ' ').replace(/^\w/, (letter) => letter.toUpperCase())
+  );
+}

@@ -5,6 +5,7 @@ import {
   decodeMapHash,
   decodePanelLink,
   fmtDistanceM,
+  garminActivityLabel,
   haversineM,
   mapProfile,
   mapProfileForRouting,
@@ -1001,7 +1002,7 @@ export function App() {
     [tracks, getTrackData],
   );
 
-  useTrackLayers(map, tracks, getTrackData, selectTrack);
+  useTrackLayers(map, tracks, getTrackData, selectTrack, selectedTrack?.track.id ?? null);
 
   // Keep the selected track's metadata fresh; drop it when the track is deleted.
   useEffect(() => {
@@ -1772,6 +1773,7 @@ export function App() {
               title={selectedTrack.track.name}
               stats={selectedTrack.track.stats}
               data={selectedTrack.data}
+              activity={garminActivityLabel(selectedTrack.track.tags)}
               onClose={() => selectTrack(null)}
               onHoverPoint={onProfileHover}
             />

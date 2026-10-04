@@ -1,5 +1,5 @@
 import { fmtDuration, fmtKm, type LatLng } from '@atlas/core';
-import { buildElevationProfile } from '@atlas/gpx';
+import { buildElevationProfile, computeTrackStats } from '@atlas/gpx';
 import type { TrackData } from '@atlas/gpx';
 import { routeSurfaceAt, routeSurfaceBreakdown, type RouteEnrichment } from '@atlas/routing';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +17,7 @@ interface ElevationProfileProps {
   /** Summary stats to show in the header (subset of @atlas/gpx TrackStats keys). */
   stats: Record<string, number>;
   data: TrackData;
+  activity?: string | null;
   /** OSM surface ranges for routed paths; imported tracks may not carry them. */
   enrichment?: RouteEnrichment;
   onClose: () => void;
@@ -40,6 +41,7 @@ export function ElevationProfile({
   title,
   stats,
   data,
+  activity,
   enrichment,
   onClose,
   onHoverPoint,
@@ -49,6 +51,7 @@ export function ElevationProfile({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   const profile = useMemo(() => buildElevationProfile(data), [data]);
+  const distanceM = stats['distanceM'] ?? computeTrackStats(data).distanceM;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -62,7 +65,6 @@ export function ElevationProfile({
   useEffect(() => () => onHoverPoint(null), [data, onHoverPoint]);
 
   const statParts = [
-    stats['distanceM'] !== undefined && fmtKm(stats['distanceM']),
     stats['ascentM'] !== undefined && `↗ ${Math.round(stats['ascentM'])} m`,
     stats['descentM'] !== undefined && `↘ ${Math.round(stats['descentM'])} m`,
     stats['durationMs'] ? fmtDuration(stats['durationMs']) : null,
@@ -164,10 +166,16 @@ export function ElevationProfile({
     <div className="elevation-panel" ref={containerRef}>
       <div className="elevation-header">
         <strong>{title}</strong>
-        <span className="elevation-stats">{statParts.join(' · ')}</span>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close profile">
           ✕
         </button>
+      </div>
+      <div className="elevation-stats">
+        {activity && <span>Activity: {activity}</span>}
+        <span>Total distance: {fmtKm(distanceM)}</span>
+        {statParts.map((part) => (
+          <span key={part}>{part}</span>
+        ))}
       </div>
       {chart ? (
         <div className="elevation-chart">

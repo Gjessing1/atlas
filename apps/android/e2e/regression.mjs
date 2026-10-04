@@ -755,7 +755,12 @@ async function recordTrackId(folderId) {
     /^track-(?!visible-|edit-|plan-|export-)[0-9a-f-]+$/i,
     'saved track row',
   ).slice('track-'.length);
-  await tap('favorites-close');
+  await tap(`track-${id}`);
+  const profile = await waitForId('track-profile-distance');
+  if (!windowStrings(profile).some((value) => /^Total distance: [\d.]+ (?:m|km)$/.test(value))) {
+    throw new Error('Saved track profile did not show its total distance');
+  }
+  await tap('track-profile-close');
   return id;
 }
 

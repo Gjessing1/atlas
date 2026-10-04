@@ -6,6 +6,7 @@ import { useEffect, useRef } from 'react';
 
 const SOURCE_PREFIX = 'atlas-track-';
 const TRACK_COLOR = '#2a78d6';
+const SELECTED_COLOR = '#a855f7';
 
 const lineLayerId = (sourceId: string) => `${sourceId}-line`;
 const casingLayerId = (sourceId: string) => `${sourceId}-casing`;
@@ -43,10 +44,13 @@ export function useTrackLayers(
   tracks: TrackRecord[],
   getTrackData: (id: string) => Promise<TrackData | null>,
   onSelectTrack: (id: string) => void,
+  selectedTrackId: string | null,
 ): void {
   // The click handler is registered once; keep the latest callback in a ref.
   const onSelectRef = useRef(onSelectTrack);
   onSelectRef.current = onSelectTrack;
+  const selectedIdRef = useRef(selectedTrackId);
+  selectedIdRef.current = selectedTrackId;
 
   useEffect(() => {
     if (!map) return;
@@ -79,7 +83,10 @@ export function useTrackLayers(
               type: 'fill',
               source: sourceId,
               filter: ['==', ['get', 'featureKind'], 'area'],
-              paint: { 'fill-color': '#c2410c', 'fill-opacity': 0.16 },
+              paint: {
+                'fill-color': selectedIdRef.current === track.id ? SELECTED_COLOR : '#c2410c',
+                'fill-opacity': selectedIdRef.current === track.id ? 0.25 : 0.16,
+              },
             });
           }
           map.addLayer({
@@ -96,7 +103,15 @@ export function useTrackLayers(
             source: sourceId,
             filter: ['==', ['get', 'featureKind'], 'line'],
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': track.area ? '#c2410c' : TRACK_COLOR, 'line-width': 3 },
+            paint: {
+              'line-color':
+                selectedIdRef.current === track.id
+                  ? SELECTED_COLOR
+                  : track.area
+                    ? '#c2410c'
+                    : TRACK_COLOR,
+              'line-width': selectedIdRef.current === track.id ? 5 : 3,
+            },
           });
         });
       }
@@ -114,6 +129,31 @@ export function useTrackLayers(
       map.off('idle', sync);
     };
   }, [map, tracks, getTrackData]);
+
+  // Update existing layers when selection changes without fetching GPX again.
+  useEffect(() => {
+    if (!map || !map.isStyleLoaded()) return;
+    for (const track of tracks) {
+      const sourceId = SOURCE_PREFIX + track.id;
+      const selected = track.id === selectedTrackId;
+      if (map.getLayer(lineLayerId(sourceId))) {
+        map.setPaintProperty(
+          lineLayerId(sourceId),
+          'line-color',
+          selected ? SELECTED_COLOR : track.area ? '#c2410c' : TRACK_COLOR,
+        );
+        map.setPaintProperty(lineLayerId(sourceId), 'line-width', selected ? 5 : 3);
+      }
+      if (map.getLayer(fillLayerId(sourceId))) {
+        map.setPaintProperty(
+          fillLayerId(sourceId),
+          'fill-color',
+          selected ? SELECTED_COLOR : '#c2410c',
+        );
+        map.setPaintProperty(fillLayerId(sourceId), 'fill-opacity', selected ? 0.25 : 0.16);
+      }
+    }
+  }, [map, tracks, selectedTrackId]);
 
   // Clicking a rendered track line selects the track (opens its profile).
   useEffect(() => {

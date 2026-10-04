@@ -39,7 +39,8 @@ everything in Atlas, exportable.
       uploaded as Garmin courses through the server's python-garminconnect session plus Garmin's
       course import endpoint and queued to a selected Garmin device. GPS activities import into a
       dedicated folder, 30 at a time, with a saved cursor for older history. Atlas already offers
-      "Prefer trails" routing. Remaining: verify sign-in, course delivery and activity import
+      "Prefer trails" routing. Imported tracks show activity type and total distance when picked,
+      with a distinct selected colour on both maps. Remaining: verify sign-in, course delivery and activity import
       against a live Garmin account and watch. The private endpoints may need repair when Garmin
       changes them.
 

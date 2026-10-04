@@ -1872,6 +1872,7 @@ button {
 .elevation-header {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
 }
 
@@ -1883,12 +1884,12 @@ button {
 }
 
 .elevation-stats {
-  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   font-size: 12px;
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-top: 4px;
 }
 
 .elevation-chart {

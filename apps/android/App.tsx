@@ -1407,13 +1407,13 @@ function AppInner() {
   // web has always answered. A track with no parseable geometry opens the
   // profile saying so, and simply doesn't move the camera.
   const showTrack = useCallback(
-    (track: TrackRecord) => {
+    (track: TrackRecord, frame = true) => {
       setTrackProfile({ track, data: null });
       void data.getTrackData(track.id).then((trackData) => {
         setTrackProfile((current) =>
           current?.track.id === track.id ? { track, data: trackData } : current,
         );
-        if (!trackData) return;
+        if (!trackData || !frame) return;
         const bounds = trackBounds(trackData);
         if (!bounds) return;
         cameraRef.current?.fitBounds([bounds.sw.lng, bounds.sw.lat, bounds.ne.lng, bounds.ne.lat], {
@@ -1428,6 +1428,14 @@ function AppInner() {
       });
     },
     [data, topInset, bottomInset, side],
+  );
+
+  const selectMapTrack = useCallback(
+    (id: string) => {
+      const track = data.tracks.find((candidate) => candidate.id === id);
+      if (track) showTrack(track, false);
+    },
+    [data.tracks, showTrack],
   );
 
   // Follow the record while the profile is up: a rename shows through, and a
@@ -1631,6 +1639,8 @@ function AppInner() {
         poiResults={viewportPois.results}
         measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}
+        selectedTrackId={planning || navActive ? null : (trackProfile?.track.id ?? null)}
+        onSelectTrack={selectMapTrack}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}
         nav={nav}
