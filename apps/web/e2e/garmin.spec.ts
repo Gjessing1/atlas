@@ -25,6 +25,7 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
     }),
   );
   await page.route('**/api/garmin/activities/123/gpx', (route) => route.fulfill({ json: { gpx } }));
+  await page.route('**/api/garmin/courses', (route) => route.fulfill({ json: { courses: [] } }));
   await page.route('**/api/garmin/course', async (route) => {
     sent = route.request().postDataJSON() as typeof sent;
     await route.fulfill({
@@ -107,4 +108,114 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   ).toHaveAttribute('href', 'https://connect.garmin.com/modern/course/42');
   expect(sent).toMatchObject({ name: 'Forest run', profile: 'run', deviceId: '456' });
   expect(sent?.gpx).toContain('<trk>');
+});
+
+test('manages Garmin courses: filter, save to Atlas, rename, sport, send and delete', async ({
+  page,
+}) => {
+  const gpx =
+    '<gpx><trk><name>18k</name><trkseg><trkpt lat="59.9" lon="10.7"/><trkpt lat="59.91" lon="10.71"/></trkseg></trk></gpx>';
+  const edits: unknown[] = [];
+  const deleted: string[] = [];
+  let sentTo: unknown = null;
+  await page.route('**/api/garmin/status', (route) => route.fulfill({ json: { connected: true } }));
+  await page.route('**/api/garmin/devices', (route) =>
+    route.fulfill({ json: { devices: [{ id: '456', name: 'Forerunner' }] } }),
+  );
+  await page.route('**/api/garmin/courses', (route) =>
+    route.fulfill({
+      json: {
+        courses: [
+          {
+            id: '7',
+            name: '18k Jørgen',
+            type: 'trail_running',
+            distanceM: 18028,
+            ascentM: 536,
+            updated: Date.UTC(2026, 6, 5),
+          },
+          {
+            id: '8',
+            name: 'Lake loop',
+            type: 'skating_ws',
+            distanceM: 4200,
+            ascentM: 0,
+            updated: Date.UTC(2026, 1, 2),
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/garmin/courses/7/gpx', (route) => route.fulfill({ json: { gpx } }));
+  await page.route('**/api/garmin/courses/7/send', async (route) => {
+    sentTo = route.request().postDataJSON();
+    await route.fulfill({ json: { queued: true } });
+  });
+  await page.route(/\/api\/garmin\/courses\/\d+$/, async (route) => {
+    const request = route.request();
+    if (request.method() === 'PATCH') {
+      edits.push(request.postDataJSON());
+      return route.fulfill({ json: { updated: true } });
+    }
+    expect(request.method()).toBe('DELETE');
+    deleted.push(request.url().split('/').pop()!);
+    return route.fulfill({ json: { deleted: true } });
+  });
+  await page.goto('/#map=12/59.91/10.75');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Account & data' }).click();
+  const create = page.getByRole('button', { name: 'Create account' });
+  await expect(create).toBeEnabled();
+  await page.getByPlaceholder('email', { exact: true }).fill(`courses-${Date.now()}@example.com`);
+  await page.getByPlaceholder('password', { exact: true }).fill('secret-password');
+  await create.click();
+
+  const courses = page.locator('.garmin-courses');
+  await expect(courses.getByRole('heading', { name: 'Courses · 2' })).toBeVisible();
+  await expect(courses).toContainText('Trail running · 18.0 km · ↗ 536 m');
+  await courses.getByRole('radio', { name: /Skating/ }).click();
+  await expect(courses.getByRole('button', { name: /18k Jørgen/ })).toHaveCount(0);
+  await expect(courses.getByRole('button', { name: /Lake loop/ })).toBeVisible();
+  await courses.getByRole('radio', { name: /All/ }).click();
+
+  // Save to Atlas files the copy under Garmin courses › Running and shows it there.
+  await courses.getByRole('button', { name: /18k Jørgen/ }).click();
+  await courses.getByRole('button', { name: 'Save to Atlas' }).click();
+  const library = page.getByRole('complementary', { name: 'Collections' });
+  await expect(library).toContainText('Garmin courses');
+  await expect(library).toContainText('Running');
+  await expect(library.getByText('18k Jørgen')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'Account & data' }).click();
+  const row = courses.getByRole('button', { name: /18k Jørgen/ });
+  await expect(row).toContainText('In Atlas');
+  await row.click();
+  await expect(courses.getByRole('button', { name: 'Show in Atlas' })).toBeVisible();
+
+  await courses.getByRole('textbox', { name: 'Name' }).fill('Ridge 18k');
+  await courses.getByRole('button', { name: 'Rename' }).click();
+  await expect(courses.getByRole('status')).toHaveText('Renamed to “Ridge 18k” in Garmin Connect.');
+  await courses.getByRole('combobox', { name: 'Course sport' }).selectOption('hiking');
+  await expect(courses.getByRole('status')).toHaveText('Sport changed in Garmin Connect.');
+  await expect(courses.getByRole('button', { name: /Ridge 18k/ })).toContainText('Hiking');
+  expect(edits).toEqual([{ name: 'Ridge 18k' }, { sport: 'hiking' }]);
+
+  await courses.getByRole('button', { name: 'Send to Forerunner' }).click();
+  await expect(courses.getByRole('status')).toHaveText(
+    'Queued for Forerunner. It arrives on the next sync with Garmin Connect.',
+  );
+  expect(sentTo).toEqual({ deviceId: '456' });
+
+  await courses.getByRole('button', { name: 'Delete…' }).click();
+  const confirm = courses.getByRole('alertdialog', { name: 'Delete course' });
+  await expect(confirm).toContainText('Your copy in Atlas stays.');
+  await confirm.getByRole('button', { name: 'Keep' }).click();
+  expect(deleted).toEqual([]);
+  await courses.getByRole('button', { name: 'Delete…' }).click();
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(courses.getByRole('status')).toHaveText('Deleted “Ridge 18k” from Garmin Connect.');
+  await expect(courses.getByRole('button', { name: /Ridge 18k/ })).toHaveCount(0);
+  expect(deleted).toEqual(['7']);
 });

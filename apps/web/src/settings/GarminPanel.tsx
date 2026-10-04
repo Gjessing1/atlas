@@ -1,7 +1,15 @@
 import type { GarminState } from '@atlas/app-hooks';
+import type { CollectionRevealTarget } from '@atlas/core';
 import { useState } from 'react';
+import { GarminCourses } from './GarminCourses.js';
 
-export function GarminPanel({ garmin }: { garmin: GarminState }) {
+export function GarminPanel({
+  garmin,
+  onReveal,
+}: {
+  garmin: GarminState;
+  onReveal: (target: CollectionRevealTarget) => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -10,12 +18,17 @@ export function GarminPanel({ garmin }: { garmin: GarminState }) {
     <div className="settings-section">
       <h3>Garmin Connect</h3>
       <p className="settings-note">
-        Send planned courses to Garmin Connect and queue them for a selected device. Import GPS
-        activity history into the Garmin activities folder in batches of 30.
+        Manage your Garmin Connect courses and send them to your watch, and bring your recorded
+        activities into Atlas, filed by sport.
       </p>
       {garmin.connected ? (
         <>
           <p>Connected to Garmin Connect.</p>
+          <GarminCourses garmin={garmin} onReveal={onReveal} />
+          <h4>Activities</h4>
+          <p className="settings-note settings-note-leading">
+            Imports GPS activities 30 at a time into Garmin activities, one folder per sport.
+          </p>
           <button
             type="button"
             disabled={garmin.busy}
@@ -36,6 +49,7 @@ export function GarminPanel({ garmin }: { garmin: GarminState }) {
               Check newest again
             </button>
           )}
+          <h4>Connection</h4>
           <button type="button" disabled={garmin.busy} onClick={() => void garmin.disconnect()}>
             Disconnect Garmin
           </button>
@@ -104,6 +118,8 @@ export function GarminPanel({ garmin }: { garmin: GarminState }) {
         <p className="settings-note" role="status">
           Imported {garmin.lastImport.imported}; skipped {garmin.lastImport.skipped};{' '}
           {garmin.lastImport.errors} failed.
+          {garmin.lastImport.sorted > 0 &&
+            ` Filed ${garmin.lastImport.sorted} earlier ${garmin.lastImport.sorted === 1 ? 'import' : 'imports'} into sport folders.`}
           {garmin.nextActivityOffset > 0
             ? ` Next batch starts at activity ${garmin.nextActivityOffset + 1}.`
             : ' All available activity pages checked.'}

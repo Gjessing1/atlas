@@ -103,8 +103,15 @@ export interface SyncState {
   /** Deletes the server account (local data stays); signs out on success. */
   deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => void;
-  /** Request an account-scoped API without exposing the bearer token to screens. */
-  accountRequest: <T>(path: `/api/${string}`, body?: unknown) => Promise<T>;
+  /**
+   * Request an account-scoped API without exposing the bearer token to screens. The method
+   * defaults to GET without a body and POST with one.
+   */
+  accountRequest: <T>(
+    path: `/api/${string}`,
+    body?: unknown,
+    method?: 'PATCH' | 'DELETE',
+  ) => Promise<T>;
 }
 
 /**
@@ -361,13 +368,13 @@ export function useSync(
   );
 
   const accountRequest = useCallback(
-    async <T>(path: `/api/${string}`, body?: unknown): Promise<T> => {
+    async <T>(path: `/api/${string}`, body?: unknown, method?: 'PATCH' | 'DELETE'): Promise<T> => {
       const token = sessionRef.current?.token;
       if (!token) throw new Error('Sign in to your Atlas account first.');
       let res: Response;
       try {
         res = await fetchImpl(`${baseUrl}${path}`, {
-          method: body === undefined ? 'GET' : 'POST',
+          method: method ?? (body === undefined ? 'GET' : 'POST'),
           headers: {
             authorization: `Bearer ${token}`,
             ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),

@@ -1746,6 +1746,10 @@ export function App() {
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}
             onExportAll={() => void userData.exportAll()}
+            onReveal={(target) => {
+              setRevealItem(target);
+              setPanel('collections');
+            }}
             onClose={closePanels}
           />
         )}

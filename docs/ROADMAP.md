@@ -30,7 +30,91 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 
 ---
 
-## 1. Map profiles — per-activity cartography and layers
+## 1. Plan & library — hikes, runs, rides and the places between
+
+Atlas should be the place a trip is planned, kept and sent from: draw a route quickly, find it
+again months later, and put it on the watch without opening Garmin Connect. UI and UX carry this
+section — every item is judged by how few taps and how little guessing a real trip takes, on a
+phone outdoors as much as on a desk. Garmin's course library (list, rename, sport, delete, send
+to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; what remains:
+
+### 1.1 Waypoint editing on the map
+
+- [ ] **Make dropping, moving and removing route points direct on the map, on both platforms.**
+      Today stops come from search, place cards and long-press; web can drag stop markers and
+      click the line to insert a via point (`viaInsertIndex`), Android edits stops mostly from
+      the list. Planning a hike or run means shaping a line, so the map itself must be the
+      editor:
+
+      - **Add:** tap empty map in planning mode appends a point (no menu); tap *on* the routed
+        line inserts a via point in that leg, not at the end. A point dropped far from any path
+        says so on the leg instead of silently detouring.
+      - **Move:** drag any point on Android as on web, with the leg previews re-routing live
+        (debounced) while the finger moves; drop snaps to the nearest routable way.
+      - **Remove:** tap a point → small popover with *Remove*, *Make start/finish*, *Name it*,
+        *Straight line to next* — no trip to the list.
+      - **Leg modes:** per-leg *follow paths* vs *straight line* (off-trail ridge, lake ice,
+        beach), drawn dashed, counted in distance; elevation sampled along straight legs too.
+      - **Undo/redo** for every point edit (a mis-drop on a phone must cost one tap), kept until
+        the plan is cleared.
+      - **Point density:** routed legs stay few points (Valhalla), but an imported or
+        Garmin-course line edited in the planner (`trackToRoutePoints`, capped at 24) must let
+        the user add points where the cap smoothed a bend away.
+
+      Done when a 10-point loop can be built, reshaped and trimmed with the map alone on a
+      390 px phone and on desktop; Android regression and a web e2e drive the add / insert /
+      drag / remove / undo path. Keep the keyboard/TalkBack alternative from 4.3 in step — the
+      list stays the accessible route to every map gesture.
+
+### 1.2 One library for places, tracks, courses and activities
+
+- [ ] **Browse everything saved as one library, by kind, sport and place — not only by folder.**
+      Saved places, saved tracks, Garmin courses saved into Atlas and imported activities all
+      live in Collections' folder tree today; finding "that ridge run from last summer" means
+      knowing which folder it fell into. Design the library around how it is looked for:
+
+      - **Views over the same records:** *Folders* (today's tree), *Places*, *Routes & courses*,
+        *Activities*, each with sport chips (Running, Hiking, Cycling, Skiing, Skating, … from
+        `garminSportFolder` and the plan's routing profile) and sort by *recent*, *distance*,
+        *nearest to the map view*.
+      - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
+        line or pin thumbnail; places show category and distance from you.
+      - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the
+        map; panning offers "only what's in view". Tapping a row frames it and opens its card.
+      - **Act from the row:** *Navigate to* (places, track start), *Follow* (track), *Edit in
+        planner*, *Send to Garmin*, *Move*, *Share/export* — the same verbs in the same order
+        on web and Android.
+      - **Search** keeps finding records and folders (main search already does) and gains the
+        sport/kind filters.
+
+      Constraints: works offline from local SQLite (rule 3); no new sync entity — views are
+      derived from existing place/track/collection records and their tags. Done when the
+      library, not Settings, is where a Garmin course or activity is found and acted on, and a
+      user test of "find X and start navigating to it" takes ≤ 3 taps from the map.
+
+### 1.3 Garmin — finish the round trip
+
+- [ ] **Edit a Garmin course's route in Atlas and replace it on Garmin.** Rename, sport and
+      delete exist; reshaping the line does not. Flow: course row → *Edit route* (saves to Atlas
+      if needed, opens it in the planner via `trackToRoutePoints`) → reshape (1.1) → *Update on
+      Garmin*, which creates the new course and, after an explicit confirm, deletes the old one
+      — Garmin's PUT cannot replace geometry safely, and a create-then-delete keeps a working
+      course on the account if either step fails. Re-send to the same watch in the same step.
+- [ ] **Verify what a Connect-side delete or rename does on the watch itself.** The API calls
+      are verified (2026-10-04: list `/web-gateway/course/owner/`, GPX `/course-service/course/gpx/{id}`,
+      PUT and DELETE `/course-service/course/{id}`, which answers 429 "not yet ready" for ~10 s
+      after an edit); whether a watch drops or renames its copy on next sync is not. Check with
+      the user's watch and state the answer in the delete confirmation.
+- [ ] **Import new activities without pressing a button.** Fetch the newest page on app start
+      (rate-limited, at most hourly) when Garmin is connected, filing by sport as the manual
+      import does; keep the manual "Import older" for history.
+- [ ] **Courses on the watch, not just in Connect.** Garmin exposes no per-device course list
+      we have found; investigate the device-message history before promising "on your watch"
+      badges.
+
+---
+
+## 2. Map profiles — per-activity cartography and layers
 
 The map profiles (Explore, Drive, Cycle, Hike, Run, Ski, Fish & Hunt) are the one-tap "what am I
 doing now" switch: each sets the default travel mode, appearance, offered overlays and defaults.
@@ -38,7 +122,7 @@ Implementation patterns and upstream constraints live in [ARCHITECTURE.md](./ARC
 [DATA-SOURCES.md](./DATA-SOURCES.md); Norway-only layers follow ARCHITECTURE.md's *Norway-only
 data* rule. The Fish & Hunt surfaces are tracked under N5 below.
 
-### 1.1 Explore — urban signature
+### 2.1 Explore — urban signature
 
 - [ ] **Proper 3D buildings, not the generic extrusion already in Liberty.** The fetched Liberty
       extrusion path exists, but a central-Oslo sample mostly used the stock 4 m fallback. Measure
@@ -47,7 +131,7 @@ data* rule. The Fish & Hunt surfaces are tracked under N5 below.
       performance and navigation-label occlusion on both clients. Consider a Norwegian height
       source only if OSM coverage proves insufficient.
 
-### 1.2 Curiosities — the register profile
+### 2.2 Curiosities — the register profile
 
 The register profile answers "what is out here that I would never have known to look for?"
 
@@ -73,20 +157,20 @@ The register profile answers "what is out here that I would never have known to 
       is the correct and common outcome: show the orbital facts alone rather than a near-miss
       article, and keep the pass/altitude/illumination detail readable with no network.
 
-### 1.3 Ski — winter cartography
+### 2.3 Ski — winter cartography
 
 - [ ] Add the NVE **Varsom** avalanche danger-level forecast, distinct from steepness.
 
 - [ ] **Live grooming status.** Colour `piste:type=nordic` tracks by time since grooming (for
       example under 2 h, under 24 h), if Skisporet.no offers an accessible API — not yet checked.
 
-### 1.4 Hike — trail cartography
+### 2.4 Hike — trail cartography
 
 - [ ] **A tuft pattern for marshes (myr), in Hike and Fish & Hunt**, so wet ground reads at a
       glance: a small repeating SVG `fill-pattern`. Wetland is only a colour today — the appearance
       code strips the base style's fill patterns.
 
-### 1.5 Fish & Hunt — field cartography
+### 2.5 Fish & Hunt — field cartography
 
 - [ ] **Clear-cuts and forest edges.** Distinguish clear-cuts (`natural=clearcut` /
       `landuse=logging` in the original sketch — OSM coverage unmeasured) from dense conifer and open
@@ -99,7 +183,7 @@ The register profile answers "what is out here that I would never have known to 
       them (a `GraphicStroke` silently renders a plain line — DATA-SOURCES.md), so this needs OSM
       waterway geometry, drawn in way direction.
 
-### 1.6 Drive — road data and costs
+### 2.6 Drive — road data and costs
 
 Statens vegvesen sources, Norway-only under ARCHITECTURE.md's *Norway-only data* rule. Record what
 each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
@@ -162,7 +246,7 @@ each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
 
 ---
 
-## 2. Data layers, weather and activities (nodemap-inspired)
+## 3. Data layers, weather and activities (nodemap-inspired)
 
 Atlas borrows nodemap's useful sources and domain calibration, not its infrastructure or UI
 architecture. Endpoint details, exact layer names and gotchas live in
@@ -265,13 +349,13 @@ The Norway-only ranked surfaces and their visible reasoning are specified in
 
 ---
 
-## 3. Engineering health
+## 4. Engineering health
 
 Runs alongside the product tracks, not after them. `DR` labels come from the
 [2026-08-31 architectural review](./reviews/2026-08-31-dan-abramov.md); what it found must be
 preserved is in ARCHITECTURE.md → *What stays as it is*.
 
-### 3.1 Data safety & offline reliability
+### 4.1 Data safety & offline reliability
 
 - [ ] **Stream tiles through uncovered parts of an installed offline area's rectangle.** Region
       packs use square bounds while country data follows the real border; currently the pack's
@@ -279,7 +363,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       offline tile as a cache miss and fall back to the online basemap when connected, rather
       than letting rectangular pack coverage suppress streaming.
 
-### 3.2 Performance
+### 4.2 Performance
 
 - [~] **Audit every upstream proxy for request storms, and give them one well-behaved client.**
       The POI layer's Overpass proxy (2026-09-19) sent a fresh upstream query for every settled
@@ -323,7 +407,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Remove synchronous zip primitives and file-format parsing from `useUserData`.
       - [ ] Change coarse full-list refreshes only where profiling proves they are material.
 
-### 3.3 Accessibility & web UX
+### 4.3 Accessibility & web UX
 
 - [ ] **Set an interaction-accessibility baseline for both web and Android.** At 390×844, most web
       controls are below comfortable touch sizes. Standardise 44 CSS px / 48 dp hit areas,
@@ -334,7 +418,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       is now the most-used place without a non-drag alternative — give `ReorderableList` rows
       TalkBack move-up/move-down `accessibilityActions` and the web rows a keyboard equivalent.
 
-### 3.4 Test & release infrastructure
+### 4.4 Test & release infrastructure
 
 - [ ] **Make a failed CI build impossible to miss.** Add a loud post-deploy smoke step that checks
       the container's `/api/health` `gitSha` against the pushed commit and calls every route added by
@@ -347,7 +431,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       PostGIS service to CI and make those integration tests required; keep memory tests for the
       fast path.
 
-### 3.5 Code structure
+### 4.5 Code structure
 
 - [ ] **DR6 — Give Android one primary-surface state instead of independent sheet booleans.**
       Define a platform-specific `PrimarySurface` union with payload-bearing variants for menu,
@@ -361,14 +445,14 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Android regression coverage proves switching between every primary surface leaves
             exactly one visible.
 
-### 3.6 System health / status (N7)
+### 4.6 System health / status (N7)
 
 - [ ] **Alert rather than wait to be asked.** The sweep now finds a dead upstream within 6 h, but
       only Settings exposes it. After two consecutive failures, send an Android notification or
       show a persistent Settings badge. Include the `potential-cells` census warning from
       `backend/src/potential/health.ts` in the same path.
 
-### 3.7 Host and release chores
+### 4.7 Host and release chores
 
 Work done on the host or in the release pipeline rather than in the code.
 
@@ -393,7 +477,7 @@ Work done on the host or in the release pipeline rather than in the code.
 
 ---
 
-## 4. Later
+## 5. Later
 
 - [ ] i18n (English + Norwegian). DATEX message texts may not be translated under NLOD, so some
       strings remain Norwegian; see [DATA-SOURCES.md](./DATA-SOURCES.md).

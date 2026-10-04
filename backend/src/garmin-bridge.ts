@@ -12,6 +12,20 @@ export interface GarminActivity {
   type: string | null;
   hasRoute?: boolean;
 }
+export interface GarminCourse {
+  id: string;
+  name: string;
+  /** Garmin's activity `typeKey` (`trail_running`, `skating_ws`, …). */
+  type: string | null;
+  distanceM: number | null;
+  ascentM: number | null;
+  /** Last change in Garmin Connect, epoch ms. */
+  updated: number | null;
+}
+export interface GarminCourseEdit {
+  name?: string;
+  sport?: string;
+}
 export interface GarminDevice {
   id: string;
   name: string;
@@ -198,6 +212,34 @@ export class GarminBridge {
       throw new Error('Garmin did not confirm the course');
     }
     return { id: result['id'], url: result['url'], queued: result['queued'] === true };
+  }
+
+  async courses(userId: string): Promise<GarminCourse[]> {
+    const result = await this.run(userId, 'courses');
+    if (!Array.isArray(result['courses'])) throw new Error('Invalid Garmin course response');
+    return result['courses'] as GarminCourse[];
+  }
+
+  async courseGpx(userId: string, id: string): Promise<string> {
+    const result = await this.run(userId, 'courseGpx', { id });
+    if (typeof result['gpx'] !== 'string') throw new Error('Garmin did not return GPX');
+    return result['gpx'];
+  }
+
+  // Edits and deletes may wait out Garmin's post-edit "not yet ready" window (bridge.py).
+  async updateCourse(userId: string, id: string, edit: GarminCourseEdit): Promise<void> {
+    const result = await this.run(userId, 'updateCourse', { id, ...edit }, 90_000);
+    if (result['updated'] !== true) throw new Error('Garmin did not confirm the change');
+  }
+
+  async deleteCourse(userId: string, id: string): Promise<void> {
+    const result = await this.run(userId, 'deleteCourse', { id }, 90_000);
+    if (result['deleted'] !== true) throw new Error('Garmin did not confirm the deletion');
+  }
+
+  async sendCourse(userId: string, id: string, deviceId: string): Promise<void> {
+    const result = await this.run(userId, 'sendCourse', { id, deviceId });
+    if (result['queued'] !== true) throw new Error('Garmin did not queue the course');
   }
 
   async devices(userId: string): Promise<GarminDevice[]> {

@@ -38,6 +38,8 @@ interface AppSheetsProps {
   favoritesOpen: boolean;
   revealCollectionItem: CollectionRevealTarget | null;
   onRevealedCollectionItem: () => void;
+  /** Open Collections at an item from elsewhere (Settings › Garmin courses). */
+  onRevealCollectionItem: (target: CollectionRevealTarget) => void;
   onCloseFavorites: () => void;
   /** Place whose focused editor should open (map pin → Edit). */
   editPlaceId: string | null;
@@ -97,6 +99,7 @@ export function AppSheets({
   favoritesOpen,
   revealCollectionItem,
   onRevealedCollectionItem,
+  onRevealCollectionItem,
   onCloseFavorites,
   editPlaceId,
   onCloseEditPlace,
@@ -209,6 +212,7 @@ export function AppSheets({
         storageState={data}
         tiles={tiles}
         onExportAll={() => void data.exportAll()}
+        onReveal={onRevealCollectionItem}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
         overlays={overlays}

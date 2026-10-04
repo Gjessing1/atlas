@@ -56,6 +56,8 @@ import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
 import type { GarminState } from '@atlas/app-hooks';
+import type { CollectionRevealTarget } from '@atlas/core';
+import { GarminCourses } from './GarminCourses';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
@@ -1399,7 +1401,13 @@ function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
 
 const SETTINGS_SECTIONS = settingsSectionsFor('android');
 
-function GarminSection({ garmin }: { garmin: GarminState }) {
+function GarminSection({
+  garmin,
+  onReveal,
+}: {
+  garmin: GarminState;
+  onReveal: (target: CollectionRevealTarget) => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -1407,11 +1415,16 @@ function GarminSection({ garmin }: { garmin: GarminState }) {
     <View>
       <Text style={styles.heading}>Garmin Connect</Text>
       <Text style={styles.muted}>
-        Send planned courses to Garmin Connect and queue them for a selected device. Import GPS
-        activity history into the Garmin activities folder in batches of 30.
+        Manage your Garmin Connect courses and send them to your watch, and bring your recorded
+        activities into Atlas, filed by sport.
       </Text>
       {garmin.connected ? (
         <View>
+          <GarminCourses garmin={garmin} onReveal={onReveal} />
+          <Text style={styles.subheading}>Activities</Text>
+          <Text style={styles.muted}>
+            Imports GPS activities 30 at a time into Garmin activities, one folder per sport.
+          </Text>
           <View style={styles.buttonRow}>
             <Pressable
               style={styles.button}
@@ -1512,6 +1525,9 @@ function GarminSection({ garmin }: { garmin: GarminState }) {
         <Text style={styles.muted}>
           Imported {garmin.lastImport.imported}; skipped {garmin.lastImport.skipped};{' '}
           {garmin.lastImport.errors} failed.
+          {garmin.lastImport.sorted > 0
+            ? ` Filed ${garmin.lastImport.sorted} earlier ${garmin.lastImport.sorted === 1 ? 'import' : 'imports'} into sport folders.`
+            : ''}
           {garmin.nextActivityOffset > 0
             ? ` Next batch starts at activity ${garmin.nextActivityOffset + 1}.`
             : ' All available activity pages checked.'}
@@ -1532,6 +1548,7 @@ export function SettingsSheet({
   storageState,
   tiles,
   onExportAll,
+  onReveal,
   appearance,
   mapStyleEditor,
   overlays,
@@ -1561,6 +1578,8 @@ export function SettingsSheet({
   tiles: TileSource;
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
   onExportAll: () => void;
+  /** Open Collections at a saved item — a Garmin course just copied into Atlas. */
+  onReveal: (target: CollectionRevealTarget) => void;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   overlays: OverlaysController;
@@ -1930,7 +1949,7 @@ export function SettingsSheet({
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
             <AccountSection sync={sync} storage={storageState} />
-            {sync.email ? <GarminSection garmin={garmin} /> : null}
+            {sync.email ? <GarminSection garmin={garmin} onReveal={onReveal} /> : null}
             <Text style={styles.heading}>Your data</Text>
             <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
             <View style={styles.buttonRow}>

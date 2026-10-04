@@ -25,6 +25,20 @@ const garmin: NonNullable<SyncApiOptions['garmin']> = {
     url: 'https://connect.garmin.com/modern/course/123',
     queued: true,
   })),
+  courses: vi.fn(async () => [
+    {
+      id: '7',
+      name: '18k',
+      type: 'trail_running',
+      distanceM: 18028,
+      ascentM: 536,
+      updated: 1783259286000,
+    },
+  ]),
+  courseGpx: vi.fn(async () => '<gpx/>'),
+  updateCourse: vi.fn(async () => {}),
+  deleteCourse: vi.fn(async () => {}),
+  sendCourse: vi.fn(async () => {}),
   devices: vi.fn(async () => [{ id: '456', name: 'Forerunner' }]),
   activities: vi.fn(async () => [{ id: '42', name: 'Run', date: null, type: 'running' }]),
   activityGpx: vi.fn(async () => '<gpx/>'),
@@ -176,4 +190,49 @@ it('reports a refused password as 401 but a broken bridge as unavailable', async
   const limited = await connect();
   expect(limited.statusCode).toBe(502);
   expect(limited.json()).toEqual({ error: 'Garmin is rate-limiting this server; try again later' });
+});
+
+it('lists, edits, deletes and resends Garmin courses for the signed-in account only', async () => {
+  const headers = { authorization: `Bearer ${await account('courses@example.com')}` };
+  expect((await app.inject({ url: '/api/garmin/courses' })).statusCode).toBe(401);
+  expect((await app.inject({ url: '/api/garmin/courses', headers })).json()).toMatchObject({
+    courses: [{ id: '7', type: 'trail_running' }],
+  });
+  expect((await app.inject({ url: '/api/garmin/courses/7/gpx', headers })).json()).toEqual({
+    gpx: '<gpx/>',
+  });
+  const edit = (url: string, payload: unknown) =>
+    app.inject({ method: 'PATCH', url, headers, payload: payload as object });
+  expect(
+    (await edit('/api/garmin/courses/7', { name: ' Ridge ', sport: 'hiking' })).json(),
+  ).toEqual({ updated: true });
+  const userId = vi.mocked(garmin.updateCourse).mock.calls.at(-1)![0];
+  expect(vi.mocked(garmin.updateCourse).mock.calls.at(-1)).toEqual([
+    userId,
+    '7',
+    { name: 'Ridge', sport: 'hiking' },
+  ]);
+  for (const bad of [{}, { name: '  ' }, { sport: 'Run!' }, { courseId: 1 }])
+    expect([bad, (await edit('/api/garmin/courses/7', bad)).statusCode]).toEqual([bad, 400]);
+  expect((await edit('/api/garmin/courses/7x', { name: 'Ridge' })).statusCode).toBe(400);
+  expect(vi.mocked(garmin.updateCourse)).toHaveBeenCalledTimes(1);
+
+  const remove = (id: string) =>
+    app.inject({ method: 'DELETE', url: `/api/garmin/courses/${id}`, headers });
+  expect((await remove('7')).json()).toEqual({ deleted: true });
+  expect((await remove('..%2F7')).statusCode).toBe(400);
+  vi.mocked(garmin.deleteCourse).mockRejectedValueOnce(
+    new GarminBridgeError('Garmin is still processing this course; try again in a minute'),
+  );
+  const busy = await remove('7');
+  expect(busy.statusCode).toBe(502);
+  expect(busy.json()).toEqual({
+    error: 'Garmin is still processing this course; try again in a minute',
+  });
+
+  const send = (payload: object) =>
+    app.inject({ method: 'POST', url: '/api/garmin/courses/7/send', headers, payload });
+  expect((await send({ deviceId: '456' })).json()).toEqual({ queued: true });
+  expect(vi.mocked(garmin.sendCourse).mock.calls.at(-1)?.slice(1)).toEqual(['7', '456']);
+  expect((await send({})).statusCode).toBe(400);
 });

@@ -10,6 +10,8 @@ import {
   GarminBridgeError,
   GarminSignInExpiredError,
   type GarminActivity,
+  type GarminCourse,
+  type GarminCourseEdit,
   type GarminDevice,
   type GarminProfile,
 } from './garmin-bridge.js';
@@ -46,6 +48,11 @@ export interface SyncApiOptions {
       gpx: string,
       deviceId?: string,
     ): Promise<{ id: number; url: string; queued: boolean }>;
+    courses(userId: string): Promise<GarminCourse[]>;
+    courseGpx(userId: string, id: string): Promise<string>;
+    updateCourse(userId: string, id: string, edit: GarminCourseEdit): Promise<void>;
+    deleteCourse(userId: string, id: string): Promise<void>;
+    sendCourse(userId: string, id: string, deviceId: string): Promise<void>;
     devices(userId: string): Promise<GarminDevice[]>;
     activities(userId: string, start: number): Promise<GarminActivity[]>;
     activityGpx(userId: string, id: string): Promise<string>;
@@ -166,6 +173,19 @@ const GarminActivitiesQuery = Type.Object({
   start: Type.Optional(Type.Integer({ minimum: 0, maximum: 100_000 })),
 });
 type GarminActivitiesQuery = Static<typeof GarminActivitiesQuery>;
+const GarminCourseParams = Type.Object({ id: Type.String({ pattern: '^\\d{1,20}$' }) });
+type GarminCourseParams = Static<typeof GarminCourseParams>;
+// Sport keys mirror GARMIN_COURSE_SPORTS in @atlas/core; bridge.py maps them to Garmin ids.
+const GarminCourseEditSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    sport: Type.Optional(Type.String({ pattern: '^[a-z_]{1,40}$' })),
+  },
+  { minProperties: 1, additionalProperties: false },
+);
+type GarminCourseEditBody = Static<typeof GarminCourseEditSchema>;
+const GarminCourseSendSchema = Type.Object({ deviceId: Type.String({ pattern: '^\\d{1,20}$' }) });
+type GarminCourseSendBody = Static<typeof GarminCourseSendSchema>;
 
 /**
  * Account + sync endpoints (Phase 5): JWT auth over the user store, plain REST
@@ -496,6 +516,85 @@ export async function registerSyncApi(
           };
         } catch {
           return upstreamError(reply);
+        }
+      },
+    );
+
+    // The bridge's own errors are written to be shown ("Garmin is still processing this
+    // course…"); anything else stays the generic upstream message.
+    const courseError = (reply: FastifyReply, error: unknown) =>
+      error instanceof GarminBridgeError
+        ? reply.code(502).send({ error: error.message })
+        : upstreamError(reply);
+    const courseRoute = { preHandler: requireAuth, attachValidation: true } as const;
+
+    app.get('/api/garmin/courses', { preHandler: requireAuth }, async (request, reply) => {
+      try {
+        return { courses: await garmin.courses(request.user.sub) };
+      } catch (error) {
+        return courseError(reply, error);
+      }
+    });
+
+    app.get<{ Params: GarminCourseParams }>(
+      '/api/garmin/courses/:id/gpx',
+      { ...courseRoute, schema: { params: GarminCourseParams } },
+      async (request, reply) => {
+        if (request.validationError) return reply.code(400).send({ error: 'invalid course id' });
+        try {
+          return { gpx: await garmin.courseGpx(request.user.sub, request.params.id) };
+        } catch (error) {
+          return courseError(reply, error);
+        }
+      },
+    );
+
+    app.patch<{ Params: GarminCourseParams; Body: GarminCourseEditBody }>(
+      '/api/garmin/courses/:id',
+      { ...courseRoute, schema: { params: GarminCourseParams, body: GarminCourseEditSchema } },
+      async (request, reply) => {
+        // Fastify strips unknown keys after the minProperties check, so `{ courseId }`
+        // arrives as an empty edit — refuse it here rather than PUT the course back unchanged.
+        const name = request.validationError ? '' : request.body.name?.trim();
+        if (name === '' || (name === undefined && request.body.sport === undefined)) {
+          return reply.code(400).send({ error: 'invalid course change' });
+        }
+        try {
+          await garmin.updateCourse(request.user.sub, request.params.id, {
+            ...(name !== undefined ? { name } : {}),
+            ...(request.body.sport !== undefined ? { sport: request.body.sport } : {}),
+          });
+          return { updated: true };
+        } catch (error) {
+          return courseError(reply, error);
+        }
+      },
+    );
+
+    app.delete<{ Params: GarminCourseParams }>(
+      '/api/garmin/courses/:id',
+      { ...courseRoute, schema: { params: GarminCourseParams } },
+      async (request, reply) => {
+        if (request.validationError) return reply.code(400).send({ error: 'invalid course id' });
+        try {
+          await garmin.deleteCourse(request.user.sub, request.params.id);
+          return { deleted: true };
+        } catch (error) {
+          return courseError(reply, error);
+        }
+      },
+    );
+
+    app.post<{ Params: GarminCourseParams; Body: GarminCourseSendBody }>(
+      '/api/garmin/courses/:id/send',
+      { ...courseRoute, schema: { params: GarminCourseParams, body: GarminCourseSendSchema } },
+      async (request, reply) => {
+        if (request.validationError) return reply.code(400).send({ error: 'invalid device' });
+        try {
+          await garmin.sendCourse(request.user.sub, request.params.id, request.body.deviceId);
+          return { queued: true };
+        } catch (error) {
+          return courseError(reply, error);
         }
       },
     );

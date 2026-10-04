@@ -1,6 +1,16 @@
+import {
+  fmtKm,
+  fmtShortDate,
+  GARMIN_ACTIVITY_TAG,
+  GARMIN_COURSE_TAG,
+  garminSportFolder,
+  garminTypeLabel,
+  type GarminCourseSport,
+} from '@atlas/core';
 import { buildGpx, computeTrackStats, parseGpx } from '@atlas/gpx';
 import { routePathToTrackData, type RoutePath, type RoutingProfile } from '@atlas/routing';
-import { useCallback, useEffect, useState } from 'react';
+import type { AtlasStorage, CollectionRecord, TrackRecord } from '@atlas/storage';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SyncState } from './useSync.js';
 import type { UserData } from './useUserData.js';
 
@@ -15,6 +25,85 @@ export interface GarminDevice {
   id: string;
   name: string;
 }
+/** A course in the user's Garmin Connect library. */
+export interface GarminCourse {
+  id: string;
+  name: string;
+  /** Garmin `typeKey`, e.g. `trail_running`. */
+  type: string | null;
+  distanceM: number | null;
+  ascentM: number | null;
+  /** Last change in Garmin Connect, epoch ms. */
+  updated: number | null;
+}
+
+/** "Trail running · 18.0 km · ↗ 536 m · 5 Jul" — the second line of a course row. */
+export function garminCourseLine(course: GarminCourse, nowMs = Date.now()): string {
+  const parts: string[] = [];
+  if (course.type) parts.push(garminTypeLabel(course.type));
+  if (course.distanceM) parts.push(fmtKm(course.distanceM));
+  if (course.ascentM && course.ascentM >= 1) parts.push(`↗ ${Math.round(course.ascentM)} m`);
+  if (course.updated) parts.push(fmtShortDate(course.updated, nowMs));
+  return parts.join(' · ');
+}
+
+/** Sport filters for a course list: one per sport folder present, most courses first. */
+export function garminCourseSports(courses: readonly GarminCourse[]) {
+  const counts = new Map<string, number>();
+  for (const course of courses) {
+    const sport = garminSportFolder(course.type);
+    counts.set(sport, (counts.get(sport) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([sport, count]) => ({ sport, count }))
+    .sort((a, b) => b.count - a.count || a.sport.localeCompare(b.sport));
+}
+
+const ACTIVITIES_FOLDER = 'Garmin activities';
+const COURSES_FOLDER = 'Garmin courses';
+
+/** The Garmin type kept as a track's plain tag beside its `garmin:`/`garmin-course:` id tag. */
+const typeTag = (tags: readonly string[]) =>
+  tags.find(
+    (tag) =>
+      tag !== '' && !tag.startsWith(GARMIN_ACTIVITY_TAG) && !tag.startsWith(GARMIN_COURSE_TAG),
+  ) ?? null;
+
+/**
+ * Finds or creates `<root> › <sport>` folders. Lookups are by name so a folder the user
+ * created, or one another device synced, is reused rather than duplicated; the root is
+ * matched at top level first, then anywhere, because earlier versions found it by name alone.
+ */
+function sportFolders(storage: AtlasStorage, rootName: string) {
+  let listed: Promise<CollectionRecord[]> | null = null;
+  let root: CollectionRecord | null = null;
+  const children = new Map<string, CollectionRecord>();
+  const list = () => (listed ??= storage.listCollections());
+  return {
+    async root(create: boolean): Promise<CollectionRecord | null> {
+      if (root) return root;
+      const all = await list();
+      root =
+        all.find((c) => c.name === rootName && c.parentId === null) ??
+        all.find((c) => c.name === rootName) ??
+        null;
+      if (!root && create) root = await storage.createCollection(rootName);
+      return root;
+    },
+    async forType(type: string | null): Promise<CollectionRecord> {
+      const parent = (await this.root(true))!;
+      const name = garminSportFolder(type);
+      let folder = children.get(name);
+      if (!folder) {
+        folder =
+          (await list()).find((c) => c.parentId === parent.id && c.name === name) ??
+          (await storage.createCollection(name, parent.id));
+        children.set(name, folder);
+      }
+      return folder;
+    },
+  };
+}
 
 export interface GarminState {
   connected: boolean | null;
@@ -24,7 +113,8 @@ export interface GarminState {
   lastCourseUrl: string | null;
   lastCourseQueued: boolean | null;
   devices: GarminDevice[];
-  lastImport: { imported: number; skipped: number; errors: number } | null;
+  /** `sorted`: earlier imports moved out of the top folder into their sport folder. */
+  lastImport: { imported: number; skipped: number; errors: number; sorted: number } | null;
   nextActivityOffset: number;
   historyComplete: boolean;
   refresh: () => Promise<void>;
@@ -41,6 +131,23 @@ export interface GarminState {
   clearCourseResult: () => void;
   importActivities: () => Promise<void>;
   restartActivityImport: () => Promise<void>;
+  /** The Garmin Connect course library; null until first loaded. */
+  courses: GarminCourse[] | null;
+  /** Course id → id of the Atlas track saved from it, when there is one. */
+  savedCourses: ReadonlyMap<string, string>;
+  /** The course an edit, delete, send or save is in flight for. */
+  pendingCourseId: string | null;
+  /** One-line confirmation of the last course action. */
+  courseNotice: string | null;
+  /** Why the last course action failed; kept apart from `error` so it shows on its row. */
+  courseError: string | null;
+  loadCourses: () => Promise<void>;
+  renameCourse: (id: string, name: string) => Promise<boolean>;
+  setCourseSport: (id: string, sport: GarminCourseSport) => Promise<boolean>;
+  deleteCourse: (id: string) => Promise<boolean>;
+  sendCourse: (id: string, deviceId: string) => Promise<boolean>;
+  /** Copies the course into Atlas (Garmin courses › sport); resolves to the track id. */
+  saveCourse: (id: string) => Promise<string | null>;
 }
 
 const activityOffsetKey = (email: string) => `local.garmin.activityOffset.${email}`;
@@ -57,6 +164,10 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
   const [lastImport, setLastImport] = useState<GarminState['lastImport']>(null);
   const [nextActivityOffset, setNextActivityOffset] = useState(0);
   const [historyComplete, setHistoryComplete] = useState(false);
+  const [courses, setCourses] = useState<GarminCourse[] | null>(null);
+  const [pendingCourseId, setPendingCourseId] = useState<string | null>(null);
+  const [courseNotice, setCourseNotice] = useState<string | null>(null);
+  const [courseError, setCourseError] = useState<string | null>(null);
   const request = sync.accountRequest;
 
   const run = useCallback(async (work: () => Promise<void>) => {
@@ -90,6 +201,8 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     setError(null);
     setNextActivityOffset(0);
     setHistoryComplete(false);
+    setCourses(null);
+    setCourseNotice(null);
     if (sync.email) void refresh();
     else {
       setConnected(null);
@@ -149,6 +262,8 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         setConnected(false);
         setMfaRequired(false);
         setDevices([]);
+        setCourses(null);
+        setCourseNotice(null);
         await resetActivityOffset();
       }),
     [request, run, resetActivityOffset],
@@ -179,6 +294,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         });
         setLastCourseUrl(response.url);
         setLastCourseQueued(response.queued);
+        setCourses(null); // the library has a new course; reload when next shown
       }),
     [request, run],
   );
@@ -187,6 +303,8 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     setLastCourseUrl(null);
     setLastCourseQueued(null);
     setError(null);
+    setCourseNotice(null);
+    setCourseError(null);
   }, []);
 
   const importActivities = useCallback(
@@ -206,14 +324,23 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         );
         const existing = await storage.listTracks();
         const tags = new Set(existing.flatMap((track) => track.tags));
-        let collection = (await storage.listCollections()).find(
-          (item) => item.name === 'Garmin activities',
-        );
+        const folders = sportFolders(storage, ACTIVITIES_FOLDER);
+        // Activities imported before sport folders existed sit in the top folder; file them now.
+        // Only those still directly in it move — a track the user filed elsewhere stays put.
+        let sorted = 0;
+        const root = await folders.root(false);
+        for (const track of existing) {
+          if (!root || track.collectionId !== root.id) continue;
+          if (!track.tags.some((tag) => tag.startsWith(GARMIN_ACTIVITY_TAG))) continue;
+          const folder = await folders.forType(typeTag(track.tags));
+          await storage.updateTrack(track.id, { collectionId: folder.id });
+          sorted++;
+        }
         let imported = 0;
         let skipped = 0;
         let errors = 0;
         for (const activity of response.activities) {
-          const tag = `garmin:${activity.id}`;
+          const tag = `${GARMIN_ACTIVITY_TAG}${activity.id}`;
           if (tags.has(tag)) {
             skipped++;
             continue;
@@ -231,13 +358,13 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
               skipped++;
               continue;
             }
-            if (!collection) collection = await storage.createCollection('Garmin activities');
+            const folder = await folders.forType(activity.type);
             const name = activity.name.trim() || track.name || 'Garmin activity';
             await storage.createTrack({
               name,
               gpx,
               stats: computeTrackStats(track) as unknown as Record<string, number>,
-              collectionId: collection.id,
+              collectionId: folder.id,
               notes: activity.date
                 ? `Recorded ${activity.date} in Garmin Connect`
                 : 'Garmin Connect activity',
@@ -254,7 +381,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         await data.setSetting(key, String(next));
         setNextActivityOffset(next);
         setHistoryComplete(next === 0);
-        setLastImport({ imported, skipped, errors });
+        setLastImport({ imported, skipped, errors, sorted });
       }),
     [data, request, run, sync.email],
   );
@@ -263,6 +390,121 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     await resetActivityOffset();
     setLastImport(null);
   }, [resetActivityOffset]);
+
+  const savedCourses = useMemo(() => {
+    const saved = new Map<string, string>();
+    for (const track of data.tracks ?? [])
+      for (const tag of track.tags)
+        if (tag.startsWith(GARMIN_COURSE_TAG))
+          saved.set(tag.slice(GARMIN_COURSE_TAG.length), track.id);
+    return saved;
+  }, [data.tracks]);
+
+  const loadCourses = useCallback(
+    () =>
+      run(async () => {
+        const response = await request<{ courses: GarminCourse[] }>('/api/garmin/courses');
+        // Newest change first: the course just planned or edited is the one being looked for.
+        setCourses([...response.courses].sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0)));
+      }),
+    [request, run],
+  );
+
+  /** Runs one course action with row-level progress; resolves false when it failed. */
+  const courseAction = useCallback(
+    async <T>(id: string, work: () => Promise<T>): Promise<T | null> => {
+      setPendingCourseId(id);
+      setCourseNotice(null);
+      setCourseError(null);
+      try {
+        return await work();
+      } catch (reason) {
+        setCourseError(reason instanceof Error ? reason.message : 'Garmin Connect request failed.');
+        return null;
+      } finally {
+        setPendingCourseId(null);
+      }
+    },
+    [],
+  );
+
+  const patchCourse = (id: string, change: Partial<GarminCourse>) =>
+    setCourses((list) =>
+      list ? list.map((course) => (course.id === id ? { ...course, ...change } : course)) : list,
+    );
+
+  const renameCourse = useCallback(
+    async (id: string, name: string) =>
+      (await courseAction(id, async () => {
+        await request(`/api/garmin/courses/${id}`, { name: name.trim() }, 'PATCH');
+        patchCourse(id, { name: name.trim(), updated: Date.now() });
+        setCourseNotice(`Renamed to “${name.trim()}” in Garmin Connect.`);
+        return true;
+      })) === true,
+    [courseAction, request],
+  );
+
+  const setCourseSport = useCallback(
+    async (id: string, sport: GarminCourseSport) =>
+      (await courseAction(id, async () => {
+        await request(`/api/garmin/courses/${id}`, { sport }, 'PATCH');
+        patchCourse(id, { type: sport, updated: Date.now() });
+        setCourseNotice('Sport changed in Garmin Connect.');
+        return true;
+      })) === true,
+    [courseAction, request],
+  );
+
+  const deleteCourse = useCallback(
+    async (id: string) =>
+      (await courseAction(id, async () => {
+        const name = courses?.find((course) => course.id === id)?.name ?? 'Course';
+        await request(`/api/garmin/courses/${id}`, undefined, 'DELETE');
+        setCourses((list) => list?.filter((course) => course.id !== id) ?? null);
+        setCourseNotice(`Deleted “${name}” from Garmin Connect.`);
+        return true;
+      })) === true,
+    [courseAction, courses, request],
+  );
+
+  const sendCourse = useCallback(
+    async (id: string, deviceId: string) =>
+      (await courseAction(id, async () => {
+        await request(`/api/garmin/courses/${id}/send`, { deviceId });
+        const device = devices.find((item) => item.id === deviceId)?.name ?? 'your device';
+        setCourseNotice(`Queued for ${device}. It arrives on the next sync with Garmin Connect.`);
+        return true;
+      })) === true,
+    [courseAction, devices, request],
+  );
+
+  const saveCourse = useCallback(
+    (id: string) =>
+      courseAction(id, async () => {
+        const already = savedCourses.get(id);
+        if (already) return already;
+        const storage = data.storage;
+        if (!storage) throw new Error('Local storage is unavailable.');
+        const course = courses?.find((item) => item.id === id);
+        const { gpx } = await request<{ gpx: string }>(`/api/garmin/courses/${id}/gpx`);
+        const parsed = parseGpx(gpx);
+        if (parsed.segments.every((segment) => segment.length < 2))
+          throw new Error('Garmin returned a course without a route.');
+        const folder = await sportFolders(storage, COURSES_FOLDER).forType(course?.type ?? null);
+        const track: TrackRecord = await storage.createTrack({
+          name: course?.name || parsed.name || 'Garmin course',
+          gpx,
+          stats: computeTrackStats(parsed) as unknown as Record<string, number>,
+          collectionId: folder.id,
+          notes: 'Copied from Garmin Connect',
+          tags: [`${GARMIN_COURSE_TAG}${id}`, ...(course?.type ? [course.type] : [])],
+        });
+        await data.refreshAll();
+        setCourseNotice(`Saved to ${COURSES_FOLDER} › ${folder.name}.`);
+        return track.id;
+      }),
+    [courseAction, courses, data, request, savedCourses],
+  );
 
   return {
     connected,
@@ -284,5 +526,16 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     clearCourseResult,
     importActivities,
     restartActivityImport,
+    courses,
+    savedCourses,
+    pendingCourseId,
+    courseNotice,
+    courseError,
+    loadCourses,
+    renameCourse,
+    setCourseSport,
+    deleteCourse,
+    sendCourse,
+    saveCourse,
   };
 }

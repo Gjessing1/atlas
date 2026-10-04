@@ -9108,6 +9108,202 @@ button.transit-notice-summary {
   color: var(--danger);
 }
 
+/* Garmin course library: a scannable list where one course opens at a time, its
+   actions directly under it so a result is reported where it was asked for. */
+.settings-section h4 {
+  margin: 14px 0 4px;
+  font-size: 13px;
+}
+
+.garmin-courses-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.garmin-quiet,
+.garmin-action-row button.garmin-quiet {
+  min-height: 0;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.garmin-sports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.garmin-count {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.garmin-course-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.garmin-course + .garmin-course {
+  border-top: 1px solid var(--border);
+}
+
+.garmin-course.open {
+  background: var(--surface-muted);
+}
+
+.garmin-course-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.garmin-course-row:hover,
+.garmin-course-row:focus-visible {
+  background: var(--surface-selected);
+}
+
+.garmin-course-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.garmin-course-line {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.garmin-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.garmin-course-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 10px 10px;
+}
+
+.garmin-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Same button language as the place card: bordered secondary actions, one filled
+   primary (Save / Show in Atlas) per open course. */
+.garmin-action-row button,
+.garmin-action-row select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.garmin-action-row button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.garmin-action-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.garmin-action-row button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* Surface, not white: dark mode's accent is light, and white on it fails contrast. */
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.garmin-action-row button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.garmin-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 150px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.garmin-field input,
+.garmin-field select {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.garmin-action-foot {
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.garmin-danger-text,
+.garmin-action-row button.garmin-danger-text {
+  color: var(--danger);
+}
+
+.garmin-confirm {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  font-size: 12px;
+}
+
+.garmin-confirm p {
+  margin: 0 0 6px;
+}
+
+.garmin-action-row button.garmin-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--surface);
+  font-weight: 600;
+}
+
 .link-button {
   border: none;
   background: none;

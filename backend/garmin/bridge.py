@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 from garminconnect import (Garmin, GarminConnectAuthenticationError,
@@ -113,6 +114,43 @@ def device_message(course_id, device_id, name):
              "priority": 0, "fileType": "FIT", "metaDataId": int(course_id)}]
 
 
+# Garmin type ids for the sports Atlas offers when editing a course (GARMIN_COURSE_SPORTS in
+# @atlas/core). Read from Garmin's activity-type table 2026-10-04; any other key is refused.
+COURSE_SPORTS = {"running": 1, "trail_running": 6, "cycling": 2, "road_biking": 10,
+                 "mountain_biking": 5, "gravel_cycling": 143, "hiking": 3, "walking": 9,
+                 "cross_country_skiing_ws": 171, "backcountry_skiing": 203}
+
+# Garmin answers 429 "not yet ready to delete or update" for a few seconds after a course is
+# created or edited (10 s observed). That is not rate limiting, so wait it out here.
+NOT_READY_WAITS = (3, 6, 10, 15)
+
+
+def when_ready(work):
+    for wait in NOT_READY_WAITS + (None,):
+        try:
+            return work()
+        except Exception as error:
+            if wait is None or "not yet ready" not in str(error):
+                raise
+            time.sleep(wait)
+
+
+def parse_course_id(value):
+    if not isinstance(value, str) or not value.isdigit() or len(value) > 20:
+        raise BridgeInputError("Invalid Garmin course")
+    return value
+
+
+def course_summary(course):
+    activity = course.get("activityType") or {}
+    return {"id": str(course["courseId"]),
+            "name": course.get("courseName") or "Garmin course",
+            "type": activity.get("typeKey"),
+            "distanceM": course.get("distanceInMeters"),
+            "ascentM": course.get("elevationGainInMeters"),
+            "updated": course.get("updatedDate") or course.get("createdDate")}
+
+
 def main():
     command = json.loads(sys.stdin.readline())
     directory = token_path(command["dataDir"], command["userId"])
@@ -175,6 +213,44 @@ def main():
         answer({"id": course_id,
                 "url": f"https://connect.garmin.com/modern/course/{course_id}",
                 "queued": queued})
+    elif action == "courses":
+        courses = garmin.connectapi("/web-gateway/course/owner/").get("coursesForUser") or []
+        answer({"courses": [course_summary(c) for c in courses
+                            if isinstance(c.get("courseId"), int)]})
+    elif action == "courseGpx":
+        data = garmin.download(f"/course-service/course/gpx/{parse_course_id(command['id'])}")
+        if len(data) > 20_000_000:
+            raise BridgeInputError("Garmin course GPX is too large to import")
+        answer({"gpx": data.decode("utf-8")})
+    elif action == "updateCourse":
+        cid = parse_course_id(command["id"])
+        course = garmin.connectapi(f"/course-service/course/{cid}")
+        # Garmin's PUT replaces the whole course, so send back exactly what it gave us with
+        # only the edited fields changed; geometry and points are never touched here.
+        if "name" in command:
+            name = command["name"]
+            if not isinstance(name, str) or not name.strip() or len(name) > 100:
+                raise BridgeInputError("Invalid course name")
+            course["courseName"] = name.strip()
+        if "sport" in command:
+            if command["sport"] not in COURSE_SPORTS:
+                raise BridgeInputError("Unsupported course sport")
+            course["activityTypePk"] = COURSE_SPORTS[command["sport"]]
+        when_ready(lambda: garmin.client.put("connect", f"/course-service/course/{cid}",
+                                             json=course, api=True))
+        answer({"updated": True})
+    elif action == "deleteCourse":
+        cid = parse_course_id(command["id"])
+        when_ready(lambda: garmin.client.delete("connect", f"/course-service/course/{cid}",
+                                                api=True))
+        answer({"deleted": True})
+    elif action == "sendCourse":
+        cid = parse_course_id(command["id"])
+        course = garmin.connectapi(f"/course-service/course/{cid}")
+        garmin.client.post("connect", "/device-service/devicemessage/messages",
+                           json=device_message(cid, command.get("deviceId"),
+                                               course.get("courseName") or "Atlas course"))
+        answer({"queued": True})
     elif action == "devices":
         devices = garmin.get_devices()
         answer({"devices": [{"id": str(d["deviceId"]),
@@ -211,6 +287,8 @@ def run():
         # Library errors may contain request context or tokens; never echo them.
         if isinstance(error, BridgeInputError):
             message = str(error)
+        elif "not yet ready" in str(error):
+            message = "Garmin is still processing this course; try again in a minute"
         elif isinstance(error, GarminConnectTooManyRequestsError):
             message = "Garmin is rate-limiting this server; try again later"
         else:

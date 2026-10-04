@@ -64,6 +64,17 @@ export function fmtDayLabel(epochMs: number, nowMs = Date.now()): string {
   return `${weekday} ${d.getDate()}`;
 }
 
+/**
+ * A short calendar date for lists of saved things: "5 Jul", with the year only when it is not
+ * this year ("5 Jul 2025"). Month word locale-derived, day number pinned, as in fmtDayLabel.
+ */
+export function fmtShortDate(epochMs: number, nowMs = Date.now()): string {
+  const d = new Date(epochMs);
+  const month = d.toLocaleDateString([], { month: 'short' });
+  const year = d.getFullYear() === new Date(nowMs).getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${d.getDate()} ${month}${year}`;
+}
+
 /** Coordinates as a fixed 5-decimal (~1 m) "lat, lng" string. */
 export function fmtCoords(p: LatLng): string {
   return `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
@@ -135,21 +146,81 @@ export function trackSummary(stats: Record<string, number>): string {
   return parts.join(' · ') || 'no stats';
 }
 
-/** Human-readable Garmin activity from the raw type tag kept with an imported GPX. */
-export function garminActivityLabel(tags: readonly string[]): string | null {
-  if (!tags.some((tag) => tag.startsWith('garmin:'))) return null;
-  const type = tags.find((tag) => tag !== '' && !tag.startsWith('garmin:'));
-  if (!type) return null;
-  const names: Record<string, string> = {
-    running: 'Running',
-    trail_running: 'Trail running',
-    cycling: 'Cycling',
-    mountain_biking: 'Mountain biking',
-    gravel_cycling: 'Gravel cycling',
-    hiking: 'Hiking',
-    walking: 'Walking',
-  };
+/** Tag prefixes that tie an Atlas track to its Garmin record: an activity, or a saved course. */
+export const GARMIN_ACTIVITY_TAG = 'garmin:';
+export const GARMIN_COURSE_TAG = 'garmin-course:';
+const isGarminIdTag = (tag: string) =>
+  tag.startsWith(GARMIN_ACTIVITY_TAG) || tag.startsWith(GARMIN_COURSE_TAG);
+
+const GARMIN_TYPE_NAMES: Record<string, string> = {
+  running: 'Running',
+  trail_running: 'Trail running',
+  cycling: 'Cycling',
+  road_biking: 'Road cycling',
+  mountain_biking: 'Mountain biking',
+  gravel_cycling: 'Gravel cycling',
+  hiking: 'Hiking',
+  walking: 'Walking',
+  skating_ws: 'Ice skating',
+  cross_country_skiing_ws: 'Cross-country skiing',
+  skate_skiing_ws: 'Skate skiing',
+};
+
+/** Human-readable name for a Garmin `typeKey` (`trail_running` → "Trail running"). */
+export function garminTypeLabel(typeKey: string): string {
   return (
-    names[type] ?? type.replace(/[_-]+/g, ' ').replace(/^\w/, (letter) => letter.toUpperCase())
+    GARMIN_TYPE_NAMES[typeKey] ??
+    typeKey
+      .replace(/_ws$/, '') // Garmin's winter-sports suffix, never part of the name
+      .replace(/[_-]+/g, ' ')
+      .replace(/^\w/, (letter) => letter.toUpperCase())
   );
 }
+
+/** Human-readable Garmin activity from the raw type tag kept with an imported GPX. */
+export function garminActivityLabel(tags: readonly string[]): string | null {
+  if (!tags.some(isGarminIdTag)) return null;
+  const type = tags.find((tag) => tag !== '' && !isGarminIdTag(tag));
+  return type ? garminTypeLabel(type) : null;
+}
+
+// Order matters: skate skiing is skiing, not skating; trail and treadmill runs are running.
+const GARMIN_SPORT_FAMILIES: readonly (readonly [RegExp, string])[] = [
+  [/running|^run$|_run$/, 'Running'],
+  [/cycling|biking|^bmx|^e_bike|cyclocross|_ride$/, 'Cycling'],
+  [/skiing|snowboard|^ski_/, 'Skiing'],
+  [/skating/, 'Skating'],
+  [/hiking|mountaineering/, 'Hiking'],
+  [/walking/, 'Walking'],
+  [/swim/, 'Swimming'],
+  [/kayak|canoe|rowing|paddl/, 'Paddling'],
+];
+
+/**
+ * The sport folder a Garmin activity or course is filed under, so every kind of run sits
+ * together and apart from hikes or skating. Unknown types get their own folder by name rather
+ * than a catch-all, so a sport Garmin adds later still files separately.
+ */
+export function garminSportFolder(typeKey: string | null | undefined): string {
+  if (!typeKey) return 'Other';
+  for (const [pattern, folder] of GARMIN_SPORT_FAMILIES) if (pattern.test(typeKey)) return folder;
+  return garminTypeLabel(typeKey);
+}
+
+/**
+ * The sports a Garmin course can be set to from Atlas. The bridge holds the matching Garmin
+ * type ids (verified against Garmin's activity-type table 2026-10-04) and refuses any other key.
+ */
+export const GARMIN_COURSE_SPORTS = [
+  'running',
+  'trail_running',
+  'cycling',
+  'road_biking',
+  'mountain_biking',
+  'gravel_cycling',
+  'hiking',
+  'walking',
+  'cross_country_skiing_ws',
+  'backcountry_skiing',
+] as const;
+export type GarminCourseSport = (typeof GARMIN_COURSE_SPORTS)[number];

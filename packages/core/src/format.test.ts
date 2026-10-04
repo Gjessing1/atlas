@@ -11,6 +11,7 @@ import {
   fmtKm,
   fmtWhenClock,
   garminActivityLabel,
+  garminSportFolder,
   trackSummary,
 } from './index.js';
 
@@ -41,6 +42,25 @@ describe('Garmin activity labels', () => {
     expect(garminActivityLabel(['garmin:124', 'backcountry_skiing'])).toBe('Backcountry skiing');
     expect(garminActivityLabel(['garmin:125'])).toBeNull();
     expect(garminActivityLabel(['trail_running'])).toBeNull();
+    expect(garminActivityLabel(['garmin-course:9', 'skating_ws'])).toBe('Ice skating');
+    expect(garminActivityLabel(['garmin:126', 'resort_skiing_snowboarding_ws'])).toBe(
+      'Resort skiing snowboarding',
+    );
+  });
+
+  it('files every kind of run together and keeps skating, skiing and hiking apart', () => {
+    for (const type of ['running', 'trail_running', 'treadmill_running', 'virtual_run'])
+      expect(garminSportFolder(type)).toBe('Running');
+    expect(garminSportFolder('mountain_biking')).toBe('Cycling');
+    expect(garminSportFolder('e_bike_mountain')).toBe('Cycling');
+    expect(garminSportFolder('skate_skiing_ws')).toBe('Skiing');
+    expect(garminSportFolder('skating_ws')).toBe('Skating');
+    expect(garminSportFolder('inline_skating')).toBe('Skating');
+    expect(garminSportFolder('mountaineering')).toBe('Hiking');
+    expect(garminSportFolder('open_water_swimming')).toBe('Swimming');
+    expect(garminSportFolder('stand_up_paddleboarding')).toBe('Paddling');
+    expect(garminSportFolder('golf')).toBe('Golf');
+    expect(garminSportFolder(null)).toBe('Other');
   });
 });
 

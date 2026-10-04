@@ -2197,6 +2197,11 @@ function AppInner() {
             favoritesOpen={favoritesOpen}
             revealCollectionItem={revealCollectionItem}
             onRevealedCollectionItem={() => setRevealCollectionItem(null)}
+            onRevealCollectionItem={(target) => {
+              setSettingsOpen(false);
+              setRevealCollectionItem(target);
+              setFavoritesOpen(true);
+            }}
             onCloseFavorites={() => setFavoritesOpen(false)}
             editPlaceId={editPlaceId}
             onCloseEditPlace={() => setEditPlaceId(null)}

@@ -87,5 +87,92 @@ class LoginTest(unittest.TestCase):
                              {"error": "Garmin rejected the email or password", "auth": True})
 
 
+class CourseActionTest(unittest.TestCase):
+    def call(self, client, request):
+        with tempfile.TemporaryDirectory() as directory:
+            stdout = io.StringIO()
+            request = {"dataDir": directory,
+                       "userId": "11111111-1111-1111-1111-111111111111", **request}
+            with patch.object(bridge, "Garmin", return_value=client), \
+                    patch.object(bridge.time, "sleep") as sleep, \
+                    patch.object(bridge.sys, "stdin", io.StringIO(json.dumps(request) + "\n")), \
+                    patch.object(bridge.sys, "stdout", stdout):
+                bridge.run()
+            self.sleeps = [c.args[0] for c in sleep.call_args_list]
+            return json.loads(stdout.getvalue())
+
+    def test_lists_the_owners_courses(self):
+        client = Mock()
+        client.connectapi.return_value = {"coursesForUser": [
+            {"courseId": 7, "courseName": "18k", "distanceInMeters": 18028.0,
+             "elevationGainInMeters": 536.1, "updatedDate": 1783259286000,
+             "activityType": {"typeKey": "trail_running"}}]}
+        reply = self.call(client, {"action": "courses"})
+        client.connectapi.assert_called_once_with("/web-gateway/course/owner/")
+        self.assertEqual(reply, {"courses": [
+            {"id": "7", "name": "18k", "type": "trail_running", "distanceM": 18028.0,
+             "ascentM": 536.1, "updated": 1783259286000}]})
+
+    def test_edits_only_name_and_sport_and_keeps_the_geometry(self):
+        client = Mock()
+        course = {"courseId": 7, "courseName": "Old", "activityTypePk": 9,
+                  "geoPoints": [{"latitude": 59.9}]}
+        client.connectapi.return_value = dict(course)
+        reply = self.call(client, {"action": "updateCourse", "id": "7",
+                                   "name": " New ", "sport": "trail_running"})
+        self.assertEqual(reply, {"updated": True})
+        path = client.client.put.call_args.args[1]
+        sent = client.client.put.call_args.kwargs["json"]
+        self.assertEqual(path, "/course-service/course/7")
+        self.assertEqual(sent, {**course, "courseName": "New", "activityTypePk": 6})
+
+    def test_refuses_a_sport_outside_the_offered_list(self):
+        client = Mock()
+        client.connectapi.return_value = {"courseId": 7}
+        reply = self.call(client, {"action": "updateCourse", "id": "7", "sport": "golf"})
+        self.assertEqual(reply, {"error": "Unsupported course sport"})
+        client.client.put.assert_not_called()
+
+    def test_waits_out_garmins_not_ready_window_before_deleting(self):
+        client = Mock()
+        client.client.delete.side_effect = [
+            Exception("API Error 429 - The course [7] is not yet ready to delete or update"),
+            {}]
+        self.assertEqual(self.call(client, {"action": "deleteCourse", "id": "7"}),
+                         {"deleted": True})
+        self.assertEqual(self.sleeps, [3])
+        self.assertEqual(client.client.delete.call_count, 2)
+
+    def test_reports_a_course_that_stays_unready(self):
+        client = Mock()
+        client.client.delete.side_effect = Exception("429 - not yet ready to delete or update")
+        reply = self.call(client, {"action": "deleteCourse", "id": "7"})
+        self.assertEqual(reply["error"],
+                         "Garmin is still processing this course; try again in a minute")
+        self.assertEqual(self.sleeps, list(bridge.NOT_READY_WAITS))
+
+    def test_does_not_retry_other_failures(self):
+        client = Mock()
+        client.client.delete.side_effect = Exception("500")
+        reply = self.call(client, {"action": "deleteCourse", "id": "7"})
+        self.assertEqual(reply, {"error": "Garmin Connect request failed"})
+        self.assertEqual(client.client.delete.call_count, 1)
+
+    def test_rejects_a_non_numeric_course_id(self):
+        client = Mock()
+        reply = self.call(client, {"action": "deleteCourse", "id": "7/../../user"})
+        self.assertEqual(reply, {"error": "Invalid Garmin course"})
+        client.client.delete.assert_not_called()
+
+    def test_sends_an_existing_course_to_a_device(self):
+        client = Mock()
+        client.connectapi.return_value = {"courseId": 7, "courseName": "18k"}
+        reply = self.call(client, {"action": "sendCourse", "id": "7", "deviceId": "123"})
+        self.assertEqual(reply, {"queued": True})
+        message = client.client.post.call_args.kwargs["json"][0]
+        self.assertEqual((message["metaDataId"], message["deviceId"], message["messageName"]),
+                         (7, 123, "18k"))
+
+
 if __name__ == "__main__":
     unittest.main()
