@@ -14,7 +14,6 @@ export {
 } from './delay.js';
 export {
   corridorFlow,
-  simplifyLine,
   tappedFlowProperties,
   trafficFlowFeatureCollection,
   type TrafficFlowFeatureCollection,

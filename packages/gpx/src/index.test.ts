@@ -12,6 +12,7 @@ import {
   parseKmz,
   parseTrackFile,
   trackBounds,
+  trackLineCoordinates,
   type TrackData,
 } from './index.js';
 
@@ -343,5 +344,23 @@ describe('trackBounds', () => {
     });
     expect(bounds).toEqual({ sw: { lat: -1, lng: 2 }, ne: { lat: 1, lng: 5 } });
     expect(trackBounds({ segments: [], waypoints: [] })).toBeNull();
+  });
+});
+
+describe('trackLineCoordinates', () => {
+  // A straight 1 Hz run: one point every ~3 m along a meridian.
+  const run = Array.from({ length: 200 }, (_, i) => ({ lat: 59.9 + i * 0.000027, lng: 10.7 }));
+
+  it('returns [lng, lat] lines and drops single-point segments', () => {
+    const lines = trackLineCoordinates({ segments: [run.slice(0, 3), [run[0]!]], waypoints: [] });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]![0]).toEqual([10.7, 59.9]);
+    expect(lines[0]).toHaveLength(3);
+  });
+
+  it('thins a drawn copy to a few vertices while keeping both ends', () => {
+    const [line] = trackLineCoordinates({ segments: [run], waypoints: [] }, 3);
+    expect(line).toHaveLength(2);
+    expect(line!.at(-1)).toEqual([run.at(-1)!.lng, run.at(-1)!.lat]);
   });
 });

@@ -12,6 +12,27 @@ const lineLayerId = (sourceId: string) => `${sourceId}-line`;
 const casingLayerId = (sourceId: string) => `${sourceId}-casing`;
 const fillLayerId = (sourceId: string) => `${sourceId}-fill`;
 
+/**
+ * Lift the selected track's layers above every other track's. Colour alone
+ * left it under whichever runs were added after it — and runs from the same
+ * front door overlap street for street — so "selected" was invisible exactly
+ * where it mattered.
+ */
+function raiseSelectedTrack(map: maplibregl.Map, selectedId: string | null): void {
+  if (!selectedId) return;
+  const sourceId = SOURCE_PREFIX + selectedId;
+  const own = [fillLayerId(sourceId), casingLayerId(sourceId), lineLayerId(sourceId)];
+  if (!map.getLayer(lineLayerId(sourceId))) return;
+  const layers = map.getStyle()?.layers ?? [];
+  let topTrack = -1;
+  layers.forEach((layer, index) => {
+    if (layer.id.startsWith(SOURCE_PREFIX) && !own.includes(layer.id)) topTrack = index;
+  });
+  if (topTrack < 0) return;
+  const before = layers.slice(topTrack + 1).find((layer) => !own.includes(layer.id))?.id;
+  for (const layerId of own) if (map.getLayer(layerId)) map.moveLayer(layerId, before);
+}
+
 function trackFeatures(track: TrackRecord, data: TrackData): FeatureCollection {
   const line: Feature = {
     type: 'Feature',
@@ -113,6 +134,7 @@ export function useTrackLayers(
               'line-width': selectedIdRef.current === track.id ? 5 : 3,
             },
           });
+          raiseSelectedTrack(map, selectedIdRef.current);
         });
       }
     };
@@ -153,6 +175,7 @@ export function useTrackLayers(
         map.setPaintProperty(fillLayerId(sourceId), 'fill-opacity', selected ? 0.25 : 0.16);
       }
     }
+    raiseSelectedTrack(map, selectedTrackId);
   }, [map, tracks, selectedTrackId]);
 
   // Clicking a rendered track line selects the track (opens its profile).
@@ -167,9 +190,19 @@ export function useTrackLayers(
           (id) => id.startsWith(SOURCE_PREFIX) && (id.endsWith('-line') || id.endsWith('-fill')),
         );
       if (trackLayers.length === 0) return;
-      const hit = map.queryRenderedFeatures(e.point, { layers: trackLayers })[0];
-      const trackId = hit?.properties?.['trackId'] as string | undefined;
-      if (trackId) onSelectRef.current(trackId);
+      const ids = [
+        ...new Set(
+          map
+            .queryRenderedFeatures(e.point, { layers: trackLayers })
+            .map((hit) => hit.properties?.['trackId'])
+            .filter((id): id is string => typeof id === 'string'),
+        ),
+      ];
+      if (ids.length === 0) return;
+      // Where several tracks overlap, each click steps to the next one, so a
+      // buried track can still be picked.
+      const current = selectedIdRef.current ? ids.indexOf(selectedIdRef.current) : -1;
+      onSelectRef.current(ids[(current + 1) % ids.length]!);
     };
     map.on('click', onClick);
     return () => {

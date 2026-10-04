@@ -18,9 +18,12 @@ import { theme } from './theme';
 export function GarminCourses({
   garmin,
   onReveal,
+  onShowTrack,
 }: {
   garmin: GarminState;
   onReveal: (target: CollectionRevealTarget) => void;
+  /** Close Settings and draw the saved copy on the map, framed. */
+  onShowTrack: (trackId: string) => void;
 }) {
   const [sport, setSport] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -117,22 +120,34 @@ export function GarminCourses({
               {expanded ? (
                 <View style={styles.actions}>
                   <View style={styles.actionRow}>
+                    {/* Seeing the course is the first thing wanted from it: save
+                        the copy if there is none yet, then draw and frame it.
+                        Opening Collections alone left the line unseen. */}
                     <Pressable
                       style={[styles.button, pending && styles.disabled]}
                       disabled={pending}
                       onPress={() => {
-                        if (savedTrack) onReveal({ kind: 'track', id: savedTrack });
+                        if (savedTrack) onShowTrack(savedTrack);
                         else
                           void garmin.saveCourse(course.id).then((id) => {
-                            if (id) onReveal({ kind: 'track', id });
+                            if (id) onShowTrack(id);
                           });
                       }}
-                      testID="garmin-course-save"
+                      testID="garmin-course-show"
                     >
                       <Text style={styles.buttonText}>
-                        {savedTrack ? 'Show in Atlas' : 'Save to Atlas'}
+                        {savedTrack ? 'Show on map' : 'Save & show on map'}
                       </Text>
                     </Pressable>
+                    {savedTrack ? (
+                      <Pressable
+                        style={[styles.button, styles.quiet]}
+                        onPress={() => onReveal({ kind: 'track', id: savedTrack })}
+                        testID="garmin-course-reveal"
+                      >
+                        <Text style={styles.quietText}>In Collections</Text>
+                      </Pressable>
+                    ) : null}
                     {garmin.devices.length > 0 ? (
                       <Pressable
                         style={[styles.button, styles.quiet, pending && styles.disabled]}

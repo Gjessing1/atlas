@@ -3,7 +3,9 @@ import {
   ancestorFolderIds,
   buildCollectionTree,
   flattenCollectionTree,
+  folderContentsLine,
   promoteParentId,
+  tracksForList,
   type TreeFolder,
 } from './useCollectionTree.js';
 
@@ -140,5 +142,30 @@ describe('ancestorFolderIds', () => {
     const ids = ancestorFolderIds(tree, 'x');
     expect(ids[0]).toBe('x');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('folder browsing helpers', () => {
+  it('lists recorded tracks newest first, then the untimed ones in stored order', () => {
+    const tracks = [
+      { name: 'A drawn route', stats: {} },
+      { name: 'Oslo Running', stats: { startTime: 100 } },
+      { name: 'Oslo Running', stats: { startTime: 300 } },
+      { name: 'B import', stats: {} },
+    ];
+    expect(tracksForList(tracks).map((track) => [track.name, track.stats.startTime])).toEqual([
+      ['Oslo Running', 300],
+      ['Oslo Running', 100],
+      ['A drawn route', undefined],
+      ['B import', undefined],
+    ]);
+  });
+
+  it('says what a folder holds, singular and plural', () => {
+    expect(folderContentsLine({ children: [1, 2], places: [1], tracks: [] })).toBe(
+      '2 folders · 1 place',
+    );
+    expect(folderContentsLine({ children: [], places: [], tracks: [1] })).toBe('1 track');
+    expect(folderContentsLine({ children: [], places: [], tracks: [] })).toBe('Empty');
   });
 });

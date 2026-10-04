@@ -41,12 +41,12 @@ import {
   haversineM,
   mapProfile,
   mapProfileForRouting,
-  placeIsVisible,
   poiTilesUrl,
   PUBLIC_TOILETS_ID,
   resolveInaturOffer,
   SATELLITES_ID,
   savedPlaceAt,
+  visibleOnMap,
   STARLINK_ID,
   type BBox,
   type LatLng,
@@ -57,7 +57,6 @@ import {
   type SearchResult,
   type MainSearchResult,
   type CollectionRevealTarget,
-  type VisibilityFolder,
   type SettingsSectionId,
 } from '@atlas/core';
 import {
@@ -193,7 +192,7 @@ import { SatellitePassSheet } from './src/ui/SatellitePassSheet';
 import { TrackProfileSheet } from './src/ui/TrackProfileSheet';
 import { WeatherSheet } from './src/ui/WeatherSheet';
 import { UpdateNotices } from './src/update/UpdateNotices';
-import { useTrackGeometry } from './src/useTrackGeometry';
+import { selectedTrackGeometry, useTrackGeometry } from './src/useTrackGeometry';
 import { useUserData, type ImportOptions } from './src/useUserData';
 import { useWeather } from './src/weather/useWeather';
 
@@ -231,12 +230,10 @@ function AppInner() {
   }, [appearance.mode]);
   // Draw only effectively-visible places (own toggle on, no hiding folder). The
   // Favorites sheet still lists hidden ones so they can be shown again.
-  const visiblePlaces = useMemo(() => {
-    const folders = new Map<string, VisibilityFolder>(
-      data.collections.map((c) => [c.id, { parentId: c.parentId, visible: c.visible }]),
-    );
-    return data.places.filter((p) => placeIsVisible(p, folders));
-  }, [data.places, data.collections]);
+  const visiblePlaces = useMemo(
+    () => visibleOnMap(data.places, data.collections),
+    [data.places, data.collections],
+  );
   // Names under the pins of folders and tags the user switched labels on for.
   const pinLabels = usePinLabels(data, visiblePlaces, data.collections);
   const sync = useSync(data.storage, data.refreshAll, data.places);
@@ -259,8 +256,13 @@ function AppInner() {
   const [showPuck, setShowPuck] = useState(false);
   const revealPuck = useCallback(() => setShowPuck(true), []);
   const directions = useDirections(route, revealPuck);
-  // Geometry of the visible tracks, for the map's track line layer.
-  const trackGeo = useTrackGeometry(data.storage, data.tracks);
+  // Geometry of the visible tracks, for the map's track line layer — tracks
+  // follow their folders' eyes exactly as pins do.
+  const visibleTracks = useMemo(
+    () => visibleOnMap(data.tracks, data.collections),
+    [data.tracks, data.collections],
+  );
+  const trackGeo = useTrackGeometry(data.storage, visibleTracks);
   // The active profile and quick overlay state are device-local; the preferred
   // switcher layout syncs and is shared by Settings and the one-tap controls.
   const profiles = useMapProfile(data);
@@ -1450,6 +1452,24 @@ function AppInner() {
     });
   }, [data.tracks]);
 
+  // A track to show once it is in the list: Settings' Garmin "Show on map"
+  // saves the course and asks for it in the same tap, before the refreshed
+  // track list has reached this render.
+  const [showTrackId, setShowTrackId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showTrackId) return;
+    const track = data.tracks.find((candidate) => candidate.id === showTrackId);
+    if (!track) return;
+    setShowTrackId(null);
+    showTrack(track);
+  }, [showTrackId, data.tracks, showTrack]);
+
+  const selectedTrackGeo = useMemo(
+    () =>
+      trackProfile?.data ? selectedTrackGeometry(trackProfile.track, trackProfile.data) : null,
+    [trackProfile],
+  );
+
   const planTrack = useCallback(
     (track: TrackRecord) => {
       void data.getTrackData(track.id).then((trackData) => {
@@ -1640,6 +1660,7 @@ function AppInner() {
         measure={measure.open ? measure.features : null}
         trackGeo={trackGeo}
         selectedTrackId={planning || navActive ? null : (trackProfile?.track.id ?? null)}
+        selectedTrackGeo={planning || navActive ? null : selectedTrackGeo}
         onSelectTrack={selectMapTrack}
         offlineRegionCorner={offlineRegion?.corner ?? null}
         offlineRegionBbox={offlineRegion?.bbox ?? null}
@@ -2201,6 +2222,10 @@ function AppInner() {
               setSettingsOpen(false);
               setRevealCollectionItem(target);
               setFavoritesOpen(true);
+            }}
+            onShowSavedTrack={(id) => {
+              setSettingsOpen(false);
+              setShowTrackId(id);
             }}
             onCloseFavorites={() => setFavoritesOpen(false)}
             editPlaceId={editPlaceId}

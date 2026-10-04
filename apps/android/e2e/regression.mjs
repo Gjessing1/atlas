@@ -511,6 +511,18 @@ async function openMenuItem(id) {
   await tap(id);
 }
 
+// Collections remembers the folder it was left in (a run tapped from a folder
+// closes the sheet, and the next one is picked from the same place), so a step
+// that wants the top level goes there explicitly.
+async function openCollectionsAtRoot() {
+  await openMenuItem('open-favorites');
+  const xml = await waitForId('favorites-sheet');
+  if (visibleNode(xml, 'collections-crumb-root')) {
+    tapId(xml, 'collections-crumb-root');
+    await waitForId('collections-crumb-root', false);
+  }
+}
+
 async function closeSettings() {
   let xml = hierarchy();
   if (visibleNode(xml, 'settings-back')) {
@@ -565,6 +577,19 @@ async function searchAndSavePlace() {
   await tap('destination-cancel');
 }
 
+/** Save a screenshot on a passing run, for layouts a window dump cannot judge. */
+function keepScreenshot(name) {
+  try {
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(
+      join(artifactsDir, name),
+      command(['exec-out', 'screencap', '-p'], { encoding: null }),
+    );
+  } catch {
+    // A missing picture is not a failed regression.
+  }
+}
+
 function dynamicId(xml, pattern, label) {
   const result = nodeIds(xml).find((id) => pattern.test(id));
   if (!result) throw new Error(`Could not find ${label} in accessibility hierarchy`);
@@ -572,8 +597,7 @@ function dynamicId(xml, pattern, label) {
 }
 
 async function createFolderAndReadPlace() {
-  await openMenuItem('open-favorites');
-  await waitForId('favorites-sheet');
+  await openCollectionsAtRoot();
   await replaceText('folder-new-name', 'regression folder');
   // Submit from the field itself. On Android a tap immediately after `input
   // text` can be consumed by the IME dismissal even though the button's
@@ -590,11 +614,15 @@ async function createFolderAndReadPlace() {
     'folder-row-'.length,
   );
   // Pin labels: a tap, not typing — the switch is a synced setting, and
-  // verifyPersistence reads it back after a process restart.
+  // verifyPersistence reads it back after a process restart. It sits in the
+  // open folder's header, so open the folder and come back.
+  await tap(`folder-open-${folderId}`);
   await tap(`folder-labels-${folderId}`);
   await waitFor('folder pin labels switched on', hierarchy, (value) =>
     isChecked(nodeForId(value, `folder-labels-${folderId}`)),
   );
+  await tap('collections-back');
+  await waitForId(`folder-row-${folderId}`);
   return {
     folderId,
     placeId: dynamicId(
@@ -620,7 +648,7 @@ function isChecked(node) {
 // that lands later (it only ever fills a one-stop plan), so what follows never
 // depends on GPS timing.
 async function openRouteFromSavedPlace(placeId) {
-  await openMenuItem('open-favorites');
+  await openCollectionsAtRoot();
   await tap(`favorite-nav-${placeId}`);
   await tap('destination-navigate');
   await waitForId('route-sheet');
@@ -742,14 +770,11 @@ async function setDarkTheme() {
 }
 
 async function recordTrackId(folderId) {
-  await openMenuItem('open-favorites');
-  let xml = await waitForId(`folder-row-${folderId}`);
-  if (!nodeIds(xml).some((id) => /^track-(?!visible-|edit-|plan-|export-)[0-9a-f-]+$/i.test(id))) {
-    tapId(xml, `folder-collapse-${folderId}`);
-    xml = await waitFor('saved track row inside folder', hierarchy, (value) =>
-      nodeIds(value).some((id) => /^track-(?!visible-|edit-|plan-|export-)[0-9a-f-]+$/i.test(id)),
-    );
-  }
+  await openCollectionsAtRoot();
+  await tap(`folder-open-${folderId}`);
+  const xml = await waitFor('saved track row inside folder', hierarchy, (value) =>
+    nodeIds(value).some((id) => /^track-(?!visible-|edit-|plan-|export-)[0-9a-f-]+$/i.test(id)),
+  );
   const id = dynamicId(
     xml,
     /^track-(?!visible-|edit-|plan-|export-)[0-9a-f-]+$/i,
@@ -778,17 +803,18 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
   }
   await closeSettings();
 
+  // A restart starts Collections at the top level: the place and the folder
+  // are there, the track and the folder's label switch are inside it.
   await openMenuItem('open-favorites');
   let xml = await waitForId(`folder-row-${folderId}`);
   if (!nodeForId(xml, `favorite-${placeId}`)) {
     throw new Error(`Saved place ${placeId} did not survive process restart`);
   }
-  if (!nodeForId(xml, `track-${trackId}`)) {
-    const collapse = visibleNode(xml, `folder-collapse-${folderId}`);
-    if (collapse) tapBounds(collapse.bounds);
-    xml = await waitForId(`track-${trackId}`);
-  }
-  expectIds(xml, [`favorite-${placeId}`, `track-${trackId}`, `folder-row-${folderId}`]);
+  tapId(xml, `folder-open-${folderId}`);
+  xml = await waitForId(`track-${trackId}`);
+  expectIds(xml, [`track-${trackId}`, `folder-labels-${folderId}`, 'collections-back']);
+  // The open folder's header and action chips are a layout, not text.
+  keepScreenshot('collections-folder.png');
   if (!isChecked(nodeForId(xml, `folder-labels-${folderId}`))) {
     throw new Error(
       `Folder pin labels did not persist: ${nodeForId(xml, `folder-labels-${folderId}`)}`,
@@ -1209,15 +1235,7 @@ async function saveCommuteAndReadBoard() {
   expectStrings(opened, ['plat. B4', 'plat. 3', 'min connection'], 'the opened journey');
   // Kept on a passing run too: the itinerary's rail is drawn, not text, and a
   // window dump cannot say whether its nodes and dotted change line up.
-  try {
-    mkdirSync(artifactsDir, { recursive: true });
-    writeFileSync(
-      join(artifactsDir, 'commute-itinerary.png'),
-      command(['exec-out', 'screencap', '-p'], { encoding: null }),
-    );
-  } catch {
-    // A missing picture is not a failed regression.
-  }
+  keepScreenshot('commute-itinerary.png');
 
   // TRANSIT.md §13's middle mode: the change as a stop, drawn as the departures
   // *leaving* it in both directions — the train in and the bus home, which is
@@ -1264,8 +1282,7 @@ async function verifyMultipleCommutes(placeId) {
   await waitForId('commute-leave-now', true, 60_000);
 
   await closeCommuteSheet();
-  await openMenuItem('open-favorites');
-  await waitForId('favorites-sheet');
+  await openCollectionsAtRoot();
   await scrollToString('Commute · Cabin E2E', 'the saved-place commute marker', 'favorites-sheet');
   await tap('favorites-close');
   await openCommuteSheet();

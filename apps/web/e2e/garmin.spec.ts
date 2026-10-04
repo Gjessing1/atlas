@@ -179,9 +179,9 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   await expect(courses.getByRole('button', { name: /Lake loop/ })).toBeVisible();
   await courses.getByRole('radio', { name: /All/ }).click();
 
-  // Save to Atlas files the copy under Garmin courses › Running and shows it there.
+  // Save & show files the copy under Garmin courses › Running, shows it there and draws it.
   await courses.getByRole('button', { name: /18k Jørgen/ }).click();
-  await courses.getByRole('button', { name: 'Save to Atlas' }).click();
+  await courses.getByRole('button', { name: 'Save & show on map' }).click();
   const library = page.getByRole('complementary', { name: 'Collections' });
   await expect(library).toContainText('Garmin courses');
   await expect(library).toContainText('Running');
@@ -192,7 +192,7 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   const row = courses.getByRole('button', { name: /18k Jørgen/ });
   await expect(row).toContainText('In Atlas');
   await row.click();
-  await expect(courses.getByRole('button', { name: 'Show in Atlas' })).toBeVisible();
+  await expect(courses.getByRole('button', { name: 'Show on map' })).toBeVisible();
 
   await courses.getByRole('textbox', { name: 'Name' }).fill('Ridge 18k');
   await courses.getByRole('button', { name: 'Rename' }).click();

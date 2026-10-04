@@ -40,6 +40,8 @@ interface AppSheetsProps {
   onRevealedCollectionItem: () => void;
   /** Open Collections at an item from elsewhere (Settings › Garmin courses). */
   onRevealCollectionItem: (target: CollectionRevealTarget) => void;
+  /** Show a saved track on the map by id — it may have been created a moment ago. */
+  onShowSavedTrack: (trackId: string) => void;
   onCloseFavorites: () => void;
   /** Place whose focused editor should open (map pin → Edit). */
   editPlaceId: string | null;
@@ -100,6 +102,7 @@ export function AppSheets({
   revealCollectionItem,
   onRevealedCollectionItem,
   onRevealCollectionItem,
+  onShowSavedTrack,
   onCloseFavorites,
   editPlaceId,
   onCloseEditPlace,
@@ -213,6 +216,7 @@ export function AppSheets({
         tiles={tiles}
         onExportAll={() => void data.exportAll()}
         onReveal={onRevealCollectionItem}
+        onShowTrack={onShowSavedTrack}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
         overlays={overlays}

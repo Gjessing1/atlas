@@ -1404,9 +1404,11 @@ const SETTINGS_SECTIONS = settingsSectionsFor('android');
 function GarminSection({
   garmin,
   onReveal,
+  onShowTrack,
 }: {
   garmin: GarminState;
   onReveal: (target: CollectionRevealTarget) => void;
+  onShowTrack: (trackId: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1420,7 +1422,7 @@ function GarminSection({
       </Text>
       {garmin.connected ? (
         <View>
-          <GarminCourses garmin={garmin} onReveal={onReveal} />
+          <GarminCourses garmin={garmin} onReveal={onReveal} onShowTrack={onShowTrack} />
           <Text style={styles.subheading}>Activities</Text>
           <Text style={styles.muted}>
             Imports GPS activities 30 at a time into Garmin activities, one folder per sport.
@@ -1549,6 +1551,7 @@ export function SettingsSheet({
   tiles,
   onExportAll,
   onReveal,
+  onShowTrack,
   appearance,
   mapStyleEditor,
   overlays,
@@ -1580,6 +1583,8 @@ export function SettingsSheet({
   onExportAll: () => void;
   /** Open Collections at a saved item — a Garmin course just copied into Atlas. */
   onReveal: (target: CollectionRevealTarget) => void;
+  /** Close Settings and show a saved track on the map (a Garmin course's copy). */
+  onShowTrack: (trackId: string) => void;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   overlays: OverlaysController;
@@ -1949,7 +1954,9 @@ export function SettingsSheet({
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
             <AccountSection sync={sync} storage={storageState} />
-            {sync.email ? <GarminSection garmin={garmin} onReveal={onReveal} /> : null}
+            {sync.email ? (
+              <GarminSection garmin={garmin} onReveal={onReveal} onShowTrack={onShowTrack} />
+            ) : null}
             <Text style={styles.heading}>Your data</Text>
             <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
             <View style={styles.buttonRow}>

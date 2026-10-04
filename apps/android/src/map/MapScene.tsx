@@ -131,6 +131,7 @@ export const ROAD_WEATHER_LAYER_IDS = ['atlas-road-weather-symbol', 'atlas-road-
 const WEATHER_ANCHOR_ID = 'atlas-weather-anchor';
 const WEATHER_ANCHOR_LAYER_ID = 'atlas-weather-anchor-layer';
 const EMPTY_WEATHER_ANCHOR: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+const EMPTY_TRACKS: TrackGeometry = { type: 'FeatureCollection', features: [] };
 /** A warning's badge or area answers a tap. */
 export const WEATHER_WARNING_LAYER_IDS = [
   'atlas-weather-warnings-badge',
@@ -323,6 +324,8 @@ interface MapSceneProps {
   /** Geometry of the visible tracks (see useTrackGeometry). */
   trackGeo: TrackGeometry;
   selectedTrackId: string | null;
+  /** The selected track's full geometry, drawn above the others; null when none. */
+  selectedTrackGeo: TrackGeometry | null;
   onSelectTrack: (id: string) => void;
   /** First corner and completed rectangle while drawing a custom offline region. */
   offlineRegionCorner: LatLng | null;
@@ -409,6 +412,7 @@ export function MapScene({
   measure,
   trackGeo,
   selectedTrackId,
+  selectedTrackGeo,
   onSelectTrack,
   offlineRegionCorner,
   offlineRegionBbox,
@@ -1688,59 +1692,82 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
-        {/* Saved/imported tracks (visible ones), drawn under the routes. */}
-        {!inPip &&
-        !(nav.profile === 'car' && ['navigating', 'rerouting', 'paused'].includes(nav.phase)) &&
-        trackGeo.features.length > 0 ? (
-          <GeoJSONSource
-            id="atlas-tracks"
-            data={trackGeo}
-            onPress={(event) => {
-              if (planning || nav.phase !== 'idle') return;
-              const trackId = event.nativeEvent.features[0]?.properties?.['trackId'];
-              if (typeof trackId !== 'string') return;
-              event.stopPropagation();
-              onSelectTrack(trackId);
+        {/* Saved/imported tracks (visible ones), drawn under the routes. Always
+            mounted, emptied rather than unmounted: a source that mounts later
+            lands on top of everything mounted before it, routes included. */}
+        <GeoJSONSource
+          id="atlas-tracks"
+          data={
+            inPip ||
+            (nav.profile === 'car' && ['navigating', 'rerouting', 'paused'].includes(nav.phase))
+              ? EMPTY_TRACKS
+              : trackGeo
+          }
+          onPress={(event) => {
+            if (planning || nav.phase !== 'idle') return;
+            const ids = [
+              ...new Set(
+                event.nativeEvent.features
+                  .map((feature) => feature.properties?.['trackId'])
+                  .filter((id): id is string => typeof id === 'string'),
+              ),
+            ];
+            if (ids.length === 0) return;
+            event.stopPropagation();
+            // Runs from home overlap street for street. Tapping where several
+            // lie steps through them, so a buried one can still be picked.
+            const current = selectedTrackId ? ids.indexOf(selectedTrackId) : -1;
+            onSelectTrack(ids[(current + 1) % ids.length]!);
+          }}
+        >
+          <Layer
+            type="fill"
+            id="atlas-track-areas-fill"
+            filter={['==', ['get', 'featureKind'], 'area']}
+            paint={{ 'fill-color': '#c2410c', 'fill-opacity': 0.16 }}
+          />
+          <Layer
+            type="line"
+            id="atlas-tracks-line"
+            filter={['==', ['get', 'featureKind'], 'line']}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{
+              'line-color': ['case', ['==', ['get', 'recordKind'], 'area'], '#c2410c', '#2a78d6'],
+              'line-width': 4,
+              'line-opacity': 0.9,
             }}
-          >
-            <Layer
-              type="fill"
-              id="atlas-track-areas-fill"
-              filter={['==', ['get', 'featureKind'], 'area']}
-              paint={{
-                'fill-color': [
-                  'case',
-                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
-                  '#a855f7',
-                  '#c2410c',
-                ],
-                'fill-opacity': [
-                  'case',
-                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
-                  0.25,
-                  0.16,
-                ],
-              }}
-            />
-            <Layer
-              type="line"
-              id="atlas-tracks-line"
-              filter={['==', ['get', 'featureKind'], 'line']}
-              paint={{
-                'line-color': [
-                  'case',
-                  ['==', ['get', 'trackId'], selectedTrackId ?? ''],
-                  '#a855f7',
-                  ['==', ['get', 'recordKind'], 'area'],
-                  '#c2410c',
-                  '#2a78d6',
-                ],
-                'line-width': ['case', ['==', ['get', 'trackId'], selectedTrackId ?? ''], 6, 4],
-                'line-opacity': 0.9,
-              }}
-            />
-          </GeoJSONSource>
-        ) : null}
+          />
+        </GeoJSONSource>
+        {/* The selected track on a layer of its own, above every other track:
+            colour alone left it buried under the runs drawn after it. Drawn
+            from its full geometry, and drawn even while it is hidden — the
+            user asked to see this one. Always mounted for the same reason as
+            the tracks above it. */}
+        <GeoJSONSource
+          id="atlas-track-selected"
+          data={!inPip && selectedTrackGeo ? selectedTrackGeo : EMPTY_TRACKS}
+        >
+          <Layer
+            type="fill"
+            id="atlas-track-selected-fill"
+            filter={['==', ['get', 'featureKind'], 'area']}
+            paint={{ 'fill-color': '#a855f7', 'fill-opacity': 0.25 }}
+          />
+          <Layer
+            type="line"
+            id="atlas-track-selected-casing"
+            filter={['==', ['get', 'featureKind'], 'line']}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.95 }}
+          />
+          <Layer
+            type="line"
+            id="atlas-track-selected-line"
+            filter={['==', ['get', 'featureKind'], 'line']}
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': '#a855f7', 'line-width': 6 }}
+          />
+        </GeoJSONSource>
         {!inPip && nav.routeAlternatives.length > 0 ? (
           <GeoJSONSource
             id="atlas-nav-alternatives"

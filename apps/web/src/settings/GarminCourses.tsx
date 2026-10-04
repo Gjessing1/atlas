@@ -115,7 +115,7 @@ export function GarminCourses({
                         className="primary"
                         onClick={() => onReveal({ kind: 'track', id: savedTrack })}
                       >
-                        Show in Atlas
+                        Show on map
                       </button>
                     ) : (
                       <button
@@ -128,7 +128,7 @@ export function GarminCourses({
                           })
                         }
                       >
-                        Save to Atlas
+                        Save &amp; show on map
                       </button>
                     )}
                     {garmin.devices.length > 1 && (

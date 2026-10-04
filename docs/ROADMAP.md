@@ -73,7 +73,7 @@ to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; wh
       live in Collections' folder tree today; finding "that ridge run from last summer" means
       knowing which folder it fell into. Design the library around how it is looked for:
 
-      - **Views over the same records:** *Folders* (today's tree), *Places*, *Routes & courses*,
+      - **Views over the same records:** *Folders* (today's tree; one level at a time on Android since v0.250.0), *Places*, *Routes & courses*,
         *Activities*, each with sport chips (Running, Hiking, Cycling, Skiing, Skating, … from
         `garminSportFolder` and the plan's routing profile) and sort by *recent*, *distance*,
         *nearest to the map view*.

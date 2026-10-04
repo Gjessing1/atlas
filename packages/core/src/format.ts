@@ -146,6 +146,17 @@ export function trackSummary(stats: Record<string, number>): string {
   return parts.join(' · ') || 'no stats';
 }
 
+/**
+ * A track's line in a list: the recorded day first when the file has times —
+ * imported runs share names like "Oslo Running", so the date is what tells
+ * them apart — then the summary.
+ */
+export function trackListLine(stats: Record<string, number>, nowMs = Date.now()): string {
+  const start = stats['startTime'];
+  const summary = trackSummary(stats);
+  return typeof start === 'number' ? `${fmtShortDate(start, nowMs)} · ${summary}` : summary;
+}
+
 /** Tag prefixes that tie an Atlas track to its Garmin record: an activity, or a saved course. */
 export const GARMIN_ACTIVITY_TAG = 'garmin:';
 export const GARMIN_COURSE_TAG = 'garmin-course:';
@@ -175,6 +186,15 @@ export function garminTypeLabel(typeKey: string): string {
       .replace(/[_-]+/g, ' ')
       .replace(/^\w/, (letter) => letter.toUpperCase())
   );
+}
+
+/**
+ * The tags worth showing as chips: everything but the Garmin id tags, which
+ * are bookkeeping (one unique number per activity) rather than a word anyone
+ * filters by.
+ */
+export function userTags(tags: readonly string[]): string[] {
+  return tags.filter((tag) => !isGarminIdTag(tag));
 }
 
 /** Human-readable Garmin activity from the raw type tag kept with an imported GPX. */

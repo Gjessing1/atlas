@@ -1,4 +1,4 @@
-import type { BBox } from '@atlas/core';
+import { simplifyLine, type BBox } from '@atlas/core';
 
 /** A single point of a recorded or planned track. */
 export interface TrackPoint {
@@ -67,4 +67,18 @@ export function trackBounds(data: TrackData): BBox | null {
   for (const w of data.waypoints) extend(w);
   if (!Number.isFinite(minLat)) return null;
   return { sw: { lat: minLat, lng: minLng }, ne: { lat: maxLat, lng: maxLng } };
+}
+
+/**
+ * A track's segments as `[lng, lat]` lines for a map source, thinned by
+ * `toleranceM` (0 keeps every point). A 1 Hz activity has a point every few
+ * metres, and a map holding a few hundred of them at full resolution is what
+ * made Android slow; the thinned copy is ink only — stats, profiles and the
+ * selected track's own line keep the full geometry.
+ */
+export function trackLineCoordinates(data: TrackData, toleranceM = 0): number[][][] {
+  return data.segments
+    .map((segment) => (toleranceM > 0 ? simplifyLine(segment, toleranceM) : segment))
+    .filter((segment) => segment.length >= 2)
+    .map((segment) => segment.map((p) => [p.lng, p.lat]));
 }

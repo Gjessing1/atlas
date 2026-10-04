@@ -12,7 +12,9 @@ import {
   fmtWhenClock,
   garminActivityLabel,
   garminSportFolder,
+  trackListLine,
   trackSummary,
+  userTags,
 } from './index.js';
 
 describe('fmtClock', () => {
@@ -177,5 +179,24 @@ describe('trackSummary', () => {
 
   it('still says something when nothing was measurable', () => {
     expect(trackSummary({})).toBe('no stats');
+  });
+});
+
+describe('track list lines', () => {
+  const now = new Date(2026, 9, 4).getTime();
+
+  it('leads with the recorded day when the file has times', () => {
+    const start = new Date(2026, 8, 12, 7, 30).getTime();
+    expect(trackListLine({ distanceM: 10_000, startTime: start }, now)).toMatch(
+      /^12 \S+ · 10\.0 km$/,
+    );
+    expect(trackListLine({ distanceM: 10_000 }, now)).toBe('10.0 km');
+  });
+
+  it('drops Garmin id tags from the chips but keeps the sport', () => {
+    expect(userTags(['garmin:123', 'garmin-course:9', 'running', 'hill'])).toEqual([
+      'running',
+      'hill',
+    ]);
   });
 });

@@ -227,6 +227,36 @@ export function ancestorFolderIds<C extends TreeFolder, P extends TreeItem, T ex
   return out;
 }
 
+/**
+ * A folder's tracks in list order: recorded ones newest first — an activity
+ * folder is browsed by when, and imported runs share names — then the rest in
+ * the order they came (by name, from storage).
+ */
+export function tracksForList<T extends { stats: Record<string, number> }>(
+  tracks: readonly T[],
+): T[] {
+  const start = (track: T) => track.stats['startTime'];
+  const recorded = tracks
+    .filter((track) => typeof start(track) === 'number')
+    .sort((a, b) => start(b)! - start(a)!);
+  return [...recorded, ...tracks.filter((track) => typeof start(track) !== 'number')];
+}
+
+/** What a folder row says it holds: "2 folders · 45 tracks · 1 place", or "Empty". */
+export function folderContentsLine(node: {
+  children: readonly unknown[];
+  places: readonly unknown[];
+  tracks: readonly unknown[];
+}): string {
+  const part = (n: number, noun: string) => (n === 0 ? null : `${n} ${noun}${n === 1 ? '' : 's'}`);
+  const parts = [
+    part(node.children.length, 'folder'),
+    part(node.tracks.length, 'track'),
+    part(node.places.length, 'place'),
+  ].filter((value): value is string => value !== null);
+  return parts.length > 0 ? parts.join(' · ') : 'Empty';
+}
+
 /** Memoized {@link buildCollectionTree} — rebuilds only when the arrays change. */
 export function useCollectionTree<
   C extends TreeFolder,

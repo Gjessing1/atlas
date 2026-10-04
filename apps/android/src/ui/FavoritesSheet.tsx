@@ -3,10 +3,13 @@ import {
   collectionDropZone,
   collectionTagSuggestions,
   filterCollectionRecords,
+  flattenCollectionTree,
+  folderContentsLine,
   importedCount,
   parseCollectionQuery,
   promoteParentId,
   tagQuery,
+  tracksForList,
   type PinLabelsController,
   useCollectionTree,
   type CollectionDragItem,
@@ -15,7 +18,8 @@ import {
 import {
   folderHasPinLabels,
   tagHasPinLabels,
-  trackSummary,
+  trackListLine,
+  userTags,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type {
@@ -43,6 +47,9 @@ import { confirmDelete, ItemEditor } from './ItemEditor';
 import { ReorderableList } from './ReorderableList';
 import { PinLabelIcon } from './icons';
 import { theme } from './theme';
+
+/** Tracks a folder level draws before its "Show more" button. */
+const TRACK_PAGE = 30;
 
 export type EditablePlacePatch = Pick<
   PlacePatch,
@@ -405,13 +412,15 @@ function ImportControls({
 /**
  * Saved (places, tracks & folders) — the mobile counterpart of the web Sidebar:
  * browse everything saved (synced records from other devices appear here too),
- * organise it into folders, and control what's drawn on the map. Fly to,
- * navigate to, or edit a place (the ✎ button or the icon badge): rename it,
- * assign it to a folder, pick an icon/colour, or delete it. Tracks sit in the
- * same tree with the same editor (folder, notes, tags, export, delete) —
- * anything filed in a folder is visible *in* that folder. Folders can be
- * created, renamed, hidden (hiding their contents too) and deleted; a header
- * toggle shows or hides everything at once.
+ * organise it into folders, and control what's drawn on the map.
+ *
+ * Folders open one level at a time, like a phone's file browser: a row is a
+ * folder's name, what it holds, its eye and a chevron; the open folder's header
+ * carries back, the path above it and its own actions (hide, names on map,
+ * rename, move up, delete). A filter lists matches flat under their folder
+ * paths instead. Places fly to / navigate / edit as before; a track row frames
+ * the track and opens its profile, and a long folder of runs lists newest
+ * first, a page at a time.
  *
  * Since the Collections merge this is the *only* saved-data surface: import (files and whole
  * backups) and the iNatur permit tool moved in from the Tracks sheet, which is
@@ -498,9 +507,19 @@ export function FavoritesSheet({
   // The import block, folded away by default: it is four controls deep and the
   // list underneath is what the sheet is for.
   const [importOpen, setImportOpen] = useState(false);
-  // What the list is narrowed to. Session-only, like the expansion state: a
-  // filter is a way of looking at the list, not a property of it.
+  // What the list is narrowed to. Session-only: a filter is a way of looking
+  // at the list, not a property of it.
   const [filter, setFilter] = useState('');
+  // The folder being looked at; null is the top level. One level at a time:
+  // the nested tree indented every level and gave each folder row seven
+  // controls, so on a phone a subfolder's name had no room left, and opening
+  // a folder of imported runs buried the rest of the list. Kept across
+  // closes, like a file browser — tapping a run closes the sheet, and the
+  // next one is picked from the same folder.
+  const [folderId, setFolderId] = useState<string | null>(null);
+  // How many tracks a level draws before "Show more": a folder of a few
+  // hundred activities rendered every row up front.
+  const [trackLimit, setTrackLimit] = useState(TRACK_PAGE);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const revealRowRef = useRef<View>(null);
@@ -524,27 +543,18 @@ export function FavoritesSheet({
     };
   }, [highlighted]);
   const [newFolder, setNewFolder] = useState('');
-  // Folder the new-folder input creates into (a folder row's ＋ sets it; null = root).
-  const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
-  // The folder whose name is open for editing. Otherwise a name is plain text:
-  // a single-line field that is always live scrolls to its caret at the end, so
-  // a long name showed only its tail and a narrow nested row could show nothing.
-  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
-  // Folders whose contents are showing (the ▾/▸ chevron toggles them). Empty by
-  // default: on a phone, expanding everything at once buries the folder list
-  // itself under its contents. Kept in memory only — which folders are open is a
-  // view preference, not user data.
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const toggleExpanded = (id: string) =>
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  /** Open a folder so something created inside it isn't added out of sight. */
-  const revealFolder = (id: string) =>
-    setExpanded((current) => (current.has(id) ? current : new Set(current).add(id)));
+  // The current folder's name is open for editing (its header's Rename).
+  const [renaming, setRenaming] = useState(false);
+
+  /** Go to a folder (null = top level), starting its list from the top. */
+  const openFolder = (id: string | null) => {
+    setFolderId(id);
+    setEditingKey(null);
+    setRenaming(false);
+    setTrackLimit(TRACK_PAGE);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
+
   // A row is being dragged: freeze the sheet's scroll and close any editor so
   // row heights are uniform while the drag measures its way through the list.
   const [dragActive, setDragActive] = useState(false);
@@ -559,6 +569,8 @@ export function FavoritesSheet({
     setDragActive(active);
     if (active) {
       setEditingKey(null);
+      // Only rows on screen now are targets — not those of a level left behind.
+      folderFrames.current.clear();
       for (const id of folderRefs.current.keys()) measureFolder(id);
     }
   };
@@ -569,26 +581,27 @@ export function FavoritesSheet({
     () => filterCollectionRecords({ collections, places, tracks }, filter),
     [collections, places, tracks, filter],
   );
-
-  // What a folder row's number means: everything filed directly in it that the
-  // list is currently showing, so the number always matches the rows beneath.
-  // Counting only places would report "0" for a folder holding nothing but tracks.
-  const counts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of [...filtered.places, ...filtered.tracks]) {
-      if (item.collectionId) map.set(item.collectionId, (map.get(item.collectionId) ?? 0) + 1);
-    }
-    return map;
-  }, [filtered]);
-
   // Folder tree — derived by the shared model, so web and Android agree on
   // nesting, ordering and what happens to a folder whose parent is missing.
+  // Browsing walks the whole tree; a filter lists what the filtered one holds.
+  const allTree = useCollectionTree({ collections, places, tracks });
   const tree = useCollectionTree({
     collections: filtered.collections,
     places: filtered.places,
     tracks: filtered.tracks,
   });
-  const allTree = useCollectionTree({ collections, places, tracks });
+
+  // A folder deleted here or on another device takes the view up to the top.
+  const current = folderId === null ? null : (allTree.byId.get(folderId) ?? null);
+  useEffect(() => {
+    if (folderId !== null && !allTree.byId.has(folderId)) setFolderId(null);
+  }, [folderId, allTree]);
+  /** Folder names from the top level down to `id`, for breadcrumbs and result headings. */
+  const pathOf = (id: string | null) =>
+    ancestorFolderIds(allTree, id)
+      .reverse()
+      .map((ancestor) => allTree.byId.get(ancestor)!.folder);
+
   useEffect(() => {
     if (!visible || !revealItem) return;
     const item =
@@ -602,13 +615,14 @@ export function FavoritesSheet({
       // hides other saved data the next time Collections is opened.
       setFilter('');
       const parentId = 'parentId' in item ? item.parentId : item.collectionId;
-      const ancestors = ancestorFolderIds(allTree, parentId);
-      setExpanded((current) => {
-        if (ancestors.every((id) => current.has(id))) return current;
-        const next = new Set(current);
-        for (const id of ancestors) next.add(id);
-        return next;
-      });
+      const level = parentId !== null && allTree.byId.has(parentId) ? parentId : null;
+      setFolderId(level);
+      setEditingKey(null);
+      setRenaming(false);
+      // A run deep in a long folder has to be drawn to be shown.
+      const levelTracks = level === null ? allTree.tracks : allTree.byId.get(level)!.tracks;
+      const index = tracksForList(levelTracks).findIndex((track) => track.id === revealItem.id);
+      setTrackLimit(Math.max(TRACK_PAGE, index + 1));
       setHighlighted(`${revealItem.kind}:${revealItem.id}`);
     }
     onRevealed?.();
@@ -624,15 +638,11 @@ export function FavoritesSheet({
   // A `#tag` filter naming a whole tag the user has is where that tag's labels
   // are switched: the rows on screen are exactly the pins it would name. A
   // partial `#sta` names no tag yet, so it offers nothing.
+  const query = useMemo(() => parseCollectionQuery(filter), [filter]);
   const filterTag = useMemo(() => {
-    const query = parseCollectionQuery(filter);
     if (!query.tagOnly || !query.text) return null;
     return tagSuggestions.find((tag) => tag.toLocaleLowerCase() === query.text) ?? null;
-  }, [filter, tagSuggestions]);
-
-  // While a filter is up every folder left standing is part of the answer, so
-  // it opens: the point is to see the matches, not which folders they are in.
-  const isOpen = (id: string) => expanded.has(id) || filtered.active;
+  }, [query, tagSuggestions]);
 
   const allShown =
     places.every((p) => p.visible) &&
@@ -642,21 +652,17 @@ export function FavoritesSheet({
   const addFolder = () => {
     const name = newFolder.trim();
     if (!name) return;
-    onCreateFolder(name, newFolderParent);
-    // A subfolder added into a collapsed parent would land out of sight and read
-    // as "nothing happened", so opening the parent is part of creating into it.
-    if (newFolderParent !== null) revealFolder(newFolderParent);
+    onCreateFolder(name, folderId);
     setNewFolder('');
-    setNewFolderParent(null);
   };
 
   const dropPlaceAtFolder = (place: PlaceRecord, pageY: number): boolean => {
-    for (const [folderId, frame] of folderFrames.current) {
+    for (const [targetId, frame] of folderFrames.current) {
       if (pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
-        onDrop({ kind: 'place', id: place.id }, { kind: 'folder', id: folderId }, 'inside');
-        // Show where it went — dropping into a closed folder otherwise looks
-        // like the place simply vanished from the list.
-        revealFolder(folderId);
+        onDrop({ kind: 'place', id: place.id }, { kind: 'folder', id: targetId }, 'inside');
+        // Mark where it went — the place leaves this level, and without a cue
+        // that reads as the place simply vanishing.
+        setHighlighted(`folder:${targetId}`);
         return true;
       }
     }
@@ -669,13 +675,13 @@ export function FavoritesSheet({
    * sibling edge selected by ReorderableList.
    */
   const dropFolderAtFolder = (folder: CollectionRecord, pageY: number): boolean => {
-    for (const [folderId, frame] of folderFrames.current) {
-      if (folderId !== folder.id && pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
+    for (const [targetId, frame] of folderFrames.current) {
+      if (targetId !== folder.id && pageY >= frame.top - 6 && pageY <= frame.bottom + 6) {
         const height = frame.bottom - frame.top;
         const position = height > 0 ? (pageY - frame.top) / height : 0.5;
         onDrop(
           { kind: 'folder', id: folder.id },
-          { kind: 'folder', id: folderId },
+          { kind: 'folder', id: targetId },
           collectionDropZone(position, 'all'),
         );
         return true;
@@ -807,8 +813,8 @@ export function FavoritesSheet({
             <Text style={styles.rowText} numberOfLines={1}>
               {track.name}
             </Text>
-            <Text style={styles.muted}>{trackSummary(track.stats)}</Text>
-            <TagChips tags={track.tags} onPick={setFilter} />
+            <Text style={styles.muted}>{trackListLine(track.stats)}</Text>
+            <TagChips tags={userTags(track.tags)} onPick={setFilter} />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
@@ -874,168 +880,331 @@ export function FavoritesSheet({
     );
   };
 
-  const renderTracks = (collectionId: string | null, nested = false): ReactNode => {
-    const level = collectionId === null ? tree.tracks : (tree.byId.get(collectionId)?.tracks ?? []);
+  /** A level's tracks, newest recording first, drawn a page at a time. */
+  const renderTracks = (level: TrackRecord[]): ReactNode => {
     if (level.length === 0) return null;
-    return <View style={nested ? styles.subLevel : undefined}>{level.map(trackRow)}</View>;
-  };
-
-  const renderPlaces = (collectionId: string | null, nested = false): ReactNode => {
-    const level = collectionId === null ? tree.places : (tree.byId.get(collectionId)?.places ?? []);
-    if (level.length === 0) return null;
+    const ordered = tracksForList(level);
+    const rest = ordered.length - trackLimit;
     return (
-      <View style={nested ? styles.subLevel : undefined}>
-        <ReorderableList
-          items={level}
-          keyOf={(place) => place.id}
-          onMove={(place, target, zone) =>
-            onDrop({ kind: 'place', id: place.id }, { kind: 'place', id: target.id }, zone)
-          }
-          onDragActive={onDragActive}
-          onDropAt={dropPlaceAtFolder}
-          renderRow={placeRow}
-        />
+      <View>
+        {ordered.slice(0, trackLimit).map(trackRow)}
+        {rest > 0 ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet, styles.moreButton]}
+            onPress={() => setTrackLimit((limit) => limit + TRACK_PAGE)}
+            testID="collections-more-tracks"
+          >
+            <Text style={styles.buttonQuietText}>
+              Show {Math.min(rest, TRACK_PAGE)} more of {rest}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   };
 
-  /** One nesting level of the folder tree: siblings reorder among themselves,
-      each row followed by its (indented) subtree so a drag carries it along. */
-  const renderFolderLevel = (parentId: string | null, depth: number): ReactNode => {
-    const level = (tree.byParent.get(parentId) ?? []).map((node) => node.folder);
+  const renderPlaces = (level: PlaceRecord[]): ReactNode => {
     if (level.length === 0) return null;
     return (
-      <View style={depth > 0 ? styles.subLevel : undefined}>
-        <ReorderableList
-          items={level}
-          keyOf={(folder) => folder.id}
-          onMove={(folder, target, zone) =>
-            onDrop({ kind: 'folder', id: folder.id }, { kind: 'folder', id: target.id }, zone)
-          }
-          onDragActive={onDragActive}
-          onDropAt={dropFolderAtFolder}
-          renderRow={(folder, handle) => (
-            <View>
-              <View
-                ref={(node) => {
-                  if (node) folderRefs.current.set(folder.id, node);
-                  else folderRefs.current.delete(folder.id);
-                  if (highlighted === `folder:${folder.id}`) revealRowRef.current = node;
-                }}
-                onLayout={() => measureFolder(folder.id)}
-                style={[
-                  styles.row,
-                  folder.visible ? null : styles.rowHidden,
-                  highlighted === `folder:${folder.id}` ? styles.rowRevealed : null,
-                ]}
-                testID={`folder-row-${folder.id}`}
-              >
-                {handle}
-                {/* Chevron and folder icon are one target: the name beside them
-                    is an inline rename field, so tapping *it* has to keep
-                    meaning "rename" — this is the widest tap area that can open
-                    a folder without stealing that. */}
-                <Pressable
-                  style={styles.chevronButton}
-                  onPress={() => toggleExpanded(folder.id)}
-                  accessibilityLabel={`${isOpen(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
-                  testID={`folder-collapse-${folder.id}`}
-                >
-                  <Text style={styles.chevronText}>{isOpen(folder.id) ? '▾' : '▸'}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => toggleExpanded(folder.id)}
-                  accessibilityLabel={`${isOpen(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`}
-                  testID={`folder-icon-${folder.id}`}
-                >
-                  <Text style={styles.folderIcon}>{isOpen(folder.id) ? '📂' : '📁'}</Text>
-                </Pressable>
-                {renamingFolder === folder.id ? (
-                  <TextInput
-                    style={styles.folderName}
-                    defaultValue={folder.name}
-                    autoFocus
-                    selectTextOnFocus
-                    onEndEditing={(e) => {
-                      const value = e.nativeEvent.text.trim();
-                      if (value && value !== folder.name) onRenameFolder(folder.id, value);
-                      // Only this row's own edit ends it: tapping another name
-                      // blurs this field after that row has already opened.
-                      setRenamingFolder((current) => (current === folder.id ? null : current));
-                    }}
-                    returnKeyType="done"
-                    accessibilityLabel={`Rename ${folder.name}`}
-                    testID={`folder-rename-${folder.id}`}
-                  />
-                ) : (
-                  <Pressable
-                    style={styles.folderNameButton}
-                    onPress={() => setRenamingFolder(folder.id)}
-                    accessibilityHint="Rename folder"
-                    testID={`folder-name-${folder.id}`}
-                  >
-                    <Text style={styles.folderNameText} numberOfLines={1}>
-                      {folder.name}
-                    </Text>
-                  </Pressable>
-                )}
-                <Text style={styles.muted}>{counts.get(folder.id) ?? 0}</Text>
-                {folder.parentId !== null ? (
-                  <Pressable
-                    style={styles.eyeButton}
-                    onPress={() => onMoveFolder(folder.id, promoteParentId(collections, folder))}
-                    accessibilityLabel={`Move ${folder.name} up one level`}
-                    testID={`folder-up-${folder.id}`}
-                  >
-                    <Text style={styles.subButtonText}>↑</Text>
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  style={styles.eyeButton}
-                  onPress={() => setNewFolderParent((id) => (id === folder.id ? null : folder.id))}
-                  testID={`folder-sub-${folder.id}`}
-                >
-                  <Text style={styles.subButtonText}>＋</Text>
-                </Pressable>
-                <PinLabelToggle
-                  on={folderHasPinLabels(pinLabels.prefs, folder.id)}
-                  what={folder.name}
-                  onToggle={() => void pinLabels.toggleFolder(folder.id)}
-                  testID={`folder-labels-${folder.id}`}
-                />
-                {/* The eye sits just left of the actions on folder and place rows alike. */}
-                <Pressable
-                  style={styles.eyeButton}
-                  onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
-                  testID={`folder-visible-${folder.id}`}
-                >
-                  <EyeIcon off={!folder.visible} />
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() =>
-                    confirmDelete(
-                      `Delete folder “${folder.name}”?`,
-                      'Places, tracks and subfolders inside it move up one level.',
-                      () => onDeleteFolder(folder.id),
-                    )
-                  }
-                  testID={`folder-delete-${folder.id}`}
-                >
-                  <Text style={styles.buttonQuietText}>Delete</Text>
-                </Pressable>
-              </View>
-              {isOpen(folder.id) ? (
-                <>
-                  {renderPlaces(folder.id, true)}
-                  {renderTracks(folder.id, true)}
-                  {renderFolderLevel(folder.id, depth + 1)}
-                </>
-              ) : null}
-            </View>
-          )}
-        />
+      <ReorderableList
+        items={level}
+        keyOf={(place) => place.id}
+        onMove={(place, target, zone) =>
+          onDrop({ kind: 'place', id: place.id }, { kind: 'place', id: target.id }, zone)
+        }
+        onDragActive={onDragActive}
+        onDropAt={dropPlaceAtFolder}
+        renderRow={placeRow}
+      />
+    );
+  };
+
+  /**
+   * A folder as one full-width row: its name gets every pixel the eye and the
+   * chevron leave, wrapping to two lines rather than clipping, with what it
+   * holds underneath. Tapping it opens the folder; its own actions live in the
+   * folder's header, where there is room to name them.
+   */
+  const folderRow = (folder: CollectionRecord, handle: ReactNode): ReactNode => {
+    const node = allTree.byId.get(folder.id);
+    const path = filtered.active ? pathOf(folder.parentId).map((f) => f.name) : [];
+    return (
+      <View
+        ref={(view) => {
+          if (view) folderRefs.current.set(folder.id, view);
+          else folderRefs.current.delete(folder.id);
+          if (highlighted === `folder:${folder.id}`) revealRowRef.current = view;
+        }}
+        onLayout={() => measureFolder(folder.id)}
+        style={[
+          styles.row,
+          node?.visible === false ? styles.rowHidden : null,
+          highlighted === `folder:${folder.id}` ? styles.rowRevealed : null,
+        ]}
+        testID={`folder-row-${folder.id}`}
+      >
+        {handle}
+        <Pressable
+          style={styles.folderOpen}
+          onPress={() => {
+            setFilter('');
+            openFolder(folder.id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${folder.name}`}
+          testID={`folder-open-${folder.id}`}
+        >
+          <Text style={styles.folderIcon}>📁</Text>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowText} numberOfLines={2}>
+              {folder.name}
+            </Text>
+            <Text style={styles.muted} numberOfLines={1}>
+              {path.length > 0 ? `${path.join(' › ')} · ` : ''}
+              {node ? folderContentsLine(node) : ''}
+            </Text>
+          </View>
+        </Pressable>
+        <Pressable
+          style={styles.eyeButton}
+          onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+          accessibilityLabel={`${folder.visible ? 'Hide' : 'Show'} ${folder.name} on the map`}
+          testID={`folder-visible-${folder.id}`}
+        >
+          <EyeIcon off={!folder.visible} />
+        </Pressable>
+        <Text style={styles.chevronText}>›</Text>
       </View>
+    );
+  };
+
+  const renderFolders = (level: CollectionRecord[]): ReactNode => {
+    if (level.length === 0) return null;
+    return (
+      <ReorderableList
+        items={level}
+        keyOf={(folder) => folder.id}
+        onMove={(folder, target, zone) =>
+          onDrop({ kind: 'folder', id: folder.id }, { kind: 'folder', id: target.id }, zone)
+        }
+        onDragActive={onDragActive}
+        onDropAt={dropFolderAtFolder}
+        renderRow={folderRow}
+      />
+    );
+  };
+
+  /**
+   * The open folder: where you are (back, the path above it, its whole name)
+   * stays above the list while a long folder scrolls.
+   */
+  const folderHeader = (folder: CollectionRecord): ReactNode => {
+    const above = pathOf(folder.parentId);
+    return (
+      <View style={styles.folderHeader}>
+        <View style={styles.crumbRow}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() =>
+              openFolder(
+                folder.parentId !== null && allTree.byId.has(folder.parentId)
+                  ? folder.parentId
+                  : null,
+              )
+            }
+            hitSlop={8}
+            accessibilityLabel={`Back to ${above.at(-1)?.name ?? 'Collections'}`}
+            testID="collections-back"
+          >
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.crumbs}>
+            <Pressable onPress={() => openFolder(null)} hitSlop={6} testID="collections-crumb-root">
+              <Text style={styles.crumb}>Collections</Text>
+            </Pressable>
+            {above.map((ancestor) => (
+              <Pressable
+                key={ancestor.id}
+                onPress={() => openFolder(ancestor.id)}
+                hitSlop={6}
+                testID={`collections-crumb-${ancestor.id}`}
+              >
+                <Text style={styles.crumb}> › {ancestor.name}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+        {renaming ? (
+          <TextInput
+            style={[styles.textField, styles.folderTitleInput]}
+            defaultValue={folder.name}
+            autoFocus
+            selectTextOnFocus
+            onEndEditing={(e) => {
+              const value = e.nativeEvent.text.trim();
+              if (value && value !== folder.name) onRenameFolder(folder.id, value);
+              setRenaming(false);
+            }}
+            returnKeyType="done"
+            accessibilityLabel={`Rename ${folder.name}`}
+            testID={`folder-rename-${folder.id}`}
+          />
+        ) : (
+          <Text style={styles.folderTitle} numberOfLines={3} testID="collections-folder-title">
+            📂 {folder.name}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  /** The open folder's own actions, named in full — the row has no room for them. */
+  const folderActions = (folder: CollectionRecord): ReactNode => (
+    <View style={styles.folderActions}>
+      <Pressable
+        style={[styles.chipButton, folder.visible ? null : styles.chipButtonOn]}
+        onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: folder.visible }}
+        testID="collections-folder-visible"
+      >
+        <EyeIcon off={!folder.visible} />
+        <Text style={styles.chipButtonText}>{folder.visible ? 'On map' : 'Hidden'}</Text>
+      </Pressable>
+      <View style={styles.chipButton}>
+        <PinLabelToggle
+          on={folderHasPinLabels(pinLabels.prefs, folder.id)}
+          what={folder.name}
+          onToggle={() => void pinLabels.toggleFolder(folder.id)}
+          testID={`folder-labels-${folder.id}`}
+        />
+        <Text style={styles.chipButtonText}>Names</Text>
+      </View>
+      <Pressable
+        style={styles.chipButton}
+        onPress={() => setRenaming(true)}
+        testID={`folder-name-${folder.id}`}
+      >
+        <Text style={styles.chipButtonText}>Rename</Text>
+      </Pressable>
+      {folder.parentId !== null ? (
+        <Pressable
+          style={styles.chipButton}
+          onPress={() => onMoveFolder(folder.id, promoteParentId(collections, folder))}
+          accessibilityLabel={`Move ${folder.name} up one level`}
+          testID={`folder-up-${folder.id}`}
+        >
+          <Text style={styles.chipButtonText}>↑ Move up</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        style={styles.chipButton}
+        onPress={() =>
+          confirmDelete(
+            `Delete folder “${folder.name}”?`,
+            'Places, tracks and subfolders inside it move up one level.',
+            () => {
+              openFolder(
+                folder.parentId !== null && allTree.byId.has(folder.parentId)
+                  ? folder.parentId
+                  : null,
+              );
+              onDeleteFolder(folder.id);
+            },
+          )
+        }
+        testID={`folder-delete-${folder.id}`}
+      >
+        <Text style={[styles.chipButtonText, styles.dangerText]}>Delete</Text>
+      </Pressable>
+    </View>
+  );
+
+  /** One folder level: its subfolders, a new-folder field, then what is filed in it. */
+  const renderLevel = (): ReactNode => {
+    const subfolders = (allTree.byParent.get(folderId) ?? []).map((node) => node.folder);
+    const levelPlaces = current ? current.places : allTree.places;
+    const levelTracks = current ? current.tracks : allTree.tracks;
+    const nothingSaved = places.length === 0 && tracks.length === 0 && collections.length === 0;
+    return (
+      <>
+        {current ? folderActions(current.folder) : null}
+        {renderFolders(subfolders)}
+        <View style={styles.row}>
+          <TextInput
+            style={[styles.folderName, styles.newFolderInput]}
+            value={newFolder}
+            onChangeText={setNewFolder}
+            placeholder={current ? `New folder in ${current.folder.name}…` : 'New folder…'}
+            returnKeyType="done"
+            onSubmitEditing={addFolder}
+            testID="folder-new-name"
+          />
+          <Pressable
+            style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
+            disabled={!newFolder.trim()}
+            onPress={addFolder}
+            testID="folder-add"
+          >
+            <Text style={styles.buttonText}>Add</Text>
+          </Pressable>
+        </View>
+        {nothingSaved ? (
+          <Text style={styles.muted}>
+            Nothing saved yet. Long-press the map to save a pin, import a GPX/KML/KMZ file — or sign
+            in to sync what you saved on your other devices.
+          </Text>
+        ) : current && current.children.length + levelPlaces.length + levelTracks.length === 0 ? (
+          <Text style={styles.muted}>This folder is empty.</Text>
+        ) : null}
+        {renderPlaces(levelPlaces)}
+        {renderTracks(levelTracks)}
+      </>
+    );
+  };
+
+  /**
+   * A filter lists its matches flat, each group headed by the folder path it
+   * sits in — the answer is the rows, and drilling through folders to reach
+   * them would hide it. Folders whose name matched come first, to open.
+   */
+  const renderResults = (): ReactNode => {
+    const namedFolders = query.tagOnly
+      ? []
+      : filtered.collections.filter((folder) =>
+          folder.name.toLocaleLowerCase().includes(query.text),
+        );
+    const groups = [
+      { id: null as string | null, places: tree.places, tracks: tree.tracks },
+      ...flattenCollectionTree(tree).map(({ folder }) => {
+        const node = tree.byId.get(folder.id)!;
+        return { id: folder.id as string | null, places: node.places, tracks: node.tracks };
+      }),
+    ].filter((group) => group.places.length + group.tracks.length > 0);
+    return (
+      <>
+        {namedFolders.length > 0 ? (
+          <>
+            <Text style={styles.sectionLabel}>Folders</Text>
+            {namedFolders.map((folder) => (
+              <View key={folder.id}>{folderRow(folder, null)}</View>
+            ))}
+          </>
+        ) : null}
+        {groups.map((group) => (
+          <View key={group.id ?? 'root'}>
+            <Text style={styles.sectionLabel} numberOfLines={2}>
+              {group.id === null
+                ? 'Not in a folder'
+                : pathOf(group.id)
+                    .map((folder) => folder.name)
+                    .join(' › ')}
+            </Text>
+            {renderPlaces(group.places)}
+            {renderTracks(group.tracks)}
+          </View>
+        ))}
+      </>
     );
   };
 
@@ -1087,7 +1256,10 @@ export function FavoritesSheet({
         <TextInput
           style={[styles.textField, styles.filterInput]}
           value={filter}
-          onChangeText={setFilter}
+          onChangeText={(text) => {
+            setFilter(text);
+            setTrackLimit(TRACK_PAGE);
+          }}
           placeholder="Filter by name, #tag or notes"
           autoCapitalize="none"
           autoCorrect={false}
@@ -1114,6 +1286,7 @@ export function FavoritesSheet({
           </Pressable>
         ) : null}
       </View>
+      {!filtered.active && current ? folderHeader(current.folder) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -1130,56 +1303,7 @@ export function FavoritesSheet({
         {filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
-        {/* Folders (nested — a folder row's ＋ targets the new-folder input at it) */}
-        <Text style={styles.sectionLabel}>Folders</Text>
-        {renderFolderLevel(null, 0)}
-        <View style={styles.row}>
-          <TextInput
-            style={[styles.folderName, styles.newFolderInput]}
-            value={newFolder}
-            onChangeText={setNewFolder}
-            placeholder={
-              newFolderParent
-                ? `New subfolder in ${collections.find((c) => c.id === newFolderParent)?.name ?? 'folder'}…`
-                : 'New folder…'
-            }
-            returnKeyType="done"
-            onSubmitEditing={addFolder}
-            testID="folder-new-name"
-          />
-          {newFolderParent ? (
-            <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={() => setNewFolderParent(null)}
-              testID="folder-new-parent-clear"
-            >
-              <Text style={styles.buttonQuietText}>Root</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
-            disabled={!newFolder.trim()}
-            onPress={addFolder}
-            testID="folder-add"
-          >
-            <Text style={styles.buttonText}>Add</Text>
-          </Pressable>
-        </View>
-
-        {/* Unfiled places and tracks stay at the root; anything in a folder is
-            rendered immediately below its folder row above. */}
-        <Text style={styles.sectionLabel}>Not in a folder</Text>
-        {places.length === 0 && tracks.length === 0 ? (
-          <Text style={styles.muted}>
-            Nothing saved yet. Long-press the map to save a pin, import a GPX/KML/KMZ file — or sign
-            in to sync what you saved on your other devices.
-          </Text>
-        ) : (
-          <>
-            {renderPlaces(null)}
-            {renderTracks(null)}
-          </>
-        )}
+        {filtered.active ? renderResults() : renderLevel()}
       </ScrollView>
       <Pressable
         style={[styles.button, styles.closeButton]}
@@ -1261,12 +1385,40 @@ const styles = StyleSheet.create({
   rowRevealed: { backgroundColor: theme.accentFaint, borderRadius: 8 },
   rowHidden: { opacity: 0.45 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
-  subButtonText: { fontSize: 16, color: theme.textMuted, fontWeight: '700' },
-  subLevel: { paddingLeft: 18 },
-  folderIcon: { fontSize: 18 },
-  // Fixed width so folder names line up whether open or collapsed.
-  chevronButton: { width: 22, paddingVertical: 6, alignItems: 'center' },
-  chevronText: { fontSize: 12, color: theme.textMuted },
+  folderIcon: { fontSize: 20 },
+  // The whole name block opens the folder: icon, name and contents line.
+  folderOpen: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  chevronText: { fontSize: 22, color: theme.textMuted, paddingHorizontal: 2 },
+  folderHeader: { marginTop: 8, gap: 2 },
+  crumbRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  backButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backText: { fontSize: 22, lineHeight: 24, color: theme.text, fontWeight: '600' },
+  crumbs: { flexGrow: 1, flexShrink: 1 },
+  crumb: { fontSize: 13, color: theme.accent, fontWeight: '600', paddingVertical: 4 },
+  folderTitle: { fontSize: 18, fontWeight: '700', color: theme.text, paddingVertical: 2 },
+  folderTitleInput: { fontSize: 18, fontWeight: '700' },
+  folderActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 4 },
+  chipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  chipButtonOn: { borderColor: theme.accent },
+  chipButtonText: { fontSize: 13, color: theme.text, fontWeight: '600' },
+  dangerText: { color: theme.danger },
+  moreButton: { alignItems: 'center', marginTop: 6 },
   folderName: {
     flexGrow: 1,
     flexShrink: 1,
@@ -1274,8 +1426,6 @@ const styles = StyleSheet.create({
     color: theme.text,
     paddingVertical: 4,
   },
-  folderNameButton: { flexGrow: 1, flexShrink: 1, paddingVertical: 4 },
-  folderNameText: { fontSize: 16, color: theme.text },
   newFolderInput: {
     borderWidth: 1,
     borderColor: theme.border,

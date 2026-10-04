@@ -6,6 +6,7 @@ import {
   poiCategoryLabel,
   savedPlaceAt,
   type PlaceTarget,
+  visibleOnMap,
   type VisibilityFolder,
 } from './index.js';
 
@@ -30,6 +31,19 @@ describe('place / folder visibility', () => {
   it('hides a place when an ancestor folder is hidden', () => {
     expect(placeIsVisible({ visible: true, collectionId: 'away' }, folders)).toBe(false);
     expect(placeIsVisible({ visible: true, collectionId: 'under-away' }, folders)).toBe(false);
+  });
+
+  it('hides tracks under a hidden subfolder or a hidden parent, as it does pins', () => {
+    const collections = [...folders].map(([id, folder]) => ({ id, ...folder }));
+    const tracks = [
+      { id: 'run', visible: true, collectionId: 'sub' },
+      { id: 'ride', visible: true, collectionId: 'under-away' },
+      { id: 'off', visible: false, collectionId: null },
+      { id: 'loose', visible: true, collectionId: null },
+    ];
+    expect(visibleOnMap(tracks, collections).map((track) => track.id)).toEqual(['run', 'loose']);
+    const subHidden = collections.map((c) => (c.id === 'sub' ? { ...c, visible: false } : c));
+    expect(visibleOnMap(tracks, subHidden).map((track) => track.id)).toEqual(['loose']);
   });
 
   it('treats a dangling parent id as visible', () => {

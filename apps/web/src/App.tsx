@@ -9,7 +9,7 @@ import {
   haversineM,
   mapProfile,
   mapProfileForRouting,
-  placeIsVisible,
+  visibleOnMap,
   poiResultTarget,
   poiTilesUrl,
   placeTargetTitle,
@@ -30,7 +30,6 @@ import {
   type CollectionRevealTarget,
   type SettingsSectionId,
   type ShareFormat,
-  type VisibilityFolder,
 } from '@atlas/core';
 import {
   collectionTagSuggestions,
@@ -713,14 +712,12 @@ export function App() {
   }, [route.active]);
 
   // Only draw places that are effectively visible — their own toggle on and no
-  // ancestor folder hidden (@atlas/core placeIsVisible). The Sidebar still lists
+  // ancestor folder hidden (@atlas/core visibleOnMap). The Sidebar still lists
   // every place so hidden ones can be shown again.
-  const visiblePlaces = useMemo(() => {
-    const folders = new Map<string, VisibilityFolder>(
-      userData.collections.map((c) => [c.id, { parentId: c.parentId, visible: c.visible }]),
-    );
-    return userData.places.filter((p) => placeIsVisible(p, folders));
-  }, [userData.places, userData.collections]);
+  const visiblePlaces = useMemo(
+    () => visibleOnMap(userData.places, userData.collections),
+    [userData.places, userData.collections],
+  );
   // A saved stand draws its own rose, so which way it faces is visible on the
   // map that planned it — and it follows the same visibility rules as its pin.
   useSavedStandLayer(map, visiblePlaces);
@@ -1004,11 +1001,18 @@ export function App() {
     [tracks, getTrackData],
   );
 
+  // Tracks follow their folders' eyes as pins do; the selected one is drawn
+  // even while hidden, because the user just asked to see it.
+  const mapTracks = useMemo(() => {
+    const shown = visibleOnMap(tracks, userData.collections);
+    const picked = selectedTrack?.track;
+    return picked && !shown.some((track) => track.id === picked.id) ? [...shown, picked] : shown;
+  }, [tracks, userData.collections, selectedTrack?.track]);
   useTrackLayers(
     map,
     nav.profile === 'car' && ['navigating', 'rerouting', 'paused'].includes(nav.phase)
       ? NO_MAP_TRACKS
-      : tracks,
+      : mapTracks,
     getTrackData,
     selectTrack,
     selectedTrack?.track.id ?? null,
@@ -1055,6 +1059,17 @@ export function App() {
     },
     [getTrackData],
   );
+
+  // A track to show once it is in the list — Settings saves a Garmin course
+  // and asks for it in the same click, before the refreshed list has arrived.
+  const [showTrackId, setShowTrackId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showTrackId) return;
+    const track = tracks.find((candidate) => candidate.id === showTrackId);
+    if (!track) return;
+    setShowTrackId(null);
+    showTrack(track);
+  }, [showTrackId, tracks, showTrack]);
 
   const savePermit = useCallback(
     async (input: string, options?: ImportOptions): Promise<TrackRecord | null> => {
@@ -1749,6 +1764,9 @@ export function App() {
             onReveal={(target) => {
               setRevealItem(target);
               setPanel('collections');
+              // A Garmin course saved from Settings: draw and frame it too, or
+              // the row is found and the line is still nowhere to be seen.
+              if (target.kind === 'track') setShowTrackId(target.id);
             }}
             onClose={closePanels}
           />

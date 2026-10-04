@@ -1,5 +1,5 @@
 export type { TrackPoint, Waypoint, TrackData, TrackStats } from './model.js';
-export { trackBounds } from './model.js';
+export { trackBounds, trackLineCoordinates } from './model.js';
 export { computeTrackStats } from './stats.js';
 export {
   parseGpx,

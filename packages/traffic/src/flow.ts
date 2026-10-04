@@ -1,4 +1,4 @@
-import type { LatLng } from '@atlas/core';
+import { simplifyLine, type LatLng } from '@atlas/core';
 
 import { distanceToTrafficRouteM } from './model.js';
 import type { TravelTimeCorridor, TravelTimeMeasurement } from './traveltime.js';
@@ -120,57 +120,6 @@ export interface TrafficFlowFeatureCollection {
     geometry: { type: 'LineString'; coordinates: [number, number][] };
     properties: TrafficFlowProperties;
   }>;
-}
-
-/** Perpendicular distance from `p` to the segment `a`→`b`, in local tangent metres. */
-const perpendicularM = (p: LatLng, a: LatLng, b: LatLng): number => {
-  const cosLat = Math.cos((p.lat * Math.PI) / 180);
-  const ax = (a.lng - p.lng) * cosLat;
-  const ay = a.lat - p.lat;
-  const dx = (b.lng - a.lng) * cosLat;
-  const dy = b.lat - a.lat;
-  const denom = dx * dx + dy * dy;
-  const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom));
-  return Math.hypot(ax + t * dx, ay + t * dy) * 111_320;
-};
-
-/**
- * Douglas–Peucker, for the *drawn* copy of a corridor only.
- *
- * The corridor table is 32 877 vertices over 202 lines — 666 kB of GeoJSON for
- * something a client re-fetches every couple of minutes. At 10 m the same
- * table is 5 200 vertices and the route answers in 147 kB, and 10 m is well
- * under a pixel at every zoom this layer draws at.
- *
- * Only the drawing copy: matching a route against a corridor
- * (`trafficDelayForRoute`) keeps the full geometry, because there the vertices
- * are evidence rather than ink and the tolerance is 60 m.
- */
-export function simplifyLine(points: readonly LatLng[], toleranceM: number): LatLng[] {
-  if (points.length < 3) return [...points];
-  const keep = new Uint8Array(points.length);
-  keep[0] = 1;
-  keep[points.length - 1] = 1;
-  // Iterative rather than recursive: a 603-vertex corridor is fine either way,
-  // but the stack depth of this algorithm is data-dependent by nature.
-  const spans: Array<[number, number]> = [[0, points.length - 1]];
-  while (spans.length > 0) {
-    const [lo, hi] = spans.pop()!;
-    let farthest = -1;
-    let worst = toleranceM;
-    for (let i = lo + 1; i < hi; i++) {
-      const distance = perpendicularM(points[i]!, points[lo]!, points[hi]!);
-      if (distance > worst) {
-        worst = distance;
-        farthest = i;
-      }
-    }
-    if (farthest > 0) {
-      keep[farthest] = 1;
-      spans.push([lo, farthest], [farthest, hi]);
-    }
-  }
-  return points.filter((_, index) => keep[index] === 1);
 }
 
 /** ≈ 1 m — finer than the simplification that produced the vertex. */

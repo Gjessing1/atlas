@@ -257,3 +257,49 @@ export function encodePolyline(
   }
   return encoded;
 }
+
+/** Perpendicular distance from `p` to the segment `a`→`b`, in local tangent metres. */
+const perpendicularM = (p: LatLng, a: LatLng, b: LatLng): number => {
+  const cosLat = Math.cos((p.lat * Math.PI) / 180);
+  const ax = (a.lng - p.lng) * cosLat;
+  const ay = a.lat - p.lat;
+  const dx = (b.lng - a.lng) * cosLat;
+  const dy = b.lat - a.lat;
+  const denom = dx * dx + dy * dy;
+  const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom));
+  return Math.hypot(ax + t * dx, ay + t * dy) * 111_320;
+};
+
+/**
+ * Douglas–Peucker, for *drawn* copies of a line only — vertices that are ink,
+ * not evidence. The traffic corridor table drops from 32 877 to 5 200 vertices
+ * at 10 m, and a 1 Hz running track loses most of its points at a few metres;
+ * anything that measures along the line (matching, stats, profiles) keeps the
+ * full geometry.
+ */
+export function simplifyLine(points: readonly LatLng[], toleranceM: number): LatLng[] {
+  if (points.length < 3) return [...points];
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  // Iterative rather than recursive: a 603-vertex corridor is fine either way,
+  // but the stack depth of this algorithm is data-dependent by nature.
+  const spans: Array<[number, number]> = [[0, points.length - 1]];
+  while (spans.length > 0) {
+    const [lo, hi] = spans.pop()!;
+    let farthest = -1;
+    let worst = toleranceM;
+    for (let i = lo + 1; i < hi; i++) {
+      const distance = perpendicularM(points[i]!, points[lo]!, points[hi]!);
+      if (distance > worst) {
+        worst = distance;
+        farthest = i;
+      }
+    }
+    if (farthest > 0) {
+      keep[farthest] = 1;
+      spans.push([lo, farthest], [farthest, hi]);
+    }
+  }
+  return points.filter((_, index) => keep[index] === 1);
+}

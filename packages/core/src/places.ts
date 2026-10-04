@@ -122,6 +122,21 @@ export function placeIsVisible(
   return place.visible && collectionIsVisible(place.collectionId, folders);
 }
 
+/**
+ * The places or tracks the map draws: each one's own toggle on and no folder
+ * above it hidden. Tracks follow the same rule as pins — a folder's eye used
+ * to hide its pins while every track inside it stayed drawn.
+ */
+export function visibleOnMap<T extends { visible: boolean; collectionId: string | null }>(
+  items: readonly T[],
+  collections: readonly ({ id: string } & VisibilityFolder)[],
+): T[] {
+  const folders = new Map<string, VisibilityFolder>(
+    collections.map((c) => [c.id, { parentId: c.parentId, visible: c.visible }]),
+  );
+  return items.filter((item) => placeIsVisible(item, folders));
+}
+
 /** Where the thing the card is describing came from. */
 export type PlaceSource = 'pin' | 'place' | 'poi' | 'search';
 

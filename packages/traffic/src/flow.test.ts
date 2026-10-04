@@ -1,12 +1,7 @@
 import type { LatLng } from '@atlas/core';
 import { describe, expect, it } from 'vitest';
 
-import {
-  corridorFlow,
-  simplifyLine,
-  tappedFlowProperties,
-  trafficFlowFeatureCollection,
-} from './flow.js';
+import { corridorFlow, tappedFlowProperties, trafficFlowFeatureCollection } from './flow.js';
 import type { TravelTimeCorridor, TravelTimeMeasurement } from './traveltime.js';
 
 const measurement = (
@@ -74,32 +69,6 @@ describe('corridor flow classification', () => {
     // dropped rather than drawn as the worst congestion in the country.
     expect(corridorFlow(measurement('a', 2400, 300)).level).toBe('unmeasured');
     expect(corridorFlow(measurement('a', 2400, 300)).delayS).toBeUndefined();
-  });
-});
-
-describe('line simplification', () => {
-  it('drops collinear vertices and keeps both ends', () => {
-    const points = straight(50);
-    const simplified = simplifyLine(points, 10);
-    expect(simplified).toHaveLength(2);
-    expect(simplified[0]).toEqual(points[0]);
-    expect(simplified.at(-1)).toEqual(points.at(-1));
-  });
-
-  it('keeps a bend that is wider than the tolerance', () => {
-    const points: LatLng[] = [
-      { lat: 59.9, lng: 10.7 },
-      // ~55 m east of the straight line between its neighbours.
-      { lat: 59.905, lng: 10.701 },
-      { lat: 59.91, lng: 10.7 },
-    ];
-    expect(simplifyLine(points, 10)).toHaveLength(3);
-    expect(simplifyLine(points, 200)).toHaveLength(2);
-  });
-
-  it('returns short lines untouched', () => {
-    expect(simplifyLine([], 10)).toEqual([]);
-    expect(simplifyLine(straight(2), 10)).toHaveLength(2);
   });
 });
 
