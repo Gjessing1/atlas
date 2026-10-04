@@ -74,6 +74,11 @@ Known flake: `core.spec.ts` "direction-arrow source is selectable and persists" 
 write 250 ms before reloading and can read the old value when it runs mid-suite. It passes on its
 own; re-run it alone before suspecting settings persistence.
 
+Observed 2026-10-04: `nav.spec.ts` "navigate to a dropped pin" reached its route line,
+alternative ETA chip and speed limit, then timed out waiting for `.nav-camera-chip` twice,
+including a single-test rerun. The mocked camera response or its delivery to the session needs
+investigation; do not infer that a route-choice UI failure caused this later assertion.
+
 ## Performance measurement (`perf.spec.ts`)
 
 `perf.spec.ts` logs the ARCHITECTURE.md performance numbers (map startup,

@@ -63,14 +63,14 @@ export interface NavTripProgress {
   originalEstimateMs: number;
 }
 
-/** A better route the periodic watch found, offered rather than imposed. */
+/** A route the periodic watch found, offered rather than imposed. */
 export interface NavFasterRoute {
   /** Time it saves over the engine's own estimate for the current route. */
   savesMs: number;
   /** Distance it saves over the remaining followed route. */
   savesM: number;
-  /** The threshold that made this route worth interrupting the driver for. */
-  reason: 'time' | 'distance';
+  /** Why this route is worth asking the driver about. */
+  reason: 'time' | 'distance' | 'closure';
 }
 
 /**
@@ -120,13 +120,13 @@ const IDLE_REROUTE: NavRerouteState = {
   backoffUntilMs: 0,
 };
 
-/** The faster-route offer's payload; the public controller shows only the saving. */
+/** The route offer's payload; the public controller shows its reason and saving. */
 export interface NavFasterOffer {
   path: RoutePath;
   vias: LatLng[];
   savesMs: number;
   savesM: number;
-  reason: 'time' | 'distance';
+  reason: 'time' | 'distance' | 'closure';
   atMs: number;
 }
 

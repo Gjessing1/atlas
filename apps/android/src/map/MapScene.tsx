@@ -1689,7 +1689,9 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Saved/imported tracks (visible ones), drawn under the routes. */}
-        {!inPip && trackGeo.features.length > 0 ? (
+        {!inPip &&
+        !(nav.profile === 'car' && ['navigating', 'rerouting', 'paused'].includes(nav.phase)) &&
+        trackGeo.features.length > 0 ? (
           <GeoJSONSource
             id="atlas-tracks"
             data={trackGeo}

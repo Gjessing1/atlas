@@ -96,6 +96,8 @@ test('navigate to a dropped pin: banner, route line, live progress, End', async 
       label: Boolean(window.__atlasMap!.getLayer('atlas-nav-alternatives-label')),
     })),
   ).toEqual({ line: true, label: true });
+  await expect(page.locator('.nav-alternative-button')).toHaveCount(1);
+  await expect(page.locator('.nav-alternative-button')).toContainText(/Grey 1 · \+\d+ min/);
   await expect(page.locator('.nav-puck')).toBeVisible();
   await expect(page.locator('.nav-dest-marker')).toBeVisible();
 

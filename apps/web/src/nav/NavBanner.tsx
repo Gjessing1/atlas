@@ -1,5 +1,12 @@
 import type { NavController } from '@atlas/app-hooks';
-import { fmtClock, fmtDistanceM, fmtDuration, fmtKm, type NavWidgetId } from '@atlas/core';
+import {
+  fmtClock,
+  fmtDistanceM,
+  fmtDuration,
+  fmtKm,
+  routeDeltaLabel,
+  type NavWidgetId,
+} from '@atlas/core';
 import {
   backToTrack,
   laneGlyphs,
@@ -355,9 +362,11 @@ export function NavBanner({
           {nav.fasterRoute && nav.phase === 'navigating' ? (
             <div className="nav-faster-row">
               <span className="nav-faster-text">
-                {nav.fasterRoute.reason === 'time'
-                  ? `Faster route — saves ${fmtDuration(nav.fasterRoute.savesMs)}`
-                  : `Shorter route — saves ${fmtDistanceM(nav.fasterRoute.savesM)}`}
+                {nav.fasterRoute.reason === 'closure'
+                  ? 'Road closure ahead — another route is available'
+                  : nav.fasterRoute.reason === 'time'
+                    ? `Faster route — saves ${fmtDuration(nav.fasterRoute.savesMs)}`
+                    : `Shorter route — saves ${fmtDistanceM(nav.fasterRoute.savesM)}`}
               </span>
               <button type="button" className="nav-faster-switch" onClick={nav.acceptFasterRoute}>
                 Switch
@@ -371,6 +380,21 @@ export function NavBanner({
               >
                 ✕
               </button>
+            </div>
+          ) : null}
+          {!nav.fasterRoute && guiding && nav.routeAlternatives.length > 0 ? (
+            <div className="nav-alternatives-row" aria-label="Other driving routes">
+              {nav.routeAlternatives.map((alternative, index) => (
+                <button
+                  type="button"
+                  key={index}
+                  className="nav-alternative-button"
+                  onClick={() => nav.selectRouteAlternative(index)}
+                  aria-label={`Switch to grey route ${index + 1}, ${routeDeltaLabel(alternative.deltaMs)} compared with current route`}
+                >
+                  Grey {index + 1} · {routeDeltaLabel(alternative.deltaMs)}
+                </button>
+              ))}
             </div>
           ) : null}
           {state && guiding ? (

@@ -1,5 +1,5 @@
 import type { NavController, NavFollowMode } from '@atlas/app-hooks';
-import { fmtDistanceM, type NavWidgetId } from '@atlas/core';
+import { fmtDistanceM, routeDeltaLabel, type NavWidgetId } from '@atlas/core';
 import { fmtClock } from '@atlas/core';
 import {
   backToTrack,
@@ -442,9 +442,11 @@ export function NavBanner({
         {nav.fasterRoute && nav.phase === 'navigating' ? (
           <View style={styles.fasterRow}>
             <Text style={styles.fasterText} numberOfLines={2}>
-              {nav.fasterRoute.reason === 'time'
-                ? `Faster route — saves ${formatDuration(nav.fasterRoute.savesMs)}`
-                : `Shorter route — saves ${formatDistance(nav.fasterRoute.savesM)}`}
+              {nav.fasterRoute.reason === 'closure'
+                ? 'Road closure ahead — another route is available'
+                : nav.fasterRoute.reason === 'time'
+                  ? `Faster route — saves ${formatDuration(nav.fasterRoute.savesMs)}`
+                  : `Shorter route — saves ${formatDistance(nav.fasterRoute.savesM)}`}
             </Text>
             <Pressable
               style={styles.fasterSwitch}
@@ -464,6 +466,24 @@ export function NavBanner({
             >
               <Text style={styles.fasterDismiss}>✕</Text>
             </Pressable>
+          </View>
+        ) : null}
+        {!nav.fasterRoute && guiding && nav.routeAlternatives.length > 0 ? (
+          <View style={styles.alternativesRow} accessibilityLabel="Other driving routes">
+            {nav.routeAlternatives.map((alternative, index) => (
+              <Pressable
+                key={index}
+                style={styles.alternativeButton}
+                onPress={() => nav.selectRouteAlternative(index)}
+                testID={`nav-alternative-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Switch to grey route ${index + 1}, ${routeDeltaLabel(alternative.deltaMs)} compared with current route`}
+              >
+                <Text style={styles.alternativeText} numberOfLines={1}>
+                  Grey {index + 1} · {routeDeltaLabel(alternative.deltaMs)}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         ) : null}
         {state?.wrongBranch && nav.phase === 'navigating' ? (
@@ -890,6 +910,16 @@ const styles = StyleSheet.create({
   },
   fasterSwitchText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   fasterDismiss: { color: theme.textMuted, fontSize: 16, paddingHorizontal: 2 },
+  alternativesRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  alternativeButton: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    backgroundColor: theme.surfaceMuted,
+  },
+  alternativeText: { color: theme.text, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   error: { color: theme.danger, fontSize: 15, fontWeight: '600' },
   mapControlsSlot: { flex: 1, paddingTop: 10 },
   mapControlsSlotPortrait: { minHeight: 106, alignItems: 'flex-end' },

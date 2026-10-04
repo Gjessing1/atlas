@@ -158,6 +158,8 @@ import { useGarmin } from '@atlas/app-hooks';
 import { useWeather } from './weather/useWeather.js';
 import { useWeatherTarget } from './weather/useWeatherTarget.js';
 
+const NO_MAP_TRACKS: TrackRecord[] = [];
+
 // The side/overlay panels are code-split: none of them is needed for the
 // initial map render, and Sidebar pulls in the GPX/KML import machinery.
 const Sidebar = lazy(() => import('./Sidebar.js').then((m) => ({ default: m.Sidebar })));
@@ -1002,7 +1004,15 @@ export function App() {
     [tracks, getTrackData],
   );
 
-  useTrackLayers(map, tracks, getTrackData, selectTrack, selectedTrack?.track.id ?? null);
+  useTrackLayers(
+    map,
+    nav.profile === 'car' && ['navigating', 'rerouting', 'paused'].includes(nav.phase)
+      ? NO_MAP_TRACKS
+      : tracks,
+    getTrackData,
+    selectTrack,
+    selectedTrack?.track.id ?? null,
+  );
 
   // Keep the selected track's metadata fresh; drop it when the track is deleted.
   useEffect(() => {

@@ -1175,23 +1175,37 @@ describe('useNavigationController — faster-route watch', () => {
     expect(h.spoken.filter((t) => t.startsWith('A faster route'))).toHaveLength(0);
   });
 
-  it('reroutes proactively when a closure appears on the active road', async () => {
+  it('offers a distinct closure detour while the driver is still on the active road', async () => {
     const trafficClosures = vi.fn(async () => [
       { id: 'closed', position: points[10]!, message: 'Vegen er stengt.' },
     ]);
     const h = harness(undefined, { trafficClosures });
     const hook = await fakeDrive(h);
     const calls = h.route.mock.calls.length;
+    h.route.mockResolvedValueOnce({ paths: [branchPath(600_000)] });
 
     await driveFor(h, 181);
 
     expect(trafficClosures).toHaveBeenCalled();
-    // One request avoids the closure; a second immediately judges the newly
-    // installed line without re-triggering the same closure.
-    expect(h.route.mock.calls.length).toBe(calls + 2);
+    expect(h.route.mock.calls.length).toBe(calls + 1);
     expect(trafficClosures).toHaveBeenCalledTimes(1);
-    expect(h.spoken).toContain('Road closure ahead. Rerouting.');
+    expect(h.spoken).toContain('Road closure ahead. Another route is available.');
+    expect(hook.result.current.fasterRoute?.reason).toBe('closure');
+    expect(hook.result.current.activePath?.points).toEqual(points);
+    act(() => hook.result.current.acceptFasterRoute());
+    expect(hook.result.current.activePath?.points).toEqual(branchPath(600_000).points);
+  });
+
+  it('does not prompt repeatedly when a closure probe returns the same road', async () => {
+    const trafficClosures = vi.fn(async () => [
+      { id: 'closed', position: points[10]!, message: 'Vegen er stengt.' },
+    ]);
+    const h = harness(undefined, { trafficClosures });
+    const hook = await fakeDrive(h);
+    await driveFor(h, 181);
+    expect(hook.result.current.activePath?.points).toEqual(points);
     expect(hook.result.current.fasterRoute).toBeNull();
+    expect(h.spoken).not.toContain('Road closure ahead. Another route is available.');
   });
 
   it('accepting swaps to the offered route without a second route request', async () => {

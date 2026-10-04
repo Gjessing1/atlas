@@ -1154,24 +1154,17 @@ export function useNavigationController(platform: NavPlatform): NavController {
       const { plan, path: currentPath } = before.stage;
       dispatch({ type: 'faster-probe-started' });
       try {
-        // A closure appearing on the line already being followed is not an
-        // optional faster-route offer: the old route has become invalid, so
-        // recalculate proactively. The provider adds the same closure to
-        // Valhalla's exclude_locations when it builds the replacement.
+        // A closure may make a different route useful, but an on-route driver
+        // still decides whether to leave the line they deliberately chose.
+        // The provider excludes the closure when calculating the candidate.
         const closureTransport = platformRef.current.trafficClosures;
+        let closureAhead = false;
         if (closureTransport && !skipClosureCheck) {
           const fromIndex = Math.max(
             0,
             Math.floor(state.routeProgress * Math.max(0, currentPath.points.length - 1)) - 2,
           );
-          const closures = await closureTransport(currentPath.points.slice(fromIndex));
-          if (closures.length > 0) {
-            dispatch({ type: 'faster-withdrawn' });
-            dispatch({ type: 'reroute-forced' });
-            speak('Road closure ahead. Rerouting.', { kind: 'alert', cause: 'closure' });
-            await reroute(fix, 'closure-ahead');
-            return;
-          }
+          closureAhead = (await closureTransport(currentPath.points.slice(fromIndex))).length > 0;
         }
         // Before comparing anything: bring the followed route's schedule up to
         // the current measurements. It is the point of the poll in its own right
@@ -1212,14 +1205,20 @@ export function useNavigationController(platform: NavPlatform): NavController {
         const qualifiesOnDistance =
           candidate.timeMs <= plannedMs &&
           candidate.distanceM <= plannedM * (1 - FASTER_MIN_DISTANCE_FRACTION);
+        // Re-cutting the same road from the latest fix is not a new choice.
+        // In particular, a distant closure must not cause repeated prompts
+        // when Valhalla still returns the line the driver is already on.
+        const closureChoice =
+          closureAhead && routeAlternativeLabelPoint(currentPath.points, candidate.points) !== null;
         const dismissed = live.stage.dismissedSavingMs;
         const dismissedFloor = dismissed === null ? 0 : dismissed + FASTER_REOFFER_STEP_MS;
         // A dismissal suppresses the same distance-only choice too: after the
         // driver has declined it, only a route with a meaningfully larger time
         // advantage may interrupt again.
         const clearsDismissal = dismissed === null || savesMs >= dismissedFloor;
-        const offering = clearsDismissal && (qualifiesOnTime || qualifiesOnDistance);
-        const reason = qualifiesOnTime ? 'time' : 'distance';
+        const offering =
+          clearsDismissal && (closureChoice || qualifiesOnTime || qualifiesOnDistance);
+        const reason = closureChoice ? 'closure' : qualifiesOnTime ? 'time' : 'distance';
         diag({
           event: 'faster-probe',
           verdict: offering ? 'offered' : 'rejected',
@@ -1238,7 +1237,12 @@ export function useNavigationController(platform: NavPlatform): NavController {
             type: 'faster-offered',
             offer: { path: candidate, vias, savesMs, savesM, reason, atMs: Date.now() },
           });
-          if (reason === 'time') {
+          if (reason === 'closure') {
+            speak('Road closure ahead. Another route is available.', {
+              kind: 'alert',
+              cause: 'closure',
+            });
+          } else if (reason === 'time') {
             const minutes = Math.round(savesMs / 60_000);
             speak(
               `A faster route is available — it saves ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
@@ -1271,7 +1275,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
       platformRef,
       fetchChoices,
       speak,
-      reroute,
       repriceTraffic,
       refreshRoadWeather,
       diag,
@@ -1322,7 +1325,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
     [lifecycleRef, dispatch, logRouteAdopted, enrich, speak],
   );
 
-  /** Take the offered faster route, exactly as a successful reroute would. */
+  /** Take the offered route, exactly as a successful reroute would. */
   const acceptFasterRoute = useCallback(() => {
     const current = lifecycleRef.current;
     if (current.stage.kind !== 'guiding') return;
