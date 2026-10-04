@@ -30,23 +30,7 @@ code must keep obeying moves to a design doc first — [ARCHITECTURE.md](./ARCHI
 
 ---
 
-## 1. Saved data and collections
-
-Saved places, tracks and folders should be quick to edit and findable from anywhere — and, like
-everything in Atlas, exportable.
-
-- [~] **Garmin Connect integration.** Planned walking, running, hiking and cycling routes can be
-      uploaded as Garmin courses through the server's python-garminconnect session plus Garmin's
-      course import endpoint and queued to a selected Garmin device. GPS activities import into a
-      dedicated folder, 30 at a time, with a saved cursor for older history. Atlas already offers
-      "Prefer trails" routing. Imported tracks show activity type and total distance when picked,
-      with a distinct selected colour on both maps. Remaining: verify sign-in, course delivery and activity import
-      against a live Garmin account and watch. The private endpoints may need repair when Garmin
-      changes them.
-
----
-
-## 2. Map profiles — per-activity cartography and layers
+## 1. Map profiles — per-activity cartography and layers
 
 The map profiles (Explore, Drive, Cycle, Hike, Run, Ski, Fish & Hunt) are the one-tap "what am I
 doing now" switch: each sets the default travel mode, appearance, offered overlays and defaults.
@@ -54,7 +38,7 @@ Implementation patterns and upstream constraints live in [ARCHITECTURE.md](./ARC
 [DATA-SOURCES.md](./DATA-SOURCES.md); Norway-only layers follow ARCHITECTURE.md's *Norway-only
 data* rule. The Fish & Hunt surfaces are tracked under N5 below.
 
-### 2.1 Explore — urban signature
+### 1.1 Explore — urban signature
 
 - [ ] **Expand and make Explore categories configurable.** Groceries currently exists only for
       Drive while Explore receives a broad Shops row and only six fixed categories. Add the
@@ -68,7 +52,7 @@ data* rule. The Fish & Hunt surfaces are tracked under N5 below.
       performance and navigation-label occlusion on both clients. Consider a Norwegian height
       source only if OSM coverage proves insufficient.
 
-### 2.2 Curiosities — the register profile
+### 1.2 Curiosities — the register profile
 
 The register profile answers "what is out here that I would never have known to look for?"
 
@@ -94,20 +78,20 @@ The register profile answers "what is out here that I would never have known to 
       is the correct and common outcome: show the orbital facts alone rather than a near-miss
       article, and keep the pass/altitude/illumination detail readable with no network.
 
-### 2.3 Ski — winter cartography
+### 1.3 Ski — winter cartography
 
 - [ ] Add the NVE **Varsom** avalanche danger-level forecast, distinct from steepness.
 
 - [ ] **Live grooming status.** Colour `piste:type=nordic` tracks by time since grooming (for
       example under 2 h, under 24 h), if Skisporet.no offers an accessible API — not yet checked.
 
-### 2.4 Hike — trail cartography
+### 1.4 Hike — trail cartography
 
 - [ ] **A tuft pattern for marshes (myr), in Hike and Fish & Hunt**, so wet ground reads at a
       glance: a small repeating SVG `fill-pattern`. Wetland is only a colour today — the appearance
       code strips the base style's fill patterns.
 
-### 2.5 Fish & Hunt — field cartography
+### 1.5 Fish & Hunt — field cartography
 
 - [ ] **Clear-cuts and forest edges.** Distinguish clear-cuts (`natural=clearcut` /
       `landuse=logging` in the original sketch — OSM coverage unmeasured) from dense conifer and open
@@ -120,7 +104,7 @@ The register profile answers "what is out here that I would never have known to 
       them (a `GraphicStroke` silently renders a plain line — DATA-SOURCES.md), so this needs OSM
       waterway geometry, drawn in way direction.
 
-### 2.6 Drive — road data and costs
+### 1.6 Drive — road data and costs
 
 Statens vegvesen sources, Norway-only under ARCHITECTURE.md's *Norway-only data* rule. Record what
 each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
@@ -183,7 +167,7 @@ each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
 
 ---
 
-## 3. Data layers, weather and activities (nodemap-inspired)
+## 2. Data layers, weather and activities (nodemap-inspired)
 
 Atlas borrows nodemap's useful sources and domain calibration, not its infrastructure or UI
 architecture. Endpoint details, exact layer names and gotchas live in
@@ -286,13 +270,13 @@ The Norway-only ranked surfaces and their visible reasoning are specified in
 
 ---
 
-## 4. Engineering health
+## 3. Engineering health
 
 Runs alongside the product tracks, not after them. `DR` labels come from the
 [2026-08-31 architectural review](./reviews/2026-08-31-dan-abramov.md); what it found must be
 preserved is in ARCHITECTURE.md → *What stays as it is*.
 
-### 4.1 Data safety & offline reliability
+### 3.1 Data safety & offline reliability
 
 - [ ] **Stream tiles through uncovered parts of an installed offline area's rectangle.** Region
       packs use square bounds while country data follows the real border; currently the pack's
@@ -300,7 +284,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       offline tile as a cache miss and fall back to the online basemap when connected, rather
       than letting rectangular pack coverage suppress streaming.
 
-### 4.2 Performance
+### 3.2 Performance
 
 - [~] **Audit every upstream proxy for request storms, and give them one well-behaved client.**
       The POI layer's Overpass proxy (2026-09-19) sent a fresh upstream query for every settled
@@ -344,7 +328,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Remove synchronous zip primitives and file-format parsing from `useUserData`.
       - [ ] Change coarse full-list refreshes only where profiling proves they are material.
 
-### 4.3 Accessibility & web UX
+### 3.3 Accessibility & web UX
 
 - [ ] **Set an interaction-accessibility baseline for both web and Android.** At 390×844, most web
       controls are below comfortable touch sizes. Standardise 44 CSS px / 48 dp hit areas,
@@ -355,7 +339,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       is now the most-used place without a non-drag alternative — give `ReorderableList` rows
       TalkBack move-up/move-down `accessibilityActions` and the web rows a keyboard equivalent.
 
-### 4.4 Test & release infrastructure
+### 3.4 Test & release infrastructure
 
 - [ ] **Make a failed CI build impossible to miss.** Add a loud post-deploy smoke step that checks
       the container's `/api/health` `gitSha` against the pushed commit and calls every route added by
@@ -368,7 +352,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       PostGIS service to CI and make those integration tests required; keep memory tests for the
       fast path.
 
-### 4.5 Code structure
+### 3.5 Code structure
 
 - [ ] **DR6 — Give Android one primary-surface state instead of independent sheet booleans.**
       Define a platform-specific `PrimarySurface` union with payload-bearing variants for menu,
@@ -382,14 +366,14 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       - [ ] Android regression coverage proves switching between every primary surface leaves
             exactly one visible.
 
-### 4.6 System health / status (N7)
+### 3.6 System health / status (N7)
 
 - [ ] **Alert rather than wait to be asked.** The sweep now finds a dead upstream within 6 h, but
       only Settings exposes it. After two consecutive failures, send an Android notification or
       show a persistent Settings badge. Include the `potential-cells` census warning from
       `backend/src/potential/health.ts` in the same path.
 
-### 4.7 Host and release chores
+### 3.7 Host and release chores
 
 Work done on the host or in the release pipeline rather than in the code.
 
@@ -414,7 +398,7 @@ Work done on the host or in the release pipeline rather than in the code.
 
 ---
 
-## 5. Later
+## 4. Later
 
 - [ ] i18n (English + Norwegian). DATEX message texts may not be translated under NLOD, so some
       strings remain Norwegian; see [DATA-SOURCES.md](./DATA-SOURCES.md).
