@@ -50,6 +50,14 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   await expect(page.getByRole('status')).toContainText('Imported 1; skipped 0; 0 failed.');
 
   await page.getByRole('button', { name: 'Close panel' }).click();
+  await page.getByRole('button', { name: 'Collections' }).click();
+  const library = page.getByRole('complementary', { name: 'Collections' });
+  await library.getByRole('tab', { name: 'Activities' }).click();
+  await library.getByRole('combobox', { name: 'Library sport' }).selectOption('Running');
+  await library.getByRole('combobox', { name: 'Activity year' }).selectOption('2026');
+  await expect(library.getByRole('button', { name: 'Morning run', exact: true })).toBeVisible();
+  await library.getByRole('button', { name: 'Show matching tracks only on map' }).click();
+  await library.getByRole('button', { name: 'Close panel' }).click();
   await expect
     .poll(() =>
       page.evaluate(

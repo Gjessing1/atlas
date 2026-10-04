@@ -3,6 +3,13 @@ import {
   collectionDropZone,
   collectionTagSuggestions,
   filterCollectionRecords,
+  activityDate,
+  activityYears,
+  librarySports,
+  libraryTrackKind,
+  libraryTrackSport,
+  libraryTracks,
+  type LibraryView,
   flattenCollectionTree,
   folderContentsLine,
   importedCount,
@@ -452,6 +459,7 @@ export function FavoritesSheet({
   onSetFolderVisible,
   onDeleteFolder,
   onSetAllVisible,
+  onShowOnlyTracks,
   onExportAll,
   onImport,
   onImportInatur,
@@ -489,6 +497,7 @@ export function FavoritesSheet({
   onDeleteFolder: (id: string) => void;
   /** Show or hide every place and folder at once (header toggle). */
   onSetAllVisible: (visible: boolean) => void;
+  onShowOnlyTracks: (ids: string[]) => void;
   /** Export everything as a file — also in Settings → Account & data. */
   onExportAll: () => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
@@ -510,6 +519,9 @@ export function FavoritesSheet({
   // What the list is narrowed to. Session-only: a filter is a way of looking
   // at the list, not a property of it.
   const [filter, setFilter] = useState('');
+  const [view, setView] = useState<LibraryView>('folders');
+  const [sport, setSport] = useState<string | null>(null);
+  const [year, setYear] = useState<number | null>(null);
   // The folder being looked at; null is the top level. One level at a time:
   // the nested tree indented every level and gave each folder row seven
   // controls, so on a phone a subfolder's name had no room left, and opening
@@ -581,6 +593,17 @@ export function FavoritesSheet({
     () => filterCollectionRecords({ collections, places, tracks }, filter),
     [collections, places, tracks, filter],
   );
+  const viewSource = useMemo(
+    () => libraryTracks(tracks, view === 'activities' ? 'activities' : 'courses', null, null),
+    [tracks, view],
+  );
+  const viewTracks = useMemo(
+    () =>
+      libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
+    [filtered.tracks, view, sport, year],
+  );
+  const sports = useMemo(() => librarySports(viewSource), [viewSource]);
+  const years = useMemo(() => activityYears(viewSource), [viewSource]);
   // Folder tree — derived by the shared model, so web and Android agree on
   // nesting, ordering and what happens to a folder whose parent is missing.
   // Browsing walks the whole tree; a filter lists what the filtered one holds.
@@ -813,7 +836,16 @@ export function FavoritesSheet({
             <Text style={styles.rowText} numberOfLines={1}>
               {track.name}
             </Text>
-            <Text style={styles.muted}>{trackListLine(track.stats)}</Text>
+            <Text style={styles.muted}>
+              {libraryTrackKind(track) === 'course'
+                ? 'Garmin + Atlas · '
+                : libraryTrackKind(track) === 'activity'
+                  ? 'Garmin recording · Atlas copy · '
+                  : 'Atlas · '}
+              {libraryTrackSport(track) ? `${libraryTrackSport(track)} · ` : ''}
+              {activityDate(track) ? `${activityDate(track)} · ` : ''}
+              {trackListLine(track.stats)}
+            </Text>
             <TagChips tags={userTags(track.tags)} onPick={setFilter} />
           </Pressable>
           <Pressable
@@ -881,9 +913,9 @@ export function FavoritesSheet({
   };
 
   /** A level's tracks, newest recording first, drawn a page at a time. */
-  const renderTracks = (level: TrackRecord[]): ReactNode => {
+  const renderTracks = (level: TrackRecord[], presorted = false): ReactNode => {
     if (level.length === 0) return null;
-    const ordered = tracksForList(level);
+    const ordered = presorted ? level : tracksForList(level);
     const rest = ordered.length - trackLimit;
     return (
       <View>
@@ -1286,7 +1318,93 @@ export function FavoritesSheet({
           </Pressable>
         ) : null}
       </View>
-      {!filtered.active && current ? folderHeader(current.folder) : null}
+      <View style={styles.choiceRow} accessibilityRole="tablist">
+        {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+          <Pressable
+            key={item}
+            style={[styles.folderChip, view === item && styles.folderChipSelected]}
+            onPress={() => {
+              setView(item);
+              setSport(null);
+              setYear(null);
+              setTrackLimit(TRACK_PAGE);
+            }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: view === item }}
+            testID={`collections-view-${item}`}
+          >
+            <Text style={styles.folderChipText}>
+              {
+                {
+                  folders: 'Folders',
+                  places: 'Places',
+                  courses: 'Routes & courses',
+                  activities: 'Activities',
+                }[item]
+              }
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {view === 'courses' || view === 'activities' ? (
+        <>
+          <View style={styles.choiceRow}>
+            <Pressable
+              style={[styles.folderChip, !sport && styles.folderChipSelected]}
+              onPress={() => setSport(null)}
+              testID="library-sport-all"
+            >
+              <Text style={styles.folderChipText}>All sports</Text>
+            </Pressable>
+            {sports.map((item) => (
+              <Pressable
+                key={item}
+                style={[styles.folderChip, sport === item && styles.folderChipSelected]}
+                onPress={() => {
+                  setSport(item);
+                  setTrackLimit(TRACK_PAGE);
+                }}
+                testID={`library-sport-${item}`}
+              >
+                <Text style={styles.folderChipText}>{item}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {view === 'activities' ? (
+            <View style={styles.choiceRow}>
+              <Pressable
+                style={[styles.folderChip, !year && styles.folderChipSelected]}
+                onPress={() => setYear(null)}
+                testID="library-year-all"
+              >
+                <Text style={styles.folderChipText}>All years</Text>
+              </Pressable>
+              {years.map((item) => (
+                <Pressable
+                  key={item}
+                  style={[styles.folderChip, year === item && styles.folderChipSelected]}
+                  onPress={() => {
+                    setYear(item);
+                    setTrackLimit(TRACK_PAGE);
+                  }}
+                  testID={`library-year-${item}`}
+                >
+                  <Text style={styles.folderChipText}>{item}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          <Pressable
+            style={[styles.chipButton, viewTracks.length === 0 && styles.buttonDisabled]}
+            disabled={viewTracks.length === 0}
+            onPress={() => onShowOnlyTracks(viewTracks.map((track) => track.id))}
+            testID="library-show-only-matches"
+          >
+            <Text style={styles.chipButtonText}>Show matching tracks only on map</Text>
+          </Pressable>
+        </>
+      ) : null}
+      {view === 'folders' && !filtered.active && current ? folderHeader(current.folder) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -1300,10 +1418,48 @@ export function FavoritesSheet({
         {/* A filter that matched nothing is not an empty collection: saying
             "nothing saved yet" to someone whose pins are all still there reads
             as data loss. */}
-        {filtered.active && filtered.empty ? (
+        {view === 'folders' && filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
-        {filtered.active ? renderResults() : renderLevel()}
+        {view === 'folders' ? (
+          filtered.active ? (
+            renderResults()
+          ) : (
+            renderLevel()
+          )
+        ) : (
+          <>
+            {view === 'places' ? (
+              <>
+                <Text style={styles.muted}>
+                  Atlas saved places. Garmin saved locations are not imported.
+                </Text>
+                {renderPlaces(filtered.places)}
+              </>
+            ) : (
+              <>
+                {view === 'courses' ? (
+                  <Text style={styles.muted}>
+                    Atlas routes and saved Garmin course copies. Garmin-only courses are in
+                    Settings.
+                  </Text>
+                ) : null}
+                {renderTracks(viewTracks, true)}
+              </>
+            )}
+            {(view === 'places' ? filtered.places.length === 0 : viewTracks.length === 0) ? (
+              <Text style={styles.muted}>
+                No{' '}
+                {view === 'places'
+                  ? 'saved places'
+                  : view === 'courses'
+                    ? 'routes or courses'
+                    : 'activities'}{' '}
+                match these filters.
+              </Text>
+            ) : null}
+          </>
+        )}
       </ScrollView>
       <Pressable
         style={[styles.button, styles.closeButton]}

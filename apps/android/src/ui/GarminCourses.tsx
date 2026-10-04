@@ -1,4 +1,9 @@
-import { garminCourseLine, garminCourseSports, type GarminState } from '@atlas/app-hooks';
+import {
+  garminCourseLine,
+  garminCourseSports,
+  garminDeliveryLine,
+  type GarminState,
+} from '@atlas/app-hooks';
 import {
   GARMIN_COURSE_SPORTS,
   garminSportFolder,
@@ -100,6 +105,8 @@ export function GarminCourses({
           const expanded = openId === course.id;
           const pending = garmin.pendingCourseId === course.id;
           const savedTrack = garmin.savedCourses.get(course.id);
+          const onMap = garmin.coursesOnMap.has(course.id);
+          const delivery = garmin.deliveries.get(course.id);
           return (
             <View key={course.id} style={[index > 0 && styles.divider, expanded && styles.rowOpen]}>
               <Pressable
@@ -113,9 +120,14 @@ export function GarminCourses({
                   <Text style={styles.name} numberOfLines={1}>
                     {course.name}
                   </Text>
-                  {savedTrack ? <Text style={styles.badge}>In Atlas</Text> : null}
+                  <Text style={styles.badge}>{savedTrack ? 'In Atlas' : 'Garmin only'}</Text>
                 </View>
                 <Text style={styles.line}>{garminCourseLine(course)}</Text>
+                <Text style={styles.line}>
+                  {delivery
+                    ? garminDeliveryLine(course, delivery)
+                    : 'No watch send recorded in Atlas'}
+                </Text>
               </Pressable>
               {expanded ? (
                 <View style={styles.actions}>
@@ -127,8 +139,11 @@ export function GarminCourses({
                       style={[styles.button, pending && styles.disabled]}
                       disabled={pending}
                       onPress={() => {
-                        if (savedTrack) onShowTrack(savedTrack);
-                        else
+                        if (savedTrack) {
+                          void garmin
+                            .setCourseVisible(course.id, true)
+                            .then(() => onShowTrack(savedTrack));
+                        } else
                           void garmin.saveCourse(course.id).then((id) => {
                             if (id) onShowTrack(id);
                           });
@@ -139,6 +154,16 @@ export function GarminCourses({
                         {savedTrack ? 'Show on map' : 'Save & show on map'}
                       </Text>
                     </Pressable>
+                    {savedTrack ? (
+                      <Pressable
+                        style={[styles.button, styles.quiet, !onMap && styles.disabled]}
+                        disabled={!onMap}
+                        onPress={() => void garmin.setCourseVisible(course.id, false)}
+                        testID="garmin-course-hide"
+                      >
+                        <Text style={styles.quietText}>Hide from map</Text>
+                      </Pressable>
+                    ) : null}
                     {savedTrack ? (
                       <Pressable
                         style={[styles.button, styles.quiet]}

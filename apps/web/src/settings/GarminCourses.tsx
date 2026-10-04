@@ -1,4 +1,9 @@
-import { garminCourseLine, garminCourseSports, type GarminState } from '@atlas/app-hooks';
+import {
+  garminCourseLine,
+  garminCourseSports,
+  garminDeliveryLine,
+  type GarminState,
+} from '@atlas/app-hooks';
 import type { CollectionRevealTarget } from '@atlas/core';
 import {
   GARMIN_COURSE_SPORTS,
@@ -89,6 +94,8 @@ export function GarminCourses({
           const expanded = openId === course.id;
           const pending = garmin.pendingCourseId === course.id;
           const savedTrack = garmin.savedCourses.get(course.id);
+          const onMap = garmin.coursesOnMap.has(course.id);
+          const delivery = garmin.deliveries.get(course.id);
           const sportKnown = (GARMIN_COURSE_SPORTS as readonly string[]).includes(
             course.type ?? '',
           );
@@ -103,20 +110,38 @@ export function GarminCourses({
                 <span className="garmin-course-name">
                   {course.name}
                   {savedTrack && <span className="garmin-badge">In Atlas</span>}
+                  {!savedTrack && <span className="garmin-badge">Garmin only</span>}
                 </span>
                 <span className="garmin-course-line">{garminCourseLine(course)}</span>
+                <span className="garmin-course-line">
+                  {delivery
+                    ? garminDeliveryLine(course, delivery)
+                    : 'No watch send recorded in Atlas'}
+                </span>
               </button>
               {expanded && (
                 <div className="garmin-course-actions" aria-busy={pending}>
                   <div className="garmin-action-row">
                     {savedTrack ? (
-                      <button
-                        type="button"
-                        className="primary"
-                        onClick={() => onReveal({ kind: 'track', id: savedTrack })}
-                      >
-                        Show on map
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => {
+                            void garmin.setCourseVisible(course.id, true);
+                            onReveal({ kind: 'track', id: savedTrack });
+                          }}
+                        >
+                          Show on map
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!onMap}
+                          onClick={() => void garmin.setCourseVisible(course.id, false)}
+                        >
+                          Hide from map
+                        </button>
+                      </>
                     ) : (
                       <button
                         type="button"

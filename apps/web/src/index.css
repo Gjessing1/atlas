@@ -9108,6 +9108,37 @@ button.transit-notice-summary {
   color: var(--danger);
 }
 
+.library-tabs,
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+.library-tabs .route-chip[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+}
+
+.library-filters label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.library-filters select {
+  max-width: 150px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* Garmin course library: a scannable list where one course opens at a time, its
    actions directly under it so a result is reported where it was asked for. */
 .settings-section h4 {

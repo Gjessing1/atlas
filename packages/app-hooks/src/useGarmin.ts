@@ -5,6 +5,7 @@ import {
   GARMIN_COURSE_TAG,
   garminSportFolder,
   garminTypeLabel,
+  visibleOnMap,
   type GarminCourseSport,
 } from '@atlas/core';
 import { buildGpx, computeTrackStats, parseGpx } from '@atlas/gpx';
@@ -35,6 +36,25 @@ export interface GarminCourse {
   ascentM: number | null;
   /** Last change in Garmin Connect, epoch ms. */
   updated: number | null;
+}
+
+export interface GarminDelivery {
+  deviceName: string;
+  queuedAt: number;
+  /** Garmin's course revision when the send request succeeded. */
+  courseUpdated: number | null;
+  changed?: boolean;
+}
+
+/** Garmin confirms queueing, but does not expose the installed course list of a watch. */
+export function garminDeliveryLine(course: GarminCourse, delivery: GarminDelivery): string {
+  const changed =
+    course.updated !== null &&
+    delivery.courseUpdated !== null &&
+    course.updated > delivery.courseUpdated + 60_000;
+  if (changed || delivery.changed)
+    return `Changed since last sent to ${delivery.deviceName} · send again`;
+  return `Sent to ${delivery.deviceName} ${fmtShortDate(delivery.queuedAt)} · watch sync unverified`;
 }
 
 /** "Trail running · 18.0 km · ↗ 536 m · 5 Jul" — the second line of a course row. */
@@ -135,6 +155,10 @@ export interface GarminState {
   courses: GarminCourse[] | null;
   /** Course id → id of the Atlas track saved from it, when there is one. */
   savedCourses: ReadonlyMap<string, string>;
+  coursesOnMap: ReadonlySet<string>;
+  setCourseVisible: (id: string, visible: boolean) => Promise<void>;
+  /** A successful queue request, not proof that the device has synced. */
+  deliveries: ReadonlyMap<string, GarminDelivery>;
   /** The course an edit, delete, send or save is in flight for. */
   pendingCourseId: string | null;
   /** One-line confirmation of the last course action. */
@@ -165,6 +189,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
   const [nextActivityOffset, setNextActivityOffset] = useState(0);
   const [historyComplete, setHistoryComplete] = useState(false);
   const [courses, setCourses] = useState<GarminCourse[] | null>(null);
+  const [deliveries, setDeliveries] = useState<ReadonlyMap<string, GarminDelivery>>(new Map());
   const [pendingCourseId, setPendingCourseId] = useState<string | null>(null);
   const [courseNotice, setCourseNotice] = useState<string | null>(null);
   const [courseError, setCourseError] = useState<string | null>(null);
@@ -202,6 +227,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     setNextActivityOffset(0);
     setHistoryComplete(false);
     setCourses(null);
+    setDeliveries(new Map());
     setCourseNotice(null);
     if (sync.email) void refresh();
     else {
@@ -263,6 +289,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         setMfaRequired(false);
         setDevices([]);
         setCourses(null);
+        setDeliveries(new Map());
         setCourseNotice(null);
         await resetActivityOffset();
       }),
@@ -286,17 +313,29 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         if (profile === 'car')
           throw new Error('Garmin courses are available for walking, running, hiking and cycling.');
         const gpx = buildGpx(routePathToTrackData(path, name));
-        const response = await request<{ url: string; queued: boolean }>('/api/garmin/course', {
-          name,
-          profile,
-          gpx,
-          ...(deviceId ? { deviceId } : {}),
-        });
+        const response = await request<{ id: number; url: string; queued: boolean }>(
+          '/api/garmin/course',
+          {
+            name,
+            profile,
+            gpx,
+            ...(deviceId ? { deviceId } : {}),
+          },
+        );
         setLastCourseUrl(response.url);
         setLastCourseQueued(response.queued);
+        if (response.queued && deviceId && Number.isFinite(response.id)) {
+          const delivery = {
+            deviceName: devices.find((device) => device.id === deviceId)?.name ?? 'your device',
+            queuedAt: Date.now(),
+            courseUpdated: null,
+          };
+          await data.setSetting(`garmin.delivery.${response.id}`, JSON.stringify(delivery));
+          setDeliveries((current) => new Map(current).set(String(response.id), delivery));
+        }
         setCourses(null); // the library has a new course; reload when next shown
       }),
-    [request, run],
+    [data.setSetting, devices, request, run],
   );
 
   const clearCourseResult = useCallback(() => {
@@ -400,14 +439,77 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     return saved;
   }, [data.tracks]);
 
+  const coursesOnMap = useMemo(() => {
+    const visible = new Set(
+      visibleOnMap(data.tracks ?? [], data.collections ?? []).map((t) => t.id),
+    );
+    return new Set(
+      [...savedCourses].filter(([, trackId]) => visible.has(trackId)).map(([id]) => id),
+    );
+  }, [data.tracks, data.collections, savedCourses]);
+
+  const setCourseVisible = useCallback(
+    async (id: string, visible: boolean) => {
+      const trackId = savedCourses.get(id);
+      if (!trackId) return;
+      const track = data.tracks.find((item) => item.id === trackId);
+      if (!track) return;
+      if (visible) {
+        let folderId = track.collectionId;
+        while (folderId) {
+          const folder = data.collections.find((item) => item.id === folderId);
+          if (!folder) break;
+          if (!folder.visible) await data.setCollectionVisible(folder.id, true);
+          folderId = folder.parentId;
+        }
+      }
+      if (track.visible !== visible) await data.updateTrack(trackId, { visible });
+    },
+    [data, savedCourses],
+  );
+
   const loadCourses = useCallback(
     () =>
       run(async () => {
         const response = await request<{ courses: GarminCourse[] }>('/api/garmin/courses');
+        const entries = await Promise.all(
+          response.courses.map(async (course) => {
+            const raw = await data.getSetting(`garmin.delivery.${course.id}`);
+            if (!raw) return null;
+            try {
+              const value: unknown = JSON.parse(raw);
+              if (
+                typeof value !== 'object' ||
+                value === null ||
+                !('deviceName' in value) ||
+                typeof value.deviceName !== 'string' ||
+                !('queuedAt' in value) ||
+                typeof value.queuedAt !== 'number' ||
+                !Number.isFinite(value.queuedAt)
+              )
+                return null;
+              const updated = 'courseUpdated' in value ? value.courseUpdated : null;
+              return [
+                course.id,
+                {
+                  deviceName: value.deviceName,
+                  queuedAt: value.queuedAt,
+                  courseUpdated: typeof updated === 'number' ? updated : null,
+                  changed: 'changed' in value && value.changed === true,
+                },
+              ] as const;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        setDeliveries(
+          new Map(entries.filter((entry): entry is NonNullable<typeof entry> => !!entry)),
+        );
         // Newest change first: the course just planned or edited is the one being looked for.
         setCourses([...response.courses].sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0)));
       }),
-    [request, run],
+    [data.getSetting, request, run],
   );
 
   /** Runs one course action with row-level progress; resolves false when it failed. */
@@ -433,15 +535,27 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
       list ? list.map((course) => (course.id === id ? { ...course, ...change } : course)) : list,
     );
 
+  const markCourseChanged = useCallback(
+    async (id: string) => {
+      const old = deliveries.get(id);
+      if (!old) return;
+      const next = { ...old, changed: true };
+      await data.setSetting(`garmin.delivery.${id}`, JSON.stringify(next));
+      setDeliveries((current) => new Map(current).set(id, next));
+    },
+    [data.setSetting, deliveries],
+  );
+
   const renameCourse = useCallback(
     async (id: string, name: string) =>
       (await courseAction(id, async () => {
         await request(`/api/garmin/courses/${id}`, { name: name.trim() }, 'PATCH');
         patchCourse(id, { name: name.trim(), updated: Date.now() });
+        await markCourseChanged(id);
         setCourseNotice(`Renamed to “${name.trim()}” in Garmin Connect.`);
         return true;
       })) === true,
-    [courseAction, request],
+    [courseAction, markCourseChanged, request],
   );
 
   const setCourseSport = useCallback(
@@ -449,10 +563,11 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
       (await courseAction(id, async () => {
         await request(`/api/garmin/courses/${id}`, { sport }, 'PATCH');
         patchCourse(id, { type: sport, updated: Date.now() });
+        await markCourseChanged(id);
         setCourseNotice('Sport changed in Garmin Connect.');
         return true;
       })) === true,
-    [courseAction, request],
+    [courseAction, markCourseChanged, request],
   );
 
   const deleteCourse = useCallback(
@@ -461,6 +576,11 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         const name = courses?.find((course) => course.id === id)?.name ?? 'Course';
         await request(`/api/garmin/courses/${id}`, undefined, 'DELETE');
         setCourses((list) => list?.filter((course) => course.id !== id) ?? null);
+        setDeliveries((current) => {
+          const next = new Map(current);
+          next.delete(id);
+          return next;
+        });
         setCourseNotice(`Deleted “${name}” from Garmin Connect.`);
         return true;
       })) === true,
@@ -472,10 +592,17 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
       (await courseAction(id, async () => {
         await request(`/api/garmin/courses/${id}/send`, { deviceId });
         const device = devices.find((item) => item.id === deviceId)?.name ?? 'your device';
+        const delivery = {
+          deviceName: device,
+          queuedAt: Date.now(),
+          courseUpdated: courses?.find((course) => course.id === id)?.updated ?? null,
+        };
+        await data.setSetting(`garmin.delivery.${id}`, JSON.stringify(delivery));
+        setDeliveries((current) => new Map(current).set(id, delivery));
         setCourseNotice(`Queued for ${device}. It arrives on the next sync with Garmin Connect.`);
         return true;
       })) === true,
-    [courseAction, devices, request],
+    [courseAction, courses, data.setSetting, devices, request],
   );
 
   const saveCourse = useCallback(
@@ -528,6 +655,9 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     restartActivityImport,
     courses,
     savedCourses,
+    coursesOnMap,
+    setCourseVisible,
+    deliveries,
     pendingCourseId,
     courseNotice,
     courseError,

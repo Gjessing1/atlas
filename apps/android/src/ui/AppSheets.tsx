@@ -179,6 +179,7 @@ export function AppSheets({
         onSetFolderVisible={(id, v) => void data.setCollectionVisible(id, v)}
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
+        onShowOnlyTracks={(ids) => void data.showOnlyTracks(ids)}
         onExportAll={() => void data.exportAll()}
         onImport={onImportTracks}
         onImportInatur={onImportInatur}

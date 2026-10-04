@@ -1420,6 +1420,9 @@ function GarminSection({
         Manage your Garmin Connect courses and send them to your watch, and bring your recorded
         activities into Atlas, filed by sport.
       </Text>
+      <Text style={styles.muted}>
+        Watch saved locations are not imported yet. Atlas places are in Collections → Places.
+      </Text>
       {garmin.connected ? (
         <View>
           <GarminCourses garmin={garmin} onReveal={onReveal} onShowTrack={onShowTrack} />

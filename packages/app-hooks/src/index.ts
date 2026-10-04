@@ -8,10 +8,22 @@ export {
 export {
   garminCourseLine,
   garminCourseSports,
+  garminDeliveryLine,
   useGarmin,
   type GarminCourse,
+  type GarminDelivery,
   type GarminState,
 } from './useGarmin.js';
+export {
+  activityDate,
+  activityYear,
+  activityYears,
+  librarySports,
+  libraryTrackKind,
+  libraryTrackSport,
+  libraryTracks,
+  type LibraryView,
+} from './libraryViews.js';
 export { useExploreShortcuts, type ExploreShortcutSettings } from './useExploreShortcuts.js';
 export {
   useRoute,

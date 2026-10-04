@@ -21,6 +21,9 @@ export function GarminPanel({
         Manage your Garmin Connect courses and send them to your watch, and bring your recorded
         activities into Atlas, filed by sport.
       </p>
+      <p className="settings-note">
+        Watch saved locations are not imported yet. Atlas saved places are in Collections → Places.
+      </p>
       {garmin.connected ? (
         <>
           <p>Connected to Garmin Connect.</p>

@@ -276,6 +276,8 @@ export interface UserData<TFile> extends StorageAvailability {
 
   /** Show or hide every place and folder at once (the "show/hide all" action). */
   setAllVisible: (visible: boolean) => Promise<void>;
+  /** Keep only selected tracks drawn; places are unaffected. */
+  showOnlyTracks: (ids: readonly string[]) => Promise<void>;
 
   /** Everything exportable (rule 5): zip when the platform can, else JSON. */
   exportAll: () => Promise<void>;
@@ -923,6 +925,39 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [refreshPlaces, refreshTracks, refreshCollections, reportWriteFailure],
   );
 
+  const showOnlyTracks = useCallback(
+    async (ids: readonly string[]) => {
+      const s = storageRef.current;
+      if (!s) return;
+      try {
+        const wanted = new Set(ids);
+        const [tracks, folders] = await Promise.all([s.listTracks(), s.listCollections()]);
+        const byId = new Map(folders.map((folder) => [folder.id, folder]));
+        const parents = new Set<string>();
+        for (const track of tracks) {
+          if (!wanted.has(track.id)) continue;
+          let id = track.collectionId;
+          while (id && !parents.has(id)) {
+            parents.add(id);
+            id = byId.get(id)?.parentId ?? null;
+          }
+        }
+        await Promise.all([
+          ...tracks
+            .filter((track) => track.visible !== wanted.has(track.id))
+            .map((track) => s.updateTrack(track.id, { visible: wanted.has(track.id) })),
+          ...folders
+            .filter((folder) => parents.has(folder.id) && !folder.visible)
+            .map((folder) => s.setCollectionVisible(folder.id, true)),
+        ]);
+        await Promise.all([refreshTracks(), refreshCollections()]);
+      } catch (err) {
+        reportWriteFailure('Updating track visibility', err);
+      }
+    },
+    [refreshTracks, refreshCollections, reportWriteFailure],
+  );
+
   const exportAll = useCallback(async () => {
     const s = storageRef.current;
     if (!s) return;
@@ -1021,6 +1056,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     setCollectionVisible,
     deleteCollection,
     setAllVisible,
+    showOnlyTracks,
     exportAll,
     getSetting,
     setSetting,

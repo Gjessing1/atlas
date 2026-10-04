@@ -68,15 +68,15 @@ to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; wh
 
 ### 1.2 One library for places, tracks, courses and activities
 
-- [ ] **Browse everything saved as one library, by kind, sport and place — not only by folder.**
+- [~] **Browse everything saved as one library, by kind, sport and place — not only by folder.**
       Saved places, saved tracks, Garmin courses saved into Atlas and imported activities all
       live in Collections' folder tree today; finding "that ridge run from last summer" means
       knowing which folder it fell into. Design the library around how it is looked for:
 
-      - **Views over the same records:** *Folders* (today's tree; one level at a time on Android since v0.250.0), *Places*, *Routes & courses*,
-        *Activities*, each with sport chips (Running, Hiking, Cycling, Skiing, Skating, … from
-        `garminSportFolder` and the plan's routing profile) and sort by *recent*, *distance*,
-        *nearest to the map view*.
+      - **Views over the same records:** Folders, Places, Routes & courses and Activities now exist
+        on both clients, with sport and recorded-year filters for activities and an action to show
+        only matching tracks on the map. Still needed: remote-only Garmin courses in this library,
+        plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
       - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
         line or pin thumbnail; places show category and distance from you.
       - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the
@@ -109,8 +109,11 @@ to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; wh
       (rate-limited, at most hourly) when Garmin is connected, filing by sport as the manual
       import does; keep the manual "Import older" for history.
 - [ ] **Courses on the watch, not just in Connect.** Garmin exposes no per-device course list
-      we have found; investigate the device-message history before promising "on your watch"
-      badges.
+      we have found; the live Epix bridge returns its device entry, but its device-message list
+      currently has only software updates. Atlas now remembers successful sends and flags later
+      edits, while watch inventory remains unverified. Investigate a readable device inventory
+      before promising "on your watch" badges. Watch-saved locations also remain unavailable
+      through the current server bridge and need a proven import path.
 
 ---
 

@@ -2,6 +2,13 @@ import {
   ancestorFolderIds,
   collectionTagSuggestions,
   filterCollectionRecords,
+  activityDate,
+  activityYears,
+  librarySports,
+  libraryTrackKind,
+  libraryTrackSport,
+  libraryTracks,
+  type LibraryView,
   parseCollectionQuery,
   promoteParentId,
   type PinLabelsController,
@@ -215,6 +222,9 @@ export function Sidebar({
   // leading `#` meaning tags alone. Session-only, like the expansion state: a
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');
+  const [view, setView] = useState<LibraryView>('folders');
+  const [sport, setSport] = useState<string | null>(null);
+  const [year, setYear] = useState<number | null>(null);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
   const filtered = useMemo(
     () =>
@@ -224,6 +234,17 @@ export function Sidebar({
       ),
     [data.collections, data.places, data.tracks, filter],
   );
+  const viewSource = useMemo(
+    () => libraryTracks(data.tracks, view === 'activities' ? 'activities' : 'courses', null, null),
+    [data.tracks, view],
+  );
+  const viewTracks = useMemo(
+    () =>
+      libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
+    [filtered.tracks, view, sport, year],
+  );
+  const sports = useMemo(() => librarySports(viewSource), [viewSource]);
+  const years = useMemo(() => activityYears(viewSource), [viewSource]);
   // The whole vocabulary, not the filtered one: a filter narrows what is on
   // screen, never which tags an editor may offer.
   const tagSuggestions = useMemo(
@@ -474,6 +495,8 @@ export function Sidebar({
 
   const trackRow = (track: TrackRecord) => {
     const key = `track:${track.id}`;
+    const kind = libraryTrackKind(track);
+    const date = activityDate(track);
     return (
       <li
         key={key}
@@ -510,7 +533,16 @@ export function Sidebar({
             <EyeIcon off={!track.visible} size={18} />
           </button>
         </div>
-        <div className="item-tags">{trackSummary(track.stats)}</div>
+        <div className="item-tags">
+          {kind === 'course'
+            ? 'Garmin Connect + Atlas copy · '
+            : kind === 'activity'
+              ? 'Garmin recording · Atlas copy · '
+              : 'Atlas · '}
+          {libraryTrackSport(track) ? `${libraryTrackSport(track)} · ` : ''}
+          {date ? `${date} · ` : ''}
+          {trackSummary(track.stats)}
+        </div>
         <TagChips tags={track.tags} onPick={setFilter} />
         {expanded === key && (
           <ItemEditor
@@ -817,6 +849,76 @@ export function Sidebar({
             </button>
           )}
         </div>
+        <div className="library-tabs" role="tablist" aria-label="Collections view">
+          {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="tab"
+              aria-selected={view === item}
+              className={`route-chip${view === item ? ' active' : ''}`}
+              onClick={() => {
+                setView(item);
+                setSport(null);
+                setYear(null);
+              }}
+            >
+              {
+                {
+                  folders: 'Folders',
+                  places: 'Places',
+                  courses: 'Routes & courses',
+                  activities: 'Activities',
+                }[item]
+              }
+            </button>
+          ))}
+        </div>
+        {(view === 'courses' || view === 'activities') && (
+          <div className="library-filters">
+            <label>
+              Sport
+              <select
+                aria-label="Library sport"
+                value={sport ?? ''}
+                onChange={(event) => setSport(event.target.value || null)}
+              >
+                <option value="">All sports</option>
+                {sports.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {view === 'activities' && (
+              <label>
+                Year
+                <select
+                  aria-label="Activity year"
+                  value={year ?? ''}
+                  onChange={(event) =>
+                    setYear(event.target.value ? Number(event.target.value) : null)
+                  }
+                >
+                  <option value="">All years</option>
+                  {years.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              disabled={viewTracks.length === 0}
+              onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
+            >
+              Show matching tracks only on map
+            </button>
+          </div>
+        )}
       </div>
       {importOpen && (
         <div className="sidebar-import">
@@ -932,7 +1034,38 @@ export function Sidebar({
             saving is disabled.
           </p>
         )}
-        {data.status === 'ready' && branch(null, 0)}
+        {data.status === 'ready' &&
+          (view === 'folders' ? (
+            branch(null, 0)
+          ) : (
+            <>
+              {view === 'places' && (
+                <p className="settings-note">
+                  Atlas saved places. Garmin saved locations are not imported.
+                </p>
+              )}
+              {view === 'courses' && (
+                <p className="settings-note">
+                  Atlas routes and saved Garmin course copies. Courses only in Garmin Connect are in
+                  Settings → Garmin.
+                </p>
+              )}
+              <ul className="item-list">
+                {view === 'places' ? filtered.places.map(placeRow) : viewTracks.map(trackRow)}
+              </ul>
+              {(view === 'places' ? filtered.places.length === 0 : viewTracks.length === 0) && (
+                <p className="sidebar-empty">
+                  No{' '}
+                  {view === 'places'
+                    ? 'saved places'
+                    : view === 'courses'
+                      ? 'routes or courses'
+                      : 'activities'}{' '}
+                  match these filters.
+                </p>
+              )}
+            </>
+          ))}
       </div>
       {confirm && <ConfirmDialog request={confirm} onCancel={closeConfirm} />}
     </aside>

@@ -774,6 +774,30 @@ describe('useUserData', () => {
     expect(result.current.tracks.every((t) => t.visible)).toBe(true);
   });
 
+  it('shows only filtered tracks and reveals their hidden folder', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    let folderId = '';
+    await act(async () => {
+      folderId = (await result.current.createCollection('Garmin activities'))!.id;
+      await result.current.importFiles([gpxFile('run.gpx'), gpxFile('ride.gpx')]);
+    });
+    await act(async () => {
+      await result.current.updateTrack(result.current.tracks[0]!.id, { collectionId: folderId });
+      await result.current.setCollectionVisible(folderId, false);
+    });
+    const chosen = result.current.tracks.find((item) => item.collectionId === folderId)!;
+    await act(async () => {
+      await result.current.showOnlyTracks([chosen.id]);
+    });
+    expect(result.current.tracks.find((item) => item.id === chosen.id)?.visible).toBe(true);
+    expect(
+      result.current.tracks.filter((item) => item.id !== chosen.id).every((item) => !item.visible),
+    ).toBe(true);
+    expect(result.current.collections.find((item) => item.id === folderId)?.visible).toBe(true);
+  });
+
   describe('storage lifecycle', () => {
     it('closes the storage on unmount', async () => {
       const { storage, platform } = createPlatform();

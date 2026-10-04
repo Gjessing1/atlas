@@ -196,7 +196,8 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
   });
   const sync = { email: 'courses@example.com', accountRequest } as unknown as SyncState;
   const tracks = { current: [] as TrackRecord[] };
-  const { result, rerender } = renderHook(() => useGarmin(sync, fakeData(storage, tracks)));
+  const data = fakeData(storage, tracks);
+  const { result, rerender } = renderHook(() => useGarmin(sync, data));
   await waitFor(() => expect(result.current.connected).toBe(true));
   await act(async () => {
     await result.current.loadCourses();
@@ -239,6 +240,12 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
   expect(result.current.courseNotice).toBe(
     'Queued for Fenix. It arrives on the next sync with Garmin Connect.',
   );
+  expect(result.current.deliveries.get('2')).toMatchObject({ deviceName: 'Fenix' });
+  expect(await data.getSetting('garmin.delivery.2')).toContain('Fenix');
+  await act(async () => {
+    await result.current.loadCourses();
+  });
+  expect(result.current.deliveries.get('2')).toMatchObject({ deviceName: 'Fenix' });
   expect(calls).toContainEqual(['/api/garmin/courses/2', { name: 'Ridge 18k' }, 'PATCH']);
   expect(calls).toContainEqual(['/api/garmin/courses/2/send', { deviceId: '456' }, undefined]);
 
