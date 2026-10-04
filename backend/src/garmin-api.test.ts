@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { buildApp } from './app.js';
+import { GarminAuthError, GarminBridgeError } from './garmin-bridge.js';
 import type { SyncApiOptions } from './sync-api.js';
 
 let app: FastifyInstance;
@@ -147,4 +148,32 @@ it('serves activity metadata and GPX only to an authenticated user', async () =>
     200,
   );
   expect(vi.mocked(garmin.activities).mock.calls.at(-1)?.[1]).toBe(30);
+});
+
+it('reports a refused password as 401 but a broken bridge as unavailable', async () => {
+  const token = await account('garmin-errors@example.com');
+  const connect = () =>
+    app.inject({
+      method: 'POST',
+      url: '/api/garmin/connect',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { email: 'runner@example.com', password: 'secret' },
+    });
+  vi.mocked(garmin.connect).mockRejectedValueOnce(new GarminAuthError('rejected'));
+  const refused = await connect();
+  expect(refused.statusCode).toBe(401);
+  expect(refused.json()).toEqual({ error: 'Garmin rejected the email or password' });
+  // The v0.246.0 image could not load libssl, so the bridge died before replying.
+  vi.mocked(garmin.connect).mockRejectedValueOnce(
+    new Error('Garmin connection ended unexpectedly'),
+  );
+  const broken = await connect();
+  expect(broken.statusCode).toBe(502);
+  expect(broken.json()).toEqual({ error: 'Garmin Connect is unavailable or needs reconnecting' });
+  vi.mocked(garmin.connect).mockRejectedValueOnce(
+    new GarminBridgeError('Garmin is rate-limiting this server; try again later'),
+  );
+  const limited = await connect();
+  expect(limited.statusCode).toBe(502);
+  expect(limited.json()).toEqual({ error: 'Garmin is rate-limiting this server; try again later' });
 });

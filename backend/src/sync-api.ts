@@ -5,7 +5,14 @@ import { parseGpx } from '@atlas/gpx';
 import { clampFutureStamps } from '@atlas/sync';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { hashPassword, verifyPassword } from './passwords.js';
-import type { GarminActivity, GarminDevice, GarminProfile } from './garmin-bridge.js';
+import {
+  GarminAuthError,
+  GarminBridgeError,
+  GarminSignInExpiredError,
+  type GarminActivity,
+  type GarminDevice,
+  type GarminProfile,
+} from './garmin-bridge.js';
 import type { Stores } from './stores.js';
 
 declare module '@fastify/jwt' {
@@ -382,8 +389,16 @@ export async function registerSyncApi(
             request.body.password,
           );
           return { connected: state === 'connected', mfaRequired: state === 'mfa' };
-        } catch {
-          return reply.code(401).send({ error: 'Garmin sign-in failed' });
+        } catch (error) {
+          // Only Garmin's own refusal is a 401: a bridge that cannot start or reach
+          // Garmin must not tell the user their password is wrong.
+          if (error instanceof GarminAuthError) {
+            return reply.code(401).send({ error: 'Garmin rejected the email or password' });
+          }
+          if (error instanceof GarminBridgeError) {
+            return reply.code(502).send({ error: error.message });
+          }
+          return upstreamError(reply);
         }
       },
     );
@@ -401,8 +416,11 @@ export async function registerSyncApi(
         try {
           await garmin.completeMfa(request.user.sub, request.body.code);
           return { connected: true };
-        } catch {
-          return reply.code(401).send({ error: 'Garmin code was rejected or sign-in expired' });
+        } catch (error) {
+          if (error instanceof GarminAuthError || error instanceof GarminSignInExpiredError) {
+            return reply.code(401).send({ error: 'Garmin code was rejected or sign-in expired' });
+          }
+          return upstreamError(reply);
         }
       },
     );

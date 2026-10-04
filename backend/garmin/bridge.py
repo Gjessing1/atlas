@@ -7,19 +7,24 @@ import os
 import sys
 from pathlib import Path
 
-from garminconnect import Garmin
+from garminconnect import (Garmin, GarminConnectAuthenticationError,
+                          GarminConnectTooManyRequestsError)
 
 
 class BridgeInputError(ValueError):
     """A deliberately safe error that can be shown to the Atlas user."""
 
 
+class BridgeAuthError(BridgeInputError):
+    """Garmin itself refused the credentials or code, as opposed to being unreachable."""
+
+
 def answer(value):
     print(json.dumps(value, separators=(",", ":")), flush=True)
 
 
-def fail(message):
-    answer({"error": message})
+def fail(message, auth=False):
+    answer({"error": message, "auth": True} if auth else {"error": message})
 
 
 def token_path(root, user_id):
@@ -121,11 +126,17 @@ def main():
         return
     if action == "connect":
         garmin = Garmin(command["email"], command["password"], return_on_mfa=True)
-        status, _ = garmin.login(directory)
+        try:
+            status, _ = garmin.login(directory)
+        except GarminConnectAuthenticationError:
+            raise BridgeAuthError("Garmin rejected the email or password")
         if status == "needs_mfa":
             answer({"mfaRequired": True})
             followup = json.loads(sys.stdin.readline())
-            garmin.resume_login({}, followup["code"])
+            try:
+                garmin.resume_login({}, followup["code"])
+            except GarminConnectAuthenticationError:
+                raise BridgeAuthError("Garmin rejected the code")
             garmin.client.dump(directory)
         else:
             # return_on_mfa exits Garmin.login before its ordinary token dump.
@@ -193,10 +204,19 @@ def main():
         raise BridgeInputError("Unknown action")
 
 
-if __name__ == "__main__":
+def run():
     try:
         main()
     except Exception as error:
         # Library errors may contain request context or tokens; never echo them.
-        message = str(error) if isinstance(error, BridgeInputError) else "Garmin Connect request failed"
-        fail(message)
+        if isinstance(error, BridgeInputError):
+            message = str(error)
+        elif isinstance(error, GarminConnectTooManyRequestsError):
+            message = "Garmin is rate-limiting this server; try again later"
+        else:
+            message = "Garmin Connect request failed"
+        fail(message, isinstance(error, BridgeAuthError))
+
+
+if __name__ == "__main__":
+    run()

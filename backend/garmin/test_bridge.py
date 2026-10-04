@@ -70,6 +70,22 @@ class LoginTest(unittest.TestCase):
             client.resume_login.assert_called_once_with({}, "123456")
             client.client.dump.assert_called_once()
 
+    def test_rejected_credentials_are_reported_as_auth_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Mock()
+            client.login.side_effect = bridge.GarminConnectAuthenticationError("401")
+            request = {"dataDir": directory,
+                       "userId": "11111111-1111-1111-1111-111111111111",
+                       "action": "connect", "email": "runner@example.com",
+                       "password": "wrong"}
+            stdout = io.StringIO()
+            with patch.object(bridge, "Garmin", return_value=client), \
+                    patch.object(bridge.sys, "stdin", io.StringIO(json.dumps(request) + "\n")), \
+                    patch.object(bridge.sys, "stdout", stdout):
+                bridge.run()
+            self.assertEqual(json.loads(stdout.getvalue()),
+                             {"error": "Garmin rejected the email or password", "auth": True})
+
 
 if __name__ == "__main__":
     unittest.main()

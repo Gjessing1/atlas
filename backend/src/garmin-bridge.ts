@@ -18,6 +18,13 @@ export interface GarminDevice {
 }
 type Reply = Record<string, unknown>;
 
+/** An error the bridge chose to report; its message is safe to show the user. */
+export class GarminBridgeError extends Error {}
+/** Garmin refused the credentials or MFA code — the one failure the user can fix by retyping. */
+export class GarminAuthError extends GarminBridgeError {}
+/** The MFA step arrived after its pending sign-in was dropped; the user must start again. */
+export class GarminSignInExpiredError extends Error {}
+
 class Worker {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly lines: Interface;
@@ -71,7 +78,11 @@ class Worker {
         }),
       ]);
       const reply = JSON.parse(raw) as Reply;
-      if (typeof reply['error'] === 'string') throw new Error(reply['error']);
+      if (typeof reply['error'] === 'string') {
+        throw reply['auth'] === true
+          ? new GarminAuthError(reply['error'])
+          : new GarminBridgeError(reply['error']);
+      }
       return reply;
     } finally {
       if (timer) clearTimeout(timer);
@@ -158,7 +169,7 @@ export class GarminBridge {
 
   async completeMfa(userId: string, code: string): Promise<void> {
     const pending = this.pending.get(userId);
-    if (!pending) throw new Error('Garmin sign-in expired; start again');
+    if (!pending) throw new GarminSignInExpiredError('Garmin sign-in expired; start again');
     try {
       const response = await pending.worker.request({ code }, 60_000);
       if (response['connected'] !== true) throw new Error('Garmin did not confirm sign-in');

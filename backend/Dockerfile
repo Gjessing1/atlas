@@ -4,8 +4,7 @@ FROM protomaps/go-pmtiles:v1.31.1 AS pmtiles
 
 FROM python:3.12-slim-bookworm AS garmin-python
 COPY backend/garmin /tmp/garmin
-RUN python -m venv /opt/garmin-venv && /opt/garmin-venv/bin/pip install --no-cache-dir -r /tmp/garmin/requirements.txt \
-  && cd /tmp/garmin && /opt/garmin-venv/bin/python -m unittest -q test_bridge.py
+RUN python -m venv /opt/garmin-venv && /opt/garmin-venv/bin/pip install --no-cache-dir -r /tmp/garmin/requirements.txt
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
@@ -48,6 +47,11 @@ ENV NODE_ENV=production
 ARG GIT_SHA=
 ENV GIT_SHA=$GIT_SHA
 COPY --from=pmtiles /go-pmtiles /usr/local/bin/pmtiles
+# Python's own /usr/local links against Debian's libssl3, which node's slim image
+# lacks (node bundles its OpenSSL). Without it `import ssl` fails and every Garmin
+# call died before reaching Garmin — v0.246.0 shipped that way.
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=garmin-python /usr/local /usr/local
 COPY --from=garmin-python /opt/garmin-venv /opt/garmin-venv
 COPY --from=build /app/node_modules ./node_modules
@@ -65,6 +69,9 @@ COPY --from=build /app/backend/package.json ./backend/
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/backend/garmin ./backend/garmin
+# The bridge tests run here, in the image that ships, not in the python stage: that
+# stage has every system library, so it proved nothing about this one.
+RUN cd backend/garmin && PYTHONDONTWRITEBYTECODE=1 /opt/garmin-venv/bin/python -m unittest -q test_bridge.py
 # Completes one upstream's broken TLS chain (kart.miljodirektoratet.no ships its
 # leaf twice and omits the signing intermediate). See backend/certs/upstream-cas.pem
 # for why this is safe and what the N7 status probe watches for.
