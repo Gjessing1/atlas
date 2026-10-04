@@ -1,19 +1,21 @@
 import {
   useExplore,
+  useExploreShortcuts,
   EXPLORE_EMPTY,
   EXPLORE_REFRESH,
   EXPLORE_TITLE,
   type ExploreArea,
   type ExploreQuery,
+  type ExploreShortcutSettings,
 } from '@atlas/app-hooks';
 import {
+  EXPLORE_CATEGORIES,
   clampExploreRadiusM,
-  exploreCategoriesForProfile,
   fmtDistanceM,
   type LatLng,
   type SearchResult,
 } from '@atlas/core';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { LocalPack } from '../regions/packs';
@@ -36,6 +38,7 @@ export function ExploreSheet({
   currentArea,
   zoom,
   profileId,
+  settings,
   onPick,
   onResultsChange,
   onClose,
@@ -47,6 +50,7 @@ export function ExploreSheet({
   currentArea: ExploreArea | null;
   zoom: number;
   profileId: string;
+  settings: ExploreShortcutSettings;
   onPick: (result: SearchResult) => void;
   onResultsChange: (results: SearchResult[]) => void;
   onClose: () => void;
@@ -64,7 +68,11 @@ export function ExploreSheet({
     [packs],
   );
 
-  const categories = useMemo(() => exploreCategoriesForProfile(profileId), [profileId]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const { shortcuts, categories, editable, setPinned, reset } = useExploreShortcuts(
+    settings,
+    profileId,
+  );
   const explore = useExplore({
     getArea,
     currentArea,
@@ -105,7 +113,61 @@ export function ExploreSheet({
             <Text style={styles.categoryText}>{item.label}</Text>
           </Pressable>
         ))}
+        <Pressable
+          style={styles.category}
+          onPress={() => setMoreOpen(!moreOpen)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: moreOpen }}
+          testID="explore-more"
+        >
+          <Text style={styles.categoryText}>More…</Text>
+        </Pressable>
       </View>
+      {moreOpen ? (
+        <View style={styles.more}>
+          <View style={styles.moreHead}>
+            <Text style={styles.categoryText}>All categories</Text>
+            <Pressable
+              onPress={reset}
+              disabled={!editable}
+              accessibilityRole="button"
+              testID="explore-reset-shortcuts"
+            >
+              <Text style={styles.refresh}>Reset shortcuts</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={styles.moreList} nestedScrollEnabled>
+            {EXPLORE_CATEGORIES.map((item) => (
+              <View style={styles.moreRow} key={item.id}>
+                <Pressable
+                  style={styles.moreChoice}
+                  onPress={() => explore.setCategory(item.id)}
+                  accessibilityRole="button"
+                  testID={`explore-more-${item.id}`}
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      explore.category === item.id && styles.moreSelected,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setPinned(item.id, !shortcuts.includes(item.id))}
+                  disabled={!editable}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${shortcuts.includes(item.id) ? 'Remove' : 'Add'} ${item.label} ${shortcuts.includes(item.id) ? 'from' : 'to'} shortcuts`}
+                  testID={`explore-pin-${item.id}`}
+                >
+                  <Text style={styles.pin}>{shortcuts.includes(item.id) ? '★' : '☆'}</Text>
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
       <View style={styles.status}>
         <Text style={[styles.muted, explore.stale && styles.stale]}>{explore.status}</Text>
         <Pressable onPress={explore.refresh}>
@@ -160,6 +222,13 @@ const styles = StyleSheet.create({
   },
   categorySelected: { borderColor: theme.accent, backgroundColor: theme.surfaceActive },
   categoryText: { color: theme.text, fontWeight: '600', fontSize: 13 },
+  more: { borderWidth: 1, borderColor: theme.border, borderRadius: 8, marginTop: 8, padding: 6 },
+  moreHead: { flexDirection: 'row', justifyContent: 'space-between', padding: 6 },
+  moreList: { maxHeight: 190 },
+  moreRow: { flexDirection: 'row', alignItems: 'center', minHeight: 38 },
+  moreChoice: { flex: 1, padding: 7 },
+  moreSelected: { color: theme.accent },
+  pin: { color: theme.accent, fontSize: 20, paddingHorizontal: 10 },
   status: {
     flexDirection: 'row',
     alignItems: 'center',

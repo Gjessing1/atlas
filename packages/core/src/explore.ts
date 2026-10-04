@@ -8,6 +8,13 @@ export type ExploreCategoryId =
   | 'nature'
   | 'shops'
   | 'essentials'
+  | 'pharmacy'
+  | 'bank-atm'
+  | 'toilets'
+  | 'campsite'
+  | 'hardware'
+  | 'post-parcel'
+  | 'playground'
   | 'fuel'
   | 'charging'
   | 'supermarket'
@@ -53,6 +60,17 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
     label: 'Essentials',
     osmTags: ['amenity/fuel', 'amenity/pharmacy', 'amenity/hospital', 'amenity/toilets'],
   },
+  { id: 'pharmacy', label: 'Pharmacies', osmTags: ['amenity/pharmacy', 'healthcare/pharmacy'] },
+  { id: 'bank-atm', label: 'Bank / ATM', osmTags: ['amenity/bank', 'amenity/atm'] },
+  { id: 'toilets', label: 'Toilets', osmTags: ['amenity/toilets'] },
+  { id: 'campsite', label: 'Campsites', osmTags: ['tourism/camp_site', 'tourism/caravan_site'] },
+  { id: 'hardware', label: 'Hardware', osmTags: ['shop/hardware', 'shop/doityourself'] },
+  {
+    id: 'post-parcel',
+    label: 'Post / parcels',
+    osmTags: ['amenity/post_office', 'amenity/parcel_locker', 'post_office/post_partner'],
+  },
+  { id: 'playground', label: 'Playgrounds', osmTags: ['leisure/playground'] },
   // Dedicated driving-stop categories: the mid-navigation "add a stop" flow
   // asks for exactly these, and a driver hunting fuel must not wade through
   // pharmacies to find it.
@@ -94,7 +112,7 @@ export const EXPLORE_CATEGORIES: readonly ExploreCategory[] = [
 const CATEGORIES_BY_ID = new Map(EXPLORE_CATEGORIES.map((category) => [category.id, category]));
 
 const PROFILE_CATEGORY_IDS: Readonly<Record<string, readonly ExploreCategoryId[]>> = {
-  explore: ['food', 'coffee', 'sights', 'nature', 'shops', 'essentials'],
+  explore: ['food', 'coffee', 'sights', 'nature', 'supermarket', 'essentials'],
   drive: ['food', 'coffee', 'fuel', 'charging', 'supermarket', 'rest-area'],
   bike: ['coffee', 'food', 'parking', 'viewpoints', 'essentials'],
   hike: ['parking', 'cabins', 'viewpoints', 'nature'],
@@ -109,6 +127,16 @@ export function exploreCategoriesForProfile(profileId: string): readonly Explore
   return (PROFILE_CATEGORY_IDS[profileId] ?? PROFILE_CATEGORY_IDS['explore']!).map((id) =>
     CATEGORIES_BY_ID.get(id)!,
   );
+}
+
+/** Keep user shortcuts valid as categories change; never leave the chooser without a shortcut. */
+export function sanitizeExploreShortcuts(value: unknown, profileId: string): ExploreCategoryId[] {
+  const fallback = exploreCategoriesForProfile(profileId).map((category) => category.id);
+  if (!Array.isArray(value)) return fallback;
+  const chosen = new Set(value.filter(isExploreCategory));
+  return chosen.size
+    ? EXPLORE_CATEGORIES.map((category) => category.id).filter((id) => chosen.has(id))
+    : fallback;
 }
 
 /**

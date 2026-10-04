@@ -2166,6 +2166,7 @@ function AppInner() {
             currentArea={currentExploreArea}
             zoom={mapZoom}
             profileId={profiles.profile.id}
+            settings={data}
             onPick={onPickExplore}
             onResultsChange={setExploreResults}
             onClose={() => {

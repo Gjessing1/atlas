@@ -4,6 +4,8 @@ import {
   exploreResultsFeatureCollection,
   isExploreCategory,
   rankExploreResults,
+  sanitizeExploreShortcuts,
+  exploreCategory,
 } from './explore.js';
 
 describe('explore categories', () => {
@@ -11,6 +13,28 @@ describe('explore categories', () => {
     expect(isExploreCategory('coffee')).toBe(true);
     expect(isExploreCategory('boat-access')).toBe(true);
     expect(isExploreCategory('anything')).toBe(false);
+  });
+
+  it('offers each practical category as a distinct nearby query', () => {
+    const expected = {
+      pharmacy: 'amenity/pharmacy',
+      'bank-atm': 'amenity/atm',
+      toilets: 'amenity/toilets',
+      campsite: 'tourism/camp_site',
+      hardware: 'shop/hardware',
+      'post-parcel': 'amenity/parcel_locker',
+      playground: 'leisure/playground',
+    } as const;
+    for (const [id, tag] of Object.entries(expected)) {
+      expect(exploreCategory(id as keyof typeof expected).osmTags).toContain(tag);
+    }
+    expect(exploreCategoriesForProfile('explore').map((item) => item.id)).toContain('supermarket');
+    expect(
+      sanitizeExploreShortcuts(['pharmacy', 'bogus', 'pharmacy', 'toilets'], 'explore'),
+    ).toEqual(['pharmacy', 'toilets']);
+    expect(sanitizeExploreShortcuts([], 'explore')).toEqual(
+      exploreCategoriesForProfile('explore').map((item) => item.id),
+    );
   });
 
   it('offers activity-specific questions and a safe fallback', () => {

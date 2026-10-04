@@ -1,13 +1,15 @@
 import {
   useExplore,
+  useExploreShortcuts,
   EXPLORE_EMPTY,
   EXPLORE_REFRESH,
   EXPLORE_TITLE,
   type ExploreArea,
   type ExploreQuery,
+  type ExploreShortcutSettings,
 } from '@atlas/app-hooks';
-import { exploreCategoriesForProfile, fmtDistanceM, type SearchResult } from '@atlas/core';
-import { useEffect, useMemo } from 'react';
+import { EXPLORE_CATEGORIES, fmtDistanceM, type SearchResult } from '@atlas/core';
+import { useEffect, useState } from 'react';
 
 export type { ExploreArea };
 
@@ -33,6 +35,7 @@ export function ExplorePanel({
   getArea,
   currentArea,
   profileId,
+  settings,
   onPick,
   onResultsChange,
   onClose,
@@ -40,11 +43,16 @@ export function ExplorePanel({
   getArea: () => ExploreArea;
   currentArea: ExploreArea | null;
   profileId: string;
+  settings: ExploreShortcutSettings;
   onPick: (result: SearchResult) => void;
   onResultsChange: (results: SearchResult[]) => void;
   onClose: () => void;
 }) {
-  const categories = useMemo(() => exploreCategoriesForProfile(profileId), [profileId]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const { shortcuts, categories, editable, setPinned, reset } = useExploreShortcuts(
+    settings,
+    profileId,
+  );
   const explore = useExplore({
     getArea,
     currentArea,
@@ -77,7 +85,40 @@ export function ExplorePanel({
             {item.label}
           </button>
         ))}
+        <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+          More…
+        </button>
       </div>
+      {moreOpen ? (
+        <div className="explore-more" aria-label="Choose Explore shortcuts">
+          <div className="explore-more-head">
+            <strong>All categories</strong>
+            <button type="button" className="link-button" onClick={reset} disabled={!editable}>
+              Reset shortcuts
+            </button>
+          </div>
+          {EXPLORE_CATEGORIES.map((item) => (
+            <div className="explore-more-row" key={item.id}>
+              <button
+                type="button"
+                onClick={() => explore.setCategory(item.id)}
+                aria-current={explore.category === item.id ? 'true' : undefined}
+              >
+                {item.label}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPinned(item.id, !shortcuts.includes(item.id))}
+                disabled={!editable}
+                aria-pressed={shortcuts.includes(item.id)}
+                aria-label={`${shortcuts.includes(item.id) ? 'Remove' : 'Add'} ${item.label} ${shortcuts.includes(item.id) ? 'from' : 'to'} shortcuts`}
+              >
+                {shortcuts.includes(item.id) ? '★' : '☆'}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className={`explore-status${explore.stale ? ' stale' : ''}`}>
         {explore.status}
         <button type="button" className="link-button" onClick={explore.refresh}>

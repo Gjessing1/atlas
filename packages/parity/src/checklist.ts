@@ -587,12 +587,12 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
   {
     id: 'explore-categories',
     surface: 'explore',
-    capability: 'Browse nearby places by categories curated for the active map profile',
+    capability: 'Browse nearby places with configurable shortcuts for the active map profile',
     hook: 'useExplore',
-    web: { file: 'apps/web/src/explore/ExplorePanel.tsx', contains: 'exploreCategoriesForProfile' },
+    web: { file: 'apps/web/src/explore/ExplorePanel.tsx', contains: 'useExploreShortcuts' },
     android: {
       file: 'apps/android/src/ui/ExploreSheet.tsx',
-      contains: 'exploreCategoriesForProfile',
+      contains: 'useExploreShortcuts',
     },
   },
   {

@@ -6,6 +6,7 @@ export {
   type SyncStatus,
 } from './useSync.js';
 export { useGarmin, type GarminState } from './useGarmin.js';
+export { useExploreShortcuts, type ExploreShortcutSettings } from './useExploreShortcuts.js';
 export {
   useRoute,
   routePlanState,

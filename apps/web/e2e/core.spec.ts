@@ -20,6 +20,32 @@ test('cold load shows the map at the default Oslo view', async ({ page }) => {
   expect(cam.lng).toBeCloseTo(10.75, 1);
 });
 
+test('Explore finds practical categories and saves its shortcuts', async ({ page }) => {
+  const queries: string[] = [];
+  await page.route('**/api/explore?**', (route) => {
+    queries.push(new URL(route.request().url()).searchParams.get('category') ?? '');
+    return route.fulfill({ json: { results: [] } });
+  });
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Explore nearby places' }).click();
+  const explore = page.getByRole('complementary', { name: 'Explore nearby places' });
+  await expect(explore.getByRole('tab', { name: 'Groceries' })).toBeVisible();
+  await explore.getByRole('button', { name: 'More…' }).click();
+  await explore.getByRole('button', { name: 'Pharmacies', exact: true }).click();
+  await expect.poll(() => queries.includes('pharmacy')).toBe(true);
+  await explore.getByRole('button', { name: 'Add Pharmacies to shortcuts' }).click();
+  await expect(explore.getByRole('tab', { name: 'Pharmacies' })).toBeVisible();
+  await page.reload();
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Explore nearby places' }).click();
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Explore nearby places' })
+      .getByRole('tab', { name: 'Pharmacies' }),
+  ).toBeVisible();
+});
+
 test('direction-arrow source is selectable and persists on this device', async ({ page }) => {
   await page.goto('/');
   await waitForMap(page);

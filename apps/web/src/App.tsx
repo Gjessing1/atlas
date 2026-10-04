@@ -1625,6 +1625,7 @@ export function App() {
           getArea={getExploreArea}
           currentArea={currentExploreArea}
           profileId={profiles.profile.id}
+          settings={userData}
           onPick={onPickExplore}
           onResultsChange={setExploreResults}
           onClose={() => {

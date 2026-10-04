@@ -40,11 +40,6 @@ data* rule. The Fish & Hunt surfaces are tracked under N5 below.
 
 ### 1.1 Explore — urban signature
 
-- [ ] **Expand and make Explore categories configurable.** Groceries currently exists only for
-      Drive while Explore receives a broad Shops row and only six fixed categories. Add the
-      missing practical categories—pharmacy, bank/ATM, toilets, campsite, hardware, post/parcel
-      and playground—and provide a “more” or customisation path.
-
 - [ ] **Proper 3D buildings, not the generic extrusion already in Liberty.** The fetched Liberty
       extrusion path exists, but a central-Oslo sample mostly used the stock 4 m fallback. Measure
       real height/storey coverage, preserve tagged OSM values, and keep unknown buildings visually
