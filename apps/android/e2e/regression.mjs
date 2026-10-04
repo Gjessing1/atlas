@@ -940,7 +940,7 @@ async function waitForHomeScreen(label, accept, timeoutMs = 120_000) {
   let xml = '';
   while (Date.now() < deadline) {
     xml = hierarchy();
-    if (accept(xml)) return xml;
+    if (await accept(xml)) return xml;
     attempt += 1;
     if (attempt % 6 === 0) {
       const y = String(Math.round(height * 0.5));
@@ -1045,19 +1045,22 @@ async function verifyStopWidget() {
   );
   tapBounds(boundsForNode(nodeForText(xml, '280  ·  Asker – Engelsrud')));
   shell('input', 'keyevent', 'KEYCODE_HOME');
-  const served = await waitFor(
+  await waitFor(
     'the stop widget to ask for its line-filtered board',
     () => servedWidgetBoard('stop'),
     (value) => Boolean(value.board?.directions?.[0]?.rows?.length),
     120_000,
   );
-  const rows = (served.history ?? [served.board]).flatMap((board) =>
-    board.directions.flatMap((direction) => direction.rows),
-  );
   let row;
   const painted = await waitForHomeScreen(
     'the stop widget to paint its first departure',
-    (next) => {
+    async (next) => {
+      // The widget may refresh after the first fixture response while the
+      // launcher is paging into view. Match against the latest served boards.
+      const served = await servedWidgetBoard('stop');
+      const rows = (served.history ?? [served.board]).flatMap((board) =>
+        board.directions.flatMap((direction) => direction.rows),
+      );
       row = rows.find((candidate) => nodeForDesc(next, candidate.text));
       return Boolean(row);
     },

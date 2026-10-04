@@ -162,8 +162,10 @@ before that destination. Also:
   advances departures on a 12-minute timetable grid. In v0.246.0, the launcher visibly showed
   a correct first departure while the regression compared it with the fixture's newer board and
   timed out. The fixture now keeps recent served boards and the check matches the visible row to
-  one of them before asserting its time and line. Read `failure.png` and `window.xml` before
-  treating this timeout as a widget bug.
+  one of them before asserting its time and line. The set of served boards must also be fetched
+  on each launcher poll: in v0.246.2 the widget again visibly showed a correct row, but refreshed
+  after the test's one-time fixture read, so the test timed out against a stale snapshot. Read
+  `failure.png` and `window.xml` before treating this timeout as a widget bug.
 - **Never `pkill -f 'node backend/dist/index.js'`.** The production container's backend matches
   too, and the kill is refused ("Operation not permitted"). Worse, the calling shell's own
   command line contains the pattern, so pkill kills the script itself (exit 144) along with
