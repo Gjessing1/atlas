@@ -79,6 +79,7 @@ import {
 } from '@atlas/routing';
 import {
   fetchTransitCommute,
+  fetchTransitCommuteSegments,
   fetchTransitStopLines,
   transitTripBounds,
   type TransitTrip,
@@ -353,12 +354,14 @@ function AppInner() {
   const [satelliteLocating, setSatelliteLocating] = useState(false);
   const [satelliteLocationError, setSatelliteLocationError] = useState(false);
   const commuteFetch = useMemo<CommuteFn>(
-    () => (query, signal, commit) =>
-      // `segments: true` brings the per-leg boards back in the same request
-      // (TRANSIT.md §5) — one round trip over a phone's link, one failure to handle.
-      // `commit` is the journey the board is tracking (TRANSIT.md §7), which a board
-      // asked "from now" could not otherwise contain once it has departed.
-      fetchTransitCommute(query, { baseUrl: serverOrigin, signal, segments: true, commit }),
+    () => async (query, signal, commit, onSegments) => {
+      if (query.via.length > 0 && onSegments) {
+        void fetchTransitCommuteSegments(query, { baseUrl: serverOrigin, signal })
+          .then(onSegments)
+          .catch(() => onSegments(null));
+      }
+      return fetchTransitCommute(query, { baseUrl: serverOrigin, signal, commit });
+    },
     [serverOrigin],
   );
   // The commute board picks stops and lines with the same seams the route

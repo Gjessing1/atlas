@@ -46,12 +46,12 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   await page.getByLabel('Garmin password').fill('garmin-secret');
   await page.getByRole('button', { name: 'Connect Garmin' }).click();
   await expect(page.getByText('Connected to Garmin Connect.')).toBeVisible();
-  await page.getByRole('button', { name: 'Import recent activities' }).click();
-  await expect(page.getByRole('status')).toContainText('Imported 1; skipped 0; 0 failed.');
-
   await page.getByRole('button', { name: 'Close panel' }).click();
   await page.getByRole('button', { name: 'Collections' }).click();
   const library = page.getByRole('complementary', { name: 'Collections' });
+  await library.getByRole('tab', { name: 'Garmin' }).click();
+  await library.getByRole('button', { name: 'Import recent' }).click();
+  await expect(library.getByRole('button', { name: 'Morning run', exact: true })).toBeVisible();
   await library.getByRole('tab', { name: 'Activities' }).click();
   await library.getByRole('combobox', { name: 'Library sport' }).selectOption('Running');
   await library.getByRole('combobox', { name: 'Activity year' }).selectOption('2026');
@@ -116,6 +116,15 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   ).toHaveAttribute('href', 'https://connect.garmin.com/modern/course/42');
   expect(sent).toMatchObject({ name: 'Forest run', profile: 'run', deviceId: '456' });
   expect(sent?.gpx).toContain('<trk>');
+
+  await page.getByRole('button', { name: 'Collections' }).click();
+  await library.getByRole('tab', { name: 'Garmin' }).click();
+  await library.locator('input[accept=".gpx,.kml,.kmz"]').setInputFiles({
+    name: 'explore.gpx',
+    mimeType: 'application/gpx+xml',
+    buffer: Buffer.from('<gpx><wpt lat="59.92" lon="10.76"><name>Watch camp</name></wpt></gpx>'),
+  });
+  await expect(library.getByRole('button', { name: 'Watch camp', exact: true })).toBeVisible();
 });
 
 test('manages Garmin courses: filter, save to Atlas, rename, sport, send and delete', async ({
@@ -179,6 +188,10 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   await page.getByPlaceholder('password', { exact: true }).fill('secret-password');
   await create.click();
 
+  await page.getByRole('button', { name: 'Close panel' }).click();
+  await page.getByRole('button', { name: 'Collections' }).click();
+  const library = page.getByRole('complementary', { name: 'Collections' });
+  await library.getByRole('tab', { name: 'Garmin' }).click();
   const courses = page.locator('.garmin-courses');
   await expect(courses.getByRole('heading', { name: 'Courses · 2' })).toBeVisible();
   await expect(courses).toContainText('Trail running · 18.0 km · ↗ 536 m');
@@ -190,13 +203,11 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   // Save & show files the copy under Garmin courses › Running, shows it there and draws it.
   await courses.getByRole('button', { name: /18k Jørgen/ }).click();
   await courses.getByRole('button', { name: 'Save & show on map' }).click();
-  const library = page.getByRole('complementary', { name: 'Collections' });
   await expect(library).toContainText('Garmin courses');
   await expect(library).toContainText('Running');
   await expect(library.getByText('18k Jørgen')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('tab', { name: 'Account & data' }).click();
+  await library.getByRole('tab', { name: 'Garmin' }).click();
   const row = courses.getByRole('button', { name: /18k Jørgen/ });
   await expect(row).toContainText('In Atlas');
   await row.click();

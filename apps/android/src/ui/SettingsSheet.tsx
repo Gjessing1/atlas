@@ -56,8 +56,6 @@ import { closeEngine } from '../routing/offlineRouting';
 import { defaultServerOrigin, setServerOrigin, useServerOrigin } from '../serverOrigin';
 import type { SyncState } from '../sync/useSync';
 import type { GarminState } from '@atlas/app-hooks';
-import type { CollectionRevealTarget } from '@atlas/core';
-import { GarminCourses } from './GarminCourses';
 import { useAppUpdate } from '../update/useAppUpdate';
 import { JS_VERSION, useOtaUpdate } from '../update/useOtaUpdate';
 import { BottomSheet } from './BottomSheet';
@@ -697,9 +695,36 @@ const HEALTH_COLOR: Record<UpstreamHealth, string> = {
 function StatusSection({ visible }: { visible: boolean }) {
   const origin = useServerOrigin();
   const status = useStatus(origin, visible);
+  const sources = status.data?.sources ?? [];
+  const affected = sources
+    .filter((source) => source.health === 'down' || source.health === 'degraded')
+    .sort((a, b) => (a.health === 'down' ? 0 : 1) - (b.health === 'down' ? 0 : 1));
+  const other = sources.filter(
+    (source) => source.health !== 'down' && source.health !== 'degraded',
+  );
+  const renderSource = (source: (typeof sources)[number]) => (
+    <View key={source.id} style={styles.statusRow} testID={`status-${source.id}`}>
+      <View style={[styles.statusDot, { backgroundColor: HEALTH_COLOR[source.health] }]} />
+      <Text style={styles.statusName} numberOfLines={1}>
+        {source.label}
+      </Text>
+      <Text
+        style={[styles.statusDetail, source.warning ? styles.statusWarning : null]}
+        numberOfLines={3}
+      >
+        {upstreamDetail(source)}
+      </Text>
+    </View>
+  );
 
   return (
     <View>
+      {affected.length > 0 ? (
+        <View style={styles.statusGroup}>
+          <Text style={styles.statusGroupName}>Needs attention</Text>
+          {affected.map(renderSource)}
+        </View>
+      ) : null}
       <View style={styles.buttonRow}>
         <Pressable
           style={[styles.button, styles.buttonQuiet, status.loading && styles.buttonDisabled]}
@@ -738,25 +763,10 @@ function StatusSection({ visible }: { visible: boolean }) {
       ) : null}
       {!status.data && !status.error ? <Text style={styles.muted}>Loading…</Text> : null}
       {status.data
-        ? groupUpstreams(status.data.sources).map(([group, sources]) => (
+        ? groupUpstreams(other).map(([group, sources]) => (
             <View key={group} style={styles.statusGroup}>
               <Text style={styles.statusGroupName}>{group}</Text>
-              {sources.map((source) => (
-                <View key={source.id} style={styles.statusRow} testID={`status-${source.id}`}>
-                  <View
-                    style={[styles.statusDot, { backgroundColor: HEALTH_COLOR[source.health] }]}
-                  />
-                  <Text style={styles.statusName} numberOfLines={1}>
-                    {source.label}
-                  </Text>
-                  <Text
-                    style={[styles.statusDetail, source.warning ? styles.statusWarning : null]}
-                    numberOfLines={3}
-                  >
-                    {upstreamDetail(source)}
-                  </Text>
-                </View>
-              ))}
+              {sources.map(renderSource)}
             </View>
           ))
         : null}
@@ -1401,15 +1411,7 @@ function VehicleSection({ vehicle }: { vehicle: VehicleProfileController }) {
 
 const SETTINGS_SECTIONS = settingsSectionsFor('android');
 
-function GarminSection({
-  garmin,
-  onReveal,
-  onShowTrack,
-}: {
-  garmin: GarminState;
-  onReveal: (target: CollectionRevealTarget) => void;
-  onShowTrack: (trackId: string) => void;
-}) {
+function GarminSection({ garmin }: { garmin: GarminState }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -1417,45 +1419,15 @@ function GarminSection({
     <View>
       <Text style={styles.heading}>Garmin Connect</Text>
       <Text style={styles.muted}>
-        Manage your Garmin Connect courses and send them to your watch, and bring your recorded
-        activities into Atlas, filed by sport.
+        Connect your Garmin account here. Browse courses, import activities and view saved copies in
+        Collections → Garmin.
       </Text>
       <Text style={styles.muted}>
-        Watch saved locations are not imported yet. Atlas places are in Collections → Places.
+        Watch saved locations can be imported from a Garmin Explore GPX file in Collections →
+        Garmin.
       </Text>
       {garmin.connected ? (
         <View>
-          <GarminCourses garmin={garmin} onReveal={onReveal} onShowTrack={onShowTrack} />
-          <Text style={styles.subheading}>Activities</Text>
-          <Text style={styles.muted}>
-            Imports GPS activities 30 at a time into Garmin activities, one folder per sport.
-          </Text>
-          <View style={styles.buttonRow}>
-            <Pressable
-              style={styles.button}
-              disabled={garmin.busy}
-              onPress={() => void garmin.importActivities()}
-              testID="garmin-import"
-            >
-              <Text style={styles.buttonText}>
-                {garmin.busy
-                  ? 'Working…'
-                  : garmin.nextActivityOffset > 0
-                    ? 'Import older'
-                    : 'Import recent'}
-              </Text>
-            </Pressable>
-            {garmin.nextActivityOffset > 0 ? (
-              <Pressable
-                style={[styles.button, styles.buttonQuiet]}
-                disabled={garmin.busy}
-                onPress={() => void garmin.restartActivityImport()}
-                testID="garmin-check-newest"
-              >
-                <Text style={styles.buttonQuietText}>Check newest</Text>
-              </Pressable>
-            ) : null}
-          </View>
           <Pressable
             style={[styles.button, styles.buttonQuiet]}
             disabled={garmin.busy}
@@ -1553,8 +1525,6 @@ export function SettingsSheet({
   storageState,
   tiles,
   onExportAll,
-  onReveal,
-  onShowTrack,
   appearance,
   mapStyleEditor,
   overlays,
@@ -1584,10 +1554,6 @@ export function SettingsSheet({
   tiles: TileSource;
   /** Share the full user-data dump as a JSON file (rule 5: everything exportable). */
   onExportAll: () => void;
-  /** Open Collections at a saved item — a Garmin course just copied into Atlas. */
-  onReveal: (target: CollectionRevealTarget) => void;
-  /** Close Settings and show a saved track on the map (a Garmin course's copy). */
-  onShowTrack: (trackId: string) => void;
   appearance: ThemeModeController;
   mapStyleEditor: MapStyleEditorController;
   overlays: OverlaysController;
@@ -1957,9 +1923,7 @@ export function SettingsSheet({
           <>
             <Text style={styles.heading}>Account &amp; sync</Text>
             <AccountSection sync={sync} storage={storageState} />
-            {sync.email ? (
-              <GarminSection garmin={garmin} onReveal={onReveal} onShowTrack={onShowTrack} />
-            ) : null}
+            {sync.email ? <GarminSection garmin={garmin} /> : null}
             <Text style={styles.heading}>Your data</Text>
             <Text style={styles.muted}>Export everything (places, folders, tracks) as a file.</Text>
             <View style={styles.buttonRow}>
@@ -1971,12 +1935,12 @@ export function SettingsSheet({
         ) : null}
         {section === 'system' ? (
           <>
-            <Text style={styles.heading}>Server</Text>
-            <ServerSection storage={storage} />
-            <Text style={styles.heading}>Data sources</Text>
-            <StatusSection visible={visible && section === 'system'} />
             <Text style={styles.heading}>App</Text>
             <UpdateSection />
+            <Text style={styles.heading}>Data sources</Text>
+            <StatusSection visible={visible && section === 'system'} />
+            <Text style={styles.heading}>Server</Text>
+            <ServerSection storage={storage} />
           </>
         ) : null}
       </ScrollView>

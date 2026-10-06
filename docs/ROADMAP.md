@@ -36,7 +36,9 @@ Atlas should be the place a trip is planned, kept and sent from: draw a route qu
 again months later, and put it on the watch without opening Garmin Connect. UI and UX carry this
 section — every item is judged by how few taps and how little guessing a real trip takes, on a
 phone outdoors as much as on a desk. Garmin's course library (list, rename, sport, delete, send
-to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; what remains:
+to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0. Collections now
+has a Garmin pane for remote courses, imported activities and manually imported Explore locations.
+What remains:
 
 ### 1.1 Waypoint editing on the map
 
@@ -73,10 +75,10 @@ to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; wh
       live in Collections' folder tree today; finding "that ridge run from last summer" means
       knowing which folder it fell into. Design the library around how it is looked for:
 
-      - **Views over the same records:** Folders, Places, Routes & courses and Activities now exist
-        on both clients, with sport and recorded-year filters for activities and an action to show
-        only matching tracks on the map. Still needed: remote-only Garmin courses in this library,
-        plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
+      - **Views over the same records:** Folders, Places, Routes & courses, Activities and Garmin now
+        exist on both clients. Garmin has remote-only courses, imported activities and Explore GPX
+        locations. Activity sport/year filters and show-matching-tracks action also exist. Still
+        needed: plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
       - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
         line or pin thumbnail; places show category and distance from you.
       - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the
@@ -112,8 +114,8 @@ to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0; wh
       we have found; the live Epix bridge returns its device entry, but its device-message list
       currently has only software updates. Atlas now remembers successful sends and flags later
       edits, while watch inventory remains unverified. Investigate a readable device inventory
-      before promising "on your watch" badges. Watch-saved locations also remain unavailable
-      through the current server bridge and need a proven import path.
+      before promising "on your watch" badges. Watch-saved locations remain unavailable
+      through the Connect bridge; Garmin Explore GPX import is manual until a readable sync path is proven.
 
 ---
 

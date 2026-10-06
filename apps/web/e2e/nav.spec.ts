@@ -20,6 +20,7 @@ test('Explorer mode follows live GPS without creating a route', async ({ page, c
   await page.goto('/#map=13/59.91/10.75');
   await waitForMap(page);
 
+  await page.locator('.profile-switch-trigger').click();
   await page.locator('.profile-switch').getByRole('radio', { name: 'Hike' }).click();
   // Follow-position lives in the map controls, not the planner: it plans
   // nothing, and the profile it follows is still the planner's (v0.173.0).
@@ -165,10 +166,11 @@ test('driving guidance replaces a previously selected Hike map profile', async (
   await waitForMap(page);
 
   const profileSwitch = page.locator('.profile-switch');
+  await profileSwitch.locator('.profile-switch-trigger').click();
   await profileSwitch.getByRole('radio', { name: 'Hike' }).click();
-  await expect(profileSwitch.getByRole('radio', { name: 'Hike' })).toHaveAttribute(
-    'aria-checked',
-    'true',
+  await expect(profileSwitch.locator('.profile-switch-trigger')).toHaveAttribute(
+    'aria-label',
+    'Map profile: Hike',
   );
 
   await page.locator('.place-marker').click();
@@ -181,9 +183,9 @@ test('driving guidance replaces a previously selected Hike map profile', async (
   await page.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('button', { name: 'End' }).click();
 
-  await expect(profileSwitch.getByRole('radio', { name: 'Drive' })).toHaveAttribute(
-    'aria-checked',
-    'true',
+  await expect(profileSwitch.locator('.profile-switch-trigger')).toHaveAttribute(
+    'aria-label',
+    'Map profile: Drive',
   );
 });
 
@@ -193,6 +195,7 @@ test('plain walking guidance restores Explore instead of retaining Drive', async
   await waitForMap(page);
 
   const profileSwitch = page.locator('.profile-switch');
+  await profileSwitch.locator('.profile-switch-trigger').click();
   await profileSwitch.getByRole('radio', { name: 'Drive' }).click();
 
   await page.locator('.place-marker').click();
@@ -205,9 +208,9 @@ test('plain walking guidance restores Explore instead of retaining Drive', async
   await page.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('button', { name: 'End' }).click();
 
-  await expect(profileSwitch.getByRole('radio', { name: 'Explore' })).toHaveAttribute(
-    'aria-checked',
-    'true',
+  await expect(profileSwitch.locator('.profile-switch-trigger')).toHaveAttribute(
+    'aria-label',
+    'Map profile: Explore',
   );
 });
 

@@ -75,7 +75,7 @@ import {
   weatherPointUrl,
   type WeatherPointSample,
 } from '@atlas/conditions';
-import { fetchTransitCommute, type TransitTrip } from '@atlas/transit';
+import { fetchTransitCommute, fetchTransitCommuteSegments, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
@@ -178,13 +178,16 @@ const CommutePanel = lazy(() =>
   import('./transit/CommutePanel.js').then((m) => ({ default: m.CommutePanel })),
 );
 
-// `segments: true` asks for the per-leg boards too (TRANSIT.md §5) — one request that
-// answers the whole dashboard rather than five the panel would have to
-// orchestrate and fail independently.
-// `commit` carries the journey the board is tracking (TRANSIT.md §7), so the answer
-// still contains it once it has left — the moment the block is worth having.
-const fetchCommute: CommuteFn = (query, signal, commit) =>
-  fetchTransitCommute(query, { signal, segments: true, commit });
+// The two door journeys answer first. Interchange departures arrive afterwards
+// without holding up the everyday outbound/return board.
+const fetchCommute: CommuteFn = async (query, signal, commit, onSegments) => {
+  if (query.via.length > 0 && onSegments) {
+    void fetchTransitCommuteSegments(query, { signal })
+      .then(onSegments)
+      .catch(() => onSegments(null));
+  }
+  return fetchTransitCommute(query, { signal, commit });
+};
 
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const TERRAIN_3D_SETTING = booleanSetting({
@@ -1732,6 +1735,11 @@ export function App() {
         {sidebarOpen && (
           <Sidebar
             data={userData}
+            garmin={garmin}
+            onRevealGarminItem={(target) => {
+              setRevealItem(target);
+              if (target.kind === 'track') setShowTrackId(target.id);
+            }}
             pinLabels={pinLabels}
             selectedTrackId={selectedTrack?.track.id ?? null}
             placeCommutes={commute.placeCommutes}
@@ -1761,13 +1769,6 @@ export function App() {
             mapZoom={mapZoom}
             profilePreferences={profilePreferences}
             onExportAll={() => void userData.exportAll()}
-            onReveal={(target) => {
-              setRevealItem(target);
-              setPanel('collections');
-              // A Garmin course saved from Settings: draw and frame it too, or
-              // the row is found and the line is still nowhere to be seen.
-              if (target.kind === 'track') setShowTrackId(target.id);
-            }}
             onClose={closePanels}
           />
         )}

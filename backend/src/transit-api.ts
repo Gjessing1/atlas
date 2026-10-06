@@ -795,14 +795,17 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
     const nowMs = Date.now();
     const queries = commuteTransitQueries(parsed.query, nowMs);
-    // The dashboard's per-leg boards (TRANSIT.md §5), fanned out here rather than by
-    // the client: one request over a phone's link instead of five, one failure
-    // to handle, and one place that knows the corridor's hops. Opt-in, because
-    // the widget and any older client want only the two directions.
+    // The dashboard's per-leg boards are fanned out here, so clients never
+    // need to construct the individual hop queries. Current clients ask for
+    // them separately to draw door journeys as soon as those are ready; older
+    // clients may still request a combined answer.
     const wantSegments = (request.body as { segments?: unknown } | null)?.segments === true;
+    const segmentsOnly = (request.body as { segmentsOnly?: unknown } | null)?.segmentsOnly === true;
     const segmentQueries = wantSegments
       ? commuteSegmentQueries(parsed.query, COMMUTE_SEGMENT_ROWS)
-      : [];
+      : segmentsOnly
+        ? commuteSegmentQueries(parsed.query, COMMUTE_SEGMENT_ROWS)
+        : [];
     // TRANSIT.md §7. The board carries the same commitment the home-screen widget
     // does, and needs the same one extra call for the same reason: a board
     // asked "from now" cannot contain a journey that has already left, which is
@@ -811,6 +814,20 @@ export function registerTransitApi(app: FastifyInstance, opts: TransitApiOptions
     const commit = parseV2Commit((request.body as { commit?: unknown } | null)?.commit);
 
     try {
+      if (segmentsOnly) {
+        const answers = await Promise.all(
+          segmentQueries.map((hop) => askDirection(hop.query, parsed.query.filter)),
+        );
+        reply.header('cache-control', 'private, max-age=30');
+        return {
+          segments: segmentQueries.flatMap((hop, index) => {
+            const answer = answers[index];
+            return answer?.ok
+              ? [{ id: hop.segment.id, result: withoutGeometry(answer.result) }]
+              : [];
+          }),
+        };
+      }
       const [committed, outbound, inbound, ...segmentAnswers] = await Promise.all([
         commit
           ? askDirection(commuteCommitQuery(parsed.query, commit), parsed.query.filter)

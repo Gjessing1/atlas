@@ -553,6 +553,27 @@ describe('useUserData', () => {
     expect(result.current.places.every((place) => place.collectionId === folder!.id)).toBe(true);
   });
 
+  it('keeps saved locations in a GPX that also contains tracks', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const mixed = {
+      name: 'explore.gpx',
+      bytes: new TextEncoder().encode(
+        '<gpx><wpt lat="59.8" lon="10.4"><name>Saved camp</name></wpt><trk><name>Hike</name><trkseg><trkpt lat="59.8" lon="10.4"/><trkpt lat="59.9" lon="10.5"/></trkseg></trk></gpx>',
+      ),
+    };
+    let imported!: Awaited<ReturnType<typeof result.current.importFiles>>;
+    await act(async () => {
+      imported = await result.current.importFiles([mixed], {
+        newCollection: { name: 'Garmin locations' },
+      });
+    });
+    expect(imported.tracks).toHaveLength(1);
+    expect(imported.places.map((place) => place.name)).toEqual(['Saved camp']);
+    expect(imported.places[0]?.collectionId).toBe(imported.tracks[0]?.collectionId);
+  });
+
   it('exports a single track as gpx or kml via the platform seam', async () => {
     const { platform, savedText } = createPlatform();
     const { result } = renderHook(() => useUserData(platform));

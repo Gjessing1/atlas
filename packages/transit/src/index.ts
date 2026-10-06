@@ -112,6 +112,7 @@ export {
   fetchTransitDepartures,
   fetchTransitStopLines,
   fetchTransitCommute,
+  fetchTransitCommuteSegments,
   type FetchTransitOptions,
   type FetchTransitCommuteOptions,
   type FetchTransitStopsOptions,

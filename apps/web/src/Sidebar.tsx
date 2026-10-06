@@ -12,6 +12,7 @@ import {
   parseCollectionQuery,
   promoteParentId,
   type PinLabelsController,
+  type GarminState,
   tagQuery,
   useCollectionTree,
 } from '@atlas/app-hooks';
@@ -24,6 +25,7 @@ import {
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon, PinLabelIcon } from './icons.js';
+import { GarminCourses } from './settings/GarminCourses.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
 import { ItemEditor } from './sidebar/ItemEditor.js';
@@ -32,6 +34,8 @@ import type { ImportOptions, ImportResult, UserData } from './storage/useUserDat
 
 interface SidebarProps {
   data: UserData;
+  garmin: GarminState;
+  onRevealGarminItem: (target: CollectionRevealTarget) => void;
   /** Which folders and tags draw their pins' names on the map. */
   pinLabels: PinLabelsController;
   selectedTrackId: string | null;
@@ -179,6 +183,8 @@ function PinLabelToggle({
 
 export function Sidebar({
   data,
+  garmin,
+  onRevealGarminItem,
   pinLabels,
   selectedTrackId,
   placeCommutes = new Map(),
@@ -222,7 +228,7 @@ export function Sidebar({
   // leading `#` meaning tags alone. Session-only, like the expansion state: a
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');
-  const [view, setView] = useState<LibraryView>('folders');
+  const [view, setView] = useState<LibraryView | 'garmin'>('folders');
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
@@ -242,6 +248,10 @@ export function Sidebar({
     () =>
       libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
     [filtered.tracks, view, sport, year],
+  );
+  const garminActivities = useMemo(
+    () => libraryTracks(filtered.tracks, 'activities', null, null),
+    [filtered.tracks],
   );
   const sports = useMemo(() => librarySports(viewSource), [viewSource]);
   const years = useMemo(() => activityYears(viewSource), [viewSource]);
@@ -267,6 +277,7 @@ export function Sidebar({
     tracks: filtered.tracks,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const garminLocationInputRef = useRef<HTMLInputElement>(null);
   const revealRowRef = useRef<HTMLLIElement>(null);
   // The just-revealed row, marked for a couple of seconds after the scroll.
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -295,6 +306,7 @@ export function Sidebar({
     // A filter left over from a moment ago can hide the very row we were asked
     // to show, so revealing clears it — the request is more specific than it is.
     setFilter('');
+    setView('folders');
     const parentId = 'parentId' in item ? item.parentId : item.collectionId;
     const ancestors = ancestorFolderIds(tree, parentId);
     setExpandedFolders((current) => {
@@ -364,11 +376,11 @@ export function Sidebar({
       ? { newCollection: { name: importFolderName.trim() } }
       : { collectionId: importTarget === 'root' ? null : importTarget };
 
-  const onImportFiles = async (files: FileList | null) => {
+  const onImportFiles = async (files: FileList | null, options = importOptions()) => {
     if (!files || files.length === 0) return;
     setImporting(true);
     try {
-      const result = await data.importFiles([...files], importOptions());
+      const result = await data.importFiles([...files], options);
       setImportErrors(result.errors);
       setRestored(result.restored);
       onImported(result);
@@ -377,6 +389,7 @@ export function Sidebar({
       setImportOpen(false);
       setImportFolderName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (garminLocationInputRef.current) garminLocationInputRef.current.value = '';
     }
   };
 
@@ -850,7 +863,15 @@ export function Sidebar({
           )}
         </div>
         <div className="library-tabs" role="tablist" aria-label="Collections view">
-          {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+          {(
+            [
+              'folders',
+              'places',
+              'courses',
+              'activities',
+              ...(garmin.connected ? (['garmin'] as const) : []),
+            ] as const
+          ).map((item) => (
             <button
               key={item}
               type="button"
@@ -869,6 +890,7 @@ export function Sidebar({
                   places: 'Places',
                   courses: 'Routes & courses',
                   activities: 'Activities',
+                  garmin: 'Garmin',
                 }[item]
               }
             </button>
@@ -1037,6 +1059,80 @@ export function Sidebar({
         {data.status === 'ready' &&
           (view === 'folders' ? (
             branch(null, 0)
+          ) : view === 'garmin' ? (
+            <div className="garmin-library">
+              <GarminCourses garmin={garmin} onReveal={onRevealGarminItem} />
+              <div className="garmin-courses-head">
+                <h4>Imported activities · {garminActivities.length}</h4>
+                <button
+                  type="button"
+                  disabled={garmin.busy}
+                  onClick={() => void garmin.importActivities()}
+                >
+                  {garmin.busy
+                    ? 'Working…'
+                    : garmin.nextActivityOffset > 0
+                      ? 'Import older'
+                      : 'Import recent'}
+                </button>
+                {garmin.nextActivityOffset > 0 && (
+                  <button
+                    type="button"
+                    disabled={garmin.busy}
+                    onClick={() => void garmin.restartActivityImport()}
+                  >
+                    Check newest
+                  </button>
+                )}
+              </div>
+              <ul className="item-list">{garminActivities.map(trackRow)}</ul>
+              {garminActivities.length === 0 && (
+                <p className="sidebar-empty">No imported activities match this filter.</p>
+              )}
+              <h4>Saved locations</h4>
+              <p className="settings-note">
+                Export waypoints as GPX from Garmin Explore, then import the file here. Garmin
+                Connect does not provide these watch locations through this connection.
+              </p>
+              <input
+                ref={garminLocationInputRef}
+                type="file"
+                accept=".gpx,.kml,.kmz"
+                hidden
+                onChange={(event) => {
+                  const folder = data.collections.find(
+                    (item) => item.name === 'Garmin locations' && item.parentId === null,
+                  );
+                  void onImportFiles(
+                    event.target.files,
+                    folder
+                      ? { collectionId: folder.id }
+                      : { newCollection: { name: 'Garmin locations' } },
+                  );
+                }}
+              />
+              <button
+                type="button"
+                disabled={importing}
+                onClick={() => garminLocationInputRef.current?.click()}
+              >
+                Import saved locations
+              </button>
+              <ul className="item-list">
+                {filtered.places
+                  .filter((place) =>
+                    data.collections.some(
+                      (item) => item.id === place.collectionId && item.name === 'Garmin locations',
+                    ),
+                  )
+                  .map(placeRow)}
+              </ul>
+              {garmin.error && (
+                <p className="settings-note settings-error" role="alert">
+                  {garmin.error}
+                </p>
+              )}
+            </div>
           ) : (
             <>
               {view === 'places' && (
@@ -1046,8 +1142,7 @@ export function Sidebar({
               )}
               {view === 'courses' && (
                 <p className="settings-note">
-                  Atlas routes and saved Garmin course copies. Courses only in Garmin Connect are in
-                  Settings → Garmin.
+                  Atlas routes and saved Garmin course copies. Garmin-only courses are in Garmin.
                 </p>
               )}
               <ul className="item-list">

@@ -284,10 +284,12 @@ export function useCommuteDashboard(commute: CommuteController): CommuteDashboar
             ? null
             : answer
               ? emptyDirectionNote('upstream')
-              : 'Could not be checked just now.',
+              : commute.segmentsLoading
+                ? 'Checking departures…'
+                : 'Could not be checked just now.',
       };
     });
-  }, [result, hops, nowMs]);
+  }, [result, hops, nowMs, commute.segmentsLoading]);
 
   // ------------------------------------------------------------ tracking ---
 

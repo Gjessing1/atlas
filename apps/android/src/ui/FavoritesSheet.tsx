@@ -18,6 +18,7 @@ import {
   tagQuery,
   tracksForList,
   type PinLabelsController,
+  type GarminState,
   useCollectionTree,
   type CollectionDragItem,
   type CollectionDropZone,
@@ -53,6 +54,7 @@ import { flattenFolders } from './folders';
 import { confirmDelete, ItemEditor } from './ItemEditor';
 import { ReorderableList } from './ReorderableList';
 import { PinLabelIcon } from './icons';
+import { GarminCourses } from './GarminCourses';
 import { theme } from './theme';
 
 /** Tracks a folder level draws before its "Show more" button. */
@@ -436,6 +438,9 @@ function ImportControls({
  */
 export function FavoritesSheet({
   visible,
+  garmin,
+  onRevealGarminItem,
+  onShowGarminTrack,
   revealItem,
   onRevealed,
   onClose,
@@ -467,6 +472,9 @@ export function FavoritesSheet({
   bottomInset = 0,
 }: {
   visible: boolean;
+  garmin: GarminState;
+  onRevealGarminItem: (target: CollectionRevealTarget) => void;
+  onShowGarminTrack: (id: string) => void;
   revealItem?: CollectionRevealTarget | null;
   onRevealed?: () => void;
   onClose: () => void;
@@ -519,7 +527,7 @@ export function FavoritesSheet({
   // What the list is narrowed to. Session-only: a filter is a way of looking
   // at the list, not a property of it.
   const [filter, setFilter] = useState('');
-  const [view, setView] = useState<LibraryView>('folders');
+  const [view, setView] = useState<LibraryView | 'garmin'>('folders');
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   // The folder being looked at; null is the top level. One level at a time:
@@ -637,6 +645,7 @@ export function FavoritesSheet({
       // A search pick should open the exact row without leaving a filter that
       // hides other saved data the next time Collections is opened.
       setFilter('');
+      setView('folders');
       const parentId = 'parentId' in item ? item.parentId : item.collectionId;
       const level = parentId !== null && allTree.byId.has(parentId) ? parentId : null;
       setFolderId(level);
@@ -1319,7 +1328,15 @@ export function FavoritesSheet({
         ) : null}
       </View>
       <View style={styles.choiceRow} accessibilityRole="tablist">
-        {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+        {(
+          [
+            'folders',
+            'places',
+            'courses',
+            'activities',
+            ...(garmin.connected ? (['garmin'] as const) : []),
+          ] as const
+        ).map((item) => (
           <Pressable
             key={item}
             style={[styles.folderChip, view === item && styles.folderChipSelected]}
@@ -1340,6 +1357,7 @@ export function FavoritesSheet({
                   places: 'Places',
                   courses: 'Routes & courses',
                   activities: 'Activities',
+                  garmin: 'Garmin',
                 }[item]
               }
             </Text>
@@ -1427,6 +1445,71 @@ export function FavoritesSheet({
           ) : (
             renderLevel()
           )
+        ) : view === 'garmin' ? (
+          <View>
+            <GarminCourses
+              garmin={garmin}
+              onReveal={onRevealGarminItem}
+              onShowTrack={onShowGarminTrack}
+            />
+            <Text style={styles.subheading}>Imported activities</Text>
+            <View style={styles.buttonRow}>
+              <Pressable
+                style={styles.button}
+                disabled={garmin.busy}
+                onPress={() => void garmin.importActivities()}
+                testID="garmin-import"
+              >
+                <Text style={styles.buttonText}>
+                  {garmin.busy
+                    ? 'Working…'
+                    : garmin.nextActivityOffset > 0
+                      ? 'Import older'
+                      : 'Import recent'}
+                </Text>
+              </Pressable>
+              {garmin.nextActivityOffset > 0 ? (
+                <Pressable
+                  style={styles.button}
+                  disabled={garmin.busy}
+                  onPress={() => void garmin.restartActivityImport()}
+                  testID="garmin-check-newest"
+                >
+                  <Text style={styles.buttonText}>Check newest</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {renderTracks(libraryTracks(filtered.tracks, 'activities', null, null), true)}
+            <Text style={styles.subheading}>Saved locations</Text>
+            <Text style={styles.muted}>
+              Export waypoints as GPX from Garmin Explore, then import the file here. Garmin Connect
+              does not provide watch locations through this connection.
+            </Text>
+            <Pressable
+              style={styles.button}
+              onPress={() => {
+                const folder = collections.find(
+                  (item) => item.name === 'Garmin locations' && item.parentId === null,
+                );
+                void onImport(
+                  folder
+                    ? { collectionId: folder.id }
+                    : { newCollection: { name: 'Garmin locations' } },
+                );
+              }}
+              testID="garmin-locations-import"
+            >
+              <Text style={styles.buttonText}>Import saved locations</Text>
+            </Pressable>
+            {renderPlaces(
+              filtered.places.filter((place) =>
+                collections.some(
+                  (item) => item.id === place.collectionId && item.name === 'Garmin locations',
+                ),
+              ),
+            )}
+            {garmin.error ? <Text style={styles.muted}>{garmin.error}</Text> : null}
+          </View>
         ) : (
           <>
             {view === 'places' ? (
@@ -1440,8 +1523,7 @@ export function FavoritesSheet({
               <>
                 {view === 'courses' ? (
                   <Text style={styles.muted}>
-                    Atlas routes and saved Garmin course copies. Garmin-only courses are in
-                    Settings.
+                    Atlas routes and saved Garmin course copies. Garmin-only courses are in Garmin.
                   </Text>
                 ) : null}
                 {renderTracks(viewTracks, true)}
@@ -1602,6 +1684,14 @@ const styles = StyleSheet.create({
   trackIcon: { fontSize: 18, color: theme.textMuted },
   rowMain: { flexShrink: 1, flexGrow: 1 },
   rowText: { fontSize: 16, color: theme.text },
+  subheading: {
+    fontSize: 16,
+    color: theme.text,
+    fontWeight: '700',
+    marginTop: 18,
+    marginBottom: 7,
+  },
+  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   button: {
     backgroundColor: theme.accent,
     borderRadius: 8,

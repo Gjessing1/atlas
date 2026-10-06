@@ -712,6 +712,37 @@ describe('useCommute', () => {
     expect(result.current.result).toBe(answer);
   });
 
+  it('warms a saved commute before opening and reuses its recent answer', async () => {
+    const answer = {
+      outbound: { trips: [], problems: [] },
+      inbound: { trips: [], problems: [] },
+    };
+    const fetchCommute = vi.fn().mockResolvedValue(answer);
+    const { result, rerender } = renderHook(
+      ({ open }) =>
+        useCommute(
+          settings(() =>
+            Promise.resolve(
+              serializeCommuteConfig({
+                ...EMPTY_COMMUTE_CONFIG,
+                from: ENGELSRUD,
+                to: NATIONALTHEATRET,
+              }),
+            ),
+          ),
+          [],
+          fetchCommute,
+          open,
+        ),
+      { initialProps: { open: false } },
+    );
+    await waitFor(() => expect(result.current.result).toBe(answer));
+    expect(fetchCommute).toHaveBeenCalledTimes(1);
+    rerender({ open: true });
+    expect(result.current.result).toBe(answer);
+    expect(fetchCommute).toHaveBeenCalledTimes(1);
+  });
+
   it('switches named commutes without repointing the widget', async () => {
     const setSetting = vi.fn();
     const work = {

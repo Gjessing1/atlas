@@ -7,6 +7,7 @@ import type {
   TransitDeparturesResult,
   TransitCommuteQuery,
   TransitCommuteResult,
+  TransitCommuteSegmentResult,
   TransitQuery,
   TransitResult,
   TransitStopLines,
@@ -218,4 +219,23 @@ export async function fetchTransitCommute(
     throw new TransitError('commute board returned an invalid response');
   }
   return json as TransitCommuteResult;
+}
+
+/** Fetch the interchange departure boards after the door-to-door answer is shown. */
+export async function fetchTransitCommuteSegments(
+  query: TransitCommuteQuery,
+  opts: FetchTransitOptions = {},
+): Promise<TransitCommuteSegmentResult[]> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const res = await doFetch(`${opts.baseUrl ?? ''}/api/transit/commute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...query, segmentsOnly: true }),
+    signal: opts.signal,
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok || !json || typeof json !== 'object' || !('segments' in json)) {
+    throw new TransitError('interchange board unavailable', res.status);
+  }
+  return (json as { segments: TransitCommuteSegmentResult[] }).segments;
 }

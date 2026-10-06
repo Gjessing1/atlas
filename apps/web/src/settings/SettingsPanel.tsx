@@ -21,7 +21,6 @@ import {
   MAX_NAV_WIDGETS,
   NAV_WIDGETS,
   settingsSectionsFor,
-  type CollectionRevealTarget,
   type SettingsSectionId,
   type SystemStatus,
   type UpstreamStatus,
@@ -57,7 +56,6 @@ interface SettingsPanelProps {
   /** Export everything (rule 5) — also offered on the Collections header. */
   onExportAll: () => void;
   /** Open Collections at a saved item — a Garmin course just copied into Atlas. */
-  onReveal: (target: CollectionRevealTarget) => void;
   onClose: () => void;
 }
 
@@ -392,7 +390,6 @@ export function SettingsPanel({
   mapZoom,
   profilePreferences,
   onExportAll,
-  onReveal,
   onClose,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsSectionId>(section ?? 'appearance');
@@ -653,7 +650,7 @@ export function SettingsPanel({
           <div className="settings-section">
             <h3>Account &amp; sync</h3>
             <AccountPanel sync={sync} storage={storage} />
-            {sync.email && <GarminPanel garmin={garmin} onReveal={onReveal} />}
+            {sync.email && <GarminPanel garmin={garmin} />}
             {/* Also on the Collections header. Two homes on purpose: Android
                 keeps it here, and a user who learned it there should find it
                 here too (rule 5 is about the data, not one route to it). */}

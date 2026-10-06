@@ -543,6 +543,24 @@ describe('POST /api/transit/commute', () => {
     ]);
   });
 
+  it('can answer interchange boards without holding up the door journeys', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/transit/commute',
+      payload: { ...payload, segmentsOnly: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.outbound).toBeUndefined();
+    expect(body.inbound).toBeUndefined();
+    expect(body.segments.map((entry: { id: string }) => entry.id)).toEqual([
+      'outbound-0',
+      'outbound-1',
+      'inbound-0',
+      'inbound-1',
+    ]);
+  });
+
   /**
    * TRANSIT.md §7. The board carries the same commitment the home-screen widget does,
    * and needs the same one extra call for the same reason: a board asked "from

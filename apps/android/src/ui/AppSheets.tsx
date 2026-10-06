@@ -138,6 +138,12 @@ export function AppSheets({
     <>
       <FavoritesSheet
         visible={favoritesOpen}
+        garmin={garmin}
+        onRevealGarminItem={onRevealCollectionItem}
+        onShowGarminTrack={(id) => {
+          onCloseFavorites();
+          onShowSavedTrack(id);
+        }}
         revealItem={revealCollectionItem}
         onRevealed={onRevealedCollectionItem}
         onClose={onCloseFavorites}
@@ -216,8 +222,6 @@ export function AppSheets({
         storageState={data}
         tiles={tiles}
         onExportAll={() => void data.exportAll()}
-        onReveal={onRevealCollectionItem}
-        onShowTrack={onShowSavedTrack}
         appearance={appearance}
         mapStyleEditor={mapStyleEditor}
         overlays={overlays}

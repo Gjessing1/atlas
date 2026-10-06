@@ -699,8 +699,10 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
             });
             trackDataCache.current.set(track.id, data);
             result.tracks.push(track);
-          } else if (data.waypoints.length > 0) {
-            // A waypoints-only file is a list of favorites, not a track.
+          }
+          if (data.waypoints.length > 0) {
+            // A Garmin Explore export can hold tracks and saved locations in
+            // one GPX. Keep each waypoint as a browsable place even then.
             for (const w of data.waypoints) {
               result.places.push(
                 await s.createPlace({
@@ -713,7 +715,8 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
                 }),
               );
             }
-          } else {
+          }
+          if (data.segments.length === 0 && data.waypoints.length === 0) {
             result.errors.push(`${read.name}: no tracks or waypoints found`);
           }
         } catch (err) {

@@ -1,4 +1,5 @@
 import type { MapProfile } from '@atlas/core';
+import { useEffect, useRef, useState } from 'react';
 import { mapProfileIcon } from '../icons.js';
 
 interface MapProfileSwitchProps {
@@ -14,34 +15,70 @@ interface MapProfileSwitchProps {
 }
 
 /**
- * One-tap activity switcher, sitting above the layer quick switch.
- *
- * Every profile is a visible button rather than a menu: the whole point is a
- * single tap, and the list is curated short enough to stay a row. Picking one
- * reveals that activity's contextual overlays and sets the travel mode new
- * routes start from — see MAP_PROFILES.
+ * Compact activity picker beside the layer control, with the same list of
+ * labelled profiles Android opens from its active-profile button.
  */
 export function MapProfileSwitch({ active, profiles, onPick }: MapProfileSwitchProps) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const current = profiles.find((profile) => profile.id === active) ?? profiles[0];
+  const CurrentIcon = current ? mapProfileIcon(current.id) : null;
+
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+
   return (
-    <div className="profile-switch" role="radiogroup" aria-label="Map profile">
-      {profiles.map((p) => {
-        const on = p.id === active;
-        const Icon = mapProfileIcon(p.id);
-        return (
-          <button
-            key={p.id}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            className={`profile-switch-item${on ? ' profile-switch-item-on' : ''}`}
-            title={p.label}
-            onClick={() => onPick(p.id)}
-          >
-            <Icon size={19} />
-            <span className="profile-switch-label">{p.label}</span>
-          </button>
-        );
-      })}
+    <div className="profile-switch" ref={root}>
+      <button
+        type="button"
+        className="profile-switch-trigger"
+        aria-label={`Map profile: ${current?.label ?? 'Choose'}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {CurrentIcon && <CurrentIcon size={21} />}
+        <span>{current?.label}</span>
+        <span aria-hidden="true">⌃</span>
+      </button>
+      {open && (
+        <div className="profile-switch-menu" role="radiogroup" aria-label="Map profile">
+          {profiles.map((profile) => {
+            const selected = profile.id === active;
+            const Icon = mapProfileIcon(profile.id);
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`profile-switch-item${selected ? ' profile-switch-item-on' : ''}`}
+                onClick={() => {
+                  onPick(profile.id);
+                  setOpen(false);
+                }}
+              >
+                <Icon size={21} />
+                <span>{profile.label}</span>
+                {selected && <span className="profile-switch-check">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

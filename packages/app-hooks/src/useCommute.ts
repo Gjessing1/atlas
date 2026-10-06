@@ -14,6 +14,7 @@ import type {
   TransitCommutePlace,
   TransitCommuteQuery,
   TransitCommuteResult,
+  TransitCommuteSegmentResult,
   TransitCommuteTime,
   TransitLineRef,
   TransitMode,
@@ -265,6 +266,8 @@ export type CommuteFn = (
   signal: AbortSignal,
   /** The journey being tracked, so the answer carries it once it has left. */
   commit: TransitWidgetV2Commit | null,
+  /** Optional later interchange answer; door journeys may render first. */
+  onSegments?: (segments: TransitCommuteSegmentResult[] | null) => void,
 ) => Promise<TransitCommuteResult>;
 
 export interface CommuteController {
@@ -291,6 +294,8 @@ export interface CommuteController {
   query: TransitCommuteQuery | null;
   result: TransitCommuteResult | null;
   loading: boolean;
+  /** Interchange boards load after the door journeys. */
+  segmentsLoading: boolean;
   error: string | null;
   updatedMs: number | null;
   refresh: () => void;
@@ -620,12 +625,18 @@ export function useCommute(
   const [loaded, setLoaded] = useState(false);
   const [result, setResult] = useState<TransitCommuteResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [segmentsLoading, setSegmentsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedMs, setUpdatedMs] = useState<number | null>(null);
   const [seed, setSeed] = useState(0);
   const [storedCommit, setStoredCommit] = useState<StoredCommuteCommit | null>(null);
   const [storedTracked, setStoredTracked] = useState<StoredTrackedJourney | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Keep a short-lived answer for each saved corridor. Switching boards should
+  // show that corridor's last times immediately, and opening the panel after
+  // app startup should not start from an empty screen.
+  const answers = useRef(new Map<string, { result: TransitCommuteResult; updatedMs: number }>());
+  const lastRefreshSeed = useRef(0);
 
   // Both settings before `ready`, not each on its own promise. Two reasons, and
   // the second is why it changed: the board's first request would otherwise go
@@ -672,56 +683,86 @@ export function useCommute(
   const widgetQuery = useMemo(() => commuteQueryFrom(widgetConfig, places), [widgetConfig, places]);
   const queryKey = query ? JSON.stringify(query) : '';
   const commitKey = commit ? `${commit.direction}:${commit.departureMs}:${commit.line}` : '';
+  const answerKey = `${activeCommute.id}:${queryKey}:${commitKey}`;
 
   useEffect(() => {
-    // A second commute is a different board even when its request will take a
-    // moment. Never leave the previous corridor's journeys under the new name.
-    setResult(null);
+    const saved = answers.current.get(answerKey);
+    // A second corridor cannot draw the first corridor's journeys. Its own
+    // prior answer, if any, can be drawn while the next refresh runs.
+    setResult(saved?.result ?? null);
     setError(null);
-    setUpdatedMs(null);
-  }, [activeCommute.id]);
+    setUpdatedMs(saved?.updatedMs ?? null);
+  }, [answerKey]);
 
   useEffect(() => {
     abortRef.current?.abort();
     if (!loaded || !query) {
       setResult(null);
       setLoading(false);
+      setSegmentsLoading(false);
       setError(null);
       setUpdatedMs(null);
       return;
     }
-    // Closed, but the last answer is kept: reopening draws it at once (its age
-    // on the footer) while the next request runs, rather than a blank board.
-    // The list itself drops departures that have gone, so an old answer shows
-    // less, never something wrong.
-    if (!active) {
+    const cached = answers.current.get(answerKey);
+    const force = seed !== lastRefreshSeed.current;
+    lastRefreshSeed.current = seed;
+    // Start the one saved board in the background as soon as its settings are
+    // ready. Once warm, closing and reopening it within 30 seconds is instant;
+    // a manual Refresh still asks again. Old answers remain visible with their
+    // age while a request runs.
+    if (!force && cached && Date.now() - cached.updatedMs < 30_000) {
       setLoading(false);
+      setSegmentsLoading(false);
       return;
     }
     const controller = new AbortController();
     abortRef.current = controller;
-    setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const next = await fetchCommute(query, controller.signal, commit);
-        if (controller.signal.aborted) return;
-        setResult(next);
-        setError(null);
-        setUpdatedMs(Date.now());
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        // Stale-while-revalidate: a refresh that failed leaves the last answer
-        // standing, and `updatedMs` still says how old it is. Clearing it turned
-        // one dropped request on a train into a board with nothing on it.
-        setError(
-          err instanceof TransitError
-            ? err.message
-            : 'Commute board unavailable — check your connection.',
-        );
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }, 250);
+    if (active) setLoading(true);
+    setSegmentsLoading(query.via.length > 0);
+    const timer = setTimeout(
+      async () => {
+        let earlySegments: TransitCommuteSegmentResult[] | null = null;
+        try {
+          const next = await fetchCommute(query, controller.signal, commit, (segments) => {
+            if (controller.signal.aborted) return;
+            setSegmentsLoading(false);
+            if (!segments) return;
+            const cached = answers.current.get(answerKey);
+            if (!cached) {
+              earlySegments = segments;
+              return;
+            }
+            const combined = { ...cached.result, segments };
+            answers.current.set(answerKey, { result: combined, updatedMs: cached.updatedMs });
+            setResult(combined);
+          });
+          if (controller.signal.aborted) return;
+          const checked = Date.now();
+          const segments =
+            earlySegments ?? next.segments ?? answers.current.get(answerKey)?.result.segments;
+          const combined = segments ? { ...next, segments } : next;
+          answers.current.set(answerKey, { result: combined, updatedMs: checked });
+          setResult(combined);
+          setError(null);
+          setUpdatedMs(checked);
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          setSegmentsLoading(false);
+          // Stale-while-revalidate: a refresh that failed leaves the last answer
+          // standing, and `updatedMs` still says how old it is. Clearing it turned
+          // one dropped request on a train into a board with nothing on it.
+          setError(
+            err instanceof TransitError
+              ? err.message
+              : 'Commute board unavailable — check your connection.',
+          );
+        } finally {
+          if (!controller.signal.aborted) setLoading(false);
+        }
+      },
+      active ? 0 : 500,
+    );
     return () => {
       clearTimeout(timer);
       controller.abort();
@@ -729,7 +770,7 @@ export function useCommute(
     // query enters through its stable serialized value; callers rebuild it.
     // `commitKey` rather than `commit`: a re-read of the same commitment must
     // not re-ask the board, or every answer would trigger the next request.
-  }, [active, commitKey, fetchCommute, loaded, queryKey, seed]);
+  }, [active, answerKey, commitKey, fetchCommute, loaded, queryKey, seed]);
 
   const updateLibrary = useCallback(
     (change: (current: CommuteLibrary) => CommuteLibrary) => {
@@ -968,6 +1009,7 @@ export function useCommute(
     query,
     result,
     loading,
+    segmentsLoading,
     error,
     updatedMs,
     refresh,

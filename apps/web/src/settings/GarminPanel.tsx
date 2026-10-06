@@ -1,15 +1,7 @@
 import type { GarminState } from '@atlas/app-hooks';
-import type { CollectionRevealTarget } from '@atlas/core';
 import { useState } from 'react';
-import { GarminCourses } from './GarminCourses.js';
 
-export function GarminPanel({
-  garmin,
-  onReveal,
-}: {
-  garmin: GarminState;
-  onReveal: (target: CollectionRevealTarget) => void;
-}) {
+export function GarminPanel({ garmin }: { garmin: GarminState }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -18,40 +10,16 @@ export function GarminPanel({
     <div className="settings-section">
       <h3>Garmin Connect</h3>
       <p className="settings-note">
-        Manage your Garmin Connect courses and send them to your watch, and bring your recorded
-        activities into Atlas, filed by sport.
+        Connect your Garmin account here. Browse courses, import activities and view saved copies in
+        Collections → Garmin.
       </p>
       <p className="settings-note">
-        Watch saved locations are not imported yet. Atlas saved places are in Collections → Places.
+        Watch saved locations can be imported from a Garmin Explore GPX file in Collections →
+        Garmin.
       </p>
       {garmin.connected ? (
         <>
           <p>Connected to Garmin Connect.</p>
-          <GarminCourses garmin={garmin} onReveal={onReveal} />
-          <h4>Activities</h4>
-          <p className="settings-note settings-note-leading">
-            Imports GPS activities 30 at a time into Garmin activities, one folder per sport.
-          </p>
-          <button
-            type="button"
-            disabled={garmin.busy}
-            onClick={() => void garmin.importActivities()}
-          >
-            {garmin.busy
-              ? 'Working…'
-              : garmin.nextActivityOffset > 0
-                ? 'Import older activities'
-                : 'Import recent activities'}
-          </button>
-          {garmin.nextActivityOffset > 0 && (
-            <button
-              type="button"
-              disabled={garmin.busy}
-              onClick={() => void garmin.restartActivityImport()}
-            >
-              Check newest again
-            </button>
-          )}
           <h4>Connection</h4>
           <button type="button" disabled={garmin.busy} onClick={() => void garmin.disconnect()}>
             Disconnect Garmin
