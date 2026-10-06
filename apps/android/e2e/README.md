@@ -22,6 +22,39 @@ fails and you change only `regression.mjs` (or the fixture server), reuse the AP
 not changed, so rebuilding it buys nothing. On 2026-09-17 three retries that each fixed only the
 script rebuilt an identical APK, 10 min apiece.
 
+## Where the emulator runs: the Ally-X worker, then this host
+
+`run-regression.sh` (and so every publish script) first offers the run to the **Ally-X worker**.
+That is a Windows 11 handheld on the LAN with 8 cores, WHPX and a real GPU, shared by every
+project on this host through `~/projects/sysadmin/ally-x-worker` (its README covers setup,
+design and troubleshooting). Only the emulator runs there. `regression.mjs` and the fixture
+server stay here and drive it through SSH forwards. Adb, `adb emu` and `10.0.2.2:3199` behave
+as with a local AVD, so the scenario code does not know which backend it got.
+
+| `ATLAS_ANDROID_BACKEND` | behaviour                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `auto` (default)        | the worker if it is healthy; otherwise this host's `atlas_test`, said loudly |
+| `ally-x`                | the worker or fail — for comparing backends, or when this host is busy       |
+| `local`                 | this host only, never touching the worker                                    |
+
+- **A fallback happens only before anything ran on the worker.** The worker is unreachable, is
+  unhealthy (on battery, < 6 GB RAM, CPU > 40 % because someone is gaming on it, toolchain
+  missing), is busy with another project's session, or fails to boot. Its client exits 75 then,
+  and only then does the run move here. Once `regression.mjs` has started on the worker, a red
+  run is a red run. Every run ends with `Android regression backend: <ally-x|local> — passed/failed after N s`.
+- **On the worker this host's state doesn't matter.** CI, swap and load checks guard the
+  _local_ AVD only, so a regression can run on the worker while CI builds here.
+- **The local AVD waits for a quiet host.** Before a local run, the script refuses if Forgejo
+  CI is running. It waits up to 10 min (`ATLAS_ANDROID_LOAD_WAIT_SECONDS`) for the 1-minute load
+  to fall to 3 or below (`ATLAS_ANDROID_MAX_LOCAL_LOAD`), printing the busiest processes, e.g. a
+  video encode or the candidate's own Gradle build. Then the swap check below runs.
+- **Results:** a worker run also writes `artifacts/ally-x/`: `logcat.txt` for the whole session,
+  `emulator.log`, and `session.txt` with boot, install, command and total seconds. These are
+  written on success too. The usual failure artifacts (`failure.png`, `window.xml`, …) are
+  written by `regression.mjs` as before.
+- **The worker's AVD renders with the Radeon iGPU**, not SwiftShader. A symbol-layer screenshot
+  from it can therefore differ from one taken here; see the next sections for this host's AVD.
+
 ## The emulator fails for reasons that are not the app
 
 The AVD is software-rendered (`swiftshader_indirect`) on a host that also runs CI, Forgejo and

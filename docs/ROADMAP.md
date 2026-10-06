@@ -430,6 +430,17 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       the release on the deployed origin. Keep route dependencies in the parity checklist so a
       renamed or deleted backend capability fails before deployment too.
 
+- [ ] **Make the device regression's window reads fast.** A full run is ~15 min even on the
+      Ally-X worker (877 s on 2026-10-06, vs ~19 min on SOYO). The time goes into
+      `uiautomator dump`, at ~2.8 s per read on the worker against ~0.1 s for an adb round trip:
+      each dump starts a fresh `app_process` JVM and waits for an idle UI, which a live map
+      rarely gives. Every `waitFor` polls one. Moving the driver to the worker would save only
+      the round trips (~5 %). Keep one UiAutomator session warm on the device instead (a small
+      instrumentation server reached through `adb forward`, or the uiautomator2 server), and
+      have `readWindow()` fetch the hierarchy from it. Measure the per-read cost and the full run
+      on both backends before and after. Keep `uiautomator dump` as the fallback for failure
+      artifacts.
+
 - [ ] **Run the real Postgres sync store in CI.** The normal quality gate skips all seven
       `backend/src/pg.test.ts` cases, so production SQL, advisory locking, sequence cursors and
       transaction semantics are not exercised by the memory-store suite. Add a disposable
@@ -479,6 +490,28 @@ Work done on the host or in the release pipeline rather than in the code.
         `admins.sqlite` back in place, covers the British Isles (Edinburgh→Glasgow routes).
       - All six published Norway packs, Oslo included, still carry pre-DR7 manifests (no
         `compat`, no `provenance`) until they are next rebuilt.
+
+- [ ] **Run CPU-bound batch jobs on the Ally-X worker — first-time and refresh tile builds.**
+      The Windows worker (`~/projects/sysadmin/ally-x-worker`, 8 cores / 16 threads, WHPX)
+      already takes the Android regression from SOYO, behind a health check, a one-session lock
+      and a "fall back only before anything ran" rule. Planetiler is the next customer:
+      `build-basemap.sh` caps it at 2 of SOYO's 4 cores and 6 GB, so a first build (Great
+      Britain for the Scotland pack; any new region) takes hours. Add a `job` mode to the worker
+      client that copies inputs to `C:\soyo\work`, runs one command under the same lock and health
+      gate, and copies outputs back, then let the tile scripts use it when the worker is healthy
+      and fall back to the local container otherwise — including scheduled night refreshes, which
+      must not wait on a sleeping or busy handheld.
+
+      - Provenance must survive the move: the tile archive records the tiler by the
+        digest pinned in `infrastructure/tools.json`, so the worker needs the matching Planetiler
+        jar pinned the same way (it already has a pinned JDK 21), not "whatever is newest".
+      - Memory is the constraint there, not CPU: the Ally-X has 16 GB with ~7 GB free, so size
+        `-Xmx`/threads from its health report, and refuse a Europe-scale area it cannot hold.
+      - SOYO keeps the authoritative outputs; the worker's copy is disposable, like its AVDs.
+      - Measure one Great Britain build on both hosts before switching the default.
+      - Candidate after tiles: release APK builds (Gradle + clang, load ~16 on SOYO), which
+        would need Node, the NDK and the signing keystore on the worker — weigh that secret's
+        placement before doing it.
 
 ---
 
