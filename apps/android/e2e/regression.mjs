@@ -545,7 +545,9 @@ async function configureFixtureServer() {
   // sources. Server is below them; scroll inside the sheet to reach its field.
   await tapAfterScroll('server-origin', 'settings-sheet');
   await replaceText('server-origin', FIXTURE_ORIGIN);
-  await tap('server-save');
+  // The keyboard can clip Save behind the sheet's sticky Back button.
+  await dismissKeyboard();
+  await tapAfterScroll('server-save', 'settings-sheet');
   await waitFor(
     'the fixture server to become the saved origin',
     hierarchy,

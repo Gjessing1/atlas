@@ -189,7 +189,9 @@ before that destination. Also:
   rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
 - **System Settings starts with updates and source health.** The server-origin field can be below
   the sheet's visible area even with healthy sources collapsed. Scroll to `server-origin` before
-  entering a fixture URL; `waitForId` alone will time out on an off-screen field.
+  entering a fixture URL; `waitForId` alone will time out on an off-screen field. After typing,
+  dismiss the keyboard before tapping Save: the sticky Back button can cover Save while the
+  keyboard is open, even though UiAutomator still reports Save in the view tree.
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
   menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
 - **The Layers button does not exist after `configureFixtureServer()`.** The fixture answers
